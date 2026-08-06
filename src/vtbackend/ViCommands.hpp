@@ -2,8 +2,8 @@
 #pragma once
 
 #include <vtbackend/JumpHistory.hpp>
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/ViInputHandler.hpp>
-#include <vtbackend/primitives.hpp>
 
 #include <gsl/pointers>
 

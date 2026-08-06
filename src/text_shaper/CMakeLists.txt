@@ -1,23 +1,23 @@
 set(text_shaper_SRC
-    cluster_spans.hpp
-    font.cpp font.hpp
-    font_locator.hpp
-    font_locator_provider.cpp font_locator_provider.hpp
-    mock_font_locator.cpp mock_font_locator.hpp
-    open_shaper.cpp open_shaper.hpp
-    shaper.cpp shaper.hpp
+    ClusterSpans.hpp
+    Font.cpp Font.hpp
+    FontLocator.hpp
+    FontLocatorProvider.cpp FontLocatorProvider.hpp
+    MockFontLocator.cpp MockFontLocator.hpp
+    OpenShaper.cpp OpenShaper.hpp
+    Shaper.cpp Shaper.hpp
 )
 
 if("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
-    list(APPEND text_shaper_SRC directwrite_analysis_wrapper.hpp)
-    list(APPEND text_shaper_SRC directwrite_locator.cpp directwrite_locator.hpp)
-    list(APPEND text_shaper_SRC directwrite_shaper.cpp directwrite_shaper.hpp)
+    list(APPEND text_shaper_SRC DirectWriteAnalysisWrapper.hpp)
+    list(APPEND text_shaper_SRC DirectWriteLocator.cpp DirectWriteLocator.hpp)
+    list(APPEND text_shaper_SRC DirectWriteShaper.cpp DirectWriteShaper.hpp)
 endif()
 if(APPLE)
-    list(APPEND text_shaper_SRC coretext_locator.hpp coretext_locator.mm)
+    list(APPEND text_shaper_SRC CoreTextLocator.hpp CoreTextLocator.mm)
 endif()
 if("${CMAKE_SYSTEM_NAME}" MATCHES "Linux" OR "${CMAKE_SYSTEM_NAME}" MATCHES "FreeBSD" OR "${CMAKE_SYSTEM_NAME}" MATCHES "OpenBSD")
-    list(APPEND text_shaper_SRC fontconfig_locator.cpp fontconfig_locator.hpp)
+    list(APPEND text_shaper_SRC FontconfigLocator.cpp FontconfigLocator.hpp)
 endif()
 
 # TODO: coretext_shaper.cpp coretext_shaper.hpp
@@ -86,7 +86,7 @@ message(STATUS "[text_shaper] Libraries: ${TEXT_SHAPER_LIBS}")
 
 if(CONTOUR_TESTING)
     enable_testing()
-    add_executable(text_shaper_test test_main.cpp cluster_spans_test.cpp font_hash_test.cpp open_shaper_test.cpp scale_test.cpp)
+    add_executable(text_shaper_test test_main.cpp ClusterSpans_test.cpp FontHash_test.cpp OpenShaper_test.cpp Scale_test.cpp)
     target_link_libraries(text_shaper_test PRIVATE text_shaper Catch2::Catch2 Microsoft.GSL::GSL unicode::unicode boxed-cpp::boxed-cpp crispy::core)
     add_test(NAME text_shaper_test COMMAND $<TARGET_FILE:text_shaper_test>)
     if(NOT WIN32)

@@ -5,7 +5,7 @@
 #include <vtbackend/Image.hpp>
 #include <vtbackend/regis/ReGISTables.hpp>
 
-#include <crispy/point.hpp>
+#include <crispy/Point.hpp>
 
 #include <cstdint>
 #include <span>

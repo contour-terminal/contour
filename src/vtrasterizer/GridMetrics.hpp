@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
-#include <crispy/point.hpp>
-#include <crispy/size.hpp>
+#include <crispy/Point.hpp>
+#include <crispy/Size.hpp>
 
 #include <format>
 

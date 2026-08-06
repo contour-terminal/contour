@@ -22,9 +22,9 @@
 #include <vtpty/Pty.hpp>
 
 #include <crispy/App.hpp>
+#include <crispy/LogStore.hpp>
 #include <crispy/ScopedTimer.hpp>
-#include <crispy/logstore.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>

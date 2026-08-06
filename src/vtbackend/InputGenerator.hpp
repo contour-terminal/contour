@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
-#include <crispy/escape.hpp>
-#include <crispy/flags.hpp>
-#include <crispy/overloaded.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/Flags.hpp>
+#include <crispy/Overloaded.hpp>
 
 #include <libunicode/convert.h>
 

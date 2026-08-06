@@ -16,7 +16,7 @@ set(_header_files
     TextRenderer.hpp
     TextureAtlas.hpp
     UnderlineGeometry.hpp
-    utils.hpp
+    Utils.hpp
 )
 
 set(_source_files
@@ -31,7 +31,7 @@ set(_source_files
     Renderer.cpp
     TextClusterGrouper.cpp
     TextRenderer.cpp
-    utils.cpp
+    Utils.cpp
 )
 
 set(_test_files

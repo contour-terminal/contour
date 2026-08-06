@@ -4,9 +4,9 @@
 #include <vtbackend/Color.hpp>
 #include <vtbackend/Hyperlink.hpp>
 #include <vtbackend/Image.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
-#include <crispy/overloaded.hpp>
+#include <crispy/Overloaded.hpp>
 
 #include <algorithm>
 #include <array>

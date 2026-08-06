@@ -3,7 +3,7 @@
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/Logging.hpp>
 
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>

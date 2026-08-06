@@ -13,7 +13,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <QtCore/QTemporaryDir>
 

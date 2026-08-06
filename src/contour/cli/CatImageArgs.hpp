@@ -3,7 +3,7 @@
 
 #include <vtbackend/Image.hpp>
 
-#include <crispy/size.hpp>
+#include <crispy/Size.hpp>
 
 #include <charconv>
 #include <string_view>

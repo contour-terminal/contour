@@ -9,7 +9,7 @@
 
 #include <vtparser/ParserExtension.hpp>
 
-#include <crispy/point.hpp>
+#include <crispy/Point.hpp>
 
 #include <cstdint>
 #include <functional>

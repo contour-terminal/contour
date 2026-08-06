@@ -13,7 +13,7 @@
 #include <contour/display/ScreenshotReadback.hpp>
 
 #include <vtbackend/Color.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <QtGui/QColor>
 #include <QtGui/QOffscreenSurface>

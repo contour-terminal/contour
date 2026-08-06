@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/tmux/ImsgServer.hpp>
 
-#include <vthost/logging.hpp>
+#include <vthost/Logging.hpp>
 
 #ifndef _WIN32
 
-    #include <crispy/utils.hpp>
+    #include <crispy/Utils.hpp>
 
     #include <algorithm>
     #include <array>

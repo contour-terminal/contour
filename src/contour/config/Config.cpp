@@ -8,11 +8,11 @@
 
 #include <vtpty/ImageSize.hpp>
 
-#include <text_shaper/font.hpp>
+#include <text_shaper/Font.hpp>
 
+#include <crispy/Environment.hpp>
+#include <crispy/Escape.hpp>
 #include <crispy/StrongHash.hpp>
-#include <crispy/environment.hpp>
-#include <crispy/escape.hpp>
 
 #include <libunicode/convert.h>
 

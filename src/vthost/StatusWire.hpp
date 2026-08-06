@@ -13,7 +13,7 @@
 /// count under an optimizing build, a UBSan abort on dev/CI). Every other enum-ish wire field in
 /// this protocol already validates; these two are now no exception.
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <cstdint>
 #include <optional>

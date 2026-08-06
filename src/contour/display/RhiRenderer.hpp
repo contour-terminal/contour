@@ -5,7 +5,7 @@
 #include <contour/display/ShaderConfig.hpp>
 
 #include <vtbackend/Image.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtrasterizer/RenderTarget.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>

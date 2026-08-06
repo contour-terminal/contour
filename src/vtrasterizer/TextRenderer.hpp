@@ -13,14 +13,14 @@
 #include <vtrasterizer/TextClusterGrouper.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
 
-#include <text_shaper/font.hpp>
-#include <text_shaper/shaper.hpp>
+#include <text_shaper/Font.hpp>
+#include <text_shaper/Shaper.hpp>
 
 #include <crispy/FNV.hpp>
+#include <crispy/Point.hpp>
+#include <crispy/Size.hpp>
 #include <crispy/StrongHash.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
-#include <crispy/point.hpp>
-#include <crispy/size.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/run_segmenter.h>

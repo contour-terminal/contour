@@ -3,10 +3,10 @@
 #include <vtpty/Pty.hpp>
 #include <vtpty/UnixPty.hpp>
 
-#include <crispy/environment.hpp>
-#include <crispy/overloaded.hpp>
-#include <crispy/user_info.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/Overloaded.hpp>
+#include <crispy/UserInfo.hpp>
+#include <crispy/Utils.hpp>
 
 #include <array>
 #include <cassert>

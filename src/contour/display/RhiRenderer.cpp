@@ -5,14 +5,14 @@
 #include <contour/display/ScreenshotReadback.hpp>
 #include <contour/display/ShaderConfig.hpp>
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtrasterizer/TextureAtlas.hpp>
 
-#include <crispy/algorithm.hpp>
-#include <crispy/assert.hpp>
-#include <crispy/defines.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Algorithm.hpp>
+#include <crispy/Assert.hpp>
+#include <crispy/Defines.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QFile>
 #include <QtCore/QVarLengthArray>

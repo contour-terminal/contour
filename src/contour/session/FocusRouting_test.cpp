@@ -22,11 +22,11 @@
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/WindowController.hpp>
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/escape.hpp>
+#include <crispy/Escape.hpp>
 
 #include <QtGui/QWindow>
 #include <QtQuick/QQuickWindow>

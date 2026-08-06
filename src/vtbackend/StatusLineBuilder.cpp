@@ -5,8 +5,8 @@
 #include <vtbackend/Color.hpp>
 #include <vtbackend/Terminal.hpp>
 
-#include <crispy/interpolated_string.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/InterpolatedString.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/convert.h>
 

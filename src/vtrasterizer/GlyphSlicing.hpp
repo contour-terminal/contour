@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/TextScale.hpp>
-#include <vtbackend/primitives.hpp>
 
 #include <crispy/StrongHash.hpp>
 

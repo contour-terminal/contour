@@ -2,7 +2,7 @@
 #pragma once
 
 #include <vtbackend/LineFlags.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <cstddef>
 #include <cstdint>

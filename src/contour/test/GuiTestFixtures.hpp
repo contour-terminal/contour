@@ -16,7 +16,7 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 
-#include <crispy/environment.hpp>
+#include <crispy/Environment.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>

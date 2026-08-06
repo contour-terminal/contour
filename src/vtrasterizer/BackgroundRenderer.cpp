@@ -4,7 +4,7 @@
 #include <vtrasterizer/GridMetrics.hpp>
 #include <vtrasterizer/RenderTarget.hpp>
 
-#include <crispy/algorithm.hpp>
+#include <crispy/Algorithm.hpp>
 
 #include <iostream>
 

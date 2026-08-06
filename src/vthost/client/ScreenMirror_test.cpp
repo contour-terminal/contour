@@ -3,7 +3,7 @@
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/base64.hpp>
+#include <crispy/Base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

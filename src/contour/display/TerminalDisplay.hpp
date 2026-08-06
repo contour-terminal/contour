@@ -14,12 +14,12 @@
 
 #include <vtbackend/Color.hpp>
 #include <vtbackend/Metrics.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtrasterizer/ReGISFontRasterizer.hpp>
 #include <vtrasterizer/Renderer.hpp>
 
-#include <crispy/deferred.hpp>
+#include <crispy/Deferred.hpp>
 
 #include <QtCore/QPoint>
 #include <QtCore/QSize>

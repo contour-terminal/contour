@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/StrongHash.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

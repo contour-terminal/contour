@@ -3,7 +3,7 @@
 
 #include <vtparser/ParserExtension.hpp>
 
-#include <crispy/algorithm.hpp>
+#include <crispy/Algorithm.hpp>
 
 #include <cstddef>
 #include <cstdint>

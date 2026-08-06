@@ -3,7 +3,7 @@
 
 #include <contour/geometry/CellRectangle.hpp>
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtrasterizer/GridMetrics.hpp>
 

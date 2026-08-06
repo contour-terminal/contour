@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtrasterizer/TextureAtlas.hpp> // Buffer
 
-#include <crispy/point.hpp>
+#include <crispy/Point.hpp>
 
 #include <algorithm>
 #include <cstdint>

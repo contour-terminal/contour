@@ -3,7 +3,7 @@
 
 #include <contour/Logging.hpp>
 
-#include <crispy/logstore.hpp>
+#include <crispy/LogStore.hpp>
 
 namespace contour
 {

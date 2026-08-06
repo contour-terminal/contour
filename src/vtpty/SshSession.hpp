@@ -3,9 +3,9 @@
 
 #include <vtpty/Pty.hpp>
 
-#include <crispy/file_descriptor.hpp>
-#include <crispy/logstore.hpp>
-#include <crispy/overloaded.hpp>
+#include <crispy/FileDescriptor.hpp>
+#include <crispy/LogStore.hpp>
+#include <crispy/Overloaded.hpp>
 
 #include <atomic>
 #include <condition_variable>

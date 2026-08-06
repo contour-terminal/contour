@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Capabilities.hpp>
 
-#include <crispy/escape.hpp>
+#include <crispy/Escape.hpp>
 
 #include <algorithm>
 #include <array>

@@ -2,8 +2,8 @@
 #pragma once
 
 #include <crispy/CLI.hpp>
-#include <crispy/environment.hpp>
-#include <crispy/logsink.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/LogSink.hpp>
 
 #include <expected>
 #include <filesystem>

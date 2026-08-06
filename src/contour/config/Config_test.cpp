@@ -14,10 +14,10 @@
 
 #include <vtbackend/Color.hpp>
 #include <vtbackend/InputGenerator.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
-#include <crispy/logsink.hpp>
-#include <crispy/logstore.hpp>
+#include <crispy/LogSink.hpp>
+#include <crispy/LogStore.hpp>
 
 #include <QtCore/QTemporaryDir>
 

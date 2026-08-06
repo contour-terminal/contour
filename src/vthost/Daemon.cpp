@@ -12,9 +12,9 @@
 
 #include <vthost/Daemon.hpp>
 
-#include <crispy/algorithm.hpp>
-#include <crispy/environment.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Algorithm.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/Utils.hpp>
 
 #include <atomic>
 #include <charconv>
@@ -42,10 +42,10 @@
 #include <net/Tls.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/LastSessionWatcher.hpp>
+#include <vthost/Logging.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SocketPath.hpp>
-#include <vthost/logging.hpp>
 #include <vthost/tmux/ControlSession.hpp>
 #include <vthost/tmux/ImsgServer.hpp>
 

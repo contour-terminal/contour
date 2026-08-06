@@ -3,7 +3,7 @@
 
 #include <vtbackend/Terminal.hpp> // vtbackend::ScrollPhase
 
-#include <crispy/point.hpp>
+#include <crispy/Point.hpp>
 
 #include <cstdlib>
 

@@ -4,6 +4,7 @@
 #include <vtbackend/ControlCode.hpp>
 #include <vtbackend/DesktopNotification.hpp>
 #include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/Logging.hpp>
 #include <vtbackend/MessageParser.hpp>
 #include <vtbackend/ModifyKeys.hpp>
 #include <vtbackend/RectangularAreaChecksum.hpp>
@@ -13,20 +14,19 @@
 #include <vtbackend/Terminal.hpp>
 #include <vtbackend/VTType.hpp>
 #include <vtbackend/VTWriter.hpp>
-#include <vtbackend/logging.hpp>
 #include <vtbackend/regis/ReGISContext.hpp>
 #include <vtbackend/regis/ReGISParser.hpp>
 #include <vtbackend/regis/ReGISRasterizer.hpp>
 #include <vtbackend/regis/ReGISTextRasterizer.hpp>
 
+#include <crispy/Algorithm.hpp>
 #include <crispy/App.hpp>
+#include <crispy/Base64.hpp>
 #include <crispy/Comparison.hpp>
-#include <crispy/algorithm.hpp>
-#include <crispy/base64.hpp>
-#include <crispy/escape.hpp>
-#include <crispy/size.hpp>
-#include <crispy/times.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/Size.hpp>
+#include <crispy/Times.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/emoji_segmenter.h>

@@ -12,9 +12,9 @@
 #include <vtbackend/InputBinding.hpp>
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/MatchModes.hpp>
+#include <vtbackend/Primitives.hpp> // CursorDisplay
 #include <vtbackend/Settings.hpp>
 #include <vtbackend/VTType.hpp>
-#include <vtbackend/primitives.hpp> // CursorDisplay
 
 #include <vtpty/ImageSize.hpp>
 #include <vtpty/PageSize.hpp>
@@ -26,17 +26,17 @@
 #include <vtrasterizer/FontDescriptions.hpp>
 #include <vtrasterizer/GlyphScaling.hpp>
 
-#include <text_shaper/font.hpp>
-#include <text_shaper/mock_font_locator.hpp>
+#include <text_shaper/Font.hpp>
+#include <text_shaper/MockFontLocator.hpp>
 
+#include <crispy/ASCII.hpp>
+#include <crispy/Assert.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/Flags.hpp>
+#include <crispy/LogStore.hpp>
+#include <crispy/Size.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
-#include <crispy/ascii.hpp>
-#include <crispy/assert.hpp>
-#include <crispy/environment.hpp>
-#include <crispy/flags.hpp>
-#include <crispy/logstore.hpp>
-#include <crispy/size.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <yaml-cpp/emitter.h>
 #include <yaml-cpp/node/detail/iterator_fwd.h>

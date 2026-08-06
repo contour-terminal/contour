@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/MockTerm.hpp>
-#include <vtbackend/primitives.hpp>
-#include <vtbackend/test_helpers.hpp>
+#include <vtbackend/Primitives.hpp>
+#include <vtbackend/TestHelpers.hpp>
 
 #include <vtpty/PageSize.hpp>
 

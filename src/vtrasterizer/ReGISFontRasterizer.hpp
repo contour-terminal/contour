@@ -3,8 +3,8 @@
 
 #include <vtbackend/regis/ReGISTextRasterizer.hpp>
 
-#include <text_shaper/font.hpp>
-#include <text_shaper/shaper.hpp>
+#include <text_shaper/Font.hpp>
+#include <text_shaper/Shaper.hpp>
 
 #include <memory>
 #include <mutex>

@@ -4,7 +4,7 @@
 #include <vtbackend/Charset.hpp>
 #include <vtbackend/GraphicsAttributes.hpp>
 #include <vtbackend/Hyperlink.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 namespace vtbackend
 {

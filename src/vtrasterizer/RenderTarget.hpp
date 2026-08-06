@@ -3,14 +3,14 @@
 
 #include <vtbackend/Color.hpp>
 #include <vtbackend/Grid.hpp> // cell attribs
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtrasterizer/GridMetrics.hpp>
 #include <vtrasterizer/ImageTextureBackend.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
 #include <vtrasterizer/shared_defines.h>
 
-#include <crispy/size.hpp>
+#include <crispy/Size.hpp>
 
 #include <optional>
 #include <vector>

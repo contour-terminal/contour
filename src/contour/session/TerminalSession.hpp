@@ -22,7 +22,7 @@
 
 #include <vtrasterizer/Renderer.hpp>
 
-#include <crispy/point.hpp>
+#include <crispy/Point.hpp>
 
 #include <QtCore/QAbstractItemModel>
 #include <QtCore/QFileSystemWatcher>

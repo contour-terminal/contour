@@ -5,7 +5,7 @@
 #include <vtbackend/Screen.hpp>
 #include <vtbackend/Terminal.hpp>
 
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <algorithm>
 #include <array>

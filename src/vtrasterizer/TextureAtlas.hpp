@@ -2,11 +2,11 @@
 #pragma once
 
 #include <vtbackend/Color.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
+#include <crispy/Assert.hpp>
 #include <crispy/StrongHash.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
-#include <crispy/assert.hpp>
 
 #include <cstdint>
 #include <format>

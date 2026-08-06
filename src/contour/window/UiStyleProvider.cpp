@@ -2,7 +2,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
-#include <crispy/logstore.hpp>
+#include <crispy/LogStore.hpp>
 
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>

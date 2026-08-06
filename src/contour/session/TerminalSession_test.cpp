@@ -26,7 +26,7 @@
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QTemporaryDir>

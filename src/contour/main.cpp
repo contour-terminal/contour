@@ -17,8 +17,8 @@
     #include <contour/cli/ContourApp.hpp>
 #endif
 
+#include <crispy/Environment.hpp>
 #include <crispy/SuppressWindowsDialogs.hpp>
-#include <crispy/environment.hpp>
 
 #include <cstddef>
 #include <cstdio>

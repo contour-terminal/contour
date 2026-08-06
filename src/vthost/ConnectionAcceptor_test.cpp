@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifndef _WIN32
 
-    #include <crispy/logsink.hpp>
+    #include <crispy/LogSink.hpp>
 
     #include <catch2/catch_test_macros.hpp>
 

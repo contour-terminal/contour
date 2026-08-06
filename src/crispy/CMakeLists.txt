@@ -18,26 +18,26 @@ set(crispy_SOURCES
     StackTrace.cpp StackTrace.hpp
     TrieMap.hpp
     AlignedAllocator.hpp
-    algorithm.hpp
-    ascii.hpp
-    assert.hpp
-    base64.hpp
-    compose.hpp
-    defines.hpp
-    environment.cpp environment.hpp
-    escape.hpp
-    file_descriptor.hpp
-    flags.hpp
-    interpolated_string.cpp interpolated_string.hpp
-    logsink.cpp logsink.hpp
-    logstore.cpp logstore.hpp
-    overloaded.hpp
-    reference.hpp
-    ring.hpp
+    Algorithm.hpp
+    ASCII.hpp
+    Assert.hpp
+    Base64.hpp
+    Compose.hpp
+    Defines.hpp
+    Environment.cpp Environment.hpp
+    Escape.hpp
+    FileDescriptor.hpp
+    Flags.hpp
+    InterpolatedString.cpp InterpolatedString.hpp
+    LogSink.cpp LogSink.hpp
+    LogStore.cpp LogStore.hpp
+    Overloaded.hpp
+    Reference.hpp
+    Ring.hpp
     testing/environment.hpp
-    times.hpp
-    user_info.cpp user_info.hpp
-    utils.cpp utils.hpp
+    Times.hpp
+    UserInfo.cpp UserInfo.hpp
+    Utils.cpp Utils.hpp
 )
 
 add_library(crispy-core STATIC ${crispy_SOURCES})
@@ -134,21 +134,21 @@ if(CRISPY_TESTING)
         StrongLRUCache_test.cpp
         StrongLRUHashtable_test.cpp
         TrieMap_test.cpp
-        base64_test.cpp
-        compose_test.cpp
-        environment_test.cpp
-        interpolated_string_test.cpp
-        logsink_test.cpp
-        utils_test.cpp
-        ring_test.cpp
-        sort_test.cpp
-        times_test.cpp
+        Base64_test.cpp
+        Compose_test.cpp
+        Environment_test.cpp
+        InterpolatedString_test.cpp
+        LogSink_test.cpp
+        Utils_test.cpp
+        Ring_test.cpp
+        Sort_test.cpp
+        Times_test.cpp
     )
     # read_selector is a POSIX select()/epoll() construct (uses fd_set, sys/select.h); its header is
     # only ever compiled through the UNIX-gated UnixPty. The test likewise only builds off Windows,
     # where MSVC would otherwise choke on the unavailable fd_set type.
     if(NOT WIN32)
-        target_sources(crispy_test PRIVATE read_selector_test.cpp)
+        target_sources(crispy_test PRIVATE ReadSelector_test.cpp)
     endif()
     target_link_libraries(crispy_test Catch2::Catch2 crispy::core)
     add_test(NAME crispy_test COMMAND $<TARGET_FILE:crispy_test>)

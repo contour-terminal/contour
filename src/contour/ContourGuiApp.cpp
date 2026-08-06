@@ -23,13 +23,13 @@
 
 #include <vtpty/Process.hpp>
 
-#include <text_shaper/font_locator.hpp>
+#include <text_shaper/FontLocator.hpp>
 
 #include <crispy/CLI.hpp>
+#include <crispy/LogSink.hpp>
+#include <crispy/LogStore.hpp>
 #include <crispy/ScopedTimer.hpp>
-#include <crispy/logsink.hpp>
-#include <crispy/logstore.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QEventLoop>
 #include <QtCore/QProcess>

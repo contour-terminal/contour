@@ -3,9 +3,9 @@
 #include <vtbackend/Charset.hpp>
 #include <vtbackend/ColorPalette.hpp>
 #include <vtbackend/InputGenerator.hpp> // Modifier
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/RectangularAreaChecksum.hpp>
 #include <vtbackend/VTType.hpp>
-#include <vtbackend/primitives.hpp>
 
 #include <chrono>
 #include <map>

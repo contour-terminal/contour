@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/ImageRenderer.hpp>
 
+#include <crispy/Algorithm.hpp>
 #include <crispy/StrongHash.hpp>
-#include <crispy/algorithm.hpp>
-#include <crispy/times.hpp>
+#include <crispy/Times.hpp>
 
 #include <algorithm>
 #include <array>

@@ -3,7 +3,7 @@
 
 #include <vtbackend/Terminal.hpp>
 
-#include <crispy/logstore.hpp>
+#include <crispy/LogStore.hpp>
 
 #include <algorithm>
 #include <optional>

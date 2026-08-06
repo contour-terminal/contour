@@ -134,7 +134,7 @@ The gap files say which sequences are unimplemented. This is for the decisions t
   rather than a checkbox, and they are the priority of their group. The rendering half of the problem
   is a separate and larger one; see `docs/internals/text-stack.md`, which does not address BiDi
   either. They are part of a block of seventeen VT525 keyboard, national and hardware modes in
-  `primitives.hpp`'s `DECMode` that are honest toggles today, each carrying its own `TODO`. Reporting a
+  `Primitives.hpp`'s `DECMode` that are honest toggles today, each carrying its own `TODO`. Reporting a
   mode's state truthfully while not acting on it is deliberate: it is a step above the
   `PermanentlyReset` modes, which can never mean anything here.
 - **The `*` table has not been audited against vttest's menu tables.** The rule above — `*` cannot

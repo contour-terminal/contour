@@ -26,7 +26,7 @@
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/WindowController.hpp>
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtpty/ChannelPty.hpp>
 

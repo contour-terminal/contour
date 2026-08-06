@@ -67,7 +67,7 @@ set(vtbackend_HEADERS
     ViInputHandler.hpp
     ViCommands.hpp
     JumpHistory.hpp
-    primitives.hpp
+    Primitives.hpp
 )
 
 set(vtbackend_SOURCES
@@ -114,7 +114,7 @@ set(vtbackend_SOURCES
     ViInputHandler.cpp
     ViCommands.cpp
     JumpHistory.cpp
-    primitives.cpp
+    Primitives.cpp
 )
 
 add_library(vtbackend STATIC ${vtbackend_SOURCES} ${vtbackend_HEADERS})

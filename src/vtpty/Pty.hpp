@@ -5,7 +5,7 @@
 #include <vtpty/PageSize.hpp>
 
 #include <crispy/BufferObject.hpp>
-#include <crispy/logstore.hpp>
+#include <crispy/LogStore.hpp>
 
 #include <chrono>
 #include <cstdint>

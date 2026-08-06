@@ -2,13 +2,13 @@
 #pragma once
 
 #include <vtbackend/InputHandler.hpp>
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/Selector.hpp>
 #include <vtbackend/Settings.hpp>
-#include <vtbackend/primitives.hpp>
 
+#include <crispy/Assert.hpp>
+#include <crispy/LogStore.hpp>
 #include <crispy/TrieMap.hpp>
-#include <crispy/assert.hpp>
-#include <crispy/logstore.hpp>
 
 #include <gsl/pointers>
 

@@ -6,7 +6,7 @@
 #include <vtbackend/Color.hpp>
 #include <vtbackend/ColorPalette.hpp>
 
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/utf8_grapheme_segmenter.h>

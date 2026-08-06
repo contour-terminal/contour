@@ -20,10 +20,10 @@
 
 #include <vtparser/ParserExtension.hpp>
 
-#include <crispy/algorithm.hpp>
-#include <crispy/logstore.hpp>
-#include <crispy/size.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Algorithm.hpp>
+#include <crispy/LogStore.hpp>
+#include <crispy/Size.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/grapheme_segmenter.h>
 #include <libunicode/width.h>

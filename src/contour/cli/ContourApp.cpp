@@ -11,11 +11,11 @@
 #include <vtparser/Parser.hpp>
 
 #include <crispy/App.hpp>
+#include <crispy/Base64.hpp>
 #include <crispy/CLI.hpp>
+#include <crispy/LogSink.hpp>
 #include <crispy/StackTrace.hpp>
-#include <crispy/base64.hpp>
-#include <crispy/logsink.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <charconv>
 #include <chrono>

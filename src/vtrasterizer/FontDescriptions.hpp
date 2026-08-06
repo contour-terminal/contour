@@ -2,10 +2,10 @@
 
 #include <vtbackend/Color.hpp>
 
-#include <text_shaper/font.hpp>
+#include <text_shaper/Font.hpp>
 
-#include <crispy/flags.hpp>
-#include <crispy/point.hpp>
+#include <crispy/Flags.hpp>
+#include <crispy/Point.hpp>
 
 namespace vtrasterizer
 {

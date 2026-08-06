@@ -4,7 +4,7 @@
 #include <vtbackend/Screen.hpp>
 #include <vtbackend/Terminal.hpp>
 
-#include <crispy/times.hpp>
+#include <crispy/Times.hpp>
 
 #include <cassert>
 

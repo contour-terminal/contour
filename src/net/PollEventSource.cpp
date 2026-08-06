@@ -2,7 +2,7 @@
 #include <net/PollEventSource.hpp>
 
 #ifdef _WIN32
-    #include <crispy/logstore.hpp>
+    #include <crispy/LogStore.hpp>
 
     #include <algorithm>
     #include <cstdint>

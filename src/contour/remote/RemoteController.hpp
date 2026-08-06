@@ -12,7 +12,7 @@
 
 #include <contour/remote/ReactorThread.hpp>
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtpty/ChannelPty.hpp>
 #include <vtpty/Pty.hpp>

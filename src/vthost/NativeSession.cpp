@@ -19,10 +19,10 @@
 #include <net/Tls.hpp>
 #include <vthost/CursorStyle.hpp>
 #include <vthost/GridWire.hpp>
+#include <vthost/Logging.hpp>
 #include <vthost/MirroredModes.hpp>
 #include <vthost/MouseWire.hpp>
 #include <vthost/PduPump.hpp>
-#include <vthost/logging.hpp>
 #include <vthost/proto/PduTrace.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>

@@ -3,8 +3,8 @@
 
 #include <vtbackend/Terminal.hpp>
 
-#include <crispy/base64.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Base64.hpp>
+#include <crispy/Utils.hpp>
 
 #include <charconv>
 #include <format>

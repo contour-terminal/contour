@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 namespace contour::display
 {

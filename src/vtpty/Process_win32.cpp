@@ -4,8 +4,8 @@
 #include <vtpty/Pty.hpp>
 #include <vtpty/SpawnLadder.hpp>
 
-#include <crispy/assert.hpp>
-#include <crispy/overloaded.hpp>
+#include <crispy/Assert.hpp>
+#include <crispy/Overloaded.hpp>
 
 #include <cassert>
 #include <cerrno>

@@ -7,9 +7,9 @@
 #include <utility>
 #include <vector>
 
+#include <vthost/Logging.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/TappingPty.hpp>
-#include <vthost/logging.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/PaneLayout.hpp>
 #include <vtworkspace/Tab.hpp>

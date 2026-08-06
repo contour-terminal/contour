@@ -6,7 +6,7 @@
 #include <vtbackend/regis/ReGISRasterizer.hpp>
 #include <vtbackend/regis/ReGISTables.hpp>
 
-#include <crispy/point.hpp>
+#include <crispy/Point.hpp>
 
 #include <string>
 #include <unordered_map>

@@ -19,7 +19,7 @@
 #include <vtpty/PageSize.hpp>
 #include <vtpty/Pty.hpp>
 
-#include <crispy/environment.hpp>
+#include <crispy/Environment.hpp>
 
 #include <functional>
 #include <memory>

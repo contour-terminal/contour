@@ -23,9 +23,9 @@
 #include <vtpty/Pty.hpp>
 #include <vtpty/SshSession.hpp>
 
+#include <crispy/Assert.hpp>
 #include <crispy/StackTrace.hpp>
-#include <crispy/assert.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QDeadlineTimer>
 #include <QtCore/QDebug>

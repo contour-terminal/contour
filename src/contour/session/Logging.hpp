@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/logstore.hpp>
+#include <crispy/LogStore.hpp>
 
 namespace contour::session
 {

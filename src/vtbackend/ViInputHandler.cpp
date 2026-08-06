@@ -2,11 +2,11 @@
 #include <vtbackend/ViInputHandler.hpp>
 
 #include <vtbackend/HintModeHandler.hpp>
-#include <vtbackend/logging.hpp>
+#include <vtbackend/Logging.hpp>
 
+#include <crispy/Assert.hpp>
 #include <crispy/TrieMap.hpp>
-#include <crispy/assert.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/convert.h>
 

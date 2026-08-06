@@ -5,13 +5,13 @@
 #include <contour/input/MouseMapping.hpp>
 
 #include <vtbackend/Image.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtrasterizer/Decorator.hpp>
 #include <vtrasterizer/FontDescriptions.hpp>
 #include <vtrasterizer/GridMetrics.hpp>
 
-#include <text_shaper/font.hpp>
+#include <text_shaper/Font.hpp>
 
 #include <filesystem>
 #include <functional>

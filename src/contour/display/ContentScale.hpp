@@ -3,7 +3,7 @@
 
 #include <contour/geometry/WindowGeometry.hpp>
 
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QFileSystemWatcher>
 #include <QtCore/QObject>

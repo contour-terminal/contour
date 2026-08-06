@@ -3,9 +3,9 @@
 #include <vtbackend/MessageParser.hpp>
 #include <vtbackend/MockTerm.hpp>
 #include <vtbackend/Screen.hpp>
-#include <vtbackend/test_helpers.hpp>
+#include <vtbackend/TestHelpers.hpp>
 
-#include <crispy/base64.hpp>
+#include <crispy/Base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

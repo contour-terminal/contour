@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/Logging.hpp>
 #include <vtbackend/MockTerm.hpp>
 #include <vtbackend/Terminal.hpp>
-#include <vtbackend/logging.hpp>
 
 #include <vtparser/ParserEvents.hpp>
 
@@ -10,8 +10,8 @@
 #include <crispy/App.hpp>
 #include <crispy/BufferObject.hpp>
 #include <crispy/CLI.hpp>
-#include <crispy/environment.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/Utils.hpp>
 
 #include <chrono>
 #include <format>

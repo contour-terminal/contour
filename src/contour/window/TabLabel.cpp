@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/window/TabLabel.hpp>
 
-#include <crispy/interpolated_string.hpp>
+#include <crispy/InterpolatedString.hpp>
 
 #include <format>
 #include <variant>

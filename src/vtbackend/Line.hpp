@@ -7,13 +7,13 @@
 #include <vtbackend/Hyperlink.hpp>
 #include <vtbackend/LineFlags.hpp>
 #include <vtbackend/LineSoA.hpp>
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/SoAClusterWriter.hpp>
-#include <vtbackend/primitives.hpp>
 
+#include <crispy/Assert.hpp>
 #include <crispy/BufferObject.hpp>
 #include <crispy/Comparison.hpp>
-#include <crispy/assert.hpp>
-#include <crispy/flags.hpp>
+#include <crispy/Flags.hpp>
 
 #include <libunicode/convert.h>
 

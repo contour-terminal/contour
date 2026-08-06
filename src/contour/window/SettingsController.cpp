@@ -4,7 +4,7 @@
 
 #include <vtbackend/StatusLineBuilder.hpp>
 
-#include <text_shaper/font.hpp>
+#include <text_shaper/Font.hpp>
 
 #include <QtCore/QStringList>
 #include <QtGui/QColor>

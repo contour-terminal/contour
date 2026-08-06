@@ -7,8 +7,8 @@
 #include <vtbackend/Hyperlink.hpp>
 #include <vtbackend/Image.hpp>
 #include <vtbackend/LineFlags.hpp>
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/TextScale.hpp>
-#include <vtbackend/primitives.hpp>
 
 #include <crispy/AlignedAllocator.hpp>
 

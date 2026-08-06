@@ -10,7 +10,7 @@
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/WindowController.hpp>
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtpty/Process.hpp>
 #ifdef VTPTY_LIBSSH2

@@ -2,7 +2,7 @@
 
 #include <vtbackend/ControlCode.hpp>
 
-#include <crispy/escape.hpp>
+#include <crispy/Escape.hpp>
 
 #include <numeric>
 #include <sstream>

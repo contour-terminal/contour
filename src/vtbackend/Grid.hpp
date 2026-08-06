@@ -4,12 +4,12 @@
 #include <vtbackend/CellProxy.hpp>
 #include <vtbackend/GraphicsAttributes.hpp>
 #include <vtbackend/Line.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
-#include <crispy/algorithm.hpp>
-#include <crispy/assert.hpp>
-#include <crispy/defines.hpp>
-#include <crispy/ring.hpp>
+#include <crispy/Algorithm.hpp>
+#include <crispy/Assert.hpp>
+#include <crispy/Defines.hpp>
+#include <crispy/Ring.hpp>
 
 #include <libunicode/convert.h>
 

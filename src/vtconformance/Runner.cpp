@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtconformance/Runner.hpp>
 
-#include <crispy/environment.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/Utils.hpp>
 
 #include <cstdlib>
 #include <deque>

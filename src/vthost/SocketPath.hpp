@@ -5,7 +5,7 @@
 /// Derivation of the daemon's control-socket path, following tmux's shape:
 /// a per-user runtime directory holding one socket file per label.
 
-#include <crispy/environment.hpp>
+#include <crispy/Environment.hpp>
 
 #include <filesystem>
 #include <optional>

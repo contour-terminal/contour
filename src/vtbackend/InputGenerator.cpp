@@ -2,10 +2,10 @@
 #include <vtbackend/InputGenerator.hpp>
 
 #include <vtbackend/ControlCode.hpp>
-#include <vtbackend/logging.hpp>
+#include <vtbackend/Logging.hpp>
 
-#include <crispy/assert.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Assert.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/case_mapping.h>
 #include <libunicode/convert.h>

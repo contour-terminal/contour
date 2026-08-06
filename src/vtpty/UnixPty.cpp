@@ -5,10 +5,10 @@
 #include <vtpty/UnixUtils.hpp>
 
 #include <crispy/BufferObject.hpp>
-#include <crispy/deferred.hpp>
-#include <crispy/environment.hpp>
-#include <crispy/escape.hpp>
-#include <crispy/logstore.hpp>
+#include <crispy/Deferred.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/LogStore.hpp>
 
 #include <cassert>
 #include <csignal>

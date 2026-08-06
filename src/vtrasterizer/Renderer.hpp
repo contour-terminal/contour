@@ -15,8 +15,8 @@
 #include <vtrasterizer/RenderTarget.hpp>
 #include <vtrasterizer/TextRenderer.hpp>
 
+#include <crispy/Size.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
-#include <crispy/size.hpp>
 
 #include <gsl/pointers>
 

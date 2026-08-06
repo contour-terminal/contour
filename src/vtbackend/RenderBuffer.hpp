@@ -6,8 +6,8 @@
 #include <vtbackend/Grid.hpp>
 #include <vtbackend/Image.hpp>
 #include <vtbackend/Line.hpp>
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/TextScale.hpp>
-#include <vtbackend/primitives.hpp>
 
 #include <vtrasterizer/RenderTarget.hpp>
 

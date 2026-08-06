@@ -2,7 +2,7 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/platform/BlurBehind.hpp>
 
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <QtCore/QDebug>
 #include <QtGui/QWindow>

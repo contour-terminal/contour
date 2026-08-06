@@ -6,8 +6,8 @@
 #include <vtrasterizer/UnderlineGeometry.hpp>
 #include <vtrasterizer/shared_defines.h>
 
-#include <crispy/times.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Times.hpp>
+#include <crispy/Utils.hpp>
 
 #include <array>
 #include <cmath>

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/logsink.hpp>
+#include <crispy/LogSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

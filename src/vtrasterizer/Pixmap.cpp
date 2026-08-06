@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/Pixmap.hpp>
 
-#include <vtrasterizer/utils.hpp>
+#include <vtrasterizer/Utils.hpp>
 
 using std::clamp;
 using std::max;

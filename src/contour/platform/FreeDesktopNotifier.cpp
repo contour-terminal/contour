@@ -3,7 +3,7 @@
 
     #include <contour/platform/FreeDesktopNotifier.hpp>
 
-    #include <crispy/logstore.hpp>
+    #include <crispy/LogStore.hpp>
 
     #include <QtDBus/QDBusConnection>
     #include <QtDBus/QDBusReply>

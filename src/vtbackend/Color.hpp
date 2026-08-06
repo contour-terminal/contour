@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/defines.hpp>
+#include <crispy/Defines.hpp>
 
 #include <algorithm>
 #include <array>

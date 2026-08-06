@@ -11,9 +11,9 @@
 #include <vector>
 
 #include <net/Sockets.hpp>
+#include <vthost/Logging.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/SessionSettings.hpp>
-#include <vthost/logging.hpp>
 #include <vthost/proto/PduTrace.hpp>
 
 namespace vthost::client

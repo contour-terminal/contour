@@ -4,21 +4,21 @@
 #include <vtbackend/ControlCode.hpp>
 #include <vtbackend/Functions.hpp>
 #include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/Logging.hpp>
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/RenderBuffer.hpp>
 #include <vtbackend/RenderBufferBuilder.hpp>
 #include <vtbackend/SequenceBuilder.hpp>
-#include <vtbackend/logging.hpp>
-#include <vtbackend/primitives.hpp>
 
 #include <vtparser/Parser.hpp>
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/assert.hpp>
-#include <crispy/base64.hpp>
-#include <crispy/environment.hpp>
-#include <crispy/escape.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Assert.hpp>
+#include <crispy/Base64.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/convert.h>
 

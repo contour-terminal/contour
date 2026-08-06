@@ -8,8 +8,8 @@
 #include <vtbackend/Hyperlink.hpp>
 #include <vtbackend/Image.hpp>
 #include <vtbackend/LineSoA.hpp>
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/SoAClusterWriter.hpp>
-#include <vtbackend/primitives.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>

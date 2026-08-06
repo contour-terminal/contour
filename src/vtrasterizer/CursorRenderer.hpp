@@ -2,12 +2,12 @@
 #pragma once
 
 #include <vtbackend/Color.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtrasterizer/GridMetrics.hpp>
 #include <vtrasterizer/RenderTarget.hpp>
 
-#include <crispy/point.hpp>
+#include <crispy/Point.hpp>
 
 namespace vtrasterizer
 {

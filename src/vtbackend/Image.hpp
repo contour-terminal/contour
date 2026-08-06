@@ -2,7 +2,7 @@
 #pragma once
 
 #include <vtbackend/Color.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <crispy/StrongHash.hpp>
 #include <crispy/StrongLRUCache.hpp>

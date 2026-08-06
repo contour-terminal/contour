@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/ShellIntegration.hpp>
 
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <algorithm>
 #include <ranges>

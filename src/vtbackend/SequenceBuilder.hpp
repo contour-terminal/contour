@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/Logging.hpp>
 #include <vtbackend/Sequence.hpp>
 #include <vtbackend/SixelParser.hpp>
-#include <vtbackend/logging.hpp>
 
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserExtension.hpp>

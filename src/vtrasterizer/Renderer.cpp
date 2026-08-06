@@ -2,16 +2,16 @@
 #include <vtrasterizer/Renderer.hpp>
 
 #include <vtrasterizer/TextRenderer.hpp>
-#include <vtrasterizer/utils.hpp>
+#include <vtrasterizer/Utils.hpp>
 
-#include <text_shaper/font_locator.hpp>
-#include <text_shaper/open_shaper.hpp>
+#include <text_shaper/FontLocator.hpp>
+#include <text_shaper/OpenShaper.hpp>
 
 #include <crispy/StrongLRUHashtable.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #ifdef _WIN32
-    #include <text_shaper/directwrite_shaper.hpp>
+    #include <text_shaper/DirectWriteShaper.hpp>
 #endif
 
 #include <algorithm>

@@ -3,7 +3,7 @@
 
 #include <vtbackend/Color.hpp>
 
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <stdexcept>
 #include <utility>

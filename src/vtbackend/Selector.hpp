@@ -4,9 +4,9 @@
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/ViInputHandler.hpp>
 
-#include <crispy/size.hpp>
-#include <crispy/times.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Size.hpp>
+#include <crispy/Times.hpp>
+#include <crispy/Utils.hpp>
 
 #include <format>
 #include <functional>

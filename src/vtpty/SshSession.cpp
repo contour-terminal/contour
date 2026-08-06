@@ -20,8 +20,8 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 
-#include <crispy/escape.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/Utils.hpp>
 
 #include <chrono>
 #include <expected>

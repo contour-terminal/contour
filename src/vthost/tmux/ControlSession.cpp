@@ -10,7 +10,7 @@
 #include <ranges>
 #include <utility>
 
-#include <vthost/logging.hpp>
+#include <vthost/Logging.hpp>
 #include <vthost/tmux/LayoutString.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>

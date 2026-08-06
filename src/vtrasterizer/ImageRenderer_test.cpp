@@ -4,7 +4,7 @@
 #include <vtrasterizer/ImageRenderer.hpp>
 #include <vtrasterizer/RendererTestHelpers.hpp>
 
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

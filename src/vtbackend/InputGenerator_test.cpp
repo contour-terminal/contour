@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/InputBinding.hpp>
 #include <vtbackend/InputGenerator.hpp>
-#include <vtbackend/test_helpers.hpp>
+#include <vtbackend/TestHelpers.hpp>
 
-#include <crispy/escape.hpp>
+#include <crispy/Escape.hpp>
 
 #include <libunicode/convert.h>
 

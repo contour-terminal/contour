@@ -2,13 +2,13 @@
 #include <vtbackend/Charset.hpp>
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/MockTerm.hpp>
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/Screen.hpp>
+#include <vtbackend/TestHelpers.hpp>
 #include <vtbackend/Viewport.hpp>
-#include <vtbackend/primitives.hpp>
-#include <vtbackend/test_helpers.hpp>
 
-#include <crispy/escape.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/convert.h>
 

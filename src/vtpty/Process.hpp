@@ -4,7 +4,7 @@
 #include <vtpty/Pty.hpp>
 
 #include <crispy/BufferObject.hpp>
-#include <crispy/overloaded.hpp>
+#include <crispy/Overloaded.hpp>
 
 #include <filesystem>
 #include <format>

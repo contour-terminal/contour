@@ -9,7 +9,7 @@
 #include <utility>
 
 #include <coro/Cancellation.hpp>
-#include <vthost/logging.hpp>
+#include <vthost/Logging.hpp>
 
 namespace vthost
 {

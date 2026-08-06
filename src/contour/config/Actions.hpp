@@ -6,8 +6,8 @@
 #include <vtbackend/Color.hpp>
 #include <vtbackend/HintModeHandler.hpp>
 
-#include <crispy/assert.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Assert.hpp>
+#include <crispy/Utils.hpp>
 
 #include <array>
 #include <format>

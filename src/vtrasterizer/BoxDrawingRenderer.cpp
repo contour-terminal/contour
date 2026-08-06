@@ -2,10 +2,10 @@
 #include <vtrasterizer/BoxDrawingRenderer.hpp>
 
 #include <vtrasterizer/Pixmap.hpp>
-#include <vtrasterizer/utils.hpp>
+#include <vtrasterizer/Utils.hpp>
 
-#include <crispy/environment.hpp>
-#include <crispy/logstore.hpp>
+#include <crispy/Environment.hpp>
+#include <crispy/LogStore.hpp>
 
 #include <array>
 #include <charconv>

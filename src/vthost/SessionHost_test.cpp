@@ -2,7 +2,7 @@
 #include <vtpty/MockPty.hpp>
 
 #include <crispy/BufferObject.hpp>
-#include <crispy/logsink.hpp>
+#include <crispy/LogSink.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

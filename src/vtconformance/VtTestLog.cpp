@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtconformance/VtTestLog.hpp>
 
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <array>
 #include <charconv>

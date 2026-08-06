@@ -10,7 +10,9 @@
 #include <vtbackend/Hyperlink.hpp>
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/InputHandler.hpp>
+#include <vtbackend/Logging.hpp>
 #include <vtbackend/PointerShape.hpp>
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/RenderBuffer.hpp>
 #include <vtbackend/Selector.hpp>
 #include <vtbackend/SemanticBlockTracker.hpp>
@@ -22,17 +24,15 @@
 #include <vtbackend/ViCommands.hpp>
 #include <vtbackend/ViInputHandler.hpp>
 #include <vtbackend/Viewport.hpp>
-#include <vtbackend/logging.hpp>
-#include <vtbackend/primitives.hpp>
 
 #include <vtparser/Parser.hpp>
 
 #include <vtpty/Pty.hpp>
 
+#include <crispy/Assert.hpp>
 #include <crispy/BufferObject.hpp>
-#include <crispy/assert.hpp>
-#include <crispy/defines.hpp>
-#include <crispy/environment.hpp>
+#include <crispy/Defines.hpp>
+#include <crispy/Environment.hpp>
 
 #include <gsl/pointers>
 

@@ -3,7 +3,7 @@
 
 #include <vtbackend/Color.hpp>
 #include <vtbackend/Line.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <libunicode/convert.h>
 

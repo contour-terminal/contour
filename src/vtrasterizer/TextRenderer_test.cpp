@@ -7,12 +7,12 @@
 #include <vtrasterizer/RendererTestHelpers.hpp>
 #include <vtrasterizer/TextRenderer.hpp>
 
-#include <text_shaper/bdf_test_font.hpp>
-#include <text_shaper/mock_font_locator.hpp>
-#include <text_shaper/open_shaper.hpp>
+#include <text_shaper/BDFTestFont.hpp>
+#include <text_shaper/MockFontLocator.hpp>
+#include <text_shaper/OpenShaper.hpp>
 
 #include <crispy/SuppressWindowsDialogs.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_session.hpp>

@@ -3,9 +3,9 @@
 
 #include <vtbackend/VTType.hpp>
 
-#include <crispy/defines.hpp>
-#include <crispy/escape.hpp>
-#include <crispy/sort.hpp>
+#include <crispy/Defines.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/Sort.hpp>
 
 #include <gsl/pointers>
 #include <gsl/span>

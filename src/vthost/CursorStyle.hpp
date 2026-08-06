@@ -11,7 +11,7 @@
 /// is a Contour extension DECSCUSR cannot name — so it degrades to block, in one place, with this
 /// comment next to it.
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <array>
 #include <cstdint>

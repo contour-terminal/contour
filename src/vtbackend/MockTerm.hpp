@@ -7,7 +7,7 @@
 #include <vtpty/MockPty.hpp>
 
 #include <crispy/App.hpp>
-#include <crispy/environment.hpp>
+#include <crispy/Environment.hpp>
 
 #include <libunicode/convert.h>
 

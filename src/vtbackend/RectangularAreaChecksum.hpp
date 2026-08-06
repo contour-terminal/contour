@@ -3,7 +3,7 @@
 
 #include <vtbackend/CellFlags.hpp>
 
-#include <crispy/flags.hpp>
+#include <crispy/Flags.hpp>
 
 #include <algorithm>
 #include <array>

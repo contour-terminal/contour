@@ -4,11 +4,11 @@
 #include <contour/config/Config.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
 
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <vtrasterizer/FontDescriptions.hpp>
 
-#include <text_shaper/font.hpp>
+#include <text_shaper/Font.hpp>
 
 namespace vtrasterizer
 {

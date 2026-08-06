@@ -3,7 +3,7 @@
 
 #include <vtbackend/CellFlags.hpp>
 #include <vtbackend/LineFlags.hpp>
-#include <vtbackend/primitives.hpp>
+#include <vtbackend/Primitives.hpp>
 
 #include <string>
 #include <variant>

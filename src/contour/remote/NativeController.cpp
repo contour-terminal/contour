@@ -2,7 +2,7 @@
 #include <contour/remote/NativeController.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 
-#include <crispy/utils.hpp>
+#include <crispy/Utils.hpp>
 
 #include <algorithm>
 #include <ranges>

@@ -5,7 +5,7 @@
 #include <vtbackend/Color.hpp>
 #include <vtbackend/ColorPalette.hpp>
 
-#include <crispy/times.hpp>
+#include <crispy/Times.hpp>
 
 #include <libunicode/case_mapping.h>
 #include <libunicode/width.h>

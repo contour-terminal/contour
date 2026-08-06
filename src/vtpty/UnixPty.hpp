@@ -5,8 +5,8 @@
 #include <vtpty/UnixUtils.hpp>
 
 #include <crispy/BufferObject.hpp>
-#include <crispy/file_descriptor.hpp>
-#include <crispy/read_selector.hpp>
+#include <crispy/FileDescriptor.hpp>
+#include <crispy/ReadSelector.hpp>
 
 #include <memory>
 #include <mutex>

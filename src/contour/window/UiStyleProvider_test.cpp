@@ -12,7 +12,7 @@
 #include <contour/config/UiStyle.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
-#include <text_shaper/font.hpp>
+#include <text_shaper/Font.hpp>
 
 #include <QtGui/QColor>
 #include <QtGui/QFont>

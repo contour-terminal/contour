@@ -8,7 +8,7 @@
 #include <vtrasterizer/RenderTarget.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
 
-#include <crispy/point.hpp>
+#include <crispy/Point.hpp>
 
 namespace vtrasterizer
 {

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <crispy/Assert.hpp>
 #include <crispy/StrongHash.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
-#include <crispy/assert.hpp>
 
 #include <optional>
 #include <ostream>

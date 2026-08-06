@@ -2,16 +2,16 @@
 #include <vtbackend/CellUtil.hpp>
 #include <vtbackend/HintModeHandler.hpp>
 #include <vtbackend/MockTerm.hpp>
+#include <vtbackend/Primitives.hpp>
 #include <vtbackend/Terminal.hpp>
-#include <vtbackend/primitives.hpp>
-#include <vtbackend/test_helpers.hpp>
+#include <vtbackend/TestHelpers.hpp>
 
 #include <vtpty/MockPty.hpp>
 
 #include <crispy/App.hpp>
-#include <crispy/testing/environment.hpp>
-#include <crispy/times.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/Times.hpp>
+#include <crispy/Utils.hpp>
+#include <crispy/testing/Environment.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>

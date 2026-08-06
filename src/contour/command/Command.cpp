@@ -3,9 +3,9 @@
 
 #include <vtbackend/Color.hpp>
 
-#include <crispy/ascii.hpp>
-#include <crispy/escape.hpp>
-#include <crispy/utils.hpp>
+#include <crispy/ASCII.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/Utils.hpp>
 
 #include <format>
 #include <ranges>
