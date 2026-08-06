@@ -160,13 +160,13 @@ namespace
 
     void fillFragmentSimd(int& x, uint8_t*& target, SimdContext const& context, int globalY, bool yInBounds)
     {
-        using float_v = simd::native_simd<float>;
-        using int_v = simd::rebind_simd_t<int, float_v>;
-        constexpr int SimdWidth = float_v::size();
+        using FloatV = simd::native_simd<float>;
+        using IntV = simd::rebind_simd_t<int, FloatV>;
+        constexpr int SimdWidth = FloatV::size();
 
         for (; x + SimdWidth <= context.width; x += SimdWidth) // SIMD loop
         {
-            auto const globalXVec = int_v([](int i) { return i; }) + (context.cellX + x);
+            auto const globalXVec = IntV([](int i) { return i; }) + (context.cellX + x);
 
             // Check bounds
             // X bounds depend on vector, Y bounds are scalar for this row
