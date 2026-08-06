@@ -76,7 +76,7 @@ namespace
     /// Loads the font keys (regular/bold/italic/...) for the given descriptions.
     ///
     /// @throws std::runtime_error if the @e regular font fails to load. The regular key is the
-    ///         anchor every other style falls back to, and a default-constructed (invalid) font_key
+    ///         anchor every other style falls back to, and a default-constructed (invalid) FontKey
     ///         would later abort inside text::Shaper::metrics() (Require on the key mapping). Throwing
     ///         instead lets applyPendingReconfig()'s try/catch keep the previously loaded font, honoring
     ///         the "keep previous font on failure" guarantee, and surfaces a startup font-load failure
@@ -84,14 +84,14 @@ namespace
     FontKeys loadFontKeys(FontDescriptions const& fd, text::Shaper& shaper)
     {
         FontKeys output {};
-        auto const regularOpt = shaper.load_font(fd.regular, fd.size);
+        auto const regularOpt = shaper.loadFont(fd.regular, fd.size);
         if (!regularOpt.has_value())
             throw std::runtime_error(std::format("Failed to load regular font: {}", fd.regular));
         output.regular = regularOpt.value();
-        output.bold = shaper.load_font(fd.bold, fd.size).value_or(output.regular);
-        output.italic = shaper.load_font(fd.italic, fd.size).value_or(output.regular);
-        output.boldItalic = shaper.load_font(fd.boldItalic, fd.size).value_or(output.regular);
-        output.emoji = shaper.load_font(fd.emoji, fd.size).value_or(output.regular);
+        output.bold = shaper.loadFont(fd.bold, fd.size).value_or(output.regular);
+        output.italic = shaper.loadFont(fd.italic, fd.size).value_or(output.regular);
+        output.boldItalic = shaper.loadFont(fd.boldItalic, fd.size).value_or(output.regular);
+        output.emoji = shaper.loadFont(fd.emoji, fd.size).value_or(output.regular);
 
         return output;
     }
@@ -150,7 +150,7 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
         auto shaper = createTextShaper(_fontDescriptions.textShapingEngine,
                                        _fontDescriptions.dpi,
                                        createFontLocator(_fontDescriptions.fontLocator));
-        shaper->set_font_fallback_limit(_fontDescriptions.maxFallbackCount);
+        shaper->setFontFallbackLimit(_fontDescriptions.maxFallbackCount);
         return shaper;
     }() },
     _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
@@ -322,8 +322,8 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
     if (fontDescriptions == _fontDescriptions)
         return;
 
-    // When only DPI changed, the enhanced set_dpi() updates existing FT_Face
-    // objects in-place. Skip clear_cache() to avoid destroying them.
+    // When only DPI changed, the enhanced setDPI() updates existing FT_Face
+    // objects in-place. Skip clearCache() to avoid destroying them.
     auto descriptionsWithSameDpi = fontDescriptions;
     descriptionsWithSameDpi.dpi = _fontDescriptions.dpi;
     auto const onlyDpiChanged = (descriptionsWithSameDpi == _fontDescriptions);
@@ -331,18 +331,18 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
     if (_fontDescriptions.textShapingEngine == fontDescriptions.textShapingEngine)
     {
         if (!onlyDpiChanged)
-            _textShaper->clear_cache();
-        _textShaper->set_dpi(fontDescriptions.dpi);
-        _textShaper->set_font_fallback_limit(fontDescriptions.maxFallbackCount);
+            _textShaper->clearCache();
+        _textShaper->setDPI(fontDescriptions.dpi);
+        _textShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
         if (_fontDescriptions.fontLocator != fontDescriptions.fontLocator)
-            _textShaper->set_locator(createFontLocator(fontDescriptions.fontLocator));
+            _textShaper->setLocator(createFontLocator(fontDescriptions.fontLocator));
     }
     else
     {
         _textShaper = createTextShaper(fontDescriptions.textShapingEngine,
                                        fontDescriptions.dpi,
                                        createFontLocator(fontDescriptions.fontLocator));
-        _textShaper->set_font_fallback_limit(fontDescriptions.maxFallbackCount);
+        _textShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
     }
 
     // Load the fonts against the NEW descriptions but only commit them to _fontDescriptions once the

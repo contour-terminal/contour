@@ -85,8 +85,8 @@ class NativeHandle
     [[nodiscard]] native_handle_type get() const noexcept { return _fd; }
     operator native_handle_type() const noexcept { return _fd; }
 
-    [[nodiscard]] bool is_closed() const noexcept { return _fd == invalid_native_handle; }
-    [[nodiscard]] bool is_open() const noexcept { return !is_closed(); }
+    [[nodiscard]] bool isClosed() const noexcept { return _fd == invalid_native_handle; }
+    [[nodiscard]] bool isOpen() const noexcept { return !isClosed(); }
 
     [[nodiscard]] native_handle_type release() noexcept
     {

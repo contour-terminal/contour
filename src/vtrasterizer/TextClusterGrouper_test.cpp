@@ -116,7 +116,7 @@ struct std::formatter<TextClusterGroup>: formatter<std::string>
                         group.initialPenPosition,
                         group.clusters | std::views::transform([](int cluster) {
                             return std::to_string(cluster);
-                        }) | crispy::views::join_with(", "),
+                        }) | crispy::views::joinWith(", "),
                         group.style,
                         group.color,
                         group.flags),

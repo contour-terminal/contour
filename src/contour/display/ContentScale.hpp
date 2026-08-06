@@ -33,7 +33,7 @@ namespace contour::display
         auto const fields = crispy::split(line, '=');
         if (fields.size() == 2 && fields[0] == key)
         {
-            auto const forcedDPI = static_cast<double>(crispy::to_integer(fields[1]).value_or(0));
+            auto const forcedDPI = static_cast<double>(crispy::toInteger(fields[1]).value_or(0));
             if (forcedDPI >= 96.0)
                 return forcedDPI;
             return std::nullopt;

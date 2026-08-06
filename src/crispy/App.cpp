@@ -282,7 +282,7 @@ std::expected<void, std::string> App::installLogging(std::string const& optionPr
 
 void App::customizeLogStoreOutput()
 {
-    logstore::Sink::console().set_enabled(true);
+    logstore::Sink::console().setEnabled(true);
 
     // console() writes to std::cout, so STDOUT is the right stream to ask about here.
     // (A destination that writes elsewhere must gate on ITS stream — see logstore::ScopedOutput.)
@@ -296,8 +296,8 @@ void App::customizeLogStoreOutput()
     // The historical console shape: timestamped standard lines, and a bare `[error]` tag with
     // no timestamp for errors. Destinations that want the process id (or a timestamp on error
     // lines) build their own options; the layout itself is single-sourced in logsink.cpp.
-    logstore::set_formatter(logstore::makeStandardFormatter({ .colorize = colorized }));
-    logstore::errorLog.set_formatter(
+    logstore::setFormatter(logstore::makeStandardFormatter({ .colorize = colorized }));
+    logstore::errorLog.setFormatter(
         logstore::makeErrorFormatter({ .colorize = colorized, .showTimestamp = false }));
 }
 

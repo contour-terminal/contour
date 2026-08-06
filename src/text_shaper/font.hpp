@@ -34,8 +34,8 @@ auto inline const locatorLog = logstore::Category("font.locator", "Logs about fo
 namespace detail
 {
     template <typename T>
-    constexpr std::optional<T> try_match(std::string_view text,
-                                         std::initializer_list<std::pair<std::string_view, T>> mappings)
+    constexpr std::optional<T> tryMatch(std::string_view text,
+                                        std::initializer_list<std::pair<std::string_view, T>> mappings)
     {
         for (auto const& mapping: mappings)
             if (mapping.first == text) // TODO: improvable (ignore case, '_' can be one or many ' ')
@@ -93,23 +93,23 @@ enum class FontWeight : uint8_t
     ExtraBlack, // aka. ultrablack
 };
 
-constexpr std::optional<FontWeight> make_font_weight(std::string_view text)
+constexpr std::optional<FontWeight> makeFontWeight(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
-    return detail::try_match(text,
-                             { pair { "thin"sv, FontWeight::Thin },
-                               pair { "extra light"sv, FontWeight::ExtraLight },
-                               pair { "light"sv, FontWeight::Light },
-                               pair { "demilight"sv, FontWeight::DemiLight },
-                               pair { "book"sv, FontWeight::Book },
-                               pair { "normal"sv, FontWeight::Normal },
-                               pair { "medium"sv, FontWeight::Medium },
-                               pair { "demibold"sv, FontWeight::DemiBold },
-                               pair { "bold"sv, FontWeight::Bold },
-                               pair { "extra bold"sv, FontWeight::ExtraBlack },
-                               pair { "black"sv, FontWeight::Black },
-                               pair { "extra black"sv, FontWeight::ExtraBlack } });
+    return detail::tryMatch(text,
+                            { pair { "thin"sv, FontWeight::Thin },
+                              pair { "extra light"sv, FontWeight::ExtraLight },
+                              pair { "light"sv, FontWeight::Light },
+                              pair { "demilight"sv, FontWeight::DemiLight },
+                              pair { "book"sv, FontWeight::Book },
+                              pair { "normal"sv, FontWeight::Normal },
+                              pair { "medium"sv, FontWeight::Medium },
+                              pair { "demibold"sv, FontWeight::DemiBold },
+                              pair { "bold"sv, FontWeight::Bold },
+                              pair { "extra bold"sv, FontWeight::ExtraBlack },
+                              pair { "black"sv, FontWeight::Black },
+                              pair { "extra black"sv, FontWeight::ExtraBlack } });
 }
 
 enum class FontSlant : uint8_t
@@ -119,14 +119,14 @@ enum class FontSlant : uint8_t
     Oblique
 };
 
-constexpr std::optional<FontSlant> make_font_slant(std::string_view text)
+constexpr std::optional<FontSlant> makeFontSlant(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
-    return detail::try_match(text,
-                             { pair { "thin"sv, FontSlant::Normal },
-                               pair { "italic"sv, FontSlant::Italic },
-                               pair { "oblique"sv, FontSlant::Oblique } });
+    return detail::tryMatch(text,
+                            { pair { "thin"sv, FontSlant::Normal },
+                              pair { "italic"sv, FontSlant::Italic },
+                              pair { "oblique"sv, FontSlant::Oblique } });
 }
 
 enum class FontSpacing : uint8_t
@@ -135,11 +135,11 @@ enum class FontSpacing : uint8_t
     Mono
 };
 
-constexpr std::optional<FontSpacing> make_font_spacing(std::string_view text)
+constexpr std::optional<FontSpacing> makeFontSpacing(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
-    return detail::try_match(
+    return detail::tryMatch(
         text, { pair { "proportional"sv, FontSpacing::Proportional }, pair { "mono"sv, FontSpacing::Mono } });
 }
 

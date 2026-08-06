@@ -581,7 +581,7 @@ struct TerminalProfile
         .program =
             []() {
                 auto const program = vtpty::Process::loginShell(true);
-                return program | crispy::views::join_with(std::string_view(" "));
+                return program | crispy::views::joinWith(std::string_view(" "));
             }(),
         .arguments = {},
         .workingDirectory = "",
@@ -1589,7 +1589,7 @@ struct Writer
 
         auto result = std::string { "[" };
         result.append(v | std::views::transform([](auto f) { return std::format("{}", f); })
-                      | crispy::views::join_with(std::string_view(", ")));
+                      | crispy::views::joinWith(std::string_view(", ")));
         result.append("]");
         return result;
     }
@@ -1642,7 +1642,7 @@ struct Writer
     [[nodiscard]] std::string format(std::string_view doc, vtpty::Process::ExecInfo const& v)
     {
         auto args = std::string { "[" };
-        args.append(v.arguments | crispy::views::join_with(std::string_view(", ")));
+        args.append(v.arguments | crispy::views::joinWith(std::string_view(", ")));
         args.append("]");
         return format(doc, v.program, args, [&]() -> std::string {
             auto fromConfig = v.workingDirectory.string();
@@ -2246,7 +2246,7 @@ struct std::formatter<std::set<std::basic_string<char>>>: formatter<std::string_
     auto format(std::set<std::basic_string<char>> const& value, auto& ctx) const
     {
         auto result = std::string {};
-        result.append(value | crispy::views::join_with(std::string_view(", ")));
+        result.append(value | crispy::views::joinWith(std::string_view(", ")));
         return formatter<std::string_view>::format(result, ctx);
     }
 };

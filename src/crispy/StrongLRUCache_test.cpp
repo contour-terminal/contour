@@ -112,29 +112,29 @@ TEST_CASE("StrongLRUCache.contains", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
 }
 
-TEST_CASE("StrongLRUCache.try_emplace", "")
+TEST_CASE("StrongLRUCache.tryEmplace", "")
 {
     auto cache = StrongLRUCache<int, int>(StrongHashtableSize { 4 }, LRUCapacity { 2 });
 
-    auto rv = cache.try_emplace(2, [](auto) { return 4; });
+    auto rv = cache.tryEmplace(2, [](auto) { return 4; });
     CHECK(rv);
     CHECK(joinHumanReadable(cache.keys()) == "2");
     CHECK(cache.at(2) == 4);
 
-    rv = cache.try_emplace(3, [](auto) { return 6; });
+    rv = cache.tryEmplace(3, [](auto) { return 6; });
     CHECK(rv);
     CHECK(joinHumanReadable(cache.keys()) == "3, 2");
     CHECK(cache.at(2) == 4);
     CHECK(cache.at(3) == 6);
 
-    rv = cache.try_emplace(2, [](auto) { return -1; });
+    rv = cache.tryEmplace(2, [](auto) { return -1; });
     CHECK_FALSE(rv);
     CHECK(joinHumanReadable(cache.keys()) == "2, 3");
     CHECK(cache.at(2) == 4);
     CHECK(cache.at(3) == 6);
 }
 
-TEST_CASE("StrongLRUCache.try_get", "")
+TEST_CASE("StrongLRUCache.tryGet", "")
 {
     auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
@@ -142,50 +142,50 @@ TEST_CASE("StrongLRUCache.try_get", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // no-op (not found)
-    REQUIRE(cache.try_get(-1) == nullptr);
+    REQUIRE(cache.tryGet(-1) == nullptr);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // no-op (found)
-    auto* const p1 = cache.try_get(4);
+    auto* const p1 = cache.tryGet(4);
     REQUIRE(p1 != nullptr);
     REQUIRE(*p1 == "4");
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // middle to front
-    auto* const p2 = cache.try_get(3);
+    auto* const p2 = cache.tryGet(3);
     REQUIRE(p2 != nullptr);
     REQUIRE(*p2 == "3");
     REQUIRE(joinHumanReadable(cache.keys()) == "3, 4, 2, 1");
 
     // back to front
-    auto* const p3 = cache.try_get(1);
+    auto* const p3 = cache.tryGet(1);
     REQUIRE(p3 != nullptr);
     REQUIRE(*p3 == "1");
     REQUIRE(joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
 }
 
-TEST_CASE("StrongLRUCache.get_or_emplace", "[lrucache]")
+TEST_CASE("StrongLRUCache.getOrEmplace", "[lrucache]")
 {
     auto cache = StrongLRUCache<int, int>(StrongHashtableSize { 4 }, LRUCapacity { 2 });
 
-    int const& a = cache.get_or_emplace(2, [](auto) { return 4; });
+    int const& a = cache.getOrEmplace(2, [](auto) { return 4; });
     CHECK(a == 4);
     CHECK(cache.at(2) == 4);
     CHECK(cache.size() == 1);
     CHECK(joinHumanReadable(cache.keys()) == "2"sv);
 
-    int const& a2 = cache.get_or_emplace(2, [](auto) { return -4; });
+    int const& a2 = cache.getOrEmplace(2, [](auto) { return -4; });
     CHECK(a2 == 4);
     CHECK(cache.at(2) == 4);
     CHECK(cache.size() == 1);
 
-    int const& b = cache.get_or_emplace(3, [](auto) { return 6; });
+    int const& b = cache.getOrEmplace(3, [](auto) { return 6; });
     CHECK(b == 6);
     CHECK(cache.at(3) == 6);
     CHECK(cache.size() == 2);
     CHECK(joinHumanReadable(cache.keys()) == "3, 2"sv);
 
-    int const& c = cache.get_or_emplace(4, [](auto) { return 8; });
+    int const& c = cache.getOrEmplace(4, [](auto) { return 8; });
     CHECK(joinHumanReadable(cache.keys()) == "4, 3"sv);
     CHECK(c == 8);
     CHECK(cache.at(4) == 8);
@@ -193,7 +193,7 @@ TEST_CASE("StrongLRUCache.get_or_emplace", "[lrucache]")
     CHECK(cache.contains(3));
     CHECK_FALSE(cache.contains(2)); // thrown out
 
-    int const& b2 = cache.get_or_emplace(3, [](auto) { return -3; });
+    int const& b2 = cache.getOrEmplace(3, [](auto) { return -3; });
     CHECK(joinHumanReadable(cache.keys()) == "3, 4"sv);
     CHECK(b2 == 6);
     CHECK(cache.at(3) == 6);

@@ -152,10 +152,10 @@ Category::Formatter makeStandardFormatter(FormatterOptions options)
         if (options.colorize)
         {
             auto const colorIndex = CategoryColors.at(
-                std::hash<std::string_view> {}(message.get_category().name()) % CategoryColors.size());
+                std::hash<std::string_view> {}(message.getCategory().name()) % CategoryColors.size());
             messageSgr = std::format("\033[38;5;{}m", colorIndex);
         }
-        return layOut(message, options, tagSgr, messageSgr, message.get_category().name());
+        return layOut(message, options, tagSgr, messageSgr, message.getCategory().name());
     };
 }
 
@@ -252,12 +252,12 @@ ScopedOutput::ScopedOutput(OutputConfig const& config, std::ofstream file):
     {
         auto& target = each.get();
         _restorePoints.push_back(RestorePoint {
-            .target = &target, .previousSink = &target.sink(), .previousFormatter = target.get_formatter() });
+            .target = &target, .previousSink = &target.sink(), .previousFormatter = target.getFormatter() });
     }
 
-    set_formatter(makeStandardFormatter(options));
-    errorLog.set_formatter(makeErrorFormatter(options));
-    set_sink(_sink);
+    setFormatter(makeStandardFormatter(options));
+    errorLog.setFormatter(makeErrorFormatter(options));
+    setSink(_sink);
 }
 
 ScopedOutput::~ScopedOutput()
@@ -265,8 +265,8 @@ ScopedOutput::~ScopedOutput()
     // MUST run before _sink dies: every category holds a reference_wrapper into it.
     for (auto const& point: _restorePoints)
     {
-        point.target->set_sink(*point.previousSink);
-        point.target->set_formatter(point.previousFormatter);
+        point.target->setSink(*point.previousSink);
+        point.target->setFormatter(point.previousFormatter);
     }
 }
 
@@ -284,9 +284,9 @@ ScopedCapture::ScopedCapture(std::string_view categoryName):
 {
     auto capture = [this](Category& target) {
         _restorePoints.push_back(RestorePoint {
-            .target = &target, .previousSink = &target.sink(), .wasEnabled = target.is_enabled() });
+            .target = &target, .previousSink = &target.sink(), .wasEnabled = target.isEnabled() });
         target.enable();
-        target.set_sink(_sink);
+        target.setSink(_sink);
     };
 
     if (categoryName.empty())
@@ -300,7 +300,7 @@ ScopedCapture::~ScopedCapture()
 {
     for (auto const& point: _restorePoints)
     {
-        point.target->set_sink(*point.previousSink);
+        point.target->setSink(*point.previousSink);
         point.target->enable(point.wasEnabled);
     }
 }

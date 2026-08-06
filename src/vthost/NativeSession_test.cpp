@@ -959,7 +959,7 @@ TEST_CASE("the PDU trace is disabled by default", "[vthost][native][diagnostics]
     // performance and a privacy problem at once.
     auto const* const category = logstore::get("vthost.trace.proto");
     REQUIRE(category != nullptr);
-    CHECK_FALSE(category->is_enabled());
+    CHECK_FALSE(category->isEnabled());
 }
 
 TEST_CASE("a ClientHello's settings reach the sessions that client creates", "[vthost][native]")

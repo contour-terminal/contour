@@ -1803,7 +1803,7 @@ TEST_CASE("Terminal.ParsingBuffer", "[terminal]")
 TEST_CASE("Terminal.TrivialLineBufferIntegrity", "[terminal]")
 {
     // Test that TrivialLineBuffer correctly stores text when written through terminal.
-    // This tests the fast path where text is stored directly in a buffer_fragment.
+    // This tests the fast path where text is stored directly in a BufferFragment.
 
     auto mock = MockTerm { ColumnCount { 20 }, LineCount { 3 } };
     auto& terminal = mock.terminal;

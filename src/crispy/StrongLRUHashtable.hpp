@@ -131,8 +131,8 @@ class StrongLRUHashtable
     [[nodiscard]] bool contains(StrongHash const& hash) const noexcept;
 
     /// Returns the value for the given hash key if found, nullptr otherwise.
-    [[nodiscard]] Value* try_get(StrongHash const& hash) noexcept;
-    [[nodiscard]] Value const* try_get(StrongHash const& hash) const noexcept;
+    [[nodiscard]] Value* tryGet(StrongHash const& hash) noexcept;
+    [[nodiscard]] Value const* tryGet(StrongHash const& hash) const noexcept;
 
     /// Returns the value for the given hash key,
     /// throwing std::out_of_range if hash key was not found.
@@ -160,15 +160,15 @@ class StrongLRUHashtable
     /// @retval true the hash key did not exist in hashtable yet, a new value was constructed.
     /// @retval false The hash key is already in the hashtable, no entry was constructed.
     template <typename ValueConstructFn>
-    [[nodiscard]] bool try_emplace(StrongHash const& hash, ValueConstructFn constructValue);
+    [[nodiscard]] bool tryEmplace(StrongHash const& hash, ValueConstructFn constructValue);
 
     /// Always returns either the existing item by the given hash key, if found,
     /// or a newly created one by invoking constructValue().
     template <typename ValueConstructFn>
-    [[nodiscard]] Value& get_or_emplace(StrongHash const& hash, ValueConstructFn constructValue);
+    [[nodiscard]] Value& getOrEmplace(StrongHash const& hash, ValueConstructFn constructValue);
 
     /**
-     * Like get_or_emplace but allows failure in @p constructValue call to cause the hash entry not
+     * Like getOrEmplace but allows failure in @p constructValue call to cause the hash entry not
      * to be created.
      *
      * Tries to get an existing entry and returns a reference to it,
@@ -176,7 +176,7 @@ class StrongLRUHashtable
      * If creation has failed, nullptr is returned instead.
      */
     template <typename ValueConstructFn>
-    [[nodiscard]] Value* get_or_try_emplace(StrongHash const& hash, ValueConstructFn constructValue);
+    [[nodiscard]] Value* getOrTryEmplace(StrongHash const& hash, ValueConstructFn constructValue);
 
     /// Retrieves the value stored at the given entry index.
     [[nodiscard]] Value& valueAtEntryIndex(uint32_t entryIndex) noexcept;
@@ -483,7 +483,7 @@ inline bool StrongLRUHashtable<Value>::contains(StrongHash const& hash) const no
 }
 
 template <typename Value>
-inline Value* StrongLRUHashtable<Value>::try_get(StrongHash const& hash) noexcept
+inline Value* StrongLRUHashtable<Value>::tryGet(StrongHash const& hash) noexcept
 {
     uint32_t const entryIndex = findEntry(hash, false);
     if (!entryIndex)
@@ -492,9 +492,9 @@ inline Value* StrongLRUHashtable<Value>::try_get(StrongHash const& hash) noexcep
 }
 
 template <typename Value>
-inline Value const* StrongLRUHashtable<Value>::try_get(StrongHash const& hash) const noexcept
+inline Value const* StrongLRUHashtable<Value>::tryGet(StrongHash const& hash) const noexcept
 {
-    return const_cast<StrongLRUHashtable*>(this)->try_get(hash);
+    return const_cast<StrongLRUHashtable*>(this)->tryGet(hash);
 }
 
 template <typename Value>
@@ -537,7 +537,7 @@ inline Value& StrongLRUHashtable<Value>::operator[](StrongHash const& hash) noex
 
 template <typename Value>
 template <typename ValueConstructFn>
-inline bool StrongLRUHashtable<Value>::try_emplace(StrongHash const& hash, ValueConstructFn constructValue)
+inline bool StrongLRUHashtable<Value>::tryEmplace(StrongHash const& hash, ValueConstructFn constructValue)
 {
     if (contains(hash))
         return false;
@@ -549,8 +549,7 @@ inline bool StrongLRUHashtable<Value>::try_emplace(StrongHash const& hash, Value
 
 template <typename Value>
 template <typename ValueConstructFn>
-inline Value& StrongLRUHashtable<Value>::get_or_emplace(StrongHash const& hash,
-                                                        ValueConstructFn constructValue)
+inline Value& StrongLRUHashtable<Value>::getOrEmplace(StrongHash const& hash, ValueConstructFn constructValue)
 {
     uint32_t* slot = hashTableSlot(hash);
 
@@ -580,8 +579,8 @@ inline Value& StrongLRUHashtable<Value>::get_or_emplace(StrongHash const& hash,
 
 template <typename Value>
 template <typename ValueConstructFn>
-inline Value* StrongLRUHashtable<Value>::get_or_try_emplace(StrongHash const& hash,
-                                                            ValueConstructFn constructValue)
+inline Value* StrongLRUHashtable<Value>::getOrTryEmplace(StrongHash const& hash,
+                                                         ValueConstructFn constructValue)
 {
     uint32_t* slot = hashTableSlot(hash);
 

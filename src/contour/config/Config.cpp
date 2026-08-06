@@ -244,7 +244,7 @@ namespace
     [[nodiscard]] std::string acceptedModifierSpellings()
     {
         return ConfigModifierTable | std::views::transform(&ConfigModifierRow::name)
-               | crispy::views::join_with(", ");
+               | crispy::views::joinWith(", ");
     }
 
     /// Renders an `input_mapping` row for a diagnostic, e.g. "action: ClearHistoryAndReset, key: Q".
@@ -265,7 +265,7 @@ namespace
 
         if (described.empty())
             return "<empty>";
-        return described | crispy::views::join_with(", ");
+        return described | crispy::views::joinWith(", ");
     }
 
     optional<std::string> readFile(fs::path const& path)
@@ -1776,7 +1776,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 {
     if (auto const child = node[entry])
     {
-        auto opt = text::make_font_slant(child.as<std::string>());
+        auto opt = text::makeFontSlant(child.as<std::string>());
         if (opt.has_value())
             where = opt.value();
     }
@@ -1788,7 +1788,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 {
     if (auto const child = node[entry])
     {
-        auto opt = text::make_font_weight(child.as<std::string>());
+        auto opt = text::makeFontWeight(child.as<std::string>());
         if (opt.has_value())
             where = opt.value();
     }
@@ -2418,7 +2418,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                         unparsed.emplace_back("mode");
                     errorLog()("Dropping input_mapping entry [{}]: could not parse its {}.",
                                describeInputMappingRow(mapping),
-                               unparsed | crispy::views::join_with(", "));
+                               unparsed | crispy::views::joinWith(", "));
                 }
             }
         }
@@ -3440,7 +3440,7 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& vEntry) {
             auto v = vEntry.value();
             auto args = std::string { "[" };
-            args.append(v.arguments | crispy::views::join_with(", "sv));
+            args.append(v.arguments | crispy::views::joinWith(", "sv));
             args.append("]");
 
             doc.append(writer.process(writer.whichDoc(vEntry), name, v.program, args, [&]() -> std::string {

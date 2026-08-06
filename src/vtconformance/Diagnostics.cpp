@@ -83,16 +83,16 @@ DiagnosticsCollector::DiagnosticsCollector():
     category->enable();
     // The default formatter decorates messages with source locations; the oracle wants the bare
     // text so that `classifyDiagnostic` can stay a pure string function.
-    category->set_formatter([](logstore::MessageBuilder const& message) { return message.text(); });
-    category->set_sink(*_sink);
+    category->setFormatter([](logstore::MessageBuilder const& message) { return message.text(); });
+    category->setSink(*_sink);
 }
 
 DiagnosticsCollector::~DiagnosticsCollector()
 {
     if (auto* const category = parserCategory())
     {
-        category->set_formatter(&logstore::Category::defaultFormatter);
-        category->set_sink(logstore::Sink::console());
+        category->setFormatter(&logstore::Category::defaultFormatter);
+        category->setSink(logstore::Sink::console());
     }
 }
 

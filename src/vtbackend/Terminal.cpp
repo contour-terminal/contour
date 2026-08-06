@@ -413,7 +413,7 @@ bool Terminal::processInputOnce()
         auto const _ = std::lock_guard { *this };
         // Use the buffer that readFromPty() actually read into, not _currentPtyBuffer
         // which might have been changed by another thread (e.g., writeToScreen()).
-        // This is critical to ensure buffer_fragment in TrivialLineBuffer holds
+        // This is critical to ensure BufferFragment in TrivialLineBuffer holds
         // the correct buffer reference.
         _parsingBuffer = ptyReadResult->buffer;
         {
@@ -1593,7 +1593,7 @@ void Terminal::parseFragmentChunked(string_view vtStream)
             _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
         auto const chunk = vtStream.substr(0, std::min(vtStream.size(), _currentPtyBuffer->bytesAvailable()));
         vtStream.remove_prefix(chunk.size());
-        // Set parsingBuffer to ensure buffer_fragment holds the correct buffer reference.
+        // Set parsingBuffer to ensure BufferFragment holds the correct buffer reference.
         _parsingBuffer = _currentPtyBuffer;
         _parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
         _parsingBuffer = nullptr;

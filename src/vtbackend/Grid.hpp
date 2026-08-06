@@ -661,7 +661,7 @@ class Grid
 
     [[nodiscard]] int computeLogicalLineNumberFromBottom(LineCount n) const noexcept;
 
-    [[nodiscard]] size_t zero_index() const noexcept { return _lines.zero_index(); }
+    [[nodiscard]] size_t zeroIndex() const noexcept { return _lines.zeroIndex(); }
     // }}}
 
     /// Gets a CellProxy to the cell relative to screen origin (top left, 0:0).
@@ -938,14 +938,14 @@ class Grid
 
     void rotateBuffersLeft(LineCount count) noexcept
     {
-        _lines.rotate_left(unbox<size_t>(count));
+        _lines.rotateLeft(unbox<size_t>(count));
         _stableBase += unbox<int64_t>(count);
         syncStableFloor();
     }
 
     void rotateBuffersRight(LineCount count) noexcept
     {
-        _lines.rotate_right(unbox<size_t>(count));
+        _lines.rotateRight(unbox<size_t>(count));
         _stableBase -= unbox<int64_t>(count);
         if (_stableBase < _stableFloor)
         {

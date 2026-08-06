@@ -58,7 +58,7 @@ small integer in the tile attributes for the sake of host memory resource usage.
 
     // renderRasterizedGlyph:
     hash = metadata.hash * tileIndex;
-    if (subTileMetadata = textureAtlas.try_get(hash))
+    if (subTileMetadata = textureAtlas.tryGet(hash))
         render(*subTileMetadata);
 
 ### reserved glyphs handling
@@ -268,8 +268,8 @@ GlyphScaler const& TextRenderer::defaultGlyphScaler() noexcept
 {
     // Re-rasterizing, matching Config's `text_scaling_method` default: asking the font for the
     // outline at the larger size re-hints it, where stretching magnifies an ordinary-size raster.
-    // This became real once Shaper::resize_font gave a caller the same face at another size -- a
-    // font_key encodes its size, so scaling `GlyphKey.size.pt` alone never reached FreeType.
+    // This became real once Shaper::resizeFont gave a caller the same face at another size -- a
+    // FontKey encodes its size, so scaling `GlyphKey.size.pt` alone never reached FreeType.
     // @see GlyphScalingMethod.
     static auto const scaler = RerasterizingGlyphScaler {};
     return scaler;
@@ -679,7 +679,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
             // slices contiguous no matter how many multipliers are in play.
             auto sliceX = pen1.x + unbox<int>(attributesCopy.metadata.targetSize.width);
             auto sliceKey = unbox(textureAtlas().tileSize().width);
-            while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(glyphHash * sliceKey))
+            while (AtlasTileAttributes const* subAttribs = textureAtlas().tryGet(glyphHash * sliceKey))
             {
                 auto const subAttribsCopy = adjustTileAttributesForLineFlags(lineFlags, *subAttribs);
                 renderTile(
@@ -727,7 +727,7 @@ std::optional<TextRenderer::BlockCanvas> TextRenderer::buildBlockCanvas(
                                        0,
                                        0);
 
-    auto const components = text::pixel_size(base->format);
+    auto const components = text::pixelSize(base->format);
     auto canvas =
         BlockCanvas { .size = box.canvasSize,
                       .format = toAtlasFormat(base->format),
@@ -847,10 +847,10 @@ std::optional<text::RasterizedGlyph> TextRenderer::rasterizeAtBlockSize(text::Gl
     auto rerasterized = false;
     if (adjustment.requiresRerasterization)
     {
-        // A font_key already encodes its size, so editing GlyphKey::size alone would change nothing
+        // A FontKey already encodes its size, so editing GlyphKey::size alone would change nothing
         // FreeType can see. Ask the shaper for the SAME face at the larger size; that re-hints it.
         key.size.pt *= adjustment.factor;
-        key.font = _textShaper.resize_font(glyphKey.font, key.size);
+        key.font = _textShaper.resizeFont(glyphKey.font, key.size);
 
         // The shaper reports "not resized" by handing back the key it was given -- it refuses once
         // its budget for wire-driven sizes is spent. Taking that as success would rasterize at the
@@ -868,7 +868,7 @@ std::optional<text::RasterizedGlyph> TextRenderer::rasterizeAtBlockSize(text::Gl
         return std::nullopt;
 
     if (!SoftRequire(glyph->bitmap.size()
-                     == text::pixel_size(glyph->format) * unbox<size_t>(glyph->bitmapSize.width)
+                     == text::pixelSize(glyph->format) * unbox<size_t>(glyph->bitmapSize.width)
                             * unbox<size_t>(glyph->bitmapSize.height)))
         return std::nullopt;
 
@@ -885,7 +885,7 @@ std::optional<text::RasterizedGlyph> TextRenderer::rasterizeAtBlockSize(text::Gl
         if (unbox(magnifiedSize.width) != 0 && unbox(magnifiedSize.height) != 0)
         {
             glyph->bitmap =
-                magnify(glyph->bitmap, glyph->bitmapSize, magnifiedSize, text::pixel_size(glyph->format));
+                magnify(glyph->bitmap, glyph->bitmapSize, magnifiedSize, text::pixelSize(glyph->format));
             glyph->bitmapSize = magnifiedSize;
             glyph->position.x =
                 static_cast<int>(std::lround(static_cast<double>(glyph->position.x) * adjustment.factor));
@@ -949,10 +949,9 @@ void TextRenderer::renderBlockGroup(text::ShapeResult const& glyphPositions,
     for (auto const column: std::views::iota(0u, columns))
     {
         auto const key = blockHash * glyphTileSubKey(column, sizing.band);
-        auto const* attributes =
-            textureAtlas().get_or_try_emplace(key, [&](atlas::TileLocation tileLocation) {
-                return createBlockTile(canvasFor(), tileLocation, column, sizing.band);
-            });
+        auto const* attributes = textureAtlas().getOrTryEmplace(key, [&](atlas::TileLocation tileLocation) {
+            return createBlockTile(canvasFor(), tileLocation, column, sizing.band);
+        });
 
         if (attributes)
         {
@@ -969,7 +968,7 @@ Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetada
     StrongHash const& hash, text::GlyphKey const& glyphKey, unicode::PresentationStyle presentationStyle)
 {
     // clang-format off
-    return textureAtlas().get_or_try_emplace(
+    return textureAtlas().getOrTryEmplace(
         hash,
         [&](atlas::TileLocation tileLocation)
         -> optional<TextureAtlas::TileCreateData>
@@ -1072,7 +1071,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
 
     text::RasterizedGlyph& glyph = theGlyphOpt.value();
     if (!SoftRequire(glyph.bitmap.size()
-                     == text::pixel_size(glyph.format) * unbox<size_t>(glyph.bitmapSize.width)
+                     == text::pixelSize(glyph.format) * unbox<size_t>(glyph.bitmapSize.width)
                             * unbox<size_t>(glyph.bitmapSize.height)))
         return nullopt;
 
@@ -1195,7 +1194,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         if (!SoftRequire(rowCount <= unbox(glyph.bitmapSize.height)))
             return nullopt;
         auto const pixelCount =
-            rowCount * unbox<size_t>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
+            rowCount * unbox<size_t>(glyph.bitmapSize.width) * text::pixelSize(glyph.format);
         if (static_cast<size_t>(pixelCount) > glyph.bitmap.size())
         {
             errorLog()("TextRenderer: Glyph bitmap size: {}, dimensions: {}, pixelCount: {}",
@@ -1249,7 +1248,7 @@ text::ShapeResult const& TextRenderer::getOrCreateCachedGlyphPositions(StrongHas
                                                                        gsl::span<unsigned> clusters,
                                                                        TextStyle style)
 {
-    return _textShapingCache->get_or_emplace(hash, [this, codepoints, clusters, style](auto) {
+    return _textShapingCache->getOrEmplace(hash, [this, codepoints, clusters, style](auto) {
         return createTextShapedGlyphPositions(codepoints, clusters, style);
     });
 }

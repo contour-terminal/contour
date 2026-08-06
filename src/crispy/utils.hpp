@@ -35,7 +35,7 @@ namespace views
     }
 
     template <typename T>
-    auto iota_as(int n)
+    auto iotaAs(int n)
     {
         return std::views::iota(0, n) | as<T>();
     }
@@ -43,7 +43,7 @@ namespace views
     namespace detail
     {
         template <typename Range>
-        std::string join_with_impl(Range const& range, std::string_view separator)
+        std::string joinWithImpl(Range const& range, std::string_view separator)
         {
             std::string result;
             auto it = std::begin(range);
@@ -70,20 +70,20 @@ namespace views
             template <typename R>
             friend auto operator|(R&& r, JoinWithFn const& self)
             {
-                return join_with_impl(std::forward<R>(r), self.separator);
+                return joinWithImpl(std::forward<R>(r), self.separator);
             }
         };
     } // namespace detail
 
-    inline auto join_with(std::string_view sep)
+    inline auto joinWith(std::string_view sep)
     {
         return detail::JoinWithFn { sep };
     }
 
     template <typename Range>
-    auto join_with(Range&& range, std::string_view sep)
+    auto joinWith(Range&& range, std::string_view sep)
     {
-        return detail::join_with_impl(std::forward<Range>(range), sep);
+        return detail::joinWithImpl(std::forward<Range>(range), sep);
     }
     template <typename Range>
     struct EnumerateViewSentinel
@@ -144,7 +144,7 @@ namespace views
     constexpr inline EnumerateFn enumerate; // NOLINT(readability-identifier-naming)
 } // namespace views
 
-using views::join_with;
+using views::joinWith;
 
 constexpr std::string_view trimRight(std::string_view value) noexcept
 {
@@ -343,7 +343,7 @@ bool endsWith(std::basic_string_view<Ch> text, std::basic_string_view<Ch> prefix
 }
 
 template <std::size_t Base = 10, typename T = unsigned, typename C>
-constexpr std::optional<T> to_integer(std::basic_string_view<C> text) noexcept
+constexpr std::optional<T> toInteger(std::basic_string_view<C> text) noexcept
 {
     static_assert(Base == 2 || Base == 8 || Base == 10 || Base == 16, "Only base-2/8/10/16 supported.");
     static_assert(std::is_integral_v<T>, "T must be an integral type.");
@@ -394,9 +394,9 @@ constexpr std::optional<T> to_integer(std::basic_string_view<C> text) noexcept
 }
 
 template <std::size_t Base = 10, typename T = unsigned, typename C>
-constexpr std::optional<T> to_integer(std::basic_string<C> const& text) noexcept
+constexpr std::optional<T> toInteger(std::basic_string<C> const& text) noexcept
 {
-    return to_integer<Base, T, C>(std::basic_string_view<C>(text));
+    return toInteger<Base, T, C>(std::basic_string_view<C>(text));
 }
 
 class Finally
@@ -504,9 +504,9 @@ struct ForEachKeyValueParams
 
 template <typename Callback>
     requires std::is_invocable_v<Callback, std::string_view, std::string_view>
-constexpr void for_each_key_value(ForEachKeyValueParams params,
-                                  Callback&& callback) noexcept(noexcept(callback(std::string_view {},
-                                                                                  std::string_view {})))
+constexpr void forEachKeyValue(ForEachKeyValueParams params,
+                               Callback&& callback) noexcept(noexcept(callback(std::string_view {},
+                                                                               std::string_view {})))
 {
     params(std::forward<Callback>(callback));
 }
@@ -753,6 +753,6 @@ template <class... Ts>
 Overloaded(Ts...) -> Overloaded<Ts...>;
 
 template <typename T, typename... Ts>
-concept one_of = (std::same_as<T, Ts> || ...);
+concept oneOf = (std::same_as<T, Ts> || ...);
 
 } // namespace crispy

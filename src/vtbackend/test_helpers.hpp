@@ -116,7 +116,7 @@ inline void logScreenTextAlways(Screen const& screen, std::string const& headlin
 {
     std::cout << std::format("{}: ZI={} cursor={} HM={}..{}\n",
                              headline.empty() ? "screen dump" : headline,
-                             screen.grid().zero_index(),
+                             screen.grid().zeroIndex(),
                              screen.realCursorPosition(),
                              screen.margin().horizontal.from,
                              screen.margin().horizontal.to);

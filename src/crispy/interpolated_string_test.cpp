@@ -4,11 +4,11 @@
 
 #include <format>
 
-TEST_CASE("InterpolatedString.parse_interpolation")
+TEST_CASE("InterpolatedString.parseInterpolation")
 {
-    using crispy::parse_interpolation;
+    using crispy::parseInterpolation;
 
-    auto const interpolation = parse_interpolation("Clock:Bold,Italic,Color=#FFFF00");
+    auto const interpolation = parseInterpolation("Clock:Bold,Italic,Color=#FFFF00");
     CHECK(interpolation.name == "Clock");
     CHECK(interpolation.flags.size() == 2);
     CHECK(interpolation.flags.count("Bold"));
@@ -18,11 +18,11 @@ TEST_CASE("InterpolatedString.parse_interpolation")
     CHECK(interpolation.attributes.at("Color") == "#FFFF00");
 }
 
-TEST_CASE("InterpolatedString.parse_interpolated_string")
+TEST_CASE("InterpolatedString.parseInterpolatedString")
 {
-    using crispy::parse_interpolated_string;
+    using crispy::parseInterpolatedString;
 
-    auto const interpolated = parse_interpolated_string("< {Clock:Bold,Italic,Color=#FFFF00} | {VTType}");
+    auto const interpolated = parseInterpolatedString("< {Clock:Bold,Italic,Color=#FFFF00} | {VTType}");
 
     CHECK(interpolated.size() == 4);
 
@@ -41,9 +41,9 @@ TEST_CASE("InterpolatedString.literal_braces_pass_through")
 {
     // There is no brace escaping: doubled braces are not collapsed, so a template that contains "{{...}}"
     // is parsed as a placeholder (matching the pre-escaping behavior we restored for compatibility).
-    using crispy::parse_interpolated_string;
+    using crispy::parseInterpolatedString;
 
-    auto const parsed = parse_interpolated_string("{{VTType}}");
+    auto const parsed = parseInterpolatedString("{{VTType}}");
     // "{{VTType}}" -> first "{...}" run is "{VTType" (a placeholder), then a trailing literal "}".
     REQUIRE(parsed.size() == 2);
     REQUIRE(std::holds_alternative<crispy::StringInterpolation>(parsed[0]));
@@ -56,11 +56,11 @@ TEST_CASE("InterpolatedString.whole_captures_exact_source_slice")
 {
     // Each parsed interpolation carries its exact original "{...}" slice (braces included) so consumers can
     // echo an unrecognized placeholder verbatim. `whole` is NOT normalized: it is the literal source text.
-    using crispy::parse_interpolated_string;
+    using crispy::parseInterpolatedString;
 
     SECTION("a simple placeholder")
     {
-        auto const parsed = parse_interpolated_string("{VTType}");
+        auto const parsed = parseInterpolatedString("{VTType}");
         REQUIRE(parsed.size() == 1);
         REQUIRE(std::holds_alternative<crispy::StringInterpolation>(parsed[0]));
         CHECK(std::get<crispy::StringInterpolation>(parsed[0]).whole == "{VTType}");
@@ -68,7 +68,7 @@ TEST_CASE("InterpolatedString.whole_captures_exact_source_slice")
 
     SECTION("flags and attributes are preserved verbatim in whole, in original order")
     {
-        auto const parsed = parse_interpolated_string("pre {Clock:Bold,Color=#FFFF00} post");
+        auto const parsed = parseInterpolatedString("pre {Clock:Bold,Color=#FFFF00} post");
         REQUIRE(parsed.size() == 3);
         REQUIRE(std::holds_alternative<crispy::StringInterpolation>(parsed[1]));
         // The parsed flags/attributes are order-normalized (set/map), but whole is the raw slice.
@@ -77,7 +77,7 @@ TEST_CASE("InterpolatedString.whole_captures_exact_source_slice")
 
     SECTION("an unterminated placeholder captures to the end of input")
     {
-        auto const parsed = parse_interpolated_string("x {Unclosed");
+        auto const parsed = parseInterpolatedString("x {Unclosed");
         REQUIRE(parsed.size() == 2);
         REQUIRE(std::holds_alternative<crispy::StringInterpolation>(parsed[1]));
         CHECK(std::get<crispy::StringInterpolation>(parsed[1]).whole == "{Unclosed");

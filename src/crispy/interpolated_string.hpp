@@ -20,7 +20,7 @@ struct StringInterpolation
     /// braces (e.g. "{Clock:Bold}"). A view into the parsed input (zero-copy), so it stays valid only as
     /// long as that input does. Lets a consumer that does not recognize @ref name emit the placeholder
     /// verbatim instead of dropping it, without lossily re-serializing the (order-normalized) flags and
-    /// attributes. Empty for an interpolation built directly via parse_interpolation() (no brace context).
+    /// attributes. Empty for an interpolation built directly via parseInterpolation() (no brace context).
     std::string_view whole;
 
     bool operator==(StringInterpolation const& rhs) const noexcept
@@ -34,7 +34,7 @@ struct StringInterpolation
 using InterpolatedStringFragment = std::variant<StringInterpolation, std::string_view>;
 using InterpolatedString = std::vector<InterpolatedStringFragment>;
 
-StringInterpolation parse_interpolation(std::string_view text);
-InterpolatedString parse_interpolated_string(std::string_view text);
+StringInterpolation parseInterpolation(std::string_view text);
+InterpolatedString parseInterpolatedString(std::string_view text);
 
 } // namespace crispy

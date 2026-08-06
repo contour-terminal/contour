@@ -647,7 +647,7 @@ void Grid::scrollLeft(GraphicsAttributes defaultAttributes, Margin margin) noexc
 void Grid::reset()
 {
     _linesUsed = _pageSize.lines;
-    _lines.rotate_right(_lines.zero_index());
+    _lines.rotateRight(_lines.zeroIndex());
     for (int i = 0; i < unbox(_pageSize.lines); ++i)
         _lines[i].reset(defaultLineFlags(), GraphicsAttributes {});
     bumpGeneration();
@@ -1023,7 +1023,7 @@ std::ostream& dumpGrid(std::ostream& os, Grid const& grid)
         grid.maxHistoryLineCount(),
         grid.pageSize().lines,
         grid.linesUsed(),
-        grid.zero_index());
+        grid.zeroIndex());
 
     for (int const lineOffset:
          std::views::iota(-unbox(grid.historyLineCount()), unbox(grid.pageSize().lines)))

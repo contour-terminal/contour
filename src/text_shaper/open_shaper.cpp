@@ -85,7 +85,7 @@ struct FontInfo // NOLINT(readability-identifier-naming)
 } // namespace
 
 #ifdef CONTOUR_HAS_CAIRO
-static void cleanup_cairo_font_face(void*)
+static void cleanupCairoFontFace(void*)
 {
     // No-op destructor callback: the FT_Face lifetime is managed elsewhere.
 }
@@ -105,7 +105,7 @@ static std::optional<text::RasterizedGlyph> rasterizeWithCairo(FT_Face ftFace,
         auto* cr = cairo_create(dummySurface);
 
         auto* fontFace = cairo_ft_font_face_create_for_ft_face(ftFace, 0);
-        cairo_font_face_set_user_data(fontFace, nullptr, ftFace, cleanup_cairo_font_face);
+        cairo_font_face_set_user_data(fontFace, nullptr, ftFace, cleanupCairoFontFace);
         cairo_set_font_face(cr, fontFace);
         cairo_set_font_size(cr, static_cast<double>(ftFace->size->metrics.y_ppem));
 
@@ -147,7 +147,7 @@ static std::optional<text::RasterizedGlyph> rasterizeWithCairo(FT_Face ftFace,
 
     // 2. Create/Set Cairo Font Face
     auto* fontFace = cairo_ft_font_face_create_for_ft_face(ftFace, 0);
-    cairo_font_face_set_user_data(fontFace, nullptr, ftFace, cleanup_cairo_font_face);
+    cairo_font_face_set_user_data(fontFace, nullptr, ftFace, cleanupCairoFontFace);
     cairo_set_font_face(cr, fontFace);
 
     // 3. Set Size (points)
@@ -254,7 +254,7 @@ auto constexpr MissingGlyphId = 0xFFFDu;
 /// in the initial set.
 constexpr size_t InitialFallbackCount = 8;
 
-/// How many distinct sizes resize_font() may open a face at before it stops opening new ones.
+/// How many distinct sizes resizeFont() may open a face at before it stops opening new ones.
 ///
 /// `OSC 66` draws at `s * n/d` with `s` in 1..7 and `n < d <= 15`, so the protocol can name a few
 /// hundred distinct factors per face -- far more than the 28 that whole-number scales alone would
@@ -267,7 +267,7 @@ constexpr size_t InitialFallbackCount = 8;
 /// the order they were asked for. That is the cost of having a hard bound at all -- eviction is not
 /// available here, because font_keys are baked into texture-atlas keys -- and unbounded memory
 /// growth driven by whatever is writing to the terminal is the worse of the two.
-/// @see OpenShaper::resize_font.
+/// @see OpenShaper::resizeFont.
 constexpr size_t MaxResizedFonts = 512;
 
 namespace
@@ -285,7 +285,7 @@ namespace
         /// The weight this face was actually loaded at, which together with @c size is its cache identity.
         ///
         /// Distinct from @c description.weight: a description is only attached to keys that came from
-        /// load_font(), so every key minted for a fallback face or a resize carried a default-constructed
+        /// loadFont(), so every key minted for a fallback face or a resize carried a default-constructed
         /// description. Reading the weight from there filed those faces under a weight they were never
         /// loaded at.
         FontWeight weight { FontWeight::Normal };
@@ -679,13 +679,13 @@ struct OpenShaper::PrivateOpenShaper // {{{
     DPI dpi;
     // Default must match vtrasterizer::DefaultMaxFallbackCount.
     // Cannot include the header directly due to dependency direction (vtrasterizer depends on
-    // text_shaper). The actual value is passed at runtime via set_font_fallback_limit().
+    // text_shaper). The actual value is passed at runtime via setFontFallbackLimit().
     int fontFallbackLimit = 16; ///< Maximum total fallback fonts per key. -1 = unlimited, 0 = disabled.
     unordered_map<FontInfo, FontKey> fontPathAndSizeToKeyMapping;
     unordered_map<FontKey, HbFontInfo> fontKeyToHbFontInfoMapping; // from FontKey to FontInfo struct
 
     /// Persistent cache for locate() results.
-    /// Survives clear_cache() since font descriptions map to the same font files
+    /// Survives clearCache() since font descriptions map to the same font files
     /// regardless of DPI or font size changes.
     unordered_map<FontDescription, FontSourceList> locateCache;
 
@@ -711,34 +711,34 @@ struct OpenShaper::PrivateOpenShaper // {{{
     /// Cache for resolveByCoverage(), keyed by the first codepoint of an unresolvable span. Holds
     /// negative answers too, so a codepoint no installed font covers is queried only once.
     ///
-    /// Unlike @c locateCache this does NOT survive clear_cache(): its values are font_keys owned by
+    /// Unlike @c locateCache this does NOT survive clearCache(): its values are font_keys owned by
     /// @c fontKeyToHbFontInfoMapping, not font files, and outliving that map would make them dangle.
     unordered_map<char32_t, CoverageCacheEntry> coverageCache;
 
-    /// How many faces resize_font() has minted, against @c resizedFontLimit.
+    /// How many faces resizeFont() has minted, against @c resizedFontLimit.
     size_t resizedFontCount = 0;
 
-    /// The ceiling on @c resizedFontCount. @see MaxResizedFonts, OpenShaper::set_resized_font_limit.
+    /// The ceiling on @c resizedFontCount. @see MaxResizedFonts, OpenShaper::setResizedFontLimit.
     size_t resizedFontLimit = MaxResizedFonts;
 
     // Blacklisted font files as we tried them already and failed.
     std::vector<std::string> blacklistedSources;
 
     // The key (for caching) should be composed out of:
-    // (file_path, file_mtime, FontWeight, FontSlant, pixel_size)
+    // (file_path, file_mtime, FontWeight, FontSlant, pixelSize)
 
     unordered_map<GlyphKey, RasterizedGlyph> glyphs;
     HbBufferPtr hbBuf;
     FontKey nextFontKey;
 
-    FontKey create_font_key()
+    FontKey createFontKey()
     {
         auto result = nextFontKey;
         nextFontKey.value++;
         return result;
     }
 
-    [[nodiscard]] bool has_color(FontKey font) const noexcept
+    [[nodiscard]] bool hasColor(FontKey font) const noexcept
     {
         return FT_HAS_COLOR(fontKeyToHbFontInfoMapping.at(font).ftFace.get());
     }
@@ -746,7 +746,7 @@ struct OpenShaper::PrivateOpenShaper // {{{
     /// @return the key already held for this face, or nullopt when opening it would load a new one.
     ///
     /// Lets a caller find out whether a request is a cache HIT without paying for the miss, which is
-    /// what resize_font() needs to keep a budget on faces it would otherwise mint without limit.
+    /// what resizeFont() needs to keep a budget on faces it would otherwise mint without limit.
     [[nodiscard]] optional<FontKey> findKeyForFont(FontSource const& source,
                                                    FontSize fontSize,
                                                    FontWeight fontWeight) const
@@ -774,7 +774,7 @@ struct OpenShaper::PrivateOpenShaper // {{{
             // a failure to open a file that has already opened at another size. A bitmap font has
             // only the strikes it ships, and `OSC 66` asks for arbitrary sizes -- so one scaled write
             // could otherwise retire the user's font for the rest of the session, including at the
-            // size it was happily rendering at, since clear_cache() does not clear this list.
+            // size it was happily rendering at, since clearCache() does not clear this list.
             auto const loadedAtAnotherSize = std::ranges::any_of(
                 fontPathAndSizeToKeyMapping, [&](auto const& entry) { return entry.first.path == sourceId; });
             if (!loadedAtAnotherSize)
@@ -794,7 +794,7 @@ struct OpenShaper::PrivateOpenShaper // {{{
                                      .hbFont = std::move(hbFontPtr),
                                      .weight = fontWeight };
 
-        auto key = create_font_key();
+        auto key = createFontKey();
         fontPathAndSizeToKeyMapping.emplace(
             pair { FontInfo { .path = sourceId, .size = fontSize, .weight = fontWeight }, key });
         fontKeyToHbFontInfoMapping.emplace(pair { key, std::move(fontInfo) });
@@ -1112,7 +1112,7 @@ OpenShaper::OpenShaper(DPI dpi, FontLocator& locator):
 {
 }
 
-void OpenShaper::set_dpi(DPI dpi)
+void OpenShaper::setDPI(DPI dpi)
 {
     if (!dpi)
         return;
@@ -1129,22 +1129,22 @@ void OpenShaper::set_dpi(DPI dpi)
         _d->updateFaceDpi(fontInfo, dpi);
 }
 
-void OpenShaper::set_locator(FontLocator& locator)
+void OpenShaper::setLocator(FontLocator& locator)
 {
     _d->locator = &locator;
 }
 
-void OpenShaper::set_font_fallback_limit(int limit)
+void OpenShaper::setFontFallbackLimit(int limit)
 {
     _d->fontFallbackLimit = limit;
 }
 
-void OpenShaper::set_resized_font_limit(size_t limit)
+void OpenShaper::setResizedFontLimit(size_t limit)
 {
     _d->resizedFontLimit = limit;
 }
 
-void OpenShaper::clear_cache()
+void OpenShaper::clearCache()
 {
     locatorLog()("Clearing cache ({} keys, {} font infos).",
                  _d->fontPathAndSizeToKeyMapping.size(),
@@ -1163,7 +1163,7 @@ void OpenShaper::clear_cache()
     _d->resizedFontCount = 0;
 }
 
-optional<FontKey> OpenShaper::load_font(FontDescription const& description, FontSize size)
+optional<FontKey> OpenShaper::loadFont(FontDescription const& description, FontSize size)
 {
     // Check the persistent locate cache before calling into fontconfig.
     auto cacheIt = _d->locateCache.find(description);
@@ -1208,7 +1208,7 @@ optional<FontKey> OpenShaper::load_font(FontDescription const& description, Font
     return fontKeyOpt;
 }
 
-FontKey OpenShaper::resize_font(FontKey key, FontSize size)
+FontKey OpenShaper::resizeFont(FontKey key, FontSize size)
 {
     auto const i = _d->fontKeyToHbFontInfoMapping.find(key);
     if (i == _d->fontKeyToHbFontInfoMapping.end())

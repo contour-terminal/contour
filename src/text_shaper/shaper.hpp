@@ -37,7 +37,7 @@ enum class BitmapFormat : uint8_t
     Outlined,  ///< 4 bytes/pixel RGBA (R=fill alpha, G=outline alpha, B=0, A=max)
 };
 
-constexpr size_t pixel_size(BitmapFormat format) noexcept
+constexpr size_t pixelSize(BitmapFormat format) noexcept
 {
     switch (format)
     {
@@ -60,7 +60,7 @@ struct RasterizedGlyph
     [[nodiscard]] bool valid() const
     {
         return bitmap.size()
-               == text::pixel_size(format) * unbox<size_t>(bitmapSize.width)
+               == text::pixelSize(format) * unbox<size_t>(bitmapSize.width)
                       * unbox<size_t>(bitmapSize.height);
     }
 };
@@ -91,21 +91,21 @@ class Shaper
     /**
      * Sets or updates DPI to the given value.
      */
-    virtual void set_dpi(DPI dpi) = 0;
+    virtual void setDPI(DPI dpi) = 0;
 
     /**
      * Configures the font location API to be used.
      */
-    virtual void set_locator(FontLocator& locator) = 0;
+    virtual void setLocator(FontLocator& locator) = 0;
 
     /**
      * Clears internal caches (if any).
      */
-    virtual void clear_cache() = 0;
+    virtual void clearCache() = 0;
 
     /// Sets the maximum number of fallback fonts to consider per font key.
     /// @param limit  -1 for unlimited, 0 to disable fallbacks, positive for a cap.
-    virtual void set_font_fallback_limit(int limit) = 0;
+    virtual void setFontFallbackLimit(int limit) = 0;
 
     /**
      * Returns a font matching the given font description.
@@ -114,8 +114,8 @@ class Shaper
      * on Windows it will be a DirectWrite font,
      * and on Apple it will be using CoreText (but for now it'll be freetype, too).
      */
-    [[nodiscard]] virtual std::optional<FontKey> load_font(FontDescription const& description,
-                                                           FontSize size) = 0;
+    [[nodiscard]] virtual std::optional<FontKey> loadFont(FontDescription const& description,
+                                                          FontSize size) = 0;
 
     /**
      * Retrieves global font metrics of font identified by @p key.
@@ -125,7 +125,7 @@ class Shaper
     /**
      * Returns the SAME face as @p key, loaded at @p size.
      *
-     * A FontKey already encodes its size -- load_font() takes one -- so a caller that wants a glyph
+     * A FontKey already encodes its size -- loadFont() takes one -- so a caller that wants a glyph
      * rasterized larger cannot get there by editing GlyphKey::size, which the rasterizer ignores.
      * This is the way to ask for it, and it is what makes scaled text (`OSC 66`) crisp rather than
      * magnified.
@@ -133,7 +133,7 @@ class Shaper
      * The default returns @p key unchanged, which degrades to rasterizing at the original size --
      * correct, merely not crisp -- on backends that have not implemented it.
      */
-    [[nodiscard]] virtual FontKey resize_font(FontKey key, FontSize /*size*/) { return key; }
+    [[nodiscard]] virtual FontKey resizeFont(FontKey key, FontSize /*size*/) { return key; }
 
     /**
      * Shapes the given text @p text using the font face @p font.

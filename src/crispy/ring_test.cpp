@@ -16,7 +16,7 @@ namespace
 template <typename T>
 [[maybe_unused]] void dump(Ring<T> const& r)
 {
-    std::cout << std::format("Ring(@{}): {{", r.zero_index());
+    std::cout << std::format("Ring(@{}): {{", r.zeroIndex());
     for (size_t i = 0; i < r.size(); ++i)
     {
         if (i)
@@ -58,11 +58,11 @@ TEST_CASE("Ring.emplace_back")
     REQUIRE(r[2] == 'c');
 }
 
-TEST_CASE("Ring.rotate_right")
+TEST_CASE("Ring.rotateRight")
 {
     Ring<char> r(3, {});
     generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
-    r.rotate_right(1);
+    r.rotateRight(1);
     REQUIRE(r[0] == 'c');
     REQUIRE(r[1] == 'a');
     REQUIRE(r[2] == 'b');
@@ -72,17 +72,17 @@ TEST_CASE("Ring.rotate_right_2")
 {
     Ring<char> r(3, {});
     generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
-    r.rotate_right(2);
+    r.rotateRight(2);
     REQUIRE(r[0] == 'b');
     REQUIRE(r[1] == 'c');
     REQUIRE(r[2] == 'a');
 }
 
-TEST_CASE("Ring.rotate_left")
+TEST_CASE("Ring.rotateLeft")
 {
     Ring<char> r(3, {});
     generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
-    r.rotate_left(1);
+    r.rotateLeft(1);
     REQUIRE(r[0] == 'b');
     REQUIRE(r[1] == 'c');
     REQUIRE(r[2] == 'a');
@@ -92,7 +92,7 @@ TEST_CASE("Ring.rotate_left_2")
 {
     Ring<char> r(3, {});
     generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
-    r.rotate_left(2);
+    r.rotateLeft(2);
     REQUIRE(r[0] == 'c');
     REQUIRE(r[1] == 'a');
     REQUIRE(r[2] == 'b');
@@ -102,7 +102,7 @@ TEST_CASE("Ring.rotate_left_3")
 {
     Ring<char> r(3, {});
     generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
-    r.rotate_left(3);
+    r.rotateLeft(3);
     REQUIRE(r[0] == 'a');
     REQUIRE(r[1] == 'b');
     REQUIRE(r[2] == 'c');
@@ -113,7 +113,7 @@ TEST_CASE("Ring.rezero")
     Ring<char> r(6, {});
     generate_n(r.begin(), r.size(), [c = 'a']() mutable { return c++; });
 
-    r.rotate_right(2);
+    r.rotateRight(2);
     r.rezero();
     REQUIRE(r[0] == 'e');
     REQUIRE(r[1] == 'f');

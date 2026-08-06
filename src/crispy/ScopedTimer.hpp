@@ -24,7 +24,7 @@ class ScopedTimer
 
     ~ScopedTimer()
     {
-        if (_category.is_enabled())
+        if (_category.isEnabled())
         {
             auto const elapsed = std::chrono::steady_clock::now() - _start;
             auto const ms =

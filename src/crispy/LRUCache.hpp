@@ -38,13 +38,13 @@ class LRUCache
         _items.clear();
     }
 
-    void touch(Key key) noexcept { (void) try_get(key); }
+    void touch(Key key) noexcept { (void) tryGet(key); }
 
     [[nodiscard]] bool contains(Key key) const noexcept { return _itemByKeyMapping.count(key) != 0; }
 
-    [[nodiscard]] Value* try_get(Key key) const { return const_cast<LRUCache*>(this)->try_get(key); }
+    [[nodiscard]] Value* tryGet(Key key) const { return const_cast<LRUCache*>(this)->tryGet(key); }
 
-    [[nodiscard]] Value* try_get(Key key)
+    [[nodiscard]] Value* tryGet(Key key)
     {
         if (auto i = _itemByKeyMapping.find(key); i != _itemByKeyMapping.end())
         {
@@ -59,7 +59,7 @@ class LRUCache
 
     [[nodiscard]] Value& at(Key key)
     {
-        if (Value* p = try_get(key))
+        if (Value* p = tryGet(key))
             return *p;
 
         throw std::out_of_range("key");
@@ -67,7 +67,7 @@ class LRUCache
 
     [[nodiscard]] Value const& at(Key key) const
     {
-        if (Value const* p = try_get(key))
+        if (Value const* p = tryGet(key))
             return *p;
 
         throw std::out_of_range("key");
@@ -77,11 +77,11 @@ class LRUCache
     /// if it wasn't in the cache just yet.
     [[nodiscard]] Value& operator[](Key key)
     {
-        if (Value* p = try_get(key))
+        if (Value* p = tryGet(key))
             return *p;
 
         if (_items.size() == _capacity)
-            return evict_one_and_push_front(key, Value {})->value;
+            return evictOneAndPushFront(key, Value {})->value;
 
         return emplaceItemToFront(key, Value {})->value;
     }
@@ -91,22 +91,22 @@ class LRUCache
     /// @retval true the key did not exist in cache yet, a new value was constructed.
     /// @retval false The key is already in the cache, no entry was constructed.
     template <typename ValueConstructFn>
-    [[nodiscard]] bool try_emplace(Key key, ValueConstructFn constructValue)
+    [[nodiscard]] bool tryEmplace(Key key, ValueConstructFn constructValue)
     {
-        if (Value const* p = try_get(key))
+        if (Value const* p = tryGet(key))
             return false;
 
         if (_items.size() == _capacity)
-            evict_one_and_push_front(key, constructValue());
+            evictOneAndPushFront(key, constructValue());
         else
             emplaceItemToFront(key, constructValue());
         return true;
     }
 
     template <typename ValueConstructFn>
-    [[nodiscard]] Value& get_or_emplace(Key key, ValueConstructFn constructValue)
+    [[nodiscard]] Value& getOrEmplace(Key key, ValueConstructFn constructValue)
     {
-        if (Value* p = try_get(key))
+        if (Value* p = tryGet(key))
             return *p;
         return emplace(key, constructValue());
     }
@@ -116,7 +116,7 @@ class LRUCache
         Require(!contains(key));
 
         if (_items.size() == _capacity)
-            return evict_one_and_push_front(key, std::move(value))->value;
+            return evictOneAndPushFront(key, std::move(value))->value;
 
         return emplaceItemToFront(key, std::move(value))->value;
     }
@@ -155,7 +155,7 @@ class LRUCache
 
   private:
     /// Evicts least recently used item and prepares (/reuses) its storage for a new item.
-    iterator evict_one_and_push_front(Key newKey, Value&& newValue)
+    iterator evictOneAndPushFront(Key newKey, Value&& newValue)
     {
         auto const oldKey = _items.back().key;
         auto keyMappingIterator = _itemByKeyMapping.find(oldKey);

@@ -212,7 +212,7 @@ enum class StatusLineStyling : uint8_t
 ///
 /// Example: "{InputMode:Bold,Color=#FFFF00}{Tabs:ActiveColor=#FFFF00,Left= │ }"
 ///
-/// @note A template has no escaping (see the note in crispy::parse_interpolated_string), so a
+/// @note A template has no escaping (see the note in crispy::parseInterpolatedString), so a
 ///       *styled* Text item whose content holds ',', '{' or '}' cannot be expressed: the ',' would
 ///       read back as an attribute separator. Such content is emitted as an unstyled literal
 ///       instead, which round-trips exactly, rather than as a styled item that would come back

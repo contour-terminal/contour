@@ -48,7 +48,7 @@ using FailHandler = std::function<void(std::string_view, std::string_view, std::
 
 namespace detail
 {
-    inline FailHandler& fail_handler() noexcept
+    inline FailHandler& failHandler() noexcept
     {
         static FailHandler storage {};
         return storage;
@@ -61,8 +61,8 @@ namespace detail
     {
         try
         {
-            if (fail_handler())
-                fail_handler()(text, message, file, line);
+            if (failHandler())
+                failHandler()(text, message, file, line);
             else
                 std::cerr << std::format("[{}:{}] {} {}\n", file, line, message, text);
         }
@@ -77,9 +77,9 @@ namespace detail
 ///
 /// This handler is supposed to report and terminate but may very well
 /// just ignore either or both.
-inline void set_fail_handler(FailHandler handler)
+inline void setFailHandler(FailHandler handler)
 {
-    detail::fail_handler() = std::move(handler);
+    detail::failHandler() = std::move(handler);
 }
 
 /// This method prints an error message and then terminates the program.

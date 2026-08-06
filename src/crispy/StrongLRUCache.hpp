@@ -78,8 +78,8 @@ class StrongLRUCache
     [[nodiscard]] bool contains(Key const& key) const noexcept;
 
     /// Returns the value for the given key if found, nullptr otherwise.
-    [[nodiscard]] Value* try_get(Key const& key) noexcept;
-    [[nodiscard]] Value const* try_get(Key const& key) const noexcept;
+    [[nodiscard]] Value* tryGet(Key const& key) noexcept;
+    [[nodiscard]] Value const* tryGet(Key const& key) const noexcept;
 
     /// Returns the value for the given key,
     /// throwing std::out_of_range if key was not found.
@@ -99,12 +99,12 @@ class StrongLRUCache
     /// @retval true the key did not exist in cache yet, a new value was constructed.
     /// @retval false The key is already in the cache, no entry was constructed.
     template <typename ValueConstructFn>
-    [[nodiscard]] bool try_emplace(Key const& key, ValueConstructFn constructValue);
+    [[nodiscard]] bool tryEmplace(Key const& key, ValueConstructFn constructValue);
 
     /// Always returns either the existing item by the given key, if found,
     /// or a newly created one by invoking constructValue().
     template <typename ValueConstructFn>
-    [[nodiscard]] Value& get_or_emplace(Key const& key, ValueConstructFn constructValue);
+    [[nodiscard]] Value& getOrEmplace(Key const& key, ValueConstructFn constructValue);
 
     void inspect(std::ostream& output) const;
 
@@ -169,17 +169,17 @@ inline bool StrongLRUCache<Key, Value, Hasher>::contains(Key const& key) const n
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value* StrongLRUCache<Key, Value, Hasher>::try_get(Key const& key) noexcept
+inline Value* StrongLRUCache<Key, Value, Hasher>::tryGet(Key const& key) noexcept
 {
-    if (Entry* e = _hashtable->try_get(Hasher {}(key)))
+    if (Entry* e = _hashtable->tryGet(Hasher {}(key)))
         return &e->value;
     return nullptr;
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value const* StrongLRUCache<Key, Value, Hasher>::try_get(Key const& key) const noexcept
+inline Value const* StrongLRUCache<Key, Value, Hasher>::tryGet(Key const& key) const noexcept
 {
-    if (Entry const* e = _hashtable->try_get(Hasher {}(key)))
+    if (Entry const* e = _hashtable->tryGet(Hasher {}(key)))
         return &e->value;
     return nullptr;
 }
@@ -199,28 +199,28 @@ inline Value& StrongLRUCache<Key, Value, Hasher>::operator[](Key const& key) noe
     // out of freed memory. The copy is therefore taken up front, before anything can be evicted.
     auto keyCopy = key;
     return _hashtable
-        ->get_or_emplace(Hasher {}(key), [&](auto) { return Entry { std::move(keyCopy), Value {} }; })
+        ->getOrEmplace(Hasher {}(key), [&](auto) { return Entry { std::move(keyCopy), Value {} }; })
         .value;
 }
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
-inline bool StrongLRUCache<Key, Value, Hasher>::try_emplace(Key const& key, ValueConstructFn constructValue)
+inline bool StrongLRUCache<Key, Value, Hasher>::tryEmplace(Key const& key, ValueConstructFn constructValue)
 {
     auto keyCopy = key; // @see operator[] for why this cannot be captured by reference.
-    return _hashtable->try_emplace(
+    return _hashtable->tryEmplace(
         Hasher {}(key), [&](auto v) { return Entry { std::move(keyCopy), constructValue(std::move(v)) }; });
 }
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
-inline Value& StrongLRUCache<Key, Value, Hasher>::get_or_emplace(Key const& key,
-                                                                 ValueConstructFn constructValue)
+inline Value& StrongLRUCache<Key, Value, Hasher>::getOrEmplace(Key const& key,
+                                                               ValueConstructFn constructValue)
 {
     auto keyCopy = key; // @see operator[] for why this cannot be captured by reference.
     return _hashtable
-        ->get_or_emplace(Hasher {}(key),
-                         [&](auto v) { return Entry { std::move(keyCopy), constructValue(v) }; })
+        ->getOrEmplace(Hasher {}(key),
+                       [&](auto v) { return Entry { std::move(keyCopy), constructValue(v) }; })
         .value;
 }
 

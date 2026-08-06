@@ -921,7 +921,7 @@ profiles:
     CHECK(profile->fonts.value().size.pt >= 8.0);
     // The three 4-letter feature codes are parsed into the feature vector.
     CHECK(profile->fonts.value().regular.features.size() == 3);
-    // The fallback sequence populates a font_fallback_list.
+    // The fallback sequence populates a FontFallbackList.
     REQUIRE(std::holds_alternative<text::FontFallbackList>(profile->fonts.value().regular.fontFallback));
     auto const& list = std::get<text::FontFallbackList>(profile->fonts.value().regular.fontFallback);
     CHECK(list.fallbackFonts.size() == 2);

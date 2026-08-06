@@ -157,7 +157,7 @@ namespace
                                        .weight = weight,
                                        .slant = slant });
         locatorLog()("Font {} (ttc index {}, weight {}, slant {}) in chain: {}",
-                     output.Size(),
+                     output.size(),
                      ttcIndex,
                      weight.has_value() ? std::format("{}", *weight) : "NONE",
                      slant.has_value() ? std::format("{}", *slant) : "NONE",
@@ -245,7 +245,7 @@ FontSourceList FontconfigLocator::locate(FontDescription const& description)
         FcFontSort(_d->ftConfig, pat.get(), /*unicode-trim*/ FcTrue, /*FcCharSet***/ nullptr, &result),
         [](auto p) { FcFontSetDestroy(p); });
 
-    if (!fs || Result != FcResultMatch)
+    if (!fs || result != FcResultMatch)
         return {};
 
     FontSourceList output;
@@ -458,7 +458,7 @@ FontSourceList FontconfigLocator::resolve(gsl::span<char32_t const> codepoints)
         FcFontSort(_d->ftConfig, pat.get(), /*unicode-trim*/ FcTrue, /*FcCharSet***/ nullptr, &result),
         [](auto p) { FcFontSetDestroy(p); });
 
-    if (!fs || Result != FcResultMatch)
+    if (!fs || result != FcResultMatch)
         return {};
 
     // Only the best few are of interest: this is consulted when every configured fallback has already
@@ -468,12 +468,12 @@ FontSourceList FontconfigLocator::resolve(gsl::span<char32_t const> codepoints)
     FontSourceList output;
     for (auto const i: std::views::iota(0, fs->nfont))
     {
-        if (output.Size() >= MaxCandidates)
+        if (output.size() >= MaxCandidates)
             break;
         appendFontSource(fs->fonts[i], output);
     }
 
-    locatorLog()("Resolved {} font(s) covering {} codepoint(s).", output.Size(), codepoints.Size());
+    locatorLog()("Resolved {} font(s) covering {} codepoint(s).", output.size(), codepoints.size());
     return output;
 }
 

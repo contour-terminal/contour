@@ -22,7 +22,7 @@ namespace
     /// Parses the colon-separated key=value metadata portion of an OSC 99 sequence.
     void parseMetadata(string_view metadata, DesktopNotification& notification)
     {
-        crispy::for_each_key_value(
+        crispy::forEachKeyValue(
             crispy::ForEachKeyValueParams {
                 .text = metadata,
                 .entryDelimiter = ':',

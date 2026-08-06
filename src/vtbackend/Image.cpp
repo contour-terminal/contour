@@ -475,7 +475,7 @@ void ImagePool::link(string const& name, shared_ptr<Image const> imageRef)
 
 shared_ptr<Image const> ImagePool::findImageByName(string const& name) const noexcept
 {
-    if (auto const* imageRef = _imageNameToImageCache.try_get(name))
+    if (auto const* imageRef = _imageNameToImageCache.tryGet(name))
         return *imageRef;
 
     return {};

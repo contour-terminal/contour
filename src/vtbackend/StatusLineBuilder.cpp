@@ -138,7 +138,7 @@ StatusLineSegment parseStatusLineSegment(std::string_view text)
     // Parses a string like:
     // "{Clock:Bold,Italic,Color=#FFFF00} | {VTType} | {InputMode} {Search:Bold,Color=Yellow}"
 
-    auto const interpolations = crispy::parse_interpolated_string(text);
+    auto const interpolations = crispy::parseInterpolatedString(text);
 
     // An un-styled literal Text item wrapping the given source bytes; used both for the plain-text
     // fragments and for the verbatim echo of an unrecognized placeholder.
@@ -150,7 +150,7 @@ StatusLineSegment parseStatusLineSegment(std::string_view text)
     {
         if (std::holds_alternative<std::string_view>(fragment))
             segment.emplace_back(literalText(std::get<std::string_view>(fragment)));
-        // Reached by const reference out of the variant (no copy): binding the string_interpolation by
+        // Reached by const reference out of the variant (no copy): binding the StringInterpolation by
         // value here would deep-copy its flag set and attribute map.
         else if (auto const item = makeStatusLineItem(std::get<crispy::StringInterpolation>(fragment)))
             segment.emplace_back(*item);
@@ -486,7 +486,7 @@ namespace
     /// Writes a placeholder's attribute list, emitting the ':' that separates the placeholder name
     /// from its first attribute and the ',' before each subsequent one.
     ///
-    /// crispy::parse_interpolation splits a placeholder at its *first* colon -- everything before it
+    /// crispy::parseInterpolation splits a placeholder at its *first* colon -- everything before it
     /// is the name -- then splits what follows on commas. Emitting a comma where the colon belongs
     /// therefore folds the entire attribute list into the name, which matches no placeholder and is
     /// echoed back as literal text: the item and every style on it are destroyed by one round trip.

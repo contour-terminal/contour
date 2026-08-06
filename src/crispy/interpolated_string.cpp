@@ -6,7 +6,7 @@ namespace crispy
 
 namespace
 {
-    void parse_attribute(StringInterpolation* interpolation, std::string_view attribute)
+    void parseAttribute(StringInterpolation* interpolation, std::string_view attribute)
     {
         auto const equal = attribute.find('=');
         if (equal != std::string_view::npos)
@@ -22,7 +22,7 @@ namespace
     }
 } // anonymous namespace
 
-StringInterpolation parse_interpolation(std::string_view text)
+StringInterpolation parseInterpolation(std::string_view text)
 {
     auto result = StringInterpolation {};
     auto const colon = text.find(':');
@@ -36,12 +36,12 @@ StringInterpolation parse_interpolation(std::string_view text)
             auto const comma = attributes.find(',', pos);
             if (comma == std::string_view::npos)
             {
-                parse_attribute(&result, attributes.substr(pos));
+                parseAttribute(&result, attributes.substr(pos));
                 break;
             }
             else
             {
-                parse_attribute(&result, attributes.substr(pos, comma - pos));
+                parseAttribute(&result, attributes.substr(pos, comma - pos));
                 pos = comma + 1;
             }
         }
@@ -53,7 +53,7 @@ StringInterpolation parse_interpolation(std::string_view text)
     return result;
 }
 
-InterpolatedString parse_interpolated_string(std::string_view text)
+InterpolatedString parseInterpolatedString(std::string_view text)
 {
     // "< {Clock:Bold,Italic,Color=#FFFF00} | {VTType} | {InputMode} {Search:Bold,Color=Yellow} >"
     //
@@ -77,7 +77,7 @@ InterpolatedString parse_interpolated_string(std::string_view text)
         // A closed placeholder strips both braces before parsing; an unterminated one keeps the leading
         // '{' in the name (so "{WindowTitle" stays unrecognized and echoes verbatim, rather than behaving
         // like a valid "{WindowTitle}").
-        auto interpolation = parse_interpolation(terminated ? whole.substr(1, whole.size() - 2) : whole);
+        auto interpolation = parseInterpolation(terminated ? whole.substr(1, whole.size() - 2) : whole);
         interpolation.whole = whole;
         return interpolation;
     };

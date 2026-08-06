@@ -895,13 +895,13 @@ void SshSession::close()
         libssh2_channel_wait_closed(_p->sshChannel);
     }
 
-    if (_p->sshSocket.is_open())
+    if (_p->sshSocket.isOpen())
         _p->sshSocket.close();
 }
 
 bool SshSession::isClosed() const noexcept
 {
-    return _p->sshSocket.is_closed() || _state == State::Closed || _state == State::Failure;
+    return _p->sshSocket.isClosed() || _state == State::Closed || _state == State::Failure;
 }
 
 void SshSession::waitForClosed()

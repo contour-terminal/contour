@@ -1979,7 +1979,7 @@ bool TerminalDisplay::setFontSize(text::FontSize newFontSize)
 
     // Report whether the change actually took: the render-thread apply catches and swallows font-load
     // failures (keeping the previous font), so the caller must not record a size the renderer never
-    // loaded. font_size has no operator==; compare the point size the apply published against the request.
+    // loaded. FontSize has no operator==; compare the point size the apply published against the request.
     // The request is the exact value just staged (no arithmetic in between), so an exact compare is
     // correct: equal means the apply loaded it, unequal means it was swallowed.
     return _renderer->fontDescriptions().size.pt == newFontSize.pt;

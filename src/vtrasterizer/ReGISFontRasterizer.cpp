@@ -18,7 +18,7 @@ namespace
     uint8_t coverageAt(text::RasterizedGlyph const& glyph, int x, int y) noexcept
     {
         auto const width = unbox<int>(glyph.bitmapSize.width);
-        auto const bytesPerPixel = static_cast<int>(text::pixel_size(glyph.format));
+        auto const bytesPerPixel = static_cast<int>(text::pixelSize(glyph.format));
         auto const base = static_cast<size_t>((y * width) + x) * static_cast<size_t>(bytesPerPixel);
         if (base >= glyph.bitmap.size())
             return 0;
@@ -57,7 +57,7 @@ std::optional<ReGISGlyphBitmap> ReGISFontRasterizer::rasterize(char32_t codepoin
     auto cached = _fontKeyByPointSize.find(sizeKey);
     if (cached == _fontKeyByPointSize.end())
     {
-        auto const loaded = _shaper->load_font(_font, text::FontSize { points });
+        auto const loaded = _shaper->loadFont(_font, text::FontSize { points });
         if (!loaded)
             return std::nullopt;
         cached = _fontKeyByPointSize.emplace(sizeKey, *loaded).first;

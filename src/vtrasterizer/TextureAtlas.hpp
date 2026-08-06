@@ -271,14 +271,14 @@ class TextureAtlas
     /// Always returns either the existing item by the given key, if found,
     /// or a newly created one by invoking constructValue().
     template <typename CreateTileDataFn>
-    [[nodiscard]] TileAttributes<Metadata>& get_or_emplace(crispy::StrongHash const& key,
-                                                           CreateTileDataFn constructValue);
+    [[nodiscard]] TileAttributes<Metadata>& getOrEmplace(crispy::StrongHash const& key,
+                                                         CreateTileDataFn constructValue);
 
-    [[nodiscard]] TileAttributes<Metadata> const* try_get(crispy::StrongHash const& key);
+    [[nodiscard]] TileAttributes<Metadata> const* tryGet(crispy::StrongHash const& key);
 
     template <typename CreateTileDataFn>
-    [[nodiscard]] TileAttributes<Metadata> const* get_or_try_emplace(crispy::StrongHash const& key,
-                                                                     CreateTileDataFn constructValue);
+    [[nodiscard]] TileAttributes<Metadata> const* getOrTryEmplace(crispy::StrongHash const& key,
+                                                                  CreateTileDataFn constructValue);
 
     /// Explicitly create or overwrites a tile for the given hash key.
     template <typename CreateTileDataFn>
@@ -578,30 +578,29 @@ auto TextureAtlas<Metadata>::constructTile(CreateTileDataFn createTileData, uint
 
 template <typename Metadata>
 template <typename CreateTileDataFn>
-TileAttributes<Metadata>& TextureAtlas<Metadata>::get_or_emplace(crispy::StrongHash const& key,
-                                                                 CreateTileDataFn constructValue)
+TileAttributes<Metadata>& TextureAtlas<Metadata>::getOrEmplace(crispy::StrongHash const& key,
+                                                               CreateTileDataFn constructValue)
 {
-    return _tileCache->get_or_emplace(key,
-                                      [&](uint32_t entryIndex) -> std::optional<TileAttributes<Metadata>> {
-                                          return constructTile(std::move(constructValue), entryIndex);
-                                      });
+    return _tileCache->getOrEmplace(key, [&](uint32_t entryIndex) -> std::optional<TileAttributes<Metadata>> {
+        return constructTile(std::move(constructValue), entryIndex);
+    });
 }
 
 template <typename Metadata>
-TileAttributes<Metadata> const* TextureAtlas<Metadata>::try_get(crispy::StrongHash const& key)
+TileAttributes<Metadata> const* TextureAtlas<Metadata>::tryGet(crispy::StrongHash const& key)
 {
-    return _tileCache->try_get(key);
+    return _tileCache->tryGet(key);
 }
 
 template <typename Metadata>
 template <typename CreateTileDataFn>
-[[nodiscard]] TileAttributes<Metadata> const* TextureAtlas<Metadata>::get_or_try_emplace(
+[[nodiscard]] TileAttributes<Metadata> const* TextureAtlas<Metadata>::getOrTryEmplace(
     crispy::StrongHash const& key, CreateTileDataFn constructValue)
 {
-    return _tileCache->get_or_try_emplace(
-        key, [&](uint32_t entryIndex) -> std::optional<TileAttributes<Metadata>> {
-            return constructTile(std::move(constructValue), entryIndex);
-        });
+    return _tileCache->getOrTryEmplace(key,
+                                       [&](uint32_t entryIndex) -> std::optional<TileAttributes<Metadata>> {
+                                           return constructTile(std::move(constructValue), entryIndex);
+                                       });
 }
 
 template <typename Metadata>

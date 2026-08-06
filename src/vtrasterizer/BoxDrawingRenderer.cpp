@@ -1973,12 +1973,11 @@ Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTile
     // Layout: [Codepoint 21][Flags 8][SubIndex 1] -> 30 bits used.
     auto const cacheKey = (static_cast<uint32_t>(codepoint) << 9)
                           | (static_cast<uint32_t>(cacheKeyFlags) << 1) | static_cast<uint32_t>(subIndex);
-    return textureAtlas().get_or_try_emplace(
-        crispy::StrongHash { 31, 13, 8, cacheKey },
-        [this, codepoint, flags, subIndex](
-            atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
-            return createTileData(codepoint, flags, tileLocation, subIndex);
-        });
+    return textureAtlas().getOrTryEmplace(crispy::StrongHash { 31, 13, 8, cacheKey },
+                                          [this, codepoint, flags, subIndex](atlas::TileLocation tileLocation)
+                                              -> optional<TextureAtlas::TileCreateData> {
+                                              return createTileData(codepoint, flags, tileLocation, subIndex);
+                                          });
 }
 
 bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept

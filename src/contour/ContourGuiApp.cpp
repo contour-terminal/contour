@@ -854,7 +854,7 @@ int ContourGuiApp::terminalGuiAction()
     auto const qtInitStart = std::chrono::steady_clock::now();
     QApplication const app(qtArgsCount, (char**) qtArgsPtr.data());
     setupQCoreApplication();
-    if (startupLog.is_enabled())
+    if (startupLog.isEnabled())
     {
         auto const elapsed = std::chrono::steady_clock::now() - qtInitStart;
         auto const ms =

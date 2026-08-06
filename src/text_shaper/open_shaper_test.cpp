@@ -104,7 +104,7 @@ class FallbackEnv
     /// Loads the named font and returns its key, failing the test if it will not load.
     [[nodiscard]] FontKey key(string const& name)
     {
-        auto const fontKey = _shaper.load_font(descriptionFor(name, _strictSpacing), BDFFont::Size);
+        auto const fontKey = _shaper.loadFont(descriptionFor(name, _strictSpacing), BDFFont::Size);
         REQUIRE(fontKey.has_value());
         return *fontKey;
     }
@@ -369,7 +369,7 @@ TEST_CASE("OpenShaper.fallback.respects_the_fallback_limit", "[OpenShaper][fallb
 
     SECTION("a limit of zero disables fallback entirely")
     {
-        env.shaper().set_font_fallback_limit(0); // must precede the first load_font
+        env.shaper().setFontFallbackLimit(0); // must precede the first loadFont
 
         auto const primary = env.key("primary");
         auto const replacement = env.shaper().shape(primary, Replacement);
@@ -383,7 +383,7 @@ TEST_CASE("OpenShaper.fallback.respects_the_fallback_limit", "[OpenShaper][fallb
 
     SECTION("an unlimited chain reaches the last font")
     {
-        env.shaper().set_font_fallback_limit(-1);
+        env.shaper().setFontFallbackLimit(-1);
 
         auto const primary = env.key("primary");
         auto const second = env.key("second");
@@ -436,8 +436,8 @@ TEST_CASE("OpenShaper.fallback.skips_a_font_that_will_not_load", "[OpenShaper][f
     auto locator = MockFontLocator {};
     auto shaper = OpenShaper { BDFFont::Dpi, locator };
 
-    auto const primaryKey = shaper.load_font(descriptionFor("primary"), BDFFont::Size);
-    auto const rescuerKey = shaper.load_font(descriptionFor("rescuer"), BDFFont::Size);
+    auto const primaryKey = shaper.loadFont(descriptionFor("primary"), BDFFont::Size);
+    auto const rescuerKey = shaper.loadFont(descriptionFor("rescuer"), BDFFont::Size);
     REQUIRE(primaryKey.has_value());
     REQUIRE(rescuerKey.has_value());
 
@@ -582,8 +582,8 @@ TEST_CASE("OpenShaper.COLRv1", "[OpenShaper]")
     auto const fd = FontDescription { .familyName = "Noto Color Emoji" };
     auto const fontSize = text::FontSize { 12.0 };
 
-    // Explicitly testing load_font which uses locate()
-    auto const fontKeyOpt = shaper.load_font(fd, fontSize);
+    // Explicitly testing loadFont which uses locate()
+    auto const fontKeyOpt = shaper.loadFont(fd, fontSize);
     REQUIRE(fontKeyOpt.has_value());
 
     auto const fontKey = *fontKeyOpt;
@@ -631,10 +631,10 @@ TEST_CASE("OpenShaper.coverage.resolves_a_codepoint_the_chain_cannot", "[OpenSha
 
 TEST_CASE("OpenShaper.coverage.cache_does_not_outlive_the_keys_it_stores", "[OpenShaper][fallback]")
 {
-    // The coverage cache answers with a FontKey, and those keys are owned by the maps clear_cache()
+    // The coverage cache answers with a FontKey, and those keys are owned by the maps clearCache()
     // empties. Surviving that call it would hand back a key nothing can resolve -- and the shaping
     // path requires the lookup to succeed, so the next frame drawing that codepoint aborted. Any
-    // non-DPI font change reaches this: applyFontDescriptions() calls clear_cache().
+    // non-DPI font change reaches this: applyFontDescriptions() calls clearCache().
     auto coverageFont = BDFFont { "coverage", Monospaced, { { Snowman, 8 } } };
 
     auto env = FallbackEnv { {
@@ -645,7 +645,7 @@ TEST_CASE("OpenShaper.coverage.cache_does_not_outlive_the_keys_it_stores", "[Ope
     // Populate the coverage cache.
     REQUIRE(shapeCells(env.shaper(), env.key("primary"), u32string { Snowman }).size() == 1);
 
-    env.shaper().clear_cache();
+    env.shaper().clearCache();
 
     // Re-loading gives a fresh key; shaping the same codepoint must not reach for the stale one.
     auto const primary = env.key("primary");
@@ -677,12 +677,12 @@ TEST_CASE("OpenShaper.coverage.is_spent_once_per_span", "[OpenShaper][fallback]"
     CHECK(result[1].glyph.index.value == replacement->glyph.index.value);
 }
 
-TEST_CASE("OpenShaper.resize_font.reports_not_resized_by_returning_the_key_it_was_given",
+TEST_CASE("OpenShaper.resizeFont.reports_not_resized_by_returning_the_key_it_was_given",
           "[OpenShaper][resize]")
 {
     // The synthetic fonts here are BDF, which ships fixed strikes and cannot be opened at an
     // arbitrary size -- the same position a user's bitmap font is in when `OSC 66` asks for one. The
-    // contract that has to hold then is that resize_font() says so by handing back the key it was
+    // contract that has to hold then is that resizeFont() says so by handing back the key it was
     // given, which TextRenderer::rasterizeAtBlockSize() reads as "not resized" and answers by
     // magnifying the raster it already has rather than rasterizing at the wrong size.
     auto env = FallbackEnv { {
@@ -690,16 +690,16 @@ TEST_CASE("OpenShaper.resize_font.reports_not_resized_by_returning_the_key_it_wa
     } };
     auto const primary = env.key("primary");
 
-    CHECK(env.shaper().resize_font(primary, FontSize { BDFFont::Size.pt * 2 }) == primary);
+    CHECK(env.shaper().resizeFont(primary, FontSize { BDFFont::Size.pt * 2 }) == primary);
 
     // The size it is already at is not a resize at all, and takes the same answer.
-    CHECK(env.shaper().resize_font(primary, BDFFont::Size) == primary);
+    CHECK(env.shaper().resizeFont(primary, BDFFont::Size) == primary);
 }
 
-TEST_CASE("OpenShaper.resize_font.a_size_the_face_lacks_does_not_retire_the_font", "[OpenShaper][resize]")
+TEST_CASE("OpenShaper.resizeFont.a_size_the_face_lacks_does_not_retire_the_font", "[OpenShaper][resize]")
 {
     // A source is blacklisted to mean "this file is not a font I can use", and nothing clears that
-    // list -- not even clear_cache(). Concluding it from a failure to open a size would let one
+    // list -- not even clearCache(). Concluding it from a failure to open a size would let one
     // `OSC 66` scaled write retire a bitmap font for the rest of the session, including at the size
     // it was rendering perfectly well at a moment earlier.
     auto env = FallbackEnv { {
@@ -708,7 +708,7 @@ TEST_CASE("OpenShaper.resize_font.a_size_the_face_lacks_does_not_retire_the_font
     auto const primary = env.key("primary");
 
     for (auto const i: std::views::iota(1, 8))
-        (void) env.shaper().resize_font(primary, FontSize { BDFFont::Size.pt + double(i) });
+        (void) env.shaper().resizeFont(primary, FontSize { BDFFont::Size.pt + double(i) });
 
     // Still shapes, and still resolves to a real glyph rather than .notdef.
     auto const result = shapeOneCell(env.shaper(), primary, u32string { U'A' });

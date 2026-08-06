@@ -265,28 +265,28 @@ using Action = std::variant<CancelSelection,
 /// The keyboard dispatch (handleAction) consults this concept to filter such actions out of
 /// KeyboardEventType::Repeat events.
 template <typename T>
-concept NonRepeatableActionConcept = crispy::one_of<T,
-                                                    CreateNewTab,
-                                                    CloseTab,
-                                                    CloseAllTabs,
-                                                    ClosePane,
-                                                    OpenCommandPalette,
-                                                    OpenContextMenu,
-                                                    SetTabColor,
-                                                    SplitVertical,
-                                                    SplitHorizontal,
-                                                    SwapPaneLeft,
-                                                    SwapPaneRight,
-                                                    SwapPaneUp,
-                                                    SwapPaneDown,
-                                                    MovePaneLeft,
-                                                    MovePaneRight,
-                                                    MovePaneUp,
-                                                    MovePaneDown,
-                                                    ToggleSplitOrientation,
-                                                    TogglePaneZoom,
-                                                    LaunchLayout,
-                                                    SaveLayout>;
+concept NonRepeatableActionConcept = crispy::oneOf<T,
+                                                   CreateNewTab,
+                                                   CloseTab,
+                                                   CloseAllTabs,
+                                                   ClosePane,
+                                                   OpenCommandPalette,
+                                                   OpenContextMenu,
+                                                   SetTabColor,
+                                                   SplitVertical,
+                                                   SplitHorizontal,
+                                                   SwapPaneLeft,
+                                                   SwapPaneRight,
+                                                   SwapPaneUp,
+                                                   SwapPaneDown,
+                                                   MovePaneLeft,
+                                                   MovePaneRight,
+                                                   MovePaneUp,
+                                                   MovePaneDown,
+                                                   ToggleSplitOrientation,
+                                                   TogglePaneZoom,
+                                                   LaunchLayout,
+                                                   SaveLayout>;
 
 /// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
 /// member), false otherwise.
@@ -333,16 +333,16 @@ concept NonRepeatableActionConcept = crispy::one_of<T,
 /// stays in the list — a nameless "launch which layout?" has no default; its per-name rows already
 /// reach the palette through the saved-layout source.
 template <typename T>
-concept ParameterizedActionConcept = crispy::one_of<T,
-                                                    ChangeProfile,
-                                                    CreateSelection,
-                                                    HintMode,
-                                                    SendChars,
-                                                    WriteScreen,
-                                                    MoveTabTo,
-                                                    SwitchToTab,
-                                                    ResizePane,
-                                                    LaunchLayout>;
+concept ParameterizedActionConcept = crispy::oneOf<T,
+                                                   ChangeProfile,
+                                                   CreateSelection,
+                                                   HintMode,
+                                                   SendChars,
+                                                   WriteScreen,
+                                                   MoveTabTo,
+                                                   SwitchToTab,
+                                                   ResizePane,
+                                                   LaunchLayout>;
 
 /// @returns true if @p action requires an argument that a bare catalog entry cannot supply (a
 /// ParameterizedActionConcept member), false if it is runnable as-is.

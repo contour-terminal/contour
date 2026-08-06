@@ -21,8 +21,8 @@ class DWriteAnalysisWrapper:
                         IDWriteTextAnalysisSink>
 {
   public:
-    DWriteAnalysisWrapper(std::wstring const& _text, std::wstring const& _userLocale):
-        text(_text), userLocale(_userLocale)
+    DWriteAnalysisWrapper(std::wstring const& text, std::wstring const& userLocale):
+        _text(text), _userLocale(userLocale)
     {
     }
 
@@ -34,10 +34,10 @@ class DWriteAnalysisWrapper:
         *textString = nullptr;
         *textLength = 0;
 
-        if (textPosition < text.Size())
+        if (textPosition < _text.size())
         {
-            *textString = &text.at(textPosition);
-            *textLength = text.Size() - textPosition;
+            *textString = &_text.at(textPosition);
+            *textLength = _text.size() - textPosition;
         }
 
         return S_OK;
@@ -50,9 +50,9 @@ class DWriteAnalysisWrapper:
         *textString = nullptr;
         *textLength = 0;
 
-        if (textPosition > 0 && textPosition <= text.Size())
+        if (textPosition > 0 && textPosition <= _text.size())
         {
-            *textString = text.data();
+            *textString = _text.data();
             *textLength = textPosition;
         }
 
@@ -69,8 +69,8 @@ class DWriteAnalysisWrapper:
                           _Out_ UINT32* textLength,
                           _Outptr_result_z_ WCHAR const** localeName) override
     {
-        *localeName = userLocale.c_str();
-        *textLength = text.Size() - textPosition;
+        *localeName = _userLocale.c_str();
+        *textLength = _text.size() - textPosition;
 
         return S_OK;
     }
@@ -81,7 +81,7 @@ class DWriteAnalysisWrapper:
     {
 
         *numberSubstitution = nullptr;
-        *textLength = text.Size() - textPosition;
+        *textLength = _text.size() - textPosition;
 
         return S_OK;
     }
@@ -122,7 +122,7 @@ class DWriteAnalysisWrapper:
     DWRITE_SCRIPT_ANALYSIS script;
 
   private:
-    std::wstring const& text;
-    std::wstring const& userLocale;
+    std::wstring const& _text;
+    std::wstring const& _userLocale;
 };
 } // namespace text

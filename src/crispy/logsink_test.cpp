@@ -89,7 +89,7 @@ TEST_CASE("the standard formatter lays a line out as configured", "[crispy][logs
 
     SECTION("uncoloured output carries no escape sequences")
     {
-        category.value.set_formatter(logstore::makeStandardFormatter({ .colorize = false }));
+        category.value.setFormatter(logstore::makeStandardFormatter({ .colorize = false }));
         category.value()("hello");
         CHECK_FALSE(capture.contains("\033"));
         CHECK(capture.contains("[test.formatter]"));
@@ -98,14 +98,14 @@ TEST_CASE("the standard formatter lays a line out as configured", "[crispy][logs
 
     SECTION("colourised output does")
     {
-        category.value.set_formatter(logstore::makeStandardFormatter({ .colorize = true }));
+        category.value.setFormatter(logstore::makeStandardFormatter({ .colorize = true }));
         category.value()("hello");
         CHECK(capture.contains("\033["));
     }
 
     SECTION("the process id appears only when asked for")
     {
-        category.value.set_formatter(
+        category.value.setFormatter(
             logstore::makeStandardFormatter({ .colorize = false, .showProcessId = true }));
         category.value()("hello");
         CHECK(capture.contains(std::format("[{}]", ::getpid())));
@@ -113,7 +113,7 @@ TEST_CASE("the standard formatter lays a line out as configured", "[crispy][logs
 
     SECTION("the timestamp can be suppressed")
     {
-        category.value.set_formatter(
+        category.value.setFormatter(
             logstore::makeStandardFormatter({ .colorize = false, .showTimestamp = false }));
         category.value()("hello");
         CHECK(capture.text().starts_with("[test.formatter] hello"));
@@ -121,7 +121,7 @@ TEST_CASE("the standard formatter lays a line out as configured", "[crispy][logs
 
     SECTION("continuation lines are indented and carry no repeated tag")
     {
-        category.value.set_formatter(
+        category.value.setFormatter(
             logstore::makeStandardFormatter({ .colorize = false, .showTimestamp = false }));
         category.value()("first\nsecond");
         auto const lines = capture.lines();
@@ -136,7 +136,7 @@ TEST_CASE("the error formatter tags its lines so they stand out", "[crispy][logs
     auto category = TestCategory { "test.errorformat" };
     auto capture = logstore::ScopedCapture { "test.errorformat" };
 
-    category.value.set_formatter(logstore::makeErrorFormatter({ .colorize = false, .showTimestamp = false }));
+    category.value.setFormatter(logstore::makeErrorFormatter({ .colorize = false, .showTimestamp = false }));
     category.value()("it broke");
     CHECK(capture.text() == "[error] it broke\n");
 }
@@ -227,12 +227,12 @@ TEST_CASE("ScopedOutput leaves an empty filter alone", "[crispy][logsink]")
     // configure("") matches no pattern and would therefore DISABLE every category, `error`
     // included. An empty --log must mean "keep whatever $LOG set", never "log nothing".
     auto category = TestCategory { "test.emptyfilter" };
-    REQUIRE(category.value.is_enabled());
+    REQUIRE(category.value.isEnabled());
 
     auto output = logstore::ScopedOutput::create({ .filter = "" });
     REQUIRE(output.has_value());
-    CHECK(category.value.is_enabled());
-    CHECK(logstore::errorLog.is_enabled());
+    CHECK(category.value.isEnabled());
+    CHECK(logstore::errorLog.isEnabled());
 }
 
 TEST_CASE("ScopedOutput serialises concurrent writers", "[crispy][logsink]")
@@ -274,18 +274,18 @@ TEST_CASE("ScopedOutput serialises concurrent writers", "[crispy][logsink]")
 TEST_CASE("ScopedCapture enables and restores what it captures", "[crispy][logsink]")
 {
     auto category = logstore::Category { "test.capture", "Test-only category." };
-    REQUIRE_FALSE(category.is_enabled());
+    REQUIRE_FALSE(category.isEnabled());
     auto const* const before = &category.sink();
 
     {
         auto capture = logstore::ScopedCapture { "test.capture" };
-        CHECK(category.is_enabled()); // capturing a category implies enabling it
+        CHECK(category.isEnabled()); // capturing a category implies enabling it
         category()("recorded");
         CHECK(capture.contains("recorded"));
         CHECK(capture.count("recorded") == 1);
     }
 
-    CHECK_FALSE(category.is_enabled());
+    CHECK_FALSE(category.isEnabled());
     CHECK(&category.sink() == before);
 }
 
@@ -298,14 +298,14 @@ TEST_CASE("configure's prefix match is bounded by the category name", "[crispy][
     auto category = TestCategory { "test.prefixbound" };
 
     logstore::configure("averyveryverylongprefixthatnocategoryhas.*");
-    CHECK_FALSE(category.value.is_enabled());
+    CHECK_FALSE(category.value.isEnabled());
 
     logstore::configure("test.*");
-    CHECK(category.value.is_enabled());
+    CHECK(category.value.isEnabled());
 
     // A pattern that is a strict prefix of another category's name must not match it whole.
     logstore::configure("test.prefixboundandmore*");
-    CHECK_FALSE(category.value.is_enabled());
+    CHECK_FALSE(category.value.isEnabled());
 
     logstore::configure("all"); // leave the process in a sane state for later tests
     logstore::configure("error");
@@ -323,6 +323,6 @@ TEST_CASE("an explicit filter never silences the error category", "[crispy][logs
     auto output = logstore::ScopedOutput::create({ .filter = "test.filterkeepserror" });
     REQUIRE(output.has_value());
 
-    CHECK(category.value.is_enabled());
-    CHECK(logstore::errorLog.is_enabled());
+    CHECK(category.value.isEnabled());
+    CHECK(logstore::errorLog.isEnabled());
 }

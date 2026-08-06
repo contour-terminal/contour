@@ -20,25 +20,24 @@ class OpenShaper: public Shaper
   public:
     explicit OpenShaper(DPI dpi, FontLocator& locator);
 
-    void set_dpi(DPI dpi) override;
+    void setDPI(DPI dpi) override;
 
-    void set_locator(FontLocator& locator) override;
+    void setLocator(FontLocator& locator) override;
 
-    void clear_cache() override;
+    void clearCache() override;
 
-    void set_font_fallback_limit(int limit) override;
+    void setFontFallbackLimit(int limit) override;
 
-    /// Sets how many distinct sizes resize_font() may open a face at before it refuses to open more.
+    /// Sets how many distinct sizes resizeFont() may open a face at before it refuses to open more.
     ///
     /// Defaults to a bound generous enough that no real document reaches it; exists so that a test
     /// can drive the refusal without paying for hundreds of real font loads to get there.
-    void set_resized_font_limit(size_t limit);
+    void setResizedFontLimit(size_t limit);
 
-    [[nodiscard]] std::optional<FontKey> load_font(FontDescription const& description,
-                                                   FontSize size) override;
+    [[nodiscard]] std::optional<FontKey> loadFont(FontDescription const& description, FontSize size) override;
 
     [[nodiscard]] FontMetrics metrics(FontKey key) const override;
-    [[nodiscard]] FontKey resize_font(FontKey key, FontSize size) override;
+    [[nodiscard]] FontKey resizeFont(FontKey key, FontSize size) override;
 
     void shape(FontKey font,
                std::u32string_view codepoints,

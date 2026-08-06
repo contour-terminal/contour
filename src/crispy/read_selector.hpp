@@ -55,7 +55,7 @@ class PosixReadSelector
         }
     }
 
-    void want_read(int fd) noexcept
+    void wantRead(int fd) noexcept
     {
         auto const _ = std::scoped_lock { _fdsMutex };
         assert(fd >= 0);
@@ -70,7 +70,7 @@ class PosixReadSelector
         return _fds.size();
     }
 
-    void cancel_read(int fd) noexcept
+    void cancelRead(int fd) noexcept
     {
         auto const _ = std::scoped_lock { _fdsMutex };
         assert(std::count(_fds.begin(), _fds.end(), fd) == 1);
@@ -80,7 +80,7 @@ class PosixReadSelector
 
     void wakeup() noexcept
     {
-        if (_breakPipeWriter.is_open())
+        if (_breakPipeWriter.isOpen())
         {
             auto written = write(_breakPipeWriter, "x", 1);
             if (written == -1)
@@ -90,20 +90,20 @@ class PosixReadSelector
 
     /// Reports whether @p fd is still a registered read-interest.
     ///
-    /// Used by the caller to re-validate, after wait_one() returned, that a concurrent cancel_read()
+    /// Used by the caller to re-validate, after waitOne() returned, that a concurrent cancelRead()
     /// (e.g. from close() on another thread) has not removed the fd in the meantime — reading from a
     /// cancelled/closed fd must be avoided.
     /// @param fd The file descriptor to test.
     /// @return true iff @p fd is currently registered for read interest.
-    [[nodiscard]] bool is_wanted(int fd) const noexcept
+    [[nodiscard]] bool isWanted(int fd) const noexcept
     {
         auto const _ = std::scoped_lock { _fdsMutex };
         return std::ranges::find(_fds, fd) != _fds.end();
     }
 
-    std::optional<int> wait_one(std::optional<std::chrono::milliseconds> timeout = std::nullopt) noexcept
+    std::optional<int> waitOne(std::optional<std::chrono::milliseconds> timeout = std::nullopt) noexcept
     {
-        if (auto const fd = try_pop_pending(); fd.has_value())
+        if (auto const fd = tryPopPending(); fd.has_value())
             return fd;
 
         FD_ZERO(&_reader);
@@ -111,11 +111,11 @@ class PosixReadSelector
         FD_ZERO(&_except);
 
         // Snapshot the registered fds under the lock, then run the blocking select() WITHOUT holding it:
-        // a concurrent cancel_read()/want_read() mutates the shared _fds vector, so iterating it here
+        // a concurrent cancelRead()/wantRead() mutates the shared _fds vector, so iterating it here
         // unsynchronized is a data race (garbage/dangling fd handed to select, or a crash). The lock must
-        // not span select() itself, or close()'s cancel_read() would block for the whole wait, defeating
-        // the independent break-pipe wakeup. A cancel_read() that lands after this snapshot is still
-        // handled: the break-pipe wakeup returns select(), and the caller re-checks is_wanted().
+        // not span select() itself, or close()'s cancelRead() would block for the whole wait, defeating
+        // the independent break-pipe wakeup. A cancelRead() that lands after this snapshot is still
+        // handled: the break-pipe wakeup returns select(), and the caller re-checks isWanted().
         int maxfd = _breakPipeReader.get();
         FD_SET(_breakPipeReader.get(), &_reader);
         {
@@ -155,11 +155,11 @@ class PosixReadSelector
                     _pending.push_back(fd);
         }
 
-        return try_pop_pending();
+        return tryPopPending();
     }
 
   private:
-    std::optional<int> try_pop_pending() noexcept
+    std::optional<int> tryPopPending() noexcept
     {
         if (_pending.empty())
         {
@@ -176,8 +176,8 @@ class PosixReadSelector
     fd_set _reader {};
     fd_set _writer {};
     fd_set _except {};
-    mutable std::mutex _fdsMutex; //!< Guards @c _fds against concurrent cancel_read()/want_read() while
-                                  //!< wait_one() snapshots it; the epoll backend delegates this to the
+    mutable std::mutex _fdsMutex; //!< Guards @c _fds against concurrent cancelRead()/wantRead() while
+                                  //!< waitOne() snapshots it; the epoll backend delegates this to the
                                   //!< kernel, the posix backend must synchronize the vector itself.
     std::vector<int> _fds;
     std::deque<int> _pending;
@@ -196,21 +196,21 @@ class EpollReadSelector
     EpollReadSelector();
     ~EpollReadSelector() = default;
 
-    void want_read(int fd) noexcept;
-    void cancel_read(int fd) noexcept;
+    void wantRead(int fd) noexcept;
+    void cancelRead(int fd) noexcept;
     [[nodiscard]] size_t size() const noexcept;
-    [[nodiscard]] bool is_wanted(int fd) const noexcept;
+    [[nodiscard]] bool isWanted(int fd) const noexcept;
 
     void wakeup() const noexcept;
-    std::optional<int> wait_one(std::optional<std::chrono::milliseconds> timeout = std::nullopt) noexcept;
+    std::optional<int> waitOne(std::optional<std::chrono::milliseconds> timeout = std::nullopt) noexcept;
 
   private:
-    std::optional<int> try_pop_pending() noexcept;
+    std::optional<int> tryPopPending() noexcept;
 
   private:
     FileDescriptor _epollFd;
     FileDescriptor _eventFd;
-    mutable std::mutex _fdsMutex; //!< Guards @c _fds against concurrent cancel_read()/want_read().
+    mutable std::mutex _fdsMutex; //!< Guards @c _fds against concurrent cancelRead()/wantRead().
     std::vector<int> _fds;
     std::deque<int> _pending;
 };
@@ -227,7 +227,7 @@ inline EpollReadSelector::EpollReadSelector()
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
-inline void EpollReadSelector::want_read(int fd) noexcept
+inline void EpollReadSelector::wantRead(int fd) noexcept
 {
     auto event = epoll_event {};
     event.events = EPOLLIN;
@@ -238,7 +238,7 @@ inline void EpollReadSelector::want_read(int fd) noexcept
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
-inline void EpollReadSelector::cancel_read(int fd) noexcept
+inline void EpollReadSelector::cancelRead(int fd) noexcept
 {
     auto event = epoll_event {};
     event.events = EPOLLIN;
@@ -255,7 +255,7 @@ inline size_t EpollReadSelector::size() const noexcept
     return _fds.size();
 }
 
-inline bool EpollReadSelector::is_wanted(int fd) const noexcept
+inline bool EpollReadSelector::isWanted(int fd) const noexcept
 {
     auto const _ = std::scoped_lock { _fdsMutex };
     return std::ranges::find(_fds, fd) != _fds.end();
@@ -269,7 +269,7 @@ inline void EpollReadSelector::wakeup() const noexcept
         errorLog()("Writing to eventFd failed. {}", std::generic_category().message(errno));
 }
 
-inline std::optional<int> EpollReadSelector::try_pop_pending() noexcept
+inline std::optional<int> EpollReadSelector::tryPopPending() noexcept
 {
     if (_pending.empty())
         return std::nullopt;
@@ -279,10 +279,10 @@ inline std::optional<int> EpollReadSelector::try_pop_pending() noexcept
     return fd;
 }
 
-inline std::optional<int> EpollReadSelector::wait_one(
+inline std::optional<int> EpollReadSelector::waitOne(
     std::optional<std::chrono::milliseconds> timeout) noexcept
 {
-    if (auto const fd = try_pop_pending(); fd.has_value())
+    if (auto const fd = tryPopPending(); fd.has_value())
         return fd;
 
     auto events = std::array<epoll_event, 64> { {} };
@@ -317,7 +317,7 @@ inline std::optional<int> EpollReadSelector::wait_one(
                 _pending.push_back(events[i].data.fd);
         }
 
-        if (auto fd = try_pop_pending(); fd.has_value())
+        if (auto fd = tryPopPending(); fd.has_value())
             return fd;
 
         errno = piped ? EINTR : EAGAIN;

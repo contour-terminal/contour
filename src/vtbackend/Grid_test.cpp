@@ -27,7 +27,7 @@ void logGridText(Grid const& grid, string const& headline = "")
                               grid.historyLineCount(),
                               grid.maxHistoryLineCount(),
                               grid.pageSize(),
-                              grid.zero_index(),
+                              grid.zeroIndex(),
                               headline));
 
     for (int line = -grid.historyLineCount().as<int>(); line < grid.pageSize().lines.as<int>(); ++line)
@@ -46,7 +46,7 @@ void logGridText(Grid const& grid, string const& headline = "")
                              grid.historyLineCount(),
                              grid.maxHistoryLineCount(),
                              grid.pageSize(),
-                             grid.zero_index(),
+                             grid.zeroIndex(),
                              headline);
     std::cout << std::format("{}\n", dumpGrid(grid));
 }

@@ -60,13 +60,13 @@ struct OutputConfig
 /// `[timestamp] [pid] [category] text`, with the continuation lines of a multi-line message
 /// indented under the text column and carrying no repeated tag.
 /// @param options How the line is laid out.
-/// @return The formatter, for logstore::set_formatter().
+/// @return The formatter, for logstore::setFormatter().
 [[nodiscard]] Category::Formatter makeStandardFormatter(FormatterOptions options);
 
 /// As makeStandardFormatter(), but tagged `[error]` and coloured red — for the errorLog
 /// category, whose lines a reader must be able to pick out of a busy log at a glance.
 /// @param options How the line is laid out.
-/// @return The formatter, for Category::set_formatter().
+/// @return The formatter, for Category::setFormatter().
 [[nodiscard]] Category::Formatter makeErrorFormatter(FormatterOptions options);
 
 /// Names the filter patterns in @p filterString that match no registered category, so a typo

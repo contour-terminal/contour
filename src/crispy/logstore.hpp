@@ -48,8 +48,10 @@ class SourceLocationCustom
     {
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): drop-in for std::source_location.
     [[nodiscard]] char const* file_name() const noexcept { return _fileName; }
     [[nodiscard]] int line() const noexcept { return _line; }
+    // NOLINTNEXTLINE(readability-identifier-naming): drop-in for std::source_location.
     [[nodiscard]] char const* function_name() const noexcept { return _functionName; }
 
     static SourceLocationCustom current() noexcept
@@ -81,7 +83,7 @@ class MessageBuilder
   public:
     explicit MessageBuilder(Category const& cat, SourceLocation loc = SourceLocation::current());
 
-    [[nodiscard]] Category const& get_category() const noexcept { return *_category; }
+    [[nodiscard]] Category const& getCategory() const noexcept { return *_category; }
     [[nodiscard]] SourceLocation const& location() const noexcept { return _location; }
 
     [[nodiscard]] std::string const& text() const noexcept { return _buffer; }
@@ -145,19 +147,19 @@ class Category
     [[nodiscard]] std::string_view name() const noexcept { return _name; }
     [[nodiscard]] std::string_view description() const noexcept { return _description; }
 
-    [[nodiscard]] bool is_enabled() const noexcept { return _state == State::Enabled; }
+    [[nodiscard]] bool isEnabled() const noexcept { return _state == State::Enabled; }
     void enable(bool enabled = true) noexcept { _state = enabled ? State::Enabled : State::Disabled; }
     void disable() noexcept { _state = State::Disabled; }
 
     [[nodiscard]] bool visible() const noexcept { return _visibility == Visibility::Public; }
-    void set_visible(bool visible) { _visibility = visible ? Visibility::Public : Visibility::Hidden; }
+    void setVisible(bool visible) { _visibility = visible ? Visibility::Public : Visibility::Hidden; }
 
-    operator bool() const noexcept { return is_enabled(); }
+    operator bool() const noexcept { return isEnabled(); }
 
-    [[nodiscard]] Formatter const& get_formatter() const { return _formatter; }
-    void set_formatter(Formatter formatter) { _formatter = std::move(formatter); }
+    [[nodiscard]] Formatter const& getFormatter() const { return _formatter; }
+    void setFormatter(Formatter formatter) { _formatter = std::move(formatter); }
 
-    void set_sink(logstore::Sink& s) { _sink = s; }
+    void setSink(logstore::Sink& s) { _sink = s; }
     [[nodiscard]] logstore::Sink& sink() const noexcept { return _sink.get(); }
 
     [[nodiscard]] MessageBuilder build(SourceLocation location = SourceLocation::current()) const
@@ -193,12 +195,12 @@ class Sink
     Sink(bool enabled, std::ostream& output);
     Sink(bool enabled, std::shared_ptr<std::ostream> f);
 
-    void set_writer(Writer writer);
+    void setWriter(Writer writer);
 
     /// Writes given built message to this sink.
     void write(MessageBuilder const& message);
 
-    void set_enabled(bool enabled) { _enabled = enabled; }
+    void setEnabled(bool enabled) { _enabled = enabled; }
 
     /// Retrieves reference to standard debug-logging sink.
     static Sink& console();
@@ -211,8 +213,8 @@ class Sink
 
 std::vector<std::reference_wrapper<Category>>& get();
 Category* get(std::string_view categoryName);
-void set_sink(Sink& sink);
-void set_formatter(Category::Formatter const& f);
+void setSink(Sink& sink);
+void setFormatter(Category::Formatter const& f);
 void enable(std::string_view categoryName, bool enabled = true);
 void disable(std::string_view categoryName);
 void configure(std::string_view filterString);
@@ -220,8 +222,8 @@ void configure(std::string_view filterString);
 // {{{ implementation
 inline std::string MessageBuilder::message() const
 {
-    if (_category->get_formatter())
-        return _category->get_formatter()(*this);
+    if (_category->getFormatter())
+        return _category->getFormatter()(*this);
     else if (!_buffer.empty() && _buffer.back() == '\n')
         return _buffer;
     else if (!_buffer.empty())
@@ -244,16 +246,16 @@ inline Category* get(std::string_view categoryName)
     return nullptr;
 }
 
-inline void set_sink(Sink& s)
+inline void setSink(Sink& s)
 {
     for (auto const& cat: get())
-        cat.get().set_sink(s);
+        cat.get().setSink(s);
 }
 
-inline void set_formatter(Category::Formatter const& f)
+inline void setFormatter(Category::Formatter const& f)
 {
     for (auto const& cat: get())
-        cat.get().set_formatter(f);
+        cat.get().setFormatter(f);
 }
 
 inline void enable(std::string_view categoryName, bool enabled)
@@ -363,7 +365,7 @@ inline Category::~Category()
 inline std::string Category::defaultFormatter(MessageBuilder const& message)
 {
     return std::format("[{}:{}:{}]: {}\n",
-                       message.get_category().name(),
+                       message.getCategory().name(),
                        message.location().file_name(),
                        message.location().line(),
                        message.text());
@@ -371,11 +373,11 @@ inline std::string Category::defaultFormatter(MessageBuilder const& message)
 
 inline void Sink::write(MessageBuilder const& message)
 {
-    if (_enabled && message.get_category().is_enabled())
+    if (_enabled && message.getCategory().isEnabled())
         _writer(message.message());
 }
 
-inline void Sink::set_writer(Writer writer)
+inline void Sink::setWriter(Writer writer)
 {
     _writer = std::move(writer);
 }

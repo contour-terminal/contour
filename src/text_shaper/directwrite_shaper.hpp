@@ -16,34 +16,34 @@ namespace text
 class DirectWriteShaper: public Shaper
 {
   public:
-    DirectWriteShaper(DPI _dpi, FontLocator& _locator);
+    DirectWriteShaper(DPI dpi, FontLocator& locator);
 
-    void set_dpi(DPI _dpi) override;
-    void set_locator(FontLocator& _locator) override;
-    void clear_cache() override;
+    void setDPI(DPI dpi) override;
+    void setLocator(FontLocator& locator) override;
+    void clearCache() override;
 
-    void set_font_fallback_limit(int limit) override;
+    void setFontFallbackLimit(int limit) override;
 
-    std::optional<FontKey> load_font(FontDescription const& _description, FontSize _size) override;
+    std::optional<FontKey> loadFont(FontDescription const& description, FontSize size) override;
 
-    FontMetrics metrics(FontKey _key) const override;
+    FontMetrics metrics(FontKey key) const override;
 
-    void shape(FontKey _font,
-               std::u32string_view _text,
-               gsl::span<unsigned> _clusters,
-               unicode::Script _script,
-               unicode::PresentationStyle _presentation,
-               ShapeResult& _result) override;
+    void shape(FontKey font,
+               std::u32string_view text,
+               gsl::span<unsigned> clusters,
+               unicode::Script script,
+               unicode::PresentationStyle presentation,
+               ShapeResult& result) override;
 
-    std::optional<GlyphPosition> shape(FontKey _font, char32_t _codepoint) override;
+    std::optional<GlyphPosition> shape(FontKey font, char32_t codepoint) override;
 
-    std::optional<RasterizedGlyph> rasterize(GlyphKey _glyph,
-                                             RenderMode _mode,
+    std::optional<RasterizedGlyph> rasterize(GlyphKey glyph,
+                                             RenderMode mode,
                                              float outlineThickness = 0.0f) override;
 
   private:
     struct Private;
-    std::unique_ptr<Private, void (*)(Private*)> d;
+    std::unique_ptr<Private, void (*)(Private*)> _d;
 };
 
 } // namespace text

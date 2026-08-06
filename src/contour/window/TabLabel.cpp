@@ -13,7 +13,7 @@ std::string expandTabLabel(std::string_view tmpl, TabLabelContext const& ctx)
 {
     auto result = std::string {};
 
-    for (auto const& fragment: crispy::parse_interpolated_string(tmpl))
+    for (auto const& fragment: crispy::parseInterpolatedString(tmpl))
     {
         if (std::holds_alternative<std::string_view>(fragment))
         {

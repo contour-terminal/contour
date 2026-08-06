@@ -48,66 +48,66 @@ R ret(R (*)(A...));
 template <typename C, typename R, typename... A>
 R ret(R (C::*)(A...));
 
-TEST_CASE("utils.to_integer.integer_type")
+TEST_CASE("utils.toInteger.integer_type")
 {
     static_assert(
-        std::is_same_v<uint8_t, std::remove_reference_t<decltype(*crispy::to_integer<10, uint8_t>(""sv))>>);
+        std::is_same_v<uint8_t, std::remove_reference_t<decltype(*crispy::toInteger<10, uint8_t>(""sv))>>);
 
-    static_assert(std::is_same_v<int, std::remove_reference_t<decltype(*crispy::to_integer<10, int>(""sv))>>);
-
-    static_assert(
-        std::is_same_v<unsigned, std::remove_reference_t<decltype(*crispy::to_integer<10, unsigned>(""sv))>>);
+    static_assert(std::is_same_v<int, std::remove_reference_t<decltype(*crispy::toInteger<10, int>(""sv))>>);
 
     static_assert(
-        std::is_same_v<uint64_t, std::remove_reference_t<decltype(*crispy::to_integer<10, uint64_t>(""sv))>>);
+        std::is_same_v<unsigned, std::remove_reference_t<decltype(*crispy::toInteger<10, unsigned>(""sv))>>);
+
+    static_assert(
+        std::is_same_v<uint64_t, std::remove_reference_t<decltype(*crispy::toInteger<10, uint64_t>(""sv))>>);
 }
 
-TEST_CASE("utils.to_integer.bad")
+TEST_CASE("utils.toInteger.bad")
 {
-    CHECK(crispy::to_integer<10>(""sv).has_value() == false);
-    CHECK(crispy::to_integer<10>("bad"sv).has_value() == false);
+    CHECK(crispy::toInteger<10>(""sv).has_value() == false);
+    CHECK(crispy::toInteger<10>("bad"sv).has_value() == false);
 }
 
-TEST_CASE("utils.to_integer.2")
+TEST_CASE("utils.toInteger.2")
 {
-    CHECK(crispy::to_integer<2>("0"sv).value_or(-1) == 0);
-    CHECK(crispy::to_integer<2>("10"sv).value_or(-1) == 0b10);
-    CHECK(crispy::to_integer<2>("1100101"sv).value_or(-1) == 0b1100101);
+    CHECK(crispy::toInteger<2>("0"sv).value_or(-1) == 0);
+    CHECK(crispy::toInteger<2>("10"sv).value_or(-1) == 0b10);
+    CHECK(crispy::toInteger<2>("1100101"sv).value_or(-1) == 0b1100101);
 }
 
-TEST_CASE("utils.to_integer.10")
+TEST_CASE("utils.toInteger.10")
 {
-    CHECK(crispy::to_integer<10>("0"sv).value_or(-1) == 0);
-    CHECK(crispy::to_integer<10>("9"sv).value_or(-1) == 9);
-    CHECK(crispy::to_integer<10>("18"sv).value_or(-1) == 18);
-    CHECK(crispy::to_integer<10>("321"sv).value_or(-1) == 321);
-    CHECK(crispy::to_integer<10>("12345"sv).value_or(-1) == 12345);
+    CHECK(crispy::toInteger<10>("0"sv).value_or(-1) == 0);
+    CHECK(crispy::toInteger<10>("9"sv).value_or(-1) == 9);
+    CHECK(crispy::toInteger<10>("18"sv).value_or(-1) == 18);
+    CHECK(crispy::toInteger<10>("321"sv).value_or(-1) == 321);
+    CHECK(crispy::toInteger<10>("12345"sv).value_or(-1) == 12345);
 
     // defaulted base is base-10
-    CHECK(crispy::to_integer("12345"sv).value_or(-1) == 12345);
+    CHECK(crispy::toInteger("12345"sv).value_or(-1) == 12345);
 }
 
-TEST_CASE("utils.to_integer.16")
+TEST_CASE("utils.toInteger.16")
 {
     // upper case hex digits
-    CHECK(crispy::to_integer<16>("B"sv).value_or(-1) == 0x0B);
-    CHECK(crispy::to_integer<16>("0B"sv).value_or(-1) == 0x0B);
-    CHECK(crispy::to_integer<16>("B0"sv).value_or(-1) == 0xB0);
-    CHECK(crispy::to_integer<16>("B0"sv).value_or(-1) == 0xB0);
-    CHECK(crispy::to_integer<16>("ABCDEF"sv).value_or(-1) == 0xABCDEF);
+    CHECK(crispy::toInteger<16>("B"sv).value_or(-1) == 0x0B);
+    CHECK(crispy::toInteger<16>("0B"sv).value_or(-1) == 0x0B);
+    CHECK(crispy::toInteger<16>("B0"sv).value_or(-1) == 0xB0);
+    CHECK(crispy::toInteger<16>("B0"sv).value_or(-1) == 0xB0);
+    CHECK(crispy::toInteger<16>("ABCDEF"sv).value_or(-1) == 0xABCDEF);
 
     // lower case hex digits
-    CHECK(crispy::to_integer<16>("b"sv).value_or(-1) == 0x0B);
-    CHECK(crispy::to_integer<16>("0b"sv).value_or(-1) == 0x0B);
-    CHECK(crispy::to_integer<16>("b0"sv).value_or(-1) == 0xB0);
-    CHECK(crispy::to_integer<16>("b0"sv).value_or(-1) == 0xB0);
-    CHECK(crispy::to_integer<16>("abcdef"sv).value_or(-1) == 0xABCDEF);
+    CHECK(crispy::toInteger<16>("b"sv).value_or(-1) == 0x0B);
+    CHECK(crispy::toInteger<16>("0b"sv).value_or(-1) == 0x0B);
+    CHECK(crispy::toInteger<16>("b0"sv).value_or(-1) == 0xB0);
+    CHECK(crispy::toInteger<16>("b0"sv).value_or(-1) == 0xB0);
+    CHECK(crispy::toInteger<16>("abcdef"sv).value_or(-1) == 0xABCDEF);
 
-    CHECK(crispy::to_integer<16>("0"sv).value_or(-1) == 0x0);
-    CHECK(crispy::to_integer<16>("9"sv).value_or(-1) == 0x9);
-    CHECK(crispy::to_integer<16>("18"sv).value_or(-1) == 0x18);
-    CHECK(crispy::to_integer<16>("321"sv).value_or(-1) == 0x321);
-    CHECK(crispy::to_integer<16>("12345"sv).value_or(-1) == 0x12345);
+    CHECK(crispy::toInteger<16>("0"sv).value_or(-1) == 0x0);
+    CHECK(crispy::toInteger<16>("9"sv).value_or(-1) == 0x9);
+    CHECK(crispy::toInteger<16>("18"sv).value_or(-1) == 0x18);
+    CHECK(crispy::toInteger<16>("321"sv).value_or(-1) == 0x321);
+    CHECK(crispy::toInteger<16>("12345"sv).value_or(-1) == 0x12345);
 }
 
 TEST_CASE("fromHexString")
@@ -216,7 +216,7 @@ TEST_CASE("unescapeURL")
     CHECK(crispy::unescapeURL("%gg"sv) == "%gg"); // invalid hex
 }
 
-TEST_CASE("for_each_key_value")
+TEST_CASE("forEachKeyValue")
 {
     auto result = std::map<std::string_view, std::string_view> {};
     auto collect = [&](std::string_view key, std::string_view value) {
@@ -224,36 +224,36 @@ TEST_CASE("for_each_key_value")
     };
 
     // empty input
-    crispy::for_each_key_value({ .text = "", .entryDelimiter = ';', .assignmentDelimiter = '=' }, collect);
+    crispy::forEachKeyValue({ .text = "", .entryDelimiter = ';', .assignmentDelimiter = '=' }, collect);
     CHECK(result.empty());
 
     // single element
     result.clear();
-    crispy::for_each_key_value({ .text = "foo=bar", .entryDelimiter = ';', .assignmentDelimiter = '=' },
-                               collect);
+    crispy::forEachKeyValue({ .text = "foo=bar", .entryDelimiter = ';', .assignmentDelimiter = '=' },
+                            collect);
     CHECK(result.size() == 1);
     CHECK(result["foo"] == "bar");
 
     // two elements
     result.clear();
-    crispy::for_each_key_value({ .text = "a=b;c=d", .entryDelimiter = ';', .assignmentDelimiter = '=' },
-                               collect);
+    crispy::forEachKeyValue({ .text = "a=b;c=d", .entryDelimiter = ';', .assignmentDelimiter = '=' },
+                            collect);
     CHECK(result.size() == 2);
     CHECK(result["a"] == "b");
     CHECK(result["c"] == "d");
 
     // empty element
     result.clear();
-    crispy::for_each_key_value({ .text = "a=b;;c=d", .entryDelimiter = ';', .assignmentDelimiter = '=' },
-                               collect);
+    crispy::forEachKeyValue({ .text = "a=b;;c=d", .entryDelimiter = ';', .assignmentDelimiter = '=' },
+                            collect);
     CHECK(result.size() == 2);
     CHECK(result["a"] == "b");
     CHECK(result["c"] == "d");
 
     // No delimiter
     result.clear();
-    crispy::for_each_key_value({ .text = "key_only", .entryDelimiter = ';', .assignmentDelimiter = '=' },
-                               collect);
+    crispy::forEachKeyValue({ .text = "key_only", .entryDelimiter = ';', .assignmentDelimiter = '=' },
+                            collect);
     CHECK(result.size() == 1);
     CHECK(result["key_only"].empty());
 }

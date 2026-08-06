@@ -63,7 +63,7 @@ class BasicRing
 
     [[nodiscard]] Vector& storage() noexcept { return _storage; }
     [[nodiscard]] Vector const& storage() const noexcept { return _storage; }
-    [[nodiscard]] std::size_t zero_index() const noexcept { return _zero; }
+    [[nodiscard]] std::size_t zeroIndex() const noexcept { return _zero; }
 
     void rezero(iterator i);
     void rezero();
@@ -73,8 +73,8 @@ class BasicRing
     // positvie count rotates right, negative count rotates left
     void rotate(int count) noexcept { _zero = size_t(OffsetType(_zero + size()) - count) % size(); }
 
-    void rotate_left(std::size_t count) noexcept { _zero = (_zero + size() + count) % size(); }
-    void rotate_right(std::size_t count) noexcept { _zero = (_zero + size() - count) % size(); }
+    void rotateLeft(std::size_t count) noexcept { _zero = (_zero + size() + count) % size(); }
+    void rotateRight(std::size_t count) noexcept { _zero = (_zero + size() - count) % size(); }
     void unrotate() { _zero = 0; }
 
     [[nodiscard]] value_type& front() noexcept { return at(0); }
@@ -173,16 +173,20 @@ class Ring: public BasicRing<T, Container<T, Allocator>>
         this->_storage.clear();
         this->_zero = 0;
     }
+    // NOLINTNEXTLINE(readability-identifier-naming): container interface.
     void push_back(T const& value) { this->_storage.push_back(value); }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): container interface.
     void push_back(T&& value) { this->emplace_back(std::move(value)); }
 
     template <typename... Args>
+    // NOLINTNEXTLINE(readability-identifier-naming): container interface.
     void emplace_back(Args&&... args)
     {
         this->_storage.emplace_back(std::forward<Args>(args)...);
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): container interface.
     void pop_front() { this->_storage.erase(this->_storage.begin()); }
 };
 

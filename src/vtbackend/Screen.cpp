@@ -163,7 +163,7 @@ namespace // {{{ helper
     {
         if (!value)
             return std::nullopt;
-        return crispy::to_integer<10, int>(string_view(*value));
+        return crispy::toInteger<10, int>(string_view(*value));
     }
 
     optional<ImageAlignment> toImageAlignmentPolicy(string const* value, ImageAlignment defaultValue)
@@ -2838,7 +2838,7 @@ void Screen::renderImage(shared_ptr<Image const> image,
         for (auto const lineOffset: crispy::times(*remainingLineCount))
         {
             linefeed(topLeft.column);
-            for (auto const columnOffset: crispy::views::iota_as<ColumnOffset>(*columnsToBeRendered))
+            for (auto const columnOffset: crispy::views::iotaAs<ColumnOffset>(*columnsToBeRendered))
             {
                 auto const fragOffset =
                     CellLocation { .line = boxed_cast<LineOffset>(linesToBeRendered) + lineOffset,
@@ -3197,7 +3197,7 @@ void Screen::inspect(std::string const& message, std::ostream& os) const
                            grid.maxHistoryLineCount(),
                            grid.pageSize().lines,
                            grid.linesUsed(),
-                           grid.zero_index());
+                           grid.zeroIndex());
     };
 
     if (!message.empty())
@@ -3938,7 +3938,7 @@ namespace impl
                 crispy::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
                     if (!pending.has_value())
                     {
-                        auto const index = crispy::to_integer<10, unsigned>(value);
+                        auto const index = crispy::toInteger<10, unsigned>(value);
                         if (!index.has_value())
                             return false;
 
@@ -3995,7 +3995,7 @@ namespace impl
 
             auto const ok =
                 crispy::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
-                    auto const index = crispy::to_integer<10, unsigned>(value);
+                    auto const index = crispy::toInteger<10, unsigned>(value);
                     if (!index.has_value())
                         return false;
 
@@ -6023,7 +6023,7 @@ void Screen::processShellIntegration(Sequence const& seq)
         return;
 
     auto const forEachKeyValue = []<typename Callback>(std::string_view text, Callback&& callback) {
-        crispy::for_each_key_value(
+        crispy::forEachKeyValue(
             crispy::ForEachKeyValueParams {
                 .text = text,
                 .entryDelimiter = ';',
@@ -6094,9 +6094,8 @@ void Screen::processShellIntegration(Sequence const& seq)
             head.setFlag(LineFlag::CommandEnd, true);
             head.setCommandEndOffset(_grid.logicalColumnOf(cursorPosition));
 
-            auto const exitCode = (cmd.size() > 2 && cmd[1] == ';')
-                                      ? crispy::to_integer<10, int>(cmd.substr(2)).value_or(0)
-                                      : 0;
+            auto const exitCode =
+                (cmd.size() > 2 && cmd[1] == ';') ? crispy::toInteger<10, int>(cmd.substr(2)).value_or(0) : 0;
             _terminal->shellIntegration().commandFinished(exitCode);
             _terminal->semanticBlockTracker().commandFinished(exitCode);
             break;

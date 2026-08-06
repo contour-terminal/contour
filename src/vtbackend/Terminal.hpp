@@ -1722,7 +1722,7 @@ class Terminal
     }
 
     /// Returns the buffer currently being parsed by parseFragment().
-    /// This is used to ensure buffer_fragment holds the correct buffer reference
+    /// This is used to ensure BufferFragment holds the correct buffer reference
     /// when creating TrivialLineBuffer entries during parsing.
     [[nodiscard]] crispy::BufferObjectPtr<char> parsingBuffer() const noexcept
     {

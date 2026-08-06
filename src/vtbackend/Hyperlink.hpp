@@ -80,7 +80,7 @@ struct HyperlinkStorage
     std::shared_ptr<HyperlinkInfo> hyperlinkById(HyperlinkId id) noexcept
     {
         if (!!id)
-            if (auto* href = cache.try_get(id))
+            if (auto* href = cache.tryGet(id))
                 return *href;
         return {};
     }
@@ -88,7 +88,7 @@ struct HyperlinkStorage
     [[nodiscard]] std::shared_ptr<HyperlinkInfo const> hyperlinkById(HyperlinkId id) const noexcept
     {
         if (!!id)
-            if (auto* href = cache.try_get(id))
+            if (auto* href = cache.tryGet(id))
                 return *href;
         return {};
     }

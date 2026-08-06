@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Unit tests for expandTabLabel — the pure tab-label template expander. These are dependency-free
-// (no Qt, no app types): expandTabLabel only parses a template via crispy::parse_interpolated_string
+// (no Qt, no app types): expandTabLabel only parses a template via crispy::parseInterpolatedString
 // and substitutes from a TabLabelContext, so it is tested here in isolation from the QAbstractListModel
 // integration covered in TabListModel_test.
 
@@ -60,7 +60,7 @@ TEST_CASE("expandTabLabel: placeholder flags/attributes are accepted but ignored
 
 TEST_CASE("expandTabLabel: an unterminated brace is echoed verbatim", "[contour][tablabel]")
 {
-    // crispy::parse_interpolated_string treats text after an unmatched '{' as one placeholder, but it
+    // crispy::parseInterpolatedString treats text after an unmatched '{' as one placeholder, but it
     // keeps the leading '{' in the parsed name (unlike a properly closed "{Name}"). So "{WindowTitle"
     // parses to a placeholder literally named "{WindowTitle", which matches nothing and is echoed verbatim
     // (its `whole` slice runs to end-of-input), so the unterminated text survives instead of vanishing.

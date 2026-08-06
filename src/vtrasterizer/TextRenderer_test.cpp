@@ -332,7 +332,7 @@ TEST_CASE("TextRenderer", "[renderer]")
     // Pre-load font to get valid key
     auto const regularFontDesc = FontDescription::parse("regular");
     auto const regularFontSize = FontSize { 9.0 }; // Matches BDF SIZE 9 96 96
-    auto const regularFontKey = textShaper.load_font(regularFontDesc, regularFontSize);
+    auto const regularFontKey = textShaper.loadFont(regularFontDesc, regularFontSize);
     REQUIRE(regularFontKey.has_value());
 
     // We need to initialize metrics for the font.
@@ -1075,7 +1075,7 @@ TEST_CASE("Renderer.reconfig.font_load_failure_keeps_previous_font", "[renderer]
     auto const descriptionsBefore = vtrasterizer::RendererTest::liveFontDescriptions(renderer);
 
     // Make every subsequent font load fail: with an empty registry the mock locator returns no source,
-    // so load_font() yields nullopt and loadFontKeys() throws (the regular font cannot be loaded).
+    // so loadFont() yields nullopt and loadFontKeys() throws (the regular font cannot be loaded).
     text::MockFontLocator::configure({});
 
     auto failing = fixture.fontDescriptions;
@@ -1431,7 +1431,7 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
     auto locator = MockFontLocator {};
     auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
 
-    auto const fontKey = textShaper.load_font(description, text::test::BDFFont::Size);
+    auto const fontKey = textShaper.loadFont(description, text::test::BDFFont::Size);
     REQUIRE(fontKey.has_value());
 
     auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
@@ -1528,7 +1528,7 @@ TEST_CASE("TextRenderer.a_scaled_block_draws_one_cell_sized_tile_per_band", "[re
     auto locator = MockFontLocator {};
     auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
 
-    auto const fontKey = textShaper.load_font(description, text::test::BDFFont::Size);
+    auto const fontKey = textShaper.loadFont(description, text::test::BDFFont::Size);
     REQUIRE(fontKey.has_value());
 
     // `baseline` is the DESCENT -- Renderer computes it as lineHeight - ascender -- so it is a few

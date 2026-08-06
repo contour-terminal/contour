@@ -21,7 +21,7 @@ struct TabLabelContext
 /// Expands a tab-label template into the string shown on a GUI tab.
 ///
 /// The template is a sequence of literal text and `{Name}` placeholders, parsed with
-/// crispy::parse_interpolated_string (the same syntax the status line uses). Literal text passes
+/// crispy::parseInterpolatedString (the same syntax the status line uses). Literal text passes
 /// through unchanged. Recognized placeholders (case-sensitive) are substituted from @p ctx:
 ///   - `{WindowTitle}` → @p ctx.windowTitle
 ///   - `{TabPosition}` → @p ctx.position (1-based)

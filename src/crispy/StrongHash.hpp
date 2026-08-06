@@ -200,14 +200,14 @@ inline StrongHash StrongHash::compute(void const* data, size_t n) noexcept
 #endif
 }
 
-inline std::string to_string(StrongHash const& hash)
+inline std::string toString(StrongHash const& hash)
 {
     uint32_t u32[4];
     std::memcpy(u32, &hash, sizeof(hash));
     return std::format("{:04X}{:04X}{:04X}{:04X}", u32[0], u32[1], u32[2], u32[3]);
 }
 
-inline std::string to_structured_string(StrongHash const& hash)
+inline std::string toStructuredString(StrongHash const& hash)
 {
     uint32_t u32[4];
     std::memcpy(u32, &hash, sizeof(hash));
@@ -223,7 +223,7 @@ inline std::string to_structured_string(StrongHash const& hash)
     return s;
 }
 
-inline int to_integer(StrongHash hash) noexcept
+inline int toInteger(StrongHash hash) noexcept
 {
 #ifdef STRONGHASH_USE_INTRINSICS
     return Intrinsics::castToInt32(hash.value);
@@ -310,6 +310,6 @@ struct std::formatter<crispy::StrongHash>
     template <typename FormatContext>
     auto format(crispy::StrongHash const& hash, FormatContext& ctx) const
     {
-        return std::format_to(ctx.out(), "{}", to_structured_string(hash));
+        return std::format_to(ctx.out(), "{}", toStructuredString(hash));
     }
 };
