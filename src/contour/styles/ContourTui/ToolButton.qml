@@ -17,8 +17,13 @@ T.ToolButton {
 
     implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset,
                             implicitContentWidth + leftPadding + rightPadding)
-    implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
-                             implicitContentHeight + topPadding + bottomPadding)
+    // Height is the background's alone, NOT the usual max() against the content. The background is
+    // chromeStyle.controlHeight -- a whole number of character cells, which is the one thing this
+    // style guarantees. A cell is ceil(lineSpacing()), so on a font whose line spacing is not an
+    // integral number of pixels the text's own implicit height is the larger of the two, and a max()
+    // would let it push the control a fraction of a cell taller and off the grid. The content is
+    // clipped to the cell instead, which is what a terminal does with an oversized glyph anyway.
+    implicitHeight: implicitBackgroundHeight + topInset + bottomInset
 
     // No padding at all, unlike Button.qml. A ToolButton in this chrome is a glyph box whose width
     // the caller pins from the token table -- one cell for a tab's close affordance, wider for the
@@ -38,6 +43,12 @@ T.ToolButton {
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
+        // Pinned to the cell grid rather than left at the Text's own natural line height. A cell is
+        // ceil(lineSpacing()), so on a font whose line spacing is not a whole number of pixels the
+        // raw content is the taller of the two -- and the control's implicitHeight is a Math.max, so
+        // the content would win and make the button a fraction of a cell taller than a cell. That is
+        // exactly the invariant this style exists to hold, so the text is told the cell height.
+        height: chromeStyle.cellHeight
     }
 
     background: Rectangle {
