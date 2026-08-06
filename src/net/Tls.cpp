@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <net/Tls.hpp>
 
-#include <crispy/Utils.hpp>
-
 #include <algorithm>
 #include <array>
 #include <coroutine>
@@ -14,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include <net/detail/ScopeGuard.hpp>
 #include <openssl/bio.h>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
@@ -229,7 +228,7 @@ namespace
 
             _handshaking = true;
             auto outcome = std::expected<void, NetError> {};
-            auto const openGate = crispy::Finally([this]() noexcept { openHandshakeGate(); });
+            auto const openGate = detail::ScopeGuard { [this]() noexcept { openHandshakeGate(); } };
             while (true)
             {
                 auto const result = SSL_do_handshake(_ssl);

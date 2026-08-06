@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/SuppressWindowsDialogs.hpp>
+#include <coro/testing/SuppressWindowsDialogs.hpp>
 
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>
@@ -7,7 +7,7 @@
 
 int main(int argc, char const* argv[])
 {
-    crispy::suppressWindowsDialogs();
+    coro::testing::suppressWindowsDialogs();
 
     int const result = Catch::Session().run(argc, argv);
     return result;

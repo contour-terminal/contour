@@ -1,12 +1,23 @@
 set(net_SOURCES
     AsyncBufferedReader.cpp
     AsyncBufferedReader.hpp
+    DefaultEventSource.cpp
+    DefaultEventSource.hpp
+    Diagnostics.cpp
+    Diagnostics.hpp
+    EpollEventSource.cpp
+    EpollEventSource.hpp
     EventLoop.cpp
     EventLoop.hpp
     EventSource.hpp
+    HttpServer.cpp
+    HttpServer.hpp
     IListener.hpp
     ISocket.hpp
     IoResult.hpp
+    KqueueEventSource.cpp
+    KqueueEventSource.hpp
+    detail/ScopeGuard.hpp
     WriteQueue.cpp
     WriteQueue.hpp
     PollEventSource.cpp
@@ -55,7 +66,7 @@ add_library(net STATIC ${net_SOURCES})
 # OpenSSL backs the TLS ISocket decorator (net/Tls.*). It stays behind the
 # ITlsContext DI seam, so it is PRIVATE: no OpenSSL type crosses net's headers.
 find_package(OpenSSL REQUIRED)
-target_link_libraries(net PUBLIC coro crispy::core)
+target_link_libraries(net PUBLIC coro)
 target_link_libraries(net PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 if(WIN32)
     target_link_libraries(net PUBLIC ws2_32)
@@ -72,6 +83,8 @@ if(NET_TESTING)
         test_main.cpp
         AsyncBufferedReader_test.cpp
         EventLoop_test.cpp
+        EventSourceParity_test.cpp
+        HttpServer_test.cpp
         Socket_test.cpp
         Tls_test.cpp
         WriteQueue_test.cpp
@@ -80,7 +93,7 @@ if(NET_TESTING)
         list(APPEND net_TEST_SOURCES FdPassing_test.cpp UnixSocket_test.cpp)
     endif()
     add_executable(net_test ${net_TEST_SOURCES})
-    target_link_libraries(net_test net crispy::core Catch2::Catch2)
+    target_link_libraries(net_test net Catch2::Catch2)
     add_test(NAME net_test COMMAND $<TARGET_FILE:net_test>)
     set_tests_properties(net_test PROPERTIES LABELS daemon)
 
