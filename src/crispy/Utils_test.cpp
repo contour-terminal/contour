@@ -110,6 +110,53 @@ TEST_CASE("utils.toInteger.16")
     CHECK(crispy::toInteger<16>("12345"sv).value_or(-1) == 0x12345);
 }
 
+TEST_CASE("utils.toInteger.8")
+{
+    CHECK(crispy::toInteger<8>("0"sv).value_or(-1) == 0);
+    CHECK(crispy::toInteger<8>("7"sv).value_or(-1) == 07);
+    CHECK(crispy::toInteger<8>("644"sv).value_or(-1) == 0644);
+
+    // 8 and 9 are not octal digits.
+    CHECK(!crispy::toInteger<8>("8"sv).has_value());
+    CHECK(!crispy::toInteger<8>("19"sv).has_value());
+}
+
+// Most of what reaches toInteger() is escape-sequence text written by the connected program, which
+// bounds neither its length nor its magnitude. Accumulating it unchecked overflowed: for the signed
+// instantiations that is undefined behaviour, and for the unsigned ones it silently wrapped to a
+// number the sender never wrote.
+TEST_CASE("utils.toInteger.overflow")
+{
+    SECTION("a value too large for the result type is rejected, not wrapped")
+    {
+        CHECK(!crispy::toInteger<10, uint8_t>("256"sv).has_value());
+        CHECK(!crispy::toInteger<10, uint8_t>("999"sv).has_value());
+        CHECK(!crispy::toInteger<10, int>("2147483648"sv).has_value());
+        CHECK(!crispy::toInteger<10, unsigned>("4294967296"sv).has_value());
+        CHECK(!crispy::toInteger<16, uint32_t>("100000000"sv).has_value());
+    }
+
+    SECTION("the largest representable value still parses")
+    {
+        CHECK(crispy::toInteger<10, uint8_t>("255"sv) == 255);
+        CHECK(crispy::toInteger<10, int>("2147483647"sv) == 2147483647);
+        CHECK(crispy::toInteger<10, unsigned>("4294967295"sv) == 4294967295U);
+        CHECK(crispy::toInteger<16, uint32_t>("ffffffff"sv) == 0xFFFFFFFFU);
+    }
+
+    SECTION("an arbitrarily long digit run terminates without undefined behaviour")
+    {
+        // The OSC 133;D payload that made the shell-integration exit code overflow a signed int.
+        CHECK(!crispy::toInteger<10, int>("99999999999"sv).has_value());
+        CHECK(!crispy::toInteger<10, uint64_t>(std::string(64, '9')).has_value());
+    }
+
+    SECTION("leading zeroes do not count towards the range")
+    {
+        CHECK(crispy::toInteger<10, uint8_t>("00000000000000255"sv) == 255);
+    }
+}
+
 TEST_CASE("fromHexString")
 {
     CHECK(!crispy::fromHexString("abc"sv));

@@ -4,10 +4,12 @@
 #include <crispy/Escape.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -88,6 +90,7 @@ namespace views
     template <typename Range>
     struct EnumerateViewSentinel
     {
+        // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
         using sentinel = std::ranges::sentinel_t<Range>;
         sentinel end;
 
@@ -103,12 +106,15 @@ namespace views
     {
         Range range;
 
-        struct iterator // NOLINT(readability-identifier-naming)
+        // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
+        struct iterator
         {
             using RangeIterator = std::ranges::iterator_t<Range>;
             using RangeReference = std::ranges::range_reference_t<Range>;
+            // NOLINTBEGIN(readability-identifier-naming): standard iterator/container trait spelling.
             using difference_type = std::ptrdiff_t;
             using value_type = std::pair<size_t, std::ranges::range_value_t<Range>>;
+            // NOLINTEND(readability-identifier-naming)
 
             size_t index;
             RangeIterator current;
@@ -161,38 +167,6 @@ template <typename T>
 constexpr bool ascending(T low, T val, T high) noexcept
 {
     return low <= val && val <= high;
-}
-
-constexpr unsigned long strntoul(char const* data, size_t count, char const** eptr, unsigned base = 10)
-{
-    constexpr auto Values = std::string_view { "0123456789ABCDEF" };
-    constexpr auto LowerLetters = std::string_view { "abcdef" };
-
-    unsigned long result = 0;
-    while (count != 0)
-    {
-        if (auto const i = Values.find(*data); i != std::string_view::npos && i < base)
-        {
-            result *= base;
-            result += static_cast<unsigned long>(i);
-            ++data;
-            --count;
-        }
-        else if (auto const i = LowerLetters.find(*data); i != std::string_view::npos && base == 16)
-        {
-            result *= base;
-            result += static_cast<unsigned long>(i);
-            ++data;
-            --count;
-        }
-        else
-            return 0;
-    }
-
-    if (eptr != nullptr)
-        *eptr = data;
-
-    return result;
 }
 
 /// Joins a range's elements into one human-readable, separator-delimited string.
@@ -342,8 +316,45 @@ bool endsWith(std::basic_string_view<Ch> text, std::basic_string_view<Ch> prefix
     return true;
 }
 
+/// Maps a character to its value as a digit in the given base.
+///
+/// @param ch   The character to interpret.
+/// @tparam Base The numeric base; digits at or above it are rejected. A template parameter rather
+///              than an argument because every caller knows it at compile time, and it is what
+///              lets the range test fold away instead of being re-decided per character.
+/// @return The digit's value, or std::nullopt if @p ch is not a digit in @p Base.
+template <std::size_t Base = 16, typename C>
+[[nodiscard]] constexpr std::optional<unsigned> digitValue(C ch) noexcept
+{
+    auto value = std::numeric_limits<unsigned>::max();
+    if ('0' <= ch && ch <= '9')
+        value = static_cast<unsigned>(ch - '0');
+    else if ('a' <= ch && ch <= 'f')
+        value = static_cast<unsigned>(ch - 'a') + 10;
+    else if ('A' <= ch && ch <= 'F')
+        value = static_cast<unsigned>(ch - 'A') + 10;
+
+    // One test covers both "not a digit at all" and "not a digit in this base", and with Base a
+    // constant it folds to a single compare.
+    if (value < Base)
+        return value;
+    return std::nullopt;
+}
+
+/// Parses @p text as an unsigned numeric literal in the given base.
+///
+/// Rejects -- rather than wraps or overflows -- any input whose value does not fit in @p T. Much
+/// of the input reaching this function is escape-sequence text from the connected program, which
+/// is neither length- nor range-bounded; without the check, the signed instantiations are plain
+/// undefined behaviour on a long enough digit run.
+///
+/// @tparam Base The numeric base: 2, 8, 10 or 16.
+/// @tparam T    The result type.
+/// @param text  The digits to parse. No sign, whitespace or base prefix is accepted.
+/// @return The parsed value, or std::nullopt if @p text is empty, holds a non-digit, or names a
+///         value too large for @p T.
 template <std::size_t Base = 10, typename T = unsigned, typename C>
-constexpr std::optional<T> toInteger(std::basic_string_view<C> text) noexcept
+[[nodiscard]] constexpr std::optional<T> toInteger(std::basic_string_view<C> text) noexcept
 {
     static_assert(Base == 2 || Base == 8 || Base == 10 || Base == 16, "Only base-2/8/10/16 supported.");
     static_assert(std::is_integral_v<T>, "T must be an integral type.");
@@ -352,45 +363,28 @@ constexpr std::optional<T> toInteger(std::basic_string_view<C> text) noexcept
     if (text.empty())
         return std::nullopt;
 
-    auto value = T { 0 };
+    // Accumulating in the widest unsigned type keeps every intermediate defined regardless of T,
+    // so the range check below is a comparison rather than an overflow that already happened.
+    // `value * Base + digit <= Limit` is tested as `value < Limit/Base`, or equality on the quotient
+    // with the digit against the remainder; both divisions are by constants and fold at compile time.
+    auto constexpr Limit = static_cast<std::uintmax_t>(std::numeric_limits<T>::max());
+    auto constexpr LimitDiv = Limit / Base;
+    auto constexpr LimitMod = Limit % Base;
+    auto value = std::uintmax_t { 0 };
 
     for (auto const ch: text)
     {
-        value = static_cast<T>(value * static_cast<T>(Base));
-        switch (Base)
-        {
-            case 2:
-                if ('0' <= ch && ch <= '1')
-                    value = T(value + T(ch - '0'));
-                else
-                    return std::nullopt;
-                break;
-            case 8:
-                if ('0' <= ch && ch <= '7')
-                    value = T(value + T(ch - '0'));
-                else
-                    return std::nullopt;
-                break;
-            case 10:
-                if ('0' <= ch && ch <= '9')
-                    value = T(value + T(ch - '0'));
-                else
-                    return std::nullopt;
-                break;
-            case 16:
-                if ('0' <= ch && ch <= '9')
-                    value = T(value + T(ch - '0'));
-                else if ('a' <= ch && ch <= 'f')
-                    value = T(value + T(10 + ch - 'a'));
-                else if (ch >= 'A' && ch <= 'F')
-                    value = T(value + T(10 + ch - 'A'));
-                else
-                    return std::nullopt;
-                break;
-        }
+        auto const digit = digitValue<Base>(ch);
+        if (!digit.has_value())
+            return std::nullopt;
+
+        if (value > LimitDiv || (value == LimitDiv && digit.value() > LimitMod))
+            return std::nullopt;
+
+        value = (value * Base) + digit.value();
     }
 
-    return value;
+    return static_cast<T>(value);
 }
 
 template <std::size_t Base = 10, typename T = unsigned, typename C>
@@ -446,17 +440,6 @@ auto locked(L& lockable, F const& f)
     return f();
 }
 
-inline std::optional<unsigned> fromHexDigit(char value)
-{
-    if ('0' <= value && value <= '9')
-        return value - '0';
-    if ('a' <= value && value <= 'f')
-        return 10 + value - 'a';
-    if ('A' <= value && value <= 'F')
-        return 10 + value - 'A';
-    return std::nullopt;
-}
-
 inline std::string unescapeURL(std::string_view input)
 {
     std::string result;
@@ -465,8 +448,8 @@ inline std::string unescapeURL(std::string_view input)
     {
         if (input[i] == '%' && i + 2 < input.size())
         {
-            auto const h1 = crispy::fromHexDigit(input[i + 1]);
-            auto const h2 = crispy::fromHexDigit(input[i + 2]);
+            auto const h1 = crispy::digitValue<16>(input[i + 1]);
+            auto const h2 = crispy::digitValue<16>(input[i + 2]);
             if (h1.has_value() && h2.has_value())
             {
                 result.push_back(static_cast<char>((h1.value() << 4) | h2.value()));
@@ -525,8 +508,8 @@ std::optional<std::basic_string<T>> fromHexString(std::basic_string_view<T> hexS
     size_t k = output.size();
     while (i != e)
     {
-        auto const c1 = fromHexDigit(*i++);
-        auto const c2 = fromHexDigit(*i++);
+        auto const c1 = digitValue<16>(*i++);
+        auto const c2 = digitValue<16>(*i++);
         if (!c1 || !c2)
             return std::nullopt;
         auto const value = (T) (c2.value() << 4 | c1.value());
@@ -593,7 +576,7 @@ inline std::string readFileAsString(std::filesystem::path const& path)
 /// Any type is supported that can be iterated,
 /// and has a specialization for std::numeric_limits<T>.
 template <typename T>
-constexpr auto each_element() noexcept
+constexpr auto eachElement() noexcept
 {
     struct Container
     {
@@ -737,7 +720,7 @@ inline std::string humanReadableBytes(uint64_t bytes)
 }
 
 template <typename... Ts>
-constexpr void ignore_unused(Ts const&... /*values*/) noexcept
+constexpr void ignoreUnused(Ts const&... /*values*/) noexcept
 {
 }
 
