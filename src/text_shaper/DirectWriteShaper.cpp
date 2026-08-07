@@ -526,17 +526,33 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
     ComPtr<IDWriteGlyphRunAnalysis> glyphAnalysis;
     RasterizedGlyph output {};
 
-    _d->factory->CreateGlyphRunAnalysis(&glyphRun,
-                                        _d->pixelPerDip(),
-                                        nullptr,
-                                        renderingMode,
-                                        DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
-                                        0.0f,
-                                        0.0f,
-                                        &glyphAnalysis);
+    // Checked for the same reason the CreateAlphaTexture()/GetGlyphPlacements() results are, but this
+    // one is worse than a bad bitmap: on failure glyphAnalysis stays NULL and the
+    // GetAlphaTextureBounds() call immediately below dereferences it.
+    hr = _d->factory->CreateGlyphRunAnalysis(&glyphRun,
+                                             _d->pixelPerDip(),
+                                             nullptr,
+                                             renderingMode,
+                                             DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
+                                             0.0f,
+                                             0.0f,
+                                             &glyphAnalysis);
+    if (FAILED(hr) || !glyphAnalysis)
+    {
+        errorLog()("directwrite: CreateGlyphRunAnalysis failed for glyph {}.", glyph.index.value);
+        return nullopt;
+    }
 
+    // A zero-initialized RECT that DirectWrite leaves untouched on failure is not distinguishable
+    // from a legitimately empty glyph, and every size below is derived from it -- a failure here
+    // yields a 0x0 bitmap whose emptiness looks deliberate.
     RECT textureBounds {};
-    glyphAnalysis->GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1, &textureBounds);
+    hr = glyphAnalysis->GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1, &textureBounds);
+    if (FAILED(hr))
+    {
+        errorLog()("directwrite: GetAlphaTextureBounds failed for glyph {}.", glyph.index.value);
+        return nullopt;
+    }
 
     output.bitmapSize.width = vtbackend::Width(textureBounds.right - textureBounds.left);
     output.bitmapSize.height = vtbackend::Height(textureBounds.bottom - textureBounds.top);
@@ -545,8 +561,11 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
 
     auto const [width, height] = output.bitmapSize;
 
-    IDWriteFactory2* factory2;
-    IDWriteColorGlyphRunEnumerator* glyphRunEnumerator;
+    // ComPtr, not raw: both of these used to be leaked outright -- QueryInterface() and
+    // TranslateColorGlyphRun() each return a reference this function never released, once per glyph
+    // rasterization. Every other COM pointer here is already a ComPtr.
+    ComPtr<IDWriteFactory2> factory2;
+    ComPtr<IDWriteColorGlyphRunEnumerator> glyphRunEnumerator;
     if (SUCCEEDED(_d->factory->QueryInterface(IID_PPV_ARGS(&factory2))))
     {
         hr = factory2->TranslateColorGlyphRun(0.0f,
@@ -556,7 +575,7 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
                                               DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
                                               nullptr,
                                               0,
-                                              &glyphRunEnumerator);
+                                              glyphRunEnumerator.GetAddressOf());
 
         if (hr == DWRITE_E_NOCOLOR)
         {
@@ -582,8 +601,17 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
             _d->fontsHasColor.at(glyph.font) = true;
             while (true)
             {
-                BOOL haveRun;
-                glyphRunEnumerator->MoveNext(&haveRun);
+                // haveRun is an out-parameter DirectWrite leaves UNTOUCHED on failure, so a
+                // discarded HRESULT here branches the loop on an indeterminate value -- reading
+                // uninitialized memory to decide whether another layer exists.
+                BOOL haveRun = FALSE;
+                hr = glyphRunEnumerator->MoveNext(&haveRun);
+                if (FAILED(hr))
+                {
+                    errorLog()("directwrite: MoveNext failed while enumerating color runs for glyph {}.",
+                               glyph.index.value);
+                    break;
+                }
                 if (!haveRun)
                     break;
 
@@ -596,14 +624,22 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
 
                 ComPtr<IDWriteGlyphRunAnalysis> colorGlyphsAnalysis;
 
-                _d->factory->CreateGlyphRunAnalysis(&colorRun->glyphRun,
-                                                    _d->pixelPerDip(),
-                                                    nullptr,
-                                                    renderingMode,
-                                                    DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
-                                                    0.0f,
-                                                    0.0f,
-                                                    &colorGlyphsAnalysis);
+                // Same null-dereference shape as the monochrome path above: on failure
+                // colorGlyphsAnalysis stays NULL and renderGlyphRunToBitmap() would call through it.
+                hr = _d->factory->CreateGlyphRunAnalysis(&colorRun->glyphRun,
+                                                         _d->pixelPerDip(),
+                                                         nullptr,
+                                                         renderingMode,
+                                                         DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
+                                                         0.0f,
+                                                         0.0f,
+                                                         &colorGlyphsAnalysis);
+                if (FAILED(hr) || !colorGlyphsAnalysis)
+                {
+                    errorLog()("directwrite: CreateGlyphRunAnalysis failed for a color run of glyph {}.",
+                               glyph.index.value);
+                    return nullopt;
+                }
 
                 auto t = output.bitmap.begin();
                 auto const color = colorRun->paletteIndex == 0xFFFF ? DWRITE_COLOR_F {} : colorRun->runColor;
