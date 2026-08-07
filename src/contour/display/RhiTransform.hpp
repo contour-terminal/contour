@@ -3,6 +3,9 @@
 
 #include <QtCore/QSize>
 #include <QtGui/QMatrix4x4>
+#include <QtGui/QVector3D>
+
+#include <cmath>
 
 namespace contour::display
 {
@@ -64,6 +67,40 @@ namespace contour::display
     if (dpr > 0.0f)
         deviceToLogical.scale(1.0f / dpr, 1.0f / dpr);
     return projection * nodeMatrix * deviceToLogical;
+}
+
+/// Measures how far a composed item→clip transform is from mapping one rasterizer device pixel onto
+/// exactly one hardware pixel.
+///
+/// The invariant the Nearest-sampled glyph atlas needs is that a quad spans exactly as many device
+/// pixels as its tile has texels. composeItemToClip() is built to satisfy that, but it does so from
+/// three inputs and only owns one of them: @p projection and the node matrix come from the scene
+/// graph. A correct `dpr` composed against a projection built for a DIFFERENT render-target size --
+/// the mid-resize case, where the two can describe different moments -- still yields a scaled quad.
+/// Measuring the composed result therefore catches the failure whatever produced it, where checking
+/// `dpr` alone would not.
+///
+/// Only the SCALE is measured. A fractional translation is harmless here: the quad still spans as
+/// many device pixels as the tile has texels, so the sample points still step one texel per pixel.
+///
+/// @param itemToClip      The composed transform, as fed to the vertex shader.
+/// @param targetPixelWidth The render target's width in DEVICE pixels.
+/// @return The ratio of actual to ideal device-pixel scale; 1.0 exactly when the mapping is 1:1.
+///         Returns 1.0 for a degenerate target width, having nothing to compare against.
+[[nodiscard]] inline float devicePixelScaleError(QMatrix4x4 const& itemToClip,
+                                                 int targetPixelWidth) noexcept
+{
+    if (targetPixelWidth <= 0)
+        return 1.0f;
+
+    // One device-pixel step in the rasterizer's input space, through the composed transform.
+    auto const p0 = itemToClip.map(QVector3D(0.0f, 0.0f, 0.0f));
+    auto const p1 = itemToClip.map(QVector3D(1.0f, 0.0f, 0.0f));
+    auto const clipPerDevicePixel = std::abs(p1.x() - p0.x());
+
+    // Clip space spans [-1, 1], so one device pixel of the target is 2/width of it.
+    auto const expected = 2.0f / static_cast<float>(targetPixelWidth);
+    return expected > 0.0f ? clipPerDevicePixel / expected : 1.0f;
 }
 
 } // namespace contour::display

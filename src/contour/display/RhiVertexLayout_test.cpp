@@ -246,3 +246,94 @@ TEST_CASE("deviceToLogicalScale: the derived scale maps device pixels 1:1 into t
     CHECK(wrong.map(QVector3D(DeviceW, DeviceH, 0.0f)).x() != Catch::Approx(1.0f).margin(1e-3));
 }
 // }}}
+
+// {{{ devicePixelScaleError — the #2040 geometry probe's detector.
+//
+// Builds the same matrices the scene graph feeds TerminalRenderNode::prepare() so the detector is
+// exercised against realistic inputs rather than hand-made ones. A projection for a target of W
+// device pixels at scale `dpr` is what Qt hands the node.
+
+namespace
+{
+/// An orthographic projection over a logical-pixel viewport, as the scene graph builds it.
+QMatrix4x4 sceneProjection(float logicalWidth, float logicalHeight)
+{
+    auto m = QMatrix4x4 {};
+    m.ortho(0.0f, logicalWidth, logicalHeight, 0.0f, -1.0f, 1.0f);
+    return m;
+}
+} // namespace
+
+TEST_CASE("rhitransform: a matched frame maps one device pixel to one hardware pixel", "[rhi][geometry]")
+{
+    // Target 1000 device px over a 1000 logical-px window: dpr 1, the steady state on a
+    // non-scaled display.
+    auto const projection = sceneProjection(1000.0f, 600.0f);
+    auto const dpr = deviceToLogicalScale(QSize(1000, 600), QSizeF(1000.0, 600.0));
+    auto const itemToClip = composeItemToClip(projection, QMatrix4x4 {}, dpr);
+
+    CHECK(devicePixelScaleError(itemToClip, 1000) == Catch::Approx(1.0f).epsilon(0.0001f));
+}
+
+TEST_CASE("rhitransform: a matched frame at DPR 2 is still 1:1", "[rhi][geometry]")
+{
+    // 2000 device px over a 1000 logical-px window. The projection is built in LOGICAL space, so it
+    // spans 1000; the 1/dpr pre-scale is what brings the device-pixel vertices back onto it.
+    auto const projection = sceneProjection(1000.0f, 600.0f);
+    auto const dpr = deviceToLogicalScale(QSize(2000, 1200), QSizeF(1000.0, 600.0));
+    CHECK(dpr == Catch::Approx(2.0f));
+
+    auto const itemToClip = composeItemToClip(projection, QMatrix4x4 {}, dpr);
+    CHECK(devicePixelScaleError(itemToClip, 2000) == Catch::Approx(1.0f).epsilon(0.0001f));
+}
+
+TEST_CASE("rhitransform: a projection from a stale render-target size is detected", "[rhi][geometry]")
+{
+    // THE MID-RESIZE CASE. The window resized 500 -> 494 logical px. The node's dpr is derived from
+    // THIS frame (494/494 = 1), which is individually correct -- but the scene graph handed a
+    // projection still built for the previous 500-px extent. composeItemToClip() cannot see that,
+    // which is exactly why the probe measures the composed result instead of dpr.
+    auto const staleProjection = sceneProjection(500.0f, 600.0f);
+    auto const dpr = deviceToLogicalScale(QSize(494, 600), QSizeF(494.0, 600.0));
+    CHECK(dpr == Catch::Approx(1.0f)); // dpr alone looks fine
+
+    auto const itemToClip = composeItemToClip(staleProjection, QMatrix4x4 {}, dpr);
+    auto const error = devicePixelScaleError(itemToClip, 494);
+
+    // 494/500 = 0.988 -- a 1.2% shortfall. Every quad is scaled by it, and under Nearest sampling
+    // that drifts the sample points across texel boundaries.
+    CHECK(error == Catch::Approx(494.0f / 500.0f).epsilon(0.001f));
+    CHECK(std::abs(error - 1.0f) > 0.001f); // i.e. the probe reports this frame
+}
+
+TEST_CASE("rhitransform: a mismatched DPR is detected", "[rhi][geometry]")
+{
+    // The originally-reported shape: the divisor and the projection disagree by ~6%, which is what
+    // duplicates whole glyph columns rather than merely blurring them.
+    auto const projection = sceneProjection(1000.0f, 600.0f);
+    auto const itemToClip = composeItemToClip(projection, QMatrix4x4 {}, 1.06f);
+
+    auto const error = devicePixelScaleError(itemToClip, 1000);
+    CHECK(error == Catch::Approx(1.0f / 1.06f).epsilon(0.001f));
+    CHECK(std::abs(error - 1.0f) > 0.001f);
+}
+
+TEST_CASE("rhitransform: a fractional pane origin is NOT reported", "[rhi][geometry]")
+{
+    // A translation leaves the quad spanning as many device pixels as the tile has texels, so the
+    // sample points still step one texel per pixel. This was investigated and disproven as a cause
+    // in #2040; the probe must not resurrect it as a false positive.
+    auto const projection = sceneProjection(1000.0f, 600.0f);
+    auto nodeMatrix = QMatrix4x4 {};
+    nodeMatrix.translate(4.5f, 7.5f);
+
+    auto const itemToClip = composeItemToClip(projection, nodeMatrix, 1.0f);
+    CHECK(devicePixelScaleError(itemToClip, 1000) == Catch::Approx(1.0f).epsilon(0.0001f));
+}
+
+TEST_CASE("rhitransform: a degenerate target width reports no error", "[rhi][geometry]")
+{
+    CHECK(devicePixelScaleError(QMatrix4x4 {}, 0) == Catch::Approx(1.0f));
+    CHECK(devicePixelScaleError(QMatrix4x4 {}, -8) == Catch::Approx(1.0f));
+}
+// }}}
