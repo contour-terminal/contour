@@ -264,6 +264,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @param osWindow The OS window that mirrors it.
     void bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow);
 
+    /// The installed log destination for the GUI verbs. Categories hold a reference into it, so it
+    /// must outlive every one of them -- hence a member rather than a local of the verb handler.
+    /// Separate from app::_logOutput, which is private to the base and serves the client/daemon
+    /// verbs that call installLogging() with their own option prefix.
+    std::unique_ptr<logstore::ScopedOutput> _guiLogOutput;
+
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.
     std::unique_ptr<remote::NativeController> _nativeController;
