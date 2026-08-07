@@ -244,8 +244,6 @@ TEST_CASE("readRequest reports EOF when the peer closes before a request", "[net
 
     auto const wire = std::string { "GET / HTTP/1.1\r\n" }; // no terminator, then close
     auto const limits = HttpLimits {};
-    auto reply = std::string {};
-    auto seen = std::optional<HttpRequest> {};
     auto error = std::optional<net::NetError> {};
 
     auto run = [](net::ISocket* client,
@@ -280,9 +278,9 @@ TEST_CASE("writeResponse serializes status, framing headers and body", "[net][ht
     loop.blockOn(exchange(pair->first.get(), pair->second.get(), &wire, &reply, &limits, &seen, &error));
 
     REQUIRE(reply.starts_with("HTTP/1.1 200 OK\r\n"));
-    REQUIRE(reply.find("Content-Length: 4\r\n") != std::string::npos);
-    REQUIRE(reply.find("Content-Type: text/plain; charset=utf-8\r\n") != std::string::npos);
-    REQUIRE(reply.find("Connection: close\r\n") != std::string::npos);
+    REQUIRE(reply.contains("Content-Length: 4\r\n"));
+    REQUIRE(reply.contains("Content-Type: text/plain; charset=utf-8\r\n"));
+    REQUIRE(reply.contains("Connection: close\r\n"));
     REQUIRE(reply.ends_with("\r\n\r\npong"));
 }
 
@@ -305,9 +303,9 @@ TEST_CASE("writeResponse keeps a handler-supplied Content-Type", "[net][http]")
     };
     loop.blockOn(run(pair->second.get(), pair->first.get(), std::move(response), &reply));
 
-    REQUIRE(reply.find("Content-Type: application/json\r\n") != std::string::npos);
+    REQUIRE(reply.contains("Content-Type: application/json\r\n"));
     // The default must not also be emitted.
-    REQUIRE(reply.find("text/plain") == std::string::npos);
+    REQUIRE_FALSE(reply.contains("text/plain"));
 }
 
 TEST_CASE("serve dispatches a request through a handler and closes", "[net][http]")
