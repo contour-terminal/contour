@@ -20,6 +20,7 @@ namespace
 
 coro::Task<std::expected<std::string, NetError>> AsyncBufferedReader::readLine()
 {
+    beginScan(Scanner::Line);
     while (true)
     {
         // Search ONLY the bytes that arrived since the last search: everything in
@@ -70,6 +71,7 @@ coro::Task<std::expected<std::string, NetError>> AsyncBufferedReader::readUntil(
     if (delimiter.empty())
         co_return std::unexpected(makeNetError(NetErrorCode::Other, 0, "empty delimiter"));
 
+    beginScan(Scanner::Until);
     while (true)
     {
         auto const found = _buffer.find(delimiter, _scanOffset);

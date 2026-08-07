@@ -15,6 +15,7 @@
 /// payloads (capture-pane output) may carry arbitrary bytes.
 
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <string>
 #include <string_view>
@@ -38,7 +39,10 @@ class AsyncBufferedReader
 
     /// @param socket The transport to read from (not owned; must outlive the reader).
     /// @param maxLineLength Reject any line longer than this many bytes
-    ///        (terminator excluded) with @c NetErrorCode::MessageTooLarge.
+    ///        (terminator excluded) with @c NetErrorCode::MessageTooLarge. The bound
+    ///        is checked between refills, so the buffer may reach the bound plus one
+    ///        read chunk before the refusal fires — it caps memory, and is not an
+    ///        exact byte count of what was accepted.
     explicit AsyncBufferedReader(ISocket* socket, std::size_t maxLineLength = DefaultMaxLineLength) noexcept:
         _socket(socket), _maxLineLength(maxLineLength)
     {
@@ -103,12 +107,37 @@ class AsyncBufferedReader
     ///         simply ended when in fact the transport failed.
     [[nodiscard]] coro::Task<std::expected<void, NetError>> fill();
 
-    ISocket* _socket;              ///< The transport read from (not owned).
-    std::size_t _maxLineLength;    ///< Reject lines longer than this.
-    std::string _buffer;           ///< Received bytes; [0, _consumed) already delivered.
-    std::size_t _consumed = 0;     ///< First buffer index not yet delivered (a read cursor).
-    std::size_t _scanOffset = 0;   ///< First buffer index not yet searched for LF.
-    std::size_t _scannedBytes = 0; ///< Lifetime count of bytes examined (see scannedBytes()).
+    /// Which scanner last set @c _scanOffset. The offset is an optimization private
+    /// to one scanning strategy — "not yet searched for LF" for @c readLine, "could
+    /// still begin a delimiter match" for @c readUntil — so a switch must reset it
+    /// rather than inherit a bound that means something else. Without this, a
+    /// @c readLine that ends past a buffered delimiter (its MessageTooLarge exit
+    /// returns without compacting) makes the next @c readUntil skip data it holds.
+    enum class Scanner : std::uint8_t
+    {
+        None = 0, ///< Nothing scanned yet; the offset carries no meaning.
+        Line,     ///< @c readLine set it: everything before it holds no LF.
+        Until,    ///< @c readUntil set it: no match can begin before it.
+    };
+
+    /// Resets @c _scanOffset when the scanning strategy changes.
+    /// @param scanner The scanner about to run.
+    void beginScan(Scanner scanner) noexcept
+    {
+        if (_scanner != scanner)
+        {
+            _scanOffset = _consumed;
+            _scanner = scanner;
+        }
+    }
+
+    ISocket* _socket;                 ///< The transport read from (not owned).
+    std::size_t _maxLineLength;       ///< Reject lines longer than this.
+    std::string _buffer;              ///< Received bytes; [0, _consumed) already delivered.
+    std::size_t _consumed = 0;        ///< First buffer index not yet delivered (a read cursor).
+    std::size_t _scanOffset = 0;      ///< Scan resume point; meaning depends on _scanner.
+    Scanner _scanner = Scanner::None; ///< Which scanner _scanOffset belongs to.
+    std::size_t _scannedBytes = 0;    ///< Lifetime count of bytes examined (see scannedBytes()).
 };
 
 } // namespace net

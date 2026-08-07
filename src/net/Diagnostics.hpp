@@ -34,11 +34,13 @@ using DiagnosticSink = std::function<void(std::string_view message)>;
 /// threading a sink through every one of them would put an observability concern
 /// into signatures that have nothing else to do with it.
 ///
-/// **Call it once, before any loop runs.** The sink is plain process-wide state
-/// with no lock: concurrent @c reportDiagnostic calls against an already-installed
-/// sink are fine, but installing one while another thread may be reporting is a
-/// data race. Nothing enforces this, because the cost of guarding a pointer read
-/// on every wait would outweigh what the guard buys for a startup-time decision.
+/// **Prefer installing once, before any loop runs** — it is a startup decision, and
+/// treating it as one keeps the reporting order across threads predictable. It is
+/// nevertheless safe to install at any time: the sink is held behind a shared
+/// pointer, so a reporting thread keeps its target alive for the duration of the
+/// call and a concurrent replacement cannot destroy the callable under it. The lock
+/// is held only while reading or writing the pointer, never across the invocation,
+/// so a slow sink does not serialize reporting threads.
 /// @param sink The sink to install; an empty target restores the discarding default.
 void setDiagnosticSink(DiagnosticSink sink);
 

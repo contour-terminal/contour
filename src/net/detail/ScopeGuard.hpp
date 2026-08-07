@@ -37,7 +37,9 @@ class ScopeGuard
     ScopeGuard(ScopeGuard&&) = delete;
     ScopeGuard& operator=(ScopeGuard&&) = delete;
 
-    ~ScopeGuard() { _callable(); }
+    /// Runs the action. Explicitly `noexcept` to state the intent the `requires`
+    /// clause enforces: a throwing action would terminate from here.
+    ~ScopeGuard() noexcept { _callable(); }
 
   private:
     Callable _callable; ///< The action run on scope exit.

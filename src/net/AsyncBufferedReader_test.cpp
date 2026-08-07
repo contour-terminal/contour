@@ -466,6 +466,65 @@ TEST_CASE("readExactly and readLine interleave over one buffer", "[net][reader]"
     REQUIRE_FALSE(error.has_value());
 }
 
+TEST_CASE("readUntil finds a delimiter buffered before readLine hit its bound", "[net][reader]")
+{
+    // The two scanners share _scanOffset but mean different things by it. readLine
+    // leaves it at buffer end when it finds no LF; every other exit either matches
+    // (leaving it at _consumed) or refills (fill() rebases it), so the one way to
+    // observe the contaminated state is readLine's MessageTooLarge return, which
+    // exits with _scanOffset past the buffer and does NOT compact. A readUntil on
+    // that same connection then resumes scanning past a delimiter it already has.
+    auto fake = FakeSocket {};
+    fake.pushChunk("xxENDyyyyyy"); // holds "END", but no LF at all
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake, 4 }; // bound smaller than the chunk
+
+    // readLine scans the whole buffer, finds no LF, and refuses to grow past the
+    // bound — returning with _scanOffset == buffer.size().
+    auto line = std::string {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(readOneLine(&reader, &line, &error));
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == NetErrorCode::MessageTooLarge);
+
+    // "END" is buffered at index 2. readUntil must find it rather than resuming at
+    // the stale offset and reporting EOF for data it is already holding.
+    error.reset();
+    auto head = std::string {};
+    auto const delimiter = std::string { "END" };
+    loop.blockOn(readOneUntil(&reader, &delimiter, &head, &error));
+    REQUIRE_FALSE(error.has_value());
+    REQUIRE(head == "xx");
+}
+
+TEST_CASE("readUntil does not skip a delimiter left behind by readLine", "[net][reader]")
+{
+    // Same contamination, in the order that actually loses data: readLine consumes
+    // a line and parks _scanOffset, then readUntil must still see a delimiter that
+    // lies in the bytes readLine already scanned past.
+    auto fake = FakeSocket {};
+    fake.pushChunk("first\nxxENDyy"); // one line, then a delimiter with no LF after it
+
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = EventLoop { source };
+    auto reader = AsyncBufferedReader { &fake };
+
+    auto line = std::string {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(readOneLine(&reader, &line, &error));
+    REQUIRE(line == "first");
+
+    // "END" is buffered right now. readUntil must find it rather than reporting
+    // EOF because it resumed scanning past it.
+    auto head = std::string {};
+    auto const delimiter = std::string { "END" };
+    loop.blockOn(readOneUntil(&reader, &delimiter, &head, &error));
+    REQUIRE_FALSE(error.has_value());
+    REQUIRE(head == "xx");
+}
+
 TEST_CASE("a transport failure is reported as itself, not as EOF", "[net][reader]")
 {
     // A connection reset must not be delivered as a clean end-of-message: the
