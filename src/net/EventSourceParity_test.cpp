@@ -244,7 +244,14 @@ TEST_CASE("two registrations on one descriptor are accepted by every event sourc
             CHECK(std::ranges::find(ready.readyRead, first) != ready.readyRead.end());
             CHECK(std::ranges::find(ready.readyRead, second) != ready.readyRead.end());
 
+            // Detaching one must not disturb the other: they are separate kernel
+            // registrations, so dropping one cannot take the survivor's with it.
             source->detach(first);
+            REQUIRE((*pipe)->write(one.data(), one.size()).has_value());
+            auto const afterOne = source->wait(200);
+            CHECK(std::ranges::find(afterOne.readyRead, second) != afterOne.readyRead.end());
+            CHECK(std::ranges::find(afterOne.readyRead, first) == afterOne.readyRead.end());
+
             source->detach(second);
         }
     }
