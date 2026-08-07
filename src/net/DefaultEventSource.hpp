@@ -8,6 +8,7 @@
 /// only in what a wait costs. This is the one place that knows which exist, so call
 /// sites say @c makeDefaultEventSource() rather than carrying `#ifdef`s of their own.
 
+#include <cstdint>
 #include <memory>
 
 #include <net/EventSource.hpp>
