@@ -87,8 +87,7 @@ namespace contour::display
 /// @param targetPixelWidth The render target's width in DEVICE pixels.
 /// @return The ratio of actual to ideal device-pixel scale; 1.0 exactly when the mapping is 1:1.
 ///         Returns 1.0 for a degenerate target width, having nothing to compare against.
-[[nodiscard]] inline float devicePixelScaleError(QMatrix4x4 const& itemToClip,
-                                                 int targetPixelWidth) noexcept
+[[nodiscard]] inline float devicePixelScaleError(QMatrix4x4 const& itemToClip, int targetPixelWidth) noexcept
 {
     if (targetPixelWidth <= 0)
         return 1.0f;

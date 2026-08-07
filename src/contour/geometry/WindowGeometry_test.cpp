@@ -599,10 +599,8 @@ TEST_CASE("viewportOrigin places a client's view inside a larger shared grid", "
     }
 }
 
-
 // {{{ #2040 -- a split pane's boundary must land on a whole device pixel.
-TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.lands on a whole device pixel",
-          "[contour][geometry]")
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.lands on a whole device pixel", "[contour][geometry]")
 {
     // The property that matters: whatever comes out, multiplying by the DPR yields an integer, so the
     // pane boundary sits on a hardware pixel and the two paths that consume it (the unrounded vertex
@@ -650,8 +648,7 @@ TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.the fractional half-split
     }
 }
 
-TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.a degenerate ratio is a no-op",
-          "[contour][geometry]")
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.a degenerate ratio is a no-op", "[contour][geometry]")
 {
     // Nothing sensible to snap to; returning the input unchanged beats dividing by zero.
     CHECK(snapPaneExtentToDevicePixels(493.5, 0.0) == Catch::Approx(493.5));
