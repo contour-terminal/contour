@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/display/Logging.hpp>
 #include <contour/display/RhiTransform.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/TerminalRenderNode.hpp>
 
 #include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGRendererInterface>
+
+#include <cmath>
 
 #include <rhi/qrhi.h>
 
@@ -81,6 +84,39 @@ void TerminalRenderNode::prepare()
     }();
     auto const dpr = deviceToLogicalScale(rt->pixelSize(), windowLogicalSize);
     auto const itemToClip = composeItemToClip(*projectionMatrix(), *matrix(), dpr);
+
+    // {{{ #2040 geometry probe
+    //
+    // Reports the frame whose composed transform does not map the rasterizer's device-pixel vertices
+    // 1:1 onto hardware pixels. That is the precondition the Nearest-sampled glyph atlas needs: at any
+    // other scale the sample points drift across texel boundaries and glyph columns duplicate or drop.
+    //
+    // The check is on the COMPOSED matrix rather than on `dpr` alone, because dpr is only one of three
+    // inputs -- projectionMatrix() and matrix() come from the scene graph and are not derived here, so
+    // a correct dpr composed against a projection built for a different render-target size still
+    // yields a scaled quad. Multiplying a unit X step through itemToClip and comparing against the
+    // clip-space width of one device pixel measures the thing that actually matters, whatever produced
+    // it.
+    if (geometryProbeLog)
+    {
+        auto const targetPixelSize = rt->pixelSize();
+        auto const scaleError = devicePixelScaleError(itemToClip, targetPixelSize.width());
+
+        // The tolerance sits well inside the ~6% mismatch that visibly duplicates a column, while
+        // absorbing float noise from the matrix multiply.
+        if (std::abs(scaleError - 1.0f) > 0.001f)
+            geometryProbeLog()(
+                "device-pixel scale is {:.6f}, not 1.0 -- a glyph texel does not map to a hardware "
+                "pixel, so Nearest sampling duplicates and drops columns. target={}x{} "
+                "windowLogical={}x{} dpr={:.6f}",
+                scaleError,
+                targetPixelSize.width(),
+                targetPixelSize.height(),
+                windowLogicalSize.width(),
+                windowLogicalSize.height(),
+                dpr);
+    }
+    // }}}
 
     // This item's top-left corner inside the render target, in device pixels. matrix() maps item-local
     // (0,0) to scene space in logical pixels (translation for Quick item placement); the scene graph

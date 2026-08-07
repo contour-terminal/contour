@@ -5,6 +5,7 @@
 #include <vtbackend/Primitives.hpp>
 
 #include <crispy/Assert.hpp>
+#include <crispy/LogStore.hpp>
 #include <crispy/StrongHash.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
 
@@ -18,6 +19,20 @@
 
 namespace vtrasterizer::atlas
 {
+
+/// Reports tiles whose bitmap does not fit the atlas slot they are uploaded into.
+///
+/// Its own category rather than part of vt.rasterizer, which logs a line per glyph and would bury
+/// this: enabled alone, the log is SILENT unless the invariant actually breaks, so any output at
+/// all is a finding.
+///
+/// Tile origins are spaced exactly one tile apart in both axes (see the tileIndex arithmetic in
+/// initialize()), so a bitmap wider or taller than tileSize spills into a NEIGHBOURING tile and
+/// replaces part of an unrelated glyph. The corruption then appears on the glyph that was
+/// overwritten, not the one that overflowed -- which is why it resists being traced back from a
+/// screenshot, and why the check belongs at the upload rather than at the rasterizer.
+auto inline const tileBoundsLog =
+    logstore::Category("vt.rasterizer.tilebounds", "Logs glyph tiles that overflow their atlas slot.");
 
 using Buffer = std::vector<uint8_t>;
 
@@ -316,6 +331,40 @@ class TextureAtlas
     std::optional<TileAttributes<Metadata>> constructTile(CreateTileDataFn createTileData,
                                                           uint32_t entryIndex);
 
+    /// Reports a tile whose bitmap exceeds the slot it is about to be uploaded into.
+    ///
+    /// Diagnostic only -- it does not clamp or reject, because what the correct bound IS depends on
+    /// the caller (a wide glyph is legitimately sliced across several tiles by the text renderer,
+    /// while a tall one has no such path). Making it observable is the point: the bleed shows up on
+    /// a neighbouring glyph, so without this the symptom and the cause never appear together.
+    ///
+    /// @param where       the upload site, so a report names which path produced it.
+    /// @param location    the tile slot being written.
+    /// @param bitmapSize  the bitmap's size, which must fit tileSize() on both axes.
+    void reportIfTileOverflows(std::string_view where,
+                               TileLocation location,
+                               vtbackend::ImageSize bitmapSize) const
+    {
+        if (!tileBoundsLog) [[likely]]
+            return;
+
+        auto const tile = tileSize();
+        auto const widthOverflow = unbox<int>(bitmapSize.width) - unbox<int>(tile.width);
+        auto const heightOverflow = unbox<int>(bitmapSize.height) - unbox<int>(tile.height);
+        if (widthOverflow <= 0 && heightOverflow <= 0) [[likely]]
+            return;
+
+        tileBoundsLog()("{}: tile at ({}, {}) got a {} bitmap for a {} slot -- overflowing by {}x{}. "
+                        "The excess lands in the neighbouring tile(s).",
+                        where,
+                        location.x.value,
+                        location.y.value,
+                        bitmapSize,
+                        tile,
+                        std::max(0, widthOverflow),
+                        std::max(0, heightOverflow));
+    }
+
     AtlasBackend& _backend;
     AtlasProperties _atlasProperties;
     vtbackend::ImageSize _atlasSize;
@@ -581,6 +630,8 @@ auto TextureAtlas<Metadata>::constructTile(CreateTileDataFn createTileData, uint
 
     TileCreateData& tileCreateData = *tileCreateDataOpt;
 
+    reportIfTileOverflows("LRU", tileLocation, tileCreateData.bitmapSize);
+
     _backend.uploadTile(UploadTile {
         .location = tileLocation,
         .bitmapSize = tileCreateData.bitmapSize,
@@ -665,6 +716,8 @@ void TextureAtlas<Metadata>::setDirectMapping(uint32_t tileIndex, TileCreateData
     Require(tileIndex < _directMapping.size());
 
     auto const tileLocation = _tileLocations[tileIndex];
+
+    reportIfTileOverflows("direct-mapped", tileLocation, tileCreateData.bitmapSize);
 
     auto tileUpload = UploadTile {};
     tileUpload.location = tileLocation;

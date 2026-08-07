@@ -37,6 +37,8 @@ using vtbackend::ImageSize;
 using vtbackend::RGBAColor;
 using vtbackend::Width;
 
+#include <cmath>
+
 namespace chrono = std::chrono;
 namespace atlas = vtrasterizer::atlas;
 
@@ -510,6 +512,55 @@ void RhiRenderer::renderTile(atlas::RenderTile tile)
         // - 4 color values (RGBA)
     };
     // clang-format on
+
+    // {{{ #2040 sampling probe
+    //
+    // Under QRhiSampler::Nearest the quad must span exactly as many device pixels as the texture
+    // region it samples has texels; at any other ratio the sample points drift across texel
+    // boundaries and whole glyph columns duplicate or drop.
+    //
+    // The two sides of that equality are computed at DIFFERENT MOMENTS from DIFFERENT fields, which
+    // is what makes this worth measuring rather than assuming. The quad size (r, s) is read here at
+    // RENDER time from targetSize/bitmapSize, while the texture region (nw, nh) was baked into
+    // normalizedLocation at UPLOAD time by createTileData(), against the atlas size and bitmap size
+    // that were current then. A tile uploaded before a cell-size change and rendered after it
+    // therefore samples a region whose texel count no longer matches its quad -- and the geometry
+    // probe upstream cannot see this, because the item->clip transform is entirely correct.
+    if (samplingProbeLog)
+    {
+        auto const atlasWidth = unbox<float>(_atlasTextureSize.width);
+        auto const atlasHeight = unbox<float>(_atlasTextureSize.height);
+        if (atlasWidth > 0.0f && atlasHeight > 0.0f && r > 0.0f && s > 0.0f)
+        {
+            // Back out the texel extent the normalized region covers.
+            auto const texelsWide = nw * atlasWidth;
+            auto const texelsHigh = nh * atlasHeight;
+            auto const widthRatio = texelsWide > 0.0f ? r / texelsWide : 1.0f;
+            auto const heightRatio = texelsHigh > 0.0f ? s / texelsHigh : 1.0f;
+
+            // Tolerance absorbs float noise in the normalize/denormalize round-trip while staying
+            // far inside the one-texel drift that visibly damages a stem.
+            if (std::abs(widthRatio - 1.0f) > 0.01f || std::abs(heightRatio - 1.0f) > 0.01f)
+                samplingProbeLog()(
+                    "tile quad {}x{} px samples {:.2f}x{:.2f} texels (ratio {:.4f}x{:.4f}) -- not 1:1, "
+                    "so Nearest sampling duplicates/drops columns. bitmap={}x{} target={}x{} "
+                    "atlas={}x{} shader={}",
+                    r,
+                    s,
+                    texelsWide,
+                    texelsHigh,
+                    widthRatio,
+                    heightRatio,
+                    tile.bitmapSize.width.value,
+                    tile.bitmapSize.height.value,
+                    tile.targetSize.width.value,
+                    tile.targetSize.height.value,
+                    _atlasTextureSize.width.value,
+                    _atlasTextureSize.height.value,
+                    tile.fragmentShaderSelector);
+        }
+    }
+    // }}}
 
     batch.renderTiles.emplace_back(tile);
     std::ranges::copy(vertices, back_inserter(batch.buffer));
@@ -1008,6 +1059,43 @@ void RhiRenderer::applyScissor(QRhiGraphicsPipeline* pipeline,
     //
     // QRhiScissor uses bottom-left-origin pixels, matching ScissorRect (and the scene graph's scissorRect()
     // that fed _nodeScissor), so the rectangle maps across directly. A zero-area clip clips everything away.
+    // {{{ #2040 clip probe
+    //
+    // Reports a frame whose final clip does not cover the pane it is drawing. The scissor is composed
+    // from inputs captured at DIFFERENT MOMENTS -- _renderTargetSize and the item origin are snapshotted
+    // at the sync point, _nodeScissor is installed by the scene graph just before recordDraws(), and
+    // targetPixelSize is the live window target read in render() -- so mid-resize they can describe
+    // different window extents. When they do, the clip shrinks away part of the pane and the glyphs
+    // inside the lost strip are simply not drawn, leaving whatever the swapchain buffer already held.
+    //
+    // This is the one stage the earlier probes could not see: geometry and sampling both measure what a
+    // quad WOULD draw, and the frame-burst readback replays into an item-sized offscreen target where
+    // the window-space node clip does not apply at all (see the offscreen branch above).
+    if (!offscreen && clipProbeLog)
+    {
+        auto const coversPane = clip.x <= itemRect.x && clip.y <= itemRect.y
+                                && clip.x + clip.width >= itemRect.x + itemRect.width
+                                && clip.y + clip.height >= itemRect.y + itemRect.height;
+        if (!coversPane)
+            clipProbeLog()("clip {}+{}+{}x{} does not cover pane {}+{}+{}x{} (target {}x{}, "
+                           "itemSize {}x{}, origin {}+{}) -- the uncovered strip keeps stale pixels.",
+                           clip.x,
+                           clip.y,
+                           clip.width,
+                           clip.height,
+                           itemRect.x,
+                           itemRect.y,
+                           itemRect.width,
+                           itemRect.height,
+                           targetPixelSize.width(),
+                           targetPixelSize.height(),
+                           unbox<int>(_renderTargetSize.width),
+                           unbox<int>(_renderTargetSize.height),
+                           _itemOriginLeftDevice,
+                           _itemOriginTopDevice);
+    }
+    // }}}
+
     _commandBuffer->setScissor(
         QRhiScissor(clip.x, clip.y, std::max(0, clip.width), std::max(0, clip.height)));
 }
