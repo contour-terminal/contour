@@ -32,7 +32,13 @@ using DiagnosticSink = std::function<void(std::string_view message)>;
 /// exception to the configuration-at-construction rule: the reporting sites are
 /// deep inside platform code reached through the @c EventSource interface, and
 /// threading a sink through every one of them would put an observability concern
-/// into signatures that have nothing else to do with it. It is set once at startup.
+/// into signatures that have nothing else to do with it.
+///
+/// **Call it once, before any loop runs.** The sink is plain process-wide state
+/// with no lock: concurrent @c reportDiagnostic calls against an already-installed
+/// sink are fine, but installing one while another thread may be reporting is a
+/// data race. Nothing enforces this, because the cost of guarding a pointer read
+/// on every wait would outweigh what the guard buys for a startup-time decision.
 /// @param sink The sink to install; an empty target restores the discarding default.
 void setDiagnosticSink(DiagnosticSink sink);
 

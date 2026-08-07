@@ -144,6 +144,15 @@ class EventSource
     [[nodiscard]] virtual WaitOutcome wait(int timeoutMs) = 0;
 
     /// Registers @p fd for multiplexing in subsequent waits.
+    ///
+    /// The same handle may be registered more than once; each call yields its own
+    /// token and its own lifetime, and detaching one leaves the others watching.
+    /// What is deliberately NOT promised is how a single readiness event is spread
+    /// across duplicate registrations: one wait may report all of them or only one,
+    /// because the underlying multiplexers differ (Linux's poll(2) fills in every
+    /// matching pollfd; macOS's reports the descriptor once). A caller that parks a
+    /// coroutine per token is unaffected — the next wait reports whoever is still
+    /// registered, since every backend here is level-triggered.
     /// @param fd The native handle to watch (not owned; the caller keeps it valid
     ///        and detaches before closing it).
     /// @param interest The readiness bits to start watching.
