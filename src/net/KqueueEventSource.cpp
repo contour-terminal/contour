@@ -98,9 +98,11 @@ bool KqueueEventSource::applyInterest(NativeHandle fd, FdInterest interest, FdTo
     // armed — the normal steady state, not a failure.
     auto const reported = std::span { results.data(), static_cast<std::size_t>(applied) };
     return std::ranges::all_of(reported, [&interests](struct kevent const& result) noexcept {
-        if (result.data == 0)
+        // EV_RECEIPT sets EV_ERROR on every entry; `data` carries the errno, 0 when
+        // the change applied cleanly. An entry without EV_ERROR is not a report.
+        if ((result.flags & EV_ERROR) == 0 || result.data == 0)
             return true;
-        auto const* const row =
+        auto const row =
             std::ranges::find(interests, static_cast<std::int16_t>(result.filter), &FilterInterest::filter);
         return result.data == ENOENT && row != interests.end() && !row->wanted;
     });
