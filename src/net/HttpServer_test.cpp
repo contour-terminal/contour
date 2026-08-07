@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -235,6 +236,168 @@ TEST_CASE("readRequest rejects a malformed request line", "[net][http]")
     REQUIRE(error->code == NetErrorCode::Other);
 }
 
+TEST_CASE("readRequest rejects conflicting duplicate Content-Length headers", "[net][http]")
+{
+    // RFC 9112 6.3: two disagreeing lengths are a request-smuggling vector, since a
+    // proxy and an origin may pick different ones and disagree about where this
+    // request ends and the next begins.
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+    auto pair = net::testing::makeSocketPair(loop);
+    REQUIRE(pair.has_value());
+
+    auto const wire =
+        std::string { "POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 100\r\n\r\nhello" };
+    auto const limits = HttpLimits {};
+    auto reply = std::string {};
+    auto seen = std::optional<HttpRequest> {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(exchange(pair->first.get(), pair->second.get(), &wire, &reply, &limits, &seen, &error));
+
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == NetErrorCode::Other);
+}
+
+TEST_CASE("readRequest accepts repeated but identical Content-Length headers", "[net][http]")
+{
+    // Repetition alone is not the hazard; disagreement is.
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+    auto pair = net::testing::makeSocketPair(loop);
+    REQUIRE(pair.has_value());
+
+    auto const wire =
+        std::string { "POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello" };
+    auto const limits = HttpLimits {};
+    auto reply = std::string {};
+    auto seen = std::optional<HttpRequest> {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(exchange(pair->first.get(), pair->second.get(), &wire, &reply, &limits, &seen, &error));
+
+    REQUIRE_FALSE(error.has_value());
+    REQUIRE(seen.has_value());
+    REQUIRE(seen->body == "hello");
+}
+
+TEST_CASE("readRequest refuses a chunked request rather than mis-framing it", "[net][http]")
+{
+    // Chunked bodies are out of scope. Parsing one as a zero-length body would leave
+    // the chunk data buffered as though it were the start of another request.
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+    auto pair = net::testing::makeSocketPair(loop);
+    REQUIRE(pair.has_value());
+
+    auto const wire =
+        std::string { "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n" };
+    auto const limits = HttpLimits {};
+    auto reply = std::string {};
+    auto seen = std::optional<HttpRequest> {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(exchange(pair->first.get(), pair->second.get(), &wire, &reply, &limits, &seen, &error));
+
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == NetErrorCode::Other);
+}
+
+TEST_CASE("readRequest rejects an obs-fold continuation line", "[net][http]")
+{
+    // A folded header has no colon. Dropping it silently would lose the folded
+    // Content-Length and leave the body unread on a connection we think we parsed.
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+    auto pair = net::testing::makeSocketPair(loop);
+    REQUIRE(pair.has_value());
+
+    auto const wire = std::string { "POST / HTTP/1.1\r\nContent-Length: 5\r\n\t0\r\n\r\nhello" };
+    auto const limits = HttpLimits {};
+    auto reply = std::string {};
+    auto seen = std::optional<HttpRequest> {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(exchange(pair->first.get(), pair->second.get(), &wire, &reply, &limits, &seen, &error));
+
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == NetErrorCode::Other);
+}
+
+TEST_CASE("readRequest parses a bare-LF request head", "[net][http]")
+{
+    // Hand-written clients and scripts routinely send LF-only endings. Splitting
+    // only on CRLF would make the whole head one "request line" whose interior
+    // spaces populate method/path/version with garbage.
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+    auto pair = net::testing::makeSocketPair(loop);
+    REQUIRE(pair.has_value());
+
+    auto const wire = std::string { "GET /plain HTTP/1.1\nHost: example\n\r\n\r\n" };
+    auto const limits = HttpLimits {};
+    auto reply = std::string {};
+    auto seen = std::optional<HttpRequest> {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(exchange(pair->first.get(), pair->second.get(), &wire, &reply, &limits, &seen, &error));
+
+    REQUIRE_FALSE(error.has_value());
+    REQUIRE(seen.has_value());
+    REQUIRE(seen->method == "GET");
+    REQUIRE(seen->path == "/plain");
+    REQUIRE(seen->header("Host") == "example");
+}
+
+TEST_CASE("readRequest rejects an unparsable Content-Length", "[net][http]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+    auto pair = net::testing::makeSocketPair(loop);
+    REQUIRE(pair.has_value());
+
+    auto const wire = std::string { "POST / HTTP/1.1\r\nContent-Length: 12abc\r\n\r\n" };
+    auto const limits = HttpLimits {};
+    auto reply = std::string {};
+    auto seen = std::optional<HttpRequest> {};
+    auto error = std::optional<net::NetError> {};
+    loop.blockOn(exchange(pair->first.get(), pair->second.get(), &wire, &reply, &limits, &seen, &error));
+
+    REQUIRE(error.has_value());
+    REQUIRE(error->code == NetErrorCode::Other);
+}
+
+TEST_CASE("writeResponse never emits duplicate framing headers", "[net][http]")
+{
+    // A handler that sets its own Content-Length or Connection is doing something
+    // natural; emitting both its value and ours would be malformed.
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+    auto pair = net::testing::makeSocketPair(loop);
+    REQUIRE(pair.has_value());
+
+    auto response = HttpResponse::ok("hello");
+    response.headers.emplace_back("Content-Length", "999");
+    response.headers.emplace_back("Connection", "keep-alive");
+
+    auto reply = std::string {};
+    auto run =
+        [](net::ISocket* client, net::ISocket* server, HttpResponse* resp, std::string* out) -> Task<void> {
+        static_cast<void>(co_await net::writeResponse(server, std::move(*resp)));
+        server->close();
+        co_await drain(client, out);
+    };
+    loop.blockOn(run(pair->first.get(), pair->second.get(), &response, &reply));
+
+    // Exactly one of each, and the length must describe the body we actually wrote.
+    auto const countOf = [&reply](std::string_view needle) {
+        auto count = std::size_t { 0 };
+        for (auto pos = reply.find(needle); pos != std::string::npos;
+             pos = reply.find(needle, pos + needle.size()))
+            ++count;
+        return count;
+    };
+    CHECK(countOf("Content-Length:") == 1);
+    CHECK(countOf("Connection:") == 1);
+    CHECK(reply.contains("Content-Length: 5\r\n"));
+    CHECK_FALSE(reply.contains("999"));
+}
+
 TEST_CASE("readRequest reports EOF when the peer closes before a request", "[net][http]")
 {
     auto source = net::PollEventSource {};
@@ -348,4 +511,44 @@ TEST_CASE("serve dispatches a request through a handler and closes", "[net][http
     REQUIRE(seenPath == "/hello");
     REQUIRE(reply.starts_with("HTTP/1.1 200 OK\r\n"));
     REQUIRE(reply.ends_with("served:/hello"));
+}
+
+TEST_CASE("serve answers 500 when a handler throws rather than dying", "[net][http]")
+{
+    // The handler is caller-supplied code. An exception escaping it would unwind
+    // through the accept loop and end every future connection, so serve() must
+    // contain it and still answer this request.
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+    auto listener = net::listen(loop, "127.0.0.1", 0);
+    REQUIRE(listener.has_value());
+    auto const port = (*listener)->localPort();
+    REQUIRE(port != 0);
+
+    auto handler = net::HttpHandler { [](HttpRequest const&) -> HttpResponse {
+        throw std::runtime_error { "handler blew up" };
+    } };
+
+    auto reply = std::string {};
+    auto client = [](EventLoop* l, std::uint16_t p, std::string* out) -> Task<void> {
+        auto connected = co_await net::connect(l, "127.0.0.1", p);
+        if (!connected.has_value())
+            co_return;
+        auto socket = std::move(*connected);
+        auto const request = std::string { "GET /boom HTTP/1.1\r\nHost: x\r\n\r\n" };
+        co_await sendText(socket.get(), &request);
+        co_await drain(socket.get(), out);
+    };
+
+    auto run = [](EventLoop* l,
+                  net::IListener* lis,
+                  net::HttpHandler h,
+                  std::uint16_t p,
+                  std::string* out,
+                  auto clientFn) -> Task<void> {
+        static_cast<void>(co_await coro::whenAny(net::serve(lis, std::move(h)), clientFn(l, p, out)));
+    };
+    loop.blockOn(run(&loop, listener->get(), std::move(handler), port, &reply, client));
+
+    REQUIRE(reply.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
 }

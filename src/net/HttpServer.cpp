@@ -74,16 +74,25 @@ namespace
     [[nodiscard]] std::optional<std::size_t> parseHead(std::string_view headerText, HttpRequest* request)
     {
         auto contentLength = std::size_t { 0 };
+        auto sawContentLength = false;
         auto lineStart = std::size_t { 0 };
         auto firstLine = true;
 
         while (lineStart <= headerText.size())
         {
-            auto lineEnd = headerText.find("\r\n", lineStart);
+            // Split on LF and strip an optional CR, so a client using bare-LF line
+            // endings parses as the same set of lines rather than as one giant first
+            // line whose interior spaces would then populate method/path/version
+            // with garbage. readLine in this module is equally tolerant.
+            auto lineEnd = headerText.find('\n', lineStart);
+            auto const nextStart = (lineEnd == std::string_view::npos) ? headerText.size() + 1 : lineEnd + 1;
             if (lineEnd == std::string_view::npos)
                 lineEnd = headerText.size();
-            auto const line = headerText.substr(lineStart, lineEnd - lineStart);
-            lineStart = lineEnd + 2;
+            auto lineStop = lineEnd;
+            if (lineStop > lineStart && headerText[lineStop - 1] == '\r')
+                --lineStop;
+            auto const line = headerText.substr(lineStart, lineStop - lineStart);
+            lineStart = nextStart;
 
             if (firstLine)
             {
@@ -100,9 +109,18 @@ namespace
 
             if (line.empty())
                 continue;
+
+            // An obs-fold continuation (a header line starting with SP/HTAB) belongs
+            // to the previous header's value. RFC 9112 §5.2 deprecates it and permits
+            // rejecting the message; dropping it silently is the one thing we must
+            // not do, since a folded Content-Length would otherwise vanish and leave
+            // the body unread on a connection we believe fully parsed.
+            if (line.front() == ' ' || line.front() == '\t')
+                return std::nullopt;
+
             auto const colon = line.find(':');
             if (colon == std::string_view::npos)
-                continue; // tolerate a junk header line rather than failing the request
+                return std::nullopt; // a header line without a colon is not a header
             auto const name = trim(line.substr(0, colon));
             auto const value = trim(line.substr(colon + 1));
             request->headers.emplace_back(std::string { name }, std::string { value });
@@ -112,9 +130,21 @@ namespace
                 auto parsed = std::size_t { 0 };
                 auto const* const begin = value.data();
                 auto const [ptr, ec] = std::from_chars(begin, begin + value.size(), parsed);
-                if (ec == std::errc {} && ptr == begin + value.size())
-                    contentLength = parsed;
+                if (ec != std::errc {} || ptr != begin + value.size())
+                    return std::nullopt; // unparsable length: refuse rather than guess
+                // A repeated Content-Length is a request-smuggling vector when it
+                // disagrees with the first; RFC 9112 §6.3 requires rejecting it.
+                if (sawContentLength && parsed != contentLength)
+                    return std::nullopt;
+                contentLength = parsed;
+                sawContentLength = true;
             }
+
+            // Chunked bodies are out of scope for this server, so a request that
+            // announces one must be refused rather than parsed as a zero-length body
+            // that leaves its payload buffered as if it were the next request.
+            if (iequals(name, "Transfer-Encoding"))
+                return std::nullopt;
         }
         return contentLength;
     }
@@ -135,7 +165,23 @@ namespace
             co_return;
         }
 
-        auto response = (*handler)(*request);
+        // The handler is caller-supplied code. An exception escaping it would unwind
+        // through the accept loop and take the whole server down — one bad request
+        // ending every future connection — so it is contained here and answered as a
+        // 500. Cancellation is NOT caught: it is how a shutdown unwinds this flow.
+        auto response = HttpResponse {};
+        try
+        {
+            response = (*handler)(*request);
+        }
+        catch (coro::OperationCancelled const&)
+        {
+            throw;
+        }
+        catch (...)
+        {
+            response = HttpResponse::withStatus(500, std::string {});
+        }
         static_cast<void>(co_await writeResponse(socket, std::move(response)));
     }
 } // namespace
@@ -170,7 +216,9 @@ HttpResponse HttpResponse::withStatus(int status, std::string text)
 coro::Task<std::expected<HttpRequest, NetError>> readRequest(ISocket* socket, HttpLimits limits)
 {
     // The head bound doubles as the reader's message bound, so an unterminated
-    // header block is refused while it is still being buffered rather than after.
+    // header block is refused as it is buffered rather than after the fact. The
+    // reader checks between refills, so the refusal fires within one read chunk of
+    // the bound — a memory cap, not an exact byte count.
     auto reader = AsyncBufferedReader { socket, limits.maxHeadBytes };
 
     auto head = co_await reader.readUntil("\r\n\r\n");
@@ -180,7 +228,7 @@ coro::Task<std::expected<HttpRequest, NetError>> readRequest(ISocket* socket, Ht
     auto request = HttpRequest {};
     auto const contentLength = parseHead(*head, &request);
     if (!contentLength.has_value())
-        co_return std::unexpected(makeNetError(NetErrorCode::Other, 0, "malformed request line"));
+        co_return std::unexpected(makeNetError(NetErrorCode::Other, 0, "malformed request head"));
 
     if (*contentLength > limits.maxBodyBytes)
         co_return std::unexpected(
@@ -206,9 +254,15 @@ coro::Task<IoResult> writeResponse(ISocket* socket, HttpResponse response)
     out += response.reason.empty() ? std::string { reasonPhrase(response.status) } : response.reason;
     out += "\r\n";
 
+    // Framing headers are ours to decide: the body we are about to write determines
+    // the length, and this server always closes. A handler that set either would
+    // otherwise produce a response with two conflicting Content-Length headers,
+    // which clients reject and proxies read as a smuggling signal.
     auto hasContentType = false;
     for (auto const& [name, value]: response.headers)
     {
+        if (iequals(name, "Content-Length") || iequals(name, "Connection"))
+            continue;
         out += name;
         out += ": ";
         out += value;
