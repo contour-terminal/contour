@@ -7,8 +7,11 @@
 
 #include <contour/geometry/WindowGeometry.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+
+#include <cmath>
 
 using namespace contour::geometry;
 
@@ -595,3 +598,74 @@ TEST_CASE("viewportOrigin places a client's view inside a larger shared grid", "
         CHECK(viewportOrigin(tiny, viewport, at(0, 0)) == vtbackend::CellLocation {});
     }
 }
+
+
+// {{{ #2040 -- a split pane's boundary must land on a whole device pixel.
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.lands on a whole device pixel",
+          "[contour][geometry]")
+{
+    // The property that matters: whatever comes out, multiplying by the DPR yields an integer, so the
+    // pane boundary sits on a hardware pixel and the two paths that consume it (the unrounded vertex
+    // transform and the qRound()ed scissor) cannot disagree.
+    for (auto const dpr: { 1.0, 1.25, 1.5, 2.0, 2.5 })
+    {
+        for (auto const raw: { 493.5, 494.3, 500.0, 512.7, 987.0 * 0.5 })
+        {
+            auto const snapped = snapPaneExtentToDevicePixels(raw, dpr);
+            auto const inDevicePixels = snapped * dpr;
+            CHECK(std::abs(inDevicePixels - std::round(inDevicePixels)) < 1e-9);
+        }
+    }
+}
+
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.moves by less than one device pixel",
+          "[contour][geometry]")
+{
+    // Snapping must not visibly move the splitter: the correction is a rounding, so it can never
+    // exceed half a device pixel. A larger jump would make the divider drift while being dragged.
+    for (auto const dpr: { 1.0, 1.5, 2.0 })
+    {
+        for (auto const raw: { 493.5, 494.3, 512.7, 640.9 })
+        {
+            auto const snapped = snapPaneExtentToDevicePixels(raw, dpr);
+            CHECK(std::abs(snapped - raw) <= (0.5 / dpr) + 1e-9);
+        }
+    }
+}
+
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.the fractional half-split case from #2040",
+          "[contour][geometry]")
+{
+    // The reported repro: an odd window width split 50/50 at DPR 1 gives each pane a .5 width, so the
+    // second pane's origin is fractional and every glyph in it inherits the offset.
+    // 987/2 = 493.5 and 993/2 = 496.5; std::round takes halves AWAY from zero, so 494 and 497.
+    CHECK(snapPaneExtentToDevicePixels(987.0 * 0.5, 1.0) == Catch::Approx(494.0));
+    CHECK(snapPaneExtentToDevicePixels(993.0 * 0.5, 1.0) == Catch::Approx(497.0));
+
+    // At DPR 1 the result is always integral -- the case the artifact was captured at.
+    for (auto const width: { 985, 987, 989, 991, 993, 995 })
+    {
+        auto const snapped = snapPaneExtentToDevicePixels(width * 0.5, 1.0);
+        CHECK(snapped == Catch::Approx(std::round(snapped)));
+    }
+}
+
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.a degenerate ratio is a no-op",
+          "[contour][geometry]")
+{
+    // Nothing sensible to snap to; returning the input unchanged beats dividing by zero.
+    CHECK(snapPaneExtentToDevicePixels(493.5, 0.0) == Catch::Approx(493.5));
+    CHECK(snapPaneExtentToDevicePixels(493.5, -2.0) == Catch::Approx(493.5));
+}
+
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.an already-snapped extent is unchanged",
+          "[contour][geometry]")
+{
+    // Idempotence: re-snapping must not drift, or a binding that re-evaluates would walk the divider.
+    for (auto const dpr: { 1.0, 1.5, 2.0 })
+    {
+        auto const once = snapPaneExtentToDevicePixels(512.7, dpr);
+        CHECK(snapPaneExtentToDevicePixels(once, dpr) == Catch::Approx(once));
+    }
+}
+// }}}

@@ -13,6 +13,7 @@
 // when the user finishes dragging (onResizingChanged) to avoid a binding loop.
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import Contour.Terminal
 
 // FocusScope, NOT a plain Item: Main.qml's restoreTerminalFocus() (fired on every tab create/switch)
@@ -94,10 +95,26 @@ FocusScope {
                 id: firstChild
                 source: "PaneNode.qml"
                 onLoaded: item.node = Qt.binding(function() { return root.node ? root.node.first : null })
+                // Snapped to whole DEVICE pixels, not left fractional (#2040).
+                //
+                // `view.width * ratio` is a real number, so the first child routinely gets a
+                // fractional width and the second child a fractional origin. That origin reaches the
+                // renderer twice, by two paths that round differently: the vertex transform composes
+                // it unrounded (TerminalRenderNode::prepare -> composeItemToClip), while the scissor
+                // rounds it to a whole pixel (qRound(originScene.x() * dpr)). Geometry and clip then
+                // disagree by up to half a pixel, and because the glyph atlas is sampled with
+                // QRhiSampler::Nearest the sample points land on texel boundaries -- a stem loses its
+                // bright column for a scanline or two while its neighbours in the same row are
+                // untouched.
+                //
+                // Snapping in LOGICAL coordinates would not be enough at a fractional device pixel
+                // ratio, hence the round-trip through Screen.devicePixelRatio: the pane boundary has
+                // to land on a hardware pixel, which is the quantity both paths agree about.
+                readonly property real dprSnap: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
                 SplitView.preferredWidth: SplitView.view.orientation === Qt.Horizontal
-                    ? SplitView.view.width * (root.node ? root.node.ratio : 0.5) : -1
+                    ? Math.round(SplitView.view.width * (root.node ? root.node.ratio : 0.5) * dprSnap) / dprSnap : -1
                 SplitView.preferredHeight: SplitView.view.orientation === Qt.Vertical
-                    ? SplitView.view.height * (root.node ? root.node.ratio : 0.5) : -1
+                    ? Math.round(SplitView.view.height * (root.node ? root.node.ratio : 0.5) * dprSnap) / dprSnap : -1
             }
 
             // Second child (fills the remaining space).
