@@ -23,12 +23,14 @@
 #include <chrono>
 #include <coroutine>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <coro/Cancellation.hpp>
@@ -47,6 +49,36 @@ namespace net
 /// deliberate cancellation.
 struct FdRegistrationFailed
 {
+};
+
+/// How a flow parked on a descriptor is resumed when that descriptor closes.
+///
+/// A readiness poller cannot report a CLOSED descriptor: epoll drops it from the
+/// set and kqueue drops its filters, both silently, so a parked flow would never
+/// be resumed at all (poll(2) reports POLLNVAL and Windows reports the handle as
+/// failed, which is why those two backends never had the bug). @c
+/// EventLoop::notifyHandleClosing is how a closing descriptor supplies that
+/// missing readiness — and this says what the flow should observe once it wakes.
+enum class FdWakePolicy : std::uint8_t
+{
+    /// Resume on the flow's normal path. For an explicit `close()`, where the
+    /// owner is alive — it is the one that called close — so the flow can safely
+    /// re-read the owner's closed flag and report the close as an error.
+    Resume = 0,
+
+    /// Resume by throwing @c OperationCancelled. For a destructor, where the owner
+    /// is already gone: unwinding through @c await_resume never re-enters the flow
+    /// body, so nothing dereferences the dead owner. This is the same reason
+    /// ~EventLoop requests stop BEFORE waking its parked waiters.
+    Cancel,
+};
+
+/// Why a parked fd waiter was resumed, reported back to the awaiter by
+/// @c EventLoop::unregisterFdWaiter.
+enum class FdWakeReason : std::uint8_t
+{
+    Ready = 0, ///< Ordinary readiness (or an explicit close under FdWakePolicy::Resume).
+    Abandoned, ///< The descriptor closed under FdWakePolicy::Cancel; unwind instead of resuming.
 };
 
 class DelayAwaiter;
@@ -150,6 +182,30 @@ class EventLoop
     ///         @c OperationCancelled if the flow is cancelled while parked.
     [[nodiscard]] WaitFdAwaiter waitWritable(NativeHandle fd) noexcept;
 
+    /// Announces that @p fd is ABOUT TO BE CLOSED, so any flow parked on it is
+    /// resumed instead of waiting forever for readiness that can no longer arrive.
+    ///
+    /// Call this BEFORE the `close()` syscall, on the loop thread: the descriptor
+    /// must still be valid so the event source can drop its kernel registration
+    /// cleanly. Deferring that to the awaiter's own detach would issue the removal
+    /// against a descriptor number the kernel may already have handed to a new
+    /// socket, silently unregistering that one instead.
+    ///
+    /// The wake is only RECORDED here and delivered by the next pump as ordinary
+    /// readiness. It is deliberately not queued for resumption from this call: a
+    /// coroutine queued outside the pump still has its cancellation callback armed,
+    /// so a later `requestStop()` would queue it a second time and the pump would
+    /// then resume a frame the first resume had already destroyed.
+    /// Not @c noexcept, though every caller is: recording a wake appends to a vector
+    /// (and, for @c Cancel, a set), so allocation failure propagates as termination
+    /// from a `close()` that cannot report it. Swallowing it would be worse — the
+    /// wake would be lost and the flow would hang, which is the bug this exists to
+    /// fix — and by that point the process is out of memory anyway.
+    /// @param fd The descriptor about to be closed.
+    /// @param policy How a flow parked on @p fd should observe the close — normally
+    ///        (an explicit close, owner alive) or as cancellation (a destructor).
+    void notifyHandleClosing(NativeHandle fd, FdWakePolicy policy);
+
     /// @name Awaiter-facing scheduler primitives (internal)
     /// Called by the loop's awaitables; not part of the consumer API.
     /// @{
@@ -171,7 +227,11 @@ class EventLoop
     /// Detaches @p token from the event source and drops its parked waiter, if any.
     /// Idempotent. Called by the awaiter on resume (ready or cancelled).
     /// @param token The registration to remove.
-    void unregisterFdWaiter(FdToken token) noexcept;
+    /// @return @c FdWakeReason::Abandoned if the descriptor was closed under
+    ///         @c FdWakePolicy::Cancel while this waiter was parked on it — the
+    ///         awaiter then unwinds instead of resuming into an owner that is gone.
+    ///         @c FdWakeReason::Ready otherwise.
+    [[nodiscard]] FdWakeReason unregisterFdWaiter(FdToken token) noexcept;
 
     /// Re-queues @p waiter for resumption because its cancellation token fired while
     /// it was parked on a timer or fd. Used by the timed/fd awaiters' stop-callbacks
@@ -236,14 +296,45 @@ class EventLoop
     /// Wakes every parked flow so cancelled awaitables can unwind.
     void wakeAllWaiters();
 
-    EventSource& _source;                       ///< The injected multiplexed wait.
-    IClock& _clock;                             ///< The injected monotonic time source.
-    std::deque<std::coroutine_handle<>> _ready; ///< Coroutines ready to resume now.
-    std::vector<TimerEntry> _timers;            ///< Min-heap by deadline (soonest at front).
-    std::unordered_map<FdToken, std::coroutine_handle<>>
-        _fdWaiters; ///< Flows parked on a generic fd, by token.
+    /// Forgets the parked waiter behind @p token, across all three indices that
+    /// describe it. The single place that does so: four call sites would otherwise
+    /// each have to remember every container a park is recorded in, and one that
+    /// forgot would leave a stale entry pointing at a frame about to be destroyed.
+    /// @param token The registration whose park is being dropped.
+    /// @return The coroutine that was parked, or a null handle if @p token had none.
+    [[nodiscard]] std::coroutine_handle<> dropParkedWaiter(FdToken token) noexcept;
+
+    /// One parked fd waiter: the coroutine to resume, and the descriptor it parked
+    /// on. The descriptor is kept so a park can be found by fd (see @c _fdToTokens)
+    /// and so dropping it can also clear that reverse index.
+    struct ParkedWaiter
+    {
+        std::coroutine_handle<> handle;  ///< The suspended coroutine.
+        NativeHandle fd = InvalidHandle; ///< The descriptor it is parked on.
+    };
+
+    EventSource& _source;                                 ///< The injected multiplexed wait.
+    IClock& _clock;                                       ///< The injected monotonic time source.
+    std::deque<std::coroutine_handle<>> _ready;           ///< Coroutines ready to resume now.
+    std::vector<TimerEntry> _timers;                      ///< Min-heap by deadline (soonest at front).
+    std::unordered_map<FdToken, ParkedWaiter> _fdWaiters; ///< Flows parked on a generic fd, by token.
     std::unordered_map<std::coroutine_handle<>, FdToken>
-        _waiterToToken;                   ///< Reverse map for O(1) cancellation.
+        _waiterToToken; ///< Reverse map for O(1) cancellation.
+    /// Reverse index from descriptor to the registrations parked on it, so a closing
+    /// descriptor finds its waiters in O(1) rather than scanning every park. A
+    /// multimap because one descriptor can carry two parks at once — a reader and a
+    /// writer — and closing it must resume both.
+    std::unordered_multimap<NativeHandle, FdToken> _fdToTokens;
+    /// Registrations whose descriptor closed since the last pump, merged into the
+    /// next pump's wait outcome as one more source of readiness. Consumed ONLY in
+    /// pumpOnce: ~EventLoop must resume parked flows through its own
+    /// request_stop()-first path, not on their normal path, because by then their
+    /// owners are already destroyed.
+    std::vector<FdToken> _closedTokens;
+    /// The subset of @c _closedTokens whose descriptor closed under
+    /// @c FdWakePolicy::Cancel, so @c unregisterFdWaiter can tell the awaiter to
+    /// unwind rather than resume.
+    std::unordered_set<FdToken> _abandoned;
     std::vector<coro::Task<void>> _roots; ///< Keeps live spawned background flows alive.
     coro::StopSource _rootStop;           ///< Root cancellation source.
 
@@ -346,20 +437,25 @@ class WaitFdAwaiter
         return true;
     }
 
-    /// Detaches the fd and, if the flow was cancelled while parked or the attach
-    /// failed, reports the failure.
+    /// Detaches the fd and, if the flow was cancelled while parked, the descriptor
+    /// was abandoned under it, or the attach failed, reports the failure.
     /// @throws FdRegistrationFailed if the fd could not be registered with the
     ///         event source (resource exhaustion — distinct from cancellation).
-    /// @throws OperationCancelled if cancelled while parked or the fd was invalid.
+    /// @throws OperationCancelled if cancelled while parked, the fd was invalid, or
+    ///         the fd was closed under @c FdWakePolicy::Cancel while parked. That
+    ///         last case is what keeps a destructor from resuming this flow into an
+    ///         owner that no longer exists: throwing here unwinds the frame without
+    ///         ever re-entering its body.
     // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
     void await_resume()
     {
         _cancelReg.reset();
+        auto reason = FdWakeReason::Ready;
         if (_registration)
-            _loop.unregisterFdWaiter(_registration);
+            reason = _loop.unregisterFdWaiter(_registration);
         else if (_fd != InvalidHandle && !_token.stop_requested())
             throw FdRegistrationFailed {};
-        if (_token.stop_requested() || _fd == InvalidHandle)
+        if (_token.stop_requested() || _fd == InvalidHandle || reason == FdWakeReason::Abandoned)
             throw coro::OperationCancelled {};
     }
 

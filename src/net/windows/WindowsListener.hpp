@@ -70,6 +70,14 @@ class WindowsListener final: public IListener
     WindowsListener(
         EventLoop& loop, SOCKET socket, WSAEVENT event, std::uint16_t localPort, std::string path) noexcept;
 
+    /// Closes the listening socket and its event (and removes the socket file),
+    /// telling the loop first so a parked accept is resumed rather than left
+    /// waiting on a handle that can never signal again.
+    /// @param policy How a parked accept observes the close. @c close() passes
+    ///        @c Resume — this listener is alive. The destructor passes @c Cancel,
+    ///        since the accept loop reaches @c _socket / @c _event through `this`.
+    void close(FdWakePolicy policy) noexcept;
+
     EventLoop& _loop;
     SOCKET _socket;
     WSAEVENT _event;

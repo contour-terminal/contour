@@ -56,6 +56,15 @@ class WindowsSocket final: public ISocket
     [[nodiscard]] bool isClosed() const noexcept override { return _closed; }
 
   private:
+    /// Closes the socket and its event, telling the loop first so a flow parked on
+    /// the event is resumed rather than left waiting on a handle that can never
+    /// signal again.
+    /// @param policy How a parked flow observes the close. The public @c close()
+    ///        passes @c Resume — this object is still alive, so the flow may safely
+    ///        re-read @c _closed. The destructor passes @c Cancel, because by then
+    ///        the flow would be reading `this` through a dangling pointer.
+    void close(FdWakePolicy policy) noexcept;
+
     /// Which readiness a park waits for.
     enum class Ready
     {

@@ -24,6 +24,25 @@
 namespace net
 {
 
+namespace
+{
+    /// Closes a descriptor the connect path is abandoning, announcing it to the loop
+    /// first.
+    ///
+    /// Nothing is normally parked on it by this point — the awaiter detached in its
+    /// own await_resume — but the loop's contract is that a descriptor which may be
+    /// registered is announced BEFORE it closes, and honouring that unconditionally
+    /// is what keeps a second waiter on the same descriptor from being stranded on
+    /// epoll or kqueue, neither of which can report a closed one.
+    /// @param loop The loop the descriptor was registered with.
+    /// @param fd The descriptor to close.
+    void discardSocket(EventLoop* loop, int fd) noexcept
+    {
+        loop->notifyHandleClosing(fd, FdWakePolicy::Cancel);
+        ::close(fd);
+    }
+} // namespace
+
 std::expected<std::unique_ptr<IListener>, NetError> listen(EventLoop& loop,
                                                            std::string_view host,
                                                            std::uint16_t port,
@@ -79,7 +98,7 @@ coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connect(EventLoop*
             }
             catch (coro::OperationCancelled const&)
             {
-                ::close(fd);
+                discardSocket(loop, fd);
                 ::freeaddrinfo(resolved);
                 co_return std::unexpected(makeNetError(NetErrorCode::Cancelled, 0, "connect cancelled"));
             }
@@ -102,7 +121,7 @@ coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connect(EventLoop*
             lastError = makeNetError(
                 errno == ECONNREFUSED ? NetErrorCode::ConnRefused : NetErrorCode::Other, errno, "connect");
         }
-        ::close(fd);
+        discardSocket(loop, fd);
     }
     ::freeaddrinfo(resolved);
     co_return std::unexpected(lastError);
@@ -146,7 +165,7 @@ coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(EventL
         }
         catch (coro::OperationCancelled const&)
         {
-            ::close(fd);
+            discardSocket(loop, fd);
             co_return std::unexpected(makeNetError(NetErrorCode::Cancelled, 0, "connect cancelled"));
         }
         int soError = 0;
@@ -154,13 +173,13 @@ coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(EventL
         ::getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &soLen);
         if (soError == 0)
             co_return std::unique_ptr<ISocket>(new PosixSocket(*loop, fd));
-        ::close(fd);
+        discardSocket(loop, fd);
         co_return std::unexpected(makeNetError(
             soError == ECONNREFUSED ? NetErrorCode::ConnRefused : NetErrorCode::Other, soError, "connect"));
     }
 
     auto const err = errno;
-    ::close(fd);
+    discardSocket(loop, fd);
     co_return std::unexpected(
         makeNetError(err == ECONNREFUSED ? NetErrorCode::ConnRefused : NetErrorCode::Other, err, "connect"));
 }

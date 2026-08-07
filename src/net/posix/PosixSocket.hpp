@@ -48,6 +48,15 @@ class PosixSocket final: public ISocket
     [[nodiscard]] int native() const noexcept { return _fd; }
 
   private:
+    /// Closes the fd, telling the loop first so a flow parked on it is resumed
+    /// rather than left waiting for readiness the poller can no longer report.
+    /// @param policy How a parked flow observes the close. The public @c close()
+    ///        passes @c Resume — this object is still alive, so the flow may safely
+    ///        re-read @c _closed. The destructor passes @c Cancel, because by the
+    ///        time it resumes the flow would be reading `this` through a dangling
+    ///        pointer; unwinding via @c OperationCancelled never re-enters the body.
+    void close(FdWakePolicy policy) noexcept;
+
     EventLoop& _loop;
     int _fd;
     bool _plainFd = false; ///< Set on first ENOTSOCK: a PTY/pipe fd, served via read/write.

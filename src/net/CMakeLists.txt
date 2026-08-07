@@ -36,6 +36,7 @@ set(net_SOURCES
     platform/WinsockInit.hpp
     testing/InMemoryTransport.cpp
     testing/InMemoryTransport.hpp
+    testing/EventSourceBackends.hpp
     testing/ScriptedEventSource.hpp
 )
 if(WIN32)

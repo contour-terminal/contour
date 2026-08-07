@@ -37,16 +37,28 @@ WindowsSocket::WindowsSocket(EventLoop& loop, SOCKET socket, std::string peerAdd
 
 WindowsSocket::~WindowsSocket()
 {
-    close();
+    // Cancel, not Resume: read/write and parkUntilReady reach _closed, _event and
+    // _socket through `this`, which is about to stop existing. Unwinding via
+    // OperationCancelled never re-enters the body.
+    close(FdWakePolicy::Cancel);
 }
 
 void WindowsSocket::close() noexcept
+{
+    close(FdWakePolicy::Resume);
+}
+
+void WindowsSocket::close(FdWakePolicy policy) noexcept
 {
     if (_closed)
         return;
     _closed = true;
     if (_event != WSA_INVALID_EVENT)
     {
+        // Before the close, while the handle is still valid. The event -- not the
+        // socket -- is what parkUntilReady registers with the loop, so it is the
+        // handle a parked flow must be woken by.
+        _loop.notifyHandleClosing(static_cast<HANDLE>(_event), policy);
         WSACloseEvent(_event);
         _event = WSA_INVALID_EVENT;
     }

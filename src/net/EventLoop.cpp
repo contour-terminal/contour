@@ -32,6 +32,13 @@ EventLoop::~EventLoop()
     // the spawned-flow Tasks destroy already-finished frames. Cancelled re-awaits
     // resume synchronously (await_suspend returns false when stop is requested), so
     // a single drain converges. No-op and effectively free when nothing is parked.
+    //
+    // Note what is deliberately NOT done here: _closedTokens is left unconsumed.
+    // Those wakes resume a flow on its NORMAL path, which is right while the loop
+    // runs (the owner just called close) and wrong now — an owner declared after the
+    // loop is already destroyed by the time this runs, so the flow must unwind via
+    // the cancellation below instead. wakeAllWaiters still finds every such waiter,
+    // because notifyHandleClosing leaves the park in place.
     _rootStop.request_stop();
     wakeAllWaiters();
     drainReadyQueue();
@@ -112,20 +119,67 @@ FdToken EventLoop::registerFdWaiter(NativeHandle fd, FdInterest interest, std::c
     auto const token = _source.attach(fd, interest);
     if (!token)
         return FdToken::invalid();
-    _fdWaiters.emplace(token, waiter);
+    _fdWaiters.emplace(token, ParkedWaiter { .handle = waiter, .fd = fd });
     _waiterToToken.emplace(waiter, token);
+    _fdToTokens.emplace(fd, token);
     return token;
 }
 
-void EventLoop::unregisterFdWaiter(FdToken token) noexcept
+std::coroutine_handle<> EventLoop::dropParkedWaiter(FdToken token) noexcept
+{
+    auto const it = _fdWaiters.find(token);
+    if (it == _fdWaiters.end())
+        return {};
+
+    auto const parked = it->second;
+    _waiterToToken.erase(parked.handle);
+    // Erase this token alone: a descriptor may carry a second park (a reader beside
+    // a writer), and erasing by key would silently drop that one too.
+    auto const [first, last] = _fdToTokens.equal_range(parked.fd);
+    for (auto entry = first; entry != last; ++entry)
+        if (entry->second == token)
+        {
+            _fdToTokens.erase(entry);
+            break;
+        }
+    _fdWaiters.erase(it);
+    return parked.handle;
+}
+
+FdWakeReason EventLoop::unregisterFdWaiter(FdToken token) noexcept
 {
     if (!token)
-        return;
+        return FdWakeReason::Ready;
     _source.detach(token);
-    if (auto const it = _fdWaiters.find(token); it != _fdWaiters.end())
+    static_cast<void>(dropParkedWaiter(token));
+    // Consume the mark rather than merely reading it: the awaiter asks exactly once,
+    // and a token left behind here would outlive its registration and could collide
+    // with nothing — but would grow without bound on a long-lived loop.
+    return _abandoned.erase(token) != 0 ? FdWakeReason::Abandoned : FdWakeReason::Ready;
+}
+
+void EventLoop::notifyHandleClosing(NativeHandle fd, FdWakePolicy policy)
+{
+    if (fd == InvalidHandle)
+        return;
+
+    auto const [first, last] = _fdToTokens.equal_range(fd);
+    for (auto entry = first; entry != last; ++entry)
     {
-        _waiterToToken.erase(it->second);
-        _fdWaiters.erase(it);
+        auto const token = entry->second;
+        // Drop the kernel registration NOW, while the descriptor is still open. Left
+        // to the awaiter's own detach it would be issued after the close, against a
+        // descriptor number the kernel may already have reassigned — unregistering
+        // whichever socket now holds it. Detaching here also releases the private
+        // dup() a duplicate registration holds, which would otherwise keep the peer's
+        // connection open past the close.
+        _source.detach(token);
+        // The park itself stays in _fdWaiters: requestStop() and ~EventLoop find their
+        // waiters there, and must still be able to cancel this one if either runs
+        // before the next pump.
+        _closedTokens.push_back(token);
+        if (policy == FdWakePolicy::Cancel)
+            _abandoned.insert(token);
     }
 }
 
@@ -136,11 +190,12 @@ void EventLoop::requeueForCancellation(std::coroutine_handle<> waiter)
 
     // If parked as an fd waiter, drop and detach its registration so the stale
     // entry cannot also fire. Use the reverse map for O(1) lookup.
+    auto wasParked = false;
     if (auto const rt = _waiterToToken.find(waiter); rt != _waiterToToken.end())
     {
         _source.detach(rt->second);
-        _fdWaiters.erase(rt->second);
-        _waiterToToken.erase(rt);
+        static_cast<void>(dropParkedWaiter(rt->second));
+        wasParked = true;
     }
 
     // If parked on a timer, remove its heap entry too. We re-queue the waiter below
@@ -150,26 +205,31 @@ void EventLoop::requeueForCancellation(std::coroutine_handle<> waiter)
     // use-after-free. Detaching it here mirrors the fd branch above. (A coroutine is
     // parked on at most one source, so at most one of these two branches matches.)
     if (std::erase_if(_timers, [waiter](TimerEntry const& entry) { return entry.handle == waiter; }) != 0)
+    {
         std::ranges::make_heap(_timers, soonestFirst);
+        wasParked = true;
+    }
 
-    // Re-queue once. drainReadyQueue skips already-done handles, so a single push
-    // is safe.
-    _ready.push_back(waiter);
+    // Re-queue ONLY a waiter this call actually unparked. A waiter that was already
+    // woken is sitting in _ready with its frame intact but its cancellation callback
+    // still armed — await_resume, which disarms it, has not run yet — so a stop
+    // requested in that window lands here and would queue it a SECOND time. The first
+    // resume runs the flow to completion and its owner destroys the frame; the second
+    // then calls .done() on freed memory. That is the use-after-free that made the
+    // first attempt at close-wakeup segfault, and this guard is what removes it.
+    if (wasParked)
+        _ready.push_back(waiter);
 }
 
 void EventLoop::wakeFdWaiters(std::vector<FdToken> const& tokens)
 {
     for (auto const token: tokens)
     {
-        auto const it = _fdWaiters.find(token);
-        if (it == _fdWaiters.end())
-            continue; // unknown token (e.g. the post self-pipe) — not a parked flow
-        auto const handle = it->second;
         // Drop the parked slot now; the awaiter detaches the source registration in
         // its await_resume. Erasing first keeps the map consistent if the resumed
-        // frame re-enters the loop.
-        _waiterToToken.erase(it->second);
-        _fdWaiters.erase(it);
+        // frame re-enters the loop. A token with no park (e.g. the post self-pipe,
+        // or one already woken this pump) yields a null handle and is skipped.
+        auto const handle = dropParkedWaiter(token);
         if (handle && !handle.done())
             _ready.push_back(handle);
     }
@@ -228,11 +288,12 @@ void EventLoop::wakeAllWaiters()
     // frame re-entering the loop cannot mutate the container mid-iteration.
     auto parked = std::exchange(_fdWaiters, {});
     _waiterToToken.clear();
-    for (auto const& [token, handle]: parked)
+    _fdToTokens.clear();
+    for (auto const& [token, waiter]: parked)
     {
         _source.detach(token);
-        if (handle && !handle.done())
-            _ready.push_back(handle);
+        if (waiter.handle && !waiter.handle.done())
+            _ready.push_back(waiter.handle);
     }
 }
 
@@ -241,6 +302,23 @@ void EventLoop::pumpOnce()
     reapFinishedSpawns();
     runPostedCallbacks();
     drainReadyQueue();
+
+    // Descriptors closed since the last pump. The source cannot report these — epoll
+    // drops a closed descriptor from its set and kqueue drops its filters, both
+    // silently — so the loop supplies that readiness itself and MERGES it into this
+    // pump's wait outcome below.
+    //
+    // Merging rather than short-circuiting is load-bearing. Returning early here
+    // would skip the wait, and every other descriptor that became ready in the same
+    // instant — a peer's EOF, most importantly — would go unreported until some
+    // later pump that may never come, because the caller's blockOn exits as soon as
+    // its root flow is done. poll(2) never had that problem: it reports POLLNVAL for
+    // the closed descriptor alongside every other revent, in one call. This keeps
+    // every backend doing the same.
+    //
+    // Taken BEFORE the wait so a pending close can turn it into a non-blocking poll:
+    // blocking would wait for readiness that can no longer arrive.
+    auto const closed = std::exchange(_closedTokens, {});
 
     // Nothing is parked on a source: a well-formed root flow either completed
     // (the caller's loop will observe `done()`) or is awaiting a child task that
@@ -256,7 +334,9 @@ void EventLoop::pumpOnce()
         return;
     }
 
-    auto const outcome = _source.wait(computeTimeoutMs());
+    // A pending close polls instead of blocking: the closed descriptor can no longer
+    // produce readiness, so an indefinite wait would never return on its account.
+    auto const outcome = _source.wait(closed.empty() ? computeTimeoutMs() : 0);
 
     // A cross-thread post may have both queued work and signalled the self-pipe.
     if (_postToken && std::ranges::find(outcome.readyRead, _postToken) != outcome.readyRead.end())
@@ -267,6 +347,10 @@ void EventLoop::pumpOnce()
     // self-pipe's token has no parked waiter and is skipped naturally.
     wakeFdWaiters(outcome.readyRead);
     wakeFdWaiters(outcome.readyWrite);
+    // Then the closed descriptors, as one more source of readiness. Last, so a token
+    // the source also reported is woken exactly once — the first wake drops its park,
+    // and a token with no park is skipped.
+    wakeFdWaiters(closed);
 
     fireExpiredTimers();
 

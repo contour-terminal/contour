@@ -69,6 +69,15 @@ class UnixListener final: public IListener
   private:
     UnixListener(EventLoop& loop, int fd, std::filesystem::path path) noexcept;
 
+    /// Closes the listening fd and unlinks the socket file, telling the loop first
+    /// so a parked accept is resumed rather than left waiting on a descriptor the
+    /// poller can no longer report.
+    /// @param policy How a parked accept observes the close. @c close() passes
+    ///        @c Resume — this listener is alive, so acceptOne may safely re-read
+    ///        the @c _fd / @c _closed it holds pointers to. The destructor passes
+    ///        @c Cancel, since those pointers are about to dangle.
+    void close(FdWakePolicy policy) noexcept;
+
     EventLoop& _loop;
     int _fd;
     std::filesystem::path _path;

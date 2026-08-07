@@ -47,6 +47,15 @@ class PosixListener final: public IListener
   private:
     PosixListener(EventLoop& loop, int fd, std::uint16_t localPort) noexcept;
 
+    /// Closes the listening fd, telling the loop first so a parked accept is
+    /// resumed rather than left waiting on a descriptor the poller can no longer
+    /// report.
+    /// @param policy How a parked accept observes the close. @c close() passes
+    ///        @c Resume — this listener is alive, so acceptOne may safely re-read
+    ///        the @c _fd / @c _closed it holds pointers to. The destructor passes
+    ///        @c Cancel, since those pointers are about to dangle.
+    void close(FdWakePolicy policy) noexcept;
+
     EventLoop& _loop;
     int _fd;
     std::uint16_t _localPort;

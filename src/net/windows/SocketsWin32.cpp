@@ -27,6 +27,25 @@
 namespace net
 {
 
+namespace
+{
+    /// Closes a connect-readiness event the connect path is done with, announcing it
+    /// to the loop first.
+    ///
+    /// The EVENT, not the socket, is what a park registers with the loop, so it is
+    /// the handle the loop knows. Nothing is normally parked on it by this point —
+    /// the awaiter detached in its own await_resume — but the loop's contract is
+    /// that a handle which may be registered is announced BEFORE it closes, and
+    /// honouring that unconditionally keeps the behaviour identical to POSIX.
+    /// @param loop The loop the event may have been registered with.
+    /// @param event The event to close.
+    void discardEvent(EventLoop* loop, WSAEVENT event) noexcept
+    {
+        loop->notifyHandleClosing(static_cast<HANDLE>(event), FdWakePolicy::Cancel);
+        WSACloseEvent(event);
+    }
+} // namespace
+
 std::expected<std::unique_ptr<IListener>, NetError> listen(EventLoop& loop,
                                                            std::string_view host,
                                                            std::uint16_t port,
@@ -87,7 +106,7 @@ coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connect(EventLoop*
             }
             catch (coro::OperationCancelled const&)
             {
-                WSACloseEvent(event);
+                discardEvent(loop, event);
                 closesocket(sock);
                 freeaddrinfo(resolved);
                 co_return std::unexpected(makeNetError(NetErrorCode::Cancelled, 0, "connect cancelled"));
@@ -100,7 +119,7 @@ coro::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connect(EventLoop*
         }
 
         // The WindowsSocket re-associates the event with its own interest set.
-        WSACloseEvent(event);
+        discardEvent(loop, event);
 
         if (connectErr == 0)
         {

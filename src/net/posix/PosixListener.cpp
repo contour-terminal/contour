@@ -25,16 +25,28 @@ PosixListener::PosixListener(EventLoop& loop, int fd, std::uint16_t localPort) n
 
 PosixListener::~PosixListener()
 {
-    close();
+    // Cancel, not Resume: acceptOne holds `int const* fd` / `bool const* closed`
+    // into this object, which is about to stop existing. Unwinding via
+    // OperationCancelled returns without ever dereferencing them again.
+    close(FdWakePolicy::Cancel);
 }
 
 void PosixListener::close() noexcept
+{
+    close(FdWakePolicy::Resume);
+}
+
+void PosixListener::close(FdWakePolicy policy) noexcept
 {
     if (_closed)
         return;
     _closed = true;
     if (_fd >= 0)
     {
+        // Before the close, while the descriptor is still valid: epoll and kqueue
+        // cannot report a closed descriptor, so without this a parked accept would
+        // never be resumed.
+        _loop.notifyHandleClosing(_fd, policy);
         ::close(_fd);
         _fd = -1;
     }
