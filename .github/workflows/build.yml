@@ -671,7 +671,14 @@ jobs:
             https://github.com/tmux/tmux/releases/download/3.7b/tmux-3.7b.tar.gz
           tar xzf "$RUNNER_TEMP/tmux.tar.gz" -C "$RUNNER_TEMP"
           # The release tarball ships a generated configure, so no autotools are needed here.
-          cd "$RUNNER_TEMP/tmux-3.7b" && ./configure && make -j"$(sysctl -n hw.ncpu)" && sudo make install
+          # --disable-utf8proc is required, not merely a choice: 3.7b's configure hard-errors
+          # ("must give --enable-utf8proc or --disable-utf8proc") rather than defaulting, and this
+          # oracle only has to speak the control-mode protocol -- how tmux measures east-Asian
+          # width does not enter into it. Stated on both platforms so they build the same binary.
+          cd "$RUNNER_TEMP/tmux-3.7b" \
+            && ./configure --disable-utf8proc \
+            && make -j"$(sysctl -n hw.ncpu)" \
+            && sudo make install
           tmux -V
       - name: "Generate build files"
         run: |
@@ -1061,7 +1068,12 @@ jobs:
             https://github.com/tmux/tmux/releases/download/3.7b/tmux-3.7b.tar.gz
           tar xzf "$RUNNER_TEMP/tmux.tar.gz" -C "$RUNNER_TEMP"
           # The release tarball ships a generated configure, so no autotools are needed here.
-          cd "$RUNNER_TEMP/tmux-3.7b" && ./configure && make -j"$(nproc)" && sudo make install
+          # --disable-utf8proc: see the macOS job for why it must be stated rather than defaulted.
+          # Passing it here too keeps both platforms measuring against the same tmux build.
+          cd "$RUNNER_TEMP/tmux-3.7b" \
+            && ./configure --disable-utf8proc \
+            && make -j"$(nproc)" \
+            && sudo make install
           tmux -V
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;

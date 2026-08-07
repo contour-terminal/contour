@@ -54,8 +54,8 @@ namespace detail
         // names are fixed snake_case by the language, and the promise hooks must
         // be instance methods (a static initial_suspend/final_suspend would make
         // the compiler-generated promise.hook() calls trip static-accessed-through-
-        // instance). readability-convert-member-functions-to-static is therefore
-        // disabled for this directory (see src/coro/.clang-tidy).
+        // instance). readability-convert-member-functions-to-static would flag the
+        // stateless ones anyway; it is disabled tree-wide in the root .clang-tidy.
         // NOLINTNEXTLINE(readability-identifier-naming): coroutine machinery, looked up by spelling.
         [[nodiscard]] bool await_ready() const noexcept { return false; }
 

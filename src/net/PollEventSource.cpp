@@ -2,14 +2,14 @@
 #include <net/PollEventSource.hpp>
 
 #ifdef _WIN32
-    #include <crispy/LogStore.hpp>
-
     #include <algorithm>
     #include <cstdint>
+    #include <format>
     #include <ranges>
 
     #include <windows.h>
 
+    #include <net/Diagnostics.hpp>
     #include <net/WaitChunking.hpp>
 #else
     #include <poll.h>
@@ -203,7 +203,7 @@ WaitOutcome PollEventSource::wait(int timeoutMs)
         // pure poll).
         if (verdict == WaitVerdict::Failed)
         {
-            errorLog()("WaitForMultipleObjects failed: {}", GetLastError());
+            reportDiagnostic(std::format("WaitForMultipleObjects failed: {}", GetLastError()));
             if (timeoutMs != 0)
                 Sleep(timeout < SweepSliceMs ? timeout : SweepSliceMs);
         }
@@ -234,7 +234,8 @@ WaitOutcome PollEventSource::wait(int timeoutMs)
                 WaitForMultipleObjects(chunkSize, handles.data() + chunk.offset, FALSE, 0), chunkSize);
             if (verdict == WaitVerdict::Failed && !failureLogged)
             {
-                errorLog()("WaitForMultipleObjects (chunk at {}) failed: {}", chunk.offset, GetLastError());
+                reportDiagnostic(std::format(
+                    "WaitForMultipleObjects (chunk at {}) failed: {}", chunk.offset, GetLastError()));
                 failureLogged = true; // log once per wait(), not once per sweep, to bound spam.
             }
             // Signalled OR Failed both hand off to collectSignalled below: a Failed chunk

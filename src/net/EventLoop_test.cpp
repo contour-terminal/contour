@@ -99,6 +99,13 @@ Task<void> incrementAndFinish(int* counter)
     co_return;
 }
 
+/// A root flow that completes at once, so `blockOn` pumps exactly as far as the
+/// spawned flows need and no further.
+Task<void> justReturn()
+{
+    co_return;
+}
+
 /// Sets *destroyed = true when its frame unwinds (RAII), so a test can prove a
 /// parked flow was cancelled-and-unwound rather than raw-destroyed.
 struct UnwindFlag
@@ -266,6 +273,90 @@ TEST_CASE("waitReadable resumes when the registered fd becomes readable", "[Even
     auto const result = loop.blockOn(awaitReadableOrCancel(&loop, (*pipe)->readFd(), Cancelled));
 
     REQUIRE(result == 1);
+}
+
+TEST_CASE("notifyHandleClosing on an unwatched fd records nothing", "[EventLoop][fd][closehang]")
+{
+    // Closing a descriptor nobody is parked on must not schedule any wake. If it
+    // did, the next pump would deliver a token naming a registration that no longer
+    // exists — harmless today only because wakeFdWaiters skips unknown tokens, but a
+    // token can be reused, and then the wake would land on an unrelated flow.
+    auto pipe = net::createSystemPipe();
+    REQUIRE(pipe.has_value());
+
+    auto source = ScriptedEventSource {};
+    auto loop = EventLoop { source };
+
+    loop.notifyHandleClosing((*pipe)->readFd(), net::FdWakePolicy::Resume);
+    // And an invalid handle is refused outright rather than looked up: on Windows a
+    // NativeHandle is a pointer, so a null one would otherwise be a perfectly good
+    // multimap key that any other unset handle could collide with.
+    loop.notifyHandleClosing(net::InvalidHandle, net::FdWakePolicy::Cancel);
+
+    // Nothing parked and nothing recorded, so this pump neither waits nor resumes.
+    // A recorded wake would have turned the wait into a poll; an exhausted script
+    // would have thrown had one been attempted.
+    auto counter = 0;
+    loop.blockOn(incrementAndFinish(&counter));
+    REQUIRE(counter == 1);
+    REQUIRE(source.waitCount() == 0);
+}
+
+TEST_CASE("notifyHandleClosing detaches the registration while the fd is still valid",
+          "[EventLoop][fd][closehang]")
+{
+    // The kernel registration has to be dropped at CLOSE time, not left for the
+    // awaiter's own detach. By then the descriptor number may have been reassigned
+    // to a new socket, and epoll_ctl(EPOLL_CTL_DEL) / kqueue's delete-by-descriptor
+    // would unregister THAT one instead. attachedCount is the observable proof.
+    auto pipe = net::createSystemPipe();
+    REQUIRE(pipe.has_value());
+
+    // Declared BEFORE the loop, so it outlives it: ~EventLoop resumes the still-
+    // parked flow, whose RAII guard writes here as it unwinds.
+    auto destroyed = false;
+
+    auto source = ScriptedEventSource {};
+    source.pushTimeout(); // the park's first wait reports nothing
+    auto loop = EventLoop { source };
+
+    loop.spawn(waitReadableWithGuard(&loop, (*pipe)->readFd(), &destroyed));
+    loop.blockOn(justReturn()); // let the spawned flow reach its park
+
+    // The loop's self-pipe plus the parked waiter.
+    REQUIRE(source.attachedCount() == 2);
+
+    loop.notifyHandleClosing((*pipe)->readFd(), net::FdWakePolicy::Resume);
+    REQUIRE(source.attachedCount() == 1); // detached immediately, not at resume
+}
+
+TEST_CASE("a recorded close is delivered without blocking the pump", "[EventLoop][fd][closehang]")
+{
+    // A closed descriptor can no longer produce readiness, so the pump must not
+    // block waiting for it. It still performs its wait — merged, not skipped, so
+    // nothing else ready in the same instant is starved — but with a zero timeout.
+    auto pipe = net::createSystemPipe();
+    REQUIRE(pipe.has_value());
+
+    // Declared BEFORE the loop, so it outlives it (see the case above).
+    auto destroyed = false;
+
+    auto source = ScriptedEventSource {};
+    source.pushTimeout(); // the park's wait
+    source.pushTimeout(); // the close-wake pump's wait, which must be a poll
+    auto loop = EventLoop { source };
+
+    loop.spawn(waitReadableWithGuard(&loop, (*pipe)->readFd(), &destroyed));
+    loop.blockOn(justReturn());
+    auto const waitsBeforeClose = source.waitCount();
+
+    loop.notifyHandleClosing((*pipe)->readFd(), net::FdWakePolicy::Resume);
+    loop.blockOn(justReturn());
+
+    REQUIRE(source.waitCount() == waitsBeforeClose + 1);
+    // Zero, not -1: an indefinite wait would never return on the closed fd's account.
+    REQUIRE(source.recordedTimeouts().back() == 0);
+    REQUIRE(destroyed); // the parked flow resumed and unwound
 }
 
 TEST_CASE("waitReadable on an invalid fd resolves immediately as cancelled", "[EventLoop][fd]")

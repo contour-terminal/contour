@@ -21,14 +21,14 @@
 #include <net/EventLoop.hpp>
 #include <net/IListener.hpp>
 #include <net/ISocket.hpp>
-#include <net/PollEventSource.hpp>
 #include <net/Sockets.hpp>
+#include <net/testing/EventSourceBackends.hpp>
 #include <net/testing/InMemoryTransport.hpp>
 
 using coro::Task;
 using net::EventLoop;
 using net::ISocket;
-using net::PollEventSource;
+using net::testing::AllBackends;
 
 namespace
 {
@@ -131,49 +131,78 @@ Task<void> closeWhileParked(EventLoop* loop, ISocket* sock, bool* resumedWithErr
 
 TEST_CASE("InMemoryTransport round-trips bytes between connected endpoints", "[net]")
 {
-    auto source = PollEventSource {};
-    auto loop = EventLoop { source };
+    for (auto const& backend: AllBackends)
+    {
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue; // not available on this platform
 
-    auto wroteOk = false;
-    auto readOk = false;
-    loop.blockOn(pairRoundTrip(&loop, &wroteOk, &readOk));
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
 
-    REQUIRE(wroteOk);
-    REQUIRE(readOk);
+            auto wroteOk = false;
+            auto readOk = false;
+            loop.blockOn(pairRoundTrip(&loop, &wroteOk, &readOk));
+
+            REQUIRE(wroteOk);
+            REQUIRE(readOk);
+        }
+    }
 }
 
-TEST_CASE("closing a socket resumes a reader parked on it instead of hanging", "[net][poll]")
+TEST_CASE("closing a socket resumes a reader parked on it instead of hanging", "[net]")
 {
     // A reader parked on an idle socket that is then closed under it must resume with an error, not
-    // hang. On POSIX poll(2) reports POLLNVAL for the closed fd; on Windows the reactor must route the
-    // now-invalid WSAEVENT the same way. Regression guard: this deadlocked on Windows before the fix,
-    // taking the whole disconnect-while-parked path (attach clients, control clients) down with it.
-    auto source = PollEventSource {};
-    auto loop = EventLoop { source };
-    auto pair = net::testing::makeSocketPair(loop);
-    REQUIRE(pair.has_value());
+    // hang. poll(2) reports POLLNVAL for the closed fd and Windows reports the now-invalid WSAEVENT
+    // as failed; epoll and kqueue can report neither, so they rely on EventLoop::notifyHandleClosing.
+    // Regression guard twice over: this deadlocked on Windows before the reactor routed the invalid
+    // handle, and it deadlocked on epoll/kqueue for as long as this case hardcoded PollEventSource —
+    // which is exactly why it now runs against every backend.
+    for (auto const& backend: AllBackends)
+    {
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue; // not available on this platform
 
-    auto resumedWithError = false;
-    loop.blockOn(closeWhileParked(&loop, pair->second.get(), &resumedWithError));
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+            auto pair = net::testing::makeSocketPair(loop);
+            REQUIRE(pair.has_value());
 
-    CHECK(resumedWithError); // it resumed at all (no hang) AND saw the close as an error
+            auto resumedWithError = false;
+            loop.blockOn(closeWhileParked(&loop, pair->second.get(), &resumedWithError));
+
+            CHECK(resumedWithError); // it resumed at all (no hang) AND saw the close as an error
+        }
+    }
 }
 
-TEST_CASE("listen + connect + accept echo a request over loopback", "[net][poll]")
+TEST_CASE("listen + connect + accept echo a request over loopback", "[net]")
 {
-    auto source = PollEventSource {};
-    auto loop = EventLoop { source };
+    for (auto const& backend: AllBackends)
+    {
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue; // not available on this platform
 
-    auto listener = net::listen(loop, "127.0.0.1", 0);
-    REQUIRE(listener.has_value());
-    REQUIRE((*listener)->localPort() != 0);
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
 
-    auto served = false;
-    auto matched = false;
-    loop.blockOn(loopbackEcho(&loop, listener->get(), &served, &matched));
+            auto listener = net::listen(loop, "127.0.0.1", 0);
+            REQUIRE(listener.has_value());
+            REQUIRE((*listener)->localPort() != 0);
 
-    REQUIRE(served);
-    REQUIRE(matched);
+            auto served = false;
+            auto matched = false;
+            loop.blockOn(loopbackEcho(&loop, listener->get(), &served, &matched));
+
+            REQUIRE(served);
+            REQUIRE(matched);
+        }
+    }
 }
 
 namespace
@@ -259,61 +288,79 @@ Task<void> unixEcho(EventLoop* loop, net::IListener* listener, std::string path,
 // subset reports no skips: `windows-latest` is far past the 1803 that introduced AF_UNIX, so a
 // skip there means the daemon's transport silently stopped being tested, not that the platform
 // lacks it. Same reasoning as the [oracle] tag on the tmux interop tests.
-TEST_CASE("unix-domain listen + connect echo a request", "[net][poll][afunix]")
+TEST_CASE("unix-domain listen + connect echo a request", "[net][afunix]")
 {
     // Runtime-gated: on platforms without AF_UNIX support this documents the
     // Unsupported answer instead (never a crash). On Windows this is the
     // afunix.h path's coverage.
-    auto source = PollEventSource {};
-    auto loop = EventLoop { source };
-
-    auto const path = (std::filesystem::temp_directory_path()
-                       / std::format("contour-net-{}", std::random_device {}()) / "echo.sock")
-                          .string();
-    auto listener = net::listenUnix(loop, path);
-    if (!listener.has_value())
+    for (auto const& backend: AllBackends)
     {
-        REQUIRE(listener.error().code == net::NetErrorCode::Unsupported);
-        SKIP("AF_UNIX not supported on this platform");
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue; // not available on this platform
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+
+            auto const path = (std::filesystem::temp_directory_path()
+                               / std::format("contour-net-{}", std::random_device {}()) / "echo.sock")
+                                  .string();
+            auto listener = net::listenUnix(loop, path);
+            if (!listener.has_value())
+            {
+                REQUIRE(listener.error().code == net::NetErrorCode::Unsupported);
+                SKIP("AF_UNIX not supported on this platform");
+            }
+
+            auto served = false;
+            auto matched = false;
+            loop.blockOn(unixEcho(&loop, listener->get(), path, &served, &matched));
+            REQUIRE(served);
+            REQUIRE(matched);
+
+            auto ec = std::error_code {};
+            std::filesystem::remove_all(std::filesystem::path { path }.parent_path(), ec);
+        }
     }
-
-    auto served = false;
-    auto matched = false;
-    loop.blockOn(unixEcho(&loop, listener->get(), path, &served, &matched));
-    REQUIRE(served);
-    REQUIRE(matched);
-
-    auto ec = std::error_code {};
-    std::filesystem::remove_all(std::filesystem::path { path }.parent_path(), ec);
 }
 
-TEST_CASE("closing a unix listener removes its socket file", "[net][poll][afunix]")
+TEST_CASE("closing a unix listener removes its socket file", "[net][afunix]")
 {
     // The daemon's contract (docs/internals/vthost.md, "Daemon lifetime"): a closed listener
     // leaves no path behind, so the next start's liveness probe finds nothing and binds fresh
     // rather than reclaiming a corpse. Windows used to keep the file — WindowsListener held no
     // path at all — which is what this pins.
-    auto source = PollEventSource {};
-    auto loop = EventLoop { source };
-
-    auto const dir = makeSocketDir();
-    auto const path = (dir / "closing.sock").string();
-    auto listener = net::listenUnix(loop, path);
-    if (!listener.has_value())
+    for (auto const& backend: AllBackends)
     {
-        REQUIRE(listener.error().code == net::NetErrorCode::Unsupported);
-        SKIP("AF_UNIX not supported on this platform");
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue; // not available on this platform
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+
+            auto const dir = makeSocketDir();
+            auto const path = (dir / "closing.sock").string();
+            auto listener = net::listenUnix(loop, path);
+            if (!listener.has_value())
+            {
+                REQUIRE(listener.error().code == net::NetErrorCode::Unsupported);
+                SKIP("AF_UNIX not supported on this platform");
+            }
+            REQUIRE(socketFileExists(path));
+
+            (*listener)->close();
+            REQUIRE_FALSE(socketFileExists(path));
+
+            auto ec = std::error_code {};
+            std::filesystem::remove_all(dir, ec);
+        }
     }
-    REQUIRE(socketFileExists(path));
-
-    (*listener)->close();
-    REQUIRE_FALSE(socketFileExists(path));
-
-    auto ec = std::error_code {};
-    std::filesystem::remove_all(dir, ec);
 }
 
-TEST_CASE("a live server on the path is not hijacked", "[net][poll][afunix]")
+TEST_CASE("a live server on the path is not hijacked", "[net][afunix]")
 {
     // A second bind must be REFUSED rather than unlink the live socket out from under the
     // incumbent, which would keep all its sessions but become unreachable forever. The refusal
@@ -321,38 +368,48 @@ TEST_CASE("a live server on the path is not hijacked", "[net][poll][afunix]")
     //
     // Cross-platform on purpose: the POSIX twin in UnixSocket_test.cpp cannot run here, and the
     // Windows probe (WindowsListener::probeUnixSocketOwner) had no coverage at all.
-    auto source = PollEventSource {};
-    auto loop = EventLoop { source };
-
-    auto const dir = makeSocketDir();
-    auto const path = (dir / "default").string();
-    auto first = net::listenUnix(loop, path);
-    if (!first.has_value())
+    for (auto const& backend: AllBackends)
     {
-        REQUIRE(first.error().code == net::NetErrorCode::Unsupported);
-        SKIP("AF_UNIX not supported on this platform");
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue; // not available on this platform
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+
+            auto const dir = makeSocketDir();
+            auto const path = (dir / "default").string();
+            auto first = net::listenUnix(loop, path);
+            if (!first.has_value())
+            {
+                REQUIRE(first.error().code == net::NetErrorCode::Unsupported);
+                SKIP("AF_UNIX not supported on this platform");
+            }
+
+            auto second = net::listenUnix(loop, path);
+            REQUIRE_FALSE(second.has_value());
+            REQUIRE(second.error().code == net::NetErrorCode::AddressInUse);
+            REQUIRE(socketFileExists(path)); // the incumbent's file, left intact
+
+            // The incumbent still serves: a client connects and gets its probe echoed back. The refused
+            // bind's own liveness probe left a dropped connection queued ahead of it, which is why the
+            // server flow here drains rather than treating the first accept as the request.
+            auto served = false;
+            auto matched = false;
+            auto run =
+                [](net::IListener* listener, EventLoop* lp, std::string p, bool* s, bool* m) -> Task<void> {
+                co_await coro::whenAll(echoOnceDraining(listener, s), unixProbe(lp, std::move(p), m));
+            };
+            loop.blockOn(run(first->get(), &loop, path, &served, &matched));
+
+            REQUIRE(served);
+            REQUIRE(matched);
+
+            auto ec = std::error_code {};
+            std::filesystem::remove_all(dir, ec);
+        }
     }
-
-    auto second = net::listenUnix(loop, path);
-    REQUIRE_FALSE(second.has_value());
-    REQUIRE(second.error().code == net::NetErrorCode::AddressInUse);
-    REQUIRE(socketFileExists(path)); // the incumbent's file, left intact
-
-    // The incumbent still serves: a client connects and gets its probe echoed back. The refused
-    // bind's own liveness probe left a dropped connection queued ahead of it, which is why the
-    // server flow here drains rather than treating the first accept as the request.
-    auto served = false;
-    auto matched = false;
-    auto run = [](net::IListener* listener, EventLoop* lp, std::string p, bool* s, bool* m) -> Task<void> {
-        co_await coro::whenAll(echoOnceDraining(listener, s), unixProbe(lp, std::move(p), m));
-    };
-    loop.blockOn(run(first->get(), &loop, path, &served, &matched));
-
-    REQUIRE(served);
-    REQUIRE(matched);
-
-    auto ec = std::error_code {};
-    std::filesystem::remove_all(dir, ec);
 }
 
 namespace
@@ -428,25 +485,34 @@ Task<void> duplexBulk(EventLoop* loop,
 //
 // A regression does not fail here — it HANGS, and the suite's per-test timeout reports it. That is
 // the nature of a lost wake-up, and matches how the TLS deadlock case is covered.
-TEST_CASE("a concurrent reader and writer on one socket both make progress", "[net][poll]")
+TEST_CASE("a concurrent reader and writer on one socket both make progress", "[net]")
 {
-    auto source = PollEventSource {};
-    auto loop = EventLoop { source };
+    for (auto const& backend: AllBackends)
+    {
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue; // not available on this platform
 
-    auto listener = net::listen(loop, "127.0.0.1", 0);
-    REQUIRE(listener.has_value());
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
 
-    // Comfortably past any socket send buffer, so both directions really do block.
-    constexpr auto Payload = std::size_t { 4 } * 1024 * 1024;
-    auto serverGot = std::size_t { 0 };
-    auto clientGot = std::size_t { 0 };
-    auto serverSent = false;
-    auto clientSent = false;
-    loop.blockOn(
-        duplexBulk(&loop, listener->get(), Payload, &serverGot, &clientGot, &serverSent, &clientSent));
+            auto listener = net::listen(loop, "127.0.0.1", 0);
+            REQUIRE(listener.has_value());
 
-    CHECK(serverSent);
-    CHECK(clientSent);
-    CHECK(serverGot == Payload);
-    CHECK(clientGot == Payload);
+            // Comfortably past any socket send buffer, so both directions really do block.
+            constexpr auto Payload = std::size_t { 4 } * 1024 * 1024;
+            auto serverGot = std::size_t { 0 };
+            auto clientGot = std::size_t { 0 };
+            auto serverSent = false;
+            auto clientSent = false;
+            loop.blockOn(duplexBulk(
+                &loop, listener->get(), Payload, &serverGot, &clientGot, &serverSent, &clientSent));
+
+            CHECK(serverSent);
+            CHECK(clientSent);
+            CHECK(serverGot == Payload);
+            CHECK(clientGot == Payload);
+        }
+    }
 }

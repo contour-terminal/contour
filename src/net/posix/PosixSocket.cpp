@@ -62,16 +62,28 @@ PosixSocket::PosixSocket(EventLoop& loop, int fd, std::string peerAddress) noexc
 
 PosixSocket::~PosixSocket()
 {
-    close();
+    // Cancel, not Resume: read/write reach _fd and _closed through `this`, which is
+    // about to stop existing. A flow resumed on its normal path would read them from
+    // freed memory; unwinding via OperationCancelled never re-enters the body.
+    close(FdWakePolicy::Cancel);
 }
 
 void PosixSocket::close() noexcept
+{
+    close(FdWakePolicy::Resume);
+}
+
+void PosixSocket::close(FdWakePolicy policy) noexcept
 {
     if (_closed)
         return;
     _closed = true;
     if (_fd >= 0)
     {
+        // Before the close, while the descriptor is still valid: epoll and kqueue
+        // cannot report a closed descriptor, so without this a flow parked on it
+        // would never be resumed.
+        _loop.notifyHandleClosing(_fd, policy);
         ::close(_fd);
         _fd = -1;
     }

@@ -5,6 +5,7 @@ add_library(coro INTERFACE
     UniqueCoroHandle.hpp
     WhenAll.hpp
     WhenAny.hpp
+    testing/SuppressWindowsDialogs.hpp
 )
 target_include_directories(coro INTERFACE
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
@@ -20,7 +21,7 @@ if(CORO_TESTING)
         WhenAll_test.cpp
         WhenAny_test.cpp
     )
-    target_link_libraries(coro_test coro crispy::core Catch2::Catch2)
+    target_link_libraries(coro_test coro Catch2::Catch2)
     add_test(NAME coro_test COMMAND $<TARGET_FILE:coro_test>)
     set_tests_properties(coro_test PROPERTIES LABELS daemon)
 

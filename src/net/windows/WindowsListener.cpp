@@ -97,16 +97,28 @@ WindowsListener::WindowsListener(
 
 WindowsListener::~WindowsListener()
 {
-    close();
+    // Cancel, not Resume: the accept loop reaches _socket, _event and _closed
+    // through `this`, which is about to stop existing. Unwinding via
+    // OperationCancelled returns without dereferencing them again.
+    close(FdWakePolicy::Cancel);
 }
 
 void WindowsListener::close() noexcept
+{
+    close(FdWakePolicy::Resume);
+}
+
+void WindowsListener::close(FdWakePolicy policy) noexcept
 {
     if (_closed)
         return;
     _closed = true;
     if (_event != WSA_INVALID_EVENT)
     {
+        // Before the close, while the handle is still valid. The event -- not the
+        // socket -- is what accept() registers with the loop, so it is the handle a
+        // parked accept must be woken by.
+        _loop.notifyHandleClosing(static_cast<HANDLE>(_event), policy);
         WSACloseEvent(_event);
         _event = WSA_INVALID_EVENT;
     }
