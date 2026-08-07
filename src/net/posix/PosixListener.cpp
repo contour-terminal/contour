@@ -35,10 +35,6 @@ void PosixListener::close() noexcept
     _closed = true;
     if (_fd >= 0)
     {
-        // Resume a parked accept() before the descriptor goes away: a readiness
-        // poller cannot report a closed descriptor, so it would otherwise wait
-        // forever. See EventLoop::notifyHandleClosing.
-        _loop.notifyHandleClosing(_fd);
         ::close(_fd);
         _fd = -1;
     }

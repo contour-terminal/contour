@@ -114,26 +114,7 @@ FdToken EventLoop::registerFdWaiter(NativeHandle fd, FdInterest interest, std::c
         return FdToken::invalid();
     _fdWaiters.emplace(token, waiter);
     _waiterToToken.emplace(waiter, token);
-    _tokenToFd.emplace(token, fd);
     return token;
-}
-
-void EventLoop::notifyHandleClosing(NativeHandle fd)
-{
-    if (fd == InvalidHandle)
-        return;
-
-    // A readiness poller cannot report a descriptor that has been closed: epoll drops
-    // it from the set and kqueue drops its filters, both silently, so a flow parked on
-    // it would never be resumed. (poll(2) reports POLLNVAL and resumes it, which is
-    // why this was invisible until the native backends landed.) The owner therefore
-    // tells us BEFORE closing, and we resume those flows here — they observe the
-    // closed socket and unwind, exactly as they do under poll(2).
-    auto woken = std::vector<FdToken> {};
-    for (auto const& [token, handle]: _tokenToFd)
-        if (handle == fd)
-            woken.push_back(token);
-    wakeFdWaiters(woken);
 }
 
 void EventLoop::unregisterFdWaiter(FdToken token) noexcept
@@ -141,7 +122,6 @@ void EventLoop::unregisterFdWaiter(FdToken token) noexcept
     if (!token)
         return;
     _source.detach(token);
-    _tokenToFd.erase(token);
     if (auto const it = _fdWaiters.find(token); it != _fdWaiters.end())
     {
         _waiterToToken.erase(it->second);
@@ -160,7 +140,6 @@ void EventLoop::requeueForCancellation(std::coroutine_handle<> waiter)
     {
         _source.detach(rt->second);
         _fdWaiters.erase(rt->second);
-        _tokenToFd.erase(rt->second);
         _waiterToToken.erase(rt);
     }
 
@@ -249,7 +228,6 @@ void EventLoop::wakeAllWaiters()
     // frame re-entering the loop cannot mutate the container mid-iteration.
     auto parked = std::exchange(_fdWaiters, {});
     _waiterToToken.clear();
-    _tokenToFd.clear();
     for (auto const& [token, handle]: parked)
     {
         _source.detach(token);

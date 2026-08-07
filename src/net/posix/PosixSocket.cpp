@@ -72,12 +72,6 @@ void PosixSocket::close() noexcept
     _closed = true;
     if (_fd >= 0)
     {
-        // Resume anything parked on this descriptor BEFORE closing it. A readiness
-        // poller cannot report a closed descriptor -- epoll drops it from the set,
-        // kqueue drops its filters, both silently -- so a parked reader would hang
-        // forever. poll(2) reports POLLNVAL and resumes it, which is why closing
-        // under a parked reader worked before the native backends existed.
-        _loop.notifyHandleClosing(_fd);
         ::close(_fd);
         _fd = -1;
     }
