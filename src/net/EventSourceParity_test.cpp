@@ -167,25 +167,43 @@ Task<void> acceptThenClose(EventLoop* loop, net::IListener* listener, bool* acce
                            closeListenerAfterParked(loop, listener));
 }
 
-/// Writes until the peer's receive buffer and this socket's send buffer are both
-/// full, so the write parks on writability, then records whether it resumed with an
-/// error rather than hanging once the socket is closed under it.
+/// Writes to a socket whose peer never reads, until the socket refuses.
+///
+/// Deliberately a LOOP rather than one enormous write. On a POSIX socket pair the
+/// send and receive buffers fill within a turn or two and the write parks on
+/// writability, which is the case this exercises. Windows auto-tunes its buffers
+/// far higher, so a fixed payload — 4 MiB was the first attempt — is simply
+/// absorbed and the write succeeds, never parking; the assertion then failed for a
+/// reason that had nothing to do with the code under test. Looping with a yield
+/// between turns makes the outcome the same everywhere: whether the writer parks
+/// and the close resumes it, or the close simply lands between two turns, a writer
+/// must end up learning the socket is gone rather than hanging.
+/// @param loop The loop to yield to between turns.
 /// @param sock The socket to write to (its peer never reads).
-/// @param resumedWithError Set to true if the write resumed and reported a failure.
-Task<void> parkThenObserveWriteClose(net::ISocket* sock, bool* resumedWithError)
+/// @param resumedWithError Set to true once a write reports a failure.
+Task<void> parkThenObserveWriteClose(EventLoop* loop, net::ISocket* sock, bool* resumedWithError)
 {
-    // Far larger than any default SO_SNDBUF/SO_RCVBUF pair, so the write cannot
-    // complete without the peer reading — which it never does.
-    constexpr auto PayloadBytes = std::size_t { 4 } * 1024 * 1024;
-    auto const payload = std::vector<std::byte>(PayloadBytes, std::byte { 'x' });
-    auto const result = co_await sock->write(payload);
-    *resumedWithError = !result.has_value();
+    constexpr auto ChunkBytes = std::size_t { 256 } * 1024;
+    auto const chunk = std::vector<std::byte>(ChunkBytes, std::byte { 'x' });
+    // Bounded so a backend that never refuses fails the CHECK instead of hanging.
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 512))
+    {
+        if (auto const result = co_await sock->write(chunk); !result.has_value())
+        {
+            *resumedWithError = true;
+            co_return;
+        }
+        // Yield, so the flow that closes the socket still gets to run on a platform
+        // where the write never had to park.
+        co_await loop->delay(std::chrono::milliseconds { 1 });
+    }
 }
 
 /// Runs the parked writer and the close concurrently on one loop.
 Task<void> closeWhileWriteParked(EventLoop* loop, net::ISocket* sock, bool* resumedWithError)
 {
-    co_await coro::whenAll(parkThenObserveWriteClose(sock, resumedWithError), closeAfterParked(loop, sock));
+    co_await coro::whenAll(parkThenObserveWriteClose(loop, sock, resumedWithError),
+                           closeAfterParked(loop, sock));
 }
 
 /// Parks a reader AND a writer on ONE socket, then closes it under both. Two
@@ -200,7 +218,7 @@ Task<void> closeWhileWriteParked(EventLoop* loop, net::ISocket* sock, bool* resu
 Task<void> closeWhileBothParked(EventLoop* loop, net::ISocket* sock, bool* readerResumed, bool* writerResumed)
 {
     co_await coro::whenAll(parkThenObserveClose(sock, readerResumed),
-                           parkThenObserveWriteClose(sock, writerResumed),
+                           parkThenObserveWriteClose(loop, sock, writerResumed),
                            closeAfterParked(loop, sock));
 }
 
