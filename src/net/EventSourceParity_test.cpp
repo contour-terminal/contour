@@ -146,6 +146,28 @@ Task<void> readOnce(net::ISocket* sock, int* outcome)
     *outcome = result.has_value() ? static_cast<int>(*result) : -1;
 }
 
+/// Parks on accept() and records whether it resumed (with a failure) rather than
+/// hanging once the listener beneath it is closed.
+Task<void> parkThenObserveListenerClose(net::IListener* listener, bool* accepted)
+{
+    auto const result = co_await listener->accept();
+    *accepted = result.has_value();
+}
+
+/// Lets the accept reach its park, then closes the listener it is parked on.
+Task<void> closeListenerAfterParked(EventLoop* loop, net::IListener* listener)
+{
+    co_await loop->delay(std::chrono::milliseconds { 20 });
+    listener->close();
+}
+
+/// Runs the parked accept and the listener close concurrently on one loop.
+Task<void> acceptThenClose(EventLoop* loop, net::IListener* listener, bool* accepted)
+{
+    co_await coro::whenAll(parkThenObserveListenerClose(listener, accepted),
+                           closeListenerAfterParked(loop, listener));
+}
+
 } // namespace
 
 TEST_CASE("every available event source reports pipe readability", "[net][eventsource][parity]")
@@ -522,6 +544,30 @@ TEST_CASE("the default source drives the scenarios Socket_test pins to poll", "[
         auto outcome = -99;
         loop.blockOn(readOnce(pair->second.get(), &outcome));
         CHECK(outcome == 0);
+    }
+}
+
+TEST_CASE("closing a listener resumes a parked accept on every event source", "[net][eventsource][parity]")
+{
+    // Same hazard as a parked reader, one layer up: accept() parks on waitReadable,
+    // so a listener closed while an accept is pending must resume it rather than
+    // leave it parked on a descriptor the poller can no longer report.
+    for (auto const& backend: AllBackends)
+    {
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue;
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+            auto listener = net::listen(loop, "127.0.0.1", 0);
+            REQUIRE(listener.has_value());
+
+            auto accepted = true;
+            loop.blockOn(acceptThenClose(&loop, listener->get(), &accepted));
+            CHECK_FALSE(accepted); // it resumed at all, and reported the close
+        }
     }
 }
 
