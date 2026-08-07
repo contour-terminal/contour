@@ -288,6 +288,10 @@ TEST_CASE("notifyHandleClosing on an unwatched fd records nothing", "[EventLoop]
     auto loop = EventLoop { source };
 
     loop.notifyHandleClosing((*pipe)->readFd(), net::FdWakePolicy::Resume);
+    // And an invalid handle is refused outright rather than looked up: on Windows a
+    // NativeHandle is a pointer, so a null one would otherwise be a perfectly good
+    // multimap key that any other unset handle could collide with.
+    loop.notifyHandleClosing(net::InvalidHandle, net::FdWakePolicy::Cancel);
 
     // Nothing parked and nothing recorded, so this pump neither waits nor resumes.
     // A recorded wake would have turned the wait into a poll; an exhausted script
