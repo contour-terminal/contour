@@ -2,16 +2,14 @@
 #include <net/PollEventSource.hpp>
 
 #ifdef _WIN32
-    #include <net/Diagnostics.hpp>
-
-    #include <format>
-
     #include <algorithm>
     #include <cstdint>
+    #include <format>
     #include <ranges>
 
     #include <windows.h>
 
+    #include <net/Diagnostics.hpp>
     #include <net/WaitChunking.hpp>
 #else
     #include <poll.h>

@@ -80,8 +80,8 @@ class EpollEventSource: public EventSource
     /// @return True if the epoll_ctl call succeeded.
     [[nodiscard]] bool applyInterest(NativeHandle fd, FdInterest interest, FdToken token) const noexcept;
 
-    FdRegistry _registry;                                   ///< Watched fds, in registration order.
-    int _epollFd = -1;                                      ///< The epoll instance (owned).
+    FdRegistry _registry; ///< Watched fds, in registration order.
+    int _epollFd = -1;    ///< The epoll instance (owned).
     /// The fd each live registration names, so detach can drop the kernel
     /// registration in O(1) without scanning the registry. Interest itself is
     /// fixed at attach — EventLoop only ever attaches and detaches — so there

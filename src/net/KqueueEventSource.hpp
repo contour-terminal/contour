@@ -85,8 +85,8 @@ class KqueueEventSource: public EventSource
     /// Drops both filters for @p fd, ignoring a filter that was not armed.
     void dropFilters(NativeHandle fd) const noexcept;
 
-    FdRegistry _registry;                                   ///< Watched fds, in registration order.
-    int _kq = -1;                                           ///< The kqueue (owned).
+    FdRegistry _registry; ///< Watched fds, in registration order.
+    int _kq = -1;         ///< The kqueue (owned).
     /// The fd each live registration names, so detach can drop the kernel
     /// registration in O(1) without scanning the registry. Interest itself is
     /// fixed at attach — EventLoop only ever attaches and detaches — so there
