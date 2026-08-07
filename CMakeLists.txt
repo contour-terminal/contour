@@ -36,7 +36,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
 endif()
 
-include(EnableCcache)
+# Compiler caching. Loaded before any compiler invocation so that CPM-fetched dependencies
+# get cached too. CompileCache.cmake prefers the fastcache-cc launcher (when installed and
+# FASTCACHE_ADDR names a daemon), falls back to sccache and then ccache, and no-ops when none
+# is usable. It also declares the USE_COMPILER_CACHE option that gates all of it.
+include(CompileCache)
 include(ClangTidy)
 
 if(NOT WIN32 AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -242,10 +246,13 @@ add_subdirectory(examples)
 # ----------------------------------------------------------------------------
 # Summary
 
-if("${CCACHE}" STREQUAL "")
-    set(USING_CCACHE_STRING "OFF")
+if("${CMAKE_CXX_COMPILER_LAUNCHER}" STREQUAL "")
+    set(USING_COMPILER_CACHE_STRING "OFF")
 else()
-    set(USING_CCACHE_STRING "${CCACHE}")
+    # The launcher may be a `cmake -E env NAME=VALUE ... <program>` wrapper; the program that
+    # identifies the cache is always the last element. Report that rather than ${CCACHE}, which
+    # CompileCache.cmake fills in from PATH even when another launcher was chosen.
+    list(GET CMAKE_CXX_COMPILER_LAUNCHER -1 USING_COMPILER_CACHE_STRING)
 endif()
 
 if("${CMAKE_CXX_CLANG_TIDY}" STREQUAL "")
@@ -268,7 +275,7 @@ macro(ContourConfigurationSummary)
     message(STATUS "System:                                             ${CMAKE_SYSTEM_PROCESSOR} (${CMAKE_SYSTEM_NAME})")
     message(STATUS "Build type:                                         ${CMAKE_BUILD_TYPE}")
     message(STATUS "C++ standard:                                       C++${CMAKE_CXX_STANDARD} (${CMAKE_CXX_COMPILER_ID})")
-    message(STATUS "Using ccache:                                       ${USING_CCACHE_STRING}")
+    message(STATUS "Compiler cache:                                     ${USING_COMPILER_CACHE_STRING}")
     message(STATUS "Build with sanitizer:                               ${CONTOUR_SANITIZE}")
     message(STATUS "Build unit tests:                                   ${CONTOUR_TESTING}")
     message(STATUS "Verify terminal state invariants:                   ${CONTOUR_VERIFY_STATE}")
