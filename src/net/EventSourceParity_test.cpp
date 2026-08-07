@@ -28,6 +28,7 @@
 #include <net/testing/InMemoryTransport.hpp>
 
 #ifndef _WIN32
+    #include <sys/resource.h>
     #include <sys/socket.h>
 
     #include <fcntl.h>
@@ -305,6 +306,70 @@ TEST_CASE("a registration does not keep a closed descriptor's connection alive",
 
             source->detach(token);
             ::close(sv[1]);
+        }
+    }
+}
+#endif
+
+#ifndef _WIN32
+TEST_CASE("a duplicate registration refuses cleanly when descriptors run out", "[net][eventsource][parity]")
+{
+    for (auto const& backend: AllBackends)
+    {
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue;
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto pipe = net::createSystemPipe();
+            REQUIRE(pipe.has_value());
+
+            // The first registration watches the caller's descriptor directly, so it
+            // needs no descriptor of its own.
+            auto const first = source->attach((*pipe)->waitHandle(), FdInterest::Read);
+            REQUIRE(first);
+
+            // A second registration on the same descriptor needs a private dup().
+            // Lower the soft descriptor limit to what is already open so that dup()
+            // must fail, and require a refusal rather than a token for a registration
+            // the kernel never accepted — parking on one of those is unresumable.
+            // The soft limit is restored below, so this stays scoped to this case
+            // rather than starving the rest of the suite.
+            auto limit = rlimit {};
+            REQUIRE(::getrlimit(RLIMIT_NOFILE, &limit) == 0);
+            auto const originalSoft = limit.rlim_cur;
+
+            auto const probe = ::dup(0); // the lowest descriptor still free
+            REQUIRE(probe >= 0);
+            auto squeezed = limit;
+            squeezed.rlim_cur = static_cast<rlim_t>(probe); // no descriptor >= probe may be opened
+            REQUIRE(::setrlimit(RLIMIT_NOFILE, &squeezed) == 0);
+            ::close(probe);
+
+            auto const underPressure = source->attach((*pipe)->waitHandle(), FdInterest::Read);
+
+            limit.rlim_cur = originalSoft;
+            REQUIRE(::setrlimit(RLIMIT_NOFILE, &limit) == 0);
+
+            // What must hold on EVERY backend is that the answer is honest: either
+            // the registration was refused, or it was genuinely armed. What must
+            // never happen is a valid token for a registration the kernel does not
+            // have. poll(2) needs no descriptor of its own, so it legitimately
+            // succeeds here; epoll and kqueue must dup() and so must refuse.
+            if (backend.kind == EventSourceKind::Poll)
+                CHECK(underPressure);
+            else
+                CHECK_FALSE(underPressure);
+
+            // Recovery: with descriptors available again, a duplicate must work.
+            auto const afterRecovery = source->attach((*pipe)->waitHandle(), FdInterest::Read);
+            CHECK(afterRecovery);
+
+            source->detach(afterRecovery);
+            if (underPressure)
+                source->detach(underPressure); // poll(2) succeeded above
+            source->detach(first);
         }
     }
 }
