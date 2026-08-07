@@ -207,11 +207,15 @@ WaitOutcome KqueueEventSource::wait(int timeoutMs)
     for (auto const& event: std::span { events.data(), static_cast<std::size_t>(ready) })
     {
         auto const token = FdToken { static_cast<std::uint64_t>(reinterpret_cast<uintptr_t>(event.udata)) };
-        // EV_EOF is reported as readable so a parked reader wakes and observes EOF,
-        // matching how poll(2)'s POLLHUP is routed.
-        if (event.filter == EVFILT_READ || (event.flags & EV_EOF) != 0)
+        // Route by the filter that fired, not by EV_EOF: a registration watches one
+        // direction, so reporting a write filter's EOF as readability would name a
+        // reader that does not exist. EV_EOF still wakes whoever is parked, because
+        // it arrives on that side's own filter — the peer closing makes the read
+        // filter fire (EOF is readable) and the write filter fire (the write can no
+        // longer block). That matches how poll(2)'s POLLHUP reaches both.
+        if (event.filter == EVFILT_READ)
             outcome.readyRead.push_back(token);
-        if (event.filter == EVFILT_WRITE)
+        else if (event.filter == EVFILT_WRITE)
             outcome.readyWrite.push_back(token);
     }
     return outcome;
