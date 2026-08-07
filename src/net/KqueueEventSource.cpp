@@ -56,9 +56,11 @@ KqueueEventSource::KqueueEventSource() noexcept: _kq { ::kqueue() }
 
 KqueueEventSource::~KqueueEventSource()
 {
-    // Close the duplicates this source owns; the caller's own descriptors are not ours.
-    for (auto const& [token, owned]: _registered)
-        ::close(owned);
+    // Close only the duplicates this source made; the caller's own descriptors are
+    // armed directly and are not ours to close.
+    for (auto const& [token, watched]: _registered)
+        if (watched.owned)
+            ::close(watched.fd);
     if (_kq >= 0)
         ::close(_kq);
 }
@@ -94,16 +96,24 @@ bool KqueueEventSource::applyInterest(NativeHandle fd, FdInterest interest, FdTo
     if (applied < 0)
         return false;
 
-    // With EV_RECEIPT every returned entry carries EV_ERROR and `data` holds the
-    // errno (0 when the change applied cleanly). Results are matched back by filter
-    // rather than by position, so the check does not depend on the kernel preserving
-    // changelist order. ENOENT on a filter we asked to drop just means it was not
-    // armed — the normal steady state, not a failure.
+    // With EV_RECEIPT the kernel reports one entry per submitted change, so anything
+    // short means a change went unreported and we cannot claim the filter was armed.
+    if (static_cast<std::size_t>(applied) != changes.size())
+        return false;
+
+    // Every returned entry carries EV_ERROR and `data` holds the errno (0 when the
+    // change applied cleanly). Results are matched back by filter rather than by
+    // position, so the check does not depend on the kernel preserving changelist
+    // order. ENOENT on a filter we asked to drop just means it was not armed — the
+    // normal steady state, not a failure.
     auto const reported = std::span { results.data(), static_cast<std::size_t>(applied) };
     return std::ranges::all_of(reported, [&interests](struct kevent const& result) noexcept {
-        // EV_RECEIPT sets EV_ERROR on every entry; `data` carries the errno, 0 when
-        // the change applied cleanly. An entry without EV_ERROR is not a report.
-        if ((result.flags & EV_ERROR) == 0 || result.data == 0)
+        // EV_RECEIPT guarantees EV_ERROR on every entry. An entry without it is not
+        // the receipt we asked for, so treat it as a failure rather than assume the
+        // change applied — parking on a filter the kernel never armed is unresumable.
+        if ((result.flags & EV_ERROR) == 0)
+            return false;
+        if (result.data == 0)
             return true;
         auto const row =
             std::ranges::find(interests, static_cast<std::int16_t>(result.filter), &FilterInterest::filter);
@@ -146,24 +156,36 @@ FdToken KqueueEventSource::attach(NativeHandle fd, FdInterest interest)
     if (!token)
         return FdToken::invalid();
 
-    // Register a private duplicate, for the same reason as the epoll backend: a
-    // kqueue filter is keyed by (descriptor, filter), so a second registration on
-    // one descriptor would replace the first rather than stand beside it, while
-    // poll(2) takes two independent entries.
-    auto const owned = ::dup(fd);
+    // Arm the CALLER'S descriptor whenever we can. A dup() would share the
+    // underlying open file description, so closing the caller's copy while this
+    // registration lives would not release it: no FIN would reach the peer, whose
+    // read would then block forever instead of seeing EOF. Only a genuine duplicate
+    // registration needs a private descriptor, because a kqueue filter is keyed by
+    // (descriptor, filter): a second registration would replace the first's filters
+    // rather than stand beside them, and dropFilters deletes by descriptor, so
+    // detaching either would tear down both.
+    auto const duplicate =
+        std::ranges::any_of(_registered, [fd](auto const& entry) { return entry.second.fd == fd; });
+    auto watched = fd;
+    auto owned = false;
+    if (duplicate)
+    {
+        watched = ::dup(fd);
+        owned = true;
+    }
 
     // A failed arm must not leave the registry claiming the fd is watched: the
     // awaiting flow has to fail rather than park on a filter the kernel never
     // armed, which nothing could ever resume.
-    if (owned < 0 || !applyInterest(owned, interest, token))
+    if (watched < 0 || !applyInterest(watched, interest, token))
     {
-        if (owned >= 0)
-            ::close(owned);
+        if (owned && watched >= 0)
+            ::close(watched);
         _registry.detach(token);
         return FdToken::invalid();
     }
 
-    _registered.emplace(token.value, owned);
+    _registered.emplace(token.value, KqueueEventSource::Watched { .fd = watched, .owned = owned });
     return token;
 }
 
@@ -171,8 +193,9 @@ void KqueueEventSource::detach(FdToken token)
 {
     if (auto const it = _registered.find(token.value); it != _registered.end())
     {
-        dropFilters(it->second);
-        ::close(it->second); // the duplicate this source owns, not the caller's fd
+        dropFilters(it->second.fd);
+        if (it->second.owned)
+            ::close(it->second.fd); // a duplicate we made, never the caller's fd
         _registered.erase(it);
     }
     _registry.detach(token);

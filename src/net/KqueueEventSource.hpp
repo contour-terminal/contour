@@ -85,13 +85,30 @@ class KqueueEventSource: public EventSource
     /// Drops both filters for @p fd, ignoring a filter that was not armed.
     void dropFilters(NativeHandle fd) const noexcept;
 
+    /// The descriptor a registration is watched through, and whether this source
+    /// created it and must therefore close it.
+    struct Watched
+    {
+        NativeHandle fd = InvalidHandle; ///< The descriptor the filters are armed on.
+        bool owned = false;              ///< True if this is our dup(), false if the caller's fd.
+    };
+
     FdRegistry _registry; ///< Watched fds, in registration order.
     int _kq = -1;         ///< The kqueue (owned).
-    /// The fd each live registration names, so detach can drop the kernel
-    /// registration in O(1) without scanning the registry. Interest itself is
-    /// fixed at attach — EventLoop only ever attaches and detaches — so there
-    /// is nothing to reconcile per wait.
-    std::unordered_map<std::uint64_t, NativeHandle> _registered;
+    /// The descriptor each live registration is watched through, so detach can drop
+    /// the kernel registration in O(1) without scanning the registry. Interest itself
+    /// is fixed at attach — EventLoop only ever attaches and detaches — so there is
+    /// nothing to reconcile per wait.
+    ///
+    /// Normally this is the CALLER'S descriptor. A `dup()` would share the underlying
+    /// open file description, so the caller closing its copy would not release it —
+    /// no FIN would reach the peer, whose read would block forever rather than
+    /// observe EOF (poll(2), which holds no descriptor of its own, has no such
+    /// effect). A duplicate is made only for a genuine second registration of one
+    /// descriptor: a kqueue filter is keyed by (descriptor, filter), so a second
+    /// registration would REPLACE the first's filters rather than stand beside them,
+    /// and @c dropFilters — which deletes by descriptor — would then tear down both.
+    std::unordered_map<std::uint64_t, Watched> _registered;
 };
 
 } // namespace net

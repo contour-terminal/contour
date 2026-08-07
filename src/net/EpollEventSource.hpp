@@ -80,19 +80,29 @@ class EpollEventSource: public EventSource
     /// @return True if the epoll_ctl call succeeded.
     [[nodiscard]] bool applyInterest(NativeHandle fd, FdInterest interest, FdToken token) const noexcept;
 
+    /// The descriptor a registration is watched through, and whether this source
+    /// created it and must therefore close it.
+    struct Watched
+    {
+        NativeHandle fd = InvalidHandle; ///< The descriptor handed to epoll_ctl.
+        bool owned = false;              ///< True if this is our dup(), false if the caller's fd.
+    };
+
     FdRegistry _registry; ///< Watched fds, in registration order.
     int _epollFd = -1;    ///< The epoll instance (owned).
-    /// The private descriptor each live registration owns, so detach can drop the
-    /// kernel registration in O(1) without scanning the registry, and close the
-    /// duplicate. Interest itself is fixed at attach — EventLoop only ever attaches
-    /// and detaches — so there is nothing to reconcile per wait.
+    /// The descriptor each live registration is watched through, so detach can drop
+    /// the kernel registration in O(1) without scanning the registry. Interest itself
+    /// is fixed at attach — EventLoop only ever attaches and detaches — so there is
+    /// nothing to reconcile per wait.
     ///
-    /// Each entry is a `dup()` of the caller's descriptor rather than the descriptor
-    /// itself: an epoll set is keyed by descriptor, so registering the same one
-    /// twice fails with `EEXIST`, whereas poll(2) simply takes two entries. The
-    /// registry permits two registrations on one descriptor, so without the dup this
-    /// backend would refuse a registration that @c PollEventSource accepts.
-    std::unordered_map<std::uint64_t, NativeHandle> _registered;
+    /// Normally this is the CALLER'S descriptor. A `dup()` would share the underlying
+    /// open file description, so the caller closing its copy would not release it —
+    /// no FIN would reach the peer, whose read would block forever rather than
+    /// observe EOF (poll(2), which holds no descriptor of its own, has no such
+    /// effect). A duplicate is therefore made only for a genuine second registration
+    /// of one descriptor, which an epoll set rejects with `EEXIST` while poll(2)
+    /// simply takes two entries; the registry permits it, so this backend must too.
+    std::unordered_map<std::uint64_t, Watched> _registered;
 };
 
 } // namespace net

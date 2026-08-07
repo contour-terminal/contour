@@ -27,6 +27,13 @@
 #include <net/platform/SystemPipe.hpp>
 #include <net/testing/InMemoryTransport.hpp>
 
+#ifndef _WIN32
+    #include <sys/socket.h>
+
+    #include <fcntl.h>
+    #include <unistd.h>
+#endif
+
 using coro::Task;
 using net::EventLoop;
 using net::EventSourceKind;
@@ -264,6 +271,44 @@ TEST_CASE("two registrations on one descriptor are accepted by every event sourc
         }
     }
 }
+
+#ifndef _WIN32
+TEST_CASE("a registration does not keep a closed descriptor's connection alive", "[net][eventsource][parity]")
+{
+    for (auto const& backend: AllBackends)
+    {
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue;
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto sv = std::array<int, 2> {};
+            REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv.data()) == 0);
+
+            // Attach one end, then close it WITHOUT detaching first — the ordering
+            // a cancelled flow or an early socket destructor produces. A backend
+            // that registers a dup() of the descriptor keeps the underlying open
+            // file description alive, so no FIN reaches the peer: its read blocks
+            // forever instead of reporting EOF, and the connection leaks.
+            auto const token = source->attach(sv[0], FdInterest::Read);
+            REQUIRE(token);
+            ::close(sv[0]);
+
+            // The peer must see EOF now. Read non-blocking so a backend that holds
+            // the description open fails the assertion instead of hanging the suite.
+            auto const flags = ::fcntl(sv[1], F_GETFL, 0);
+            ::fcntl(sv[1], F_SETFL, flags | O_NONBLOCK);
+            auto buffer = std::array<char, 16> {};
+            auto const got = ::read(sv[1], buffer.data(), buffer.size());
+            CHECK(got == 0); // 0 == EOF; -1/EAGAIN means the FIN never arrived
+
+            source->detach(token);
+            ::close(sv[1]);
+        }
+    }
+}
+#endif
 
 TEST_CASE("an invalid handle is refused by every event source", "[net][eventsource][parity]")
 {

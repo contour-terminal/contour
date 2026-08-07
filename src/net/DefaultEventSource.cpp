@@ -51,7 +51,11 @@ std::unique_ptr<EventSource> makeEventSource(EventSourceKind kind)
 #endif
         }
     }
-    return std::make_unique<PollEventSource>();
+    // Every enumerator returns above, so this is only reached for a value outside
+    // the enumeration. Report it as unavailable rather than quietly substituting a
+    // working poll source: a new enumerator added without a case here must surface
+    // as a null (and fall back explicitly in makeDefaultEventSource), not be masked.
+    return nullptr;
 }
 
 std::unique_ptr<EventSource> makeDefaultEventSource()
