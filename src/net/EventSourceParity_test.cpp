@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -114,6 +115,37 @@ Task<void> echoOverListener(EventLoop* loop, net::IListener* listener, std::uint
     co_await coro::whenAll(acceptAndEcho(listener, out), connectAndSend(loop, port));
 }
 
+/// Parks reading an idle socket and records whether the read resumed with an error
+/// rather than hanging forever.
+Task<void> parkThenObserveClose(net::ISocket* sock, bool* resumedWithError)
+{
+    auto buffer = std::array<std::byte, 64> {};
+    auto const result = co_await sock->read(buffer);
+    *resumedWithError = !result.has_value();
+}
+
+/// Lets the reader reach its park, then closes the socket it is parked on.
+Task<void> closeAfterParked(EventLoop* loop, net::ISocket* sock)
+{
+    co_await loop->delay(std::chrono::milliseconds { 20 });
+    sock->close();
+}
+
+/// Runs the parked reader and the close concurrently on one loop.
+Task<void> closeWhileParked(EventLoop* loop, net::ISocket* sock, bool* resumedWithError)
+{
+    co_await coro::whenAll(parkThenObserveClose(sock, resumedWithError), closeAfterParked(loop, sock));
+}
+
+/// Reads once, recording the byte count so a clean EOF is distinguishable from an
+/// error and from a hang.
+Task<void> readOnce(net::ISocket* sock, int* outcome)
+{
+    auto buffer = std::array<std::byte, 64> {};
+    auto const result = co_await sock->read(buffer);
+    *outcome = result.has_value() ? static_cast<int>(*result) : -1;
+}
+
 } // namespace
 
 TEST_CASE("every available event source reports pipe readability", "[net][eventsource][parity]")
@@ -185,6 +217,57 @@ TEST_CASE("every available event source serves a loopback listener", "[net][even
             auto got = std::string {};
             loop.blockOn(echoOverListener(&loop, listener->get(), port, &got));
             REQUIRE(got == "parity");
+        }
+    }
+}
+
+TEST_CASE("closing a socket resumes a parked reader on every event source", "[net][eventsource][parity]")
+{
+    // Socket_test covers this only for PollEventSource, so it stayed green while the
+    // native backends were broken. Driving it through the loop on every backend is
+    // what catches a source that holds a descriptor the socket thinks it closed.
+    for (auto const& backend: AllBackends)
+    {
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue;
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+            auto pair = net::testing::makeSocketPair(loop);
+            REQUIRE(pair.has_value());
+
+            auto resumedWithError = false;
+            loop.blockOn(closeWhileParked(&loop, pair->second.get(), &resumedWithError));
+            CHECK(resumedWithError); // resumed at all (no hang) AND saw the close
+        }
+    }
+}
+
+TEST_CASE("a peer's close is delivered as EOF on every event source", "[net][eventsource][parity]")
+{
+    // The end-to-end form of the descriptor-ownership rule: the reader goes through
+    // EventLoop and ISocket rather than touching the source directly, so a backend
+    // that keeps the peer's file description alive shows up as a read that never
+    // reports EOF.
+    for (auto const& backend: AllBackends)
+    {
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue;
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+            auto pair = net::testing::makeSocketPair(loop);
+            REQUIRE(pair.has_value());
+
+            pair->first->close(); // the peer goes away
+
+            auto outcome = -99;
+            loop.blockOn(readOnce(pair->second.get(), &outcome));
+            CHECK(outcome == 0); // 0 == clean EOF; -1 would be an error, -99 a hang
         }
     }
 }

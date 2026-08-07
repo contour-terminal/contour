@@ -173,6 +173,21 @@ class EventLoop
     /// @param token The registration to remove.
     void unregisterFdWaiter(FdToken token) noexcept;
 
+    /// Resumes every flow parked on @p fd, because that descriptor is about to be
+    /// closed.
+    ///
+    /// **The owner of a descriptor must call this before closing it** while any flow
+    /// may be parked on it. A readiness poller cannot report a closed descriptor:
+    /// epoll removes it from the set and kqueue drops its filters, both silently, so
+    /// the parked flow would never be resumed and would hang forever. poll(2) reports
+    /// `POLLNVAL` and resumes it, which is why this is not needed there — and why the
+    /// gap was invisible until the native backends landed.
+    ///
+    /// The resumed flows observe the closed socket and unwind, exactly as under
+    /// poll(2). Safe to call with no waiters parked, and safe to call more than once.
+    /// @param fd The descriptor about to be closed.
+    void notifyHandleClosing(NativeHandle fd);
+
     /// Re-queues @p waiter for resumption because its cancellation token fired while
     /// it was parked on a timer or fd. Used by the timed/fd awaiters' stop-callbacks
     /// so a `whenAny`/`withTimeout` loser parked on `delay`/`waitReadable` unwinds
@@ -243,7 +258,12 @@ class EventLoop
     std::unordered_map<FdToken, std::coroutine_handle<>>
         _fdWaiters; ///< Flows parked on a generic fd, by token.
     std::unordered_map<std::coroutine_handle<>, FdToken>
-        _waiterToToken;                   ///< Reverse map for O(1) cancellation.
+        _waiterToToken; ///< Reverse map for O(1) cancellation.
+    /// The descriptor each live registration watches, so @c notifyHandleClosing can
+    /// find the flows parked on a descriptor that is about to be closed. Kept here
+    /// rather than asked of the source: @c EventSource exposes no token→fd lookup,
+    /// and adding one would put a query on the interface that only this needs.
+    std::unordered_map<FdToken, NativeHandle> _tokenToFd;
     std::vector<coro::Task<void>> _roots; ///< Keeps live spawned background flows alive.
     coro::StopSource _rootStop;           ///< Root cancellation source.
 
