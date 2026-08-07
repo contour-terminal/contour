@@ -572,6 +572,42 @@ TEST_CASE("SixelParser.explicit_raster_vertical_overflow", "[sixel]")
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(1) });
 }
 
+TEST_CASE("SixelParser.raster_aspect_ratio_wraparound_is_clamped", "[sixel]")
+{
+    // A raster Pan close to UINT_MAX with Pad=1 used to set _aspectRatio to ~2^31 unclamped. The
+    // render()/bandRows() bounds check (y + _aspectRatio > canvasHeight) is unsigned arithmetic,
+    // so that huge aspect ratio made the check wrap around and pass while the write offset itself
+    // (y, still ~2^31) stayed enormous -- a heap write far past the pixel buffer. setRaster() now
+    // clamps the ratio to a sane maximum, so this must no longer reach anywhere near that scale.
+    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
+
+    // Canvas height must clear 512: with Pan=2147483904, (topBit+1)*_aspectRatio wraps mod 2^32 to
+    // exactly 512, and the pre-write bounds check only reaches the vulnerable line when that wrapped
+    // value is <= canvasHeight -- a too-small canvas makes render() bail out via its own early
+    // return before ever touching the write path this test exists to cover.
+    auto ib = SixelImageBuilder(
+        { Width(4), Height(600) }, 1, 1, DefaultColor, std::make_shared<SixelColorPalette>(16, 256));
+    ib.setRaster(2147483904u, 1, std::nullopt);
+
+    // The clamp is the actual regression guard: any value near 2^31 here means the wraparound
+    // window this test exists to close is open again.
+    REQUIRE(ib.aspectRatio() <= 255u);
+
+    auto sp = SixelParser { ib };
+    ib.setColor(0, PinColor);
+
+    // Bit 1 set ('A' = 63+2): with an unclamped aspect ratio this alone used to be enough to
+    // compute a pointer offset gigabytes past the buffer -- the wrapped bounds check above passes,
+    // y stays ~2^31, and paintBit() writes there. It must now just clip against the 600-row canvas
+    // like any other out-of-range sixel, painting nothing.
+    sp.parseFragment("A");
+    sp.done();
+
+    // Storage stays bounded by the declared canvas -- not by whatever `Pan` claimed.
+    CHECK(ib.data().size() <= static_cast<std::size_t>(4u * 600u * 4u));
+}
+
 TEST_CASE("SixelParser.finalize_is_idempotent", "[sixel]")
 {
     // finalize() must be safe to run twice. On the implicit-raster path it compacts rows from the
