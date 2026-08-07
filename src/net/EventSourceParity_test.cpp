@@ -477,6 +477,54 @@ TEST_CASE("an invalid handle is refused by every event source", "[net][eventsour
     }
 }
 
+TEST_CASE("the default source drives the scenarios Socket_test pins to poll", "[net][eventsource][parity]")
+{
+    // Socket_test hardcodes PollEventSource in all of its cases, which is why two
+    // native-backend defects (a registration holding the peer's connection open, and
+    // a parked reader never resuming after close) passed a green suite. These run the
+    // same shapes against whatever makeDefaultEventSource picks -- epoll on Linux,
+    // kqueue on macOS/BSD -- so the backend production actually uses is exercised.
+    auto source = net::makeDefaultEventSource();
+    REQUIRE(source != nullptr);
+
+    SECTION("loopback echo")
+    {
+        auto loop = EventLoop { *source };
+        auto listener = net::listen(loop, "127.0.0.1", 0);
+        REQUIRE(listener.has_value());
+        auto const port = (*listener)->localPort();
+        REQUIRE(port != 0);
+
+        auto got = std::string {};
+        loop.blockOn(echoOverListener(&loop, listener->get(), port, &got));
+        CHECK(got == "parity");
+    }
+
+    SECTION("close resumes a parked reader")
+    {
+        auto loop = EventLoop { *source };
+        auto pair = net::testing::makeSocketPair(loop);
+        REQUIRE(pair.has_value());
+
+        auto resumedWithError = false;
+        loop.blockOn(closeWhileParked(&loop, pair->second.get(), &resumedWithError));
+        CHECK(resumedWithError);
+    }
+
+    SECTION("a peer's close reads as EOF")
+    {
+        auto loop = EventLoop { *source };
+        auto pair = net::testing::makeSocketPair(loop);
+        REQUIRE(pair.has_value());
+
+        pair->first->close();
+
+        auto outcome = -99;
+        loop.blockOn(readOnce(pair->second.get(), &outcome));
+        CHECK(outcome == 0);
+    }
+}
+
 TEST_CASE("makeDefaultEventSource yields a usable source", "[net][eventsource]")
 {
     auto source = net::makeDefaultEventSource();
