@@ -56,6 +56,9 @@ KqueueEventSource::KqueueEventSource() noexcept: _kq { ::kqueue() }
 
 KqueueEventSource::~KqueueEventSource()
 {
+    // Close the duplicates this source owns; the caller's own descriptors are not ours.
+    for (auto const& [token, owned]: _registered)
+        ::close(owned);
     if (_kq >= 0)
         ::close(_kq);
 }
@@ -143,16 +146,24 @@ FdToken KqueueEventSource::attach(NativeHandle fd, FdInterest interest)
     if (!token)
         return FdToken::invalid();
 
+    // Register a private duplicate, for the same reason as the epoll backend: a
+    // kqueue filter is keyed by (descriptor, filter), so a second registration on
+    // one descriptor would replace the first rather than stand beside it, while
+    // poll(2) takes two independent entries.
+    auto const owned = ::dup(fd);
+
     // A failed arm must not leave the registry claiming the fd is watched: the
     // awaiting flow has to fail rather than park on a filter the kernel never
     // armed, which nothing could ever resume.
-    if (!applyInterest(fd, interest, token))
+    if (owned < 0 || !applyInterest(owned, interest, token))
     {
+        if (owned >= 0)
+            ::close(owned);
         _registry.detach(token);
         return FdToken::invalid();
     }
 
-    _registered.emplace(token.value, fd);
+    _registered.emplace(token.value, owned);
     return token;
 }
 
@@ -161,6 +172,7 @@ void KqueueEventSource::detach(FdToken token)
     if (auto const it = _registered.find(token.value); it != _registered.end())
     {
         dropFilters(it->second);
+        ::close(it->second); // the duplicate this source owns, not the caller's fd
         _registered.erase(it);
     }
     _registry.detach(token);

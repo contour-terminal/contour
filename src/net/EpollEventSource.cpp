@@ -55,6 +55,9 @@ EpollEventSource::EpollEventSource() noexcept: _epollFd { ::epoll_create1(EPOLL_
 
 EpollEventSource::~EpollEventSource()
 {
+    // Close the duplicates this source owns; the caller's own descriptors are not ours.
+    for (auto const& [token, owned]: _registered)
+        ::close(owned);
     if (_epollFd >= 0)
         ::close(_epollFd);
 }
@@ -78,16 +81,24 @@ FdToken EpollEventSource::attach(NativeHandle fd, FdInterest interest)
     if (!token)
         return FdToken::invalid();
 
+    // Register a private duplicate: an epoll set is keyed by descriptor, so adding
+    // the same one twice fails with EEXIST, while poll(2) happily takes two entries.
+    // The registry allows two registrations on one descriptor, so without this the
+    // backends would disagree about what is even registrable.
+    auto const owned = ::dup(fd);
+
     // A failed registration must not leave the registry claiming the fd is watched:
     // the awaiting flow has to fail rather than park on an interest the kernel never
     // accepted, which nothing could ever resume.
-    if (!applyInterest(fd, interest, token))
+    if (owned < 0 || !applyInterest(owned, interest, token))
     {
+        if (owned >= 0)
+            ::close(owned);
         _registry.detach(token);
         return FdToken::invalid();
     }
 
-    _registered.emplace(token.value, fd);
+    _registered.emplace(token.value, owned);
     return token;
 }
 
@@ -97,6 +108,7 @@ void EpollEventSource::detach(FdToken token)
     {
         auto event = epoll_event {};
         ::epoll_ctl(_epollFd, EPOLL_CTL_DEL, it->second, &event);
+        ::close(it->second); // the duplicate this source owns, not the caller's fd
         _registered.erase(it);
     }
     _registry.detach(token);

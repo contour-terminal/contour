@@ -212,6 +212,44 @@ TEST_CASE("an attached token is reported and a detached one is not", "[net][even
     }
 }
 
+TEST_CASE("two registrations on one descriptor are accepted by every event source",
+          "[net][eventsource][parity]")
+{
+    for (auto const& backend: AllBackends)
+    {
+        auto source = net::makeEventSource(backend.kind);
+        if (!source)
+            continue;
+
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto pipe = net::createSystemPipe();
+            REQUIRE(pipe.has_value());
+
+            // FdRegistry permits it and poll(2) takes two entries, so the native
+            // backends must too — an epoll set is keyed by descriptor and would
+            // otherwise refuse the second with EEXIST, and a kqueue filter is keyed
+            // by (descriptor, filter) and would replace rather than add.
+            auto const first = source->attach((*pipe)->waitHandle(), FdInterest::Read);
+            auto const second = source->attach((*pipe)->waitHandle(), FdInterest::Read);
+            REQUIRE(first);
+            REQUIRE(second);
+            REQUIRE(first != second);
+
+            auto const one = std::array<std::byte, 1> { std::byte { 'x' } };
+            REQUIRE((*pipe)->write(one.data(), one.size()).has_value());
+
+            // Both registrations must observe the readiness, not just one.
+            auto const ready = source->wait(200);
+            CHECK(std::ranges::find(ready.readyRead, first) != ready.readyRead.end());
+            CHECK(std::ranges::find(ready.readyRead, second) != ready.readyRead.end());
+
+            source->detach(first);
+            source->detach(second);
+        }
+    }
+}
+
 TEST_CASE("an invalid handle is refused by every event source", "[net][eventsource][parity]")
 {
     for (auto const& backend: AllBackends)
