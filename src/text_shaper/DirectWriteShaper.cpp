@@ -577,8 +577,20 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
                                               0,
                                               glyphRunEnumerator.GetAddressOf());
 
-        if (hr == DWRITE_E_NOCOLOR)
+        // DWRITE_E_NOCOLOR is the "this glyph has no color layers" answer, not the only failure:
+        // E_INVALIDARG (a font whose COLR/CPAL tables DirectWrite rejects) and E_OUTOFMEMORY both
+        // land here too, and both leave glyphRunEnumerator NULL. Testing only for NOCOLOR sent every
+        // other failure into the color branch, whose first act is glyphRunEnumerator->MoveNext() --
+        // a call through a null pointer, and a deterministic one now that the enumerator is a ComPtr
+        // rather than an uninitialized raw pointer. Treat any failure as "render it monochrome",
+        // which is the same graceful degradation NOCOLOR already gets.
+        if (FAILED(hr))
         {
+            if (hr != DWRITE_E_NOCOLOR)
+                errorLog()("directwrite: TranslateColorGlyphRun failed for glyph {}; rendering it "
+                           "without color.",
+                           glyph.index.value);
+
             output.bitmap.resize(*height * *width * 3);
             output.format = BitmapFormat::RGB;
 
