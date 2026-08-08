@@ -91,6 +91,9 @@ class RendererTest
     /// The renderer's text renderer, so a test can shape through the exact instance the frame path uses.
     [[nodiscard]] static TextRenderer& textRenderer(Renderer& renderer) { return renderer._textRenderer; }
 
+    /// The renderer's live text shaper, so a test can rasterize through the same faces the frame does.
+    [[nodiscard]] static text::Shaper& textShaper(Renderer& renderer) { return *renderer._textShaper; }
+
     /// Seeds self-consistent grid metrics into the live and published metrics.
     ///
     /// The minimal BDF test font yields zero line metrics from the shaper, which a real TextureAtlas
@@ -1985,6 +1988,119 @@ TEST_CASE("TextRenderer.a_scaled_block_draws_one_cell_sized_tile_per_band", "[re
 }
 
 // }}}
+
+TEST_CASE("TextRenderer.a_tile_normalizes_against_its_own_atlas", "[renderer][atlas]")
+{
+    // #2040. A tile's normalized location is only meaningful relative to the texture it will be sampled
+    // from, and that is the atlas it is being placed into -- whose size is fixed for its whole lifetime.
+    // It used to be computed from the BACKEND's atlas size, which is whatever atlas configured it LAST,
+    // from either thread, at any moment. Rebuilding a pane's atlas one size band larger while the render
+    // thread sat inside a multi-megabyte texture allocation carrying the previous size therefore left
+    // every glyph rasterized afterwards addressing half the texture it was drawn from: on screen, an
+    // entire split pane of shrunken, garbled glyphs.
+    //
+    // The backend here reports twice the real atlas. Nothing production does that deliberately; it is
+    // how a stale read looked from the tile's point of view, and the tile must come out right anyway.
+    auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                                           .cellSize = ImageSize { Width(10), Height(20) },
+                                           .baseline = 15,
+                                           .underline = { .position = 17, .thickness = 1 } };
+
+    auto fontDescriptions = FontDescriptions {};
+    fontDescriptions.dpi = DPI { 96, 96 };
+    fontDescriptions.size = FontSize { 9.0 }; // Matches the BDF test font's SIZE 9 96 96.
+    fontDescriptions.textShapingEngine = TextShapingEngine::OpenShaper;
+
+    REQUIRE(std::filesystem::exists(testFontPath));
+    configureMockFont();
+    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+
+    auto fontLocator = MockFontLocator {};
+    auto textShaper = OpenShaper(DPI { 96, 96 }, fontLocator);
+    auto const fontKey = textShaper.loadFont(FontDescription::parse("regular"), fontDescriptions.size);
+    REQUIRE(fontKey.has_value());
+
+    auto const fontKeys = FontKeys {
+        .regular = *fontKey, .bold = *fontKey, .italic = *fontKey, .boldItalic = *fontKey, .emoji = *fontKey
+    };
+    MockTextRendererEvents events;
+    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+
+    MockRenderTarget renderTarget;
+    vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
+    renderer.setRenderTarget(renderTarget, allocator);
+
+    auto const atlasProperties =
+        vtrasterizer::atlas::AtlasProperties { .format = vtrasterizer::atlas::Format::Red,
+                                               .tileSize = gridMetrics.cellSize,
+                                               .hashCount = { 1024 },
+                                               .tileCount = { 4096 },
+                                               .directMappingCount = 128 };
+    auto textureAtlas = TextureAtlas(renderTarget.getMockBackend(), atlasProperties);
+    renderer.setTextureAtlas(textureAtlas);
+
+    auto const atlasSize = textureAtlas.atlasSize();
+    REQUIRE(unbox(atlasSize.width) != 0);
+
+    auto& backend = renderTarget.getMockBackend();
+    backend.atlasSizeOverride = ImageSize { atlasSize.width * 2, atlasSize.height * 2 };
+
+    auto const tile = renderSingleGlyph(renderer, textShaper, *fontKey, fontDescriptions.size, U'A');
+    REQUIRE(tile.has_value());
+    REQUIRE(unbox(tile->bitmapSize.width) != 0);
+
+    // The invariant the gui.display.sampling probe measures at render time, stated at bake time: the
+    // normalized region must cover exactly as many texels as the bitmap has pixels, in the atlas that
+    // owns the tile. Against the lying backend this used to come out at half, in both axes.
+    auto const& normalized = tile->metadata.normalizedLocation;
+    CHECK(normalized.width * unbox<float>(atlasSize.width)
+          == Catch::Approx(unbox<float>(tile->bitmapSize.width)));
+    CHECK(normalized.height * unbox<float>(atlasSize.height)
+          == Catch::Approx(unbox<float>(tile->bitmapSize.height)));
+}
+
+TEST_CASE("Renderer.reconfig.tiles_follow_the_atlas_across_a_rebuild", "[renderer][atlas]")
+{
+    // The same invariant, driven the way a vertical split reaches it: the pane's renderer is built for
+    // the profile's page, the real (much larger) pane extent arrives right after, growAtlasForPage()
+    // rebuilds the atlas at a new size -- and the glyphs rasterized after that rebuild must address the
+    // NEW atlas. Holding the backend at the pre-rebuild size is what the render thread did while it was
+    // allocating the new texture.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    auto& backend = fixture.renderTarget.getMockBackend();
+
+    auto const sizeBeforeGrow = backend.atlasSize();
+    auto const configuresBeforeGrow = backend.configureCount;
+
+    auto const grown = PageSize { LineCount(120), ColumnCount(400) };
+    fixture.renderer.applyResize(
+        vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+    vtrasterizer::RendererTest::applyPendingReconfig(fixture.renderer);
+
+    REQUIRE(backend.configureCount > configuresBeforeGrow); // the atlas was actually rebuilt
+    auto const sizeAfterGrow = backend.atlasSize();
+    REQUIRE(sizeAfterGrow != sizeBeforeGrow); // ... at a different texture size
+
+    // Pin the backend at the size it reported before the rebuild, then rasterize.
+    backend.atlasSizeOverride = sizeBeforeGrow;
+
+    auto& textRenderer = vtrasterizer::RendererTest::textRenderer(fixture.renderer);
+    auto& shaper = vtrasterizer::RendererTest::textShaper(fixture.renderer);
+    auto const fontKey = shaper.loadFont(FontDescription::parse("regular"), fixture.fontDescriptions.size);
+    REQUIRE(fontKey.has_value());
+
+    auto const tile = renderSingleGlyph(textRenderer, shaper, *fontKey, fixture.fontDescriptions.size, U'A');
+    REQUIRE(tile.has_value());
+    REQUIRE(unbox(tile->bitmapSize.width) != 0);
+
+    auto const& normalized = tile->metadata.normalizedLocation;
+    CHECK(normalized.width * unbox<float>(sizeAfterGrow.width)
+          == Catch::Approx(unbox<float>(tile->bitmapSize.width)));
+    CHECK(normalized.height * unbox<float>(sizeAfterGrow.height)
+          == Catch::Approx(unbox<float>(tile->bitmapSize.height)));
+}
 
 int main(int argc, char* argv[])
 {

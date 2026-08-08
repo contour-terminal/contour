@@ -26,9 +26,16 @@ auto Renderable::createTileData(atlas::TileLocation tileLocation,
                                 RenderTileAttributes::Y y,
                                 uint32_t fragmentShaderSelector) -> TextureAtlas::TileCreateData
 {
+    // The size of the atlas THIS tile is being placed into, not the backend's idea of "the current
+    // atlas". A tile's normalized location is only meaningful relative to the texture it will be
+    // sampled from, and the owning atlas fixes that size for its whole lifetime, whereas the backend
+    // holds whatever was configured last -- by any atlas, at any moment, from either thread. Reading
+    // the backend here is what made #2040 visible: a pane's atlas was rebuilt one size band larger
+    // while the render thread was still inside a multi-millisecond texture allocation carrying the
+    // previous size, and every glyph baked afterwards addressed half the texture it was drawn from.
     // clang-format off
     auto tileData = TextureAtlas::TileCreateData {};
-    auto const atlasSize = _textureScheduler->atlasSize();
+    auto const atlasSize = textureAtlas().atlasSize();
     Require(!!atlasSize.width);
     Require(!!atlasSize.height);
     if (!SoftRequire(bitmap.size() == bitmapSize.area() * atlas::elementCount(bitmapFormat)))
