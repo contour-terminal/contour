@@ -449,6 +449,15 @@ ImageSize RhiRenderer::atlasSize() const noexcept
 
 void RhiRenderer::configureAtlas(atlas::ConfigureAtlas atlas)
 {
+    // Tiles queued so far belong to the atlas being replaced, and their TileLocations were computed from
+    // the OLD tiles-per-row -- execute() applies the single (last) ConfigureAtlas and then replays EVERY
+    // queued upload, so keeping them writes the previous atlas' bitmaps at the previous atlas'
+    // coordinates into the new texture, landing each one on top of an unrelated tile. Two configures in
+    // one drain window is not hypothetical: applyPendingReconfig() rebuilds the atlas from its geometry
+    // branch (growAtlasForPage) and again from its font branch (updateFontMetrics) in the same pass.
+    // Whoever owns the new atlas re-uploads what it needs; nothing here can be salvaged.
+    _scheduledExecutions.uploadTiles.clear();
+
     // schedule atlas creation
     _scheduledExecutions.configureAtlas.emplace(atlas);
     _atlasTextureSize = atlas.size;
