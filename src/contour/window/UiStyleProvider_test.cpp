@@ -174,6 +174,26 @@ TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell
     CHECK(terminal.trailingPadding() > 0.0);
     CHECK(terminal.tabSlack() == 0.0); // a cell of padding at either end is already the breathing room
 
+    // The window-control extents go through the SAME quantum, which is the whole reason they live in
+    // this table rather than in the window-control style's own row: it is what lets a macOS-style
+    // traffic light land on a whole cell under `ui_style: terminal` instead of straddling two.
+    CHECK(native.trafficLightDotSize() == nativeTokens.trafficLightDotUnits);
+    CHECK(native.trafficLightGap() == nativeTokens.trafficLightGapUnits);
+    CHECK(native.windowControlInset() == nativeTokens.windowControlInsetUnits);
+
+    CHECK(terminal.trafficLightDotSize() == terminal.cellWidth());
+    CHECK(terminal.trafficLightGap() == terminal.cellWidth());
+    CHECK(terminal.windowControlInset() == terminal.cellWidth());
+
+    // Note the check above is against cellWidth, not cellHeight: a dot is a circle, and resolving its
+    // width and height through different quanta would make it an ellipse wherever the cell is not
+    // square -- which is every font this chrome is ever set in.
+
+    // The glyph is the switch the QML branches on. Empty means "draw the shape", so a style that
+    // stated one would silently change which delegate every window control uses.
+    CHECK(native.trafficLightGlyph().isEmpty());
+    CHECK(terminal.trafficLightGlyph() == QStringLiteral("●"));
+
     // The three translucent overlays are the token row's alphas applied to a palette color, so they
     // keep the color and change only its opacity -- a scrim that dropped the hue would dim the window
     // to grey rather than to shadow.
