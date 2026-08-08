@@ -82,7 +82,26 @@ void TerminalRenderNode::prepare()
                      static_cast<qreal>(window->size().height()) };
         return {};
     }();
-    auto const dpr = deviceToLogicalScale(rt->pixelSize(), windowLogicalSize);
+    // The snapshot is refreshed only when this item is dirtied, while the scene graph calls prepare()
+    // on EVERY frame. A resize that reaches the swapchain render target without putting this item on
+    // the dirty list -- a pane whose own geometry an anchor holds fixed while a sibling absorbs the
+    // delta, or a frame driven by another item's update() -- pairs the new render target with the
+    // previous window extent, and the non-empty test above accepts that pair rather than falling back.
+    // effectiveDevicePixelRatio() is the scale the scene graph itself built projectionMatrix() with, so
+    // when the derived ratio disagrees with it the derivation is the stale half; prefer the live scalar,
+    // which is a single value and so cannot pair two moments. Kept as a cross-check rather than the
+    // primary source because the render-target-derived ratio is what makes a layered or offscreen target
+    // come out right, and it agrees with this whenever the snapshot is current.
+    auto const dpr = [&]() -> qreal {
+        auto const derived = deviceToLogicalScale(rt->pixelSize(), windowLogicalSize);
+        auto const* const window = display->window();
+        if (window == nullptr)
+            return derived;
+        auto const effective = window->effectiveDevicePixelRatio();
+        if (effective > 0.0 && std::abs(derived - effective) > 0.001)
+            return effective;
+        return derived;
+    }();
     auto const itemToClip = composeItemToClip(*projectionMatrix(), *matrix(), dpr);
 
     // {{{ #2040 geometry probe
