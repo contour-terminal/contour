@@ -291,6 +291,24 @@ class Renderer
         return std::unique_lock { _applyMutex };
     }
 
+    /// Raises the glyph atlas budget to cover @p pageSize, before a render target is attached.
+    ///
+    /// A renderer is constructed from the PROFILE's page size, which is the right answer only for a
+    /// window's first pane: a freshly split pane is created at a fraction of the window, and a maximized
+    /// one at several times the profile. Without this the atlas is built for the profile and the real
+    /// extent, arriving one call later, immediately rebuilds it one power-of-two band larger -- throwing
+    /// away a multi-megabyte texture per pane, per split, on the pane's very first frame.
+    ///
+    /// Only meaningful before setRenderTarget(): once an atlas exists the same growth happens through
+    /// the ordinary staged-geometry path, and doing it here would rebuild rather than reserve.
+    ///
+    /// @param pageSize the page the pane will actually render.
+    void reserveAtlasForPage(vtbackend::PageSize pageSize)
+    {
+        auto const applyGuard = std::scoped_lock { _applyMutex };
+        growAtlasForPage(pageSize);
+    }
+
     void discardImage(vtbackend::Image const& image);
 
     void clearCache();

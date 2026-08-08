@@ -900,6 +900,29 @@ void TerminalDisplay::createRenderer()
                      windowSize.height());
     }
 
+    // Size the glyph atlas for the page this pane will ACTUALLY render, before the atlas is built. The
+    // renderer was constructed from the profile's page size, which is the right answer only for a
+    // window's first pane; a split pane is created at a fraction of the window and a maximized one at
+    // several times the profile. Letting the real extent arrive after the atlas exists rebuilds it one
+    // power-of-two band larger on the pane's very first frame, throwing away a multi-megabyte texture
+    // per pane per split -- and it was a rebuild at exactly that moment that #2040 rode in on.
+    //
+    // Same page fit session::applyResize() performs a few lines below, deliberately: reserving against
+    // any other number would size the atlas for a page this pane never renders. Skipped when the item
+    // has no extent yet (the SplitView has not polished), where the profile budget is the best guess
+    // and the ordinary staged-geometry path grows it later.
+    if (auto const availablePx = geometry::availableDevicePixels(width(), height(), devicePixelRatio());
+        availablePx.width.value != 0 && availablePx.height.value != 0)
+    {
+        auto const marginsDevicePx =
+            geometry::scaled(session::toGeometryMargins(profile().margins.value()), devicePixelRatio());
+        auto const fit = geometry::fitPageToPixels(
+            availablePx, gridMetrics().cellSize, marginsDevicePx, [this](auto page) {
+                return _session->terminal().clampedTotalPageSize(page);
+            });
+        _renderer->reserveAtlasForPage(fit.pageSize);
+    }
+
     _renderTarget = std::make_unique<RhiRenderer>(precalculatedTargetSize, textureTileSize);
     _renderer->setRenderTarget(*_renderTarget);
 
