@@ -14,6 +14,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -29,6 +30,39 @@ TEST_CASE("ContourGuiApp resolves the default profile and its config", "[contour
     // default_profile key.
     CHECK(app.app().profileName() == "main");
     CHECK(app.app().config().profile("main") != nullptr);
+}
+
+TEST_CASE("every verb reaching loadConfig declares the options it reads", "[contour][app][cli]")
+{
+    // loadConfig() reads `log` and `log-file` unconditionally, under the prefix of whichever verb is
+    // running, and crispy::cli::FlagStore::get() is a `values.at(key)` over the options that verb
+    // DECLARED. A verb missing either one therefore does not "just log nothing": it throws
+    // std::out_of_range before doing any of its own work, which is how `contour font-locator` stopped
+    // listing fonts. Asserted over the whole verb list rather than for one name, so a third caller of
+    // loadConfig() cannot reintroduce this quietly.
+    TestApp app;
+    auto const syntax = app.app().parameterDefinition();
+
+    auto const declares = [](crispy::cli::Command const& command, std::string_view option) {
+        return std::ranges::any_of(
+            command.options, [option](crispy::cli::Option const& o) { return o.name.longName == option; });
+    };
+
+    // Named explicitly, because membership is a fact about the C++ call graph rather than about the
+    // option lists: these are ContourGuiApp::loadConfig()'s two callers (terminalGuiAction and
+    // fontConfigAction). `client` and `daemon` route through App::installLogging() instead and are
+    // deliberately not here. A third caller of loadConfig() belongs in this list.
+    for (auto const* verbName: { "terminal", "font-locator" })
+    {
+        INFO("verb: " << verbName);
+        auto const verb = std::ranges::find_if(
+            syntax.children, [verbName](crispy::cli::Command const& c) { return c.name == verbName; });
+        REQUIRE(verb != syntax.children.end());
+
+        CHECK(declares(*verb, "debug"));
+        CHECK(declares(*verb, "log"));
+        CHECK(declares(*verb, "log-file"));
+    }
 }
 
 TEST_CASE("ContourGuiApp early-exit threshold falls back to the documented default", "[contour][app]")
