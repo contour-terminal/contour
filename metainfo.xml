@@ -250,6 +250,7 @@
           <li>Fixes characters rendering as other characters on a window that has grown a lot since it opened, such as one maximized from a small size or a split pane given most of the tab. The glyph cache was sized once, for the window's original size, so a screenful of distinct characters could need more slots than it held and glyphs began overwriting each other mid-frame. It is now resized along with the page</li>
           <li>Fixes a pane rendering blank or partially after a font, font-size or DPI change that reached it while it was not on screen — minimized, occluded, or on another tab. The pane kept shaping text with fonts it had already discarded, and the frame was dropped instead of drawn</li>
           <li>Fixes the window padding being computed against the wrong scale when a forced font DPI is configured (KDE's "Force font DPI"), which fitted the grid to a width the window did not have and left the terminal's own idea of where the grid starts disagreeing with where it was drawn</li>
+          <li>Fixes every glyph in one pane rendering shrunken and unreadable after splitting a large window, while the other pane stayed perfect — and the same after closing a split. The pane's glyph cache is enlarged for its new size on its first frame, and text drawn while that was still happening was sampled from the wrong half of it. Splitting also no longer builds each pane's glyph cache at the wrong size and immediately rebuilds it (#2040)</li>
         </ul>
       </description>
     </release>
