@@ -964,6 +964,13 @@ void TerminalDisplay::prepareFrameRhi(QRhi* rhi,
     if (!_renderTarget || !_session || rhi == nullptr || cb == nullptr || rt == nullptr || rpDesc == nullptr)
         return;
 
+    // Serialize this whole staging phase against a GUI-thread reconfiguration. paint() -> render() takes
+    // the same (recursive) lock, but createPipelines() and flushFrame() below sit OUTSIDE render() and
+    // touch the very state a reconfiguration rewrites: the atlas backend's queued commands, its atlas
+    // texture, and the atlas size tiles are normalized against. #2040 is what that gap looked like -- a
+    // GUI-thread atlas rebuild slipped into createPipelines()' multi-millisecond texture allocation.
+    auto const frameGuard = _renderer->lockForFrame();
+
     // Snapshot the render target into a local for the rest of this frame. prepare() runs on the render
     // thread with the GUI thread UNBLOCKED, and releaseResources() nulls the _renderTarget member with a
     // std::move() on the GUI thread (handing ownership to a BeforeSynchronizingStage CleanupJob). Reading
@@ -1028,6 +1035,10 @@ void TerminalDisplay::recordFrameRhi(QSGRenderNode::RenderState const* state)
 {
     if (!_renderTarget)
         return;
+
+    // Same frame guard as prepareFrameRhi(): recordDraws() replays the staged batch and reads the atlas
+    // size for the text uniforms, so a GUI-thread reconfiguration must not land in the middle of it.
+    auto const frameGuard = _renderer->lockForFrame();
 
     // Pin the render target for this frame: like prepareFrameRhi(), this runs on the render thread with the
     // GUI thread unblocked, so releaseResources() can std::move the _renderTarget member to null between the

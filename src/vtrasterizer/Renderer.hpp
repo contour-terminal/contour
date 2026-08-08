@@ -272,6 +272,25 @@ class Renderer
         return consumeFontReconfigApplied();
     }
 
+    /// Serializes a whole render-thread frame against a GUI-thread reconfiguration.
+    ///
+    /// render() takes the same lock, but a frame is more than render(): the render target's pipeline and
+    /// texture creation, the per-frame command staging and the draw replay all live in the display around
+    /// it, and all of them touch state that applyStagedReconfigDuringSetup() mutates -- the atlas backend's
+    /// scheduled commands, its atlas texture, and the atlas size the rasterizer normalizes tiles against.
+    /// Holding this for the frame is what makes the "mutually exclusive with an in-flight frame" claim on
+    /// applyStagedReconfigDuringSetup() true rather than nearly true.
+    ///
+    /// In #2040 it was not true: a GUI-thread atlas rebuild landed inside the render thread's
+    /// multi-millisecond atlas texture allocation, and every glyph rasterized afterwards addressed the
+    /// pre-rebuild texture size.
+    ///
+    /// @return a lock guard the caller keeps for the duration of the frame phase.
+    [[nodiscard]] std::unique_lock<std::recursive_mutex> lockForFrame()
+    {
+        return std::unique_lock { _applyMutex };
+    }
+
     void discardImage(vtbackend::Image const& image);
 
     void clearCache();
@@ -416,13 +435,18 @@ class Renderer
     ///
     /// applyPendingReconfig() normally runs only on the render thread (at the top of renderImpl()), but
     /// applyStagedReconfigDuringSetup() also invokes it from the GUI thread for the non-renderable
-    /// (minimized/occluded) case. A window losing exposure does not synchronously stop an already
-    /// in-flight frame, so the GUI-thread apply could otherwise overlap the render-thread apply and race
-    /// on _gridMetrics / the texture atlas / the non-thread-safe shaper. Holding this mutex across the
-    /// whole apply body makes the two mutually exclusive. It is distinct from _reconfigMutex (which only
-    /// guards the short staged-request/published-metrics critical sections) so a UI-thread gridMetrics()
-    /// reader is not blocked for the multi-millisecond font load.
-    std::mutex _applyMutex;
+    /// (minimized/occluded) case and for a discrete font change. A window losing exposure does not
+    /// synchronously stop an already in-flight frame, so the GUI-thread apply could otherwise overlap the
+    /// render-thread apply and race on _gridMetrics / the texture atlas / the non-thread-safe shaper.
+    /// Holding this mutex across the whole apply body makes the two mutually exclusive. It is distinct
+    /// from _reconfigMutex (which only guards the short staged-request/published-metrics critical
+    /// sections) so a UI-thread gridMetrics() reader is not blocked for the multi-millisecond font load.
+    ///
+    /// Recursive because the frame guard (lockForFrame()) nests over renderImpl()'s own acquisition. The
+    /// alternative -- splitting render() into locked and unlocked twins -- moves the invariant out of the
+    /// type and into a rule every caller has to remember, and the unlocked twin is exactly the mistake
+    /// #2040 was.
+    std::recursive_mutex _applyMutex;
 
     /// The most recently *requested* grid metrics, observable synchronously via gridMetrics().
     ///
