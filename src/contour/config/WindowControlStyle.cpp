@@ -33,12 +33,16 @@ namespace
 
 HostPlatform detectDesktopPlatform(crispy::Environment const& env)
 {
-    // XDG_CURRENT_DESKTOP first: it is the standardized answer and the one a session sets even when
-    // it is not the login session's own desktop. KDE_FULL_SESSION is KDE's older marker and covers
-    // the sessions -- and the su/sudo shells -- where the XDG variable is not propagated.
-    if (auto const desktop = env.get("XDG_CURRENT_DESKTOP"); desktop && containsIgnoreCase(*desktop, "KDE"))
-        return HostPlatform::KdePlasma;
+    // XDG_CURRENT_DESKTOP is the standardized answer, so where it says anything at all it is the
+    // whole answer -- a desktop that named itself is not overruled by another desktop's marker.
+    if (auto const desktop = env.get("XDG_CURRENT_DESKTOP"); desktop && !desktop->empty())
+        return containsIgnoreCase(*desktop, "KDE") ? HostPlatform::KdePlasma : HostPlatform::Other;
 
+    // Only once it said nothing: KDE's older marker, which covers the sessions -- and the su/sudo
+    // shells -- where the XDG variable is not propagated. It is consulted last rather than as a
+    // second chance because it LEAKS: a terminal, a `su -` or a nested session started from Plasma
+    // carries KDE_FULL_SESSION into whatever runs there, so treating it as evidence against an
+    // explicit `XDG_CURRENT_DESKTOP=ubuntu:GNOME` would draw Breeze's chrome on a GNOME desktop.
     if (auto const kde = env.get("KDE_FULL_SESSION"); kde && !kde->empty())
         return HostPlatform::KdePlasma;
 

@@ -280,6 +280,11 @@ constexpr std::span<ConfigEnumInfo<WindowControlStyle> const> configEnumValues()
 /// there is, and which one is running is something only the environment can say. Takes the
 /// environment as a collaborator rather than calling getenv() so a test can answer for it.
 ///
+/// @c XDG_CURRENT_DESKTOP decides wherever it says anything, because it is the standardized answer
+/// and the only one a desktop other than KDE also sets. @c KDE_FULL_SESSION is consulted only when
+/// it is silent: KDE's older marker leaks into everything Plasma starts, so a session that named
+/// itself must not be overruled by it.
+///
 /// @param env The environment to read @c XDG_CURRENT_DESKTOP and @c KDE_FULL_SESSION from.
 /// @return @c KdePlasma for a KDE session, @c Other for anything else.
 [[nodiscard]] HostPlatform detectDesktopPlatform(crispy::Environment const& env);

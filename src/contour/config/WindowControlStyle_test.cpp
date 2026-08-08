@@ -173,6 +173,19 @@ TEST_CASE("WindowControlStyle: the desktop is read from the environment", "[wind
         CHECK(detectDesktopPlatform(env) == HostPlatform::Other);
     }
 
+    SECTION("a leaked KDE_FULL_SESSION does not overrule a desktop that named itself")
+    {
+        // The reason KDE_FULL_SESSION is a fallback and not a second chance: Plasma exports it into
+        // every child process, so a GNOME session started from a Plasma terminal -- or reached
+        // through `su -` -- still carries it. Reading it as evidence would draw Breeze's circular
+        // hover fills and Breeze red on a desktop that explicitly said it was something else.
+        auto const env = FakeEnvironment { {
+            { "XDG_CURRENT_DESKTOP", "ubuntu:GNOME" },
+            { "KDE_FULL_SESSION", "true" },
+        } };
+        CHECK(detectDesktopPlatform(env) == HostPlatform::Other);
+    }
+
     SECTION("no desktop at all")
     {
         // A bare TTY, a container, a CI runner. It must answer rather than guess.
