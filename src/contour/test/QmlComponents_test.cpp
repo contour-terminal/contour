@@ -3511,25 +3511,40 @@ void postGesture(
     return buildQmlHost(engine, source, QStringLiteral("TabItemBorderTestHost.qml"));
 }
 
-/// Hosts the REAL TitleBar under the REAL ResizeBorder, in Main.qml's stacking order (bar at z:1, border
-/// filling the window at z:1000) — so the bar's window-move region really does sit beneath the border's top
-/// edge zone, as it does in the running application.
+/// Builds the REAL TitleBar with its window controls enabled, under @p uiStyle and
+/// @p windowControlStyle.
 ///
-/// @param engine     The engine to build in.
-/// @param controller The mock the bar binds to.
+/// The one place TitleBar is instantiated for a test, so a change to how it is instantiated -- a new
+/// required property, say -- lands on every test at once rather than on whichever host builder the
+/// author happened to notice. The bar sits at z:1 as Main.qml puts it, which is what lets a caller
+/// stack the REAL ResizeBorder (z:1000) over it via @p extraChildren.
+///
+/// @param engine             The engine to build in. Both style providers are installed on it.
+/// @param controller         The mock the bar binds to.
+/// @param uiStyle            The chrome style, i.e. what decides the extents.
+/// @param windowControlStyle The window-control style, i.e. what decides side, order and shape.
+/// @param extraChildren      QML appended after the bar, e.g. a ResizeBorder over it.
+/// @param width              The host window's width. Wide by default, so the tab strip's 70% cap
+///                           leaves the drag region real width and "left of the tabs" and "right of
+///                           the drag region" are genuinely different places to be.
 /// @return The host Window; the bar is reachable via findChild("titleBar").
-[[nodiscard]] std::unique_ptr<QObject> makeTitleBarUnderResizeBorderHost(QQmlEngine& engine,
-                                                                         MockTabController& controller)
+[[nodiscard]] std::unique_ptr<QObject> makeTitleBarHost(
+    QQmlEngine& engine,
+    MockTabController& controller,
+    contour::config::UiStyle uiStyle = contour::config::UiStyle::Native,
+    contour::config::WindowControlStyle windowControlStyle = contour::config::WindowControlStyle::Windows,
+    QString const& extraChildren = {},
+    int width = 900)
 {
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine, uiStyle, windowControlStyle);
 
-    contour::test::installChromeStyle(engine);
     auto const source = QStringLiteral("import QtQuick\n"
                                        "import QtQuick.Window\n"
                                        "import Contour.Ui\n"
                                        "Window {\n"
                                        "  id: host\n"
-                                       "  width: 800; height: 400; visible: true\n"
+                                       "  width: %1; height: 400; visible: true\n"
                                        "  TitleBar {\n"
                                        "    objectName: \"titleBar\"\n"
                                        "    anchors.left: parent.left\n"
@@ -3541,10 +3556,12 @@ void postGesture(
                                        "    window: host\n"
                                        "    useCustomWindowControls: true\n"
                                        "  }\n"
-                                       "  ResizeBorder { window: host }\n"
-                                       "}\n");
+                                       "%2"
+                                       "}\n")
+                            .arg(width)
+                            .arg(extraChildren);
 
-    return buildQmlHost(engine, source, QStringLiteral("TitleBarBorderTestHost.qml"));
+    return buildQmlHost(engine, source, QStringLiteral("TitleBarTestHost.qml"));
 }
 } // namespace
 
@@ -3612,7 +3629,15 @@ TEST_CASE("A resize-border press over the title bar does not start a window move
     QQmlEngine engine;
     MockTabController controller;
 
-    auto const host = makeTitleBarUnderResizeBorderHost(engine, controller);
+    // The REAL ResizeBorder stacked over the bar, in Main.qml's own order (bar at z:1, border filling
+    // the window at z:1000), so the bar's window-move region really does sit beneath the border's top
+    // edge zone as it does in the running application. 800 wide, as this test has always been.
+    auto const host = makeTitleBarHost(engine,
+                                       controller,
+                                       contour::config::UiStyle::Native,
+                                       contour::config::WindowControlStyle::Windows,
+                                       QStringLiteral("  ResizeBorder { window: host }\n"),
+                                       800);
     auto* window = qobject_cast<QQuickWindow*>(host.get());
     REQUIRE(window != nullptr);
 
@@ -4046,46 +4071,6 @@ TEST_CASE("The tab strip's \"+\" and \"▾\" are padded wider than a tab's close
 namespace
 {
 
-/// Builds the REAL TitleBar with its window controls enabled, under @p uiStyle and
-/// @p windowControlStyle.
-///
-/// @param engine             The engine to build in. Both style providers are installed on it.
-/// @param controller         The mock the bar binds to.
-/// @param uiStyle            The chrome style, i.e. what decides the extents.
-/// @param windowControlStyle The window-control style, i.e. what decides side, order and shape.
-/// @return The host Window; the bar is reachable via findChild("titleBar").
-[[nodiscard]] std::unique_ptr<QObject> makeTitleBarHost(
-    QQmlEngine& engine,
-    MockTabController& controller,
-    contour::config::UiStyle uiStyle,
-    contour::config::WindowControlStyle windowControlStyle)
-{
-    engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    contour::test::installChromeStyle(engine, uiStyle, windowControlStyle);
-
-    // Wide enough that the tab strip's 70% cap leaves the drag region real width, so "left of the
-    // tabs" and "right of the drag region" are genuinely different places to be.
-    auto const source = QStringLiteral("import QtQuick\n"
-                                       "import QtQuick.Window\n"
-                                       "import Contour.Ui\n"
-                                       "Window {\n"
-                                       "  id: host\n"
-                                       "  width: 900; height: 400; visible: true\n"
-                                       "  TitleBar {\n"
-                                       "    objectName: \"titleBar\"\n"
-                                       "    anchors.left: parent.left\n"
-                                       "    anchors.right: parent.right\n"
-                                       "    y: 0\n"
-                                       "    height: implicitHeight\n"
-                                       "    controller: terminalSessions\n"
-                                       "    window: host\n"
-                                       "    useCustomWindowControls: true\n"
-                                       "  }\n"
-                                       "}\n");
-
-    return buildQmlHost(engine, source, QStringLiteral("TitleBarPlacementTestHost.qml"));
-}
-
 /// Finds the first descendant of @p root satisfying @p predicate, in the VISUAL tree.
 ///
 /// findChild() is not enough for anything a Repeater created: a delegate is given a parentItem but
@@ -4213,19 +4198,106 @@ TEST_CASE("Every window control takes its width from the active chrome style (of
     // A traffic light is a dot plus its gap -- the gap is part of the control so that it is
     // clickable -- and a button is a full window-control width. Both come from the chrome style, so
     // under Terminal both are counts of cells and under Native both are pixels.
-    auto const expected = style == contour::config::WindowControlStyle::MacOS
-                              ? provider->trafficLightDotSize() + provider->trafficLightGap()
-                              : provider->windowControlWidth();
+    //
+    // Except for the LAST traffic light, which is a bare dot: its gap would have no neighbour on the
+    // far side of it, so it would be a clickable strip in what reads as bare title bar. macOS draws
+    // close, minimize, maximize in that order, so maximize is the one.
+    auto const trafficLights = style == contour::config::WindowControlStyle::MacOS;
+    auto const expectedFor = [&](std::string_view action) {
+        if (!trafficLights)
+            return provider->windowControlWidth();
+        return action == "maximize" ? provider->trafficLightDotSize()
+                                    : provider->trafficLightDotSize() + provider->trafficLightGap();
+    };
+
+    // A traffic light's HEIGHT is bounded too, and that is a hit-target fact rather than a cosmetic
+    // one: a title bar is mostly drag region, its top edge belongs to the resize border, and the
+    // group's hover reveal covers exactly the extent its controls occupy. Were a control stretched to
+    // the full bar height, a click well above or below a 12px dot would close the window. A button
+    // presentation is the opposite case -- its hover fill IS a full-height rectangle.
+    auto const expectedHeight = trafficLights
+                                    ? std::min(provider->chromeHeight(),
+                                               provider->trafficLightDotSize() + provider->trafficLightGap())
+                                    : provider->chromeHeight();
 
     for (auto const* action: { "close", "minimize", "maximize" })
     {
         auto const name = QStringLiteral("windowControl_") + QLatin1StringView(action);
         auto const* control = findItemNamed(*bar, name);
         REQUIRE(control != nullptr);
+        auto const expected = expectedFor(action);
         INFO("control: " << action << ", width: " << control->width() << ", expected: " << expected);
         // Within a pixel, which is the layout's own snap and not slack in the token arithmetic.
         CHECK(control->width() == Catch::Approx(expected).margin(1.0));
+        INFO("control: " << action << ", height: " << control->height() << ", expected: " << expectedHeight);
+        CHECK(control->height() == Catch::Approx(expectedHeight).margin(1.0));
     }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The window controls change corner when the style does, without rebuilding (offscreen)",
+          "[contour][gui][qml][titlebar][windowcontrols]")
+{
+    // The branch's headline promise: the settings page moves the controls with no restart. That is
+    // the ONE thing every other window-control test cannot see, because each builds its engine with
+    // the final style already installed -- so a `side` property quietly turned CONSTANT, or a Loader
+    // whose `active:` binding became a one-shot assignment, would leave all of them passing while
+    // the live path silently stopped working. Which is the same class of gap that let the
+    // ReloadConfig path ship unwired.
+    contour::test::QmlMessageCapture const warnings;
+
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host = makeTitleBarHost(
+        engine, controller, contour::config::UiStyle::Native, contour::config::WindowControlStyle::Windows);
+    auto* bar = host->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+    REQUIRE(bar != nullptr);
+
+    auto* leading = bar->findChild<QQuickItem*>(QStringLiteral("leadingWindowControls"));
+    auto* trailing = bar->findChild<QQuickItem*>(QStringLiteral("trailingWindowControls"));
+    REQUIRE(leading != nullptr);
+    REQUIRE(trailing != nullptr);
+
+    // Windows: on the right, as Contour has always drawn them.
+    CHECK(!leading->property("active").toBool());
+    CHECK(trailing->property("active").toBool());
+
+    auto* provider = engine.rootContext()
+                         ->contextProperty(QStringLiteral("windowControls"))
+                         .value<contour::window::WindowControlStyleProvider*>();
+    REQUIRE(provider != nullptr);
+
+    // Exactly what ContourGuiApp::applyWindowControlStyle() does on Apply.
+    provider->setStyle(contour::config::WindowControlStyle::MacOS);
+
+    // The `active` bindings re-evaluate the moment the provider says so, but the WIDTHS follow a
+    // layout polish, which is a render-loop pass rather than an event -- so this waits for the
+    // geometry rather than assuming one processEvents() is enough. A failure here times out and then
+    // fails on the assertions below with the stale numbers, which is what says what went wrong.
+    CHECK(QTest::qWaitFor([&] { return leading->width() > 0.0 && trailing->width() == 0.0; }, 2000));
+
+    // They moved corner, and the vacated slot gave its width back rather than holding it.
+    CHECK(leading->property("active").toBool());
+    CHECK(!trailing->property("active").toBool());
+    CHECK(leading->width() > 0.0);
+    CHECK(trailing->width() == 0.0);
+
+    // The vacated corner gave its width back rather than holding it: an inactive Loader keeps the
+    // implicit size of whatever it last held, so without a Layout.preferredWidth of its own the bar
+    // would go on reserving three buttons' worth of space in the corner the controls just left --
+    // which the drag region, being the elastic middle, is exactly what measures.
+    auto const* dragRegion = bar->findChild<QQuickItem*>(QStringLiteral("dragRegion"));
+    REQUIRE(dragRegion != nullptr);
+    CHECK(sceneRectOf(*dragRegion).right() == Catch::Approx(sceneRectOf(*bar).right()));
+
+    // And the group that moved is the macOS one, in the macOS order -- so what followed the style is
+    // the whole row, not just which Loader was switched on.
+    auto const* close = findItemNamed(*leading, QStringLiteral("windowControl_close"));
+    auto const* maximize = findItemNamed(*leading, QStringLiteral("windowControl_maximize"));
+    REQUIRE(close != nullptr);
+    REQUIRE(maximize != nullptr);
+    CHECK(sceneRectOf(*close).left() < sceneRectOf(*maximize).left());
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

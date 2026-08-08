@@ -18,7 +18,7 @@ namespace contour::test
 /// Every chrome component reads its metrics, fonts and glyphs from the `chromeStyle` context
 /// property and its window-control placement from `windowControls`, so an engine without both loads
 /// nothing. Being context properties they are per-engine -- which is what lets one test binary drive
-/// every combination of the two (see UiStyleProvider.h for why context properties rather than QML
+/// every combination of the two (see UiStyleProvider.hpp for why context properties rather than QML
 /// singletons).
 ///
 /// Both are installed together, by one call, because a chrome component needs both to load: making

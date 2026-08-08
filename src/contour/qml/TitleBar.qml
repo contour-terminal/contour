@@ -52,8 +52,8 @@ Item {
     }
 
     // The window controls, wherever they go. One definition, instantiated by whichever of the two
-    // Loaders below the configured side turns on; the other stays inactive and so has no implicit
-    // size at all, which is what lets the layout collapse it rather than reserve width for it.
+    // Loaders below the configured side turns on; the other is held at zero width, so the corner it
+    // is not using costs the bar nothing.
     Component {
         id: windowControlsComponent
 
@@ -72,6 +72,12 @@ Item {
             objectName: "leadingWindowControls"
             Layout.fillHeight: true
             active: root.useCustomWindowControls && windowControls.side === "leading"
+            // Zero while inactive, stated rather than inherited: a Loader only recomputes its
+            // implicit size while it HAS an item, so one that has ever been filled keeps the width
+            // of three controls forever -- and after a live style change that would leave the
+            // vacated corner reserving space for buttons that moved to the other one.
+            // @see the trailing slot below.
+            Layout.preferredWidth: active ? implicitWidth : 0
             sourceComponent: windowControlsComponent
         }
 
@@ -134,6 +140,8 @@ Item {
             objectName: "trailingWindowControls"
             Layout.fillHeight: true
             active: root.useCustomWindowControls && windowControls.side === "trailing"
+            // Zero while inactive, for the reason the leading slot states.
+            Layout.preferredWidth: active ? implicitWidth : 0
             sourceComponent: windowControlsComponent
         }
     }
