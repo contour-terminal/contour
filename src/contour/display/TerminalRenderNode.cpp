@@ -92,13 +92,13 @@ void TerminalRenderNode::prepare()
     // which is a single value and so cannot pair two moments. Kept as a cross-check rather than the
     // primary source because the render-target-derived ratio is what makes a layered or offscreen target
     // come out right, and it agrees with this whenever the snapshot is current.
-    auto const dpr = [&]() -> qreal {
+    auto const dpr = [&]() -> float {
         auto const derived = deviceToLogicalScale(rt->pixelSize(), windowLogicalSize);
         auto const* const window = display->window();
         if (window == nullptr)
             return derived;
-        auto const effective = window->effectiveDevicePixelRatio();
-        if (effective > 0.0 && std::abs(derived - effective) > 0.001)
+        auto const effective = static_cast<float>(window->effectiveDevicePixelRatio());
+        if (effective > 0.0f && std::abs(derived - effective) > 0.001f)
             return effective;
         return derived;
     }();
