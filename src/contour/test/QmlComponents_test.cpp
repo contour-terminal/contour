@@ -44,6 +44,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -4038,6 +4039,237 @@ TEST_CASE("The tab strip's \"+\" and \"▾\" are padded wider than a tab's close
         REQUIRE(button != nullptr);
         CHECK(button->width() == provider->stripButtonWidth());
     }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+
+/// Builds the REAL TitleBar with its window controls enabled, under @p uiStyle and
+/// @p windowControlStyle.
+///
+/// @param engine             The engine to build in. Both style providers are installed on it.
+/// @param controller         The mock the bar binds to.
+/// @param uiStyle            The chrome style, i.e. what decides the extents.
+/// @param windowControlStyle The window-control style, i.e. what decides side, order and shape.
+/// @return The host Window; the bar is reachable via findChild("titleBar").
+[[nodiscard]] std::unique_ptr<QObject> makeTitleBarHost(
+    QQmlEngine& engine,
+    MockTabController& controller,
+    contour::config::UiStyle uiStyle,
+    contour::config::WindowControlStyle windowControlStyle)
+{
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine, uiStyle, windowControlStyle);
+
+    // Wide enough that the tab strip's 70% cap leaves the drag region real width, so "left of the
+    // tabs" and "right of the drag region" are genuinely different places to be.
+    auto const source = QStringLiteral("import QtQuick\n"
+                                       "import QtQuick.Window\n"
+                                       "import Contour.Ui\n"
+                                       "Window {\n"
+                                       "  id: host\n"
+                                       "  width: 900; height: 400; visible: true\n"
+                                       "  TitleBar {\n"
+                                       "    objectName: \"titleBar\"\n"
+                                       "    anchors.left: parent.left\n"
+                                       "    anchors.right: parent.right\n"
+                                       "    y: 0\n"
+                                       "    height: implicitHeight\n"
+                                       "    controller: terminalSessions\n"
+                                       "    window: host\n"
+                                       "    useCustomWindowControls: true\n"
+                                       "  }\n"
+                                       "}\n");
+
+    return buildQmlHost(engine, source, QStringLiteral("TitleBarPlacementTestHost.qml"));
+}
+
+/// Finds the first descendant of @p root satisfying @p predicate, in the VISUAL tree.
+///
+/// findChild() is not enough for anything a Repeater created: a delegate is given a parentItem but
+/// no QObject parent, so it never appears among its ancestors' QObject children. The window controls
+/// are exactly that, being one delegate per row of `windowControls.buttons`, and so is whatever a
+/// Loader loads.
+///
+/// @param root      The item to search beneath.
+/// @param predicate What to look for.
+/// @return The item, or nullptr when no descendant satisfies @p predicate.
+[[nodiscard]] QQuickItem* findDescendant(QQuickItem const& root, auto&& predicate)
+{
+    for (auto* child: root.childItems())
+    {
+        if (predicate(*child))
+            return child;
+        if (auto* found = findDescendant(*child, predicate); found != nullptr)
+            return found;
+    }
+    return nullptr;
+}
+
+/// Finds the item named @p objectName anywhere in @p root's visual tree. @see findDescendant.
+[[nodiscard]] QQuickItem* findItemNamed(QQuickItem const& root, QString const& objectName)
+{
+    return findDescendant(root, [&](QQuickItem const& item) { return item.objectName() == objectName; });
+}
+
+} // namespace
+
+TEST_CASE("The window controls sit on the side their style asks for (offscreen)",
+          "[contour][gui][qml][titlebar][windowcontrols]")
+{
+    // The bug this whole setting exists for: on macOS the controls drew in the top-RIGHT corner,
+    // Windows-fashion. Placement is not an anchor here but a pair of Loaders the configured side
+    // switches between, so what is pinned is that the ACTIVE one is the right one and that the
+    // inactive one reserves no width at all -- an inactive Loader that still had an implicit size
+    // would push the tab strip across by the width of three buttons.
+    //
+    // Run under both chrome styles: the two are orthogonal by design, and a style that only worked
+    // in the native chrome would be exactly the regression this split was meant to prevent.
+    contour::test::QmlMessageCapture const warnings;
+    auto const uiStyle = GENERATE(contour::config::UiStyle::Native, contour::config::UiStyle::Terminal);
+
+    struct Placement
+    {
+        contour::config::WindowControlStyle style;
+        char const* active;   //!< The Loader that must hold the controls.
+        char const* inactive; //!< The one that must hold nothing and take no width.
+    };
+
+    auto const placement = GENERATE(
+        Placement {
+            contour::config::WindowControlStyle::MacOS, "leadingWindowControls", "trailingWindowControls" },
+        Placement {
+            contour::config::WindowControlStyle::Windows, "trailingWindowControls", "leadingWindowControls" },
+        Placement {
+            contour::config::WindowControlStyle::Plasma, "trailingWindowControls", "leadingWindowControls" });
+
+    INFO("ui style: " << static_cast<int>(uiStyle));
+    INFO("window control style: " << static_cast<int>(placement.style));
+
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host = makeTitleBarHost(engine, controller, uiStyle, placement.style);
+    auto* bar = host->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+    REQUIRE(bar != nullptr);
+
+    auto* active = bar->findChild<QQuickItem*>(QLatin1StringView(placement.active));
+    auto* inactive = bar->findChild<QQuickItem*>(QLatin1StringView(placement.inactive));
+    REQUIRE(active != nullptr);
+    REQUIRE(inactive != nullptr);
+
+    // The active slot really loaded something, and it is wide enough to be three controls rather
+    // than a collapsed remnant.
+    CHECK(active->property("active").toBool());
+    CHECK(active->width() > 0.0);
+    // The other one holds nothing and costs nothing.
+    CHECK(!inactive->property("active").toBool());
+    CHECK(inactive->width() == 0.0);
+
+    // And it is on the side it claimed. The drag region is the elastic middle, so being left of it
+    // versus right of it is the whole difference between the two corners.
+    auto* dragRegion = bar->findChild<QQuickItem*>(QStringLiteral("dragRegion"));
+    REQUIRE(dragRegion != nullptr);
+    auto const controls = sceneRectOf(*active);
+    auto const drag = sceneRectOf(*dragRegion);
+
+    if (placement.style == contour::config::WindowControlStyle::MacOS)
+        CHECK(controls.right() <= drag.left());
+    else
+        CHECK(controls.left() >= drag.right());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Every window control takes its width from the active chrome style (offscreen)",
+          "[contour][gui][qml][titlebar][windowcontrols]")
+{
+    // The requirement that made the extents live in UiStyleTokens rather than in the window-control
+    // row: whatever the window-control style, its controls must be measured by whichever chrome is
+    // active, so `ui_style: terminal` sizes them in cells and `native` in pixels. Pinned per control
+    // rather than over the group's total, because Qt Quick Layouts snap each child to a whole pixel
+    // -- so the SUM is never an exact multiple of a fractional cell, and asserting that it were would
+    // be asserting away a property the tab strip's own buttons have had all along.
+    contour::test::QmlMessageCapture const warnings;
+    auto const uiStyle = GENERATE(contour::config::UiStyle::Native, contour::config::UiStyle::Terminal);
+    auto const style = GENERATE(contour::config::WindowControlStyle::Windows,
+                                contour::config::WindowControlStyle::MacOS,
+                                contour::config::WindowControlStyle::Plasma);
+    INFO("ui style: " << static_cast<int>(uiStyle));
+    INFO("window control style: " << static_cast<int>(style));
+
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host = makeTitleBarHost(engine, controller, uiStyle, style);
+    auto* bar = host->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+    REQUIRE(bar != nullptr);
+
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+
+    // A traffic light is a dot plus its gap -- the gap is part of the control so that it is
+    // clickable -- and a button is a full window-control width. Both come from the chrome style, so
+    // under Terminal both are counts of cells and under Native both are pixels.
+    auto const expected = style == contour::config::WindowControlStyle::MacOS
+                              ? provider->trafficLightDotSize() + provider->trafficLightGap()
+                              : provider->windowControlWidth();
+
+    for (auto const* action: { "close", "minimize", "maximize" })
+    {
+        auto const name = QStringLiteral("windowControl_") + QLatin1StringView(action);
+        auto const* control = findItemNamed(*bar, name);
+        REQUIRE(control != nullptr);
+        INFO("control: " << action << ", width: " << control->width() << ", expected: " << expected);
+        // Within a pixel, which is the layout's own snap and not slack in the token arithmetic.
+        CHECK(control->width() == Catch::Approx(expected).margin(1.0));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Traffic lights are drawn as cells in the terminal chrome and as shapes in the native one "
+          "(offscreen)",
+          "[contour][gui][qml][titlebar][windowcontrols]")
+{
+    // The mechanism that lets the macOS controls exist in a cell-quantized chrome at all: the
+    // cell-counting style states a trafficLightGlyph and the QML draws a character, the pixel-counting
+    // one leaves it empty and the QML draws a circle. Which delegate a Loader picked is not directly
+    // observable, so this asserts the shape each one builds: a circle is a Rectangle whose radius is
+    // half its width, and the cell delegate has no Rectangle at all.
+    //
+    // Structure rather than rendered text, deliberately: both delegates DO have a Text, and which
+    // string it holds depends on whether the group is hovered -- which offscreen, with no pointer,
+    // is not a state a test can rely on either way.
+    contour::test::QmlMessageCapture const warnings;
+
+    auto drawsACircle = [](contour::config::UiStyle uiStyle) {
+        QQmlEngine engine;
+        MockTabController controller;
+        auto const host =
+            makeTitleBarHost(engine, controller, uiStyle, contour::config::WindowControlStyle::MacOS);
+        auto* bar = host->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+        REQUIRE(bar != nullptr);
+        auto const* control = findItemNamed(*bar, QStringLiteral("windowControl_close"));
+        REQUIRE(control != nullptr);
+
+        // A circle is a Rectangle whose radius is half its width.
+        return findDescendant(*control,
+                              [](QQuickItem const& item) {
+                                  auto const radius = item.property("radius");
+                                  return radius.isValid() && item.width() > 0.0
+                                         && radius.toReal() == Catch::Approx(item.width() / 2.0);
+                              })
+               != nullptr;
+    };
+
+    // Native counts in pixels, so a dot is the circle it is.
+    CHECK(drawsACircle(contour::config::UiStyle::Native));
+    // Terminal counts in cells, so it is a character instead -- and a circle here would be the one
+    // part of the bar that did not line up with the terminal below it.
+    CHECK(!drawsACircle(contour::config::UiStyle::Terminal));
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
