@@ -246,6 +246,19 @@ constexpr StringLiteral UiStyleConfig {
     "\n"
 };
 
+constexpr StringLiteral WindowControlStyleConfig {
+    "{comment} How the window's own minimize/maximize/close controls are drawn, and which side of\n"
+    "{comment} the tab bar they sit on (ignore-case). Only applies while the native title bar is\n"
+    "{comment} hidden (show_title_bar: false); with it shown, the OS draws these itself.\n"
+    "{comment}   auto    = match the host: macOS -> macos, Windows -> windows, KDE -> plasma,\n"
+    "{comment}             anything else -> windows (default).\n"
+    "{comment}   windows = trailing edge, flush rectangular buttons, red close hover.\n"
+    "{comment}   macos   = leading edge, traffic lights, close/minimize/zoom order.\n"
+    "{comment}   plasma  = trailing edge, circular hover fills (KDE Plasma's Breeze).\n"
+    "window_control_style: {}\n"
+    "\n"
+};
+
 // Quoted, like every other free-text string key (see WordDelimitersConfig below). Unquoted, the
 // default empty value emits `ui_font_family:` -- a YAML null the reader cannot convert to a string --
 // and a family beginning with a YAML indicator, of which "@MS Gothic" is a real one, would be read as
@@ -1761,6 +1774,32 @@ constexpr StringLiteral UiStyleWeb {
     "\n"
 };
 
+constexpr StringLiteral WindowControlStyleWeb {
+    "\n"
+    "Selects how the window's own minimize/maximize/close controls are drawn, and which side of the tab "
+    "bar they sit on. These are drawn only while the native title bar is hidden "
+    "([`show_title_bar`](profiles.md#show_title_bar) is `false`, the default), which is when the tab bar "
+    "doubles as the title bar; with the native frame shown, the operating system draws them itself. "
+    "Valid values (ignore-case):\n"
+    "\n"
+    "- `auto` — match the host: macOS gets `macos`, Windows gets `windows`, a KDE Plasma session gets "
+    "`plasma`, and anything else gets `windows`. This is the default.\n"
+    "- `windows` — trailing (right) edge, flush rectangular buttons in minimize/maximize/close order, "
+    "with a red close hover.\n"
+    "- `macos` — leading (left) edge, traffic lights in close/minimize/zoom order. The dots reveal their "
+    "glyphs while the group is hovered and grey out while the window is inactive.\n"
+    "- `plasma` — trailing (right) edge, like `windows` but with the circular hover fills of KDE "
+    "Plasma's Breeze decoration.\n"
+    "\n"
+    "Independent of [`ui_style`](#ui_style): every value works in both the native and the terminal "
+    "chrome, and takes its extents from whichever of those is active — so under `ui_style: terminal` the "
+    "controls stay quantized to whole character cells, and the traffic lights are drawn as coloured "
+    "cell-wide dots.\n"
+    "\n"
+    "Unlike `ui_style`, this applies immediately when changed from the settings page.\n"
+    "\n"
+};
+
 constexpr StringLiteral UiFontFamilyWeb {
     "\n"
     "Font family the terminal-style chrome is drawn with. When empty (the default) the chrome inherits "
@@ -2328,6 +2367,7 @@ using ProgressTimeout = DocumentationEntry<ProgressTimeoutConfig, ProgressTimeou
 using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
 using UiStyle = DocumentationEntry<UiStyleConfig, UiStyleWeb>;
+using WindowControlStyle = DocumentationEntry<WindowControlStyleConfig, WindowControlStyleWeb>;
 using UiFontFamily = DocumentationEntry<UiFontFamilyConfig, UiFontFamilyWeb>;
 using UiFontSize = DocumentationEntry<UiFontSizeConfig, UiFontSizeWeb>;
 using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;

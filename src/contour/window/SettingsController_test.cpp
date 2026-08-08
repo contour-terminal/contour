@@ -485,6 +485,45 @@ TEST_CASE("SettingsController: the chrome style is a global field offering its t
     CHECK(fx.cfg.uiStyle.value() == config::UiStyle::Native);
 }
 
+TEST_CASE("SettingsController: the window control style is a global field offering its table's tokens",
+          "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    // Same discipline as ui_style above: the options come from contour/config/WindowControlStyle.hpp,
+    // so the page cannot offer a token the configuration reader would then reject -- and a style
+    // added to that table shows up in the settings page with neither file touched.
+    auto expected = QStringList {};
+    for (auto const& info: config::configEnumValues<config::WindowControlStyle>())
+        expected.push_back(QString::fromUtf8(info.token.data(), static_cast<qsizetype>(info.token.size())));
+
+    auto options = QStringList {};
+    auto type = QString {};
+    auto help = QString {};
+    for (auto const& row: fx.controller->globalFields())
+        if (row.toMap().value("key").toString() == "window_control_style")
+        {
+            type = row.toMap().value("type").toString();
+            options = row.toMap().value("options").toStringList();
+            help = row.toMap().value("help").toString();
+        }
+
+    CHECK(type == "enum");
+    CHECK(options == expected);
+    // Unlike its ui_* neighbours this one applies live, so its help must NOT carry their restart
+    // note -- a false "takes effect after restart" is worse than none, because the user then closes
+    // and reopens the window to get something they already had.
+    CHECK(!help.contains("restart"));
+
+    REQUIRE(fx.controller->setGlobalField("window_control_style", "macos"));
+    CHECK(fx.cfg.windowControlStyle.value() == config::WindowControlStyle::MacOS);
+
+    // Resetting drops the override, so the value falls back to what contour.yml says -- here the
+    // shipped default, which is the host-resolving one.
+    fx.controller->resetGlobalField("window_control_style");
+    CHECK(fx.cfg.windowControlStyle.value() == config::WindowControlStyle::Auto);
+}
+
 TEST_CASE("SettingsController: exposes the configured keybindings read-only", "[settings]")
 {
     auto fx = Fixture(BasicConfig);
