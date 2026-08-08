@@ -214,11 +214,39 @@ void Renderer::detachRenderTarget() noexcept
         renderable->detachRenderTarget();
 }
 
+crispy::LRUCapacity Renderer::boundedAtlasTileCount(crispy::LRUCapacity wanted) const noexcept
+{
+    auto const ceiling = atlasbudget::maxTileCountFor(_gridMetrics.cellSize,
+                                                      _directMappingAllocator.currentlyAllocatedCount,
+                                                      atlasbudget::MaxAtlasTextureEdge);
+    return crispy::LRUCapacity { std::min(wanted.value, ceiling.value) };
+}
+
 void Renderer::configureTextureAtlas()
 {
     Require(_renderTarget);
 
     auto const atlasCellSize = _gridMetrics.cellSize;
+
+    // Clamped HERE because this is the one place a budget becomes a texture, so every path into it --
+    // construction, a font or DPI change, page growth -- is bounded, and afterwards the member states
+    // what the atlas actually holds rather than what the page asked for. Losing tiles this way brings
+    // back the mid-frame recycling the budget exists to prevent, so it is reported at every rebuild:
+    // a texture the driver refuses to allocate would lose the glyphs entirely and say nothing.
+    if (auto const bounded = boundedAtlasTileCount(_atlasTileCount); bounded.value < _atlasTileCount.value)
+    {
+        rendererLog()("Capping atlas tile budget at {} (page asked for {}): {} tiles of {} do not fit a "
+                      "texture of at most {}x{} pixels.",
+                      bounded.value,
+                      _atlasTileCount.value,
+                      _atlasTileCount.value,
+                      atlasCellSize,
+                      atlasbudget::MaxAtlasTextureEdge,
+                      atlasbudget::MaxAtlasTextureEdge);
+        _atlasTileCount = bounded;
+        _atlasHashtableSlotCount = atlasbudget::slotCountFor(_configuredAtlasHashtableSlotCount, bounded);
+    }
+
     auto atlasProperties =
         atlas::AtlasProperties { .format = atlas::Format::RGBA,
                                  .tileSize = atlasCellSize,
@@ -249,22 +277,55 @@ void Renderer::growAtlasForPage(vtbackend::PageSize pageSize)
     // with. A pane created small — which a freshly split pane always is — and then grown by a window
     // resize kept the small-pane atlas for the rest of its life, and once a frame needed more distinct
     // tiles than that atlas held, tile slots were recycled mid-frame and glyphs rendered as each other.
-    auto const required = atlasbudget::tileCountFor(_configuredAtlasTileCount, pageSize);
-    if (required.value <= _atlasTileCount.value)
+    // Quantized to the atlas' own power-of-two granularity and clamped to what the GPU can hold, both
+    // so that this converges: an enlarging resize drag walks the page one cell at a time, and an
+    // un-quantized budget would clear the guard below on nearly every step, rebuilding a multi-megabyte
+    // texture and re-uploading every sixel image once per frame of the drag. Every budget inside one
+    // band produces the same texture anyway, so snapping to the top of the band costs nothing.
+    auto const normalize = [this](crispy::LRUCapacity budget) {
+        return boundedAtlasTileCount(
+            atlasbudget::quantizedTileCountFor(budget, _directMappingAllocator.currentlyAllocatedCount));
+    };
+
+    // Both sides go through the same normalization, so the constructor's un-normalized starting budget
+    // and every later one are compared on one grid -- otherwise the first resize after construction
+    // would always appear to be a growth.
+    auto const required = normalize(atlasbudget::tileCountFor(_configuredAtlasTileCount, pageSize));
+    if (required.value <= normalize(_atlasTileCount).value)
         return; // grow-only: resize jitter must not churn the atlas every frame, and surplus only costs VRAM
 
-    _atlasTileCount = required;
-    _atlasHashtableSlotCount = atlasbudget::slotCountFor(_configuredAtlasHashtableSlotCount, required);
-
-    rendererLog()("Growing atlas tile budget to {} for page size {}.", _atlasTileCount.value, pageSize);
+    rendererLog()("Growing atlas tile budget to {} for page size {}.", required.value, pageSize);
 
     if (!_renderTarget)
-        return; // no atlas to rebuild yet; setRenderTarget() will build it at the new budget
+    {
+        // No atlas to rebuild yet; setRenderTarget() will build it at the new budget.
+        _atlasTileCount = required;
+        _atlasHashtableSlotCount = atlasbudget::slotCountFor(_configuredAtlasHashtableSlotCount, required);
+        return;
+    }
 
     // configureTextureAtlas() replaces the atlas wholesale, and a tile's normalized location was baked
     // into vertex data against the OLD atlas, so every cache holding one must go with it — the same
     // pairing updateFontMetrics() uses.
-    configureTextureAtlas();
+    //
+    // The budget is committed only once that rebuild has returned. Atlas (re)allocation can throw --
+    // applyPendingReconfig()'s font branch says so and wraps itself accordingly, while this geometry
+    // branch does not -- and raising the member first would make the guard above swallow every later
+    // attempt, stranding the pane on the undersized atlas for good.
+    auto const previousTileCount = _atlasTileCount;
+    auto const previousSlotCount = _atlasHashtableSlotCount;
+    _atlasTileCount = required;
+    _atlasHashtableSlotCount = atlasbudget::slotCountFor(_configuredAtlasHashtableSlotCount, required);
+    try
+    {
+        configureTextureAtlas();
+    }
+    catch (...)
+    {
+        _atlasTileCount = previousTileCount;
+        _atlasHashtableSlotCount = previousSlotCount;
+        throw;
+    }
     clearCache();
 }
 

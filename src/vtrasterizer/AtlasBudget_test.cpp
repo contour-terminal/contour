@@ -13,6 +13,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <bit>
+#include <cmath>
 
 using namespace vtrasterizer::atlasbudget;
 using vtbackend::ColumnCount;
@@ -53,6 +54,70 @@ TEST_CASE("atlas budget: a degenerate page falls back to the configured floor", 
     // floor is the only sensible answer, and it must not be multiplied down to zero.
     CHECK(tileCountFor(crispy::LRUCapacity { 256 }, PageSize { LineCount(0), ColumnCount(0) }).value == 256);
     CHECK(tileCountFor(crispy::LRUCapacity { 256 }, PageSize { LineCount(0), ColumnCount(80) }).value == 256);
+}
+
+TEST_CASE("atlas budget: growth is quantized to the atlas' own granularity", "[atlas][budget]")
+{
+    // computeAtlasSize() rounds `1 + tileCount + directMappingCount` up to a power of two, so every
+    // budget within one band yields the same texture. Without this quantization an enlarging resize
+    // drag -- which walks the page one cell at a time -- clears the renderer's grow-only guard on
+    // nearly every step and rebuilds a multi-megabyte atlas per frame of the drag.
+    auto const directMappingCount = 7u;
+    auto const reserved = reservedTileCount(directMappingCount);
+    CHECK(reserved == 8);
+
+    // Every budget in the band snaps to the same value...
+    auto const band = quantizedTileCountFor(crispy::LRUCapacity { 4200 }, directMappingCount);
+    CHECK(std::has_single_bit(band.value + reserved));
+    CHECK(band.value >= 4200);
+    CHECK(quantizedTileCountFor(crispy::LRUCapacity { 4201 }, directMappingCount).value == band.value);
+    CHECK(quantizedTileCountFor(crispy::LRUCapacity { band.value }, directMappingCount).value == band.value);
+
+    // ... and the next band up is strictly larger, so real growth is still seen.
+    CHECK(quantizedTileCountFor(crispy::LRUCapacity { band.value + 1 }, directMappingCount).value
+          > band.value);
+
+    // Idempotent: normalizing an already-normalized budget must not walk up a band, or the guard
+    // would report growth on every call.
+    CHECK(quantizedTileCountFor(band, directMappingCount).value == band.value);
+}
+
+TEST_CASE("atlas budget: the tile budget is capped at what a texture can hold", "[atlas][budget]")
+{
+    // The page-derived budget has no upper bound of its own. A maximized pane on a high-DPI display
+    // asks for a texture past the driver's maximum, which does not allocate -- and the atlas has no
+    // failure path, so the pane renders no glyphs at all. Worse than the recycling the budget prevents.
+    auto const cell = vtbackend::ImageSize { vtbackend::Width(18), vtbackend::Height(38) };
+    auto const capped = maxTileCountFor(cell, /*directMappingCount*/ 1, MaxAtlasTextureEdge);
+
+    // The cap mirrors computeAtlasSize(): a ceil(sqrt(totalTiles)) square of tiles, each edge rounded
+    // up to a power of two, must stay within the limit.
+    auto const totalTiles = capped.value + reservedTileCount(1);
+    auto const squareEdge =
+        static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<double>(std::bit_ceil(totalTiles)))));
+    CHECK(std::bit_ceil(squareEdge * 18u) <= MaxAtlasTextureEdge);
+    CHECK(std::bit_ceil(squareEdge * 38u) <= MaxAtlasTextureEdge);
+
+    // A 5K page at this cell size asks for more than the cap: that request is exactly the one that
+    // used to reach the driver as a 8192x16384 texture.
+    auto const huge = tileCountFor(crispy::LRUCapacity { 256 }, PageSize { LineCount(75), ColumnCount(284) });
+    CHECK(huge.value > capped.value);
+
+    // A smaller cell fits proportionally more tiles, and the cap never reaches zero -- the atlas has
+    // to stay constructible even for an absurd tile size.
+    CHECK(maxTileCountFor(
+              vtbackend::ImageSize { vtbackend::Width(9), vtbackend::Height(19) }, 1, MaxAtlasTextureEdge)
+              .value
+          > capped.value);
+    CHECK(maxTileCountFor(
+              vtbackend::ImageSize { vtbackend::Width(0), vtbackend::Height(0) }, 1, MaxAtlasTextureEdge)
+              .value
+          > 0);
+    CHECK(maxTileCountFor(vtbackend::ImageSize { vtbackend::Width(99999), vtbackend::Height(99999) },
+                          1,
+                          MaxAtlasTextureEdge)
+              .value
+          > 0);
 }
 
 TEST_CASE("atlas budget: the hashtable stays proportional to the tile count", "[atlas][budget]")

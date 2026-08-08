@@ -316,6 +316,15 @@ class Renderer
 
     void configureTextureAtlas();
 
+    /// Clamps a wanted tile budget to what the GPU can actually hold at the current cell size.
+    ///
+    /// The page-derived budget has no upper bound of its own — a maximized pane on a high-DPI display
+    /// asks for a texture larger than the driver's maximum, which does not allocate and leaves the pane
+    /// with no glyphs at all. @see atlasbudget::MaxAtlasTextureEdge.
+    /// @param wanted The budget the page asked for.
+    /// @return @p wanted, or the ceiling when it exceeds it.
+    [[nodiscard]] crispy::LRUCapacity boundedAtlasTileCount(crispy::LRUCapacity wanted) const noexcept;
+
     /// Raises the atlas tile budget if @p pageSize needs more tiles than the atlas currently holds, and
     /// rebuilds the atlas when it does.
     ///
