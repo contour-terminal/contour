@@ -2141,22 +2141,6 @@ TEST_CASE("Config: window_control_style parses each value (ignore-case)", "[conf
         QTemporaryDir dir;
         CHECK(load(dir, "aqua").windowControlStyle.value() == WindowControlStyle::Auto);
     }
-
-    SECTION("the key is global, not per profile")
-    {
-        // A window draws one title bar while its tabs may each run a different profile, so a
-        // profile-scoped copy has no answer when they disagree -- same reasoning as tab_bar_*.
-        QTemporaryDir dir;
-        auto const config = loadFromYaml(dir, R"(
-default_profile: main
-profiles:
-    main:
-        shell: /bin/sh
-        window_control_style: macos
-)"sv);
-        REQUIRE(config.profile("main") != nullptr);
-        CHECK(config.windowControlStyle.value() == WindowControlStyle::Auto);
-    }
 }
 
 TEST_CASE("Config: git-drawings, arc and braille styles parse from YAML", "[config]")

@@ -5,7 +5,6 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QVariantList>
-#include <QtGui/QColor>
 
 namespace contour::window
 {

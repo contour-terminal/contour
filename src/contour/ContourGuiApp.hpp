@@ -237,11 +237,23 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// The companion to @c applyGuiTheme, and called from the same two places for the same reason:
     /// both are application-wide state derived from the configuration that must survive a live
     /// reload. Every open window follows at once, because one provider serves the one QML engine.
-    /// Safe to call at startup and live (e.g. from the settings page).
+    /// Safe to call at startup and live (e.g. from the settings page) -- before the QML engine
+    /// exists there is simply nothing to re-point, and the provider is built with the resolved style
+    /// when it does.
     /// @param style The configured window-control style, @c Auto included.
     void applyWindowControlStyle(config::WindowControlStyle style);
 
   private:
+    /// @p configured with @c Auto resolved against this host.
+    ///
+    /// The one place that resolves, so the style the first frame draws and the style a later reload
+    /// applies cannot disagree about what the host is.
+    ///
+    /// @param configured The configured style, @c Auto included.
+    /// @return A concrete style; never @c Auto.
+    [[nodiscard]] config::WindowControlStyle resolvedWindowControlStyle(
+        config::WindowControlStyle configured) const;
+
     static void ensureTermInfoFile();
     void setupQCoreApplication();
     bool loadConfig(std::string const& target);

@@ -678,19 +678,31 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
 #endif
 }
 
-void ContourGuiApp::applyWindowControlStyle(config::WindowControlStyle style)
+config::WindowControlStyle ContourGuiApp::resolvedWindowControlStyle(
+    config::WindowControlStyle configured) const
 {
     // Resolving here rather than in the provider is deliberate: only a composition root knows the
     // environment to resolve Auto against, and keeping the provider a pure function of one concrete
     // enumerator is what makes it drivable from a test with no environment at all.
-    auto const resolved =
-        config::resolveWindowControlStyle(style, config::detectHostPlatform(processEnvironment()));
+    //
+    // One place does it, so the style the first frame draws and the style every later reload applies
+    // cannot come to different answers about what this host is.
+    return config::resolveWindowControlStyle(configured, config::detectHostPlatform(processEnvironment()));
+}
+
+void ContourGuiApp::applyWindowControlStyle(config::WindowControlStyle style)
+{
+    auto const resolved = resolvedWindowControlStyle(style);
 
     display::displayLog()("Applying window control style: {} (configured: {})", resolved, style);
 
-    // Unconditional, unlike applyGuiTheme's startup call: this only ever runs from a config reload,
-    // which needs a window, which needs the QML engine that the provider is built before.
-    _windowControlStyleProvider->setStyle(resolved);
+    // Guarded, exactly as applyGuiTheme is safe before the GUI exists: this is public and documented
+    // as callable at startup, and the provider is built partway through terminalGuiAction(). Any
+    // caller reaching it earlier -- a headless verb, a test fixture that builds a WindowController
+    // without ever running the GUI action -- would otherwise dereference a null unique_ptr. There is
+    // nothing to apply to yet, and the provider is constructed with the resolved style regardless.
+    if (_windowControlStyleProvider)
+        _windowControlStyleProvider->setStyle(resolved);
 }
 
 int ContourGuiApp::checkConfig()
@@ -1092,9 +1104,8 @@ int ContourGuiApp::terminalGuiAction()
     // Constructed with the resolved style rather than default-constructed and then applied: a
     // constructed object is a usable object, and the first frame must already draw the right
     // controls. applyWindowControlStyle() below exists for the reloads that follow.
-    _windowControlStyleProvider =
-        make_unique<window::WindowControlStyleProvider>(config::resolveWindowControlStyle(
-            _config.windowControlStyle.value(), config::detectHostPlatform(processEnvironment())));
+    _windowControlStyleProvider = make_unique<window::WindowControlStyleProvider>(
+        resolvedWindowControlStyle(_config.windowControlStyle.value()));
 
     {
         auto const timer = crispy::ScopedTimer(startupLog, "QML engine setup");

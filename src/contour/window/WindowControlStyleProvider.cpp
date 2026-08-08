@@ -2,6 +2,7 @@
 #include <contour/window/WindowControlStyleProvider.hpp>
 
 #include <QtCore/QVariantMap>
+#include <QtGui/QColor>
 
 #include <cstddef>
 
