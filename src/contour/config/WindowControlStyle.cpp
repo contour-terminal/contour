@@ -51,9 +51,9 @@ HostPlatform detectDesktopPlatform(crispy::Environment const& env)
 
 HostPlatform detectHostPlatform([[maybe_unused]] crispy::Environment const& env)
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     return HostPlatform::Windows;
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     return HostPlatform::MacOS;
 #else
     return detectDesktopPlatform(env);
