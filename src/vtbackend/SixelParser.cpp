@@ -416,8 +416,15 @@ void SixelImageBuilder::newline()
 void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, optional<ImageSize> imageSize)
 {
     if (pad != 0)
-        _aspectRatio =
-            max(1u, static_cast<unsigned int>(std::ceil(static_cast<float>(pan) / static_cast<float>(pad))));
+        // Clamped to keep every y0 + bit*_aspectRatio computation below (render(), bandRows()) well
+        // inside unsigned range: an attacker-supplied Pan close to UINT_MAX with Pad=1 would otherwise
+        // let (y + _aspectRatio) wrap around to a small value in the bounds check while y itself stays
+        // huge, producing a heap write far past _buffer. Real encoders never need more than single-digit
+        // ratios; 255 leaves generous headroom without reopening the overflow.
+        _aspectRatio = clamp(
+            max(1u, static_cast<unsigned int>(std::ceil(static_cast<float>(pan) / static_cast<float>(pad)))),
+            1u,
+            255u);
     _sixelBandHeight = 6 * _aspectRatio;
     if (imageSize)
     {
@@ -460,7 +467,10 @@ void SixelImageBuilder::render(int8_t sixel)
     // A bit that would overhang the bottom paints nothing and so cannot grow the image either --
     // taking the highest SET bit instead would grow it by the very rows that get clipped.
     auto const topBit = static_cast<unsigned>(std::bit_width(bits)) - 1;
-    auto lastRowExclusive = y0 + ((topBit + 1) * _aspectRatio);
+    // 64-bit throughout: with _aspectRatio now clamped this can no longer wrap in practice, but doing
+    // the arithmetic in a width the values can never fill is a second, independent guard against the
+    // same overflow class regardless of what future callers of setRaster() pass in.
+    auto lastRowExclusive = static_cast<uint64_t>(y0) + (static_cast<uint64_t>(topBit + 1) * _aspectRatio);
     if (lastRowExclusive > canvasHeight)
     {
         // Only when the sixel overhangs is it worth hunting for the highest bit that still fits.
@@ -469,7 +479,8 @@ void SixelImageBuilder::render(int8_t sixel)
         {
             if ((bits & (1u << bit)) == 0)
                 continue;
-            if (auto const y = y0 + (bit * _aspectRatio); y + _aspectRatio <= canvasHeight)
+            auto const y = static_cast<uint64_t>(y0) + (static_cast<uint64_t>(bit) * _aspectRatio);
+            if (y + _aspectRatio <= canvasHeight)
             {
                 lastRowExclusive = y + _aspectRatio;
                 break;
@@ -483,14 +494,18 @@ void SixelImageBuilder::render(int8_t sixel)
         return;
     }
 
+    // Narrowed back down deliberately: every path above leaves lastRowExclusive <= canvasHeight (an
+    // unsigned), so this is lossless -- the 64-bit width above exists only to keep the intermediate
+    // additions from wrapping, not because the final row count can legitimately exceed 32 bits.
+    auto const lastRow = static_cast<unsigned>(lastRowExclusive);
     if (!_explicitSize)
     {
-        if (lastRowExclusive > unbox<unsigned>(_size.height))
-            _size.height = Height::cast_from(lastRowExclusive);
+        if (lastRow > unbox<unsigned>(_size.height))
+            _size.height = Height::cast_from(lastRow);
         if (x >= unbox<unsigned>(_size.width))
             _size.width = Width::cast_from(x + 1);
     }
-    reserve(x + 1, lastRowExclusive);
+    reserve(x + 1, lastRow);
 
     auto const color = currentColor();
     auto const rowBytes = static_cast<size_t>(_stride) * 4;
@@ -499,7 +514,7 @@ void SixelImageBuilder::render(int8_t sixel)
     for (auto remaining = bits; remaining != 0; remaining &= remaining - 1)
     {
         auto const bit = static_cast<unsigned>(std::countr_zero(remaining));
-        auto const y = y0 + (bit * _aspectRatio);
+        auto const y = static_cast<uint64_t>(y0) + (static_cast<uint64_t>(bit) * _aspectRatio);
         if (y + _aspectRatio > canvasHeight)
             break; // bits only climb, so nothing above this fits either
 
@@ -583,7 +598,7 @@ SixelImageBuilder::BandRows SixelImageBuilder::bandRows() const noexcept
 
     for (auto const bit: std::views::iota(0u, SixelBitCount))
     {
-        auto const y = y0 + (bit * _aspectRatio);
+        auto const y = static_cast<uint64_t>(y0) + (static_cast<uint64_t>(bit) * _aspectRatio);
         if (y + _aspectRatio > canvasHeight)
             break; // bits only climb, so nothing above this fits either
         result.fittingBits |= 1u << bit;
