@@ -649,6 +649,7 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             overrides.loadFromEntry("tab_bar_visibility", config.tabBarVisibility);
             overrides.loadFromEntry("theme", config.theme);
             overrides.loadFromEntry("ui_style", config.uiStyle);
+            overrides.loadFromEntry("window_control_style", config.windowControlStyle);
             overrides.loadFromEntry("ui_font_family", config.uiFontFamily);
             overrides.loadFromEntry("ui_font_size", config.uiFontSize);
             overrides.loadFromEntry("early_exit_threshold", config.earlyExitThreshold);
@@ -859,6 +860,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("gui_config_locked", c.guiConfigLocked);
         loadFromEntry("theme", c.theme);
         loadFromEntry("ui_style", c.uiStyle);
+        loadFromEntry("window_control_style", c.windowControlStyle);
         loadFromEntry("ui_font_family", c.uiFontFamily);
         loadFromEntry("ui_font_size", c.uiFontSize);
         loadFromEntry("experimental", c.experimentalFeatures);
@@ -2297,6 +2299,13 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, UiStyle& where)
+{
+    loadConfigEnum(node, entry, where, logger);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     WindowControlStyle& where)
 {
     loadConfigEnum(node, entry, where, logger);
 }

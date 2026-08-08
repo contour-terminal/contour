@@ -1550,10 +1550,16 @@ TEST_CASE("Config: generated default config round-trips through the loader", "[c
     // Guards the global `theme` writer<->reader key match: the std::formatter emits "system" into the
     // generated doc, and the loader must read the same key back.
     CHECK(reloaded.theme.value() == defaults.theme.value());
+    // Same guard for window_control_style: its std::formatter emits "auto", and its default surviving
+    // the round trip is what proves the writer and the reader agree on the key. The rendered-document
+    // check below is the half that would catch the key being missing entirely, since "auto" read back
+    // as the default would look identical to it never having been written.
+    CHECK(reloaded.windowControlStyle.value() == defaults.windowControlStyle.value());
     CHECK(rendered.contains("pixel_reporting:"));
     CHECK(rendered.contains("tab_bar_position:"));
     CHECK(rendered.contains("tab_bar_visibility:"));
     CHECK(rendered.contains("theme:"));
+    CHECK(rendered.contains("window_control_style:"));
 }
 
 TEST_CASE("Config: dual color schemes, palette list forms, and infinite history load", "[config]")
@@ -1990,6 +1996,11 @@ TEST_CASE("Config: every tab bar mode is described by its table", "[config]")
     checkModes(configEnumValues<TabBarVisibility>(),
                std::array { TabBarVisibility::Always, TabBarVisibility::Never, TabBarVisibility::Multiple });
     checkModes(configEnumValues<UiStyle>(), std::array { UiStyle::Native, UiStyle::Terminal });
+    checkModes(configEnumValues<WindowControlStyle>(),
+               std::array { WindowControlStyle::Auto,
+                            WindowControlStyle::Windows,
+                            WindowControlStyle::MacOS,
+                            WindowControlStyle::Plasma });
 
     // The reader is case-insensitive, and refuses what no row carries.
     CHECK(configEnumFromToken<TabBarVisibility>("MULTIPLE") == TabBarVisibility::Multiple);
@@ -2092,6 +2103,60 @@ profiles:
 )"sv);
     CHECK(config.tabBarPosition.value() == TabBarPosition::Top);
     CHECK(config.tabBarVisibility.value() == TabBarVisibility::Always);
+}
+
+TEST_CASE("Config: window_control_style parses each value (ignore-case)", "[config]")
+{
+    using contour::config::WindowControlStyle;
+
+    auto const load = [](QTemporaryDir& dir, std::string_view value) {
+        return loadFromYaml(dir,
+                            std::string { "default_profile: main\nwindow_control_style: " }
+                                + std::string { value } + "\nprofiles:\n    main:\n        shell: /bin/sh\n");
+    };
+
+    SECTION("every token the table carries round-trips")
+    {
+        // Driven from the table rather than from a literal list, so a style added there is covered
+        // here without this test being touched -- and one whose token the reader cannot parse fails
+        // immediately rather than at the first user who writes it.
+        for (auto const& info: contour::config::configEnumValues<WindowControlStyle>())
+        {
+            QTemporaryDir dir;
+            INFO("token: " << info.token);
+            CHECK(load(dir, info.token).windowControlStyle.value() == info.value);
+        }
+    }
+
+    SECTION("the match ignores case")
+    {
+        QTemporaryDir dir;
+        CHECK(load(dir, "MacOS").windowControlStyle.value() == WindowControlStyle::MacOS);
+    }
+
+    SECTION("an unknown token leaves the default")
+    {
+        // Auto, not a zeroed field: the loadFromEntry overload only writes on a successful parse, so
+        // a typo in the config file costs the user their default rather than their title bar.
+        QTemporaryDir dir;
+        CHECK(load(dir, "aqua").windowControlStyle.value() == WindowControlStyle::Auto);
+    }
+
+    SECTION("the key is global, not per profile")
+    {
+        // A window draws one title bar while its tabs may each run a different profile, so a
+        // profile-scoped copy has no answer when they disagree -- same reasoning as tab_bar_*.
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        window_control_style: macos
+)"sv);
+        REQUIRE(config.profile("main") != nullptr);
+        CHECK(config.windowControlStyle.value() == WindowControlStyle::Auto);
+    }
 }
 
 TEST_CASE("Config: git-drawings, arc and braille styles parse from YAML", "[config]")

@@ -678,6 +678,21 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
 #endif
 }
 
+void ContourGuiApp::applyWindowControlStyle(config::WindowControlStyle style)
+{
+    // Resolving here rather than in the provider is deliberate: only a composition root knows the
+    // environment to resolve Auto against, and keeping the provider a pure function of one concrete
+    // enumerator is what makes it drivable from a test with no environment at all.
+    auto const resolved =
+        config::resolveWindowControlStyle(style, config::detectHostPlatform(processEnvironment()));
+
+    display::displayLog()("Applying window control style: {} (configured: {})", resolved, style);
+
+    // Unconditional, unlike applyGuiTheme's startup call: this only ever runs from a config reload,
+    // which needs a window, which needs the QML engine that the provider is built before.
+    _windowControlStyleProvider->setStyle(resolved);
+}
+
 int ContourGuiApp::checkConfig()
 {
     auto const& flags = parameters();
@@ -1074,6 +1089,13 @@ int ContourGuiApp::terminalGuiAction()
     _uiStyleProvider = make_unique<window::UiStyleProvider>(
         _config.uiStyle.value(), window::resolveChromeFont(_config, profileName()));
 
+    // Constructed with the resolved style rather than default-constructed and then applied: a
+    // constructed object is a usable object, and the first frame must already draw the right
+    // controls. applyWindowControlStyle() below exists for the reloads that follow.
+    _windowControlStyleProvider =
+        make_unique<window::WindowControlStyleProvider>(config::resolveWindowControlStyle(
+            _config.windowControlStyle.value(), config::detectHostPlatform(processEnvironment())));
+
     {
         auto const timer = crispy::ScopedTimer(startupLog, "QML engine setup");
         _qmlEngine = make_unique<QQmlApplicationEngine>();
@@ -1107,6 +1129,9 @@ int ContourGuiApp::terminalGuiAction()
         // name must not do. It also gives each test engine its own style (see test/QmlChromeStyle.h).
         // See UiStyleProvider.h for the price this trade pays.
         context->setContextProperty("chromeStyle", _uiStyleProvider.get());
+        // A second provider beside chromeStyle rather than more properties on it: this one changes
+        // live and chromeStyle's are CONSTANT by contract. See WindowControlStyleProvider.hpp.
+        context->setContextProperty("windowControls", _windowControlStyleProvider.get());
     }
 
     // auto const HTS = "\033H";
