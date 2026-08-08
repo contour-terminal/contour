@@ -238,7 +238,14 @@ void RhiRenderer::createAtlasTexture(QRhi* rhi, ImageSize size)
     _atlasTexture.reset(rhi->newTexture(QRhiTexture::RGBA8, pixelSize, 1, {}));
     if (!_atlasTexture->create())
         errorLog()("Failed to create RHI atlas texture of size {}.", size);
-    _atlasTextureSize = size;
+
+    // Only the GPU extent is recorded here. _atlasTextureSize belongs to configureAtlas(): it is the size
+    // of the atlas the RASTERIZER is filling, and writing it from this GPU-side function let a caller's
+    // stale `size` argument travel backwards in time. createPipelines() reads the member, allocates a
+    // multi-megabyte texture (milliseconds), and lands here long after a concurrent configureAtlas() has
+    // moved on -- which is exactly how #2040 rewound a 4096x8192 atlas to 2048x4096 and left every glyph
+    // sampling a quarter of its tile. A texture created at the wrong size is self-healing: the pending
+    // ConfigureAtlas is applied by the next execute(), and _atlasCreatedSize below is what tells it to.
     _atlasCreatedSize = size;
 
     // Nearest filtering + clamp-to-edge mirrors the former QOpenGLTexture configuration; created once and
@@ -401,10 +408,15 @@ void RhiRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
     // hasSampler). If configureAtlas has not been observed yet, fall back to the currently known atlas size
     // (or a 1x1 placeholder) so the shader-resource-bindings are valid; the real atlas is (re)created on the
     // next configureAtlas.
+    //
+    // Prefer the size of the ConfigureAtlas already queued for this frame over the member: execute() is
+    // about to apply it, and building the placeholder at the member's size only to throw it away one call
+    // later costs a second multi-megabyte allocation on every pane's first frame.
     if (!_atlasTexture)
     {
-        auto const size =
-            _atlasTextureSize.area() != 0 ? _atlasTextureSize : ImageSize { Width(1), Height(1) };
+        auto const requested = _scheduledExecutions.configureAtlas ? _scheduledExecutions.configureAtlas->size
+                                                                   : _atlasTextureSize;
+        auto const size = requested.area() != 0 ? requested : ImageSize { Width(1), Height(1) };
         createAtlasTexture(rhi, size);
     }
 
