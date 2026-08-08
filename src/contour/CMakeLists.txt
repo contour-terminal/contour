@@ -200,6 +200,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/TerminalSession.hpp
         session/TerminalSessionManager.hpp
         window/UiStyleProvider.hpp
+        window/WindowControlStyleProvider.hpp
         session/SessionInput.hpp
         session/FontControl.hpp
         session/SpawnCommand.hpp
@@ -229,6 +230,7 @@ if(CONTOUR_FRONTEND_GUI)
         display/TerminalAccessible.cpp
         session/TerminalSessionManager.cpp
         window/UiStyleProvider.cpp
+        window/WindowControlStyleProvider.cpp
         window/WindowController.cpp
         session/SessionInput.cpp
         session/FontControl.cpp
@@ -588,6 +590,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/TabColorScheme_test.cpp
             test/ContourTuiStyle_test.cpp
             window/UiStyleProvider_test.cpp
+            window/WindowControlStyleProvider_test.cpp
             window/TabListModel_test.cpp
             window/TabLabel_test.cpp
             geometry/CellRectangle_test.cpp
@@ -711,6 +714,7 @@ if(CONTOUR_TESTING)
         config/Actions_test.cpp
         config/LayoutBuilder_test.cpp
         config/UiStyle_test.cpp
+        config/WindowControlStyle_test.cpp
         command/CommandCatalog_test.cpp
         command/CommandHistory_test.cpp
         command/ContextMenu_test.cpp

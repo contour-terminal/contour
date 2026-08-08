@@ -16,6 +16,7 @@ add_library(contour_config STATIC
     ModifierNames.hpp
     TabBarMode.hpp
     UiStyle.hpp
+    WindowControlStyle.cpp WindowControlStyle.hpp
 )
 
 # yaml-cpp is PUBLIC because Config.hpp exposes it in its own interface, so every consumer of the
