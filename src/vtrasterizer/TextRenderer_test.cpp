@@ -56,6 +56,17 @@ class TextRendererTest
     {
         return renderer.createRasterizedGlyph(tileLocation, glyphKey, presentation);
     }
+
+    /// Shapes @p codepoints through the renderer's shaping cache, exactly as renderTextGroup() does.
+    /// @return The shaped positions, cached or not.
+    static text::ShapeResult const& glyphPositions(TextRenderer& renderer,
+                                                   std::u32string_view codepoints,
+                                                   gsl::span<unsigned> clusters,
+                                                   TextStyle style)
+    {
+        return renderer.getOrCreateCachedGlyphPositions(
+            renderer.shapingCacheKeyFor(codepoints, style), codepoints, clusters, style);
+    }
 };
 
 /// Test accessor granting unit tests access to Renderer's deferred-reconfiguration internals.
@@ -76,6 +87,9 @@ class RendererTest
     {
         return renderer._pendingReconfig.has_value();
     }
+
+    /// The renderer's text renderer, so a test can shape through the exact instance the frame path uses.
+    [[nodiscard]] static TextRenderer& textRenderer(Renderer& renderer) { return renderer._textRenderer; }
 
     /// Seeds self-consistent grid metrics into the live and published metrics.
     ///
@@ -1038,6 +1052,41 @@ TEST_CASE("Renderer.reconfig.geometry_resizes_render_target_on_apply", "[rendere
     CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
 }
 
+TEST_CASE("Renderer.reconfig.shaping_engine_change_rebinds_the_text_renderer", "[renderer]")
+{
+    // A shaping-engine change replaces the whole shaper, and TextRenderer was constructed against the
+    // OLD one. Nothing rebound it, so every draw after the change shaped through freed memory -- caught
+    // here by ASan rather than by an assertion, since the symptom is a use-after-free and not a wrong
+    // value. Both the shaping path (renderCell) and the metrics path (updateFontMetrics, run by
+    // applyFontDescriptions itself) touch the shaper.
+    //
+    // On a build without DirectWrite, createTextShaper() answers DWrite with an OpenShaper -- but the
+    // ENGINE fields still differ, so applyFontDescriptions() takes the replacement branch, which is the
+    // branch under test.
+    //
+    // No render target is attached: the minimal BDF test font yields zero line metrics, so the
+    // updateFontMetrics() this triggers would rebuild the atlas at a zero-height tile and trip the
+    // atlas' own precondition -- a property of the test font, not of the rebind under test.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto changed = fixture.fontDescriptions;
+    changed.textShapingEngine = TextShapingEngine::DWrite;
+    renderer.setFonts(changed);
+    REQUIRE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+    REQUIRE_NOTHROW(vtrasterizer::RendererTest::applyPendingReconfig(renderer));
+
+    CHECK(renderer.fontDescriptions().textShapingEngine == TextShapingEngine::DWrite);
+
+    // Shape something through the rebound renderer: this is the call that dereferenced the destroyed
+    // shaper.
+    auto& textRenderer = vtrasterizer::RendererTest::textRenderer(renderer);
+    auto const text = std::u32string { U"AB" };
+    auto clusters = std::vector<unsigned> { 0, 1 };
+    CHECK_NOTHROW(TextRendererTest::glyphPositions(textRenderer, text, clusters, TextStyle::Regular));
+}
+
 TEST_CASE("Renderer.reconfig.atlas_budget_follows_the_page", "[renderer][atlas]")
 {
     // A pane created small — which a freshly split pane always is — and then grown by a window resize
@@ -1582,7 +1631,110 @@ constexpr auto CellWidth = 10;
     return positions;
 }
 
+/// A Shaper that forwards everything to a real one but can be told to drop shape()'s output.
+///
+/// Models a shaper failing mid-run — DirectWrite's GetGlyphPlacements returning a failed HRESULT is the
+/// real instance — which yields no positions at all for a non-empty run. There is no other way to
+/// produce that state from a working font.
+class FlakyShaper: public text::Shaper
+{
+  public:
+    explicit FlakyShaper(text::Shaper& inner) noexcept: _inner { inner } {}
+
+    /// Whether shape() discards what the inner shaper produced.
+    void setFailing(bool failing) noexcept { _failing = failing; }
+
+    void setDPI(text::DPI dpi) override { _inner.setDPI(dpi); }
+    void setLocator(text::FontLocator& locator) override { _inner.setLocator(locator); }
+    void clearCache() override { _inner.clearCache(); }
+    void setFontFallbackLimit(int limit) override { _inner.setFontFallbackLimit(limit); }
+    [[nodiscard]] std::optional<text::FontKey> loadFont(text::FontDescription const& description,
+                                                        text::FontSize size) override
+    {
+        return _inner.loadFont(description, size);
+    }
+    [[nodiscard]] text::FontMetrics metrics(text::FontKey key) const override { return _inner.metrics(key); }
+    [[nodiscard]] text::FontKey resizeFont(text::FontKey key, text::FontSize size) override
+    {
+        return _inner.resizeFont(key, size);
+    }
+    void shape(text::FontKey font,
+               std::u32string_view text,
+               gsl::span<unsigned> clusters,
+               unicode::Script script,
+               unicode::PresentationStyle presentation,
+               text::ShapeResult& result) override
+    {
+        if (_failing)
+            return; // exactly what DirectWriteShaper does on a failed GetGlyphPlacements
+        _inner.shape(font, text, clusters, script, presentation, result);
+    }
+    [[nodiscard]] std::optional<text::GlyphPosition> shape(text::FontKey font, char32_t codepoint) override
+    {
+        return _inner.shape(font, codepoint);
+    }
+    [[nodiscard]] std::optional<text::RasterizedGlyph> rasterize(text::GlyphKey glyph,
+                                                                 text::RenderMode mode,
+                                                                 float outlineThickness) override
+    {
+        return _inner.rasterize(glyph, mode, outlineThickness);
+    }
+
+  private:
+    text::Shaper& _inner;
+    bool _failing = false;
+};
+
 } // namespace
+
+TEST_CASE("TextRenderer.a_failed_shaping_is_not_cached", "[renderer][shaping]")
+{
+    // A shaper that fails mid-run leaves the ShapeResult empty, and caching THAT turns one transient
+    // failure into a permanent hole: every later occurrence of the same text in the same style and size
+    // hits the cached emptiness and draws nothing, until a font or size change happens to change the
+    // key. The cache must refuse an empty result for a non-empty run.
+    configureMockFont();
+    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+
+    auto locator = MockFontLocator {};
+    auto innerShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
+    auto textShaper = FlakyShaper { innerShaper };
+
+    auto const fontKey = textShaper.loadFont(FontDescription::parse("regular"), text::test::BDFFont::Size);
+    REQUIRE(fontKey.has_value());
+
+    auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                                           .cellSize = ImageSize { Width(8), Height(20) },
+                                           .baseline = 15,
+                                           .underline = { .position = 17, .thickness = 1 } };
+    auto fontDescriptions = FontDescriptions {};
+    fontDescriptions.dpi = text::test::BDFFont::Dpi;
+    fontDescriptions.size = text::test::BDFFont::Size;
+    fontDescriptions.textShapingEngine = TextShapingEngine::OpenShaper;
+    auto const fontKeys = FontKeys {
+        .regular = *fontKey, .bold = *fontKey, .italic = *fontKey, .boldItalic = *fontKey, .emoji = *fontKey
+    };
+
+    MockTextRendererEvents events;
+    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+
+    auto const text = std::u32string { U"AB" };
+    auto clusters = std::vector<unsigned> { 0, 1 };
+
+    // Shaping fails once...
+    textShaper.setFailing(true);
+    CHECK(TextRendererTest::glyphPositions(renderer, text, clusters, TextStyle::Regular).empty());
+
+    // ... and the very next attempt, with the shaper working again, must produce glyphs. Before this
+    // the empty result was cached against the same key and every later frame drew blank cells.
+    textShaper.setFailing(false);
+    CHECK_FALSE(TextRendererTest::glyphPositions(renderer, text, clusters, TextStyle::Regular).empty());
+
+    // A successful result IS cached: the second lookup returns the identical object, not a re-shape.
+    auto const& first = TextRendererTest::glyphPositions(renderer, text, clusters, TextStyle::Regular);
+    auto const& second = TextRendererTest::glyphPositions(renderer, text, clusters, TextStyle::Regular);
+    CHECK(&first == &second);
+}
 
 TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallback]")
 {

@@ -418,6 +418,16 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
     descriptionsWithSameDpi.dpi = _fontDescriptions.dpi;
     auto const onlyDpiChanged = (descriptionsWithSameDpi == _fontDescriptions);
 
+    // Said out loud rather than dropped on the floor: neither branch below can honour a new
+    // FontLocatorEngine -- the locator is constructor-injected and both the same-engine path and the
+    // replacement shaper resolve through _fontLocator. Committing _fontDescriptions further down then
+    // makes the configuration model report the new engine while the fonts on screen keep coming from
+    // the old one, and without this line the only symptom is "my font_locator setting does nothing".
+    if (_fontDescriptions.fontLocator != fontDescriptions.fontLocator)
+        rendererLog()("Ignoring font locator change to {}: the locator is fixed for this renderer's "
+                      "lifetime; restart to apply it.",
+                      fontDescriptions.fontLocator);
+
     if (_fontDescriptions.textShapingEngine == fontDescriptions.textShapingEngine)
     {
         if (!onlyDpiChanged)
@@ -435,6 +445,13 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
         _textShaper =
             createTextShaper(fontDescriptions.textShapingEngine, fontDescriptions.dpi, _fontLocator);
         _textShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
+
+        // The assignment above destroyed the shaper _textRenderer was constructed against, and
+        // TextRenderer holds it for the whole frame path (shape, resizeFont, rasterize). Without this
+        // rebind every draw after an engine switch runs through freed memory. The loadFontKeys() and
+        // updateFontMetrics() below then re-resolve the FontKeys and drop the caches that still name
+        // the old shaper's glyphs -- both halves are required, which is why setTextShaper() says so.
+        _textRenderer.setTextShaper(*_textShaper);
     }
 
     // Load the fonts against the NEW descriptions but only commit them to _fontDescriptions once the

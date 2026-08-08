@@ -275,7 +275,7 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
     _textShapingCache { ShapingResultCache::create(crispy::StrongHashtableSize { 16384 },
                                                    crispy::LRUCapacity { TextShapingCacheSize },
                                                    "Text shaping cache") },
-    _textShaper { textShaper },
+    _textShaper { &textShaper },
     _boxDrawingRenderer { gridMetrics },
     _glyphScaler { &glyphScaler }
 {
@@ -384,7 +384,7 @@ void TextRenderer::initializeDirectMapping()
 
     for (char32_t const codepoint: std::views::iota(FirstReservedChar, LastReservedChar + 1))
     {
-        if (optional<text::GlyphPosition> gposOpt = _textShaper.shape(_fonts.regular, codepoint))
+        if (optional<text::GlyphPosition> gposOpt = _textShaper->shape(_fonts.regular, codepoint))
         {
             text::GlyphKey const& glyph = gposOpt.value().glyph;
             if (glyph.index.value >= _directMappedGlyphKeyToTileIndex.size())
@@ -873,7 +873,7 @@ std::optional<text::RasterizedGlyph> TextRenderer::rasterizeAtBlockSize(text::Gl
         // A FontKey already encodes its size, so editing GlyphKey::size alone would change nothing
         // FreeType can see. Ask the shaper for the SAME face at the larger size; that re-hints it.
         key.size.pt *= adjustment.factor;
-        key.font = _textShaper.resizeFont(glyphKey.font, key.size);
+        key.font = _textShaper->resizeFont(glyphKey.font, key.size);
 
         // The shaper reports "not resized" by handing back the key it was given -- it refuses once
         // its budget for wire-driven sizes is spent. Taking that as success would rasterize at the
@@ -886,7 +886,7 @@ std::optional<text::RasterizedGlyph> TextRenderer::rasterizeAtBlockSize(text::Gl
     }
 
     auto glyph =
-        _textShaper.rasterize(key, _fontDescriptions.renderMode, _fontDescriptions.textOutline.thickness);
+        _textShaper->rasterize(key, _fontDescriptions.renderMode, _fontDescriptions.textOutline.thickness);
     if (!glyph.has_value())
         return std::nullopt;
 
@@ -1087,7 +1087,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                                          GlyphWidthPolicy widthPolicy)
     -> optional<TextureAtlas::TileCreateData>
 {
-    auto theGlyphOpt = _textShaper.rasterize(
+    auto theGlyphOpt = _textShaper->rasterize(
         glyphKey, _fontDescriptions.renderMode, _fontDescriptions.textOutline.thickness);
     if (!theGlyphOpt.has_value())
         return nullopt;
@@ -1271,9 +1271,27 @@ text::ShapeResult const& TextRenderer::getOrCreateCachedGlyphPositions(StrongHas
                                                                        gsl::span<unsigned> clusters,
                                                                        TextStyle style)
 {
-    return _textShapingCache->getOrEmplace(hash, [this, codepoints, clusters, style](auto) {
-        return createTextShapedGlyphPositions(codepoints, clusters, style);
-    });
+    // getOrTryEmplace, not getOrEmplace: a shaper that fails mid-run (DirectWrite's GetGlyphPlacements
+    // is the documented case) yields no positions at all for a non-empty run, and caching THAT turns one
+    // transient failure into a permanent hole -- every later occurrence of the same text in the same
+    // style and size hits the cached emptiness and draws nothing, until a font or size change happens to
+    // change the key. Refusing to cache it costs a re-shape per occurrence and lets the next frame
+    // recover.
+    auto const* cached =
+        _textShapingCache->getOrTryEmplace(hash, [&](auto) -> std::optional<text::ShapeResult> {
+            auto shaped = createTextShapedGlyphPositions(codepoints, clusters, style);
+            if (shaped.empty() && !codepoints.empty())
+            {
+                // Rejected for the cache, but the caller still gets what was shaped, so park it in the
+                // scratch slot rather than shaping the run a second time. One text group is drawn at a
+                // time and the caller is done with the result before the next one is shaped.
+                _uncachedShapeResult = std::move(shaped);
+                return std::nullopt;
+            }
+            return shaped;
+        });
+
+    return cached ? *cached : _uncachedShapeResult;
 }
 
 text::ShapeResult TextRenderer::createTextShapedGlyphPositions(u32string_view codepoints,
@@ -1315,12 +1333,12 @@ text::ShapeResult TextRenderer::shapeTextRun(unicode::run_segmenter::range const
 
     text::ShapeResult glyphPosition;
     glyphPosition.reserve(clusters.size());
-    _textShaper.shape(font,
-                      codepoints,
-                      clusters,
-                      script,            // get<unicode::Script>(run.properties),
-                      presentationStyle, // get<unicode::PresentationStyle>(run.properties),
-                      glyphPosition);
+    _textShaper->shape(font,
+                       codepoints,
+                       clusters,
+                       script,            // get<unicode::Script>(run.properties),
+                       presentationStyle, // get<unicode::PresentationStyle>(run.properties),
+                       glyphPosition);
 
     if (rasterizerLog && !glyphPosition.empty())
     {
