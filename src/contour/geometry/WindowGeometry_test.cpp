@@ -7,8 +7,11 @@
 
 #include <contour/geometry/WindowGeometry.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+
+#include <cmath>
 
 using namespace contour::geometry;
 
@@ -490,6 +493,43 @@ TEST_CASE("WindowGeometry.resolveContentScale.precedence", "[contour][geometry]"
     CHECK(resolveContentScale(row.forcedFontDpi, row.windowDpr, row.screenDpr) == row.expected);
 }
 
+TEST_CASE("WindowGeometry.fitPageToPixels.marginsUseTheDeviceRatioNotTheContentScale", "[contour][geometry]")
+{
+    // The page fit must scale its margins by the device-pixel RATIO. A forced font DPI changes how large
+    // glyphs are rasterized (the content scale); it does not change how many hardware pixels the surface
+    // has, so it must not change how many cells fit into it.
+    //
+    // The numbers are the divergent row from resolveContentScale.precedence above: forceFontDPI 144 on a
+    // DPR-2.0 window yields a content scale of 1.5 while the ratio stays 2.0. session::applyResize() used
+    // to scale the margins by the former, which both mis-fits the page and disagrees with the identical
+    // margin TerminalDisplay bakes into the renderer using the latter.
+    constexpr auto Dpr = 2.0;
+    constexpr auto ContentScaleUnderForcedDpi = 1.5;
+    REQUIRE(resolveContentScale(144.0, Dpr, Dpr) == ContentScaleUnderForcedDpi);
+
+    auto const cell = imageSize(10, 20);
+    auto const surface = imageSize(800, 600); // the hardware pixels the surface actually has
+    auto const logicalMargin = Margins { .horizontal = 5, .vertical = 5 };
+    auto const noClamp = [](vtbackend::PageSize page) {
+        return page;
+    };
+
+    auto const scaled = [](Margins m, double s) {
+        return Margins { .horizontal = static_cast<int>(m.horizontal * s),
+                         .vertical = static_cast<int>(m.vertical * s) };
+    };
+
+    auto const withRatio = fitPageToPixels(surface, cell, scaled(logicalMargin, Dpr), noClamp);
+    auto const withContentScale =
+        fitPageToPixels(surface, cell, scaled(logicalMargin, ContentScaleUnderForcedDpi), noClamp);
+
+    // The two disagree, which is precisely why the call site had to pick the right one: a margin scaled by
+    // 1.5 instead of 2.0 leaves 5 device pixels unaccounted for on each side.
+    CHECK(withRatio.pageMargin.left != withContentScale.pageMargin.left);
+    CHECK(withRatio.pageMargin.left == 10);       // 5 logical * DPR 2.0
+    CHECK(withContentScale.pageMargin.left == 7); // 5 logical * 1.5, truncated — the bug
+}
+
 TEST_CASE("viewportOrigin places a client's view inside a larger shared grid", "[geometry][viewport]")
 {
     // A daemon-hosted grid belongs to every attached client, so a client smaller than it shows a
@@ -558,3 +598,102 @@ TEST_CASE("viewportOrigin places a client's view inside a larger shared grid", "
         CHECK(viewportOrigin(tiny, viewport, at(0, 0)) == vtbackend::CellLocation {});
     }
 }
+
+// {{{ #2040 -- a split pane's boundary must land on a whole device pixel.
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.lands on a whole device pixel", "[contour][geometry]")
+{
+    // The property that matters: whatever comes out, multiplying by the DPR yields an integer, so the
+    // pane boundary sits on a hardware pixel and the two paths that consume it (the unrounded vertex
+    // transform and the qRound()ed scissor) cannot disagree.
+    for (auto const dpr: { 1.0, 1.25, 1.5, 2.0, 2.5 })
+    {
+        for (auto const raw: { 493.5, 494.3, 500.0, 512.7, 987.0 * 0.5 })
+        {
+            auto const snapped = snapPaneExtentToDevicePixels(raw, dpr);
+            auto const inDevicePixels = snapped * dpr;
+            CHECK(std::abs(inDevicePixels - std::round(inDevicePixels)) < 1e-9);
+        }
+    }
+}
+
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.moves by less than one device pixel",
+          "[contour][geometry]")
+{
+    // Snapping must not visibly move the splitter: the correction is a rounding, so it can never
+    // exceed half a device pixel. A larger jump would make the divider drift while being dragged.
+    for (auto const dpr: { 1.0, 1.5, 2.0 })
+    {
+        for (auto const raw: { 493.5, 494.3, 512.7, 640.9 })
+        {
+            auto const snapped = snapPaneExtentToDevicePixels(raw, dpr);
+            CHECK(std::abs(snapped - raw) <= (0.5 / dpr) + 1e-9);
+        }
+    }
+}
+
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.the fractional half-split case from #2040",
+          "[contour][geometry]")
+{
+    // The reported repro: an odd window width split 50/50 at DPR 1 gives each pane a .5 width, so the
+    // second pane's origin is fractional and every glyph in it inherits the offset.
+    // 987/2 = 493.5 and 993/2 = 496.5; std::round takes halves AWAY from zero, so 494 and 497.
+    CHECK(snapPaneExtentToDevicePixels(987.0 * 0.5, 1.0) == Catch::Approx(494.0));
+    CHECK(snapPaneExtentToDevicePixels(993.0 * 0.5, 1.0) == Catch::Approx(497.0));
+
+    // At DPR 1 the result is always integral -- the case the artifact was captured at.
+    for (auto const width: { 985, 987, 989, 991, 993, 995 })
+    {
+        auto const snapped = snapPaneExtentToDevicePixels(width * 0.5, 1.0);
+        CHECK(snapped == Catch::Approx(std::round(snapped)));
+    }
+}
+
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.the split handle needs snapping too",
+          "[contour][geometry]")
+{
+    // Snapping the first pane's EXTENT alone does not put the second pane's ORIGIN on a device pixel:
+    // that origin is `firstExtent + handleThickness`, and the default handle is 6 LOGICAL pixels, which
+    // is 7.5 device pixels at the very common 125% scale and 10.5 at 175%. Panes on exactly those
+    // scales would have kept the #2040 artifact while 100/150/200% were fixed.
+    auto constexpr DefaultHandleThickness = 6.0; // vtworkspace::DefaultSplitHandleThickness
+
+    for (auto const dpr: { 1.0, 1.25, 1.5, 1.75, 2.0, 2.5 })
+    {
+        auto const extent = snapPaneExtentToDevicePixels(987.0 * 0.5, dpr);
+
+        // Snapping the extent alone: the handle carries the fraction straight into the second origin.
+        auto const unsnappedOrigin = (extent + DefaultHandleThickness) * dpr;
+        auto const handleIsWhole =
+            std::abs((DefaultHandleThickness * dpr) - std::round(DefaultHandleThickness * dpr)) < 1e-9;
+        CHECK(handleIsWhole
+              == (std::abs(unsnappedOrigin - std::round(unsnappedOrigin)) < 1e-9)); // fails at 1.25/1.75
+
+        // Snapping BOTH through the same rule -- what PaneNode.qml now does -- makes it whole at every
+        // ratio, which is the property the renderer's two paths need to agree.
+        auto const handle = snapPaneExtentToDevicePixels(DefaultHandleThickness, dpr);
+        auto const secondOrigin = (extent + handle) * dpr;
+        CHECK(std::abs(secondOrigin - std::round(secondOrigin)) < 1e-9);
+
+        // ... and the handle stays visible, never rounded away to nothing.
+        CHECK(handle > 0.0);
+    }
+}
+
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.a degenerate ratio is a no-op", "[contour][geometry]")
+{
+    // Nothing sensible to snap to; returning the input unchanged beats dividing by zero.
+    CHECK(snapPaneExtentToDevicePixels(493.5, 0.0) == Catch::Approx(493.5));
+    CHECK(snapPaneExtentToDevicePixels(493.5, -2.0) == Catch::Approx(493.5));
+}
+
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.an already-snapped extent is unchanged",
+          "[contour][geometry]")
+{
+    // Idempotence: re-snapping must not drift, or a binding that re-evaluates would walk the divider.
+    for (auto const dpr: { 1.0, 1.5, 2.0 })
+    {
+        auto const once = snapPaneExtentToDevicePixels(512.7, dpr);
+        CHECK(snapPaneExtentToDevicePixels(once, dpr) == Catch::Approx(once));
+    }
+}
+// }}}

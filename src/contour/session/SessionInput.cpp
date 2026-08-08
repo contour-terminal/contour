@@ -37,7 +37,7 @@ namespace
     {
         auto const pageSize = session.terminal().totalPageSize();
         auto const cellSize = session.display()->cellSize();
-        auto const dpr = session.display()->contentScale();
+        auto const dpr = session.display()->devicePixelRatio();
 
         // The renderer's own origin, not the profile margin re-derived: they are equal while the
         // grid starts at the top-left, and they must STAY equal when it does not. A daemon-hosted
@@ -551,7 +551,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     auto const modifiers = input::makeModifiers(event->modifiers()).chord;
 
     auto const pixelPosition = makeMousePixelPosition(
-        event, session.display()->gridMetrics().pageMargin, session.display()->contentScale());
+        event, session.display()->gridMetrics().pageMargin, session.display()->devicePixelRatio());
 
     // NOTE: Qt is playing some weird games with the mouse wheel events, i.e. if Alt is pressed
     //       it will send horizontal wheel events instead of vertical ones. We need to compensate
@@ -561,7 +561,7 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
         if (event->pixelDelta().isNull())
             return { .x = 0, .y = 0 };
 
-        auto const scaledPixelDelta = session.display()->contentScale() * event->pixelDelta();
+        auto const scaledPixelDelta = session.display()->devicePixelRatio() * event->pixelDelta();
         auto const x = scaledPixelDelta.x();
         auto const y = scaledPixelDelta.y();
         if (modifiers & Modifier::Alt)
@@ -596,7 +596,7 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
                                 input::makeMouseButton(event->button()),
                                 makeMousePixelPosition(event,
                                                        session.display()->gridMetrics().pageMargin,
-                                                       session.display()->contentScale()));
+                                                       session.display()->devicePixelRatio()));
     event->accept();
 }
 
@@ -611,7 +611,7 @@ void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
                                   input::makeMouseButton(event->button()),
                                   makeMousePixelPosition(event,
                                                          session.display()->gridMetrics().pageMargin,
-                                                         session.display()->contentScale()));
+                                                         session.display()->devicePixelRatio()));
     event->accept();
 }
 
@@ -626,7 +626,7 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
                                makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
                                makeMousePixelPosition(event,
                                                       session.display()->gridMetrics().pageMargin,
-                                                      session.display()->contentScale()));
+                                                      session.display()->devicePixelRatio()));
     event->accept();
 }
 
@@ -642,13 +642,13 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
                                makeMouseCellLocation(position.x(), position.y(), session),
                                makeMousePixelPosition(event,
                                                       session.display()->gridMetrics().pageMargin,
-                                                      session.display()->contentScale()));
+                                                      session.display()->devicePixelRatio()));
     event->accept();
 }
 
 AutoScrollInfo computeAutoScrollInfo(QMouseEvent const* event, TerminalSession const& session) noexcept
 {
-    auto const dpr = session.display()->contentScale();
+    auto const dpr = session.display()->devicePixelRatio();
     auto const cellHeight = session.display()->cellSize().height.as<int>();
     auto const marginTop = static_cast<int>(unbox(session.profile().margins.value().vertical) * dpr);
     auto const pageLines = *session.terminal().totalPageSize().lines;

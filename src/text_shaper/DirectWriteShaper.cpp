@@ -38,11 +38,20 @@ namespace text
 {
 namespace
 {
-    void renderGlyphRunToBitmap(IDWriteGlyphRunAnalysis* glyphAnalysis,
-                                const RECT& textureBounds,
-                                const DWRITE_COLOR_F& runColor,
-                                BitmapFormat targetFormat,
-                                std::vector<uint8_t>::iterator& _it)
+    /// Rasterizes one glyph run into @p _it, returning false when DirectWrite could not produce the
+    /// alpha texture.
+    ///
+    /// The HRESULT is load-bearing and used to be discarded. CreateAlphaTexture() leaves the buffer
+    /// untouched on failure, and `tmp` is zero-initialized, so a swallowed failure did not skip the glyph
+    /// -- it copied ZEROS out as if they were coverage. In an RGB subpixel bitmap a zero run is not a
+    /// hole, it is *attenuated ink*: the glyph keeps its shape but loses weight over the affected span,
+    /// which is exactly the "stem dims for two scanlines then recovers" artifact reported in #2040 and
+    /// impossible to see on the FreeType path our CI actually builds.
+    [[nodiscard]] bool renderGlyphRunToBitmap(IDWriteGlyphRunAnalysis* glyphAnalysis,
+                                              const RECT& textureBounds,
+                                              const DWRITE_COLOR_F& runColor,
+                                              BitmapFormat targetFormat,
+                                              std::vector<uint8_t>::iterator& _it)
     {
         auto const width = textureBounds.right - textureBounds.left;
         auto const height = textureBounds.bottom - textureBounds.top;
@@ -50,8 +59,13 @@ namespace
         std::vector<uint8_t> tmp;
         tmp.resize(height * width * 3);
 
-        auto hr = glyphAnalysis->CreateAlphaTexture(
+        auto const hr = glyphAnalysis->CreateAlphaTexture(
             DWRITE_TEXTURE_CLEARTYPE_3x1, &textureBounds, tmp.data(), tmp.size());
+        if (FAILED(hr))
+        {
+            errorLog()("directwrite: CreateAlphaTexture failed for a {}x{} glyph run.", width, height);
+            return false;
+        }
 
         // TODO: #ifdef (__SSE2__) SIMD me :-)
         for (auto i = 0; i < height; i++)
@@ -93,6 +107,8 @@ namespace
                     *_it++ = currentA * (1.0 - averageAlpha) + averageAlpha * 255;
                 }
             }
+
+        return true;
     }
 
     constexpr double ptToEm(double pt)
@@ -447,6 +463,16 @@ void DirectWriteShaper::shape(FontKey font,
                                                        &glyphAdvances.at(glyphStart),
                                                        &glyphOffsets.at(glyphStart));
 
+        // Checked for the same reason CreateAlphaTexture() is: the out-parameters are zero-initialized
+        // vectors DirectWrite leaves untouched on failure, so a discarded HRESULT here does not lose the
+        // placements loudly -- it gives every glyph in the run an advance of 0, stacking the whole run on
+        // one pen position. Emitting no positions lets the caller fall back instead.
+        if (FAILED(hr))
+        {
+            errorLog()("directwrite: GetGlyphPlacements failed for a {}-glyph run.", actualGlyphCount);
+            return;
+        }
+
         for (size_t i = glyphStart; i < actualGlyphCount; i++)
         {
             GlyphPosition gpos {};
@@ -500,17 +526,33 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
     ComPtr<IDWriteGlyphRunAnalysis> glyphAnalysis;
     RasterizedGlyph output {};
 
-    _d->factory->CreateGlyphRunAnalysis(&glyphRun,
-                                        _d->pixelPerDip(),
-                                        nullptr,
-                                        renderingMode,
-                                        DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
-                                        0.0f,
-                                        0.0f,
-                                        &glyphAnalysis);
+    // Checked for the same reason the CreateAlphaTexture()/GetGlyphPlacements() results are, but this
+    // one is worse than a bad bitmap: on failure glyphAnalysis stays NULL and the
+    // GetAlphaTextureBounds() call immediately below dereferences it.
+    hr = _d->factory->CreateGlyphRunAnalysis(&glyphRun,
+                                             _d->pixelPerDip(),
+                                             nullptr,
+                                             renderingMode,
+                                             DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
+                                             0.0f,
+                                             0.0f,
+                                             &glyphAnalysis);
+    if (FAILED(hr) || !glyphAnalysis)
+    {
+        errorLog()("directwrite: CreateGlyphRunAnalysis failed for glyph {}.", glyph.index.value);
+        return nullopt;
+    }
 
+    // A zero-initialized RECT that DirectWrite leaves untouched on failure is not distinguishable
+    // from a legitimately empty glyph, and every size below is derived from it -- a failure here
+    // yields a 0x0 bitmap whose emptiness looks deliberate.
     RECT textureBounds {};
-    glyphAnalysis->GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1, &textureBounds);
+    hr = glyphAnalysis->GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1, &textureBounds);
+    if (FAILED(hr))
+    {
+        errorLog()("directwrite: GetAlphaTextureBounds failed for glyph {}.", glyph.index.value);
+        return nullopt;
+    }
 
     output.bitmapSize.width = vtbackend::Width(textureBounds.right - textureBounds.left);
     output.bitmapSize.height = vtbackend::Height(textureBounds.bottom - textureBounds.top);
@@ -519,8 +561,11 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
 
     auto const [width, height] = output.bitmapSize;
 
-    IDWriteFactory2* factory2;
-    IDWriteColorGlyphRunEnumerator* glyphRunEnumerator;
+    // ComPtr, not raw: both of these used to be leaked outright -- QueryInterface() and
+    // TranslateColorGlyphRun() each return a reference this function never released, once per glyph
+    // rasterization. Every other COM pointer here is already a ComPtr.
+    ComPtr<IDWriteFactory2> factory2;
+    ComPtr<IDWriteColorGlyphRunEnumerator> glyphRunEnumerator;
     if (SUCCEEDED(_d->factory->QueryInterface(IID_PPV_ARGS(&factory2))))
     {
         hr = factory2->TranslateColorGlyphRun(0.0f,
@@ -530,16 +575,33 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
                                               DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
                                               nullptr,
                                               0,
-                                              &glyphRunEnumerator);
+                                              glyphRunEnumerator.GetAddressOf());
 
-        if (hr == DWRITE_E_NOCOLOR)
+        // DWRITE_E_NOCOLOR is the "this glyph has no color layers" answer, not the only failure:
+        // E_INVALIDARG (a font whose COLR/CPAL tables DirectWrite rejects) and E_OUTOFMEMORY both
+        // land here too, and both leave glyphRunEnumerator NULL. Testing only for NOCOLOR sent every
+        // other failure into the color branch, whose first act is glyphRunEnumerator->MoveNext() --
+        // a call through a null pointer, and a deterministic one now that the enumerator is a ComPtr
+        // rather than an uninitialized raw pointer. Treat any failure as "render it monochrome",
+        // which is the same graceful degradation NOCOLOR already gets.
+        if (FAILED(hr))
         {
+            if (hr != DWRITE_E_NOCOLOR)
+                errorLog()("directwrite: TranslateColorGlyphRun failed for glyph {}; rendering it "
+                           "without color.",
+                           glyph.index.value);
+
             output.bitmap.resize(*height * *width * 3);
             output.format = BitmapFormat::RGB;
 
             auto t = output.bitmap.begin();
 
-            renderGlyphRunToBitmap(glyphAnalysis.Get(), textureBounds, DWRITE_COLOR_F {}, output.format, t);
+            // Report the failure rather than returning a bitmap the texture step never filled: the
+            // caller's std::nullopt path skips the glyph, where a zero-filled buffer would have been
+            // drawn as a faded one.
+            if (!renderGlyphRunToBitmap(
+                    glyphAnalysis.Get(), textureBounds, DWRITE_COLOR_F {}, output.format, t))
+                return std::nullopt;
 
             return output;
         }
@@ -551,8 +613,17 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
             _d->fontsHasColor.at(glyph.font) = true;
             while (true)
             {
-                BOOL haveRun;
-                glyphRunEnumerator->MoveNext(&haveRun);
+                // haveRun is an out-parameter DirectWrite leaves UNTOUCHED on failure, so a
+                // discarded HRESULT here branches the loop on an indeterminate value -- reading
+                // uninitialized memory to decide whether another layer exists.
+                BOOL haveRun = FALSE;
+                hr = glyphRunEnumerator->MoveNext(&haveRun);
+                if (FAILED(hr))
+                {
+                    errorLog()("directwrite: MoveNext failed while enumerating color runs for glyph {}.",
+                               glyph.index.value);
+                    break;
+                }
                 if (!haveRun)
                     break;
 
@@ -565,18 +636,30 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
 
                 ComPtr<IDWriteGlyphRunAnalysis> colorGlyphsAnalysis;
 
-                _d->factory->CreateGlyphRunAnalysis(&colorRun->glyphRun,
-                                                    _d->pixelPerDip(),
-                                                    nullptr,
-                                                    renderingMode,
-                                                    DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
-                                                    0.0f,
-                                                    0.0f,
-                                                    &colorGlyphsAnalysis);
+                // Same null-dereference shape as the monochrome path above: on failure
+                // colorGlyphsAnalysis stays NULL and renderGlyphRunToBitmap() would call through it.
+                hr = _d->factory->CreateGlyphRunAnalysis(&colorRun->glyphRun,
+                                                         _d->pixelPerDip(),
+                                                         nullptr,
+                                                         renderingMode,
+                                                         DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
+                                                         0.0f,
+                                                         0.0f,
+                                                         &colorGlyphsAnalysis);
+                if (FAILED(hr) || !colorGlyphsAnalysis)
+                {
+                    errorLog()("directwrite: CreateGlyphRunAnalysis failed for a color run of glyph {}.",
+                               glyph.index.value);
+                    return nullopt;
+                }
 
                 auto t = output.bitmap.begin();
                 auto const color = colorRun->paletteIndex == 0xFFFF ? DWRITE_COLOR_F {} : colorRun->runColor;
-                renderGlyphRunToBitmap(colorGlyphsAnalysis.Get(), textureBounds, color, output.format, t);
+                // A color glyph composites one layer per run, so a failed layer leaves the ones already
+                // blended in place; abandoning the glyph is still better than compositing zeros over them.
+                if (!renderGlyphRunToBitmap(
+                        colorGlyphsAnalysis.Get(), textureBounds, color, output.format, t))
+                    return std::nullopt;
             }
 
             return output;

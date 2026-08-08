@@ -473,8 +473,25 @@ crispy::cli::Command ContourGuiApp::parameterDefinition() const
                     "profile", CLI::Value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
                 CLI::Option { "debug",
                               CLI::Value { ""s },
-                              "Enables debug logging, using a comma (,) separated list of tags.",
+                              "Enables debug logging, using a comma (,) separated list of tags. "
+                              "Writes to standard error unless `log-file` names a file.",
                               "TAGS" },
+                // `log` and `log-file` are not optional here: both verbs funnel through
+                // loadConfig(), which reads them unconditionally, and FlagStore::get() is a
+                // `values.at(key)` over the options the *invoked* verb declared. Leaving either
+                // out of this list is not "no logging for font-locator", it is a std::out_of_range
+                // thrown before the verb does anything at all.
+                CLI::Option { "log",
+                              CLI::Value { ""s },
+                              "Enables logging for a comma (,) separated list of tags, or `all` "
+                              "(see `contour list-debug-tags`). Synonym for `debug`. Writes to "
+                              "standard error unless `log-file` names a file.",
+                              "TAGS" },
+                CLI::Option { "log-file",
+                              CLI::Value { ""s },
+                              "Appends log output to FILE instead of standard error ('-' means "
+                              "standard error).",
+                              "FILE" },
             },
         });
 
@@ -492,8 +509,27 @@ crispy::cli::Command ContourGuiApp::parameterDefinition() const
                     "profile", CLI::Value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
                 CLI::Option { "debug",
                               CLI::Value { ""s },
-                              "Enables debug logging, using a comma (,) separated list of tags.",
+                              "Enables debug logging, using a comma (,) separated list of tags. "
+                              "Writes to standard error unless `log-file` names a file.",
                               "TAGS" },
+                CLI::Option { "log",
+                              CLI::Value { ""s },
+                              "Enables logging for a comma (,) separated list of tags, or `all` "
+                              "(see `contour list-debug-tags`). Synonym for `debug`. Writes to "
+                              "standard error unless `log-file` names a file.",
+                              "TAGS" },
+                // Shell redirection is NOT an alternative to this on Windows: tryAttachConsole()
+                // (main.cpp) runs AttachConsole() and then freopen()s stderr onto CONOUT$, which
+                // replaces a `2> file` redirection before a single log line is written. The result
+                // is a file holding only the pre-attach noise while the log itself goes to the
+                // console -- indistinguishable, to whoever is reading the file, from "the thing you
+                // asked about never happened". Writing through the sink sidesteps the console
+                // entirely.
+                CLI::Option { "log-file",
+                              CLI::Value { ""s },
+                              "Appends log output to FILE instead of standard error ('-' means "
+                              "standard error).",
+                              "FILE" },
                 CLI::Option { "live-config", CLI::Value { false }, "Enables live config reloading." },
                 CLI::Option {
                     "dump-state-at-exit",
@@ -667,9 +703,67 @@ bool ContourGuiApp::loadConfig(string const& target)
         ++configFailures;
     };
 
-    if (auto const filterString = flags.get<string>(prefix + "debug"); !filterString.empty())
+    // `debug` and `log` are synonyms; whichever was given wins, `log` if both.
+    auto const logFilter = [&] {
+        auto const fromLog = flags.get<string>(prefix + "log");
+        return fromLog.empty() ? flags.get<string>(prefix + "debug") : fromLog;
+    }();
+
+    auto const logFile = logstore::parseLogFileSpec(flags.get<string>(prefix + "log-file"));
+
+    // A destination is worth installing for EITHER half: a filter needs somewhere to write, and
+    // `--log-file` alone is a request to redirect whatever $LOG already enabled. Gating the whole
+    // block on a non-empty filter made `--log-file` a silent no-op -- no file created, and on
+    // Windows tryAttachConsole() has already taken `2>` away, so nothing to fall back on either.
+    // An empty OutputConfig::filter deliberately leaves the current enablement alone, so passing
+    // one through is safe.
+    if (!logFilter.empty() || logFile.has_value())
     {
-        logstore::configure(filterString);
+        // ScopedOutput does both halves at once: it enables the named categories AND installs an
+        // enabled sink for them, and it lets the destination be a file -- which on Windows is the
+        // only way to capture this at all (see the log-file option).
+        //
+        // NOTE ON THE STREAM. logstore::Sink::console() is constructed disabled (LogStore.cpp:29),
+        // but App::run() enables it via customizeLogStoreOutput() before any verb is dispatched,
+        // so the bare logstore::configure() this replaced was NOT discarding its output -- it went
+        // to std::cout. A ScopedOutput with no file writes to std::cerr, so `--debug`/`--log`
+        // output moves from stdout to stderr here. That is deliberate (diagnostics belong on
+        // stderr, and it matches the client and daemon verbs, which route through
+        // App::installLogging()), and it is stated in the option help so a pipeline that captured
+        // stdout has something to find.
+        auto output = logstore::ScopedOutput::create({
+            .filter = logFilter,
+            .file = logFile,
+            .showProcessId = false,
+        });
+
+        // An unopenable log file must not cost the user their logging as well. create() applies the
+        // filter from inside the ScopedOutput constructor, so a failed open means the categories
+        // were never enabled either -- warn and continue would boot the GUI completely silent, and
+        // silence is the one thing whoever passed --log cannot distinguish from "it never happened".
+        // The stderr destination has no fallible step, so this retry cannot fail in turn.
+        if (!output)
+        {
+            cerr << std::format("contour: {}; logging to standard error instead.\n", output.error());
+            output = logstore::ScopedOutput::create({
+                .filter = logFilter,
+                .file = std::nullopt,
+                .showProcessId = false,
+            });
+        }
+
+        if (output)
+            _guiLogOutput = std::move(*output);
+        else
+            cerr << std::format("contour: {}\n", output.error());
+
+        // A pattern matching nothing is nearly always a typo, and its symptom -- no output -- is
+        // indistinguishable from "the thing you asked about never happened", which is exactly the
+        // wrong signal to give someone reproducing a rendering artifact.
+        for (auto const& unmatched: logstore::unmatchedFilters(logFilter))
+            cerr << std::format("contour: '{}' matches no known tag (see `contour "
+                                "list-debug-tags`).\n",
+                                unmatched);
     }
 
     auto const configPath = QString::fromStdString(flags.get<string>(prefix + "config"));

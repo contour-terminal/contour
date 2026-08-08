@@ -95,4 +95,23 @@ class ForcedFontDpiProvider: public QObject
 [[nodiscard]] double contentScaleForWindow(QWindow const* window,
                                            ForcedFontDpiProvider const* provider) noexcept;
 
+/// The window's actual device-pixel ratio: hardware pixels per logical pixel.
+///
+/// This is NOT interchangeable with contentScaleForWindow(). The content scale answers "how large should
+/// glyphs be rasterized", and KDE's forceFontDPI *replaces* the ratio there to make text physically
+/// bigger. This answers "how many hardware pixels is a logical pixel", which no font setting may change —
+/// it is a property of the surface, and it is what Qt's scene graph builds its projection and sizes its
+/// render target with.
+///
+/// Every geometry conversion must use this one. Using the content scale instead fits the grid into
+/// `width * fontScale` pixels while the surface only has `width * dpr` of them, so under a forced DPI the
+/// page gets too many columns and the whole grid is rescaled onto the surface — which, with the atlas
+/// sampled at QRhiSampler::Nearest, drops and duplicates glyph columns (@see #2040).
+///
+/// With no forced DPI configured the two are equal, which is every platform other than KDE-with-forcing
+/// and is asserted in the tests.
+/// @param window The window, or nullptr when none exists yet.
+/// @return The device-pixel ratio, or 1.0 when there is no window to ask.
+[[nodiscard]] double devicePixelRatioForWindow(QWindow const* window) noexcept;
+
 } // namespace contour::display

@@ -100,8 +100,17 @@ class DisplaySurface
     /// @c pixel_reporting selects. 1.0 when reporting device pixels, the content scale otherwise.
     [[nodiscard]] virtual double reportedPixelScale() const = 0;
 
-    /// Device pixels per logical pixel (the DPI scale in force, including any forced-DPI override).
+    /// How large glyphs are rasterized, in device pixels per logical pixel — the DPI scale in force,
+    /// including any forced-DPI override. A font decision, so it feeds the font size and nothing else.
     [[nodiscard]] virtual double contentScale() const = 0;
+
+    /// Hardware pixels per logical pixel for this surface — what the scene graph sizes its render target
+    /// with, and which no font setting may change.
+    ///
+    /// EVERY logical<->device geometry conversion uses this, never contentScale(): the mouse and IME
+    /// mapping, the accessibility rectangles and what is reported to applications. The two are equal
+    /// unless a forced font DPI is configured.
+    [[nodiscard]] virtual double devicePixelRatio() const = 0;
 
     /// The renderer's grid metrics — margins and cell size — for mapping a cell to a rectangle.
     [[nodiscard]] virtual vtrasterizer::GridMetrics gridMetrics() const = 0;

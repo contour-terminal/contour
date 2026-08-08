@@ -1743,7 +1743,7 @@ void TerminalSession::updateHyperlinkHover(std::string_view uri, vtbackend::Cell
                                                           _display->cellSize(),
                                                           change.anchor,
                                                           1,
-                                                          _display->contentScale());
+                                                          _display->devicePixelRatio());
     emit hyperlinkHoverChanged();
 }
 
@@ -3276,8 +3276,8 @@ void TerminalSession::updateImageCanvasCeiling()
         return;
 
     auto const screenSize = _display->window()->screen()->size();
-    auto const devicePixels =
-        geometry::availableDevicePixels(screenSize.width(), screenSize.height(), _display->contentScale());
+    auto const devicePixels = geometry::availableDevicePixels(
+        screenSize.width(), screenSize.height(), _display->devicePixelRatio());
 
     // In the unit every other pixel report uses: XTSMGRAPHICS answers this ceiling alongside a canvas
     // size the application reads in reported pixels, and it sizes an image against both. Leaving the

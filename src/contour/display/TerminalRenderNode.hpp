@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <QtCore/QSizeF>
 #include <QtQuick/QSGRenderNode>
 
 #include <atomic>
@@ -103,6 +104,17 @@ class TerminalRenderNode: public QSGRenderNode
     /// @param liveness The owning display's liveness cell.
     void setLiveness(DisplayLiveness liveness) noexcept { _liveness = std::move(liveness); }
 
+    /// Publishes the window's LOGICAL size for the next frame's device→logical scale.
+    ///
+    /// Called from updatePaintNode(), which runs on the render thread with the GUI thread BLOCKED — the
+    /// only point at which Qt geometry can be read without racing. prepare() previously read
+    /// QWindow::size() itself, in the render phase with the GUI thread running: during an interactive
+    /// resize that can observe a window size which no longer matches the frame's render target, and the
+    /// ratio derived from the two is then wrong for that frame — reintroducing exactly the scale mismatch
+    /// deviceToLogicalScale() exists to prevent (#2040).
+    /// @param size The window's size in logical pixels, snapshotted at the sync point.
+    void setWindowLogicalSize(QSizeF size) noexcept { _windowLogicalSize = size; }
+
   private:
     /// Loads the owning display for one callback, or nullptr when the display is gone/dying or the
     /// node was released.
@@ -113,6 +125,10 @@ class TerminalRenderNode: public QSGRenderNode
 
     DisplayLiveness _liveness; //!< Owning display's liveness cell; dropped in releaseResources() and
                                //!< re-established by updatePaintNode() via setLiveness() on reuse.
+
+    QSizeF _windowLogicalSize {}; //!< Window size in logical pixels, snapshotted at the sync point by
+                                  //!< updatePaintNode(); see setWindowLogicalSize(). Empty until the
+                                  //!< first sync, where prepare() falls back to the live window.
 };
 
 } // namespace contour::display

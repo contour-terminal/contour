@@ -325,7 +325,7 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
         // geometry change: the mouse hit-test maps through it, and a zero origin under a configured
         // margin reports the cell the user clicked minus that margin.
         auto const marginsDevicePx =
-            geometry::scaled(session::toGeometryMargins(profile().margins.value()), contentScale());
+            geometry::scaled(session::toGeometryMargins(profile().margins.value()), devicePixelRatio());
         _renderer = make_unique<vtrasterizer::Renderer>(
             _session->profile().terminalSize.value(),
             vtrasterizer::PageMargin { .left = marginsDevicePx.horizontal,
@@ -336,6 +336,8 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
             _session->config().renderer.value().textureAtlasHashtableSlots,
             _session->config().renderer.value().textureAtlasTileCount,
             _session->config().renderer.value().textureAtlasDirectMapping,
+            // The composition root picks the locator engine; the renderer just uses what it is given.
+            vtrasterizer::createFontLocator(profile().fonts.value().fontLocator),
             _session->profile().hyperlinkDecoration.value().normal,
             _session->profile().hyperlinkDecoration.value().hover,
             _session->config().textScalingMethod.value());
@@ -455,7 +457,7 @@ void TerminalDisplay::applyDisplaySizeToGrid()
     // QWindow — the WM's size is obeyed as-is (grid alignment during interactive resizes is the WM's job,
     // via the size-increment hint where the platform supports it) — so a resize event can never re-enter
     // itself. Grid->window resizes exist only for content-driven requests through the WindowHost.
-    auto const deviceSize = geometry::availableDevicePixels(width(), height(), contentScale());
+    auto const deviceSize = geometry::availableDevicePixels(width(), height(), devicePixelRatio());
     displayLog()("Display size changed to {}x{} virtual ({} device).", width(), height(), deviceSize);
     session::applyResize(deviceSize, *_session, *_renderer);
 }
@@ -740,7 +742,11 @@ void TerminalDisplay::logDisplayInfo()
 
 void TerminalDisplay::onSceneGrapheInitialized()
 {
-    displayLog()("onSceneGrapheInitialized ({}x{}, DPR {})", width(), height(), contentScale());
+    displayLog()("onSceneGrapheInitialized ({}x{}, DPR {}, content scale {})",
+                 width(),
+                 height(),
+                 devicePixelRatio(),
+                 contentScale());
 }
 
 void TerminalDisplay::logRhiBackendInfoOnce()
@@ -875,12 +881,12 @@ void TerminalDisplay::createRenderer()
     // not by the render target.
     auto const precalculatedTargetSize = [this]() -> ImageSize {
         auto const uiSize = ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
-        return uiSize * contentScale();
+        return uiSize * devicePixelRatio();
     }();
 
     if (displayLog)
     {
-        auto const dpr = contentScale();
+        auto const dpr = devicePixelRatio();
         auto const viewSize =
             ImageSize { Width::cast_from(width() * dpr), Height::cast_from(height() * dpr) };
         auto const windowSize = window()->size() * dpr;
@@ -892,6 +898,29 @@ void TerminalDisplay::createRenderer()
                      viewSize,
                      windowSize.width(),
                      windowSize.height());
+    }
+
+    // Size the glyph atlas for the page this pane will ACTUALLY render, before the atlas is built. The
+    // renderer was constructed from the profile's page size, which is the right answer only for a
+    // window's first pane; a split pane is created at a fraction of the window and a maximized one at
+    // several times the profile. Letting the real extent arrive after the atlas exists rebuilds it one
+    // power-of-two band larger on the pane's very first frame, throwing away a multi-megabyte texture
+    // per pane per split -- and it was a rebuild at exactly that moment that #2040 rode in on.
+    //
+    // Same page fit session::applyResize() performs a few lines below, deliberately: reserving against
+    // any other number would size the atlas for a page this pane never renders. Skipped when the item
+    // has no extent yet (the SplitView has not polished), where the profile budget is the best guess
+    // and the ordinary staged-geometry path grows it later.
+    if (auto const availablePx = geometry::availableDevicePixels(width(), height(), devicePixelRatio());
+        availablePx.width.value != 0 && availablePx.height.value != 0)
+    {
+        auto const marginsDevicePx =
+            geometry::scaled(session::toGeometryMargins(profile().margins.value()), devicePixelRatio());
+        auto const fit = geometry::fitPageToPixels(
+            availablePx, gridMetrics().cellSize, marginsDevicePx, [this](auto page) {
+                return _session->terminal().clampedTotalPageSize(page);
+            });
+        _renderer->reserveAtlasForPage(fit.pageSize);
     }
 
     _renderTarget = std::make_unique<RhiRenderer>(precalculatedTargetSize, textureTileSize);
@@ -909,7 +938,7 @@ void TerminalDisplay::createRenderer()
     // sync the anchor layout may not have fully propagated yet; that is fine: geometryChange() re-derives
     // the grid the moment the committed geometry changes, and applyResize() no-ops once they match.
     session::applyResize(
-        geometry::availableDevicePixels(width(), height(), contentScale()), *_session, *_renderer);
+        geometry::availableDevicePixels(width(), height(), devicePixelRatio()), *_session, *_renderer);
 
     // Defer configureDisplay() until the GUI thread processes QML binding propagation
     // and the window is committed at its final initial size (e.g. 1136x600 at DPR 1.5).
@@ -957,6 +986,13 @@ void TerminalDisplay::prepareFrameRhi(QRhi* rhi,
     // _session here to avoid a null deref in release builds.
     if (!_renderTarget || !_session || rhi == nullptr || cb == nullptr || rt == nullptr || rpDesc == nullptr)
         return;
+
+    // Serialize this whole staging phase against a GUI-thread reconfiguration. paint() -> render() takes
+    // the same (recursive) lock, but createPipelines() and flushFrame() below sit OUTSIDE render() and
+    // touch the very state a reconfiguration rewrites: the atlas backend's queued commands, its atlas
+    // texture, and the atlas size tiles are normalized against. #2040 is what that gap looked like -- a
+    // GUI-thread atlas rebuild slipped into createPipelines()' multi-millisecond texture allocation.
+    auto const frameGuard = _renderer->lockForFrame();
 
     // Snapshot the render target into a local for the rest of this frame. prepare() runs on the render
     // thread with the GUI thread UNBLOCKED, and releaseResources() nulls the _renderTarget member with a
@@ -1022,6 +1058,10 @@ void TerminalDisplay::recordFrameRhi(QSGRenderNode::RenderState const* state)
 {
     if (!_renderTarget)
         return;
+
+    // Same frame guard as prepareFrameRhi(): recordDraws() replays the staged batch and reads the atlas
+    // size for the text uniforms, so a GUI-thread reconfiguration must not land in the middle of it.
+    auto const frameGuard = _renderer->lockForFrame();
 
     // Pin the render target for this frame: like prepareFrameRhi(), this runs on the render thread with the
     // GUI thread unblocked, so releaseResources() can std::move the _renderTarget member to null between the
@@ -1204,6 +1244,12 @@ QSGNode* TerminalDisplay::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*
         // without destroying it — on scene-graph invalidation paths that reuse the node. Re-link it to
         // this display every frame, or a released-but-reused node would render nothing (black terminal).
         node->setLiveness(_nodeLiveness);
+
+    // Snapshot the window's logical extent here, for the same reason the render size and model matrix are
+    // snapshotted above: this is the sync point, with the GUI thread blocked. The node needs it to derive
+    // the frame's device→logical scale, and reading QWindow::size() from the render phase instead would
+    // race a concurrent resize (see TerminalRenderNode::setWindowLogicalSize).
+    node->setWindowLogicalSize(window() != nullptr ? QSizeF(window()->size()) : QSizeF {});
 
     // Content changes every frame the terminal is dirty; mark the node so Qt invokes render() again.
     node->markDirty(QSGNode::DirtyMaterial);
@@ -1414,8 +1460,11 @@ QVariant TerminalDisplay::inputMethodQuery(Qt::InputMethodQuery query) const
             auto const& screen = term.currentScreen();
             auto const cursor = screen.cursor().position;
             if (term.isCursorInViewport() && imeCursorAddressable(cursor, term.pageSize()))
-                return imeCursorRectangle(
-                    metrics.pageMargin, metrics.cellSize, cursor, screen.cellWidthAt(cursor), contentScale());
+                return imeCursorRectangle(metrics.pageMargin,
+                                          metrics.cellSize,
+                                          cursor,
+                                          screen.cellWidthAt(cursor),
+                                          devicePixelRatio());
             return QRectF();
         }
         case Qt::ImCursorPosition: {
@@ -1476,6 +1525,11 @@ void TerminalDisplay::onScrollBarValueChanged(int value)
     scheduleRedraw();
 }
 
+double TerminalDisplay::devicePixelRatio() const
+{
+    return devicePixelRatioForWindow(window());
+}
+
 double TerminalDisplay::contentScale() const
 {
     // THE content-scale read: the cached app-wide forced-DPI override (injected in setSession) wins over
@@ -1487,8 +1541,9 @@ double TerminalDisplay::contentScale() const
 TerminalDisplay::DevicePixelGeometry TerminalDisplay::itemDevicePixelGeometry() const
 {
     // The item's device-pixel extent. Scene position is no longer needed: the scene graph supplies the
-    // item→clip transform at render time (see renderFrame), so callers want only the size.
-    auto const dpr = contentScale();
+    // item→clip transform at render time (see renderFrame), so callers want only the size. The DPR, not
+    // the content scale: this is how many hardware pixels the item covers, which no font setting changes.
+    auto const dpr = devicePixelRatio();
     return DevicePixelGeometry {
         .width = width() * dpr,
         .height = height() * dpr,
@@ -1542,7 +1597,8 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
     return geometry::requiredPixelsForPage(
         _session->terminal().totalPageSize(),
         _renderer->publishedCellSize(),
-        geometry::scaled(session::toGeometryMargins(_session->profile().margins.value()), contentScale()));
+        geometry::scaled(session::toGeometryMargins(_session->profile().margins.value()),
+                         devicePixelRatio()));
 }
 
 vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize totalPageSize) const
@@ -1573,8 +1629,9 @@ vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize tota
 double TerminalDisplay::reportedPixelScale() const
 {
     assert(_session);
-    return _session->profile().pixelReporting.value() == config::PixelReporting::Device ? 1.0
-                                                                                        : contentScale();
+    if (_session->profile().pixelReporting.value() == config::PixelReporting::Device)
+        return 1.0;
+    return devicePixelRatio();
 }
 
 vtbackend::ImageSize TerminalDisplay::cellSize() const
@@ -1830,7 +1887,7 @@ void TerminalDisplay::resizeTerminalToDisplaySize()
     Require(_session != nullptr);
 
     session::applyResize(
-        geometry::availableDevicePixels(width(), height(), contentScale()), *_session, *_renderer);
+        geometry::availableDevicePixels(width(), height(), devicePixelRatio()), *_session, *_renderer);
 }
 
 void TerminalDisplay::resizeWindow(vtbackend::Width newWidth, vtbackend::Height newHeight)

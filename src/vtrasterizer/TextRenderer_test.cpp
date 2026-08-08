@@ -56,6 +56,17 @@ class TextRendererTest
     {
         return renderer.createRasterizedGlyph(tileLocation, glyphKey, presentation);
     }
+
+    /// Shapes @p codepoints through the renderer's shaping cache, exactly as renderTextGroup() does.
+    /// @return The shaped positions, cached or not.
+    static text::ShapeResult const& glyphPositions(TextRenderer& renderer,
+                                                   std::u32string_view codepoints,
+                                                   gsl::span<unsigned> clusters,
+                                                   TextStyle style)
+    {
+        return renderer.getOrCreateCachedGlyphPositions(
+            renderer.shapingCacheKeyFor(codepoints, style), codepoints, clusters, style);
+    }
 };
 
 /// Test accessor granting unit tests access to Renderer's deferred-reconfiguration internals.
@@ -76,6 +87,12 @@ class RendererTest
     {
         return renderer._pendingReconfig.has_value();
     }
+
+    /// The renderer's text renderer, so a test can shape through the exact instance the frame path uses.
+    [[nodiscard]] static TextRenderer& textRenderer(Renderer& renderer) { return renderer._textRenderer; }
+
+    /// The renderer's live text shaper, so a test can rasterize through the same faces the frame does.
+    [[nodiscard]] static text::Shaper& textShaper(Renderer& renderer) { return *renderer._textShaper; }
 
     /// Seeds self-consistent grid metrics into the live and published metrics.
     ///
@@ -683,6 +700,117 @@ TEST_CASE("TextRenderer", "[renderer]")
     }
 }
 
+TEST_CASE("TextRenderer shaping cache key changes with the font generation", "[renderer][shapingcache]")
+{
+    // The shaping cache maps text -> shape_result, and a shape_result names the font it was shaped with.
+    // The key used to be text and style alone, which is sound only while every font change flushes the
+    // cache — and the flushes were conditional on a render target, so an occluded pane could keep entries
+    // naming fonts that had already been unloaded. Resolving one reaches OpenShaper::rasterize(), whose
+    // .at() on a dead key throws and costs the frame.
+    //
+    // Font keys are never reissued, so folding the key in makes a stale entry unreachable: the same text
+    // hashes differently after a reload, degrading a missed flush to a cache miss instead of a bad glyph.
+    REQUIRE(std::filesystem::exists(testFontPath));
+    MockFontLocator::configure(
+        { { .description = FontDescription::parse("regular"),
+            .source = FontPath { .value = std::filesystem::absolute(testFontPath).string() } } });
+    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+
+    auto locator = MockFontLocator {};
+    auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
+
+    auto const firstKey = textShaper.loadFont(FontDescription::parse("regular"), text::test::BDFFont::Size);
+    REQUIRE(firstKey.has_value());
+
+    auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                                           .cellSize = ImageSize { Width(8), Height(20) },
+                                           .baseline = 15,
+                                           .underline = { .position = 17, .thickness = 1 } };
+
+    auto fontDescriptions = FontDescriptions {};
+    fontDescriptions.dpi = text::test::BDFFont::Dpi;
+    fontDescriptions.size = text::test::BDFFont::Size;
+    fontDescriptions.textShapingEngine = TextShapingEngine::OpenShaper;
+
+    auto fontKeys = FontKeys { .regular = *firstKey,
+                               .bold = *firstKey,
+                               .italic = *firstKey,
+                               .boldItalic = *firstKey,
+                               .emoji = *firstKey };
+
+    MockTextRendererEvents events;
+    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+
+    auto const text = std::u32string { U"Building" };
+    auto const before = renderer.shapingCacheKeyFor(text, TextStyle::Regular);
+
+    SECTION("reloading the font changes the key for the same text")
+    {
+        // What applyFontDescriptions() does: drop every font key, then mint fresh ones. The old keys are
+        // dead afterwards, and nextFontKey only counts up so the new ones differ.
+        textShaper.clearCache();
+        auto const reloaded =
+            textShaper.loadFont(FontDescription::parse("regular"), text::test::BDFFont::Size);
+        REQUIRE(reloaded.has_value());
+        REQUIRE(reloaded->value != firstKey->value); // keys are never reissued
+
+        fontKeys.regular = *reloaded; // held by reference; this is the live font the renderer shapes with
+        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Regular) != before);
+    }
+
+    SECTION("changing the font size changes the key for the same text")
+    {
+        fontDescriptions.size = text::FontSize { fontDescriptions.size.pt + 3.0 };
+        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Regular) != before);
+    }
+
+    SECTION("the style still separates runs of identical text")
+    {
+        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Bold) != before);
+    }
+
+    SECTION("nothing changed means the same key, or the cache would never hit")
+    {
+        CHECK(renderer.shapingCacheKeyFor(text, TextStyle::Regular) == before);
+    }
+}
+
+TEST_CASE("TextRenderer flushes its caches without a render target", "[renderer][shapingcache]")
+{
+    // updateFontMetrics() early-returned when no render target was attached, so a font change applied to
+    // an occluded or not-yet-exposed pane advanced its metrics while leaving its caches behind. The
+    // caches are CPU-side; clearing them never needed a GPU.
+    REQUIRE(std::filesystem::exists(testFontPath));
+    MockFontLocator::configure(
+        { { .description = FontDescription::parse("regular"),
+            .source = FontPath { .value = std::filesystem::absolute(testFontPath).string() } } });
+    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+
+    auto locator = MockFontLocator {};
+    auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
+    auto const fontKey = textShaper.loadFont(FontDescription::parse("regular"), text::test::BDFFont::Size);
+    REQUIRE(fontKey.has_value());
+
+    auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                                           .cellSize = ImageSize { Width(8), Height(20) },
+                                           .baseline = 15,
+                                           .underline = { .position = 17, .thickness = 1 } };
+    auto fontDescriptions = FontDescriptions {};
+    fontDescriptions.dpi = text::test::BDFFont::Dpi;
+    fontDescriptions.size = text::test::BDFFont::Size;
+    auto const fontKeys = FontKeys {
+        .regular = *fontKey, .bold = *fontKey, .italic = *fontKey, .boldItalic = *fontKey, .emoji = *fontKey
+    };
+
+    MockTextRendererEvents events;
+    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+
+    // No setRenderTarget() call: this is the detached pane. The flush must run rather than be skipped,
+    // and must not reach for the atlas that does not exist.
+    REQUIRE_NOTHROW(renderer.updateFontMetrics());
+    REQUIRE_NOTHROW(renderer.clearCache());
+}
+
 TEST_CASE("Renderer.findCellPartitionPoint", "[renderer]")
 {
     SECTION("empty vector returns 0")
@@ -809,6 +937,8 @@ struct ReconfigFixture
 
     vtbackend::ColorPalette colorPalette {};
     MockRenderTarget renderTarget {};
+    // Declared before `renderer`: the renderer holds it by reference for its whole lifetime.
+    MockFontLocator fontLocator {};
     Renderer renderer;
 
     ReconfigFixture():
@@ -819,6 +949,7 @@ struct ReconfigFixture
                  crispy::StrongHashtableSize { 1024 },
                  crispy::LRUCapacity { 4096 },
                  /* atlasDirectMapping */ false,
+                 fontLocator,
                  Decorator::Underline,
                  Decorator::Underline)
     {
@@ -922,6 +1053,121 @@ TEST_CASE("Renderer.reconfig.geometry_resizes_render_target_on_apply", "[rendere
     vtrasterizer::RendererTest::applyPendingReconfig(renderer);
     CHECK(fixture.renderTarget.renderSize() == newPixelSize); // applied on the render thread
     CHECK_FALSE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+}
+
+TEST_CASE("Renderer.reconfig.shaping_engine_change_rebinds_the_text_renderer", "[renderer]")
+{
+    // A shaping-engine change replaces the whole shaper, and TextRenderer was constructed against the
+    // OLD one. Nothing rebound it, so every draw after the change shaped through freed memory -- caught
+    // here by ASan rather than by an assertion, since the symptom is a use-after-free and not a wrong
+    // value. Both the shaping path (renderCell) and the metrics path (updateFontMetrics, run by
+    // applyFontDescriptions itself) touch the shaper.
+    //
+    // Asserted for BOTH outcomes of the switch, because which one happens is a platform fact. Where
+    // createTextShaper() answers DWrite with an OpenShaper the switch succeeds and the renderer must be
+    // rebound; on Windows it builds a real DirectWriteShaper, which cannot load the BDF test font, so
+    // loadFontKeys() throws and the whole apply must roll back to the shaper it had. Either way the
+    // invariant is the same and is the one that matters: the shaper installed afterwards is the one the
+    // live FontKeys belong to. Installing the replacement before the load is what broke it -- the
+    // renderer kept a DirectWriteShaper holding OpenShaper keys and threw on every lookup.
+    //
+    // No render target is attached: the minimal BDF test font yields zero line metrics, so the
+    // updateFontMetrics() this triggers would rebuild the atlas at a zero-height tile and trip the
+    // atlas' own precondition -- a property of the test font, not of the rebind under test.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto& renderer = fixture.renderer;
+
+    auto changed = fixture.fontDescriptions;
+    changed.textShapingEngine = TextShapingEngine::DWrite;
+    renderer.setFonts(changed);
+    REQUIRE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+
+    // applyPendingReconfig() absorbs a font-load failure by design; neither outcome may escape.
+    REQUIRE_NOTHROW(vtrasterizer::RendererTest::applyPendingReconfig(renderer));
+
+    auto const engine = renderer.fontDescriptions().textShapingEngine;
+    INFO("engine after apply: " << (engine == TextShapingEngine::DWrite ? "DWrite (switched)"
+                                                                        : "OpenShaper (rolled back)"));
+
+    // Shape through the renderer's own TextRenderer -- the call that dereferenced the destroyed shaper
+    // when the switch succeeded, and that resolved a stale FontKey when it failed.
+    auto& textRenderer = vtrasterizer::RendererTest::textRenderer(renderer);
+    auto const text = std::u32string { U"AB" };
+    auto clusters = std::vector<unsigned> { 0, 1 };
+    CHECK_NOTHROW(TextRendererTest::glyphPositions(textRenderer, text, clusters, TextStyle::Regular));
+
+    // A rolled-back apply must leave the request retryable rather than half-committed: the descriptions
+    // still name the engine actually in use, so the change-detection guard does not swallow the retry.
+    if (engine != TextShapingEngine::DWrite)
+        CHECK(engine == fixture.fontDescriptions.textShapingEngine);
+}
+
+TEST_CASE("Renderer.reconfig.atlas_budget_follows_the_page", "[renderer][atlas]")
+{
+    // A pane created small — which a freshly split pane always is — and then grown by a window resize
+    // used to keep the atlas it was constructed with, because the tile budget was computed once in the
+    // constructor and setPageSize()/applyResize() never revisited it. Once a frame needed more distinct
+    // tiles than that atlas held, a tile slot was recycled mid-frame and the quads already recorded
+    // against it sampled the wrong glyph. AtlasBudget_test pins the arithmetic; this pins that the resize
+    // path actually applies it and rebuilds the atlas.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    auto& renderer = fixture.renderer;
+    auto& backend = fixture.renderTarget.getMockBackend();
+
+    auto const configuresAfterAttach = backend.configureCount;
+    auto const tilesAfterAttach = backend.properties().tileCount.value;
+    REQUIRE(configuresAfterAttach > 0); // attaching built the first atlas
+
+    SECTION("growing the page past the budget rebuilds the atlas at the larger size")
+    {
+        auto const grown = PageSize { LineCount(120), ColumnCount(400) };
+        renderer.applyResize(
+            vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+        vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+        auto const grownCells = static_cast<uint32_t>(grown.area());
+        CHECK(backend.properties().tileCount.value > tilesAfterAttach);
+        CHECK(backend.properties().tileCount.value >= grownCells); // covers the page it must render
+        CHECK(backend.configureCount > configuresAfterAttach);
+
+        // Kept proportional; it used to stay pinned while the tile count climbed with the page.
+        CHECK(backend.properties().hashCount.value >= backend.properties().tileCount.value);
+    }
+
+    SECTION("shrinking back does not rebuild the atlas again")
+    {
+        auto const grown = PageSize { LineCount(120), ColumnCount(400) };
+        renderer.applyResize(
+            vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+        vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+        auto const grownTiles = backend.properties().tileCount.value;
+        auto const grownConfigures = backend.configureCount;
+
+        renderer.applyResize(vtbackend::ImageSize { Width(400), Height(300) },
+                             PageSize { LineCount(10), ColumnCount(20) },
+                             vtrasterizer::PageMargin {});
+        vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+
+        // Grow-only: a resize drag walks through dozens of sizes, and rebuilding on each would throw
+        // away every cached glyph mid-drag.
+        CHECK(backend.properties().tileCount.value == grownTiles);
+        CHECK(backend.configureCount == grownConfigures);
+    }
+
+    SECTION("a resize within the existing budget rebuilds nothing")
+    {
+        // Strictly smaller than the 24x80 the fixture was built for, so the existing atlas still covers
+        // it and there is nothing to do. (A page even slightly LARGER does grow the budget — the bound
+        // is the page's own cell count, not a round number near it.)
+        renderer.applyResize(vtbackend::ImageSize { Width(700), Height(400) },
+                             PageSize { LineCount(20), ColumnCount(70) },
+                             vtrasterizer::PageMargin {});
+        vtrasterizer::RendererTest::applyPendingReconfig(renderer);
+        CHECK(backend.configureCount == configuresAfterAttach);
+    }
 }
 
 TEST_CASE("Renderer.reconfig.font_size_change_is_deferred", "[renderer]")
@@ -1401,7 +1647,110 @@ constexpr auto CellWidth = 10;
     return positions;
 }
 
+/// A Shaper that forwards everything to a real one but can be told to drop shape()'s output.
+///
+/// Models a shaper failing mid-run — DirectWrite's GetGlyphPlacements returning a failed HRESULT is the
+/// real instance — which yields no positions at all for a non-empty run. There is no other way to
+/// produce that state from a working font.
+class FlakyShaper: public text::Shaper
+{
+  public:
+    explicit FlakyShaper(text::Shaper& inner) noexcept: _inner { inner } {}
+
+    /// Whether shape() discards what the inner shaper produced.
+    void setFailing(bool failing) noexcept { _failing = failing; }
+
+    void setDPI(text::DPI dpi) override { _inner.setDPI(dpi); }
+    void setLocator(text::FontLocator& locator) override { _inner.setLocator(locator); }
+    void clearCache() override { _inner.clearCache(); }
+    void setFontFallbackLimit(int limit) override { _inner.setFontFallbackLimit(limit); }
+    [[nodiscard]] std::optional<text::FontKey> loadFont(text::FontDescription const& description,
+                                                        text::FontSize size) override
+    {
+        return _inner.loadFont(description, size);
+    }
+    [[nodiscard]] text::FontMetrics metrics(text::FontKey key) const override { return _inner.metrics(key); }
+    [[nodiscard]] text::FontKey resizeFont(text::FontKey key, text::FontSize size) override
+    {
+        return _inner.resizeFont(key, size);
+    }
+    void shape(text::FontKey font,
+               std::u32string_view text,
+               gsl::span<unsigned> clusters,
+               unicode::Script script,
+               unicode::PresentationStyle presentation,
+               text::ShapeResult& result) override
+    {
+        if (_failing)
+            return; // exactly what DirectWriteShaper does on a failed GetGlyphPlacements
+        _inner.shape(font, text, clusters, script, presentation, result);
+    }
+    [[nodiscard]] std::optional<text::GlyphPosition> shape(text::FontKey font, char32_t codepoint) override
+    {
+        return _inner.shape(font, codepoint);
+    }
+    [[nodiscard]] std::optional<text::RasterizedGlyph> rasterize(text::GlyphKey glyph,
+                                                                 text::RenderMode mode,
+                                                                 float outlineThickness) override
+    {
+        return _inner.rasterize(glyph, mode, outlineThickness);
+    }
+
+  private:
+    text::Shaper& _inner;
+    bool _failing = false;
+};
+
 } // namespace
+
+TEST_CASE("TextRenderer.a_failed_shaping_is_not_cached", "[renderer][shaping]")
+{
+    // A shaper that fails mid-run leaves the ShapeResult empty, and caching THAT turns one transient
+    // failure into a permanent hole: every later occurrence of the same text in the same style and size
+    // hits the cached emptiness and draws nothing, until a font or size change happens to change the
+    // key. The cache must refuse an empty result for a non-empty run.
+    configureMockFont();
+    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+
+    auto locator = MockFontLocator {};
+    auto innerShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
+    auto textShaper = FlakyShaper { innerShaper };
+
+    auto const fontKey = textShaper.loadFont(FontDescription::parse("regular"), text::test::BDFFont::Size);
+    REQUIRE(fontKey.has_value());
+
+    auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                                           .cellSize = ImageSize { Width(8), Height(20) },
+                                           .baseline = 15,
+                                           .underline = { .position = 17, .thickness = 1 } };
+    auto fontDescriptions = FontDescriptions {};
+    fontDescriptions.dpi = text::test::BDFFont::Dpi;
+    fontDescriptions.size = text::test::BDFFont::Size;
+    fontDescriptions.textShapingEngine = TextShapingEngine::OpenShaper;
+    auto const fontKeys = FontKeys {
+        .regular = *fontKey, .bold = *fontKey, .italic = *fontKey, .boldItalic = *fontKey, .emoji = *fontKey
+    };
+
+    MockTextRendererEvents events;
+    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+
+    auto const text = std::u32string { U"AB" };
+    auto clusters = std::vector<unsigned> { 0, 1 };
+
+    // Shaping fails once...
+    textShaper.setFailing(true);
+    CHECK(TextRendererTest::glyphPositions(renderer, text, clusters, TextStyle::Regular).empty());
+
+    // ... and the very next attempt, with the shaper working again, must produce glyphs. Before this
+    // the empty result was cached against the same key and every later frame drew blank cells.
+    textShaper.setFailing(false);
+    CHECK_FALSE(TextRendererTest::glyphPositions(renderer, text, clusters, TextStyle::Regular).empty());
+
+    // A successful result IS cached: the second lookup returns the identical object, not a re-shape.
+    auto const& first = TextRendererTest::glyphPositions(renderer, text, clusters, TextStyle::Regular);
+    auto const& second = TextRendererTest::glyphPositions(renderer, text, clusters, TextStyle::Regular);
+    CHECK(&first == &second);
+}
 
 TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallback]")
 {
@@ -1639,6 +1988,119 @@ TEST_CASE("TextRenderer.a_scaled_block_draws_one_cell_sized_tile_per_band", "[re
 }
 
 // }}}
+
+TEST_CASE("TextRenderer.a_tile_normalizes_against_its_own_atlas", "[renderer][atlas]")
+{
+    // #2040. A tile's normalized location is only meaningful relative to the texture it will be sampled
+    // from, and that is the atlas it is being placed into -- whose size is fixed for its whole lifetime.
+    // It used to be computed from the BACKEND's atlas size, which is whatever atlas configured it LAST,
+    // from either thread, at any moment. Rebuilding a pane's atlas one size band larger while the render
+    // thread sat inside a multi-megabyte texture allocation carrying the previous size therefore left
+    // every glyph rasterized afterwards addressing half the texture it was drawn from: on screen, an
+    // entire split pane of shrunken, garbled glyphs.
+    //
+    // The backend here reports twice the real atlas. Nothing production does that deliberately; it is
+    // how a stale read looked from the tile's point of view, and the tile must come out right anyway.
+    auto const gridMetrics = GridMetrics { .pageSize = PageSize { LineCount(24), ColumnCount(80) },
+                                           .cellSize = ImageSize { Width(10), Height(20) },
+                                           .baseline = 15,
+                                           .underline = { .position = 17, .thickness = 1 } };
+
+    auto fontDescriptions = FontDescriptions {};
+    fontDescriptions.dpi = DPI { 96, 96 };
+    fontDescriptions.size = FontSize { 9.0 }; // Matches the BDF test font's SIZE 9 96 96.
+    fontDescriptions.textShapingEngine = TextShapingEngine::OpenShaper;
+
+    REQUIRE(std::filesystem::exists(testFontPath));
+    configureMockFont();
+    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+
+    auto fontLocator = MockFontLocator {};
+    auto textShaper = OpenShaper(DPI { 96, 96 }, fontLocator);
+    auto const fontKey = textShaper.loadFont(FontDescription::parse("regular"), fontDescriptions.size);
+    REQUIRE(fontKey.has_value());
+
+    auto const fontKeys = FontKeys {
+        .regular = *fontKey, .bold = *fontKey, .italic = *fontKey, .boldItalic = *fontKey, .emoji = *fontKey
+    };
+    MockTextRendererEvents events;
+    auto renderer = TextRenderer { gridMetrics, textShaper, fontDescriptions, fontKeys, events };
+
+    MockRenderTarget renderTarget;
+    vtrasterizer::atlas::DirectMappingAllocator<vtrasterizer::RenderTileAttributes> allocator;
+    renderer.setRenderTarget(renderTarget, allocator);
+
+    auto const atlasProperties =
+        vtrasterizer::atlas::AtlasProperties { .format = vtrasterizer::atlas::Format::Red,
+                                               .tileSize = gridMetrics.cellSize,
+                                               .hashCount = { 1024 },
+                                               .tileCount = { 4096 },
+                                               .directMappingCount = 128 };
+    auto textureAtlas = TextureAtlas(renderTarget.getMockBackend(), atlasProperties);
+    renderer.setTextureAtlas(textureAtlas);
+
+    auto const atlasSize = textureAtlas.atlasSize();
+    REQUIRE(unbox(atlasSize.width) != 0);
+
+    auto& backend = renderTarget.getMockBackend();
+    backend.atlasSizeOverride = ImageSize { atlasSize.width * 2, atlasSize.height * 2 };
+
+    auto const tile = renderSingleGlyph(renderer, textShaper, *fontKey, fontDescriptions.size, U'A');
+    REQUIRE(tile.has_value());
+    REQUIRE(unbox(tile->bitmapSize.width) != 0);
+
+    // The invariant the gui.display.sampling probe measures at render time, stated at bake time: the
+    // normalized region must cover exactly as many texels as the bitmap has pixels, in the atlas that
+    // owns the tile. Against the lying backend this used to come out at half, in both axes.
+    auto const& normalized = tile->metadata.normalizedLocation;
+    CHECK(normalized.width * unbox<float>(atlasSize.width)
+          == Catch::Approx(unbox<float>(tile->bitmapSize.width)));
+    CHECK(normalized.height * unbox<float>(atlasSize.height)
+          == Catch::Approx(unbox<float>(tile->bitmapSize.height)));
+}
+
+TEST_CASE("Renderer.reconfig.tiles_follow_the_atlas_across_a_rebuild", "[renderer][atlas]")
+{
+    // The same invariant, driven the way a vertical split reaches it: the pane's renderer is built for
+    // the profile's page, the real (much larger) pane extent arrives right after, growAtlasForPage()
+    // rebuilds the atlas at a new size -- and the glyphs rasterized after that rebuild must address the
+    // NEW atlas. Holding the backend at the pre-rebuild size is what the render thread did while it was
+    // allocating the new texture.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    auto& backend = fixture.renderTarget.getMockBackend();
+
+    auto const sizeBeforeGrow = backend.atlasSize();
+    auto const configuresBeforeGrow = backend.configureCount;
+
+    auto const grown = PageSize { LineCount(120), ColumnCount(400) };
+    fixture.renderer.applyResize(
+        vtbackend::ImageSize { Width(4000), Height(2400) }, grown, vtrasterizer::PageMargin {});
+    vtrasterizer::RendererTest::applyPendingReconfig(fixture.renderer);
+
+    REQUIRE(backend.configureCount > configuresBeforeGrow); // the atlas was actually rebuilt
+    auto const sizeAfterGrow = backend.atlasSize();
+    REQUIRE(sizeAfterGrow != sizeBeforeGrow); // ... at a different texture size
+
+    // Pin the backend at the size it reported before the rebuild, then rasterize.
+    backend.atlasSizeOverride = sizeBeforeGrow;
+
+    auto& textRenderer = vtrasterizer::RendererTest::textRenderer(fixture.renderer);
+    auto& shaper = vtrasterizer::RendererTest::textShaper(fixture.renderer);
+    auto const fontKey = shaper.loadFont(FontDescription::parse("regular"), fixture.fontDescriptions.size);
+    REQUIRE(fontKey.has_value());
+
+    auto const tile = renderSingleGlyph(textRenderer, shaper, *fontKey, fixture.fontDescriptions.size, U'A');
+    REQUIRE(tile.has_value());
+    REQUIRE(unbox(tile->bitmapSize.width) != 0);
+
+    auto const& normalized = tile->metadata.normalizedLocation;
+    CHECK(normalized.width * unbox<float>(sizeAfterGrow.width)
+          == Catch::Approx(unbox<float>(tile->bitmapSize.width)));
+    CHECK(normalized.height * unbox<float>(sizeAfterGrow.height)
+          == Catch::Approx(unbox<float>(tile->bitmapSize.height)));
+}
 
 int main(int argc, char* argv[])
 {

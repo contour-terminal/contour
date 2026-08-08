@@ -297,7 +297,19 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     void setScreenshotOutput(ScreenshotOutput where) final { _saveScreenshot = std::move(where); }
     // }}}
 
+    /// How large glyphs are rasterized, in device pixels per logical pixel.
+    ///
+    /// Feeds fontDPI() and nothing else. KDE's forceFontDPI replaces the device-pixel ratio here to make
+    /// text physically larger; that is a font decision, so it must not leak into geometry.
     [[nodiscard]] double contentScale() const final;
+
+    /// Hardware pixels per logical pixel for this item's window — the ratio Qt's scene graph sizes its
+    /// render target and builds its projection with.
+    ///
+    /// EVERY logical<->device geometry conversion uses this, never contentScale(): the item's device
+    /// extent, the page fit, the margins, the mouse/IME mapping and what is reported to applications.
+    /// The two are equal unless a forced font DPI is configured. @see devicePixelRatioForWindow.
+    [[nodiscard]] double devicePixelRatio() const final;
 
     Q_INVOKABLE void logDisplayInfo();
 

@@ -1,4 +1,5 @@
 set(_header_files
+    AtlasBudget.hpp
     BackgroundRenderer.hpp
     BoxDrawingRenderer.hpp
     CursorRenderer.hpp
@@ -35,6 +36,7 @@ set(_source_files
 )
 
 set(_test_files
+    AtlasBudget_test.cpp
     TextClusterGrouper_test.cpp
     BoxDrawingRenderer_test.cpp
     DecorationRenderer_test.cpp

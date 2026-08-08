@@ -44,15 +44,39 @@ class MockAtlasBackend: public vtrasterizer::atlas::AtlasBackend
     /// want to name the violation.
     std::vector<size_t> oversizedUploads;
 
-    [[nodiscard]] vtbackend::ImageSize atlasSize() const noexcept override { return _atlasSize; }
+    /// Makes atlasSize() report something other than what the live atlas was configured with.
+    ///
+    /// Stands in for the real backend, whose reported size is whatever atlas configured it LAST and is
+    /// therefore free to disagree with the atlas a tile is actually being placed into -- across a
+    /// rebuild, or across a concurrent one. A tile normalized against this value samples the wrong
+    /// region of its own texture, which is #2040. Nothing production sets this; it exists so a test can
+    /// hand a Renderable a backend that lies and assert the tile comes out right anyway.
+    std::optional<vtbackend::ImageSize> atlasSizeOverride;
+
+    [[nodiscard]] vtbackend::ImageSize atlasSize() const noexcept override
+    {
+        return atlasSizeOverride.value_or(_atlasSize);
+    }
 
     /// The tile size the atlas last configured, or a zero size if it never did.
     [[nodiscard]] vtbackend::ImageSize tileSize() const noexcept { return _properties.tileSize; }
+
+    /// The properties the atlas last configured with, so a test can assert on the tile budget and not
+    /// merely on the tile size.
+    [[nodiscard]] vtrasterizer::atlas::AtlasProperties const& properties() const noexcept
+    {
+        return _properties;
+    }
+
+    /// How many times the atlas has been (re)configured. A rebuild throws away every cached tile, so
+    /// "did this reconfigure at all" is itself the behaviour some tests are about.
+    size_t configureCount = 0;
 
     void configureAtlas(vtrasterizer::atlas::ConfigureAtlas atlas) override
     {
         _atlasSize = atlas.size;
         _properties = atlas.properties;
+        ++configureCount;
     }
 
     void uploadTile(vtrasterizer::atlas::UploadTile tile) override

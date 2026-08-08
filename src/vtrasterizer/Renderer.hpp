@@ -73,6 +73,10 @@ class Renderer
              crispy::StrongHashtableSize atlasHashtableSlotCount,
              crispy::LRUCapacity atlasTileCount,
              bool atlasDirectMapping,
+             /// The font locator this renderer's shaper resolves font descriptions through. Injected
+             /// rather than fetched from FontLocatorProvider so a renderer can be built against
+             /// MockFontLocator, and fixed for the renderer's lifetime like every other collaborator.
+             text::FontLocator& fontLocator,
              Decorator hyperlinkNormal,
              Decorator hyperlinkHover,
              // Must match Config's `text_scaling_method` default. When these disagreed, every
@@ -268,6 +272,43 @@ class Renderer
         return consumeFontReconfigApplied();
     }
 
+    /// Serializes a whole render-thread frame against a GUI-thread reconfiguration.
+    ///
+    /// render() takes the same lock, but a frame is more than render(): the render target's pipeline and
+    /// texture creation, the per-frame command staging and the draw replay all live in the display around
+    /// it, and all of them touch state that applyStagedReconfigDuringSetup() mutates -- the atlas backend's
+    /// scheduled commands, its atlas texture, and the atlas size the rasterizer normalizes tiles against.
+    /// Holding this for the frame is what makes the "mutually exclusive with an in-flight frame" claim on
+    /// applyStagedReconfigDuringSetup() true rather than nearly true.
+    ///
+    /// In #2040 it was not true: a GUI-thread atlas rebuild landed inside the render thread's
+    /// multi-millisecond atlas texture allocation, and every glyph rasterized afterwards addressed the
+    /// pre-rebuild texture size.
+    ///
+    /// @return a lock guard the caller keeps for the duration of the frame phase.
+    [[nodiscard]] std::unique_lock<std::recursive_mutex> lockForFrame()
+    {
+        return std::unique_lock { _applyMutex };
+    }
+
+    /// Raises the glyph atlas budget to cover @p pageSize, before a render target is attached.
+    ///
+    /// A renderer is constructed from the PROFILE's page size, which is the right answer only for a
+    /// window's first pane: a freshly split pane is created at a fraction of the window, and a maximized
+    /// one at several times the profile. Without this the atlas is built for the profile and the real
+    /// extent, arriving one call later, immediately rebuilds it one power-of-two band larger -- throwing
+    /// away a multi-megabyte texture per pane, per split, on the pane's very first frame.
+    ///
+    /// Only meaningful before setRenderTarget(): once an atlas exists the same growth happens through
+    /// the ordinary staged-geometry path, and doing it here would rebuild rather than reserve.
+    ///
+    /// @param pageSize the page the pane will actually render.
+    void reserveAtlasForPage(vtbackend::PageSize pageSize)
+    {
+        auto const applyGuard = std::scoped_lock { _applyMutex };
+        growAtlasForPage(pageSize);
+    }
+
     void discardImage(vtbackend::Image const& image);
 
     void clearCache();
@@ -312,6 +353,24 @@ class Renderer
 
     void configureTextureAtlas();
 
+    /// Clamps a wanted tile budget to what the GPU can actually hold at the current cell size.
+    ///
+    /// The page-derived budget has no upper bound of its own — a maximized pane on a high-DPI display
+    /// asks for a texture larger than the driver's maximum, which does not allocate and leaves the pane
+    /// with no glyphs at all. @see atlasbudget::MaxAtlasTextureEdge.
+    /// @param wanted The budget the page asked for.
+    /// @return @p wanted, or the ceiling when it exceeds it.
+    [[nodiscard]] crispy::LRUCapacity boundedAtlasTileCount(crispy::LRUCapacity wanted) const noexcept;
+
+    /// Raises the atlas tile budget if @p pageSize needs more tiles than the atlas currently holds, and
+    /// rebuilds the atlas when it does.
+    ///
+    /// Called from the geometry branch of applyPendingReconfig(), i.e. on the render thread under
+    /// _applyMutex, because it replaces the texture atlas the in-flight frame would otherwise be reading.
+    /// Grow-only.
+    /// @param pageSize The page size being applied.
+    void growAtlasForPage(vtbackend::PageSize pageSize);
+
     /// Sets the smooth scroll Y pixel offset on all sub-renderers.
     ///
     /// @param offset  Y pixel offset for smooth scrolling.
@@ -330,6 +389,14 @@ class Renderer
 
     void executeImageDiscards();
 
+    /// The atlas sizing the *configuration* asked for, kept apart from the effective sizing below.
+    ///
+    /// The effective budget is raised to cover the page actually being rendered, and a resize can raise
+    /// it again — so the configured floor has to survive that, or each recomputation would compound the
+    /// previous one instead of being derived afresh.
+    crispy::StrongHashtableSize _configuredAtlasHashtableSlotCount;
+    crispy::LRUCapacity _configuredAtlasTileCount;
+
     crispy::StrongHashtableSize _atlasHashtableSlotCount;
     crispy::LRUCapacity _atlasTileCount;
     bool _atlasDirectMapping;
@@ -338,6 +405,9 @@ class Renderer
 
     Renderable::DirectMappingAllocator _directMappingAllocator;
     std::unique_ptr<Renderable::TextureAtlas> _textureAtlas;
+
+    /// Resolves font descriptions to files. Constructor-injected and fixed thereafter.
+    text::FontLocator& _fontLocator;
 
     FontDescriptions _fontDescriptions;
     std::unique_ptr<text::Shaper> _textShaper;
@@ -383,13 +453,18 @@ class Renderer
     ///
     /// applyPendingReconfig() normally runs only on the render thread (at the top of renderImpl()), but
     /// applyStagedReconfigDuringSetup() also invokes it from the GUI thread for the non-renderable
-    /// (minimized/occluded) case. A window losing exposure does not synchronously stop an already
-    /// in-flight frame, so the GUI-thread apply could otherwise overlap the render-thread apply and race
-    /// on _gridMetrics / the texture atlas / the non-thread-safe shaper. Holding this mutex across the
-    /// whole apply body makes the two mutually exclusive. It is distinct from _reconfigMutex (which only
-    /// guards the short staged-request/published-metrics critical sections) so a UI-thread gridMetrics()
-    /// reader is not blocked for the multi-millisecond font load.
-    std::mutex _applyMutex;
+    /// (minimized/occluded) case and for a discrete font change. A window losing exposure does not
+    /// synchronously stop an already in-flight frame, so the GUI-thread apply could otherwise overlap the
+    /// render-thread apply and race on _gridMetrics / the texture atlas / the non-thread-safe shaper.
+    /// Holding this mutex across the whole apply body makes the two mutually exclusive. It is distinct
+    /// from _reconfigMutex (which only guards the short staged-request/published-metrics critical
+    /// sections) so a UI-thread gridMetrics() reader is not blocked for the multi-millisecond font load.
+    ///
+    /// Recursive because the frame guard (lockForFrame()) nests over renderImpl()'s own acquisition. The
+    /// alternative -- splitting render() into locked and unlocked twins -- moves the invariant out of the
+    /// type and into a rule every caller has to remember, and the unlocked twin is exactly the mistake
+    /// #2040 was.
+    std::recursive_mutex _applyMutex;
 
     /// The most recently *requested* grid metrics, observable synchronously via gridMetrics().
     ///

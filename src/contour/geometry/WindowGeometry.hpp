@@ -6,6 +6,7 @@
 #include <vtrasterizer/GridMetrics.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -477,6 +478,47 @@ template <typename ClampFn>
                                                 unbox<int>(cursor.column),
                                                 /*centre=*/true)),
     };
+}
+
+/// Snaps a split pane's logical extent so its boundary lands on a whole DEVICE pixel.
+///
+/// A split child is sized `view.width * ratio`, which is a real number -- so the first pane routinely
+/// gets a fractional width and the second a fractional ORIGIN. That origin reaches the renderer by two
+/// paths that round differently: the vertex transform composes it unrounded
+/// (TerminalRenderNode::prepare -> composeItemToClip), while the scissor rounds it to a whole pixel
+/// (`qRound(originScene.x() * dpr)`). Geometry and clip then disagree by up to half a pixel, and since
+/// the glyph atlas is sampled with QRhiSampler::Nearest the sample points land on texel boundaries --
+/// a stem loses its bright column for a scanline or two while its neighbours in the same row, same
+/// frame, are untouched. That is #2040: measured as a stem's ink dropping 2656 -> 2043 (23%) with the
+/// glyph's mask intact, on two of three identical `l` glyphs.
+///
+/// Snapping in logical coordinates alone is not enough at a fractional device-pixel ratio: the
+/// quantity both paths agree about is the HARDWARE pixel, so the rounding happens in device space and
+/// converts back.
+///
+/// @note Applies to the SPLIT HANDLE too, not just the pane extent. The second pane's origin is
+///       `firstExtent + handleThickness`, so a snapped extent alone still leaves that origin
+///       fractional whenever the handle is: the default 6 logical pixels is 7.5 device pixels at the
+///       common 125% scale and 10.5 at 175%. PaneNode.qml therefore snaps both through this rule.
+///       WindowController's window-size solver keeps using the unsnapped thickness, which is
+///       deliberate -- it sizes the WINDOW, where a sub-logical-pixel difference cannot move a pane
+///       boundary off the device grid.
+///
+/// @note The binding in PaneNode.qml computes this inline rather than calling here: a QML property
+///       binding cannot invoke a free C++ function, and exposing it would mean a QObject singleton
+///       registered with the meta-object system purely for one arithmetic expression. The two must
+///       therefore stay in step by hand -- this function is the specification and the tested one, so
+///       any change to the rule belongs here first, and the QML binding follows.
+///
+/// @param logicalExtent The unsnapped extent (`view.width * ratio`) in logical pixels.
+/// @param devicePixelRatio Logical-to-device scale; values <= 0 are treated as 1 (nothing to snap to).
+/// @return The extent snapped so `extent * devicePixelRatio` is an integer.
+[[nodiscard]] inline double snapPaneExtentToDevicePixels(double logicalExtent,
+                                                         double devicePixelRatio) noexcept
+{
+    if (!(devicePixelRatio > 0.0))
+        return logicalExtent;
+    return std::round(logicalExtent * devicePixelRatio) / devicePixelRatio;
 }
 
 } // namespace contour::geometry

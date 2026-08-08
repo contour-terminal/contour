@@ -82,7 +82,30 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
 
     void clearCache() override;
 
+    /// Rebinds this renderer onto a different text shaper.
+    ///
+    /// The narrow exception to "configuration at construction time": the owning Renderer replaces its
+    /// shaper when the shaping engine changes, and everything cached here -- shaped runs, resolved
+    /// FontKeys, rasterized tiles -- names glyphs of the OLD shaper. Rebinding without dropping those
+    /// would resolve a stale FontKey inside the new shaper; the caller must therefore reload the font
+    /// keys and call updateFontMetrics() (which clears the caches) after this, exactly as
+    /// Renderer::applyFontDescriptions() does.
+    /// @param textShaper The shaper to shape and rasterize through from now on.
+    void setTextShaper(text::Shaper& textShaper) noexcept { _textShaper = &textShaper; }
+
     void updateFontMetrics();
+
+    /// The shaping-cache key for @p text in @p style under the renderer's CURRENT fonts and size.
+    ///
+    /// Exposed so the property the key exists for can be asserted directly: a font or size change must
+    /// change the key, so entries cached against the previous font become unreachable rather than
+    /// resolvable. The cached values are shape_results naming a specific font, and resolving one after
+    /// that font has been unloaded throws inside the shaper.
+    /// @param text  The codepoints being shaped.
+    /// @param style The text style the run is drawn in.
+    /// @return The cache key.
+    [[nodiscard]] crispy::StrongHash shapingCacheKeyFor(std::u32string_view text,
+                                                        TextStyle style) const noexcept;
 
     void setPressure(bool pressure) noexcept { _pressure = pressure; }
 
@@ -213,8 +236,14 @@ class TextRenderer: public Renderable, public TextClusterGrouper::Events
     using ShapingResultCachePtr = ShapingResultCache::Ptr;
 
     ShapingResultCachePtr _textShapingCache;
+    /// Holds a shaping result the cache refused (an empty result for a non-empty run, i.e. a shaper
+    /// failure) for as long as the caller needs it. @see getOrCreateCachedGlyphPositions().
+    text::ShapeResult _uncachedShapeResult {};
     // TODO: make unique_ptr, get owned, export cref for other users in Renderer impl.
-    text::Shaper& _textShaper;
+    // A pointer rather than a reference so setTextShaper() can rebind it; the owner (Renderer)
+    // replaces the shaper wholesale when the shaping engine changes, and a reference member would
+    // then name a destroyed object for the rest of the renderer's life.
+    gsl::not_null<text::Shaper*> _textShaper;
 
     DirectMapping _directMapping {};
 

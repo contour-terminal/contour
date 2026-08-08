@@ -37,6 +37,8 @@ using vtbackend::ImageSize;
 using vtbackend::RGBAColor;
 using vtbackend::Width;
 
+#include <cmath>
+
 namespace chrono = std::chrono;
 namespace atlas = vtrasterizer::atlas;
 
@@ -236,7 +238,14 @@ void RhiRenderer::createAtlasTexture(QRhi* rhi, ImageSize size)
     _atlasTexture.reset(rhi->newTexture(QRhiTexture::RGBA8, pixelSize, 1, {}));
     if (!_atlasTexture->create())
         errorLog()("Failed to create RHI atlas texture of size {}.", size);
-    _atlasTextureSize = size;
+
+    // Only the GPU extent is recorded here. _atlasTextureSize belongs to configureAtlas(): it is the size
+    // of the atlas the RASTERIZER is filling, and writing it from this GPU-side function let a caller's
+    // stale `size` argument travel backwards in time. createPipelines() reads the member, allocates a
+    // multi-megabyte texture (milliseconds), and lands here long after a concurrent configureAtlas() has
+    // moved on -- which is exactly how #2040 rewound a 4096x8192 atlas to 2048x4096 and left every glyph
+    // sampling a quarter of its tile. A texture created at the wrong size is self-healing: the pending
+    // ConfigureAtlas is applied by the next execute(), and _atlasCreatedSize below is what tells it to.
     _atlasCreatedSize = size;
 
     // Nearest filtering + clamp-to-edge mirrors the former QOpenGLTexture configuration; created once and
@@ -399,10 +408,15 @@ void RhiRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
     // hasSampler). If configureAtlas has not been observed yet, fall back to the currently known atlas size
     // (or a 1x1 placeholder) so the shader-resource-bindings are valid; the real atlas is (re)created on the
     // next configureAtlas.
+    //
+    // Prefer the size of the ConfigureAtlas already queued for this frame over the member: execute() is
+    // about to apply it, and building the placeholder at the member's size only to throw it away one call
+    // later costs a second multi-megabyte allocation on every pane's first frame.
     if (!_atlasTexture)
     {
-        auto const size =
-            _atlasTextureSize.area() != 0 ? _atlasTextureSize : ImageSize { Width(1), Height(1) };
+        auto const requested = _scheduledExecutions.configureAtlas ? _scheduledExecutions.configureAtlas->size
+                                                                   : _atlasTextureSize;
+        auto const size = requested.area() != 0 ? requested : ImageSize { Width(1), Height(1) };
         createAtlasTexture(rhi, size);
     }
 
@@ -435,6 +449,15 @@ ImageSize RhiRenderer::atlasSize() const noexcept
 
 void RhiRenderer::configureAtlas(atlas::ConfigureAtlas atlas)
 {
+    // Tiles queued so far belong to the atlas being replaced, and their TileLocations were computed from
+    // the OLD tiles-per-row -- execute() applies the single (last) ConfigureAtlas and then replays EVERY
+    // queued upload, so keeping them writes the previous atlas' bitmaps at the previous atlas'
+    // coordinates into the new texture, landing each one on top of an unrelated tile. Two configures in
+    // one drain window is not hypothetical: applyPendingReconfig() rebuilds the atlas from its geometry
+    // branch (growAtlasForPage) and again from its font branch (updateFontMetrics) in the same pass.
+    // Whoever owns the new atlas re-uploads what it needs; nothing here can be salvaged.
+    _scheduledExecutions.uploadTiles.clear();
+
     // schedule atlas creation
     _scheduledExecutions.configureAtlas.emplace(atlas);
     _atlasTextureSize = atlas.size;
@@ -510,6 +533,55 @@ void RhiRenderer::renderTile(atlas::RenderTile tile)
         // - 4 color values (RGBA)
     };
     // clang-format on
+
+    // {{{ #2040 sampling probe
+    //
+    // Under QRhiSampler::Nearest the quad must span exactly as many device pixels as the texture
+    // region it samples has texels; at any other ratio the sample points drift across texel
+    // boundaries and whole glyph columns duplicate or drop.
+    //
+    // The two sides of that equality are computed at DIFFERENT MOMENTS from DIFFERENT fields, which
+    // is what makes this worth measuring rather than assuming. The quad size (r, s) is read here at
+    // RENDER time from targetSize/bitmapSize, while the texture region (nw, nh) was baked into
+    // normalizedLocation at UPLOAD time by createTileData(), against the atlas size and bitmap size
+    // that were current then. A tile uploaded before a cell-size change and rendered after it
+    // therefore samples a region whose texel count no longer matches its quad -- and the geometry
+    // probe upstream cannot see this, because the item->clip transform is entirely correct.
+    if (samplingProbeLog)
+    {
+        auto const atlasWidth = unbox<float>(_atlasTextureSize.width);
+        auto const atlasHeight = unbox<float>(_atlasTextureSize.height);
+        if (atlasWidth > 0.0f && atlasHeight > 0.0f && r > 0.0f && s > 0.0f)
+        {
+            // Back out the texel extent the normalized region covers.
+            auto const texelsWide = nw * atlasWidth;
+            auto const texelsHigh = nh * atlasHeight;
+            auto const widthRatio = texelsWide > 0.0f ? r / texelsWide : 1.0f;
+            auto const heightRatio = texelsHigh > 0.0f ? s / texelsHigh : 1.0f;
+
+            // Tolerance absorbs float noise in the normalize/denormalize round-trip while staying
+            // far inside the one-texel drift that visibly damages a stem.
+            if (std::abs(widthRatio - 1.0f) > 0.01f || std::abs(heightRatio - 1.0f) > 0.01f)
+                samplingProbeLog()(
+                    "tile quad {}x{} px samples {:.2f}x{:.2f} texels (ratio {:.4f}x{:.4f}) -- not 1:1, "
+                    "so Nearest sampling duplicates/drops columns. bitmap={}x{} target={}x{} "
+                    "atlas={}x{} shader={}",
+                    r,
+                    s,
+                    texelsWide,
+                    texelsHigh,
+                    widthRatio,
+                    heightRatio,
+                    tile.bitmapSize.width.value,
+                    tile.bitmapSize.height.value,
+                    tile.targetSize.width.value,
+                    tile.targetSize.height.value,
+                    _atlasTextureSize.width.value,
+                    _atlasTextureSize.height.value,
+                    tile.fragmentShaderSelector);
+        }
+    }
+    // }}}
 
     batch.renderTiles.emplace_back(tile);
     std::ranges::copy(vertices, back_inserter(batch.buffer));
@@ -979,23 +1051,74 @@ void RhiRenderer::applyScissor(QRhiGraphicsPipeline* pipeline,
                                    unbox<int>(_renderTargetSize.height),
                                    targetPixelSize.height());
     }();
+    // The pane's own rectangle is the base of the clip, so a draw can never paint over a sibling pane even
+    // when neither the scene graph nor the rasterizer supplies one (no pane item sets clip: true, and the
+    // inner scissor exists only while smooth-scrolling). Drawing into the item-sized offscreen screenshot
+    // target the item frame IS the target frame, so the base is simply the whole target.
+    auto const itemHeight = unbox<int>(_renderTargetSize.height);
+    auto const itemRect =
+        offscreen
+            ? ScissorRect { .x = 0,
+                            .y = 0,
+                            .width = targetPixelSize.width(),
+                            .height = targetPixelSize.height() }
+            : itemScissorToTarget(
+                  ScissorRect {
+                      .x = 0, .y = 0, .width = unbox<int>(_renderTargetSize.width), .height = itemHeight },
+                  _itemOriginLeftDevice,
+                  _itemOriginTopDevice,
+                  itemHeight,
+                  targetPixelSize.height());
+
     auto const clip =
-        computeEffectiveClip(targetInner, offscreen ? std::optional<ScissorRect> {} : _nodeScissor);
+        computePaneClip(itemRect, targetInner, offscreen ? std::optional<ScissorRect> {} : _nodeScissor);
 
     // A pipeline that declares UsesScissor must be given an explicit scissor every draw: the RHI otherwise
     // keeps the *last* scissor set in this render pass, which — since the scene graph clips earlier nodes
     // (e.g. the tab strip's ListView with clip:true sets a small scissor) — would confine the terminal to a
-    // stale sub-rectangle. So when no clip applies, scissor to the full render target (the whole viewport).
-    if (!clip.has_value())
-    {
-        _commandBuffer->setScissor(QRhiScissor(0, 0, targetPixelSize.width(), targetPixelSize.height()));
-        return;
-    }
-
+    // stale sub-rectangle. computePaneClip() always yields one, so there is no unclipped path left.
+    //
     // QRhiScissor uses bottom-left-origin pixels, matching ScissorRect (and the scene graph's scissorRect()
     // that fed _nodeScissor), so the rectangle maps across directly. A zero-area clip clips everything away.
-    auto const& r = *clip;
-    _commandBuffer->setScissor(QRhiScissor(r.x, r.y, std::max(0, r.width), std::max(0, r.height)));
+    // {{{ #2040 clip probe
+    //
+    // Reports a frame whose final clip does not cover the pane it is drawing. The scissor is composed
+    // from inputs captured at DIFFERENT MOMENTS -- _renderTargetSize and the item origin are snapshotted
+    // at the sync point, _nodeScissor is installed by the scene graph just before recordDraws(), and
+    // targetPixelSize is the live window target read in render() -- so mid-resize they can describe
+    // different window extents. When they do, the clip shrinks away part of the pane and the glyphs
+    // inside the lost strip are simply not drawn, leaving whatever the swapchain buffer already held.
+    //
+    // This is the one stage the earlier probes could not see: geometry and sampling both measure what a
+    // quad WOULD draw, and the frame-burst readback replays into an item-sized offscreen target where
+    // the window-space node clip does not apply at all (see the offscreen branch above).
+    if (!offscreen && clipProbeLog)
+    {
+        auto const coversPane = clip.x <= itemRect.x && clip.y <= itemRect.y
+                                && clip.x + clip.width >= itemRect.x + itemRect.width
+                                && clip.y + clip.height >= itemRect.y + itemRect.height;
+        if (!coversPane)
+            clipProbeLog()("clip {}+{}+{}x{} does not cover pane {}+{}+{}x{} (target {}x{}, "
+                           "itemSize {}x{}, origin {}+{}) -- the uncovered strip keeps stale pixels.",
+                           clip.x,
+                           clip.y,
+                           clip.width,
+                           clip.height,
+                           itemRect.x,
+                           itemRect.y,
+                           itemRect.width,
+                           itemRect.height,
+                           targetPixelSize.width(),
+                           targetPixelSize.height(),
+                           unbox<int>(_renderTargetSize.width),
+                           unbox<int>(_renderTargetSize.height),
+                           _itemOriginLeftDevice,
+                           _itemOriginTopDevice);
+    }
+    // }}}
+
+    _commandBuffer->setScissor(
+        QRhiScissor(clip.x, clip.y, std::max(0, clip.width), std::max(0, clip.height)));
 }
 
 void RhiRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)

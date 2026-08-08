@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/Renderer.hpp>
 
+#include <vtrasterizer/AtlasBudget.hpp>
 #include <vtrasterizer/TextRenderer.hpp>
 #include <vtrasterizer/Utils.hpp>
 
@@ -135,21 +136,22 @@ Renderer::Renderer(vtbackend::PageSize pageSize,
                    crispy::StrongHashtableSize atlasHashtableSlotCount,
                    crispy::LRUCapacity atlasTileCount,
                    bool atlasDirectMapping,
+                   text::FontLocator& fontLocator,
                    Decorator hyperlinkNormal,
                    Decorator hyperlinkHover,
                    GlyphScalingMethod textScalingMethod):
-    _atlasHashtableSlotCount { crispy::nextPowerOfTwo(atlasHashtableSlotCount.value) },
-    _atlasTileCount {
-        std::max(atlasTileCount.value, static_cast<uint32_t>(pageSize.area() * 3))
-    }, // TODO instead of pagesize use size for fullscreen window
-       // 3 required for huge sixel images rendering due to initial page size smaller than
+    _configuredAtlasHashtableSlotCount { atlasHashtableSlotCount },
+    _configuredAtlasTileCount { atlasTileCount },
+    _atlasHashtableSlotCount { atlasbudget::slotCountFor(
+        atlasHashtableSlotCount, atlasbudget::tileCountFor(atlasTileCount, pageSize)) },
+    _atlasTileCount { atlasbudget::tileCountFor(atlasTileCount, pageSize) },
     _atlasDirectMapping { atlasDirectMapping },
     //.
+    _fontLocator { fontLocator },
     _fontDescriptions { std::move(fontDescriptions) },
     _textShaper { [&] {
-        auto shaper = createTextShaper(_fontDescriptions.textShapingEngine,
-                                       _fontDescriptions.dpi,
-                                       createFontLocator(_fontDescriptions.fontLocator));
+        auto shaper =
+            createTextShaper(_fontDescriptions.textShapingEngine, _fontDescriptions.dpi, fontLocator);
         shaper->setFontFallbackLimit(_fontDescriptions.maxFallbackCount);
         return shaper;
     }() },
@@ -212,11 +214,39 @@ void Renderer::detachRenderTarget() noexcept
         renderable->detachRenderTarget();
 }
 
+crispy::LRUCapacity Renderer::boundedAtlasTileCount(crispy::LRUCapacity wanted) const noexcept
+{
+    auto const ceiling = atlasbudget::maxTileCountFor(_gridMetrics.cellSize,
+                                                      _directMappingAllocator.currentlyAllocatedCount,
+                                                      atlasbudget::MaxAtlasTextureEdge);
+    return crispy::LRUCapacity { std::min(wanted.value, ceiling.value) };
+}
+
 void Renderer::configureTextureAtlas()
 {
     Require(_renderTarget);
 
     auto const atlasCellSize = _gridMetrics.cellSize;
+
+    // Clamped HERE because this is the one place a budget becomes a texture, so every path into it --
+    // construction, a font or DPI change, page growth -- is bounded, and afterwards the member states
+    // what the atlas actually holds rather than what the page asked for. Losing tiles this way brings
+    // back the mid-frame recycling the budget exists to prevent, so it is reported at every rebuild:
+    // a texture the driver refuses to allocate would lose the glyphs entirely and say nothing.
+    if (auto const bounded = boundedAtlasTileCount(_atlasTileCount); bounded.value < _atlasTileCount.value)
+    {
+        rendererLog()("Capping atlas tile budget at {} (page asked for {}): {} tiles of {} do not fit a "
+                      "texture of at most {}x{} pixels.",
+                      bounded.value,
+                      _atlasTileCount.value,
+                      _atlasTileCount.value,
+                      atlasCellSize,
+                      atlasbudget::MaxAtlasTextureEdge,
+                      atlasbudget::MaxAtlasTextureEdge);
+        _atlasTileCount = bounded;
+        _atlasHashtableSlotCount = atlasbudget::slotCountFor(_configuredAtlasHashtableSlotCount, bounded);
+    }
+
     auto atlasProperties =
         atlas::AtlasProperties { .format = atlas::Format::RGBA,
                                  .tileSize = atlasCellSize,
@@ -241,6 +271,64 @@ void Renderer::configureTextureAtlas()
         renderable->setTextureAtlas(*_textureAtlas);
 }
 
+void Renderer::growAtlasForPage(vtbackend::PageSize pageSize)
+{
+    // The budget was previously fixed at construction, from the page size the renderer happened to start
+    // with. A pane created small — which a freshly split pane always is — and then grown by a window
+    // resize kept the small-pane atlas for the rest of its life, and once a frame needed more distinct
+    // tiles than that atlas held, tile slots were recycled mid-frame and glyphs rendered as each other.
+    // Quantized to the atlas' own power-of-two granularity and clamped to what the GPU can hold, both
+    // so that this converges: an enlarging resize drag walks the page one cell at a time, and an
+    // un-quantized budget would clear the guard below on nearly every step, rebuilding a multi-megabyte
+    // texture and re-uploading every sixel image once per frame of the drag. Every budget inside one
+    // band produces the same texture anyway, so snapping to the top of the band costs nothing.
+    auto const normalize = [this](crispy::LRUCapacity budget) {
+        return boundedAtlasTileCount(
+            atlasbudget::quantizedTileCountFor(budget, _directMappingAllocator.currentlyAllocatedCount));
+    };
+
+    // Both sides go through the same normalization, so the constructor's un-normalized starting budget
+    // and every later one are compared on one grid -- otherwise the first resize after construction
+    // would always appear to be a growth.
+    auto const required = normalize(atlasbudget::tileCountFor(_configuredAtlasTileCount, pageSize));
+    if (required.value <= normalize(_atlasTileCount).value)
+        return; // grow-only: resize jitter must not churn the atlas every frame, and surplus only costs VRAM
+
+    rendererLog()("Growing atlas tile budget to {} for page size {}.", required.value, pageSize);
+
+    if (!_renderTarget)
+    {
+        // No atlas to rebuild yet; setRenderTarget() will build it at the new budget.
+        _atlasTileCount = required;
+        _atlasHashtableSlotCount = atlasbudget::slotCountFor(_configuredAtlasHashtableSlotCount, required);
+        return;
+    }
+
+    // configureTextureAtlas() replaces the atlas wholesale, and a tile's normalized location was baked
+    // into vertex data against the OLD atlas, so every cache holding one must go with it — the same
+    // pairing updateFontMetrics() uses.
+    //
+    // The budget is committed only once that rebuild has returned. Atlas (re)allocation can throw --
+    // applyPendingReconfig()'s font branch says so and wraps itself accordingly, while this geometry
+    // branch does not -- and raising the member first would make the guard above swallow every later
+    // attempt, stranding the pane on the undersized atlas for good.
+    auto const previousTileCount = _atlasTileCount;
+    auto const previousSlotCount = _atlasHashtableSlotCount;
+    _atlasTileCount = required;
+    _atlasHashtableSlotCount = atlasbudget::slotCountFor(_configuredAtlasHashtableSlotCount, required);
+    try
+    {
+        configureTextureAtlas();
+    }
+    catch (...)
+    {
+        _atlasTileCount = previousTileCount;
+        _atlasHashtableSlotCount = previousSlotCount;
+        throw;
+    }
+    clearCache();
+}
+
 void Renderer::discardImage(vtbackend::Image const& image)
 {
     // Defer rendering into the renderer thread & render stage, as this call might have
@@ -261,10 +349,12 @@ void Renderer::executeImageDiscards()
 
 void Renderer::clearCache()
 {
-    if (!_renderTarget)
-        return;
-
-    _renderTarget->clearCache();
+    // Only the render target's own cache needs a target; every renderable's cache is CPU-side. Skipping
+    // the whole flush when detached left the shaping cache holding results that named fonts the caller
+    // had just invalidated — a pane that is occluded, minimized or between detachRenderTarget() and the
+    // next setRenderTarget() is exactly that case.
+    if (_renderTarget)
+        _renderTarget->clearCache();
 
     // TODO(?): below functions are actually doing the same again and again and again. delete them (and their
     // functions for that) either that, or only the render target is allowed to clear the actual atlas caches.
@@ -328,32 +418,62 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
     descriptionsWithSameDpi.dpi = _fontDescriptions.dpi;
     auto const onlyDpiChanged = (descriptionsWithSameDpi == _fontDescriptions);
 
+    // Said out loud rather than dropped on the floor: neither branch below can honour a new
+    // FontLocatorEngine -- the locator is constructor-injected and both the same-engine path and the
+    // replacement shaper resolve through _fontLocator. Committing _fontDescriptions further down then
+    // makes the configuration model report the new engine while the fonts on screen keep coming from
+    // the old one, and without this line the only symptom is "my font_locator setting does nothing".
+    if (_fontDescriptions.fontLocator != fontDescriptions.fontLocator)
+        rendererLog()("Ignoring font locator change to {}: the locator is fixed for this renderer's "
+                      "lifetime; restart to apply it.",
+                      fontDescriptions.fontLocator);
+
+    // A replacement shaper, when the engine changed. Built and loaded into BEFORE anything is
+    // committed, and only then swapped in: loadFontKeys() throws whenever the regular font will not
+    // load, and installing the new shaper first left the renderer holding it alongside FontKeys issued
+    // by the OLD one. applyPendingReconfig()'s try/catch then reports "keeping the previous font" over a
+    // renderer that can no longer shape at all -- every lookup is a miss in the new shaper's font map,
+    // which throws from inside the frame. Windows CI caught exactly that: DirectWrite cannot load the
+    // BDF test font, so the switch fails there on every attempt.
+    auto replacementShaper = unique_ptr<text::Shaper> {};
+
     if (_fontDescriptions.textShapingEngine == fontDescriptions.textShapingEngine)
     {
+        // Mutating the shaper we already have is safe to have run on a failed attempt: it is
+        // render-thread-owned, and re-applying the same DPI and fallback limit is idempotent.
         if (!onlyDpiChanged)
             _textShaper->clearCache();
         _textShaper->setDPI(fontDescriptions.dpi);
         _textShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
-        if (_fontDescriptions.fontLocator != fontDescriptions.fontLocator)
-            _textShaper->setLocator(createFontLocator(fontDescriptions.fontLocator));
     }
     else
     {
-        _textShaper = createTextShaper(fontDescriptions.textShapingEngine,
-                                       fontDescriptions.dpi,
-                                       createFontLocator(fontDescriptions.fontLocator));
-        _textShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
+        replacementShaper =
+            createTextShaper(fontDescriptions.textShapingEngine, fontDescriptions.dpi, _fontLocator);
+        replacementShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
     }
 
-    // Load the fonts against the NEW descriptions but only commit them to _fontDescriptions once the
-    // load succeeds. loadFontKeys()/updateFontMetrics() (atlas reconfiguration) can throw, and this is
-    // called from applyPendingReconfig()'s try/catch which keeps the previous font on failure. Committing
-    // _fontDescriptions first (as before) would leave it at a never-loaded value: the change-detection
-    // guard at the top of this function and helper.cpp::applyFontDescription would then both early-return
-    // on retry, permanently stranding the wrong font. This mirrors the size-only branch in
-    // applyPendingReconfig(). The shaper reconfiguration above is render-thread-owned and idempotent on
-    // retry, so it is fine to have run already.
-    _fonts = loadFontKeys(fontDescriptions, *_textShaper);
+    // Load the fonts against the NEW descriptions, through whichever shaper is going to serve them, but
+    // only commit once the load succeeds. loadFontKeys()/updateFontMetrics() (atlas reconfiguration) can
+    // throw, and this is called from applyPendingReconfig()'s try/catch which keeps the previous font on
+    // failure. Committing _fontDescriptions first (as before) would leave it at a never-loaded value: the
+    // change-detection guard at the top of this function and helper.cpp::applyFontDescription would then
+    // both early-return on retry, permanently stranding the wrong font. This mirrors the size-only branch
+    // in applyPendingReconfig().
+    auto fonts = loadFontKeys(fontDescriptions, replacementShaper ? *replacementShaper : *_textShaper);
+
+    if (replacementShaper)
+    {
+        // The assignment destroys the shaper _textRenderer was constructed against, and TextRenderer
+        // holds it for the whole frame path (shape, resizeFont, rasterize). Without the rebind every
+        // draw after an engine switch runs through freed memory. The FontKeys above and the
+        // updateFontMetrics() below supply the other half setTextShaper() requires: fresh keys, and
+        // caches emptied of everything naming the old shaper's glyphs.
+        _textShaper = std::move(replacementShaper);
+        _textRenderer.setTextShaper(*_textShaper);
+    }
+
+    _fonts = fonts;
     _fontDescriptions = std::move(fontDescriptions);
     updateFontMetrics();
 
@@ -446,6 +566,7 @@ void Renderer::applyPendingReconfig()
         }
         _gridMetrics.pageSize = geometry.pageSize;
         _gridMetrics.pageMargin = geometry.pageMargin;
+        growAtlasForPage(geometry.pageSize);
     }
 
     // Apply a pending font change (full descriptions or size-only): reconfigure the shaper, load the

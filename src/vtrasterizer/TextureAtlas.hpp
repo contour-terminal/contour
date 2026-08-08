@@ -5,9 +5,11 @@
 #include <vtbackend/Primitives.hpp>
 
 #include <crispy/Assert.hpp>
+#include <crispy/LogStore.hpp>
 #include <crispy/StrongHash.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <format>
 #include <variant> // monostate
@@ -17,6 +19,20 @@
 
 namespace vtrasterizer::atlas
 {
+
+/// Reports tiles whose bitmap does not fit the atlas slot they are uploaded into.
+///
+/// Its own category rather than part of vt.rasterizer, which logs a line per glyph and would bury
+/// this: enabled alone, the log is SILENT unless the invariant actually breaks, so any output at
+/// all is a finding.
+///
+/// Tile origins are spaced exactly one tile apart in both axes (see the tileIndex arithmetic in
+/// initialize()), so a bitmap wider or taller than tileSize spills into a NEIGHBOURING tile and
+/// replaces part of an unrelated glyph. The corruption then appears on the glyph that was
+/// overwritten, not the one that overflowed -- which is why it resists being traced back from a
+/// screenshot, and why the check belongs at the upload rather than at the rasterizer.
+auto inline const tileBoundsLog =
+    logstore::Category("vt.rasterizer.tilebounds", "Logs glyph tiles that overflow their atlas slot.");
 
 using Buffer = std::vector<uint8_t>;
 
@@ -235,8 +251,6 @@ class TextureAtlas
     /// This will create at least one atlas in the backend.
     TextureAtlas(AtlasBackend& backend, AtlasProperties atlasProperties);
 
-    void reset(AtlasProperties atlasProperties);
-
     [[nodiscard]] AtlasBackend& backend() noexcept { return _backend; }
 
     [[nodiscard]] vtbackend::ImageSize atlasSize() const noexcept { return _atlasSize; }
@@ -316,6 +330,40 @@ class TextureAtlas
     template <typename CreateTileDataFn>
     std::optional<TileAttributes<Metadata>> constructTile(CreateTileDataFn createTileData,
                                                           uint32_t entryIndex);
+
+    /// Reports a tile whose bitmap exceeds the slot it is about to be uploaded into.
+    ///
+    /// Diagnostic only -- it does not clamp or reject, because what the correct bound IS depends on
+    /// the caller (a wide glyph is legitimately sliced across several tiles by the text renderer,
+    /// while a tall one has no such path). Making it observable is the point: the bleed shows up on
+    /// a neighbouring glyph, so without this the symptom and the cause never appear together.
+    ///
+    /// @param where       the upload site, so a report names which path produced it.
+    /// @param location    the tile slot being written.
+    /// @param bitmapSize  the bitmap's size, which must fit tileSize() on both axes.
+    void reportIfTileOverflows(std::string_view where,
+                               TileLocation location,
+                               vtbackend::ImageSize bitmapSize) const
+    {
+        if (!tileBoundsLog) [[likely]]
+            return;
+
+        auto const tile = tileSize();
+        auto const widthOverflow = unbox<int>(bitmapSize.width) - unbox<int>(tile.width);
+        auto const heightOverflow = unbox<int>(bitmapSize.height) - unbox<int>(tile.height);
+        if (widthOverflow <= 0 && heightOverflow <= 0) [[likely]]
+            return;
+
+        tileBoundsLog()("{}: tile at ({}, {}) got a {} bitmap for a {} slot -- overflowing by {}x{}. "
+                        "The excess lands in the neighbouring tile(s).",
+                        where,
+                        location.x.value,
+                        location.y.value,
+                        bitmapSize,
+                        tile,
+                        std::max(0, widthOverflow),
+                        std::max(0, heightOverflow));
+    }
 
     AtlasBackend& _backend;
     AtlasProperties _atlasProperties;
@@ -399,6 +447,7 @@ constexpr auto sliced(vtbackend::Width tileWidth, uint32_t offsetX, vtbackend::I
         struct iterator // NOLINT(readability-identifier-naming)
         {
             vtbackend::Width tileWidth;
+            uint32_t bitmapWidth; //!< Clamps the last slice; see the endX assignments below.
             TileSliceIndex value;
             constexpr TileSliceIndex const& operator*() const noexcept { return value; }
             constexpr bool operator==(iterator const& rhs) const noexcept
@@ -413,30 +462,51 @@ constexpr auto sliced(vtbackend::Width tileWidth, uint32_t offsetX, vtbackend::I
             {
                 value.sliceIndex++;
                 value.beginX = value.endX;
-                value.endX += unbox(tileWidth);
+                // Clamp: a trailing partial slice ends AT the bitmap's edge, not a full tile past its
+                // start. Without this the last slice of a bitmap whose width is not a whole number of
+                // tiles spans past the row, and sliceTileData() reads out of bounds.
+                value.endX = std::min(value.endX + unbox(tileWidth), bitmapWidth);
                 return *this;
             }
         };
 
-        [[nodiscard]] constexpr uint32_t offsetForEndX() const noexcept
-        {
-            auto const c = unbox(bitmapSize.width) % unbox(tileWidth);
-            return unbox(bitmapSize.width) + c;
-        }
+        /// The sentinel beginX the iteration stops at: the bitmap's width.
+        ///
+        /// It must be a value beginX actually *takes*, because the iterators compare beginX for equality.
+        /// Since endX is clamped to the width, beginX walks tileWidth at a time and then lands exactly on
+        /// the width — for both an exact multiple and a partial trailing slice.
+        ///
+        /// This used to return `width + (width % tileWidth)`, which is neither the width nor a slice
+        /// boundary. For width 20 / tile 8 it gave 24, one slice too many: the last slice spanned [16,24)
+        /// over a 20-wide bitmap, so sliceTileData() read past the row, and its SoftRequire then broke out
+        /// mid-copy — leaving the remaining rows zero-filled while the tile still claimed full height.
+        /// For width 17 / tile 8 it gave 18, which the sequence 0, 8, 16, … never hits at all: the
+        /// iteration did not terminate.
+        ///
+        /// Both are unreachable from the only current caller (CursorRenderer slices a bitmap whose width
+        /// is an exact multiple of the tile width), which is why this lay dormant; it is a trap for the
+        /// next one.
+        [[nodiscard]] constexpr uint32_t offsetForEndX() const noexcept { return unbox(bitmapSize.width); }
 
         [[nodiscard]] constexpr iterator begin() noexcept
         {
+            // A zero tile width cannot advance beginX, so the iteration would never reach the sentinel:
+            // yield the empty range rather than spin.
+            if (unbox(tileWidth) == 0)
+                return end();
             return iterator { .tileWidth = tileWidth,
+                              .bitmapWidth = unbox(bitmapSize.width),
                               .value = TileSliceIndex {
-                                  .sliceIndex = 0,         // index
-                                  .beginX = offsetX,       // begin
-                                  .endX = unbox(tileWidth) // end
+                                  .sliceIndex = 0,                                            // index
+                                  .beginX = offsetX,                                          // begin
+                                  .endX = std::min(unbox(tileWidth), unbox(bitmapSize.width)) // end
                               } };
         }
 
         [[nodiscard]] constexpr iterator end() noexcept
         {
             return iterator { .tileWidth = tileWidth,
+                              .bitmapWidth = unbox(bitmapSize.width),
                               .value = TileSliceIndex {
                                   .sliceIndex = 0,           // index (irrelevant, undefined)
                                   .beginX = offsetForEndX(), // begin
@@ -560,6 +630,8 @@ auto TextureAtlas<Metadata>::constructTile(CreateTileDataFn createTileData, uint
 
     TileCreateData& tileCreateData = *tileCreateDataOpt;
 
+    reportIfTileOverflows("LRU", tileLocation, tileCreateData.bitmapSize);
+
     _backend.uploadTile(UploadTile {
         .location = tileLocation,
         .bitmapSize = tileCreateData.bitmapSize,
@@ -632,13 +704,6 @@ void TextureAtlas<Metadata>::remove(crispy::StrongHash key)
 }
 
 template <typename Metadata>
-void TextureAtlas<Metadata>::reset(AtlasProperties atlasProperties)
-{
-    _atlasProperties = atlasProperties;
-    _tileCache->clear();
-}
-
-template <typename Metadata>
 TileAttributes<Metadata> const& TextureAtlas<Metadata>::directMapped(uint32_t index) const
 {
     Require(index < _directMapping.size());
@@ -651,6 +716,8 @@ void TextureAtlas<Metadata>::setDirectMapping(uint32_t tileIndex, TileCreateData
     Require(tileIndex < _directMapping.size());
 
     auto const tileLocation = _tileLocations[tileIndex];
+
+    reportIfTileOverflows("direct-mapped", tileLocation, tileCreateData.bitmapSize);
 
     auto tileUpload = UploadTile {};
     tileUpload.location = tileLocation;

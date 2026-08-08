@@ -89,8 +89,14 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
     auto const oldPageSize = terminal.totalPageSize();
     // Read the published cell size once (lock-free), reused for both the page size and margin below.
     ImageSize const cellSize = renderer.publishedCellSize();
+    // The device-pixel RATIO, not the content scale. This is a geometry conversion feeding the page fit,
+    // and the surface only has `logical * dpr` hardware pixels to fit a page into. Under KDE's
+    // forceFontDPI the content scale is the *font* decision and replaces the ratio, so scaling the margins
+    // by it fits the page against a width the surface does not have — while TerminalDisplay bakes the very
+    // same margin into the renderer using the DPR, leaving the two disagreeing. @see TerminalDisplay.h,
+    // which names the page fit and the margins explicitly.
     auto const marginsDevicePx = geometry::scaled(toGeometryMargins(session.profile().margins.value()),
-                                                  session.display()->contentScale());
+                                                  session.display()->devicePixelRatio());
 
     // Fit the grid with the terminal's own total-page clamp injected, so the renderer geometry published
     // below and what resizeScreen() will actually apply can never disagree: resizeScreen() raises the
