@@ -1060,9 +1060,13 @@ TEST_CASE("Renderer.reconfig.shaping_engine_change_rebinds_the_text_renderer", "
     // value. Both the shaping path (renderCell) and the metrics path (updateFontMetrics, run by
     // applyFontDescriptions itself) touch the shaper.
     //
-    // On a build without DirectWrite, createTextShaper() answers DWrite with an OpenShaper -- but the
-    // ENGINE fields still differ, so applyFontDescriptions() takes the replacement branch, which is the
-    // branch under test.
+    // Asserted for BOTH outcomes of the switch, because which one happens is a platform fact. Where
+    // createTextShaper() answers DWrite with an OpenShaper the switch succeeds and the renderer must be
+    // rebound; on Windows it builds a real DirectWriteShaper, which cannot load the BDF test font, so
+    // loadFontKeys() throws and the whole apply must roll back to the shaper it had. Either way the
+    // invariant is the same and is the one that matters: the shaper installed afterwards is the one the
+    // live FontKeys belong to. Installing the replacement before the load is what broke it -- the
+    // renderer kept a DirectWriteShaper holding OpenShaper keys and threw on every lookup.
     //
     // No render target is attached: the minimal BDF test font yields zero line metrics, so the
     // updateFontMetrics() this triggers would rebuild the atlas at a zero-height tile and trip the
@@ -1075,16 +1079,25 @@ TEST_CASE("Renderer.reconfig.shaping_engine_change_rebinds_the_text_renderer", "
     changed.textShapingEngine = TextShapingEngine::DWrite;
     renderer.setFonts(changed);
     REQUIRE(vtrasterizer::RendererTest::hasPendingReconfig(renderer));
+
+    // applyPendingReconfig() absorbs a font-load failure by design; neither outcome may escape.
     REQUIRE_NOTHROW(vtrasterizer::RendererTest::applyPendingReconfig(renderer));
 
-    CHECK(renderer.fontDescriptions().textShapingEngine == TextShapingEngine::DWrite);
+    auto const engine = renderer.fontDescriptions().textShapingEngine;
+    INFO("engine after apply: " << (engine == TextShapingEngine::DWrite ? "DWrite (switched)"
+                                                                        : "OpenShaper (rolled back)"));
 
-    // Shape something through the rebound renderer: this is the call that dereferenced the destroyed
-    // shaper.
+    // Shape through the renderer's own TextRenderer -- the call that dereferenced the destroyed shaper
+    // when the switch succeeded, and that resolved a stale FontKey when it failed.
     auto& textRenderer = vtrasterizer::RendererTest::textRenderer(renderer);
     auto const text = std::u32string { U"AB" };
     auto clusters = std::vector<unsigned> { 0, 1 };
     CHECK_NOTHROW(TextRendererTest::glyphPositions(textRenderer, text, clusters, TextStyle::Regular));
+
+    // A rolled-back apply must leave the request retryable rather than half-committed: the descriptions
+    // still name the engine actually in use, so the change-detection guard does not swallow the retry.
+    if (engine != TextShapingEngine::DWrite)
+        CHECK(engine == fixture.fontDescriptions.textShapingEngine);
 }
 
 TEST_CASE("Renderer.reconfig.atlas_budget_follows_the_page", "[renderer][atlas]")

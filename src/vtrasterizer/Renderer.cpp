@@ -428,41 +428,52 @@ void Renderer::applyFontDescriptions(FontDescriptions fontDescriptions)
                       "lifetime; restart to apply it.",
                       fontDescriptions.fontLocator);
 
+    // A replacement shaper, when the engine changed. Built and loaded into BEFORE anything is
+    // committed, and only then swapped in: loadFontKeys() throws whenever the regular font will not
+    // load, and installing the new shaper first left the renderer holding it alongside FontKeys issued
+    // by the OLD one. applyPendingReconfig()'s try/catch then reports "keeping the previous font" over a
+    // renderer that can no longer shape at all -- every lookup is a miss in the new shaper's font map,
+    // which throws from inside the frame. Windows CI caught exactly that: DirectWrite cannot load the
+    // BDF test font, so the switch fails there on every attempt.
+    auto replacementShaper = unique_ptr<text::Shaper> {};
+
     if (_fontDescriptions.textShapingEngine == fontDescriptions.textShapingEngine)
     {
+        // Mutating the shaper we already have is safe to have run on a failed attempt: it is
+        // render-thread-owned, and re-applying the same DPI and fallback limit is idempotent.
         if (!onlyDpiChanged)
             _textShaper->clearCache();
         _textShaper->setDPI(fontDescriptions.dpi);
         _textShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
-        // The locator is a constructor-injected collaborator and is fixed for this renderer's lifetime, so
-        // a FontLocatorEngine change in the descriptions is not honored here. Selecting the engine is the
-        // composition root's job (@see createFontLocator), and switching it means a new Renderer -- which
-        // is the "configuration at construction time" rule, not an oversight. In practice only tests pick a
-        // non-native engine.
     }
     else
     {
-        _textShaper =
+        replacementShaper =
             createTextShaper(fontDescriptions.textShapingEngine, fontDescriptions.dpi, _fontLocator);
-        _textShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
+        replacementShaper->setFontFallbackLimit(fontDescriptions.maxFallbackCount);
+    }
 
-        // The assignment above destroyed the shaper _textRenderer was constructed against, and
-        // TextRenderer holds it for the whole frame path (shape, resizeFont, rasterize). Without this
-        // rebind every draw after an engine switch runs through freed memory. The loadFontKeys() and
-        // updateFontMetrics() below then re-resolve the FontKeys and drop the caches that still name
-        // the old shaper's glyphs -- both halves are required, which is why setTextShaper() says so.
+    // Load the fonts against the NEW descriptions, through whichever shaper is going to serve them, but
+    // only commit once the load succeeds. loadFontKeys()/updateFontMetrics() (atlas reconfiguration) can
+    // throw, and this is called from applyPendingReconfig()'s try/catch which keeps the previous font on
+    // failure. Committing _fontDescriptions first (as before) would leave it at a never-loaded value: the
+    // change-detection guard at the top of this function and helper.cpp::applyFontDescription would then
+    // both early-return on retry, permanently stranding the wrong font. This mirrors the size-only branch
+    // in applyPendingReconfig().
+    auto fonts = loadFontKeys(fontDescriptions, replacementShaper ? *replacementShaper : *_textShaper);
+
+    if (replacementShaper)
+    {
+        // The assignment destroys the shaper _textRenderer was constructed against, and TextRenderer
+        // holds it for the whole frame path (shape, resizeFont, rasterize). Without the rebind every
+        // draw after an engine switch runs through freed memory. The FontKeys above and the
+        // updateFontMetrics() below supply the other half setTextShaper() requires: fresh keys, and
+        // caches emptied of everything naming the old shaper's glyphs.
+        _textShaper = std::move(replacementShaper);
         _textRenderer.setTextShaper(*_textShaper);
     }
 
-    // Load the fonts against the NEW descriptions but only commit them to _fontDescriptions once the
-    // load succeeds. loadFontKeys()/updateFontMetrics() (atlas reconfiguration) can throw, and this is
-    // called from applyPendingReconfig()'s try/catch which keeps the previous font on failure. Committing
-    // _fontDescriptions first (as before) would leave it at a never-loaded value: the change-detection
-    // guard at the top of this function and helper.cpp::applyFontDescription would then both early-return
-    // on retry, permanently stranding the wrong font. This mirrors the size-only branch in
-    // applyPendingReconfig(). The shaper reconfiguration above is render-thread-owned and idempotent on
-    // retry, so it is fine to have run already.
-    _fonts = loadFontKeys(fontDescriptions, *_textShaper);
+    _fonts = fonts;
     _fontDescriptions = std::move(fontDescriptions);
     updateFontMetrics();
 
