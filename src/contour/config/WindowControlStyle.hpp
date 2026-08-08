@@ -3,9 +3,11 @@
 
 #include <contour/config/ConfigEnum.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <ranges>
 #include <span>
 #include <string_view>
 
@@ -80,7 +82,11 @@ inline constexpr size_t WindowControlCount = 3;
 /// multiplying into a style-per-combination.
 struct WindowControlTokens
 {
+    /// Which end of the title bar the group sits at.
     WindowControlSide side;
+
+    /// The shape every control in the group is drawn as. Whether a field below applies at all is
+    /// this value's to say -- @c dotColors are a @c TrafficLight's, @c closeHoverColor a @c Button's.
     WindowControlPresentation presentation;
 
     /// The controls in the order they are drawn, from the leading edge of the group to its trailing
@@ -139,8 +145,6 @@ namespace detail
     // inline, so every translation unit that includes this header shares one table rather than
     // getting a private copy the returned span would then point into.
     //
-    // Rows are indexed by WindowControlStyle, so their order is the enumerator order --
-    // windowControlTokens() relies on that, and the static_assert below pins it.
     // The appearance every Contour window has had until now: flush full-height buttons at the
     // trailing edge, square hover wash, and the close button turning Windows' own red.
     inline constexpr auto WindowsTokens = WindowControlTokens {
@@ -209,6 +213,20 @@ namespace detail
     static_assert(WindowControlTokenTable.size() == WindowControlStyleTable.size(),
                   "Every WindowControlStyle needs exactly one token row; windowControlTokens() "
                   "indexes by enumerator.");
+
+    // The size check above says nothing about ORDER: reordering the enumerators, or inserting one in
+    // the middle, keeps both tables the same size and compiles cleanly while every style silently
+    // hands back another style's row -- a macOS window drawing Breeze buttons, with no diagnostic.
+    // So walk the index and check that row i really is enumerator i, the same way ModifierNames.hpp
+    // pins its own table against reordering.
+    static_assert(std::ranges::all_of(std::views::iota(size_t { 0 }, WindowControlStyleTable.size()),
+                                      [](size_t index) {
+                                          return WindowControlStyleTable[index].value
+                                                 == static_cast<WindowControlStyle>(index);
+                                      }),
+                  "WindowControlStyleTable must be in enumerator order, one row per enumerator, "
+                  "starting at zero: windowControlTokens() indexes the parallel token table by "
+                  "static_cast<size_t>(style) and does no bounds check.");
 } // namespace detail
 
 template <>
