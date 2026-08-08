@@ -78,14 +78,35 @@ FocusScope {
             // orientation: vtworkspace::SplitState::Vertical (2) => side-by-side (Qt.Horizontal).
             orientation: (root.node && root.node.orientation === 2) ? Qt.Horizontal : Qt.Vertical
 
+            // The device-pixel grid both the geometry and the clip path agree about (#2040). Shared by
+            // the handle and the first child, because BOTH have to sit on it -- see below.
+            //
+            // KNOWN GAP: this is the SCREEN's ratio, while every C++ consumer of the boundary rounds at
+            // QWindow::devicePixelRatio() -- TerminalDisplay::devicePixelRatio(), and the frame-derived
+            // scale in TerminalRenderNode::prepare(). The two agree unless something overrides the ratio
+            // per window (QT_SCALE_FACTOR, or a compositor handing Qt a window ratio distinct from its
+            // screen's), and there they would differ. Closing it needs C++: QWindow::devicePixelRatio()
+            // is a plain method, not a Q_PROPERTY, so QML cannot read it -- it would take a QML-facing
+            // per-window object, which does not exist today (the only context properties are the
+            // app-global terminalSessions and chromeStyle).
+            readonly property real dprSnap: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+
             // Explicit handle so the thickness has ONE source (vtworkspace::DefaultSplitHandleThickness,
             // surfaced as terminalSessions.splitHandleThickness) shared with the window-size solver.
             // Visuals reproduce the Qt Quick "Basic" style default delegate this replaces.
+            //
+            // Snapped to whole device pixels for the same reason the first child's extent is: the SECOND
+            // pane's origin is `firstChild.width + handleThickness`, so snapping only the extent leaves
+            // that origin fractional whenever the handle is. At the very common 125% desktop scale the
+            // default 6 logical pixels is 7.5 device pixels, and 175% makes it 10.5 -- users on exactly
+            // those scales would have seen the #2040 artifact survive in the right/bottom pane.
             handle: Rectangle {
+                readonly property real snappedThickness:
+                    Math.round(terminalSessions.splitHandleThickness * splitView.dprSnap) / splitView.dprSnap
                 implicitWidth: splitView.orientation === Qt.Horizontal
-                    ? terminalSessions.splitHandleThickness : splitView.width
+                    ? snappedThickness : splitView.width
                 implicitHeight: splitView.orientation === Qt.Horizontal
-                    ? splitView.height : terminalSessions.splitHandleThickness
+                    ? splitView.height : snappedThickness
                 color: SplitHandle.pressed ? splitView.palette.mid
                     : (SplitHandle.hovered ? splitView.palette.midlight : splitView.palette.button)
             }
@@ -108,9 +129,11 @@ FocusScope {
                 // untouched.
                 //
                 // Snapping in LOGICAL coordinates would not be enough at a fractional device pixel
-                // ratio, hence the round-trip through Screen.devicePixelRatio: the pane boundary has
-                // to land on a hardware pixel, which is the quantity both paths agree about.
-                readonly property real dprSnap: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+                // ratio, hence the round-trip through splitView.dprSnap: the pane boundary has to land
+                // on a hardware pixel, which is the quantity both paths agree about. The handle is
+                // snapped to the same grid, which is what makes the SECOND pane's origin
+                // (`firstChild.width + handleThickness`) whole as well.
+                readonly property real dprSnap: splitView.dprSnap
                 SplitView.preferredWidth: SplitView.view.orientation === Qt.Horizontal
                     ? Math.round(SplitView.view.width * (root.node ? root.node.ratio : 0.5) * dprSnap) / dprSnap : -1
                 SplitView.preferredHeight: SplitView.view.orientation === Qt.Vertical

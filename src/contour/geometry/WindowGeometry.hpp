@@ -496,6 +496,14 @@ template <typename ClampFn>
 /// quantity both paths agree about is the HARDWARE pixel, so the rounding happens in device space and
 /// converts back.
 ///
+/// @note Applies to the SPLIT HANDLE too, not just the pane extent. The second pane's origin is
+///       `firstExtent + handleThickness`, so a snapped extent alone still leaves that origin
+///       fractional whenever the handle is: the default 6 logical pixels is 7.5 device pixels at the
+///       common 125% scale and 10.5 at 175%. PaneNode.qml therefore snaps both through this rule.
+///       WindowController's window-size solver keeps using the unsnapped thickness, which is
+///       deliberate -- it sizes the WINDOW, where a sub-logical-pixel difference cannot move a pane
+///       boundary off the device grid.
+///
 /// @note The binding in PaneNode.qml computes this inline rather than calling here: a QML property
 ///       binding cannot invoke a free C++ function, and exposing it would mean a QObject singleton
 ///       registered with the meta-object system purely for one arithmetic expression. The two must

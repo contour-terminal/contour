@@ -648,6 +648,37 @@ TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.the fractional half-split
     }
 }
 
+TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.the split handle needs snapping too",
+          "[contour][geometry]")
+{
+    // Snapping the first pane's EXTENT alone does not put the second pane's ORIGIN on a device pixel:
+    // that origin is `firstExtent + handleThickness`, and the default handle is 6 LOGICAL pixels, which
+    // is 7.5 device pixels at the very common 125% scale and 10.5 at 175%. Panes on exactly those
+    // scales would have kept the #2040 artifact while 100/150/200% were fixed.
+    auto constexpr DefaultHandleThickness = 6.0; // vtworkspace::DefaultSplitHandleThickness
+
+    for (auto const dpr: { 1.0, 1.25, 1.5, 1.75, 2.0, 2.5 })
+    {
+        auto const extent = snapPaneExtentToDevicePixels(987.0 * 0.5, dpr);
+
+        // Snapping the extent alone: the handle carries the fraction straight into the second origin.
+        auto const unsnappedOrigin = (extent + DefaultHandleThickness) * dpr;
+        auto const handleIsWhole =
+            std::abs((DefaultHandleThickness * dpr) - std::round(DefaultHandleThickness * dpr)) < 1e-9;
+        CHECK(handleIsWhole
+              == (std::abs(unsnappedOrigin - std::round(unsnappedOrigin)) < 1e-9)); // fails at 1.25/1.75
+
+        // Snapping BOTH through the same rule -- what PaneNode.qml now does -- makes it whole at every
+        // ratio, which is the property the renderer's two paths need to agree.
+        auto const handle = snapPaneExtentToDevicePixels(DefaultHandleThickness, dpr);
+        auto const secondOrigin = (extent + handle) * dpr;
+        CHECK(std::abs(secondOrigin - std::round(secondOrigin)) < 1e-9);
+
+        // ... and the handle stays visible, never rounded away to nothing.
+        CHECK(handle > 0.0);
+    }
+}
+
 TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.a degenerate ratio is a no-op", "[contour][geometry]")
 {
     // Nothing sensible to snap to; returning the input unchanged beats dividing by zero.
