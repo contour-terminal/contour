@@ -48,6 +48,10 @@ RowLayout {
     // character grid the token exists to keep it on.
     readonly property real outerInset: root.trafficLights ? chromeStyle.windowControlInset : 0
 
+    // Which of the group's two margins faces the window's edge. The other one faces the rest of the
+    // bar, and takes the gutter instead.
+    readonly property bool leadingSide: windowControls.side === "leading"
+
     // The vertical band a traffic-light group occupies, and so the extent its hover reveal covers.
     // As tall as one control is wide -- deliberately more than the dot itself, because these are the
     // smallest targets in the chrome -- but bounded rather than the full bar height: the rest of a
@@ -157,9 +161,17 @@ RowLayout {
     RowLayout {
         id: controlGroup
 
-        // Only the side facing outwards takes the inset.
-        Layout.leftMargin: windowControls.side === "leading" ? root.outerInset : 0
-        Layout.rightMargin: windowControls.side === "trailing" ? root.outerInset : 0
+        // The inset keeps the group off the window's corner; the gutter keeps it off whatever the bar
+        // puts beside it -- the tab strip at the leading edge, the drag region at the trailing one.
+        // Both are margins rather than width, so neither is clickable: the space between the last
+        // light and the first tab must not activate the light it is beside.
+        //
+        // The gutter is unconditional where the inset is a traffic light's alone. A button style
+        // sits flush in the CORNER by design -- that is what keeps "throw the pointer into the
+        // screen corner and click" landing on close -- but nothing wants to sit flush against its
+        // neighbour, and a leading-edge button style would otherwise begin where the tabs end.
+        Layout.leftMargin: root.leadingSide ? root.outerInset : chromeStyle.windowControlGutter
+        Layout.rightMargin: root.leadingSide ? chromeStyle.windowControlGutter : root.outerInset
 
         // A button presentation spans the bar -- its hover fill IS a full-height rectangle. Traffic
         // lights take the bounded band instead, centred, so the group's extent is exactly the union

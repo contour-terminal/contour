@@ -180,10 +180,12 @@ TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell
     CHECK(native.trafficLightDotSize() == nativeTokens.trafficLightDotUnits);
     CHECK(native.trafficLightGap() == nativeTokens.trafficLightGapUnits);
     CHECK(native.windowControlInset() == nativeTokens.windowControlInsetUnits);
+    CHECK(native.windowControlGutter() == nativeTokens.windowControlGutterUnits);
 
     CHECK(terminal.trafficLightDotSize() == terminal.cellWidth());
     CHECK(terminal.trafficLightGap() == terminal.cellWidth());
     CHECK(terminal.windowControlInset() == terminal.cellWidth());
+    CHECK(terminal.windowControlGutter() == terminal.cellWidth());
 
     // Note the check above is against cellWidth, not cellHeight: a dot is a circle, and resolving its
     // width and height through different quanta would make it an ellipse wherever the cell is not

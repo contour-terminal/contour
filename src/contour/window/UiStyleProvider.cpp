@@ -68,6 +68,7 @@ namespace
             .stripButtonWidth = tokens.stripButtonUnits * horizontal,
             .windowControlWidth = tokens.windowControlUnits * horizontal,
             .windowControlInset = tokens.windowControlInsetUnits * horizontal,
+            .windowControlGutter = tokens.windowControlGutterUnits * horizontal,
             // Horizontal for both extents of the dot: a traffic light is a circle, and quantizing its
             // width and height to different cells would make it an ellipse in a cell-counting style.
             .trafficLightDotSize = tokens.trafficLightDotUnits * horizontal,

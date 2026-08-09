@@ -39,6 +39,9 @@ TEST_CASE("UiStyle: every style has a token row", "[uistyle]")
         // control flush against the window corner where the resize border already lives.
         CHECK(tokens.trafficLightDotUnits > 0);
         CHECK(tokens.windowControlInsetUnits > 0);
+        // And a zero gutter puts the last control flush against the tab strip, which is where the
+        // group stops reading as the window's controls and starts reading as the first tab.
+        CHECK(tokens.windowControlGutterUnits > 0);
         // Zero is legal (a cell-counting style wants none) but negative would place each dot on top
         // of the one before it.
         CHECK(tokens.trafficLightGapUnits >= 0);
@@ -105,6 +108,10 @@ TEST_CASE("UiStyle: Native reproduces the chrome's historical metrics", "[uistyl
     CHECK(native.trafficLightDotUnits == 12);
     CHECK(native.trafficLightGapUnits == 8);
     CHECK(native.windowControlInsetUnits == 10);
+    // Wider than the inset, and deliberately so: the outer end of the group faces the window's edge,
+    // the inner end faces the tab strip.
+    CHECK(native.windowControlGutterUnits == 16);
+    CHECK(native.windowControlGutterUnits > native.windowControlInsetUnits);
     // Empty: a pixel-counting chrome draws a dot as the shape it is. @see the Terminal case below,
     // which is the whole reason this is a token rather than a test on the style.
     CHECK(native.trafficLightGlyph.empty());
@@ -137,6 +144,9 @@ TEST_CASE("UiStyle: Terminal counts its chrome in whole cells", "[uistyle]")
     CHECK(terminal.trafficLightDotUnits == 1);
     CHECK(terminal.trafficLightGapUnits == 1);
     CHECK(terminal.windowControlInsetUnits == 1);
+    // One blank cell says "these are not the first tab" on a character grid as clearly as sixteen
+    // pixels do on a pixel one, which is why this style states a cell and not the native 16.
+    CHECK(terminal.windowControlGutterUnits == 1);
 
     // And the dot is a character here, like everything else this style paints. This token is the
     // entire mechanism: without it the QML would need to ask which UiStyle is active, which is the

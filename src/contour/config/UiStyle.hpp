@@ -139,6 +139,16 @@ struct UiStyleTokens
     /// @c labelPaddingUnits does for a tab.
     int windowControlInsetUnits;
 
+    /// Clear space between the window-control group and whatever the bar puts beside it -- the tab
+    /// strip where the group is at the leading edge, the drag region where it is at the trailing
+    /// one. The inward counterpart of @c windowControlInsetUnits.
+    ///
+    /// Inert, unlike @c trafficLightGapUnits: what separates two lights is part of a control's own
+    /// clickable width because a dot is the smallest target in the chrome, but the space beside the
+    /// GROUP has no control to belong to, and a clickable strip of maximize in what reads as bare
+    /// title bar is a bug rather than a generous hit target.
+    int windowControlGutterUnits;
+
     /// Point size for the per-tab close button, or 0 to use the chrome font's own size.
     int closePointSize;
     /// Point size for the new-tab button, or 0 to use the chrome font's own size.
@@ -234,6 +244,11 @@ namespace detail
             .trafficLightDotUnits = 12,
             .trafficLightGapUnits = 8,
             .windowControlInsetUnits = 10,
+            // Roughly what macOS leaves between its traffic lights and the first toolbar item. It is
+            // larger than the inset on purpose: the outer end of the group faces the window's edge,
+            // which is empty, while this end faces the tab strip -- a run of labelled, clickable
+            // boxes that the lights would otherwise read as the first of.
+            .windowControlGutterUnits = 16,
             .closePointSize = 8,
             .newTabPointSize = 12,
             .menuPointSize = 10,
@@ -297,6 +312,10 @@ namespace detail
             .trafficLightDotUnits = 1,
             .trafficLightGapUnits = 1,
             .windowControlInsetUnits = 1,
+            // One cell, like every other gap this style states: the point of the gutter is that the
+            // lights are not the first tab, and one blank cell says that on a character grid as
+            // clearly as sixteen pixels do on a pixel one.
+            .windowControlGutterUnits = 1,
             .closePointSize = 0,
             .newTabPointSize = 0,
             .menuPointSize = 0,

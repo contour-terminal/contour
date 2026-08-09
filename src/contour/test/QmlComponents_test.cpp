@@ -4120,15 +4120,21 @@ TEST_CASE("The window controls sit on the side their style asks for (offscreen)"
         contour::config::WindowControlStyle style;
         char const* active;   //!< The Loader that must hold the controls.
         char const* inactive; //!< The one that must hold nothing and take no width.
+        char const* inward;   //!< The control whose edge faces the rest of the bar, not the corner.
     };
 
-    auto const placement = GENERATE(
-        Placement {
-            contour::config::WindowControlStyle::MacOS, "leadingWindowControls", "trailingWindowControls" },
-        Placement {
-            contour::config::WindowControlStyle::Windows, "trailingWindowControls", "leadingWindowControls" },
-        Placement {
-            contour::config::WindowControlStyle::Plasma, "trailingWindowControls", "leadingWindowControls" });
+    auto const placement = GENERATE(Placement { contour::config::WindowControlStyle::MacOS,
+                                                "leadingWindowControls",
+                                                "trailingWindowControls",
+                                                "maximize" },
+                                    Placement { contour::config::WindowControlStyle::Windows,
+                                                "trailingWindowControls",
+                                                "leadingWindowControls",
+                                                "minimize" },
+                                    Placement { contour::config::WindowControlStyle::Plasma,
+                                                "trailingWindowControls",
+                                                "leadingWindowControls",
+                                                "minimize" });
 
     INFO("ui style: " << static_cast<int>(uiStyle));
     INFO("window control style: " << static_cast<int>(placement.style));
@@ -4163,6 +4169,30 @@ TEST_CASE("The window controls sit on the side their style asks for (offscreen)"
         CHECK(controls.right() <= drag.left());
     else
         CHECK(controls.left() >= drag.right());
+
+    // And the group keeps a gutter of clear space between its innermost control and whatever the bar
+    // puts beside it. Under the macOS style that neighbour is the TAB STRIP rather than the elastic
+    // drag region, so without it the green light ends exactly where the first tab begins.
+    //
+    // Measured as the slack inside the group's own box rather than against the neighbour's rect,
+    // because that is what says the space is INERT: it belongs to no control, so a click in it
+    // activates nothing. The margin of a pixel is the layout's own snap. @see
+    // UiStyleTokens::windowControlGutterUnits.
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+
+    auto const* inward =
+        findItemNamed(*bar, QStringLiteral("windowControl_") + QLatin1StringView(placement.inward));
+    REQUIRE(inward != nullptr);
+    auto const inwardRect = sceneRectOf(*inward);
+
+    auto const gutter = placement.style == contour::config::WindowControlStyle::MacOS
+                            ? controls.right() - inwardRect.right()
+                            : inwardRect.left() - controls.left();
+    INFO("gutter: " << gutter << ", expected at least: " << provider->windowControlGutter());
+    CHECK(gutter >= provider->windowControlGutter() - 1.0);
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

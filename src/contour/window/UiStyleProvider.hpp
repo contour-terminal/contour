@@ -42,6 +42,7 @@ struct ChromeMetrics
     qreal stripButtonWidth = 0.0;
     qreal windowControlWidth = 0.0;
     qreal windowControlInset = 0.0;
+    qreal windowControlGutter = 0.0;
     qreal trafficLightDotSize = 0.0;
     qreal trafficLightGap = 0.0;
     qreal badgeWidth = 0.0;
@@ -115,6 +116,7 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(qreal stripButtonWidth READ stripButtonWidth CONSTANT)
     Q_PROPERTY(qreal windowControlWidth READ windowControlWidth CONSTANT)
     Q_PROPERTY(qreal windowControlInset READ windowControlInset CONSTANT)
+    Q_PROPERTY(qreal windowControlGutter READ windowControlGutter CONSTANT)
     Q_PROPERTY(qreal trafficLightDotSize READ trafficLightDotSize CONSTANT)
     Q_PROPERTY(qreal trafficLightGap READ trafficLightGap CONSTANT)
     Q_PROPERTY(qreal badgeWidth READ badgeWidth CONSTANT)
@@ -164,6 +166,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] qreal stripButtonWidth() const noexcept { return _metrics.stripButtonWidth; }
     [[nodiscard]] qreal windowControlWidth() const noexcept { return _metrics.windowControlWidth; }
     [[nodiscard]] qreal windowControlInset() const noexcept { return _metrics.windowControlInset; }
+    [[nodiscard]] qreal windowControlGutter() const noexcept { return _metrics.windowControlGutter; }
     [[nodiscard]] qreal trafficLightDotSize() const noexcept { return _metrics.trafficLightDotSize; }
     [[nodiscard]] qreal trafficLightGap() const noexcept { return _metrics.trafficLightGap; }
     [[nodiscard]] qreal badgeWidth() const noexcept { return _metrics.badgeWidth; }
