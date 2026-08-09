@@ -5,6 +5,7 @@
 #include <libunicode/convert.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 using namespace std;
 
@@ -170,6 +171,51 @@ TEST_CASE("Parser.BulkText_MultipleIncompleteUtf8Splits", "[Parser]")
           == "A\xE2\x94\x82"
              "B\xE2\x94\x9C"
              "C");
+}
+
+TEST_CASE("Parser.BulkText_ZeroWidthAfterAsciiBase", "[Parser]")
+{
+    // Zero COLUMNS is not zero BYTES. scan_text() splits a run at the ASCII/non-ASCII boundary, and a
+    // zero-width codepoint that follows an ASCII base arrives in the non-ASCII half on its own,
+    // joining the cluster the ASCII half left open without widening it. libunicode < 0.9.3 measured
+    // that half's progress in columns: state.next moved past those bytes while the reported end did
+    // not, so parseBulkText -- which prints [subStart, subEnd) and resumes at _scanState.next --
+    // printed the base, consumed the rest, and never rendered it. Decomposed "é" arrived as "e".
+    //
+    // Every byte handed in must come back out, whatever the cluster measures.
+    auto const input = GENERATE(values<std::string_view>({
+        "e\xCC\x81"sv, // U+0301 COMBINING ACUTE on a lone ASCII base, at end of buffer
+        "abcde\xCC\x81"
+        "fgh"sv,           // ... mid-buffer, so the scan hands over and then returns to ASCII
+        "a\xEF\xB8\x8E"sv, // U+FE0E VARIATION SELECTOR-15, three bytes, on a base with no
+                           // variation sequence to select -- so it too adds no column
+        "a\xE2\x80\x8D"sv, // U+200D ZERO WIDTH JOINER, which opens no cluster of its own
+    }));
+
+    INFO("input: " << input);
+    MockParserEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+
+    p.parseFragment(input);
+
+    CHECK(listener.text == input);
+}
+
+TEST_CASE("Parser.BulkText_CombiningMarkSplitAcrossCalls", "[Parser]")
+{
+    // The base and its mark arriving in separate reads, as a PTY delivers them. The second fragment
+    // opens with the mark, so the scan enters its non-ASCII half immediately rather than through the
+    // ASCII handoff -- the arm that was always correct. Pinned so both routes to the same cluster
+    // stay in agreement.
+
+    MockParserEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+
+    p.parseFragment("e"sv);
+    CHECK(listener.text == "e");
+
+    p.parseFragment("\xCC\x81"sv);
+    CHECK(listener.text == "e\xCC\x81");
 }
 
 TEST_CASE("Parser.precedingGraphicCharacter.ascii", "[Parser]")
