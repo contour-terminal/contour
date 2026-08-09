@@ -470,6 +470,45 @@ TEST_CASE("AppendChar.VS15_is_inert_without_a_defined_variation_sequence", "[scr
     CHECK(c0.width() == 2);
 }
 
+TEST_CASE("AppendChar.a_zero_width_codepoint_after_an_ASCII_base_joins_its_cell", "[screen]")
+{
+    // The cell-level half of Parser.BulkText_ZeroWidthAfterAsciiBase. scan_text() splits a run at the
+    // ASCII/non-ASCII boundary, so a mark on an ASCII base is handed to Screen separately from its
+    // base and has to find that cell again through the grapheme-state reconstruction in writeText --
+    // which deliberately does NOT reuse the parser's state. Every other cluster test here uses a
+    // non-ASCII base, which never crosses that seam, so this is the case that reached the screen as a
+    // bare "e" while libunicode measured the handover in columns rather than bytes (< 0.9.3).
+    //
+    // Bytes, not codepoints: the defect lives in the UTF-8 bulk scanner, so it has to be fed UTF-8.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(10) } };
+    auto& screen = mock.terminal.primaryScreen();
+
+    SECTION("the base alone in the buffer")
+    {
+        mock.writeToScreen("e\xCC\x81"); // "é" decomposed: 'e' + U+0301 COMBINING ACUTE ACCENT
+
+        CHECK(*screen.logicalCursorPosition().column == 1);
+        auto const& c0 = screen.at(LineOffset(0), ColumnOffset(0));
+        CHECK(c0.codepoints() == U"é");
+        CHECK(c0.width() == 1);
+    }
+
+    SECTION("the base mid-run, so the scan hands over and then returns to ASCII")
+    {
+        mock.writeToScreen("abcde\xCC\x81"
+                           "fgh");
+
+        CHECK(*screen.logicalCursorPosition().column == 8);
+        // The mark joined 'e' at column 4 rather than opening a cell of its own...
+        auto const& c4 = screen.at(LineOffset(0), ColumnOffset(4));
+        CHECK(c4.codepoints() == U"é");
+        CHECK(c4.width() == 1);
+        // ... so what follows it is still 'f', not a column further along.
+        CHECK(screen.at(LineOffset(0), ColumnOffset(5)).codepoints() == U"f");
+        CHECK(screen.renderMainPageText() == "abcdéfgh  \n");
+    }
+}
+
 TEST_CASE("AppendChar.a_wide_char_at_the_second_to_last_column_claims_the_last_one", "[screen]")
 {
     // The room a character has is its own column PLUS the writable columns to its right. Counting
