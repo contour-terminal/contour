@@ -41,6 +41,10 @@ struct ChromeMetrics
     qreal controlHeight = 0.0;
     qreal stripButtonWidth = 0.0;
     qreal windowControlWidth = 0.0;
+    qreal windowControlInset = 0.0;
+    qreal windowControlGutter = 0.0;
+    qreal trafficLightDotSize = 0.0;
+    qreal trafficLightGap = 0.0;
     qreal badgeWidth = 0.0;
     qreal badgeHeight = 0.0;
 };
@@ -61,6 +65,7 @@ struct ChromeFonts
 struct ChromeGlyphs
 {
     QString tabSeparator; ///< Drawn between adjacent tabs. Empty in a style that sets them flush.
+    QString trafficLight; ///< Empty in a style that draws a traffic-light dot as a vector circle.
     QString close;
     QString zoom;
     QString newTab;
@@ -110,6 +115,10 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(qreal controlHeight READ controlHeight CONSTANT)
     Q_PROPERTY(qreal stripButtonWidth READ stripButtonWidth CONSTANT)
     Q_PROPERTY(qreal windowControlWidth READ windowControlWidth CONSTANT)
+    Q_PROPERTY(qreal windowControlInset READ windowControlInset CONSTANT)
+    Q_PROPERTY(qreal windowControlGutter READ windowControlGutter CONSTANT)
+    Q_PROPERTY(qreal trafficLightDotSize READ trafficLightDotSize CONSTANT)
+    Q_PROPERTY(qreal trafficLightGap READ trafficLightGap CONSTANT)
     Q_PROPERTY(qreal badgeWidth READ badgeWidth CONSTANT)
     Q_PROPERTY(qreal badgeHeight READ badgeHeight CONSTANT)
 
@@ -118,6 +127,7 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(int dropCaretWidth READ dropCaretWidth CONSTANT)
 
     Q_PROPERTY(QString tabSeparator READ tabSeparator CONSTANT)
+    Q_PROPERTY(QString trafficLightGlyph READ trafficLightGlyph CONSTANT)
     Q_PROPERTY(QString closeGlyph READ closeGlyph CONSTANT)
     Q_PROPERTY(QString zoomGlyph READ zoomGlyph CONSTANT)
     Q_PROPERTY(QString newTabGlyph READ newTabGlyph CONSTANT)
@@ -155,6 +165,10 @@ class UiStyleProvider: public QObject
     [[nodiscard]] qreal controlHeight() const noexcept { return _metrics.controlHeight; }
     [[nodiscard]] qreal stripButtonWidth() const noexcept { return _metrics.stripButtonWidth; }
     [[nodiscard]] qreal windowControlWidth() const noexcept { return _metrics.windowControlWidth; }
+    [[nodiscard]] qreal windowControlInset() const noexcept { return _metrics.windowControlInset; }
+    [[nodiscard]] qreal windowControlGutter() const noexcept { return _metrics.windowControlGutter; }
+    [[nodiscard]] qreal trafficLightDotSize() const noexcept { return _metrics.trafficLightDotSize; }
+    [[nodiscard]] qreal trafficLightGap() const noexcept { return _metrics.trafficLightGap; }
     [[nodiscard]] qreal badgeWidth() const noexcept { return _metrics.badgeWidth; }
     [[nodiscard]] qreal badgeHeight() const noexcept { return _metrics.badgeHeight; }
 
@@ -169,6 +183,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] Q_INVOKABLE QColor progressColor(int state) const;
 
     [[nodiscard]] QString const& tabSeparator() const noexcept { return _glyphs.tabSeparator; }
+    [[nodiscard]] QString const& trafficLightGlyph() const noexcept { return _glyphs.trafficLight; }
     [[nodiscard]] QString const& closeGlyph() const noexcept { return _glyphs.close; }
     [[nodiscard]] QString const& zoomGlyph() const noexcept { return _glyphs.zoom; }
     [[nodiscard]] QString const& newTabGlyph() const noexcept { return _glyphs.newTab; }

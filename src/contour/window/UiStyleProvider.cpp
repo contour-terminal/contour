@@ -67,6 +67,12 @@ namespace
             .controlHeight = tokens.controlUnits * vertical,
             .stripButtonWidth = tokens.stripButtonUnits * horizontal,
             .windowControlWidth = tokens.windowControlUnits * horizontal,
+            .windowControlInset = tokens.windowControlInsetUnits * horizontal,
+            .windowControlGutter = tokens.windowControlGutterUnits * horizontal,
+            // Horizontal for both extents of the dot: a traffic light is a circle, and quantizing its
+            // width and height to different cells would make it an ellipse in a cell-counting style.
+            .trafficLightDotSize = tokens.trafficLightDotUnits * horizontal,
+            .trafficLightGap = tokens.trafficLightGapUnits * horizontal,
             .badgeWidth = tokens.badgeUnits * horizontal,
             .badgeHeight = tokens.badgeUnits * vertical,
         };
@@ -120,6 +126,7 @@ namespace
         // no data()/size() pair and no hand-written qsizetype cast.
         return ChromeGlyphs {
             .tabSeparator = QString::fromUtf8(tokens.tabSeparator),
+            .trafficLight = QString::fromUtf8(tokens.trafficLightGlyph),
             .close = QString::fromUtf8(tokens.closeGlyph),
             .zoom = QString::fromUtf8(tokens.zoomGlyph),
             .newTab = QString::fromUtf8(tokens.newTabGlyph),

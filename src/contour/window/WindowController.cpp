@@ -61,6 +61,10 @@ WindowController::WindowController(session::TerminalSessionManager& manager, vtw
             // Re-apply the GUI chrome theme live: a settings-page change to `theme` is already in the
             // reloaded Config, so the chrome recolors without a restart.
             _manager.app().applyGuiTheme(_manager.app().config().theme.value());
+            // Likewise for `window_control_style`: which corner the min/max/close buttons sit in,
+            // and what shape they take, are QML bindings on the provider, so they re-evaluate the
+            // moment it says so. Application-wide, so every open window follows.
+            _manager.app().applyWindowControlStyle(_manager.app().config().windowControlStyle.value());
         },
         this);
 }
@@ -718,10 +722,10 @@ void WindowController::setTitleBarVisible(bool visible)
 
 void WindowController::toggleTitleBar()
 {
-    // Under client-side decoration the title bar is our custom QML TitleBar, not the OS frame; toggling
-    // flips the custom bar's visibility and the window stays frameless. On macOS (native frame kept)
-    // setTitleBarVisible() drives the frame itself. Window-scoped: a toggle from any pane flips the
-    // whole window and survives pane-focus changes and tab switches.
+    // One axis on every OS, macOS included: setTitleBarVisible() drives the NATIVE frame (the
+    // FramelessWindowHint), and the custom QML TitleBar drops its own window controls in step so the
+    // two sets never both appear. Window-scoped: a toggle from any pane flips the whole window and
+    // survives pane-focus changes and tab switches.
     setTitleBarVisible(!_titleBarVisible);
 }
 

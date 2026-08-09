@@ -972,6 +972,19 @@ namespace
               },
               [](QVariant const& v) { return v.toString().toStdString(); },
               configEnumTokens<config::UiStyle>() },
+            // No restart note, unlike the three ui_* rows around it: this one IS applied live (see
+            // ContourGuiApp::applyWindowControlStyle), because nothing about it is pinned before the
+            // first control exists -- it only decides what the title bar draws and where.
+            { "window_control_style",
+              "Window controls",
+              "How the minimize/maximize/close buttons are drawn, and which side they sit on. Only "
+              "applies while the native title bar is hidden.",
+              "enum",
+              [](config::Config const& c) {
+                  return QVariant(toQString(config::configEnumToken(c.windowControlStyle.value())));
+              },
+              [](QVariant const& v) { return v.toString().toStdString(); },
+              configEnumTokens<config::WindowControlStyle>() },
             // Same restart note as ui_style above, and for the same reason: the chrome's design
             // tokens are resolved from this font once, when the provider is built (ContourGuiApp),
             // and every property of it is CONSTANT. Saying so here is the whole difference between

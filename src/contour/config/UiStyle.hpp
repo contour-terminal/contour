@@ -115,6 +115,40 @@ struct UiStyleTokens
     int windowControlUnits; ///< Width of a window button (minimize/maximize/close), which is wider.
     int badgeUnits;         ///< Edge length of the zoom badge.
 
+    /// Diameter of one traffic-light dot, for a @c WindowControlStyle that draws its window controls
+    /// as dots rather than as buttons. @see WindowControlStyle.hpp.
+    ///
+    /// The extents of the window controls live in THIS table rather than in the window-control style's
+    /// own row for the same reason every other chrome extent does: how long a thing is, is what the
+    /// two styles disagree about, and stating it here is what lets a cell-counting chrome keep every
+    /// window control on the grid. The window-control row states only what a style IS -- which side,
+    /// which order, which colors -- so the two tables stay orthogonal instead of multiplying out.
+    int trafficLightDotUnits;
+
+    /// Gap between adjacent traffic-light dots.
+    ///
+    /// Part of the control's own width rather than empty space between controls, so that it is
+    /// clickable: a dot is the smallest target in the whole chrome, and one exactly its own size is
+    /// a hard thing to hit. The dot sits at the control's leading edge with the gap trailing it,
+    /// which is also what keeps it on the grid in a cell-counting chrome -- centring a one-cell dot
+    /// inside a wider box would land it half a cell off.
+    int trafficLightGapUnits;
+
+    /// Inset from the bar's outer edge to the first (or last) window control, so the controls sit in
+    /// clear space rather than flush against the window corner. The horizontal counterpart of what
+    /// @c labelPaddingUnits does for a tab.
+    int windowControlInsetUnits;
+
+    /// Clear space between the window-control group and whatever the bar puts beside it -- the tab
+    /// strip where the group is at the leading edge, the drag region where it is at the trailing
+    /// one. The inward counterpart of @c windowControlInsetUnits.
+    ///
+    /// Inert, unlike @c trafficLightGapUnits: what separates two lights is part of a control's own
+    /// clickable width because a dot is the smallest target in the chrome, but the space beside the
+    /// GROUP has no control to belong to, and a clickable strip of maximize in what reads as bare
+    /// title bar is a bug rather than a generous hit target.
+    int windowControlGutterUnits;
+
     /// Point size for the per-tab close button, or 0 to use the chrome font's own size.
     int closePointSize;
     /// Point size for the new-tab button, or 0 to use the chrome font's own size.
@@ -136,6 +170,15 @@ struct UiStyleTokens
     /// palette because they say what an operation is DOING -- a theme-picked hue could render a
     /// failure green. Both rows agree today; the point is that they need not.
     std::array<uint32_t, 5> progressColors;
+
+    /// How a traffic-light dot is drawn: empty paints a vector circle, and any other value is the
+    /// glyph to paint in the dot's color instead.
+    ///
+    /// This is what lets the macOS-style window controls appear in a cell-quantized chrome without a
+    /// special case anywhere: that style draws its dots the way it draws every other affordance --
+    /// as one glyph in one cell -- while a pixel-counting style keeps the round shape the platform
+    /// itself draws. The QML branches on this string, so it never learns which style is active.
+    std::string_view trafficLightGlyph;
 
     std::string_view tabSeparator; ///< Drawn between adjacent tabs; empty when the style has none.
     std::string_view closeGlyph;   ///< The per-tab close affordance.
@@ -195,6 +238,17 @@ namespace detail
             .stripButtonUnits = 32,
             .windowControlUnits = 44,
             .badgeUnits = 16,
+            // The dimensions macOS itself uses for its traffic lights: a 12px dot on a 20px pitch,
+            // inset from the window's leading edge. They are stated here rather than in the macOS
+            // window-control row because they are lengths, and lengths are this table's business.
+            .trafficLightDotUnits = 12,
+            .trafficLightGapUnits = 8,
+            .windowControlInsetUnits = 10,
+            // Roughly what macOS leaves between its traffic lights and the first toolbar item. It is
+            // larger than the inset on purpose: the outer end of the group faces the window's edge,
+            // which is empty, while this end faces the tab strip -- a run of labelled, clickable
+            // boxes that the lights would otherwise read as the first of.
+            .windowControlGutterUnits = 16,
             .closePointSize = 8,
             .newTabPointSize = 12,
             .menuPointSize = 10,
@@ -207,6 +261,9 @@ namespace detail
                 0x3D9A50,  // Indeterminate: busy, drawn as running but pulsing
                 0xE8A317,  // Paused: paused, or warning
             },
+            // Empty: at 12 logical pixels a dot is smaller than any text this chrome sets, so it is
+            // drawn as the shape it is rather than as a glyph scaled down to fit.
+            .trafficLightGlyph = "",
             .tabSeparator = "",
             .closeGlyph = "✕",
             .zoomGlyph = "Z",
@@ -248,6 +305,17 @@ namespace detail
             .stripButtonUnits = 3,
             .windowControlUnits = 3,
             .badgeUnits = 1,
+            // One cell per dot, and one between them: "● ● ●" reads as the six-cell run a status
+            // line would draw, and every dot stays on the grid. The gap is not decoration -- a cell
+            // is around ten pixels, so three abutting one-cell dots are three targets too small and
+            // too close together to hit, which is what a bare "●●●" turned out to be.
+            .trafficLightDotUnits = 1,
+            .trafficLightGapUnits = 1,
+            .windowControlInsetUnits = 1,
+            // One cell, like every other gap this style states: the point of the gutter is that the
+            // lights are not the first tab, and one blank cell says that on a character grid as
+            // clearly as sixteen pixels do on a pixel one.
+            .windowControlGutterUnits = 1,
             .closePointSize = 0,
             .newTabPointSize = 0,
             .menuPointSize = 0,
@@ -260,6 +328,9 @@ namespace detail
                 0x3D9A50,  // Indeterminate: busy, drawn as running but pulsing
                 0xE8A317,  // Paused: paused, or warning
             },
+            // A dot is a character here, like everything else this style paints: one cell of "●" in
+            // the traffic light's color, set in the same monospace font as the tabs beside it.
+            .trafficLightGlyph = "●",
             .tabSeparator = "│",
             .closeGlyph = "×",
             .zoomGlyph = "Z",

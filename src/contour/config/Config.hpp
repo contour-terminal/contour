@@ -5,6 +5,7 @@
 #include <contour/config/ConfigDocumentation.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
+#include <contour/config/WindowControlStyle.hpp>
 
 #include <vtbackend/Color.hpp>
 #include <vtbackend/ColorPalette.hpp>
@@ -1149,6 +1150,12 @@ struct Config
     // window paints one tab strip and one set of menus while its panes may each run a different
     // profile, so asking a profile which style the chrome wears has no answer when they disagree.
     ConfigEntry<UiStyle, documentation::UiStyle> uiStyle { UiStyle::Native };
+    // Like uiStyle, this belongs to the APPLICATION: a window draws one title bar, so which corner
+    // its controls sit in cannot be a per-profile answer. Auto rather than a concrete default so the
+    // shipped configuration follows whatever host it is opened on.
+    ConfigEntry<WindowControlStyle, documentation::WindowControlStyle> windowControlStyle {
+        WindowControlStyle::Auto
+    };
     // Empty / 0 mean "inherit the default profile's regular font", which is what makes the
     // terminal-style chrome match the grid below it. Resolved in UiStyleProvider, not here, because
     // the default profile is not known until the whole config has been read.
@@ -1436,6 +1443,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarVisibility& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, UiStyle& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, WindowControlStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontDescriptions& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, text::RenderMode& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::TextOutlineConfig& where);
@@ -2333,6 +2341,15 @@ template <>
 struct std::formatter<contour::config::UiStyle>: formatter<std::string_view>
 {
     auto format(contour::config::UiStyle value, auto& ctx) const
+    {
+        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::config::WindowControlStyle>: formatter<std::string_view>
+{
+    auto format(contour::config::WindowControlStyle value, auto& ctx) const
     {
         return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
     }

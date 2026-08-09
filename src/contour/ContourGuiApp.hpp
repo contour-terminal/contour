@@ -11,6 +11,7 @@
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/UiStyleProvider.hpp>
+#include <contour/window/WindowControlStyleProvider.hpp>
 
 #include <vtpty/Process.hpp>
 #include <vtpty/SshSession.hpp>
@@ -231,7 +232,28 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///       follows the OS unconditionally.
     void applyGuiTheme(config::GuiTheme theme);
 
+    /// Re-points the window controls at @p style, resolving @c Auto against this host.
+    ///
+    /// The companion to @c applyGuiTheme, and called from the same two places for the same reason:
+    /// both are application-wide state derived from the configuration that must survive a live
+    /// reload. Every open window follows at once, because one provider serves the one QML engine.
+    /// Safe to call at startup and live (e.g. from the settings page) -- before the QML engine
+    /// exists there is simply nothing to re-point, and the provider is built with the resolved style
+    /// when it does.
+    /// @param style The configured window-control style, @c Auto included.
+    void applyWindowControlStyle(config::WindowControlStyle style);
+
   private:
+    /// @p configured with @c Auto resolved against this host.
+    ///
+    /// The one place that resolves, so the style the first frame draws and the style a later reload
+    /// applies cannot disagree about what the host is.
+    ///
+    /// @param configured The configured style, @c Auto included.
+    /// @return A concrete style; never @c Auto.
+    [[nodiscard]] config::WindowControlStyle resolvedWindowControlStyle(
+        config::WindowControlStyle configured) const;
+
     static void ensureTermInfoFile();
     void setupQCoreApplication();
     bool loadConfig(std::string const& target);
@@ -333,6 +355,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// BEFORE the engine so it outlives it: a context property is a borrowed pointer the engine keeps
     /// dereferencing, and members are destroyed in reverse declaration order.
     std::unique_ptr<window::UiStyleProvider> _uiStyleProvider;
+
+    /// What the window controls are and where they go, handed to QML as the `windowControls` context
+    /// property. Declared before the engine for the same borrowed-pointer reason as above.
+    std::unique_ptr<window::WindowControlStyleProvider> _windowControlStyleProvider;
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
 };

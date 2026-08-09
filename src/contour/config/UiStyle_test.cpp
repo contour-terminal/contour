@@ -34,6 +34,17 @@ TEST_CASE("UiStyle: every style has a token row", "[uistyle]")
         CHECK(tokens.modalScrimPercent > tokens.modelessScrimPercent);
         CHECK(tokens.minTabUnits > 0);
         CHECK(tokens.maxTabUnits >= tokens.minTabUnits);
+        // The window controls are drawn in whichever style is active, so every style has to state
+        // their extents -- a zero dot is an invisible traffic light, and a zero inset puts the first
+        // control flush against the window corner where the resize border already lives.
+        CHECK(tokens.trafficLightDotUnits > 0);
+        CHECK(tokens.windowControlInsetUnits > 0);
+        // And a zero gutter puts the last control flush against the tab strip, which is where the
+        // group stops reading as the window's controls and starts reading as the first tab.
+        CHECK(tokens.windowControlGutterUnits > 0);
+        // Zero is legal (a cell-counting style wants none) but negative would place each dot on top
+        // of the one before it.
+        CHECK(tokens.trafficLightGapUnits >= 0);
         CHECK(!tokens.closeGlyph.empty());
         CHECK(!tokens.zoomGlyph.empty());
         CHECK(!tokens.newTabGlyph.empty());
@@ -92,6 +103,18 @@ TEST_CASE("UiStyle: Native reproduces the chrome's historical metrics", "[uistyl
     CHECK(native.newTabPointSize == 12);
     CHECK(native.menuPointSize == 10);
     CHECK(native.windowControlUnits == 44);
+    // The dimensions macOS itself uses: a 12px dot on a 20px pitch. They are pinned because they are
+    // what makes the traffic lights read as traffic lights rather than as three coloured squares.
+    CHECK(native.trafficLightDotUnits == 12);
+    CHECK(native.trafficLightGapUnits == 8);
+    CHECK(native.windowControlInsetUnits == 10);
+    // Wider than the inset, and deliberately so: the outer end of the group faces the window's edge,
+    // the inner end faces the tab strip.
+    CHECK(native.windowControlGutterUnits == 16);
+    CHECK(native.windowControlGutterUnits > native.windowControlInsetUnits);
+    // Empty: a pixel-counting chrome draws a dot as the shape it is. @see the Terminal case below,
+    // which is the whole reason this is a token rather than a test on the style.
+    CHECK(native.trafficLightGlyph.empty());
     CHECK(native.quickControlsStyle == "Fusion");
     CHECK(native.fontSource == ChromeFontSource::PlatformUi);
 
@@ -113,6 +136,22 @@ TEST_CASE("UiStyle: Terminal counts its chrome in whole cells", "[uistyle]")
     CHECK(terminal.tabHeightUnits == 1);
     CHECK(terminal.controlUnits == 1);
     CHECK(terminal.badgeUnits == 1);
+
+    // The window controls too, which is what lets the macOS traffic lights appear in this chrome
+    // without leaving the grid: one cell per dot and one between them, so the three of them are the
+    // six-cell run "● ● ●". The gap is not decoration -- a cell is around ten pixels, so abutting
+    // one-cell dots are three targets too small and too close together to hit.
+    CHECK(terminal.trafficLightDotUnits == 1);
+    CHECK(terminal.trafficLightGapUnits == 1);
+    CHECK(terminal.windowControlInsetUnits == 1);
+    // One blank cell says "these are not the first tab" on a character grid as clearly as sixteen
+    // pixels do on a pixel one, which is why this style states a cell and not the native 16.
+    CHECK(terminal.windowControlGutterUnits == 1);
+
+    // And the dot is a character here, like everything else this style paints. This token is the
+    // entire mechanism: without it the QML would need to ask which UiStyle is active, which is the
+    // one thing the chrome components are never allowed to do.
+    CHECK(terminal.trafficLightGlyph == "●");
 
     // No slack: a cell of padding at either end is already the breathing room slack buys natively, and
     // a spare cell per tab is a cell of title the user does not get.
