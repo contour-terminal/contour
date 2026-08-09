@@ -10,11 +10,9 @@
 #include <contour/platform/Announcer.hpp>
 #include <contour/platform/Audio.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/platform/Notifier.hpp>
 #include <contour/session/DisplaySurface.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
-#ifdef __linux__
-    #include <contour/platform/FreeDesktopNotifier.hpp>
-#endif
 
 #include <vtbackend/Terminal.hpp>
 
@@ -326,13 +324,17 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
      *        any. Empty (the default) means the session launched the profile's configured shell.
      *        Recorded verbatim for later introspection (e.g. by layout tooling); does not affect the
      *        PTY itself, which is already spawned by the caller.
+     * @param notifier how desktop notifications are raised. Null (the default) means the notifier
+     *        this platform offers, per platform::makeDesktopNotifier(); a test passes a recording
+     *        one to assert what OSC 99 asked for and to drive close/activation events back.
      */
     TerminalSession(TerminalSessionManager* manager,
                     std::unique_ptr<vtpty::Pty> pty,
                     ContourGuiApp& app,
                     std::string profileName = {},
                     std::optional<vtbackend::PageSize> initialPageSize = std::nullopt,
-                    std::optional<vtpty::Process::ExecInfo> launchedCommand = std::nullopt);
+                    std::optional<vtpty::Process::ExecInfo> launchedCommand = std::nullopt,
+                    std::unique_ptr<platform::Notifier> notifier = nullptr);
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
@@ -895,9 +897,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @see noteTransportLost.
     std::atomic<bool> _transportLost = false;
 
-#ifdef __linux__
-    platform::FreeDesktopNotifier _desktopNotifier;
-#endif
+    /// How desktop notifications are raised. Never null: platform::makeDesktopNotifier() answers
+    /// with a NullNotifier where there is nothing to raise them through, so no #ifdef reaches this
+    /// declaration and no call site has to check.
+    std::unique_ptr<platform::Notifier> _desktopNotifier;
 };
 
 } // namespace contour::session

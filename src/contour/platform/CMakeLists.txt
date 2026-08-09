@@ -3,14 +3,15 @@
 #
 # What belongs here is anything that reaches an ambient resource -- an audio device, a D-Bus
 # session, a compositor, the desktop's URL handler. Each one is split into the decision and the
-# adapter (NotificationRouter vs FreeDesktopNotifier, AudioNote vs Audio, speakableText vs
+# adapter (FreeDesktopNotifier vs DBusNotificationTransport, AudioNote vs Audio, speakableText vs
 # QtSpeechSynthesizer), so the decision stays testable when the resource is absent.
 #
 # STATIC, unlike contour_core. The OBJECT form is what contour_core needs for its AUTORCC resource
 # registration -- symbols nothing references by name -- and CMake does not propagate one object
 # library's objects through another, so an OBJECT library here would simply never reach the binary.
-# Nothing in this target is registered reflectively: Audio and FreeDesktopNotifier declare Q_OBJECT, but
-# their moc output is referenced by the very code that emits their signals, so the archive keeps it.
+# Nothing in this target is registered reflectively: Audio, Notifier and the two notification
+# classes declare Q_OBJECT, but their moc output is referenced by the very code that emits their
+# signals, so the archive keeps it.
 add_library(contour_platform STATIC
     Announcer.hpp
     Audio.cpp Audio.hpp
@@ -19,11 +20,14 @@ add_library(contour_platform STATIC
     Clipboard.cpp Clipboard.hpp
     ColorConversion.hpp
     ExternalLauncher.hpp
-    # Its whole translation unit is inside `#ifdef __linux__`, so it compiles to nothing elsewhere.
-    # Listed unconditionally all the same: AUTOMOC must still see the Q_OBJECT, exactly as before.
+    # Both translation units are wholly inside `#ifdef __linux__`, so they compile to nothing
+    # elsewhere. Listed unconditionally all the same: AUTOMOC must still see the Q_OBJECT.
+    DBusNotificationTransport.cpp DBusNotificationTransport.hpp
     FreeDesktopNotifier.cpp FreeDesktopNotifier.hpp
     GuiTheme.hpp
     NotificationRouter.hpp
+    NotificationTransport.hpp
+    Notifier.cpp Notifier.hpp
     QtExternalLauncher.cpp QtExternalLauncher.hpp
     QtInvoke.hpp
     QtPath.hpp

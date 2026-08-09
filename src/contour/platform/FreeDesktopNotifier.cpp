@@ -1,152 +1,108 @@
 // SPDX-License-Identifier: Apache-2.0
 #ifdef __linux__
 
+    #include <contour/Logging.hpp>
     #include <contour/platform/FreeDesktopNotifier.hpp>
+    #include <contour/platform/QtInvoke.hpp>
 
-    #include <crispy/LogStore.hpp>
+    #include <QtCore/QStringList>
+    #include <QtCore/QVariantMap>
 
-    #include <QtDBus/QDBusConnection>
-    #include <QtDBus/QDBusReply>
+    #include <utility>
 
 namespace contour::platform
 {
 
-namespace
+FreeDesktopNotifier::FreeDesktopNotifier(std::unique_ptr<NotificationTransport> transport, QObject* parent):
+    Notifier(parent), _transport { std::move(transport) }
 {
-    auto const notifierLog = logstore::Category("gui.notifier", "Desktop notification backend");
-} // namespace
+    // Installed unconditionally, and without first asking whether a notification daemon is there:
+    // subscribing is fire-and-forget, and a daemon that starts later is then simply picked up. The
+    // old code probed the service synchronously and, when that probe failed, left the session unable
+    // to notify for the rest of the process's life.
+    _transport->subscribe(
+        [this](NotificationTransport::ServerId serverId, uint32_t reason) {
+            auto const oscIdentifier = _router.takeForServerEvent(serverId);
+            if (!oscIdentifier.has_value())
+                return;
 
-FreeDesktopNotifier::FreeDesktopNotifier(QObject* parent): QObject(parent)
-{
-    _interface = std::make_unique<QDBusInterface>("org.freedesktop.Notifications",
-                                                  "/org/freedesktop/Notifications",
-                                                  "org.freedesktop.Notifications",
-                                                  QDBusConnection::sessionBus(),
-                                                  this);
+            notifierLog()("Notification closed: dbus_id={} reason={}", serverId, reason);
+            emit notificationClosed(QString::fromStdString(*oscIdentifier), reason);
+        },
+        [this](NotificationTransport::ServerId serverId) {
+            auto const oscIdentifier = _router.takeForServerEvent(serverId);
+            if (!oscIdentifier.has_value())
+                return;
 
-    if (!_interface->isValid())
-    {
-        notifierLog()("Failed to connect to org.freedesktop.Notifications D-Bus interface: {}",
-                      _interface->lastError().message().toStdString());
-        return;
-    }
-
-    // Connect to the NotificationClosed and ActionInvoked signals from the notification server.
-    auto bus = QDBusConnection::sessionBus();
-    bus.connect("org.freedesktop.Notifications",
-                "/org/freedesktop/Notifications",
-                "org.freedesktop.Notifications",
-                "NotificationClosed",
-                this,
-                SLOT(onNotificationClosed(uint, uint)));
-
-    bus.connect("org.freedesktop.Notifications",
-                "/org/freedesktop/Notifications",
-                "org.freedesktop.Notifications",
-                "ActionInvoked",
-                this,
-                SLOT(onActionInvoked(uint, QString)));
-}
-
-FreeDesktopNotifier::~FreeDesktopNotifier()
-{
-    // Mirror image of the two bus.connect() calls above; the arguments must match exactly or the
-    // match rule is not removed. @see the declaration for why this cannot be defaulted.
-    auto bus = QDBusConnection::sessionBus();
-    bus.disconnect("org.freedesktop.Notifications",
-                   "/org/freedesktop/Notifications",
-                   "org.freedesktop.Notifications",
-                   "NotificationClosed",
-                   this,
-                   SLOT(onNotificationClosed(uint, uint)));
-
-    bus.disconnect("org.freedesktop.Notifications",
-                   "/org/freedesktop/Notifications",
-                   "org.freedesktop.Notifications",
-                   "ActionInvoked",
-                   this,
-                   SLOT(onActionInvoked(uint, QString)));
+            notifierLog()("Notification activated: dbus_id={}", serverId);
+            emit actionInvoked(QString::fromStdString(*oscIdentifier));
+        });
 }
 
 void FreeDesktopNotifier::notify(vtbackend::DesktopNotification const& notification)
 {
-    if (!_interface || !_interface->isValid())
-        return;
-
-    auto const appName = notification.applicationName.empty()
-                             ? QStringLiteral("contour")
-                             : QString::fromStdString(notification.applicationName);
-    auto const title = QString::fromStdString(notification.title);
-    auto const body = QString::fromStdString(notification.body);
-
-    // Build hints map with urgency level.
-    QVariantMap hints;
-    hints["urgency"] = QVariant::fromValue(NotificationRouter::toFreedesktopUrgency(notification.urgency));
-
-    // Check if we're replacing an existing notification.
-    auto const replacesId = _router.replacementFor(notification.identifier);
-
-    // Build actions list. The default action is triggered on click.
-    QStringList actions;
-    actions << QStringLiteral("default") << QStringLiteral("Activate");
-
-    // org.freedesktop.Notifications.Notify parameters:
-    // STRING app_name, UINT32 replaces_id, STRING app_icon, STRING summary,
-    // STRING body, ARRAY actions, DICT hints, INT32 expire_timeout
-    QDBusReply<uint> const reply = _interface->call("Notify",
-                                                    appName,
-                                                    replacesId,
-                                                    QStringLiteral(""), // app_icon (empty)
-                                                    title,
-                                                    body,
-                                                    actions,
-                                                    hints,
-                                                    notification.timeout);
-
-    if (reply.isValid())
-    {
-        auto const dbusId = reply.value();
-        notifierLog()("Notification sent: id='{}' -> dbus_id={}", notification.identifier, dbusId);
-        _router.onSent(notification.identifier, dbusId, replacesId);
-    }
-    else
-    {
-        notifierLog()("Failed to send notification: {}", reply.error().message().toStdString());
-    }
+    // ALWAYS posts, never sends inline -- the same rule QtAnnouncer::announce follows, for the same
+    // call sites. This runs on the TERMINAL thread with the terminal's non-recursive state mutex
+    // held, so any wait here stalls that session's PTY drain; and _router must be reached from one
+    // thread only, or it races the close/activation events arriving on the GUI thread.
+    postToObject(this, [this, notification] { sendNotification(notification); });
 }
 
 void FreeDesktopNotifier::close(std::string const& identifier)
 {
-    if (!_interface || !_interface->isValid())
-        return;
-
-    auto const dbusId = _router.takeForClose(identifier);
-    if (!dbusId.has_value())
-        return;
-
-    _interface->call("CloseNotification", *dbusId);
+    postToObject(this, [this, identifier] { sendClose(identifier); });
 }
 
-void FreeDesktopNotifier::onNotificationClosed(uint id, uint reason)
+void FreeDesktopNotifier::sendNotification(vtbackend::DesktopNotification const& notification)
 {
-    auto const oscId = _router.takeForServerEvent(id);
-    if (!oscId.has_value())
-        return;
+    auto const appName = notification.applicationName.empty()
+                             ? QStringLiteral("contour")
+                             : QString::fromStdString(notification.applicationName);
 
-    notifierLog()("Notification closed: dbus_id={} reason={}", id, reason);
-    emit notificationClosed(QString::fromStdString(*oscId), reason);
+    auto hints = QVariantMap {};
+    hints["urgency"] = QVariant::fromValue(NotificationRouter::toFreedesktopUrgency(notification.urgency));
+
+    // The default action is what a click on the popup triggers.
+    auto const actions = QStringList { QStringLiteral("default"), QStringLiteral("Activate") };
+
+    // Whether this replaces a notification of ours that is still on screen.
+    auto const replacesId = _router.replacementFor(notification.identifier);
+
+    // org.freedesktop.Notifications.Notify, signature susssasa{sv}i:
+    // STRING app_name, UINT32 replaces_id, STRING app_icon, STRING summary,
+    // STRING body, ARRAY actions, DICT hints, INT32 expire_timeout.
+    // The casts are load-bearing: QDBusInterface::call used to deduce the wire types from the C++
+    // argument types, and a QVariant built from the wrong integer type marshals as the wrong D-Bus
+    // type, which the notification server rejects outright.
+    auto arguments = QVariantList {
+        appName,
+        QVariant::fromValue(static_cast<quint32>(replacesId)),
+        QStringLiteral(""), // app_icon (empty)
+        QString::fromStdString(notification.title),
+        QString::fromStdString(notification.body),
+        actions,
+        hints,
+        QVariant::fromValue(static_cast<int>(notification.timeout)),
+    };
+
+    auto const identifier = notification.identifier;
+    _transport->notify(std::move(arguments),
+                       [this, identifier, replacesId](std::optional<NotificationRouter::ServerId> serverId) {
+                           if (!serverId.has_value())
+                               return;
+
+                           notifierLog()("Notification sent: id='{}' -> dbus_id={}", identifier, *serverId);
+                           _router.onSent(identifier, *serverId, replacesId);
+                       });
 }
 
-void FreeDesktopNotifier::onActionInvoked(uint id, QString const& actionKey)
+void FreeDesktopNotifier::sendClose(std::string const& identifier)
 {
-    (void) actionKey; // We only register "default" action.
-
-    auto const oscId = _router.takeForServerEvent(id);
-    if (!oscId.has_value())
+    auto const serverId = _router.takeForClose(identifier);
+    if (!serverId.has_value())
         return;
 
-    notifierLog()("Notification activated: dbus_id={}", id);
-    emit actionInvoked(QString::fromStdString(*oscId));
+    _transport->close(*serverId);
 }
 
 } // namespace contour::platform
