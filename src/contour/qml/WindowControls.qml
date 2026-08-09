@@ -346,11 +346,15 @@ RowLayout {
                             fontSizeMode: Text.HorizontalFit
                             minimumPointSize: 1
                             minimumPixelSize: 1
-                            // Hovered, the glyph is a symbol and takes the palette's text color; at rest
-                            // it IS the traffic light and takes the light's own.
-                            color: root.groupHovered ? systemPalette.windowText
-                                 : root.window.active ? slot.modelData.dotColor
-                                 : windowControls.inactiveDotColor
+                            // The light keeps its own color through the reveal -- what changes is the
+                            // SHAPE it is drawn as, never its identity. The vector delegate says the
+                            // same thing by keeping the dot and putting the glyph inside it; here the
+                            // glyph IS the light, so it takes the light's color. Taking the palette's
+                            // text color instead dropped all three to one monochrome row for as long
+                            // as the pointer was over the group, which read as the macOS controls
+                            // turning into some other style's under the cursor.
+                            color: root.window.active ? slot.modelData.dotColor
+                                                      : windowControls.inactiveDotColor
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
