@@ -108,8 +108,17 @@ fetch_and_unpack_libunicode() {
         # (LIBUNICODE_MINIMAL_VERSION). Hard-coding it here too would let the vendored source drift
         # below the CMake requirement, which then fails to configure.
         local libunicode_version
+        local thirdparties_cmake="$SYSDEPS_BASE_DIR/../cmake/ContourThirdParties.cmake"
         libunicode_version=$(sed -n 's/^set(LIBUNICODE_MINIMAL_VERSION "\([0-9.]*\)".*/\1/p' \
-            "$SYSDEPS_BASE_DIR/../cmake/ContourThirdParties.cmake")
+            "$thirdparties_cmake")
+        # Say what went wrong here rather than 404 on ".../tags/v.tar.gz" further down: an empty
+        # version means that line changed shape, and the download error names neither the file nor
+        # the reason.
+        if test x$libunicode_version = x; then
+            echo 1>&2 "Cannot read LIBUNICODE_MINIMAL_VERSION from $thirdparties_cmake."
+            echo 1>&2 "Expected a line of the form: set(LIBUNICODE_MINIMAL_VERSION \"<version>\")"
+            exit 1
+        fi
         fetch_and_unpack \
             libunicode-$libunicode_version \
             libunicode-$libunicode_version.tar.gz \

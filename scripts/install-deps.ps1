@@ -15,8 +15,16 @@ class ThirdParty {
 # the vendored source drift below the CMake requirement, which then fails to configure -- and it did:
 # raising the floor updated every platform except Windows, which kept unpacking the older archive.
 $ThirdPartiesCMakeFile = Join-Path (Join-Path $PSScriptRoot "..") "cmake/ContourThirdParties.cmake"
-$libunicode_version = (Select-String -Path $ThirdPartiesCMakeFile `
-    -Pattern '^set\(LIBUNICODE_MINIMAL_VERSION "([0-9.]+)"').Matches[0].Groups[1].Value
+$libunicode_match = Select-String -Path $ThirdPartiesCMakeFile `
+    -Pattern '^set\(LIBUNICODE_MINIMAL_VERSION "([0-9.]+)"'
+# Say what went wrong here rather than 404 on ".../tags/v.zip" further down: no match means that line
+# changed shape, and the download error names neither the file nor the reason. Without this, the
+# missing match surfaces as a null-reference on .Matches[0] at best, and as an empty version at worst.
+if (-not $libunicode_match) {
+    Write-Error "Cannot read LIBUNICODE_MINIMAL_VERSION from ${ThirdPartiesCMakeFile}.`nExpected a line of the form: set(LIBUNICODE_MINIMAL_VERSION `"<version>`")"
+    exit 1
+}
+$libunicode_version = $libunicode_match.Matches[0].Groups[1].Value
 $reflection_cpp_version="0.4.0"
 
 # Take care, order matters, at least as much as dependencies are of concern.

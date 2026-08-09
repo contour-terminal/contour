@@ -2,19 +2,44 @@
 
 set -e
 
+# A check that silently checks nothing is worse than no check, and relative paths are how that
+# happens -- so resolve the repo root rather than trusting $PWD.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null)"
+
+if [[ -z "$repo_root" ]]; then
+    echo 1>&2 "Error: ${script_dir} is not inside a git repository."
+    exit 1
+fi
+
 ErrorCount=0
 
-## libunicode version match
+## libunicode version
 
-LIBUNICODE_SHA_PS=$(awk 'match ($0, /libunicode_git_sha="[0-9a-f]+/) { print(substr($0, RSTART+20, RLENGTH-20)); }' scripts/install-deps.ps1)
-LIBUNICODE_SHA_SH=$(awk 'match ($0, /libunicode_git_sha="[0-9a-f]+/) { print(substr($0, RSTART+20, RLENGTH-20)); }' scripts/install-deps.sh)
+# Neither install-deps script pins libunicode's version: both read it out of the single
+# LIBUNICODE_MINIMAL_VERSION line in cmake/ContourThirdParties.cmake, so there is no pair of literals
+# left to compare -- and restating their patterns here would only compare this file against itself.
+# Each script now rejects an unreadable version where it reads it, which covers every platform rather
+# than just CI. What is left worth doing here is failing fast, in the cheap lint job, on the two ways
+# that arrangement breaks: the line stops being parseable, or a script stops consulting it.
 
-if [[ "${LIBUNICODE_SHA_SH}" != "${LIBUNICODE_SHA_PS}" ]]; then
-    echo 1>&2 "Error: libunicode version seems to mismatch between the two install-deps scripts."
-    echo 1>&2 "libunicode sha (PowerShell) : ${LIBUNICODE_SHA_SH}"
-    echo 1>&2 "libunicode sha (bash)       : ${LIBUNICODE_SHA_PS}"
-    ErrorCount=$[ErrorCount + 1]
+ThirdPartiesCMakeFile="${repo_root}/cmake/ContourThirdParties.cmake"
+
+LibUnicodeVersion=$(sed -n 's/^set(LIBUNICODE_MINIMAL_VERSION "\([0-9.]*\)".*/\1/p' "${ThirdPartiesCMakeFile}")
+
+if [[ -z "${LibUnicodeVersion}" ]]; then
+    echo 1>&2 "Error: cannot read LIBUNICODE_MINIMAL_VERSION from cmake/ContourThirdParties.cmake."
+    echo 1>&2 "Expected a line of the form: set(LIBUNICODE_MINIMAL_VERSION \"<version>\")"
+    ErrorCount=$((ErrorCount + 1))
 fi
+
+for script in scripts/install-deps.sh scripts/install-deps.ps1; do
+    if ! grep -q 'LIBUNICODE_MINIMAL_VERSION' "${repo_root}/${script}"; then
+        echo 1>&2 "Error: ${script} no longer derives libunicode's version from"
+        echo 1>&2 "cmake/ContourThirdParties.cmake, so the two can drift apart again."
+        ErrorCount=$((ErrorCount + 1))
+    fi
+done
 
 if [[ $ErrorCount -ne 0 ]]; then
     exit 1
