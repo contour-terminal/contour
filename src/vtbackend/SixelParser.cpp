@@ -4,9 +4,9 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <limits>
 #include <ranges>
 
-using std::clamp;
 using std::max;
 using std::min;
 using std::vector;
@@ -330,17 +330,15 @@ void SixelParser::finalize()
 // =================================================================================
 
 SixelImageBuilder::SixelImageBuilder(ImageSize maxSize,
-                                     int aspectVertical,
-                                     int aspectHorizontal,
+                                     SixelAspectRatio aspect,
                                      RGBAColor backgroundColor,
                                      std::shared_ptr<SixelColorPalette> colorPalette):
     _maxSize { maxSize },
     _colors { std::move(colorPalette) },
     _size { ImageSize { Width { 1 }, Height { 1 } } },
     _sixelCursor {},
-    _aspectRatio(static_cast<unsigned int>(
-        std::ceil(static_cast<float>(aspectVertical) / static_cast<float>(aspectHorizontal)))),
-    _sixelBandHeight(6 * _aspectRatio)
+    // The same call setRaster() makes, so the ratio is bounded however the builder was reached.
+    _aspectRatio { sixelAspectRatioFrom(aspect, maxSize.height) }
 {
     clear(backgroundColor);
     _currentColorValue = _colors->at(_currentColor);
@@ -409,28 +407,41 @@ void SixelImageBuilder::rewind()
 void SixelImageBuilder::newline()
 {
     _sixelCursor.column = {};
-    if (unbox<unsigned int>(_sixelCursor.line) + _sixelBandHeight < unbox<unsigned int>(canvasSize().height))
-        _sixelCursor.line = LineOffset::cast_from(_sixelCursor.line.as<unsigned int>() + _sixelBandHeight);
+    auto const bandHeight = sixelBandHeight();
+    if (unbox<unsigned>(_sixelCursor.line) + bandHeight < unbox<unsigned>(canvasSize().height))
+        _sixelCursor.line = LineOffset::cast_from(_sixelCursor.line.as<unsigned>() + bandHeight);
+}
+
+namespace
+{
+    /// Multiplies @p height by @p factor, saturating at the widest Height rather than wrapping.
+    ///
+    /// Both operands come off the wire, so their 32-bit product wraps: a Pv of 2^31 at scale 2
+    /// wrapped to exactly zero, and a zero-height canvas failed every following row check.
+    /// @param height the declared raster height.
+    /// @param factor the vertical scaling to apply.
+    /// @return the scaled height, never wrapped.
+    [[nodiscard]] Height saturatingScale(Height height, unsigned factor) noexcept
+    {
+        auto constexpr Widest = uint64_t { std::numeric_limits<unsigned>::max() };
+        return Height::cast_from(min(static_cast<uint64_t>(unbox<unsigned>(height)) * factor, Widest));
+    }
+} // namespace
+
+void SixelImageBuilder::setSize(ImageSize requested) noexcept
+{
+    _size = vtpty::min(requested, _maxSize);
 }
 
 void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, optional<ImageSize> imageSize)
 {
-    if (pad != 0)
-        // Clamped to keep every y0 + bit*_aspectRatio computation below (render(), bandRows()) well
-        // inside unsigned range: an attacker-supplied Pan close to UINT_MAX with Pad=1 would otherwise
-        // let (y + _aspectRatio) wrap around to a small value in the bounds check while y itself stays
-        // huge, producing a heap write far past _buffer. Real encoders never need more than single-digit
-        // ratios; 255 leaves generous headroom without reopening the overflow.
-        _aspectRatio = clamp(
-            max(1u, static_cast<unsigned int>(std::ceil(static_cast<float>(pan) / static_cast<float>(pad)))),
-            1u,
-            255u);
-    _sixelBandHeight = 6 * _aspectRatio;
+    // Against _maxSize -- Terminal::maxImageSize(), the negotiated canvas -- not canvasSize(), which
+    // a previous raster may have narrowed: the ceiling is what a new raster is measured by.
+    _aspectRatio = sixelAspectRatioFrom({ .vertical = pan, .horizontal = pad }, _maxSize.height);
     if (imageSize)
     {
-        imageSize->height = Height::cast_from(imageSize->height.value * _aspectRatio);
-        _size.width = clamp(imageSize->width, Width(0), _maxSize.width);
-        _size.height = clamp(imageSize->height, Height(0), _maxSize.height);
+        setSize(ImageSize { .width = imageSize->width,
+                            .height = saturatingScale(imageSize->height, _aspectRatio) });
         _explicitSize = true;
         // Exactly the declared raster, background-filled: a plain resize() would zero-fill any
         // grown region, leaving a black band when a raster attribute widens the image.
@@ -467,9 +478,8 @@ void SixelImageBuilder::render(int8_t sixel)
     // A bit that would overhang the bottom paints nothing and so cannot grow the image either --
     // taking the highest SET bit instead would grow it by the very rows that get clipped.
     auto const topBit = static_cast<unsigned>(std::bit_width(bits)) - 1;
-    // 64-bit throughout: with _aspectRatio now clamped this can no longer wrap in practice, but doing
-    // the arithmetic in a width the values can never fill is a second, independent guard against the
-    // same overflow class regardless of what future callers of setRaster() pass in.
+    // The 64-bit width, not the bound on _aspectRatio, is what stands between this and a write past
+    // _buffer: topBit is at most 5, so the product cannot wrap for any ratio a 32-bit field holds.
     auto lastRowExclusive = static_cast<uint64_t>(y0) + (static_cast<uint64_t>(topBit + 1) * _aspectRatio);
     if (lastRowExclusive > canvasHeight)
     {
@@ -670,22 +680,22 @@ void SixelImageBuilder::finalize()
         return;
     _finalized = true;
 
-    // Nothing ever painted and no raster declared a size, so the image is only what the cursor
-    // walked over. Asking the storage is what tells that apart: reserve() backs every paint, so an
-    // empty buffer means nothing landed. Testing _size.height against its constructed 1 sentinel
-    // cannot -- a single painted pixel row is a height of 1 too, and an explicit `"1;1;Ph;1` raster
-    // declares one, so both were compacted away to a zero-height image.
-    if (!_explicitSize && _allocatedHeight == 0)
-    {
-        _size.height = Height::cast_from(_sixelCursor.line.as<unsigned int>() * _aspectRatio);
-        reshape(unbox<unsigned>(_size.width), unbox<unsigned>(_size.height));
+    if (_explicitSize)
         return;
-    }
-    if (!_explicitSize)
-    {
-        reshape(unbox<unsigned>(_size.width), unbox<unsigned>(_size.height));
+
+    // An empty buffer means nothing painted, so the image is only what the cursor walked over.
+    // _size.height cannot tell that apart: a single painted row and `"1;1;Ph;1` are a height of 1 too.
+    if (_allocatedHeight == 0)
+        // The cursor line is already a pixel row: newline() advances it by a whole band. See
+        // unpainted_image_height_stays_within_the_canvas for the double-counting this replaced.
+        setSize(ImageSize { .width = _size.width,
+                            .height = Height::cast_from(_sixelCursor.line.as<unsigned>()) });
+    else
         _explicitSize = true;
-    }
+
+    // Safe to set _explicitSize first: reshape() reads its arguments and the buffer's own geometry,
+    // never _size or canvasSize().
+    reshape(unbox<unsigned>(_size.width), unbox<unsigned>(_size.height));
 }
 
 void SixelImageBuilder::reshape(unsigned newStride, unsigned newRows)

@@ -17,10 +17,46 @@ using namespace vtbackend;
 namespace
 {
 
+constexpr auto OpaqueBlack = RGBAColor { 0, 0, 0, 0xFF };
+
+/// A builder of @p canvas size with no raster of its own, on a fresh 16/256 colour palette.
+///
+/// The plain construction this file repeats; sixelImageBuilder() and buildOn() are the two
+/// ready-made shapes on top of it, and cases that drive the parser themselves use it directly.
+/// @param canvas the maximum image size the builder is constructed with.
+/// @param background the colour unpainted pixels carry.
+/// @param aspect the pixel aspect ratio to construct with; 1:1 unless a case is about the ratio.
+/// @return the builder.
+SixelImageBuilder rawBuilder(ImageSize canvas,
+                             RGBAColor background = OpaqueBlack,
+                             SixelAspectRatio aspect = {})
+{
+    return { canvas, aspect, background, std::make_shared<SixelColorPalette>(16, 256) };
+}
+
 SixelImageBuilder sixelImageBuilder(ImageSize size, RGBAColor defaultColor)
 {
-    auto ib = SixelImageBuilder(size, 1, 1, defaultColor, std::make_shared<SixelColorPalette>(16, 256));
+    auto ib = rawBuilder(size, defaultColor);
     ib.setRaster(1, 1, size);
+    return ib;
+}
+
+/// Runs @p input on a fresh 1:1-aspect builder of @p canvas size and finalizes it.
+///
+/// Deliberately not sixelImageBuilder(), which declares an explicit raster of its own: what these
+/// cases pin is what a stream that declares its own raster -- or none -- leaves behind.
+/// @param canvas the maximum image size the builder is constructed with.
+/// @param input the sixel fragment to parse, without the DCS introducer or ST.
+/// @param pin colour register 0 is defined to this before parsing, so a painted pixel is
+///            identifiable. Harmless for a stream that paints nothing.
+/// @return the finalized builder.
+SixelImageBuilder buildOn(ImageSize canvas, std::string_view input, RGBColor pin = {})
+{
+    auto ib = rawBuilder(canvas);
+    ib.setColor(0, pin);
+    auto sp = SixelParser { ib };
+    sp.parseFragment(input);
+    sp.done();
     return ib;
 }
 
@@ -32,7 +68,7 @@ SixelImageBuilder sixelImageBuilder(ImageSize size, RGBAColor defaultColor)
 /// @return the colour the painted pixel carries.
 RGBColor paintOnePixelWith(std::string_view colorDefinition)
 {
-    auto ib = sixelImageBuilder(ImageSize { Width(4), Height(4) }, RGBAColor { 0, 0, 0, 0xFF });
+    auto ib = sixelImageBuilder(ImageSize { Width(4), Height(4) }, OpaqueBlack);
     auto sp = SixelParser { ib };
     sp.parseFragment(colorDefinition);
     sp.parseFragment("@"); // bit 0: paints pixel (0, 0) with the register just selected
@@ -161,10 +197,9 @@ TEST_CASE("SixelParser.ground_000000", "[sixel]")
 
 TEST_CASE("SixelParser.ground_111111", "[sixel]")
 {
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
     auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
 
-    auto ib = sixelImageBuilder(ImageSize { Width(2), Height(8) }, DefaultColor);
+    auto ib = sixelImageBuilder(ImageSize { Width(2), Height(8) }, OpaqueBlack);
     auto sp = SixelParser { ib };
 
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
@@ -186,7 +221,7 @@ TEST_CASE("SixelParser.ground_111111", "[sixel]")
             if (pinned)
                 CHECK(actualColor.rgb() == PinColor);
             else
-                CHECK(actualColor == DefaultColor);
+                CHECK(actualColor == OpaqueBlack);
         }
     }
 }
@@ -289,8 +324,7 @@ TEST_CASE("SixelParser.ground_101010", "[sixel]")
 
 TEST_CASE("SixelParser.raster", "[sixel]")
 {
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
-    auto ib = sixelImageBuilder(ImageSize { Width(640), Height(480) }, DefaultColor);
+    auto ib = sixelImageBuilder(ImageSize { Width(640), Height(480) }, OpaqueBlack);
     auto sp = SixelParser { ib };
 
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
@@ -314,7 +348,12 @@ TEST_CASE("SixelParser.raster", "[sixel]")
     sp.done();
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
     CHECK(ib.aspectRatio() == 1);
+    // `"5;0` is 5:1 -- a zero Pad reads as one, not as "leave the previous ratio untouched".
     sp.parseFragment("\"5;0");
+    sp.done();
+    CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    CHECK(ib.aspectRatio() == 5);
+    sp.parseFragment("\"0;5");
     sp.done();
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
     CHECK(ib.aspectRatio() == 1);
@@ -326,9 +365,8 @@ TEST_CASE("SixelParser.raster", "[sixel]")
 
 TEST_CASE("SixelParser.rep", "[sixel]")
 {
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
     auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x30 };
-    auto ib = sixelImageBuilder(ImageSize { Width(14), Height(8) }, DefaultColor);
+    auto ib = sixelImageBuilder(ImageSize { Width(14), Height(8) }, OpaqueBlack);
     auto sp = SixelParser { ib };
 
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
@@ -349,7 +387,7 @@ TEST_CASE("SixelParser.rep", "[sixel]")
             if (pinned)
                 CHECK(actualColor.rgb() == PinColor);
             else
-                CHECK(actualColor == DefaultColor);
+                CHECK(actualColor == OpaqueBlack);
         }
     }
 }
@@ -362,8 +400,7 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
                                                           RGBAColor { 0, 0, 255, 255 },
                                                           RGBAColor { 255, 255, 255, 255 } };
 
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
-    auto ib = sixelImageBuilder(ImageSize { Width(5), Height(6) }, DefaultColor);
+    auto ib = sixelImageBuilder(ImageSize { Width(5), Height(6) }, OpaqueBlack);
     auto sp = SixelParser { ib };
 
     sp.parseFragment("#1;2;100;0;0");
@@ -384,7 +421,7 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
          crispy::times(ib.size().width.as<int>()) * crispy::times(ib.size().height.as<int>()))
     {
         auto const& expectedColor =
-            x < 5 && y < 6 ? PinColors.at(static_cast<size_t>(x ? x : 4)) : DefaultColor;
+            x < 5 && y < 6 ? PinColors.at(static_cast<size_t>(x ? x : 4)) : OpaqueBlack;
         auto const& actualColor = ib.at(CellLocation { .line = LineOffset(y), .column = ColumnOffset(x) });
         // INFO(std::format("at {}, expect {}, actual {}",
         //                  CellLocation { LineOffset(y), ColumnOffset(x) },
@@ -400,8 +437,7 @@ TEST_CASE("SixelParser.saturates out-of-range HLS color parameters", "[sixel]")
     // out-of-range value converts a double far outside 0..255 to uint8_t -- which is undefined, and
     // aborts a sanitizer build on nothing worse than a garbled sixel. Each saturates at the top of the
     // range the VT340 defines for it, exactly as the RGB parameters do.
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
-    auto ib = sixelImageBuilder(ImageSize { Width(1), Height(6) }, DefaultColor);
+    auto ib = sixelImageBuilder(ImageSize { Width(1), Height(6) }, OpaqueBlack);
     auto sp = SixelParser { ib };
 
     // Hue, lightness and saturation each far beyond their range -- the digits alone overflow the
@@ -418,7 +454,7 @@ TEST_CASE("SixelParser.saturates out-of-range HLS color parameters", "[sixel]")
 TEST_CASE("SixelParser.rewind", "[sixel]")
 {
     auto constexpr PinColors = std::array<RGBAColor, 4> {
-        RGBAColor { 0, 0, 0, 255 },
+        OpaqueBlack,
         RGBAColor { 255, 255, 0, 255 },
         RGBAColor { 0, 255, 255, 255 },
     };
@@ -453,7 +489,7 @@ TEST_CASE("SixelParser.rewind", "[sixel]")
 TEST_CASE("SixelParser.newline", "[sixel]")
 {
     auto constexpr PinColors = std::array<RGBAColor, 4> {
-        RGBAColor { 0, 0, 0, 255 },
+        OpaqueBlack,
         RGBAColor { 255, 255, 0, 255 },
         RGBAColor { 0, 255, 255, 255 },
     };
@@ -494,9 +530,8 @@ TEST_CASE("SixelParser.newline", "[sixel]")
 
 TEST_CASE("SixelParser.vertical_cursor_advance", "[sixel]")
 {
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 255 };
     SixelImageBuilder ib(
-        { Width(5), Height(30) }, 1, 1, DefaultColor, std::make_shared<SixelColorPalette>(16, 256));
+        { Width(5), Height(30) }, {}, OpaqueBlack, std::make_shared<SixelColorPalette>(16, 256));
     auto sp = SixelParser { ib };
 
     sp.parseFragment("$-$-$-$-");
@@ -513,11 +548,9 @@ TEST_CASE("SixelParser.aspect_ratio_overflow", "[sixel]")
     // bit 0: rows 0,1  ok      bit 3: rows 6,7  row 7 overflows
     // bit 1: rows 2,3  ok      bit 4: rows 8,9  skipped
     // bit 2: rows 4,5  ok      bit 5: rows 10,11 skipped
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
     auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
 
-    auto ib = SixelImageBuilder(
-        { Width(3), Height(7) }, 2, 1, DefaultColor, std::make_shared<SixelColorPalette>(16, 256));
+    auto ib = rawBuilder({ Width(3), Height(7) }, OpaqueBlack, { .vertical = 2, .horizontal = 1 });
     ib.setRaster(2, 1, std::nullopt);
 
     auto sp = SixelParser { ib };
@@ -549,14 +582,9 @@ TEST_CASE("SixelParser.explicit_raster_vertical_overflow", "[sixel]")
     // the line against _maxSize.height (480) while the index uses the _size.width stride. A '~'
     // (all six sixel bits) therefore addresses row 5 at byte 5*10*4 = 200 of a 40-byte buffer.
     // Only bit 0 (row 0) is inside the declared raster; bits 1..5 must be dropped.
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
     auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
 
-    auto ib = SixelImageBuilder(ImageSize { Width(640), Height(480) },
-                                1,
-                                1,
-                                DefaultColor,
-                                std::make_shared<SixelColorPalette>(16, 256));
+    auto ib = rawBuilder(ImageSize { Width(640), Height(480) });
     ib.setRaster(1, 1, ImageSize { Width(10), Height(1) });
     ib.setColor(0, PinColor);
 
@@ -572,40 +600,86 @@ TEST_CASE("SixelParser.explicit_raster_vertical_overflow", "[sixel]")
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(1) });
 }
 
+TEST_CASE("SixelParser.aspect_ratio_is_bounded_by_the_canvas", "[sixel]")
+{
+    // One rule -- bounded by maxSixelAspectRatio(), whose contract carries the rationale -- reached
+    // through each of its three doors. What is pinned here is that no door bypasses it.
+    SECTION("the bound itself")
+    {
+        // Compile time deliberately: constant evaluation diagnoses undefined behaviour, so a Pan of
+        // UINT_MAX failing to compile is exactly the report we want.
+        STATIC_CHECK(sixelAspectRatioFrom({ .vertical = 4294967295u, .horizontal = 1u }, Height(600))
+                     == 100u);
+        STATIC_CHECK(sixelAspectRatioFrom({ .vertical = 2147483904u, .horizontal = 1u }, Height(600))
+                     == 100u);
+
+        // Zero on either side reads as one, per STD 070's guideline for omitted parameters.
+        STATIC_CHECK(sixelAspectRatioFrom({ .vertical = 0u, .horizontal = 0u }, Height(600)) == 1u);
+        STATIC_CHECK(sixelAspectRatioFrom({ .vertical = 5u, .horizontal = 0u }, Height(600)) == 5u);
+        STATIC_CHECK(sixelAspectRatioFrom({ .vertical = 0u, .horizontal = 5u }, Height(600)) == 1u);
+
+        // Rounding up is exact, where the float division could only approximate it.
+        STATIC_CHECK(sixelAspectRatioFrom({ .vertical = 15u, .horizontal = 2u }, Height(600)) == 8u);
+        STATIC_CHECK(sixelAspectRatioFrom({ .vertical = 16u, .horizontal = 2u }, Height(600)) == 8u);
+        STATIC_CHECK(sixelAspectRatioFrom({ .vertical = 17u, .horizontal = 2u }, Height(600)) == 9u);
+        STATIC_CHECK(sixelAspectRatioFrom({ .vertical = 1u, .horizontal = 4u }, Height(600)) == 1u);
+
+        STATIC_CHECK(maxSixelAspectRatio(Height(600)) == 100u);
+        STATIC_CHECK(maxSixelAspectRatio(Height(2160)) == 360u);
+        STATIC_CHECK(maxSixelAspectRatio(Height(4320)) == 720u);
+
+        // Never zero, however small the surface -- a scale of zero would collapse every row
+        // computation.
+        STATIC_CHECK(maxSixelAspectRatio(Height(4)) == 1u);
+        STATIC_CHECK(maxSixelAspectRatio(Height(0)) == 1u);
+    }
+
+    SECTION("through a raster attribute")
+    {
+        // The bound used to be a constant 255, squashing legal images on any display taller than
+        // 255*6 = 1530 pixels -- every 4K panel.
+        CHECK(buildOn({ Width(3840), Height(2160) }, "\"300;1").aspectRatio() == 300u);
+        CHECK(buildOn({ Width(3840), Height(2160) }, "\"360;1").aspectRatio() == 360u);
+
+        // And a surface that cannot show it bounds it, rather than the other way round.
+        CHECK(buildOn({ Width(3840), Height(2160) }, "\"361;1").aspectRatio() == 360u);
+        CHECK(buildOn({ Width(800), Height(600) }, "\"300;1").aspectRatio() == 100u);
+
+        // Measured against the maximum image size, not the box a previous raster narrowed the image
+        // to -- see setRaster(). Against canvasSize() this would be 1.
+        CHECK(buildOn({ Width(3840), Height(2160) }, "\"1;1;10;10\"300;1").aspectRatio() == 300u);
+    }
+
+    SECTION("through the constructor")
+    {
+        // It is public API: what setRaster() refuses to accept must not arrive here either.
+        auto const build = [](SixelAspectRatio aspect) {
+            return rawBuilder({ Width(64), Height(600) }, OpaqueBlack, aspect).aspectRatio();
+        };
+
+        CHECK(build({ .vertical = 2, .horizontal = 1 }) == 2u);
+        CHECK(build({ .vertical = 1000000, .horizontal = 1 }) == 100u);
+
+        // A zero horizontal used to divide by zero and convert the resulting infinity, which is
+        // undefined.
+        CHECK(build({ .vertical = 5, .horizontal = 0 }) == 5u);
+        CHECK(build({ .vertical = 0, .horizontal = 0 }) == 1u);
+    }
+}
+
 TEST_CASE("SixelParser.raster_aspect_ratio_wraparound_is_clamped", "[sixel]")
 {
-    // A raster Pan close to UINT_MAX with Pad=1 used to set _aspectRatio to ~2^31 unclamped. The
-    // render()/bandRows() bounds check (y + _aspectRatio > canvasHeight) is unsigned arithmetic,
-    // so that huge aspect ratio made the check wrap around and pass while the write offset itself
-    // (y, still ~2^31) stayed enormous -- a heap write far past the pixel buffer. setRaster() now
-    // clamps the ratio to a sane maximum, so this must no longer reach anywhere near that scale.
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    // A Pan near UINT_MAX made the then-32-bit row check wrap and pass while y stayed ~2^31, so a
+    // single set bit ('A' = 63+2) wrote gigabytes past the buffer. At the bound it paints rows 100..199.
     auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
 
-    // Canvas height must clear 512: with Pan=2147483904, (topBit+1)*_aspectRatio wraps mod 2^32 to
-    // exactly 512, and the pre-write bounds check only reaches the vulnerable line when that wrapped
-    // value is <= canvasHeight -- a too-small canvas makes render() bail out via its own early
-    // return before ever touching the write path this test exists to cover.
-    auto ib = SixelImageBuilder(
-        { Width(4), Height(600) }, 1, 1, DefaultColor, std::make_shared<SixelColorPalette>(16, 256));
-    ib.setRaster(2147483904u, 1, std::nullopt);
+    auto const ib = buildOn({ Width(4), Height(600) }, "\"2147483904;1A", PinColor);
 
-    // The clamp is the actual regression guard: any value near 2^31 here means the wraparound
-    // window this test exists to close is open again.
-    REQUIRE(ib.aspectRatio() <= 255u);
-
-    auto sp = SixelParser { ib };
-    ib.setColor(0, PinColor);
-
-    // Bit 1 set ('A' = 63+2): with an unclamped aspect ratio this alone used to be enough to
-    // compute a pointer offset gigabytes past the buffer -- the wrapped bounds check above passes,
-    // y stays ~2^31, and paintBit() writes there. It must now just clip against the 600-row canvas
-    // like any other out-of-range sixel, painting nothing.
-    sp.parseFragment("A");
-    sp.done();
-
-    // Storage stays bounded by the declared canvas -- not by whatever `Pan` claimed.
-    CHECK(ib.data().size() <= static_cast<std::size_t>(4u * 600u * 4u));
+    CHECK(ib.aspectRatio() == 100u);
+    CHECK(ib.size() == ImageSize { Width(1), Height(200) });
+    CHECK(ib.at({ .line = LineOffset(99), .column = ColumnOffset(0) }) == OpaqueBlack);
+    CHECK(ib.at({ .line = LineOffset(100), .column = ColumnOffset(0) }).rgb() == PinColor);
+    CHECK(ib.at({ .line = LineOffset(199), .column = ColumnOffset(0) }).rgb() == PinColor);
 }
 
 TEST_CASE("SixelParser.finalize_is_idempotent", "[sixel]")
@@ -614,11 +688,7 @@ TEST_CASE("SixelParser.finalize_is_idempotent", "[sixel]")
     // max-canvas stride down to _size.width; re-running it would compact the already-compacted
     // buffer, reading at the wider stride past its end. SixelParser::done() calls finalize()
     // unconditionally, so a second done() reaches this.
-    auto ib = SixelImageBuilder(ImageSize { Width(64), Height(64) },
-                                1,
-                                1,
-                                RGBAColor { 0, 0, 0, 0xFF },
-                                std::make_shared<SixelColorPalette>(16, 256));
+    auto ib = rawBuilder(ImageSize { Width(64), Height(64) });
     auto sp = SixelParser { ib };
     sp.parseFragment("#1;2;100;100;0");
     sp.parseFragment("~~~-~~~");
@@ -638,17 +708,12 @@ TEST_CASE("SixelParser.finalize_compacts_rows", "[sixel]")
     // Implicit raster: the builder writes at the max-canvas stride and finalize() must re-lay every
     // row out at _size.width. Colors differ per (band, column) so any stride or row-offset error
     // surfaces as wrong pixel content rather than merely as wasted work.
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
     auto constexpr C1 = RGBAColor { 255, 255, 0, 255 };
     auto constexpr C2 = RGBAColor { 0, 255, 255, 255 };
     auto constexpr C3 = RGBAColor { 255, 0, 255, 255 };
     auto constexpr ByIndex = std::array { C1, C2, C3 };
 
-    auto ib = SixelImageBuilder(ImageSize { Width(64), Height(64) },
-                                1,
-                                1,
-                                DefaultColor,
-                                std::make_shared<SixelColorPalette>(16, 256));
+    auto ib = rawBuilder(ImageSize { Width(64), Height(64) });
     auto sp = SixelParser { ib };
     sp.parseFragment("#1;2;100;100;0");
     sp.parseFragment("#2;2;0;100;100");
@@ -684,11 +749,7 @@ TEST_CASE("SixelParser.at_of_an_image_that_never_painted", "[sixel]")
                                          "");          // nothing at all
     INFO(std::format("payload='{}'", payload));
 
-    auto ib = SixelImageBuilder(ImageSize { Width(640), Height(480) },
-                                1,
-                                1,
-                                DefaultColor,
-                                std::make_shared<SixelColorPalette>(16, 256));
+    auto ib = rawBuilder(ImageSize { Width(640), Height(480) }, DefaultColor);
     auto sp = SixelParser { ib };
     sp.parseFragment(std::string_view { payload });
 
@@ -701,20 +762,9 @@ TEST_CASE("SixelParser.finalize_keeps_an_explicitly_declared_single_row", "[sixe
     // `"1;1;100;1` declares a 1-pixel-tall image. finalize() compacted anything whose height read 1
     // down to the sixel cursor's line -- still 0 within the first band -- freeing every pixel and
     // leaving a zero-height image for the renderer to choke on.
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
     auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
 
-    auto ib = SixelImageBuilder(ImageSize { Width(640), Height(480) },
-                                1,
-                                1,
-                                DefaultColor,
-                                std::make_shared<SixelColorPalette>(16, 256));
-    ib.setRaster(1, 1, ImageSize { Width(100), Height(1) });
-    ib.setColor(0, PinColor);
-
-    auto sp = SixelParser { ib };
-    sp.parseFragment("@");
-    sp.done();
+    auto const ib = buildOn({ Width(640), Height(480) }, "\"1;1;100;1@", PinColor);
 
     CHECK(ib.size() == ImageSize { Width(100), Height(1) });
     CHECK(ib.data().size() == static_cast<std::size_t>(100u * 1u * 4u));
@@ -725,19 +775,10 @@ TEST_CASE("SixelParser.finalize_keeps_a_single_painted_row", "[sixel]")
 {
     // Without a raster the image grows as it paints, and one painted pixel row is a height of 1 --
     // which is also the constructed sentinel. Compacting on that predicate threw the row away.
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
     auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
 
-    auto ib = SixelImageBuilder(ImageSize { Width(640), Height(480) },
-                                1,
-                                1,
-                                DefaultColor,
-                                std::make_shared<SixelColorPalette>(16, 256));
-    ib.setColor(0, PinColor);
-
-    auto sp = SixelParser { ib };
-    sp.parseFragment("@"); // bit 0 only: paints pixel row 0 and nothing else
-    sp.done();
+    // '@' is bit 0 only: it paints pixel row 0 and nothing else.
+    auto const ib = buildOn({ Width(640), Height(480) }, "@", PinColor);
 
     CHECK(ib.size() == ImageSize { Width(1), Height(1) });
     CHECK(ib.at(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }).rgb() == PinColor);
@@ -747,19 +788,40 @@ TEST_CASE("SixelParser.finalize_sizes_an_unpainted_image_by_the_cursor", "[sixel
 {
     // The compaction branch exists for this: nothing painted, so the image is only what the cursor
     // walked over. Asking the storage rather than the height is what still tells this apart from the
-    // two cases above.
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    // two cases above. Two newlines, no pixel data -- two bands of six rows.
+    CHECK(buildOn({ Width(640), Height(480) }, "--").size() == ImageSize { Width(1), Height(12) });
+}
 
-    auto ib = SixelImageBuilder(ImageSize { Width(640), Height(480) },
-                                1,
-                                1,
-                                DefaultColor,
-                                std::make_shared<SixelColorPalette>(16, 256));
-    auto sp = SixelParser { ib };
-    sp.parseFragment("--"); // two newlines, no pixel data
-    sp.done();
+TEST_CASE("SixelParser.unpainted_image_height_stays_within_the_canvas", "[sixel]")
+{
+    // Nothing paints, so finalize() sizes from the cursor alone -- and it used to scale that line by
+    // the ratio newline() had already applied, reporting a 58806-row image on a 600-row canvas.
+    auto const heightAfter = [](ImageSize canvas, std::string_view input) {
+        return buildOn(canvas, input).size().height;
+    };
 
-    CHECK(ib.size() == ImageSize { Width(1), Height(12) }); // two bands of six rows
+    // One band of 6*99 rows walked over, and that is the height -- not that number times 99 again.
+    CHECK(heightAfter({ Width(800), Height(600) }, "\"99;1-") == Height(594));
+    CHECK(heightAfter({ Width(3840), Height(2160) }, "\"99;1-") == Height(594));
+
+    // A ratio the canvas cannot fit a second band of leaves the cursor where it started.
+    CHECK(heightAfter({ Width(800), Height(600) }, "\"100;1-") == Height(0));
+
+    // Further newlines cannot advance past the last band that fits, so the height stays where one
+    // newline left it however many the stream sends.
+    CHECK(heightAfter({ Width(800), Height(600) }, "\"99;1----------") == Height(594));
+}
+
+TEST_CASE("SixelParser.explicit_raster_height_saturates", "[sixel]")
+{
+    // Pv and the ratio are both wire-supplied: their 32-bit product wrapped Pv = 2^31 at ratio 2 to
+    // exactly zero, and a zero-height canvas failed every row check, so the image vanished.
+    auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
+
+    auto const ib = buildOn({ Width(800), Height(600) }, "\"2;1;100;2147483648#0@", PinColor);
+
+    CHECK(ib.size() == ImageSize { Width(100), Height(600) });
+    CHECK(ib.at({ .line = LineOffset(0), .column = ColumnOffset(0) }).rgb() == PinColor);
 }
 
 TEST_CASE("SixelParser.hls_saturation_is_its_own_parameter", "[sixel]")
@@ -804,11 +866,7 @@ TEST_CASE("SixelParser.currentColor_tracks_palette", "[sixel]")
     auto constexpr A = RGBColor { 1, 2, 3 };
     auto constexpr B = RGBColor { 4, 5, 6 };
     auto constexpr C = RGBColor { 7, 8, 9 };
-    auto ib = SixelImageBuilder(ImageSize { Width(4), Height(6) },
-                                1,
-                                1,
-                                RGBAColor { 0, 0, 0, 0xFF },
-                                std::make_shared<SixelColorPalette>(16, 256));
+    auto ib = rawBuilder(ImageSize { Width(4), Height(6) });
 
     SECTION("redefining the selected register is visible immediately")
     {
@@ -842,22 +900,17 @@ TEST_CASE("SixelParser.storage_is_right_sized", "[sixel]")
     // terminal's maximum image size -- in practice the whole monitor -- once per sixel sequence,
     // so allocating (and background-filling) that up front costs ~33 MB per image on a 4K display
     // even for a tiny one.
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
     auto constexpr MaxSize = ImageSize { Width(3840), Height(2160) }; // 33 MB if allocated eagerly
-    auto const palette = [] {
-        return std::make_shared<SixelColorPalette>(16, 256);
-    };
-
     SECTION("the constructor allocates nothing")
     {
-        auto ib = SixelImageBuilder(MaxSize, 1, 1, DefaultColor, palette());
+        auto ib = rawBuilder(MaxSize);
         CHECK(ib.data().empty());
         CHECK(ib.canvasSize() == MaxSize); // bounds still span the full canvas
     }
 
     SECTION("an explicit raster allocates exactly")
     {
-        auto ib = SixelImageBuilder(MaxSize, 1, 1, DefaultColor, palette());
+        auto ib = rawBuilder(MaxSize);
         ib.setRaster(1, 1, ImageSize { Width(20), Height(20) });
         CHECK(ib.data().size() == static_cast<std::size_t>(20u * 20u * 4u));
         CHECK(ib.canvasSize() == ImageSize { Width(20), Height(20) });
@@ -865,7 +918,7 @@ TEST_CASE("SixelParser.storage_is_right_sized", "[sixel]")
 
     SECTION("an implicit raster grows on demand")
     {
-        auto ib = SixelImageBuilder(MaxSize, 1, 1, DefaultColor, palette());
+        auto ib = rawBuilder(MaxSize);
         auto sp = SixelParser { ib };
         sp.parseFragment("#1;2;100;100;0");
         sp.parseFragment("!20~-!20~-!20~");                              // 20 x 18 pixels
@@ -885,8 +938,7 @@ TEST_CASE("SixelParser.run_matches_per_byte", "[sixel]")
     // path, and compares the whole buffer -- not hand-computed pixels, which would stop pinning the
     // equivalence the moment either side changed.
     auto const build = [](std::string_view input, bool batched, ImageSize canvas, bool explicitRaster) {
-        auto ib = SixelImageBuilder(
-            canvas, 1, 1, RGBAColor { 0, 0, 0, 0xFF }, std::make_shared<SixelColorPalette>(16, 256));
+        auto ib = rawBuilder(canvas);
         if (explicitRaster)
             ib.setRaster(1, 1, canvas);
         auto sp = SixelParser { ib };
@@ -968,8 +1020,7 @@ TEST_CASE("SixelParser.digit_runs_match_per_byte", "[sixel]")
     // changed. aspectRatio() is in the tuple because a raster's parameters are only visible there.
     auto const build = [](std::string_view input, bool batched) {
         auto const canvas = ImageSize { Width(8), Height(12) };
-        auto ib = SixelImageBuilder(
-            canvas, 1, 1, RGBAColor { 0, 0, 0, 0xFF }, std::make_shared<SixelColorPalette>(16, 256));
+        auto ib = rawBuilder(canvas);
         auto sp = SixelParser { ib };
         if (batched)
             sp.parseFragment(input); // routes through pass() -> foldDigits()
@@ -1024,8 +1075,7 @@ TEST_CASE("SixelParser.digit_runs_match_per_byte", "[sixel]")
         // tens of thousands of them -- so a parameter's digits straddling a call is routine.
         auto const buildSplit = [](std::string_view first, std::string_view second) {
             auto const canvas = ImageSize { Width(8), Height(12) };
-            auto ib = SixelImageBuilder(
-                canvas, 1, 1, RGBAColor { 0, 0, 0, 0xFF }, std::make_shared<SixelColorPalette>(16, 256));
+            auto ib = rawBuilder(canvas);
             auto sp = SixelParser { ib };
             sp.parseFragment(first);
             sp.parseFragment(second);
@@ -1055,11 +1105,7 @@ TEST_CASE("SixelParser.param_count_saturates", "[sixel]")
     // can send. Stated as equivalences rather than against hand-computed pixels: what matters is
     // that a saturated list decides the same way a longer one would.
     auto const build = [](std::string_view input) {
-        auto ib = SixelImageBuilder(ImageSize { Width(8), Height(12) },
-                                    1,
-                                    1,
-                                    RGBAColor { 0, 0, 0, 0xFF },
-                                    std::make_shared<SixelColorPalette>(16, 256));
+        auto ib = rawBuilder(ImageSize { Width(8), Height(12) });
         auto sp = SixelParser { ib };
         sp.parseFragment(input);
         sp.done();
@@ -1106,8 +1152,7 @@ TEST_CASE("SixelParser.rep_matches_unrolled", "[sixel]")
     // reaches render(). Comparing whole buffers rather than hand-computed pixels is what keeps this
     // pinning the equivalence rather than one side's idea of the answer.
     auto const build = [](std::string_view input, bool batched, bool explicitRaster, ImageSize canvas) {
-        auto ib = SixelImageBuilder(
-            canvas, 1, 1, RGBAColor { 0, 0, 0, 0xFF }, std::make_shared<SixelColorPalette>(16, 256));
+        auto ib = rawBuilder(canvas);
         if (explicitRaster)
             ib.setRaster(1, 1, canvas);
         auto sp = SixelParser { ib };
