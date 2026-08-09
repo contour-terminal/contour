@@ -7103,14 +7103,11 @@ unique_ptr<ParserExtension> Screen::hookSixel(Sequence const& seq)
     auto const pa = seq.paramOr(0, 1);
     auto const pb = seq.paramOr(1, 2);
 
-    auto const aspectVertical = sixelAspectVertical(pa);
-    auto const aspectHorizontal = 1u;
     auto const transparentBackground = pb == 1;
 
     _sixelImageBuilder = make_unique<SixelImageBuilder>(
         _terminal->maxImageSize(),
-        aspectVertical,
-        aspectHorizontal,
+        SixelAspectRatio { .vertical = sixelAspectVertical(pa), .horizontal = 1 },
         transparentBackground ? RGBAColor { 0, 0, 0, 0 } : _terminal->colorPalette().defaultBackground,
         _terminal->usePrivateColorRegisters()
             ? make_shared<SixelColorPalette>(_terminal->maxSixelColorRegisters(),

@@ -39,44 +39,55 @@ constexpr inline std::array<unsigned, 10> SixelAspectVerticalByP1 = { 2, 2, 5, 3
     return p1 < SixelAspectVerticalByP1.size() ? SixelAspectVerticalByP1[p1] : 1;
 }
 
-/// The largest vertical scaling a sixel row can use and still fit a canvas.
+/// A sixel pixel aspect ratio, as a raster attribute states it.
+///
+/// One named pair rather than two adjacent unsigneds: the two differ by a factor of four when
+/// exchanged and nothing diagnoses the swap.
+struct SixelAspectRatio
+{
+    unsigned vertical = 1;   ///< Raster attribute Pan.
+    unsigned horizontal = 1; ///< Raster attribute Pad.
+};
+
+/// The largest vertical scaling a sixel row can use and still fit the surface it is drawn on.
 ///
 /// One sixel row is @c SixelBitCount pixel rows tall at scale 1, so a scale above
-/// canvasHeight/SixelBitCount makes a single row taller than the surface it is drawn on -- nothing
-/// can display it, and on real hardware the active position would scroll past the bottom margin
-/// before the row was finished. This is a renderability bound, not a protocol one: DEC STD 070
-/// chapter 9 states no maximum for the raster attribute's Pn1/Pn2 at all. Deriving it from the
-/// canvas rather than picking a constant is what lets a 4K display use the ratios it can actually
-/// show while a small canvas stays correspondingly tight.
-/// @param canvasHeight the pixel height of the surface the image is drawn into.
+/// surfaceHeight/SixelBitCount makes a single row taller than that surface -- nothing can display
+/// it, and on real hardware the active position would scroll past the bottom margin before the row
+/// was finished. This is a renderability bound, not a protocol one: DEC STD 070 chapter 9 states no
+/// maximum for the raster attribute's Pn1/Pn2 at all. Deriving it from the surface rather than
+/// picking a constant is what lets a 4K display use the ratios it can actually show while a small
+/// one stays correspondingly tight.
+/// @param surfaceHeight the pixel height of the surface the image may occupy -- the builder's
+///                      maximum image size, not the possibly narrower canvasSize() a previous
+///                      raster attribute left behind.
 /// @return the bound, never below 1.
-[[nodiscard]] constexpr unsigned int maxSixelAspectRatio(unsigned int canvasHeight) noexcept
+[[nodiscard]] constexpr unsigned maxSixelAspectRatio(Height surfaceHeight) noexcept
 {
-    return std::max(1u, canvasHeight / SixelBitCount);
+    return std::max(1u, unbox<unsigned>(surfaceHeight) / SixelBitCount);
 }
 
-/// Resolves a raster attribute's Pan/Pad to the vertical scaling a canvas can actually show.
+/// Resolves a raster attribute's Pan/Pad to the vertical scaling a surface can actually show.
 ///
-/// Taking the canvas rather than the bound means a caller cannot supply the wrong ceiling, which is
-/// the only way the two writers of the ratio could drift apart.
+/// Taking the surface rather than the bound keeps the two writers of the ratio on one rule, and
+/// taking it as a @c Height makes handing it a width a compile error. Both writers still name
+/// _maxSize.height themselves, so this narrows the room for drift rather than closing it.
 ///
 /// The division is integer throughout. Computing the ratio in @c float and converting afterwards is
 /// undefined for a Pan whose float rounds beyond UINT_MAX, and resolves differently per
 /// architecture -- arm64 saturates, x86-64 yields zero -- so one stream rendered at two different
-/// scales. Widening to 64 bits keeps the rounding addition exact for every 32-bit input.
-/// @param pan raster attribute Pn1; 0 reads as 1, as STD 070's guideline for omitted parameters and
-///            xterm's own handling both do, here by way of the lower bound.
-/// @param pad raster attribute Pn2; 0 reads as 1, likewise.
-/// @param canvasHeight the pixel height of the surface the image is drawn into.
-/// @return the vertical scaling, in [1, maxSixelAspectRatio(canvasHeight)].
-[[nodiscard]] constexpr unsigned sixelAspectRatioFrom(unsigned pan,
-                                                      unsigned pad,
-                                                      unsigned canvasHeight) noexcept
+/// scales.
+/// @param aspect the raster attribute's Pan:Pad; a zero on either side reads as 1, as STD 070's
+///               guideline for omitted parameters and xterm's own handling both do.
+/// @param surfaceHeight the pixel height of the surface the image may occupy.
+/// @return the vertical scaling, in [1, maxSixelAspectRatio(surfaceHeight)].
+[[nodiscard]] constexpr unsigned sixelAspectRatioFrom(SixelAspectRatio aspect, Height surfaceHeight) noexcept
 {
-    auto const denominator = static_cast<uint64_t>(pad == 0 ? 1u : pad);
-    auto const ratio = (static_cast<uint64_t>(pan) + denominator - 1) / denominator; // ceil, exactly
-    return static_cast<unsigned>(
-        std::clamp(ratio, uint64_t { 1 }, uint64_t { maxSixelAspectRatio(canvasHeight) }));
+    auto const numerator = aspect.vertical != 0 ? aspect.vertical : 1u;
+    auto const denominator = aspect.horizontal != 0 ? aspect.horizontal : 1u;
+    // Quotient plus remainder rather than (n + d - 1) / d: the same ceiling, but no sum to overflow.
+    auto const ratio = (numerator / denominator) + (numerator % denominator != 0 ? 1u : 0u);
+    return std::min(ratio, maxSixelAspectRatio(surfaceHeight));
 }
 
 /// Sixel Stream Parser API.
@@ -441,8 +452,7 @@ class SixelImageBuilder: public SixelParser::Events
     using Buffer = std::vector<uint8_t>;
 
     SixelImageBuilder(ImageSize maxSize,
-                      unsigned aspectVertical,
-                      unsigned aspectHorizontal,
+                      SixelAspectRatio aspect,
                       RGBAColor backgroundColor,
                       std::shared_ptr<SixelColorPalette> colorPalette);
 
@@ -457,9 +467,6 @@ class SixelImageBuilder: public SixelParser::Events
     /// pixel buffer's own geometry always follows it, never the other way round.
     [[nodiscard]] ImageSize canvasSize() const noexcept { return _explicitSize ? _size : _maxSize; }
     [[nodiscard]] unsigned aspectRatio() const noexcept { return _aspectRatio; }
-
-    /// @return the height of one sixel band in pixel rows.
-    [[nodiscard]] unsigned sixelBandHeight() const noexcept { return SixelBitCount * _aspectRatio; }
 
     /// The color pixels are currently painted with.
     ///
@@ -488,6 +495,28 @@ class SixelImageBuilder: public SixelParser::Events
     [[nodiscard]] CellLocation const& sixelCursor() const noexcept { return _sixelCursor; }
 
   private:
+    /// @return the height of one sixel band in pixel rows.
+    ///
+    /// 64-bit for the same reason render() and bandRows() are: the width is what makes the
+    /// arithmetic safe, not the bound on _aspectRatio. Computed in 32 bits this wrapped above a
+    /// ratio of 2^32/SixelBitCount, so the bound was silently carrying a safety role here alone --
+    /// and relaxing it, a legitimate rendering-policy change, would have reopened the wrap.
+    [[nodiscard]] uint64_t sixelBandHeight() const noexcept
+    {
+        return uint64_t { SixelBitCount } * _aspectRatio;
+    }
+
+    /// Assigns the image's size, clamped to the maximum it may occupy.
+    ///
+    /// `_size <= _maxSize` is what canvasSize(), reserve() and every write guard rest on, and _size
+    /// is the choke point rather than reshape() because _size and data() leave the class together
+    /// into ImagePool::create(), which checks no relationship between them. render() writes _size
+    /// directly and does not come through here; its growth is bounded structurally instead, by the
+    /// same canvasSize() its write guard uses.
+    /// @param requested the size the stream asked for, each axis already narrowed to 32 bits --
+    ///                  see saturatingScale() for the one product that has to get there safely.
+    void setSize(ImageSize requested) noexcept;
+
     /// Re-lays the pixel buffer out to @p newStride pixels per row and @p newRows rows.
     ///
     /// Overlapping pixel content is preserved. This is the only function that moves pixels, so the
