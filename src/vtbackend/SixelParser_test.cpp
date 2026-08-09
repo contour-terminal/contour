@@ -17,10 +17,28 @@ using namespace vtbackend;
 namespace
 {
 
+constexpr auto OpaqueBlack = RGBAColor { 0, 0, 0, 0xFF };
+
 SixelImageBuilder sixelImageBuilder(ImageSize size, RGBAColor defaultColor)
 {
     auto ib = SixelImageBuilder(size, 1, 1, defaultColor, std::make_shared<SixelColorPalette>(16, 256));
     ib.setRaster(1, 1, size);
+    return ib;
+}
+
+/// Runs @p input on a fresh 1:1-aspect builder of @p canvas size and finalizes it.
+///
+/// Deliberately not sixelImageBuilder(), which declares an explicit raster of its own: what these
+/// cases pin is what a stream that declares its own raster -- or none -- leaves behind.
+/// @param canvas the maximum image size the builder is constructed with.
+/// @param input the sixel fragment to parse, without the DCS introducer or ST.
+/// @return the finalized builder.
+SixelImageBuilder buildOn(ImageSize canvas, std::string_view input)
+{
+    auto ib = SixelImageBuilder(canvas, 1, 1, OpaqueBlack, std::make_shared<SixelColorPalette>(16, 256));
+    auto sp = SixelParser { ib };
+    sp.parseFragment(input);
+    sp.done();
     return ib;
 }
 
@@ -314,7 +332,13 @@ TEST_CASE("SixelParser.raster", "[sixel]")
     sp.done();
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
     CHECK(ib.aspectRatio() == 1);
+    // A zero Pan or Pad reads as one, which is what STD 070's guideline for omitted parameters says
+    // and what xterm does; `"5;0` is therefore 5:1, not the previous ratio left untouched.
     sp.parseFragment("\"5;0");
+    sp.done();
+    CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    CHECK(ib.aspectRatio() == 5);
+    sp.parseFragment("\"0;5");
     sp.done();
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
     CHECK(ib.aspectRatio() == 1);
@@ -572,40 +596,103 @@ TEST_CASE("SixelParser.explicit_raster_vertical_overflow", "[sixel]")
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(1) });
 }
 
+TEST_CASE("SixelParser.aspect_ratio_bound_is_total", "[sixel]")
+{
+    // The bound is a pure function of the canvas, so every input it must survive can be stated here
+    // rather than smuggled through a builder. Checking at compile time is deliberate: constant
+    // evaluation diagnoses undefined behaviour, so a Pan of UINT_MAX failing to compile is exactly
+    // the report we want -- the predecessor computed ceil() in float and converted afterwards.
+    STATIC_CHECK(sixelAspectRatioFrom(4294967295u, 1u, 600u) == 100u);
+    STATIC_CHECK(sixelAspectRatioFrom(2147483904u, 1u, 600u) == 100u);
+
+    // Zero on either side reads as one, per STD 070's guideline for omitted parameters.
+    STATIC_CHECK(sixelAspectRatioFrom(0u, 0u, 600u) == 1u);
+    STATIC_CHECK(sixelAspectRatioFrom(5u, 0u, 600u) == 5u);
+    STATIC_CHECK(sixelAspectRatioFrom(0u, 5u, 600u) == 1u);
+
+    // Rounding up is exact, where the float division could only approximate it.
+    STATIC_CHECK(sixelAspectRatioFrom(15u, 2u, 600u) == 8u);
+    STATIC_CHECK(sixelAspectRatioFrom(16u, 2u, 600u) == 8u);
+    STATIC_CHECK(sixelAspectRatioFrom(17u, 2u, 600u) == 9u);
+    STATIC_CHECK(sixelAspectRatioFrom(1u, 4u, 600u) == 1u);
+
+    // One sixel row is six pixel rows tall at scale 1, so the bound is the canvas over six: a taller
+    // row cannot be displayed on any device. It follows the canvas rather than a constant, which is
+    // what lets a 4K display use the whole range it can actually show.
+    STATIC_CHECK(maxSixelAspectRatio(600u) == 100u);
+    STATIC_CHECK(maxSixelAspectRatio(2160u) == 360u);
+    STATIC_CHECK(maxSixelAspectRatio(4320u) == 720u);
+
+    // Never zero, however small the canvas -- a scale of zero would collapse every row computation.
+    STATIC_CHECK(maxSixelAspectRatio(4u) == 1u);
+    STATIC_CHECK(maxSixelAspectRatio(0u) == 1u);
+}
+
 TEST_CASE("SixelParser.raster_aspect_ratio_wraparound_is_clamped", "[sixel]")
 {
-    // A raster Pan close to UINT_MAX with Pad=1 used to set _aspectRatio to ~2^31 unclamped. The
+    // A raster Pan close to UINT_MAX with Pad=1 used to set _aspectRatio to ~2^31 unbounded. The
     // render()/bandRows() bounds check (y + _aspectRatio > canvasHeight) is unsigned arithmetic,
     // so that huge aspect ratio made the check wrap around and pass while the write offset itself
-    // (y, still ~2^31) stayed enormous -- a heap write far past the pixel buffer. setRaster() now
-    // clamps the ratio to a sane maximum, so this must no longer reach anywhere near that scale.
-    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    // (y, still ~2^31) stayed enormous -- a heap write far past the pixel buffer.
     auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
 
-    // Canvas height must clear 512: with Pan=2147483904, (topBit+1)*_aspectRatio wraps mod 2^32 to
-    // exactly 512, and the pre-write bounds check only reaches the vulnerable line when that wrapped
-    // value is <= canvasHeight -- a too-small canvas makes render() bail out via its own early
-    // return before ever touching the write path this test exists to cover.
     auto ib = SixelImageBuilder(
-        { Width(4), Height(600) }, 1, 1, DefaultColor, std::make_shared<SixelColorPalette>(16, 256));
+        { Width(4), Height(600) }, 1, 1, OpaqueBlack, std::make_shared<SixelColorPalette>(16, 256));
     ib.setRaster(2147483904u, 1, std::nullopt);
 
-    // The clamp is the actual regression guard: any value near 2^31 here means the wraparound
-    // window this test exists to close is open again.
-    REQUIRE(ib.aspectRatio() <= 255u);
+    // A CHECK, not a REQUIRE: the write path below is the half of this test that reproduces the
+    // heap write, and aborting the case here would skip it whenever the bound is what regressed.
+    CHECK(ib.aspectRatio() == maxSixelAspectRatio(600u));
 
     auto sp = SixelParser { ib };
     ib.setColor(0, PinColor);
 
-    // Bit 1 set ('A' = 63+2): with an unclamped aspect ratio this alone used to be enough to
-    // compute a pointer offset gigabytes past the buffer -- the wrapped bounds check above passes,
-    // y stays ~2^31, and paintBit() writes there. It must now just clip against the 600-row canvas
-    // like any other out-of-range sixel, painting nothing.
+    // Bit 1 set ('A' = 63+2): with an unbounded aspect ratio this alone was enough to compute a
+    // pointer offset gigabytes past the buffer -- the wrapped bounds check above passed, y stayed
+    // ~2^31, and paintBit() wrote there. At the bound it paints an ordinary, in-canvas band: bit 1
+    // starts at row 1*100 and covers the 100 rows the scaling asks for.
     sp.parseFragment("A");
     sp.done();
 
-    // Storage stays bounded by the declared canvas -- not by whatever `Pan` claimed.
-    CHECK(ib.data().size() <= static_cast<std::size_t>(4u * 600u * 4u));
+    CHECK(ib.size() == ImageSize { Width(1), Height(200) });
+    CHECK(ib.at({ .line = LineOffset(99), .column = ColumnOffset(0) }) == OpaqueBlack);
+    CHECK(ib.at({ .line = LineOffset(100), .column = ColumnOffset(0) }).rgb() == PinColor);
+    CHECK(ib.at({ .line = LineOffset(199), .column = ColumnOffset(0) }).rgb() == PinColor);
+}
+
+TEST_CASE("SixelParser.aspect_ratio_follows_the_canvas", "[sixel]")
+{
+    // The bound used to be the constant 255, which silently squashed a legal image on any display
+    // taller than 255*6 = 1530 pixels. The image canvas is derived from the monitor, so that is
+    // every 4K panel: a ratio of 300 needs 1800 pixel rows and fits a 2160-row canvas comfortably.
+    CHECK(buildOn({ Width(3840), Height(2160) }, "\"300;1").aspectRatio() == 300u);
+    CHECK(buildOn({ Width(3840), Height(2160) }, "\"360;1").aspectRatio() == 360u);
+
+    // And a canvas that cannot show it bounds it, rather than the other way round.
+    CHECK(buildOn({ Width(3840), Height(2160) }, "\"361;1").aspectRatio() == 360u);
+    CHECK(buildOn({ Width(800), Height(600) }, "\"300;1").aspectRatio() == 100u);
+}
+
+TEST_CASE("SixelParser.constructed_aspect_ratio_is_bounded", "[sixel]")
+{
+    // The constructor is the builder's other writer of the aspect ratio, and it is public API: what
+    // setRaster() refuses to accept must not arrive through it either.
+    auto const build = [&](unsigned aspectVertical, unsigned aspectHorizontal) {
+        return SixelImageBuilder({ Width(64), Height(600) },
+                                 aspectVertical,
+                                 aspectHorizontal,
+                                 OpaqueBlack,
+                                 std::make_shared<SixelColorPalette>(16, 256))
+            .aspectRatio();
+    };
+
+    CHECK(build(2, 1) == 2u);
+    CHECK(build(1000000, 1) == maxSixelAspectRatio(600u));
+
+    // A zero horizontal used to divide by zero and convert the resulting infinity, which is
+    // undefined; it reads as one, matching what setRaster() does with a zero Pad.
+    CHECK(build(5, 0) == 5u);
+    CHECK(build(0, 0) == 1u);
 }
 
 TEST_CASE("SixelParser.finalize_is_idempotent", "[sixel]")
@@ -760,6 +847,47 @@ TEST_CASE("SixelParser.finalize_sizes_an_unpainted_image_by_the_cursor", "[sixel
     sp.done();
 
     CHECK(ib.size() == ImageSize { Width(1), Height(12) }); // two bands of six rows
+}
+
+TEST_CASE("SixelParser.unpainted_image_height_stays_within_the_canvas", "[sixel]")
+{
+    // Nothing paints here, so finalize() sizes the image from the cursor alone -- the one path that
+    // reaches reshape() without going through reserve(), and so the one place nothing else bounds
+    // the height to the canvas. It also used to scale the cursor line by the aspect ratio, which
+    // counts the ratio twice: newline() advances the line by six rows *times* the ratio already.
+    // Together those reported a 58806-row image on a 600-row canvas.
+    auto const heightAfter = [&](ImageSize canvas, std::string_view input) {
+        return buildOn(canvas, input).size().height;
+    };
+
+    // One band of 6*99 rows walked over, and that is the height -- not that number times 99 again.
+    CHECK(heightAfter({ Width(800), Height(600) }, "\"99;1-") == Height(594));
+    CHECK(heightAfter({ Width(3840), Height(2160) }, "\"99;1-") == Height(594));
+
+    // A ratio the canvas cannot fit a second band of leaves the cursor where it started.
+    CHECK(heightAfter({ Width(800), Height(600) }, "\"100;1-") == Height(0));
+
+    // Whatever the stream asks for, the image never claims more rows than the canvas has.
+    CHECK(heightAfter({ Width(800), Height(600) }, "\"99;1----------") <= Height(600));
+}
+
+TEST_CASE("SixelParser.explicit_raster_height_saturates", "[sixel]")
+{
+    // Pv and the aspect ratio are both wire-supplied and their product was a 32-bit multiply done
+    // before the clamp to the ceiling: Pv = 2^31 at ratio 2 wrapped to exactly zero, and a
+    // zero-height canvas made every following sixel fail the row bounds check, so the image
+    // vanished entirely instead of being clamped to what the canvas can hold.
+    auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
+
+    auto ib = SixelImageBuilder(
+        { Width(800), Height(600) }, 1, 1, OpaqueBlack, std::make_shared<SixelColorPalette>(16, 256));
+    auto sp = SixelParser { ib };
+    ib.setColor(0, PinColor);
+    sp.parseFragment("\"2;1;100;2147483648#0@");
+    sp.done();
+
+    CHECK(ib.size() == ImageSize { Width(100), Height(600) });
+    CHECK(ib.at({ .line = LineOffset(0), .column = ColumnOffset(0) }).rgb() == PinColor);
 }
 
 TEST_CASE("SixelParser.hls_saturation_is_its_own_parameter", "[sixel]")

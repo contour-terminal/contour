@@ -7104,7 +7104,7 @@ unique_ptr<ParserExtension> Screen::hookSixel(Sequence const& seq)
     auto const pb = seq.paramOr(1, 2);
 
     auto const aspectVertical = sixelAspectVertical(pa);
-    auto const aspectHorizontal = 1;
+    auto const aspectHorizontal = 1u;
     auto const transparentBackground = pb == 1;
 
     _sixelImageBuilder = make_unique<SixelImageBuilder>(

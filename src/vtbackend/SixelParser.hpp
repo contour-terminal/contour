@@ -6,8 +6,10 @@
 
 #include <vtparser/ParserExtension.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -27,14 +29,54 @@ constexpr inline unsigned SixelBitMask = (1u << SixelBitCount) - 1u;
 
 /// VT340 vertical aspect ratio (Pan) by sixel DCS parameter P1.
 /// @see https://vt100.net/docs/vt3xx-gp/chapter14.html
-constexpr inline std::array<int, 10> SixelAspectVerticalByP1 = { 2, 2, 5, 3, 3, 2, 2, 1, 1, 1 };
+constexpr inline std::array<unsigned, 10> SixelAspectVerticalByP1 = { 2, 2, 5, 3, 3, 2, 2, 1, 1, 1 };
 
 /// Maps a sixel DCS P1 parameter to its vertical aspect ratio.
 /// @param p1 the DCS P1 parameter.
 /// @return the vertical aspect ratio; 1 for values outside the defined range.
-[[nodiscard]] constexpr int sixelAspectVertical(unsigned p1) noexcept
+[[nodiscard]] constexpr unsigned sixelAspectVertical(unsigned p1) noexcept
 {
     return p1 < SixelAspectVerticalByP1.size() ? SixelAspectVerticalByP1[p1] : 1;
+}
+
+/// The largest vertical scaling a sixel row can use and still fit a canvas.
+///
+/// One sixel row is @c SixelBitCount pixel rows tall at scale 1, so a scale above
+/// canvasHeight/SixelBitCount makes a single row taller than the surface it is drawn on -- nothing
+/// can display it, and on real hardware the active position would scroll past the bottom margin
+/// before the row was finished. This is a renderability bound, not a protocol one: DEC STD 070
+/// chapter 9 states no maximum for the raster attribute's Pn1/Pn2 at all. Deriving it from the
+/// canvas rather than picking a constant is what lets a 4K display use the ratios it can actually
+/// show while a small canvas stays correspondingly tight.
+/// @param canvasHeight the pixel height of the surface the image is drawn into.
+/// @return the bound, never below 1.
+[[nodiscard]] constexpr unsigned int maxSixelAspectRatio(unsigned int canvasHeight) noexcept
+{
+    return std::max(1u, canvasHeight / SixelBitCount);
+}
+
+/// Resolves a raster attribute's Pan/Pad to the vertical scaling a canvas can actually show.
+///
+/// Taking the canvas rather than the bound means a caller cannot supply the wrong ceiling, which is
+/// the only way the two writers of the ratio could drift apart.
+///
+/// The division is integer throughout. Computing the ratio in @c float and converting afterwards is
+/// undefined for a Pan whose float rounds beyond UINT_MAX, and resolves differently per
+/// architecture -- arm64 saturates, x86-64 yields zero -- so one stream rendered at two different
+/// scales. Widening to 64 bits keeps the rounding addition exact for every 32-bit input.
+/// @param pan raster attribute Pn1; 0 reads as 1, as STD 070's guideline for omitted parameters and
+///            xterm's own handling both do, here by way of the lower bound.
+/// @param pad raster attribute Pn2; 0 reads as 1, likewise.
+/// @param canvasHeight the pixel height of the surface the image is drawn into.
+/// @return the vertical scaling, in [1, maxSixelAspectRatio(canvasHeight)].
+[[nodiscard]] constexpr unsigned sixelAspectRatioFrom(unsigned pan,
+                                                      unsigned pad,
+                                                      unsigned canvasHeight) noexcept
+{
+    auto const denominator = static_cast<uint64_t>(pad == 0 ? 1u : pad);
+    auto const ratio = (static_cast<uint64_t>(pan) + denominator - 1) / denominator; // ceil, exactly
+    return static_cast<unsigned>(
+        std::clamp(ratio, uint64_t { 1 }, uint64_t { maxSixelAspectRatio(canvasHeight) }));
 }
 
 /// Sixel Stream Parser API.
@@ -399,8 +441,8 @@ class SixelImageBuilder: public SixelParser::Events
     using Buffer = std::vector<uint8_t>;
 
     SixelImageBuilder(ImageSize maxSize,
-                      int aspectVertical,
-                      int aspectHorizontal,
+                      unsigned aspectVertical,
+                      unsigned aspectHorizontal,
                       RGBAColor backgroundColor,
                       std::shared_ptr<SixelColorPalette> colorPalette);
 
@@ -414,7 +456,10 @@ class SixelImageBuilder: public SixelParser::Events
     /// maximum permitted image size. This is the single authority for "may I write here?" — the
     /// pixel buffer's own geometry always follows it, never the other way round.
     [[nodiscard]] ImageSize canvasSize() const noexcept { return _explicitSize ? _size : _maxSize; }
-    [[nodiscard]] unsigned int aspectRatio() const noexcept { return _aspectRatio; }
+    [[nodiscard]] unsigned aspectRatio() const noexcept { return _aspectRatio; }
+
+    /// @return the height of one sixel band in pixel rows.
+    [[nodiscard]] unsigned sixelBandHeight() const noexcept { return SixelBitCount * _aspectRatio; }
 
     /// The color pixels are currently painted with.
     ///
@@ -510,11 +555,9 @@ class SixelImageBuilder: public SixelParser::Events
     /// Guards against finalize() running twice: SixelParser::done() calls it unconditionally, and
     /// re-compacting an already-compacted buffer would read past its end.
     bool _finalized = false;
-    // This is an int because vt3xx takes the given ratio pan/pad and rounds up the ratio
-    // to nearest integers. So 1:3 = 0.33 and it  becomes 1;
-    unsigned int _aspectRatio;
-    // Height of sixel band in pixels
-    unsigned int _sixelBandHeight;
+    /// Vertical scaling in pixel rows per sixel bit, bounded by maxSixelAspectRatio(): vt3xx rounds
+    /// the given pan/pad up to the nearest integer, so 1:3 = 0.33 becomes 1.
+    unsigned _aspectRatio;
 };
 
 } // namespace vtbackend
