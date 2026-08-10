@@ -59,20 +59,61 @@ constexpr auto TestPageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::Col
 /// Creates a TerminalSession backed by @p pty, with NO display attached (the default state).
 /// The session owns the PTY; the caller owns the session.
 [[nodiscard]] std::unique_ptr<contour::session::TerminalSession> makeSessionWith(
-    contour::ContourGuiApp& app, std::unique_ptr<vtpty::Pty> pty)
+    contour::ContourGuiApp& app,
+    std::unique_ptr<vtpty::Pty> pty,
+    std::unique_ptr<contour::platform::Notifier> notifier = nullptr)
 {
     // Pass the app's real session manager so the sessionClosed->removeSession wiring matches
     // production; we never pump the Qt event loop here, so that slot does not actually fire and the
     // test stays deterministic.
-    return std::make_unique<contour::session::TerminalSession>(&app.sessionsManager(), std::move(pty), app);
+    return std::make_unique<contour::session::TerminalSession>(&app.sessionsManager(),
+                                                               std::move(pty),
+                                                               app,
+                                                               std::string {},
+                                                               std::nullopt,
+                                                               std::nullopt,
+                                                               std::move(notifier));
 }
 
 /// The common case: a session over a plain MockPty.
+/// @param notifier the desktop notifier to inject; null (the default) takes the platform's own.
 [[nodiscard]] std::unique_ptr<contour::session::TerminalSession> makeDisplaylessSession(
-    contour::ContourGuiApp& app)
+    contour::ContourGuiApp& app, std::unique_ptr<contour::platform::Notifier> notifier = nullptr)
 {
-    return makeSessionWith(app, std::make_unique<vtpty::MockPty>(TestPageSize));
+    return makeSessionWith(app, std::make_unique<vtpty::MockPty>(TestPageSize), std::move(notifier));
 }
+
+/// A Notifier that raises nothing and records everything, and can play the desktop's own close and
+/// activation events back at the session. Deliberately not a mock framework: the recorded vectors
+/// ARE the assertions.
+///
+/// Without this the notification path could only be asserted not to throw: the real backend reaches
+/// a D-Bus session that a headless run does not have.
+class RecordingNotifier final: public contour::platform::Notifier
+{
+  public:
+    void notify(vtbackend::DesktopNotification const& notification) override
+    {
+        raised.push_back(notification);
+    }
+
+    void close(std::string const& identifier) override { closed.push_back(identifier); }
+
+    /// Plays back what the desktop would report once the user (or a timeout) retired a notification.
+    void fireClosed(std::string const& identifier, uint reason)
+    {
+        emit notificationClosed(QString::fromStdString(identifier), reason);
+    }
+
+    /// Plays back what the desktop would report when the user clicked a notification.
+    void fireActivated(std::string const& identifier)
+    {
+        emit actionInvoked(QString::fromStdString(identifier));
+    }
+
+    std::vector<vtbackend::DesktopNotification> raised;
+    std::vector<std::string> closed;
+};
 
 } // namespace
 
@@ -1271,17 +1312,41 @@ TEST_CASE("TerminalSession: desktop notification wiring is display-safe and repo
           "[contour][session][notification]")
 {
     TestApp testApp;
-    auto session = makeDisplaylessSession(testApp.app());
+    auto notifier = std::make_unique<RecordingNotifier>();
+    auto* const raised = notifier.get();
+    auto session = makeDisplaylessSession(testApp.app(), std::move(notifier));
 
-    // A plain notification just relays to the FreeDesktopNotifier (Linux) / showNotification signal.
+    // Where a notification ends up is platform-dependent: Linux raises it through the desktop
+    // notifier, and every other platform hands it to the QML tray icon as a signal instead. Record
+    // both, and assert against whichever one this build actually uses.
+    auto shown = std::vector<std::pair<QString, QString>> {};
+    QObject::connect(session.get(),
+                     &contour::session::TerminalSession::showNotification,
+                     [&](QString const& title, QString const& body) { shown.emplace_back(title, body); });
+
+    // A plain notification is passed on as it was parsed.
     auto plain = vtbackend::DesktopNotification {};
     plain.identifier = "n1";
     plain.title = "Build finished";
     plain.body = "OK";
-    CHECK_NOTHROW(session->showDesktopNotification(plain));
+    session->showDesktopNotification(plain);
+
+#ifdef __linux__
+    REQUIRE(raised->raised.size() == 1);
+    CHECK(raised->raised[0].identifier == "n1");
+    CHECK(raised->raised[0].title == "Build finished");
+    CHECK(raised->raised[0].body == "OK");
+#else
+    REQUIRE(shown.size() == 1);
+    CHECK(shown[0].first == QStringLiteral("Build finished"));
+    CHECK(shown[0].second == QStringLiteral("OK"));
+    // One route or the other, never both -- a notification shown twice is a bug the user sees.
+    CHECK(raised->raised.empty());
+#endif
 
     // A notification requesting close/activation/focus reporting wires the notifier's signals; the
-    // handlers reply over the PTY. Emitting the notifier signals drives those single-shot handlers.
+    // handlers reply over the PTY. Playing the notifier's events back drives those single-shot
+    // handlers, which is the only way these OSC 99 replies are reachable without a desktop.
     auto reporting = vtbackend::DesktopNotification {};
     reporting.identifier = "n2";
     reporting.title = "Job";
@@ -1289,10 +1354,59 @@ TEST_CASE("TerminalSession: desktop notification wiring is display-safe and repo
     reporting.closeEventRequested = true;
     reporting.reportOnActivation = true;
     reporting.focusOnActivation = true;
-    CHECK_NOTHROW(session->showDesktopNotification(reporting));
+    session->showDesktopNotification(reporting);
 
-    session->discardDesktopNotification("n2"); // routes to the notifier's close()
-    SUCCEED("desktop notification paths execute without a display");
+    SECTION("discarding a notification asks the notifier to withdraw it")
+    {
+        // Not platform-conditional: withdrawing goes through the notifier everywhere, which off
+        // Linux is a NullNotifier that accepts it and does nothing.
+        session->discardDesktopNotification("n2");
+
+        REQUIRE(raised->closed.size() == 1);
+        CHECK(raised->closed[0] == "n2");
+    }
+
+// The OSC 99 close/activation replies exist only where a notifier raises the notification in the
+// first place; off Linux the tray icon reports nothing back, so there is nothing to assert.
+#ifdef __linux__
+    REQUIRE(raised->raised.size() == 2);
+
+    auto& pty = contour::test::mockPtyOf(*session);
+
+    // Terminal::reply() queues into the input generator; flushInput() is what puts the bytes on the
+    // PTY, so the assertion is that they reach the shell and not merely that a flag flipped.
+    auto const writtenAfter = [&](auto&& fire) {
+        pty.stdinBuffer().clear();
+        fire();
+        session->terminal().flushInput();
+        return pty.stdinBuffer();
+    };
+
+    SECTION("a close event is reported back as p=close")
+    {
+        auto const written = writtenAfter([&] { raised->fireClosed("n2", /*reason*/ 2); });
+
+        CHECK(written.contains("\033]99;i=n2:p=close;"));
+    }
+
+    SECTION("an activation is reported back as p=activated")
+    {
+        auto const written = writtenAfter([&] { raised->fireActivated("n2"); });
+
+        CHECK(written.contains("\033]99;i=n2:p=activated;"));
+    }
+
+    SECTION("someone else's notification is not reported back")
+    {
+        auto const written = writtenAfter([&] {
+            raised->fireClosed("not-ours", 2);
+            raised->fireActivated("not-ours");
+        });
+
+        CHECK_FALSE(written.contains(":p=close;"));
+        CHECK_FALSE(written.contains(":p=activated;"));
+    }
+#endif
 }
 
 TEST_CASE("TerminalSession: openDocument resolves URLs and local paths without crashing",
@@ -1458,11 +1572,11 @@ TEST_CASE("TerminalSession: desktop notification wiring runs for every report/cl
           "[contour][session][notification]")
 {
     TestApp testApp;
-    auto session = makeDisplaylessSession(testApp.app());
+    auto notifier = std::make_unique<RecordingNotifier>();
+    auto* const raised = notifier.get();
+    auto session = makeDisplaylessSession(testApp.app(), std::move(notifier));
 
-    // Headlessly the FreeDesktop notifier has no valid D-Bus interface, so notify() early-returns —
-    // but the per-request signal-connection branches (close/activation/focus) still execute. Drive
-    // every combination so all three branches are covered, and discard by id.
+    // Drive every combination of the optional report branches so all three are covered.
     auto notification = vtbackend::DesktopNotification {};
     notification.identifier = "note-1";
     notification.title = "Title";
@@ -1470,7 +1584,7 @@ TEST_CASE("TerminalSession: desktop notification wiring runs for every report/cl
     notification.closeEventRequested = true;
     notification.reportOnActivation = true;
     notification.focusOnActivation = true;
-    CHECK_NOTHROW(session->showDesktopNotification(notification));
+    session->showDesktopNotification(notification);
 
     // A second notification with none of the optional reports takes the plain path.
     auto plain = vtbackend::DesktopNotification {};
@@ -1479,20 +1593,58 @@ TEST_CASE("TerminalSession: desktop notification wiring runs for every report/cl
     plain.closeEventRequested = false;
     plain.reportOnActivation = false;
     plain.focusOnActivation = false;
-    CHECK_NOTHROW(session->showDesktopNotification(plain));
+    session->showDesktopNotification(plain);
 
-    CHECK_NOTHROW(session->discardDesktopNotification("note-1"));
+// Only Linux raises these through the notifier; elsewhere they go to the QML tray icon and the
+// per-request report wiring below does not exist at all. @see the display-safe case above.
+#ifdef __linux__
+    REQUIRE(raised->raised.size() == 2);
+    CHECK(raised->raised[0].identifier == "note-1");
+    CHECK(raised->raised[1].identifier == "note-2");
+
+    // note-2 asked for nothing to be reported, so its events are dropped rather than replied to.
+    auto& pty = contour::test::mockPtyOf(*session);
+    pty.stdinBuffer().clear();
+    raised->fireClosed("note-2", 2);
+    raised->fireActivated("note-2");
+    session->terminal().flushInput();
+    CHECK_FALSE(pty.stdinBuffer().contains(":p="));
+#endif
+
+    // Withdrawing runs through the notifier on every platform.
+    session->discardDesktopNotification("note-1");
+    REQUIRE(raised->closed.size() == 1);
+    CHECK(raised->closed[0] == "note-1");
 }
 
 TEST_CASE("TerminalSession: notify() routes an OSC-9 title/body to the desktop notifier",
           "[contour][session][notification]")
 {
     TestApp testApp;
-    auto session = makeDisplaylessSession(testApp.app());
+    auto notifier = std::make_unique<RecordingNotifier>();
+    auto* const raised = notifier.get();
+    auto session = makeDisplaylessSession(testApp.app(), std::move(notifier));
 
-    // notify() builds a DesktopNotification and hands it to the (headlessly inert) notifier; the
-    // build-and-dispatch path must run without a display or a live D-Bus session.
-    CHECK_NOTHROW(session->notify("Build finished", "All targets are up to date"));
+    auto shown = std::vector<std::pair<QString, QString>> {};
+    QObject::connect(session.get(),
+                     &contour::session::TerminalSession::showNotification,
+                     [&](QString const& title, QString const& body) { shown.emplace_back(title, body); });
+
+    // notify() is the OSC 9 / OSC 777 entry point: it builds a DesktopNotification out of a bare
+    // title and body and passes that on -- to the notifier on Linux, to the tray icon elsewhere.
+    session->notify("Build finished", "All targets are up to date");
+
+#ifdef __linux__
+    REQUIRE(raised->raised.size() == 1);
+    CHECK(raised->raised[0].title == "Build finished");
+    CHECK(raised->raised[0].body == "All targets are up to date");
+#else
+    REQUIRE(shown.size() == 1);
+    CHECK(shown[0].first == QStringLiteral("Build finished"));
+    CHECK(shown[0].second == QStringLiteral("All targets are up to date"));
+    // One route or the other, never both -- a notification shown twice is a bug the user sees.
+    CHECK(raised->raised.empty());
+#endif
 }
 
 TEST_CASE("TerminalSession: onSelectionCompleted honours the configured on-mouse-selection action",

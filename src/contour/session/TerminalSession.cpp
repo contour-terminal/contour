@@ -276,7 +276,8 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                                  ContourGuiApp& app,
                                  std::string profileName,
                                  std::optional<vtbackend::PageSize> initialPageSize,
-                                 std::optional<vtpty::Process::ExecInfo> launchedCommand):
+                                 std::optional<vtpty::Process::ExecInfo> launchedCommand,
+                                 std::unique_ptr<platform::Notifier> notifier):
     _manager { manager },
     _id { createSessionId() },
     _startTime { steady_clock::now() },
@@ -294,7 +295,8 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 std::move(pty),
                 createSettingsFromConfig(_config, _profile, _currentColorPreference, initialPageSize),
                 std::chrono::steady_clock::now() },
-    _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) }
+    _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
+    _desktopNotifier { notifier ? std::move(notifier) : platform::makeDesktopNotifier() }
 {
     if (app.liveConfig())
     {
@@ -964,7 +966,7 @@ void TerminalSession::notify(string_view title, string_view content)
     auto notification = vtbackend::DesktopNotification {};
     notification.title = std::string(title);
     notification.body = std::string(content);
-    _desktopNotifier.notify(notification);
+    _desktopNotifier->notify(notification);
 #else
     emit showNotification(QString::fromUtf8(title.data(), static_cast<int>(title.size())),
                           QString::fromUtf8(content.data(), static_cast<int>(content.size())));
@@ -981,15 +983,15 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
                                                 QString::fromStdString(notification.body)));
 
 #ifdef __linux__
-    _desktopNotifier.notify(notification);
+    _desktopNotifier->notify(notification);
 
     // Connect close event reporting if requested.
     if (notification.closeEventRequested)
     {
         auto const identifier = notification.identifier;
         QObject::connect(
-            &_desktopNotifier,
-            &platform::FreeDesktopNotifier::notificationClosed,
+            _desktopNotifier.get(),
+            &platform::Notifier::notificationClosed,
             this,
             [this, identifier](QString const& closedId, uint /*reason*/) {
                 if (closedId.toStdString() == identifier)
@@ -1007,8 +1009,8 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
     if (notification.reportOnActivation)
     {
         QObject::connect(
-            &_desktopNotifier,
-            &platform::FreeDesktopNotifier::actionInvoked,
+            _desktopNotifier.get(),
+            &platform::Notifier::actionInvoked,
             this,
             [this, identifier](QString const& activatedId) {
                 if (activatedId.toStdString() == identifier)
@@ -1021,8 +1023,8 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
     if (notification.focusOnActivation)
     {
         QObject::connect(
-            &_desktopNotifier,
-            &platform::FreeDesktopNotifier::actionInvoked,
+            _desktopNotifier.get(),
+            &platform::Notifier::actionInvoked,
             this,
             [this, identifier](QString const& activatedId) {
                 if (activatedId.toStdString() == identifier)
@@ -1039,11 +1041,9 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
 
 void TerminalSession::discardDesktopNotification(std::string_view identifier)
 {
-#ifdef __linux__
-    _desktopNotifier.close(std::string(identifier));
-#else
-    (void) identifier;
-#endif
+    // No #ifdef: where there is nothing to withdraw a notification from, the notifier is a
+    // NullNotifier and this is a no-op.
+    _desktopNotifier->close(std::string(identifier));
 }
 
 void TerminalSession::focusTerminalWindow()

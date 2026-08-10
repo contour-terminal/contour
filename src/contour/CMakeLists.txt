@@ -575,6 +575,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/MainWindowQml_test.cpp
             session/FocusRouting_test.cpp
             window/MultiWindow_test.cpp
+            platform/FreeDesktopNotifier_test.cpp
             platform/NotificationRouter_test.cpp
             platform/TaskbarProgressRouter_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
@@ -624,6 +625,29 @@ if(CONTOUR_FRONTEND_GUI)
         set_tests_properties(contour_gui_test
             PROPERTIES
                 ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0")
+
+        # The notification suite again, but against a session bus whose org.freedesktop.Notifications
+        # is activatable and never answers -- a desktop with its notification daemon disabled, which
+        # is what issue #2051 was reported from. It asserts a time budget rather than an output,
+        # because the bug was not a wrong result but a 25-second wait per terminal session, paid on
+        # the startup path before any window was mapped. Nothing else in the suite would notice a
+        # synchronous D-Bus call coming back.
+        #
+        # Guarded on dbus-daemon: without it there is no way to stand up a wedged bus, and a machine
+        # that lacks it simply does not run this one.
+        find_program(DBUS_DAEMON_EXECUTABLE dbus-daemon)
+        if(DBUS_DAEMON_EXECUTABLE AND NOT WIN32 AND NOT APPLE)
+            add_test(NAME contour_notification_nonblocking
+                     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/notification-nonblocking.sh
+                             $<TARGET_FILE:contour_gui_test>)
+            set_tests_properties(contour_notification_nonblocking
+                PROPERTIES
+                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0"
+                    TIMEOUT 120
+                    LABELS e2e)
+        else()
+            message(STATUS "dbus-daemon not found: skipping contour_notification_nonblocking test")
+        endif()
 
         # {{{ Offscreen end-to-end app runs
         # Each test boots the REAL contour binary headlessly (offscreen platform + software GL) and
