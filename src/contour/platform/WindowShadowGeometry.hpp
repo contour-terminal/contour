@@ -104,15 +104,24 @@ namespace detail
     /// specifications': stdDev = radius / 2, and the reach is stdDev * 3 * sqrt(2*pi) / 4 * 1.5.
     /// The constant is spelled out because std::sqrt is not usable in a constant expression.
     inline constexpr auto GaussianScaleFactor = 2.8199568089598753;
+
+    /// Rounds a NON-NEGATIVE @p value to the nearest integer.
+    ///
+    /// Spelled out rather than reached for: std::lround is not usable in a constant expression with
+    /// the standard libraries this builds against, and the obvious `static_cast<int>(value + 0.5)`
+    /// is a documented rounding bug -- for values just below .5 the addition can carry in binary
+    /// floating point and round the wrong way.
+    [[nodiscard]] constexpr int roundToInt(double value) noexcept
+    {
+        auto const truncated = static_cast<int>(value);
+        return (value - truncated) >= 0.5 ? truncated + 1 : truncated;
+    }
 } // namespace detail
 
 /// The visible reach of a blur of @p radius, in logical pixels.
 [[nodiscard]] constexpr int blurExtentFor(int radius) noexcept
 {
-    // Truncation rather than std::floor, which is not constexpr everywhere we build; the argument
-    // is never negative, so the two agree.
-    auto const extent =
-        static_cast<int>((static_cast<double>(radius) * 0.5 * detail::GaussianScaleFactor) + 0.5);
+    auto const extent = detail::roundToInt(static_cast<double>(radius) * 0.5 * detail::GaussianScaleFactor);
     return std::max(2, extent);
 }
 

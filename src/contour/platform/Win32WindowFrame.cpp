@@ -234,11 +234,11 @@ namespace
     };
 } // namespace
 
-std::unique_ptr<NativeWindowFrame> makeWin32WindowFrame(std::function<Qt::ColorScheme()> colorScheme)
+std::unique_ptr<NativeWindowFrame> makeWin32WindowFrame(std::function<Qt::ColorScheme()> const& colorScheme)
 {
     if (!dwmApi().isUsable())
         return std::make_unique<NullWindowFrame>();
-    return std::make_unique<Win32WindowFrame>(std::move(colorScheme));
+    return std::make_unique<Win32WindowFrame>(colorScheme);
 }
 
 } // namespace contour::platform

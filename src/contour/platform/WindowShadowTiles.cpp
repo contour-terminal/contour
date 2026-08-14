@@ -102,7 +102,7 @@ namespace
     /// geometry cut still contain the whole falloff.
     [[nodiscard]] int boxRadiusFor(int radius) noexcept
     {
-        return std::max(1, static_cast<int>((static_cast<double>(radius) * 0.5) + 0.5));
+        return std::max(1, detail::roundToInt(static_cast<double>(radius) * 0.5));
     }
 
     /// Draws one layer's silhouette into a fresh plane and blurs it.
@@ -172,7 +172,7 @@ WindowShadowTiles renderWindowShadowTiles(ShadowMetrics metrics, QColor const& c
             if (combined <= 0.0)
                 continue;
 
-            auto const alpha = static_cast<int>((combined * 255.0) + 0.5);
+            auto const alpha = detail::roundToInt(combined * 255.0);
             // Premultiplied, as the format demands.
             scanline[x] = qRgba((red * alpha) / 255, (green * alpha) / 255, (blue * alpha) / 255, alpha);
         }

@@ -98,7 +98,7 @@ namespace
                 auto const image = tiles.tiles[i].convertToFormat(QImage::Format_ARGB32);
                 auto const width = image.width();
                 auto const height = image.height();
-                if (width <= 0 || height <= 0 || image.bytesPerLine() != width * 4)
+                if (width <= 0 || height <= 0 || image.bytesPerLine() != static_cast<qsizetype>(width) * 4)
                 {
                     releasePixmaps(created);
                     if (gc != XCB_NONE)

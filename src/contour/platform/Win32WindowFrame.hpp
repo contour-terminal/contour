@@ -18,7 +18,7 @@ namespace contour::platform
 /// @param colorScheme Supplies the effective dark/light scheme for the border DWM draws around the
 ///                    rounded corners.
 [[nodiscard]] std::unique_ptr<NativeWindowFrame> makeWin32WindowFrame(
-    std::function<Qt::ColorScheme()> colorScheme);
+    std::function<Qt::ColorScheme()> const& colorScheme);
 
 } // namespace contour::platform
 

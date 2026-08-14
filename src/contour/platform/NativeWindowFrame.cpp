@@ -15,11 +15,11 @@ namespace contour::platform
 {
 
 std::unique_ptr<NativeWindowFrame> makeNativeWindowFrame(
-    [[maybe_unused]] std::function<Qt::ColorScheme()> colorScheme)
+    [[maybe_unused]] std::function<Qt::ColorScheme()> const& colorScheme)
 {
-#if defined(_WIN32)
-    return makeWin32WindowFrame(std::move(colorScheme));
-#elif defined(__APPLE__)
+#ifdef _WIN32
+    return makeWin32WindowFrame(colorScheme);
+#elifdef __APPLE__
     return makeCocoaWindowFrame();
 #else
     // The Linux and BSD desktops: there is no OS frame service to keep here, so the window is

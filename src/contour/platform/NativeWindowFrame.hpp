@@ -25,9 +25,9 @@ enum class FramePlatform : uint8_t
 /// The platform this binary was built for.
 [[nodiscard]] constexpr FramePlatform currentFramePlatform() noexcept
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     return FramePlatform::Windows;
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     return FramePlatform::MacOS;
 #else
     return FramePlatform::Other;
@@ -233,6 +233,6 @@ class NullWindowFrame final: public NativeWindowFrame
 ///                    the decision stays the configuration's (@see qtColorSchemeFor) and testable.
 /// @return A NullWindowFrame where the platform offers nothing; never null.
 [[nodiscard]] std::unique_ptr<NativeWindowFrame> makeNativeWindowFrame(
-    std::function<Qt::ColorScheme()> colorScheme);
+    std::function<Qt::ColorScheme()> const& colorScheme);
 
 } // namespace contour::platform
