@@ -1,23 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.hpp>
 #include <contour/platform/BlurBehind.hpp>
+#include <contour/platform/XcbProperty.hpp>
 
 #include <crispy/Utils.hpp>
 
 #include <QtCore/QDebug>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
 
 #ifdef _WIN32
     #include <Windows.h>
-#endif
-
-#if !defined(Q_OS_WINDOWS) && !defined(Q_OS_DARWIN)
-    #define CONTOUR_FRONTEND_XCB
-    #include <xcb/xproto.h>
-#endif
-
-#ifdef CONTOUR_FRONTEND_XCB
-    #include <QtGui/QGuiApplication>
 #endif
 
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
@@ -33,99 +26,6 @@
 
 namespace contour::platform
 {
-
-using std::nullopt;
-using std::optional;
-using std::string;
-
-#ifdef CONTOUR_FRONTEND_XCB
-namespace
-{
-    struct XcbPropertyInfo
-    {
-        xcb_connection_t* connection;
-        xcb_window_t window;
-        xcb_atom_t propertyAtom;
-    };
-
-    xcb_connection_t* x11Connection()
-    {
-        if (!qApp)
-            return nullptr;
-
-        auto* native = qApp->nativeInterface<QNativeInterface::QX11Application>();
-        if (!native)
-            return nullptr;
-
-        return native->connection();
-    }
-
-    optional<XcbPropertyInfo> queryXcbPropertyInfo(QWindow* window, string const& name)
-    {
-        auto const winId = static_cast<xcb_window_t>(window->winId());
-
-        xcb_connection_t* xcbConnection = x11Connection();
-        if (!xcbConnection)
-            return nullopt;
-
-        auto const atomNameCookie =
-            xcb_intern_atom(xcbConnection, 0, static_cast<uint16_t>(name.size()), name.c_str());
-        xcb_intern_atom_reply_t const* reply = xcb_intern_atom_reply(xcbConnection, atomNameCookie, nullptr);
-        if (!reply)
-            return nullopt;
-        auto const atomName = reply->atom;
-
-        return XcbPropertyInfo { .connection = xcbConnection, .window = winId, .propertyAtom = atomName };
-    }
-
-    void setPropertyX11(QWindow* window, string const& name, uint32_t value)
-    {
-        if (auto infoOpt = queryXcbPropertyInfo(window, name))
-        {
-            xcb_change_property(infoOpt.value().connection,
-                                XCB_PROP_MODE_REPLACE,
-                                infoOpt.value().window,
-                                infoOpt.value().propertyAtom,
-                                XCB_ATOM_CARDINAL,
-                                32,
-                                1,
-                                &value);
-            xcb_flush(infoOpt.value().connection);
-        }
-        else
-            errorLog()(R"(Could not set X11 property info for "{}" to {}.)", name, value);
-    }
-
-    void setPropertyX11(QWindow* window, string const& name, string const& value)
-    {
-        if (auto infoOpt = queryXcbPropertyInfo(window, name))
-        {
-            xcb_change_property(infoOpt.value().connection,
-                                XCB_PROP_MODE_REPLACE,
-                                infoOpt.value().window,
-                                infoOpt.value().propertyAtom,
-                                XCB_ATOM_STRING,
-                                8,
-                                static_cast<uint32_t>(value.size()),
-                                value.data());
-
-            xcb_flush(infoOpt.value().connection);
-        }
-        else
-            errorLog()(R"(Could not set X11 property info for "{}" to "{}".)", name, value);
-    }
-
-    void unsetPropertyX11(QWindow* window, string const& name)
-    {
-        if (auto infoOpt = queryXcbPropertyInfo(window, name))
-        {
-            xcb_delete_property(
-                infoOpt.value().connection, infoOpt.value().window, infoOpt.value().propertyAtom);
-        }
-    }
-
-} // namespace
-#endif
 
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
 namespace
@@ -210,7 +110,10 @@ void setBlurBehind(QWindow* window, bool enable, QRegion const& region)
         }
         else
         {
-            unsetPropertyX11(window, "kwin_blur");
+            // Unset exactly what the branch above sets. This used to delete an atom named
+            // "kwin_blur", which nothing ever creates -- so _KDE_NET_WM_BLUR_BEHIND_REGION
+            // survived, and blur could never be switched off again for the window's lifetime.
+            unsetPropertyX11(window, "_KDE_NET_WM_BLUR_BEHIND_REGION");
             unsetPropertyX11(window, "_MUTTER_HINTS");
         }
         return;
