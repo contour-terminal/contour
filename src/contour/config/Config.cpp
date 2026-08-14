@@ -911,6 +911,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "escape_sandbox", where.escapeSandbox);
         loadFromEntry(child, "copy_last_mark_range_offset", where.copyLastMarkRangeOffset);
         loadFromEntry(child, "show_title_bar", where.showTitleBar);
+        loadFromEntry(child, "window_shadow", where.windowShadow);
         loadFromEntry(child, "dim_unfocused", where.dimUnfocused);
         loadFromEntry(child, "size_indicator_on_resize", where.sizeIndicatorOnResize);
         loadFromEntry(child, "fullscreen", where.fullscreen);
@@ -2294,6 +2295,11 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      TabBarVisibility& where)
+{
+    loadConfigEnum(node, entry, where, logger);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, ShadowSize& where)
 {
     loadConfigEnum(node, entry, where, logger);
 }

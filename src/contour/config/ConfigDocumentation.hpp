@@ -118,6 +118,18 @@ constexpr StringLiteral ShowTitleBarConfig {
     "\n"
 };
 
+constexpr StringLiteral WindowShadowConfig {
+    "{comment} How far the drop shadow around a frameless window reaches: None, Small, Medium,\n"
+    "{comment} Large or VeryLarge. The names and the sizes are Breeze's, so this matches what the\n"
+    "{comment} rest of a Plasma desktop is doing.\n"
+    "{comment} Only KWin can act on this. A window with `show_title_bar: true` gets the window\n"
+    "{comment} manager's own shadow instead, and no other compositor -- GNOME/mutter, sway,\n"
+    "{comment} Hyprland -- offers a way for an undecorated window to publish one, so everywhere\n"
+    "{comment} else every value behaves as None. Windows and macOS draw their own.\n"
+    "window_shadow: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral DimUnfocusedConfig {
     "{comment} Dims a pane while it is not the focused one — an inactive pane of a split, or any\n"
     "{comment} pane of an unfocused window — by blending it toward its own background color.\n"
@@ -2241,6 +2253,23 @@ constexpr StringLiteral ShowTitleBarWeb { "configuration option determines wheth
 
 };
 
+constexpr StringLiteral WindowShadowWeb {
+    "configuration option sets how far the drop shadow around a frameless window reaches.\n"
+    "One of `None`, `Small`, `Medium`, `Large` or `VeryLarge` — the same names and sizes Breeze "
+    "offers, so a Contour window matches the rest of a Plasma desktop.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    window_shadow: Large\n"
+    "```\n"
+    "Only KWin can act on this. With "
+    "[`show_title_bar`](profiles.md#show_title_bar) set to `true` the window manager draws its own "
+    "shadow along with its decoration, and no other Wayland compositor or X11 window manager offers "
+    "a way for an undecorated window to publish one — so everywhere else, every value behaves as "
+    "`None`. Windows and macOS draw a system shadow of their own instead.\n"
+    "\n"
+};
+
 constexpr StringLiteral DimUnfocusedWeb {
     "configuration option dims a pane while it is not the focused one (an inactive pane of a split, or "
     "any pane of an unfocused window) by blending it toward its own background color. The value is the "
@@ -2349,6 +2378,7 @@ using SshHostConfig = DocumentationEntry<SshHostConfigConfig, SshHostConfigWeb>;
 using Maximized = DocumentationEntry<MaximizedConfig, MaximizedWeb>;
 using Fullscreen = DocumentationEntry<FullscreenConfig, FullscreenWeb>;
 using ShowTitleBar = DocumentationEntry<ShowTitleBarConfig, ShowTitleBarWeb>;
+using WindowShadow = DocumentationEntry<WindowShadowConfig, WindowShadowWeb>;
 using DimUnfocused = DocumentationEntry<DimUnfocusedConfig, DimUnfocusedWeb>;
 using ShowIndicatorOnResize = DocumentationEntry<ShowIndicatorOnResizeConfig, ShowIndicatorOnResizeWeb>;
 using Mouse = DocumentationEntry<MouseConfig, MouseWeb>;

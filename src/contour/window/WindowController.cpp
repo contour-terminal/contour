@@ -651,6 +651,10 @@ void WindowController::closeWindow()
     // tab was dragged out), this is what actually removes the lingering window — otherwise its title bar
     // / tab strip stays on screen as a ghost. The re-entrant onClosing -> closeWindow() is absorbed by
     // the _closing guard above.
+    // Before the close, not after: withdrawing the shadow needs a live connection and a live window
+    // id, and close() takes both away. The destructor would otherwise be talking to a dead handle.
+    _windowShadow.reset();
+
     if (_osWindow != nullptr)
         _osWindow->close();
 
@@ -718,6 +722,12 @@ void WindowController::setTitleBarVisible(bool visible)
         return;
     _titleBarVisible = visible;
     emit titleBarVisibleChanged();
+
+    // Which decoration is showing decides whether we publish a shadow at all: with the native frame
+    // the window manager draws its own, and a second would stack on it. If setFlag() above recreated
+    // the platform window, the surface events have already dropped the stale attachment and this
+    // rebuilds it against the new one.
+    refreshWindowShadow();
 }
 
 void WindowController::toggleTitleBar()
@@ -790,6 +800,10 @@ void WindowController::applyTabBarFromConfig(config::TabBarPosition position,
         emit tabBarVisibilityChanged();
         emit tabBarShouldShowChanged();
     }
+
+    // window_shadow is read straight off the active profile rather than passed in, so a reload only
+    // has to say "look again". Same reason the tab bar values above win over the current state.
+    refreshWindowShadow();
 }
 
 void WindowController::seedTabBarPosition(config::TabBarPosition position)
@@ -878,6 +892,64 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
             this,
             &WindowController::onOSWindowActiveChanged,
             Qt::UniqueConnection);
+
+    // A maximize the window manager drives — its own keybinding, a double click on the native frame —
+    // reaches none of the presentation entry points, so the shadow is re-decided from here too.
+    connect(osWindow,
+            &QWindow::visibilityChanged,
+            this,
+            &WindowController::onWindowVisibilityChanged,
+            Qt::UniqueConnection);
+}
+
+void WindowController::refreshWindowShadow()
+{
+    if (_osWindow == nullptr)
+        return;
+
+    if (!_windowShadow)
+        _windowShadow =
+            std::make_unique<platform::WindowShadowController>(platform::makeWindowShadow(*_osWindow));
+
+    auto const* session = activeSession();
+    // Before the first session attaches there is no profile to read; the ConfigEntry default is the
+    // same value the profile would carry, so a window shown that early still gets its shadow.
+    auto const size =
+        session != nullptr ? session->profile().windowShadow.value() : config::ShadowSize::Large;
+
+    _windowShadow->refresh(_presentation,
+                           _titleBarVisible ? platform::WindowDecoration::ServerSide
+                                            : platform::WindowDecoration::ClientSide,
+                           size);
+}
+
+void WindowController::applyWindowPresentation(platform::WindowPresentation presentation)
+{
+    _presentation = presentation;
+    refreshWindowShadow();
+}
+
+void WindowController::onWindowVisibilityChanged()
+{
+    if (_osWindow == nullptr)
+        return;
+
+    // Only the states the window manager can put us in on its own. Hidden and Minimized are left
+    // alone deliberately: an unmapped window has nothing to cast a shadow on, and re-publishing on
+    // the way back out is what the restore path already does.
+    switch (_osWindow->visibility())
+    {
+        case QQuickWindow::Visibility::Windowed:
+            applyWindowPresentation(platform::WindowPresentation::Windowed);
+            break;
+        case QQuickWindow::Visibility::Maximized:
+            applyWindowPresentation(platform::WindowPresentation::Maximized);
+            break;
+        case QQuickWindow::Visibility::FullScreen:
+            applyWindowPresentation(platform::WindowPresentation::FullScreen);
+            break;
+        default: break;
+    }
 }
 
 void WindowController::onOSWindowActiveChanged()
@@ -907,6 +979,7 @@ void WindowController::showInitial()
         // Never leave the user windowless: map at whatever size the window has.
         display::displayLog()("showInitial: no display metrics available; showing at default size.");
         _osWindow->show();
+        refreshWindowShadow();
         return;
     }
 
@@ -940,8 +1013,31 @@ void WindowController::showInitial()
 
 bool WindowController::eventFilter(QObject* watched, QEvent* event)
 {
-    if (watched == _osWindow && event->type() == QEvent::DevicePixelRatioChange)
-        onWindowScaleMaybeChanged();
+    if (watched == _osWindow)
+    {
+        switch (event->type())
+        {
+            case QEvent::DevicePixelRatioChange: onWindowScaleMaybeChanged(); break;
+
+            case QEvent::PlatformSurface:
+                // The shadow attachment holds the platform window's identity — an X11 window id, or a
+                // wl_surface — and toggling Qt::FramelessWindowHint destroys and recreates it. Drop the
+                // attachment while that identity is still valid to withdraw through; leaving it would
+                // publish the next shadow against a dead handle. Expose below rebuilds it.
+                if (static_cast<QPlatformSurfaceEvent*>(event)->surfaceEventType()
+                    == QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)
+                    _windowShadow.reset();
+                break;
+
+            case QEvent::Expose:
+                // The one point where the platform window is guaranteed to exist. Cheap to repeat:
+                // both the controller and the attachment skip work whose result would be unchanged.
+                refreshWindowShadow();
+                break;
+
+            default: break;
+        }
+    }
     return QAbstractListModel::eventFilter(watched, event);
 }
 
@@ -1056,6 +1152,7 @@ void WindowController::setWindowFullScreen(session::DisplaySurface& requester)
     if (osWindow == nullptr)
         return;
     showWithoutSizeIncrements(*osWindow, &QWindow::showFullScreen);
+    applyWindowPresentation(platform::WindowPresentation::FullScreen);
 }
 
 void WindowController::setWindowMaximized(session::DisplaySurface& requester)
@@ -1065,6 +1162,7 @@ void WindowController::setWindowMaximized(session::DisplaySurface& requester)
         return;
     showWithoutSizeIncrements(*osWindow, &QWindow::showMaximized);
     _maximizedState = true;
+    applyWindowPresentation(platform::WindowPresentation::Maximized);
 }
 
 void WindowController::setWindowNormal(session::DisplaySurface& requester)
@@ -1078,6 +1176,7 @@ void WindowController::setWindowNormal(session::DisplaySurface& requester)
     updateSizeHintsFor(requester, HintApplyMode::Full);
     osWindow->showNormal();
     _maximizedState = false;
+    applyWindowPresentation(platform::WindowPresentation::Windowed);
 }
 
 void WindowController::toggleMaximized()

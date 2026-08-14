@@ -6,6 +6,7 @@
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/config/WindowShadow.hpp>
 
 #include <vtbackend/Color.hpp>
 #include <vtbackend/ColorPalette.hpp>
@@ -597,6 +598,10 @@ struct TerminalProfile
     // full client-side decoration (our tab strip draws the controls). Defaults to false so the
     // out-of-box look is the custom CSD tab strip, matching the prior Linux/Windows appearance.
     ConfigEntry<bool, documentation::ShowTitleBar> showTitleBar { false };
+    // The drop shadow a FRAMELESS window publishes for itself. Only meaningful alongside
+    // show_title_bar: false — with the native frame the window manager draws its own, and a second
+    // one would stack on it. Large is Breeze's default, so the out-of-box look matches Plasma.
+    ConfigEntry<ShadowSize, documentation::WindowShadow> windowShadow { ShadowSize::Large };
     // Blend amount (0.0 = off .. 1.0 = fully background-colored) applied to a pane while it is not
     // the focused one: an inactive pane of a split, or any pane of an unfocused window. Composited
     // in QML (TerminalPane.qml); the renderer is untouched.
@@ -1441,6 +1446,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PixelReporting& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, GuiTheme& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, ShadowSize& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarVisibility& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, UiStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, WindowControlStyle& where);
@@ -2323,6 +2329,15 @@ template <>
 struct std::formatter<contour::config::TabBarPosition>: formatter<std::string_view>
 {
     auto format(contour::config::TabBarPosition value, auto& ctx) const
+    {
+        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
+    }
+};
+
+template <>
+struct std::formatter<contour::config::ShadowSize>: formatter<std::string_view>
+{
+    auto format(contour::config::ShadowSize value, auto& ctx) const
     {
         return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
     }

@@ -33,8 +33,14 @@ add_library(contour_platform STATIC
     QtPath.hpp
     SpeechSynthesizer.cpp SpeechSynthesizer.hpp
     TaskbarProgressRouter.hpp
+    # Both shadow adapters are wholly inside a platform #ifdef, so they compile to nothing where
+    # they do not apply -- listed unconditionally all the same, as the notification pair above is.
+    WaylandWindowShadow.cpp WaylandWindowShadow.hpp
+    WindowShadow.cpp WindowShadow.hpp
+    WindowShadowController.hpp
     WindowShadowGeometry.hpp
     WindowShadowTiles.cpp WindowShadowTiles.hpp
+    X11WindowShadow.cpp X11WindowShadow.hpp
     XcbProperty.cpp XcbProperty.hpp
 )
 set_target_properties(contour_platform PROPERTIES AUTOMOC ON)
@@ -59,8 +65,9 @@ if(CONTOUR_WITH_TTS)
     target_link_libraries(contour_platform PUBLIC Qt6::TextToSpeech)
 endif()
 
-# BlurBehind.cpp is the only consumer of either: the X11 blur-behind property is set through xcb,
-# and the Wayland one through the KWin blur protocol generated from protocols/blur.xml.
+# xcb and the KWin protocols serve two features here, and only these: the blur-behind effect
+# (BlurBehind.cpp, protocols/blur.xml) and the window drop shadow a client-decorated window has to
+# publish for itself (X11WindowShadow.cpp and WaylandWindowShadow.cpp, protocols/shadow.xml).
 if(OPENBSD)
     find_package(X11 REQUIRED)
     target_link_libraries(contour_platform PUBLIC X11::xcb X11::xcb_cursor)
@@ -73,10 +80,13 @@ if(LINUX AND CONTOUR_WAYLAND)
     target_compile_definitions(contour_platform PUBLIC CONTOUR_WAYLAND)
     target_link_libraries(contour_platform PUBLIC Qt6::WaylandClient Qt6::WaylandClientPrivate)
     qt6_generate_wayland_protocol_client_sources(contour_platform
-                                                 FILES "${CMAKE_CURRENT_SOURCE_DIR}/protocols/blur.xml")
+                                                 FILES "${CMAKE_CURRENT_SOURCE_DIR}/protocols/blur.xml"
+                                                       "${CMAKE_CURRENT_SOURCE_DIR}/protocols/shadow.xml")
     # Explicitly add the generated protocol source code to the target, as the macro sometimes fails
     # to do so.
     target_sources(contour_platform PRIVATE
         "${CMAKE_CURRENT_BINARY_DIR}/wayland-blur-protocol.c"
-        "${CMAKE_CURRENT_BINARY_DIR}/qwayland-blur.cpp")
+        "${CMAKE_CURRENT_BINARY_DIR}/qwayland-blur.cpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/wayland-shadow-protocol.c"
+        "${CMAKE_CURRENT_BINARY_DIR}/qwayland-shadow.cpp")
 endif()

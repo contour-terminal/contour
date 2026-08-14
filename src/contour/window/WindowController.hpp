@@ -5,6 +5,7 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
+#include <contour/platform/WindowShadowController.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
@@ -616,6 +617,30 @@ class WindowController:
     /// away from Contour notifies the shell (DECSET 1004) even when no display holds Qt item focus.
     void onOSWindowActiveChanged();
 
+    /// Re-publishes the window's drop shadow for the state it is now in.
+    ///
+    /// A frameless window gets no server-side decoration, and on KWin the shadow is drawn as part of
+    /// that decoration — so the window has to hand the compositor its own. Called from every place
+    /// that changes an input to the decision: the first map, the presentation transitions, the
+    /// title-bar toggle, and a window-manager-driven maximize.
+    ///
+    /// Creates the attachment on first use rather than in bindWindow(), because resolving it needs
+    /// the platform window, and forcing that into existence before showInitial() has sized the
+    /// still-unmapped window is exactly the premature realization WindowGeometry.hpp warns about.
+    void refreshWindowShadow();
+
+    /// Records the presentation the window is being MOVED to, then re-publishes the shadow.
+    ///
+    /// The intent, not a live read of QWindow::visibility(): visibility settles asynchronously, so
+    /// during the transition it still reports the state being left — the same reason the size-hint
+    /// path takes an explicit HintApplyMode rather than reading it back.
+    void applyWindowPresentation(platform::WindowPresentation presentation);
+
+    /// QWindow::visibilityChanged handler: a maximize driven from outside the application — a
+    /// window-manager keybinding, a title-bar double click on the native frame — reaches none of the
+    /// entry points above, so the shadow would otherwise survive into a maximized window.
+    void onWindowVisibilityChanged();
+
     session::TerminalSessionManager& _manager;
     vtworkspace::WindowId _windowId;
 
@@ -680,6 +705,18 @@ class WindowController:
 
     // Carries beginMoveRows()'s result from onTabAboutToBeMoved() to onTabMoved().
     bool _tabMoveInProgress = false;
+
+    // The window's drop shadow, and the presentation it was last published for. Created lazily on
+    // the first refresh (see refreshWindowShadow) and destroyed before the window closes, while its
+    // handle is still live enough to withdraw through.
+    //
+    // _presentation is written from INTENT by applyWindowPresentation and from the
+    // visibilityChanged signal for changes the window manager drives; it is never read back off
+    // QWindow::visibility(), which settles too late to be the authority here. Tiled is unreachable
+    // today: Qt reports no such visibility, so a KWin quick-tiled window keeps its shadow — the same
+    // as every other client-decorated application does.
+    std::unique_ptr<platform::WindowShadowController> _windowShadow;
+    platform::WindowPresentation _presentation = platform::WindowPresentation::Windowed;
 
     // Window-scoped title-bar visibility (see the decoration block above). Seeded once from the
     // profile's show_title_bar (first display attach), flipped by ToggleTitleBar.
