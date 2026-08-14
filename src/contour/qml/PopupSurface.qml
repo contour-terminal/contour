@@ -31,6 +31,14 @@ import QtQuick
 Rectangle {
     id: root
 
+    // A background is what gives an unsized control its minimum: Qt Quick Controls compute a
+    // popup's width as max(implicitBackgroundWidth, contentWidth + padding), and a plain Rectangle's
+    // implicit size is ZERO. Replacing a style's background without restoring this is what collapsed
+    // every menu to a two-pixel vertical line -- the width of its own border and nothing else.
+    // The numbers mirror ContourTui/Menu.qml's background, which states the same contract.
+    implicitWidth: chromeStyle.widthQuantum * 12
+    implicitHeight: chromeStyle.controlHeight
+
     // Opaque, for the reason ContourTui/Popup.qml states: the application window is transparent so
     // the terminal can show through it, and a popup that inherited any of that would render its text
     // over whatever happens to be scrolling underneath.

@@ -18,7 +18,31 @@ import QtQuick
 import QtQuick.Controls
 
 Menu {
+    id: control
+
     popupType: Popup.Item
     background: PopupSurface {}
     margins: chromeStyle.shadowMargin
+
+    // The width of the widest entry, snapped up to a whole unit.
+    //
+    // Not something the template does for us: a Menu does NOT derive contentWidth from its items,
+    // so its width falls back to whatever its BACKGROUND asks for -- and the moment a menu supplies
+    // its own background, as this one does to carry the drop shadow, that fallback is the background's
+    // implicit size rather than the style's. Without this every entry is elided to nothing and the
+    // menu opens as a vertical line. ContourTui/Menu.qml carries the identical computation, and for
+    // the identical reason.
+    //
+    // Reading `count` is what makes this re-evaluate: menus built at runtime (the terminal's context
+    // menu, the new-tab profile list) add their items after construction, and the binding has to
+    // follow.
+    contentWidth: {
+        var widest = 0
+        for (var i = 0; i < control.count; ++i) {
+            var item = control.itemAt(i)
+            if (item)
+                widest = Math.max(widest, item.implicitWidth)
+        }
+        return chromeStyle.widthQuantum * Math.ceil(widest / chromeStyle.widthQuantum)
+    }
 }

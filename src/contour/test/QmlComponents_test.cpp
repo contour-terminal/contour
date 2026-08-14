@@ -604,6 +604,87 @@ TEST_CASE("Tab context menu exposes all its actions (offscreen)", "[contour][gui
     CHECK(count.toInt() >= 5);
 }
 
+TEST_CASE("The terminal context menu opens, sub-menus and all (offscreen)", "[contour][gui][qml]")
+{
+    // The gap that let a broken right-click menu ship. The case below builds this same menu and
+    // asserts its rows, but says outright that it never popup()s it -- so everything that can only
+    // fail once a menu is OPEN went uncovered: its background, its margins, and the runtime-built
+    // sub-menus, which are popups of their own and get none of the parent's treatment for free.
+    //
+    // Opening one offscreen needs a window to open INTO, which is the whole difference from the case
+    // below: hosted in a Window, popup() works under the offscreen platform.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+
+    // A state that produces sub-menus: profileNames is what "Change Profile" expands into.
+    auto const state = contour::command::ContextMenuState {
+        .hasSelection = true,
+        .clipboardHasText = true,
+        .hasLastCommand = false,
+        .hasLocalWorkingDirectory = true,
+        .hasSplits = false,
+        .hyperlinkUnderCursor = "",
+        .activeProfile = "dark",
+        .profileNames = { "dark", "light" },
+    };
+    auto actions = std::vector<contour::actions::Action> {};
+    auto const model =
+        contour::window::toContextMenuModel(contour::command::buildContextMenu(state), actions);
+    REQUIRE_FALSE(model.isEmpty());
+
+    QQmlComponent hostComponent(&engine);
+    hostComponent.setData(QByteArrayLiteral("import QtQuick\n"
+                                            "import QtQuick.Window\n"
+                                            "import Contour.Ui\n"
+                                            "Window {\n"
+                                            "  width: 800; height: 600; visible: true\n"
+                                            "  property alias menu: contextMenu\n"
+                                            "  ActionContextMenu { id: contextMenu }\n"
+                                            "}\n"),
+                          QUrl(QStringLiteral("qrc:/contour/test/TerminalMenuHost.qml")));
+    INFO("host errors: " << hostComponent.errorString().toStdString());
+    REQUIRE(hostComponent.isReady());
+
+    std::unique_ptr<QObject> host(hostComponent.create());
+    REQUIRE(host != nullptr);
+    auto* menu = host->property("menu").value<QObject*>();
+    REQUIRE(menu != nullptr);
+    menu->setProperty("entries", model);
+    QCoreApplication::processEvents();
+
+    REQUIRE(QMetaObject::invokeMethod(menu, "popup"));
+    QCoreApplication::processEvents();
+
+    CHECK(menu->property("opened").toBool());
+    CHECK(menu->property("count").toInt() == model.size());
+
+    // Open at a size that can actually show its entries. `> 0` is NOT enough -- a menu collapsed to
+    // a two-pixel sliver passes that while being, on screen, a vertical line.
+    QQuickItem* firstItem = nullptr;
+    REQUIRE(QMetaObject::invokeMethod(
+        menu, "itemAt", Q_RETURN_ARG(QQuickItem*, firstItem), Q_ARG(int, 0)));
+    REQUIRE(firstItem != nullptr);
+    auto const widest = firstItem->property("implicitWidth").toReal();
+    INFO("menu " << menu->property("width").toReal() << "x" << menu->property("height").toReal()
+                 << ", widest item " << widest);
+    REQUIRE(widest > 0.0);
+    CHECK(menu->property("width").toReal() >= widest);
+    CHECK(menu->property("height").toReal() > 0.0);
+
+    auto* background = menu->property("background").value<QObject*>();
+    REQUIRE(background != nullptr);
+    CHECK(background->property("width").toReal() > 0.0);
+    CHECK(background->property("height").toReal() > 0.0);
+
+    QMetaObject::invokeMethod(menu, "close");
+    QCoreApplication::processEvents();
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
 TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)", "[contour][gui][qml]")
 {
     // End-to-end over the real bridge: the pure table (ContextMenu.h) -> the Qt model (ContextMenuModel.h)
@@ -986,9 +1067,17 @@ TEST_CASE("A context menu actually opens, with its surface (offscreen)", "[conto
     CHECK(background->property("width").toReal() > 0.0);
     CHECK(background->property("height").toReal() > 0.0);
 
-    // And its rows are laid out, not collapsed to nothing.
+    // And its rows are laid out at a size that can show them. `> 0` is NOT enough: a menu collapsed
+    // to a two-pixel sliver passes that while being, on screen, a vertical line.
     CHECK(menu->property("count").toInt() > 0);
-    CHECK(menu->property("width").toReal() > 0.0);
+    QQuickItem* firstItem = nullptr;
+    REQUIRE(QMetaObject::invokeMethod(
+        menu, "itemAt", Q_RETURN_ARG(QQuickItem*, firstItem), Q_ARG(int, 0)));
+    REQUIRE(firstItem != nullptr);
+    auto const widest = firstItem->property("implicitWidth").toReal();
+    REQUIRE(widest > 0.0);
+    INFO("menu " << menu->property("width").toReal() << " wide, widest item " << widest);
+    CHECK(menu->property("width").toReal() >= widest);
     CHECK(menu->property("height").toReal() > 0.0);
 
     QMetaObject::invokeMethod(menu, "close");
