@@ -213,11 +213,14 @@ namespace
             // The border DWM draws around the rounded corners is tinted by this. Driven from the
             // CONFIGURED theme: it used to be forced on in BlurBehind.cpp regardless, which put a
             // dark border on a light-themed window.
+            // sizeof yields size_t and the attribute size is a DWORD; spelled out rather than left
+            // to an implicit narrowing, which -Werror rejects on the Windows toolchains.
             auto dark = static_cast<BOOL>(_colorScheme() == Qt::ColorScheme::Dark);
-            api.setWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, &dark, sizeof(dark));
+            api.setWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, &dark, static_cast<DWORD>(sizeof(dark)));
 
             auto corner = DwmwcpRound;
-            api.setWindowAttribute(hwnd, DwmwaWindowCornerPreference, &corner, sizeof(corner));
+            api.setWindowAttribute(
+                hwnd, DwmwaWindowCornerPreference, &corner, static_cast<DWORD>(sizeof(corner)));
         }
 
         void invalidateShadow(QWindow& /*window*/) override

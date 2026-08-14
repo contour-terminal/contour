@@ -5,6 +5,12 @@
 
     #include <Windows.h>
 
+    // MARGINS lives here, not in Windows.h. Including these declares the DWM entry points too,
+    // which is harmless: they are resolved at runtime below rather than linked against, so the
+    // declarations are used only for their TYPES and dwmapi.lib stays out of the link line.
+    #include <dwmapi.h>
+    #include <uxtheme.h>
+
 namespace contour::platform
 {
 

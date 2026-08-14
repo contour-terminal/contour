@@ -33,7 +33,7 @@ namespace
 class CocoaWindowFrame final: public NativeWindowFrame
 {
   public:
-    void apply(QWindow& window, TitleBarDecoration decoration) override
+    void apply(QWindow& window, WindowDecoration decoration) override
     {
         NSWindow* nsWindow = nsWindowOf(window);
         if (nsWindow == nil)
