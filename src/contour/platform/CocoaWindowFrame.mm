@@ -5,6 +5,8 @@
 
     #include <QtGui/QWindow>
 
+    #include <map>
+
     #import <AppKit/AppKit.h>
 
 namespace contour::platform
@@ -68,6 +70,32 @@ class CocoaWindowFrame final: public NativeWindowFrame
         if (NSWindow* nsWindow = nsWindowOf(window))
             [nsWindow invalidateShadow];
     }
+
+    /// The width of AppKit's own traffic-light cluster, measured rather than guessed.
+    ///
+    /// The buttons are a fixed size whatever font Contour is set in, so this is the one honest
+    /// source for it -- and the reason the tab strip asks the adapter instead of composing it from
+    /// chrome tokens, which under `ui_style: terminal` are counted in character cells.
+    [[nodiscard]] qreal nativeControlsInset(QWindow& window) const override
+    {
+        NSWindow* nsWindow = nsWindowOf(window);
+        if (nsWindow == nil)
+            return 0.0;
+
+        NSButton* close = [nsWindow standardWindowButton:NSWindowCloseButton];
+        NSButton* zoom = [nsWindow standardWindowButton:NSWindowZoomButton];
+        if (close == nil || zoom == nil)
+            return 0.0;
+
+        // Leading edge of the first button to the trailing edge of the last, plus the same gap
+        // again so the first tab does not sit flush against the zoom button.
+        auto const leading = NSMinX(close.frame);
+        auto const trailing = NSMaxX(zoom.frame);
+        return static_cast<qreal>(trailing + leading);
+    }
+
+  private:
+    std::map<NSWindow*, WindowDecoration> _applied;
 };
 
 std::unique_ptr<NativeWindowFrame> makeCocoaWindowFrame()

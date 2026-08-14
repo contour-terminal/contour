@@ -11,7 +11,8 @@
     #include <algorithm>
     #include <array>
     #include <ranges>
-    #include <vector>
+    #include <span>
+
 
 namespace contour::platform
 {
@@ -56,13 +57,13 @@ namespace
     class X11WindowShadow final: public WindowShadow
     {
       public:
-        X11WindowShadow(QWindow& window,
-                        xcb_connection_t* connection,
+        X11WindowShadow(xcb_connection_t* connection,
                         xcb_window_t windowId,
+                        xcb_atom_t propertyAtom,
                         uint32_t maxRequestBytes) noexcept:
-            _window { window },
             _connection { connection },
             _windowId { windowId },
+            _propertyAtom { propertyAtom },
             _maxRequestBytes { maxRequestBytes }
         {
         }
@@ -146,7 +147,8 @@ namespace
             if (_pixmaps.front() == XCB_PIXMAP_NONE && _published == ShadowGeometry {})
                 return;
 
-            unsetPropertyX11(&_window, ShadowPropertyName);
+            xcb_delete_property(_connection, _windowId, _propertyAtom);
+            xcb_flush(_connection);
             roundTrip();
             releasePixmaps(_pixmaps);
             _pixmaps = {};
@@ -191,24 +193,34 @@ namespace
         {
             // Eight pixmap ids in ShadowTile order, then top, right, bottom, left -- the order
             // kwin/src/shadow.cpp reads them back in.
-            auto values = std::vector<uint32_t> {};
-            values.reserve(12);
-            for (auto const pixmap: _pixmaps)
-                values.push_back(pixmap);
-            values.push_back(static_cast<uint32_t>(geometry.offsets.top));
-            values.push_back(static_cast<uint32_t>(geometry.offsets.right));
-            values.push_back(static_cast<uint32_t>(geometry.offsets.bottom));
-            values.push_back(static_cast<uint32_t>(geometry.offsets.left));
+            auto values = std::array<uint32_t, ShadowTileCount + 4> {};
+            std::ranges::copy(_pixmaps, values.begin());
+            values[ShadowTileCount + 0] = static_cast<uint32_t>(geometry.offsets.top);
+            values[ShadowTileCount + 1] = static_cast<uint32_t>(geometry.offsets.right);
+            values[ShadowTileCount + 2] = static_cast<uint32_t>(geometry.offsets.bottom);
+            values[ShadowTileCount + 3] = static_cast<uint32_t>(geometry.offsets.left);
 
-            setPropertyX11(&_window, ShadowPropertyName, std::span<uint32_t const> { values });
+            // Straight to xcb rather than through setPropertyX11: the atom was interned once, in
+            // the factory, and that helper would re-intern it on every publish -- a synchronous
+            // round trip, which over a forwarded X connection is a full network round trip.
+            xcb_change_property(_connection,
+                                XCB_PROP_MODE_REPLACE,
+                                _windowId,
+                                _propertyAtom,
+                                XCB_ATOM_CARDINAL,
+                                32,
+                                static_cast<uint32_t>(values.size()),
+                                values.data());
+            xcb_flush(_connection);
         }
 
         /// Waits until the server has processed everything queued so far.
         void roundTrip()
         {
             auto const cookie = xcb_get_input_focus(_connection);
-            free(xcb_get_input_focus_reply(
-                _connection, cookie, nullptr)); // NOLINT(cppcoreguidelines-no-malloc)
+            auto const reply = XcbReply<xcb_get_input_focus_reply_t> {
+                xcb_get_input_focus_reply(_connection, cookie, nullptr)
+            };
         }
 
         void releasePixmaps(std::array<xcb_pixmap_t, ShadowTileCount> const& pixmaps) noexcept
@@ -218,9 +230,9 @@ namespace
                     xcb_free_pixmap(_connection, pixmap);
         }
 
-        QWindow& _window;
         xcb_connection_t* _connection;
         xcb_window_t _windowId;
+        xcb_atom_t _propertyAtom;
         uint32_t _maxRequestBytes;
         std::array<xcb_pixmap_t, ShadowTileCount> _pixmaps {};
         ShadowGeometry _published {};
@@ -230,22 +242,23 @@ namespace
 std::unique_ptr<WindowShadow> makeX11WindowShadow(QWindow& window)
 {
     if (QGuiApplication::platformName() != "xcb")
-        return std::make_unique<NullWindowShadow>();
+        return nullptr;
 
     auto const info = queryXcbPropertyInfo(&window, ShadowPropertyName);
     if (!info)
-        return std::make_unique<NullWindowShadow>();
+        return nullptr;
 
     if (!hasUsableByteOrder(info->connection) || !hasDepth32Pixmaps(info->connection))
     {
         errorLog()("This X server cannot carry a window shadow; continuing without one.");
-        return std::make_unique<NullWindowShadow>();
+        return nullptr;
     }
 
     // In 4-byte units, hence the multiply.
     auto const maxRequestBytes = xcb_get_maximum_request_length(info->connection) * 4;
 
-    return std::make_unique<X11WindowShadow>(window, info->connection, info->window, maxRequestBytes);
+    return std::make_unique<X11WindowShadow>(
+        info->connection, info->window, info->propertyAtom, maxRequestBytes);
 }
 
 } // namespace contour::platform

@@ -31,12 +31,26 @@ Rectangle {
     border.width: chromeStyle.borderWidth
     border.color: root.palette.mid
 
-    // Skipped entirely for a style that casts no shadow, rather than paying for a no-op shader pass:
-    // `layer.enabled` puts the whole popup through an offscreen render target.
-    layer.enabled: chromeStyle.hasPopupShadow
+    // A hard-edged shadow is just an offset rectangle, so it is drawn as one. Only a BLURRED shadow
+    // goes through MultiEffect, which costs an offscreen render target and a shader pass per popup --
+    // `layer.enabled` puts the whole surface through an FBO. The terminal chrome's shadow has no
+    // blur at all, and would otherwise have paid for a shader that does nothing but translate.
+    Rectangle {
+        visible: chromeStyle.hasPopupShadow && chromeStyle.shadowBlur <= 0
+        z: -1
+        anchors.fill: parent
+        anchors.topMargin: chromeStyle.shadowOffsetY
+        anchors.leftMargin: chromeStyle.shadowOffsetY
+        anchors.bottomMargin: -chromeStyle.shadowOffsetY
+        anchors.rightMargin: -chromeStyle.shadowOffsetY
+        color: chromeStyle.shadowTint(root.palette.shadow)
+        radius: root.radius
+    }
+
+    layer.enabled: chromeStyle.hasPopupShadow && chromeStyle.shadowBlur > 0
     layer.effect: MultiEffect {
         shadowEnabled: true
-        shadowBlur: chromeStyle.shadowBlur > 0 ? 1.0 : 0.0
+        shadowBlur: 1.0
         blurMax: chromeStyle.shadowBlur
         shadowVerticalOffset: chromeStyle.shadowOffsetY
         shadowColor: chromeStyle.shadowTint(root.palette.shadow)

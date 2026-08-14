@@ -6,7 +6,6 @@
 #include <QtGui/QColor>
 
 #include <memory>
-#include <optional>
 #include <utility>
 
 namespace contour::platform
@@ -26,9 +25,7 @@ class WindowShadowController
 {
   public:
     /// @param shadow The attachment to publish through, @see makeWindowShadow. Never null.
-    /// @param color  The shadow's colour.
-    explicit WindowShadowController(std::unique_ptr<WindowShadow> shadow, QColor color = Qt::black):
-        _shadow { std::move(shadow) }, _color { std::move(color) }
+    explicit WindowShadowController(std::unique_ptr<WindowShadow> shadow): _shadow { std::move(shadow) }
     {
     }
 
@@ -46,7 +43,10 @@ class WindowShadowController
 
         if (_renderedFor != size)
         {
-            _tiles = renderWindowShadowTiles(shadowMetricsFor(size), _color);
+            // Black, because that is what a shadow is. Left as a literal rather than a constructor
+            // parameter until something actually wants to vary it -- a knob no caller turns reads
+            // as configurable when it is not.
+            _tiles = renderWindowShadowTiles(shadowMetricsFor(size), Qt::black);
             _renderedFor = size;
         }
         _shadow->apply(_tiles);
@@ -57,9 +57,10 @@ class WindowShadowController
 
   private:
     std::unique_ptr<WindowShadow> _shadow;
-    QColor _color;
     WindowShadowTiles _tiles {};
-    std::optional<ShadowSize> _renderedFor;
+    // No optional: refresh() returns early for None, so None can never be a RENDERED size and
+    // doubles perfectly as "nothing rendered yet".
+    ShadowSize _renderedFor = ShadowSize::None;
 };
 
 } // namespace contour::platform

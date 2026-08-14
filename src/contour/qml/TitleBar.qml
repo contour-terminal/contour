@@ -30,19 +30,16 @@ Item {
     // window_control_style's job, not this flag's.
     property bool useCustomWindowControls: true
 
-    // True where the OPERATING SYSTEM paints its window controls over our own chrome rather than in
-    // a bar of its own above it -- macOS, whose full-size-content window keeps drawing the real
-    // traffic lights while the content view extends underneath them. The leading slot then reserves
-    // their space instead of collapsing, or the first tab sits under the buttons.
-    property bool nativeControlsOverChrome: false
-
-    // The width our own traffic-light cluster would have taken, which is what the OS's occupies:
-    // ours were sized to look native in the first place. Composed from the same tokens
-    // WindowControls.qml lays itself out with, so the two cannot drift.
-    readonly property real nativeControlsInset: chromeStyle.windowControlInset
-                                              + (3 * chromeStyle.trafficLightDotSize)
-                                              + (2 * chromeStyle.trafficLightGap)
-                                              + chromeStyle.windowControlGutter
+    // Leading space to leave clear for the OPERATING SYSTEM's own window controls, where it paints
+    // them over our chrome rather than in a bar of its own above it -- macOS, whose
+    // full-size-content window keeps drawing the real traffic lights while the content view extends
+    // underneath them. Zero everywhere else.
+    //
+    // The number comes from the frame adapter (WindowController.nativeControlsInset), NOT from our
+    // chrome tokens: AppKit's buttons are a fixed size whatever font Contour is set in, so composing
+    // it from windowControlInset/trafficLightDotSize would be wrong by whatever the style says --
+    // badly wrong under `ui_style: terminal`, where those are counted in character cells.
+    property real nativeControlsInset: 0
 
     // The whole bar's height, and so the window's chrome height (Main.qml declares it to the
     // WindowController, which feeds the WM size hints). One character row in the terminal style,
@@ -93,9 +90,7 @@ Item {
             // @see the trailing slot below.
             Layout.preferredWidth: active
                                  ? implicitWidth
-                                 : (root.nativeControlsOverChrome && windowControls.side === "leading"
-                                    ? root.nativeControlsInset
-                                    : 0)
+                                 : (windowControls.side === "leading" ? root.nativeControlsInset : 0)
             sourceComponent: windowControlsComponent
         }
 

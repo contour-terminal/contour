@@ -9,6 +9,7 @@
     #include <QtCore/QCoreApplication>
     #include <QtGui/QWindow>
 
+    #include <map>
     #include <set>
     #include <utility>
 
@@ -44,8 +45,7 @@ namespace
 
     /// Watches the windows we decorate, and answers the two messages that keep the frame invisible.
     ///
-    /// Not a singleton: one instance is owned by the Win32WindowFrame, which the composition root
-    /// owns, so it installs and removes itself with the object rather than living for the process.
+    /// There is one, shared -- see frameEventFilter() below for why that is the right scope.
     class Win32FrameEventFilter final: public QAbstractNativeEventFilter
     {
       public:
@@ -92,8 +92,14 @@ namespace
                     // Except when maximized: Windows sizes a maximized window to the work area PLUS
                     // the frame, so a zero inset there would hang the terminal's content over the
                     // neighbouring monitor.
+                    //
+                    // The thickness is looked up only when it will be used: ncCalcSizeInset
+                    // discards it for a normal window, and this message arrives on every step of a
+                    // drag-resize.
                     auto const maximized = IsZoomed(msg->hwnd) ? WindowMaximized::Yes : WindowMaximized::No;
-                    auto const inset = ncCalcSizeInset(maximized, frameThicknessOf(msg->hwnd));
+                    auto const inset = ncCalcSizeInset(
+                        maximized,
+                        maximized == WindowMaximized::Yes ? frameThicknessOf(msg->hwnd) : FrameInset {});
 
                     auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(msg->lParam);
                     params->rgrc[0].left += inset.left;
@@ -133,6 +139,17 @@ namespace
         std::set<HWND> _watched;
     };
 
+    /// The one filter, shared by every window.
+    ///
+    /// Process-scoped because a native event filter IS process-scoped: it sees every message the
+    /// application receives and dispatches on msg->hwnd. One per window would have every Contour
+    /// window add another qstrcmp and set probe to every mouse move in the process.
+    [[nodiscard]] Win32FrameEventFilter& frameEventFilter()
+    {
+        static Win32FrameEventFilter filter;
+        return filter;
+    }
+
     class Win32WindowFrame final: public NativeWindowFrame
     {
       public:
@@ -141,7 +158,7 @@ namespace
         {
         }
 
-        void apply(QWindow& window, TitleBarDecoration decoration) override
+        void apply(QWindow& window, WindowDecoration decoration) override
         {
             auto const& api = dwmApi();
             if (!api.isUsable())
@@ -158,11 +175,18 @@ namespace
             if (hwnd == nullptr)
                 return;
 
+            // Idempotent, and it has to be: this is re-applied on every expose, and the work below
+            // is not free -- SWP_FRAMECHANGED forces a fresh WM_NCCALCSIZE round and can queue the
+            // repaint that produces the next expose, which would feed itself during a drag-resize.
+            if (auto const seen = _applied.find(hwnd); seen != _applied.end() && seen->second == decoration)
+                return;
+            _applied[hwnd] = decoration;
+
             auto const policy = framePolicyFor(FramePlatform::Windows, decoration);
             if (policy.shadow != FrameShadowStrategy::NativeFrameKept)
             {
                 // The native title bar: Qt's own frame is exactly right, so stop intercepting.
-                _filter.forget(hwnd);
+                frameEventFilter().forget(hwnd);
                 return;
             }
 
@@ -172,7 +196,7 @@ namespace
             auto const style = GetWindowLongPtrW(hwnd, GWL_STYLE);
             SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_THICKFRAME | WS_CAPTION | WS_MAXIMIZEBOX);
 
-            _filter.watch(hwnd);
+            frameEventFilter().watch(hwnd);
 
             // Force the WM_NCCALCSIZE round that applies the style change.
             SetWindowPos(hwnd,
@@ -201,9 +225,12 @@ namespace
             // DWM keeps its own shadow current; nothing to re-assert.
         }
 
+        /// Zero: Windows draws its controls in a title bar of its own, never over our chrome.
+        [[nodiscard]] qreal nativeControlsInset(QWindow& /*window*/) const override { return 0.0; }
+
       private:
         std::function<Qt::ColorScheme()> _colorScheme;
-        Win32FrameEventFilter _filter;
+        std::map<HWND, WindowDecoration> _applied;
     };
 } // namespace
 

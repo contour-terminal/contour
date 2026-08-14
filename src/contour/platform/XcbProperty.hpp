@@ -15,6 +15,8 @@
 #ifdef CONTOUR_FRONTEND_XCB
 
     #include <cstdint>
+    #include <cstdlib>
+    #include <memory>
     #include <optional>
     #include <span>
     #include <string>
@@ -23,6 +25,22 @@
 
 namespace contour::platform
 {
+
+/// Owns a libxcb reply, which the caller must free.
+///
+/// Every xcb_*_reply() hands back a malloc'd block; forgetting one leaks silently. Declared here
+/// rather than privately in the .cpp so the adapters that issue their own requests state the rule
+/// the same way instead of hand-writing free() with a clang-tidy suppression.
+struct XcbReplyDeleter
+{
+    void operator()(void* reply) const noexcept
+    {
+        std::free(reply);
+    }
+};
+
+template <typename T>
+using XcbReply = std::unique_ptr<T, XcbReplyDeleter>;
 
 /// A window's xcb identity paired with one interned property atom.
 ///

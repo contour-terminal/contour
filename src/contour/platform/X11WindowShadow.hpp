@@ -9,7 +9,7 @@
 namespace contour::platform
 {
 
-/// The X11 shadow attachment for @p window, or a NullWindowShadow.
+/// The X11 shadow attachment for @p window, or nullptr when X11 is not the answer here.
 ///
 /// Null when the platform is not xcb, when the server's image byte order is not the little-endian
 /// one `QImage::Format_ARGB32` lays out, or when depth-32 pixmaps are unavailable -- each of which

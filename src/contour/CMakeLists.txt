@@ -288,6 +288,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SettingsNavItem.qml
         qml/SettingsListItem.qml
         qml/ConfirmDialog.qml
+        qml/ContourMenu.qml
         qml/PopupSurface.qml
         qml/SettingRow.qml
         qml/SettingsSection.qml

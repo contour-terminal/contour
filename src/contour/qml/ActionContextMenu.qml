@@ -9,21 +9,13 @@
 import QtQuick
 import QtQuick.Controls
 
-Menu {
+ContourMenu {
     id: root
 
     // Force the in-scene (item) popup rather than a native OS menu. Since Qt 6.8 a Controls Menu defaults
     // to a native platform menu where one exists, and a native menu cannot host the sub-menus this file
     // creates at runtime — the same trap that made TabContextMenu come up EMPTY on Windows. Fusion (pinned
     // app-wide in ContourGuiApp) then draws an opaque, themed surface on every platform.
-    popupType: Popup.Item
-
-    background: PopupSurface {}
-
-    // A minimum distance to the window edge, so a menu popped near one still has room to cast its
-    // drop shadow -- an in-scene popup is clipped by the window it lives in. Qt's default (-1) lets a
-    // menu overflow the window instead, which would cut the shadow off.
-    margins: chromeStyle.shadowMargin
 
 
     // Raised when a command row is picked, carrying that row's actionId. A SIGNAL rather than a
@@ -63,11 +55,10 @@ Menu {
 
     Component {
         id: submenuEntry
-        // popupType is per-Popup, so a sub-menu needs the same in-scene treatment as the root does.
-        Menu {
-            popupType: Popup.Item
-            background: PopupSurface {}
-        }
+        // Every one of ContourMenu's three properties is per-Popup, so a sub-menu needs exactly
+        // the same treatment the root does -- including the margin, which it silently went without
+        // while these were copied by hand.
+        ContourMenu {}
     }
 
     // Appends `rows` to `menu`, recursing into sub-menus. Returns the objects it created, so the caller

@@ -8,7 +8,7 @@
 namespace contour::platform
 {
 
-/// The Wayland shadow attachment for @p window, or a NullWindowShadow.
+/// The Wayland shadow attachment for @p window, or nullptr when Wayland is not the answer.
 ///
 /// Null when the platform is not Wayland or when the compositor does not offer
 /// `org_kde_kwin_shadow` -- which is every compositor but KWin.

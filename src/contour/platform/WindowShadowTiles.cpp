@@ -73,34 +73,25 @@ namespace
         if (radius <= 0)
             return;
 
-        auto scratch = std::vector<uint8_t>(plane.samples.size(), 0);
+        auto scratch = AlphaPlane { plane.width, plane.height };
         auto const width = plane.width;
         auto const height = plane.height;
 
+        // Both passes go through AlphaPlane::at rather than indexing by hand: four open-coded
+        // `y * width + x` expressions are four chances at a silent off-by-one.
         for ([[maybe_unused]] auto const pass: std::views::iota(0, 3))
         {
             for (auto const y: std::views::iota(0, height))
-            {
-                auto const row = static_cast<size_t>(y) * static_cast<size_t>(width);
-                boxBlurLine([&](int x) { return plane.samples[row + static_cast<size_t>(x)]; },
-                            [&](int x, uint8_t v) { scratch[row + static_cast<size_t>(x)] = v; },
+                boxBlurLine([&](int x) { return plane.at(x, y); },
+                            [&](int x, uint8_t v) { scratch.at(x, y) = v; },
                             width,
                             radius);
-            }
+
             for (auto const x: std::views::iota(0, width))
-            {
-                boxBlurLine(
-                    [&](int y) {
-                        return scratch[(static_cast<size_t>(y) * static_cast<size_t>(width))
-                                       + static_cast<size_t>(x)];
-                    },
-                    [&](int y, uint8_t v) {
-                        plane.samples[(static_cast<size_t>(y) * static_cast<size_t>(width))
-                                      + static_cast<size_t>(x)] = v;
-                    },
-                    height,
-                    radius);
-            }
+                boxBlurLine([&](int y) { return scratch.at(x, y); },
+                            [&](int y, uint8_t v) { plane.at(x, y) = v; },
+                            height,
+                            radius);
         }
     }
 
@@ -117,7 +108,6 @@ namespace
     /// Draws one layer's silhouette into a fresh plane and blurs it.
     [[nodiscard]] AlphaPlane renderLayer(ShadowLayer const& layer,
                                          ShadowGeometry const& geometry,
-                                         int windowExtent,
                                          int compositeOffsetY)
     {
         auto plane = AlphaPlane { geometry.atlasWidth, geometry.atlasHeight };
@@ -127,10 +117,11 @@ namespace
         auto const left = geometry.offsets.left;
         auto const top = geometry.offsets.top + compositeOffsetY + layer.offsetY;
 
+        auto const extent = geometry.windowExtent;
         for (auto const y:
-             std::views::iota(std::max(0, top), std::min(geometry.atlasHeight, top + windowExtent)))
+             std::views::iota(std::max(0, top), std::min(geometry.atlasHeight, top + extent)))
             for (auto const x:
-                 std::views::iota(std::max(0, left), std::min(geometry.atlasWidth, left + windowExtent)))
+                 std::views::iota(std::max(0, left), std::min(geometry.atlasWidth, left + extent)))
                 plane.at(x, y) = 255;
 
         blurAlphaPlane(plane, boxRadiusFor(layer.radius));
@@ -149,10 +140,8 @@ WindowShadowTiles renderWindowShadowTiles(ShadowMetrics metrics, QColor const& c
     if (geometry.atlasWidth == 0)
         return {};
 
-    auto const windowExtent = geometry.atlasHeight - geometry.offsets.top - geometry.offsets.bottom;
-
-    auto const primary = renderLayer(metrics.primary, geometry, windowExtent, metrics.offsetY);
-    auto const secondary = renderLayer(metrics.secondary, geometry, windowExtent, metrics.offsetY);
+    auto const primary = renderLayer(metrics.primary, geometry, metrics.offsetY);
+    auto const secondary = renderLayer(metrics.secondary, geometry, metrics.offsetY);
 
     auto atlas = QImage { geometry.atlasWidth, geometry.atlasHeight, QImage::Format_ARGB32_Premultiplied };
     atlas.fill(Qt::transparent);

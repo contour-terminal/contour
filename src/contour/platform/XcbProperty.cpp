@@ -14,15 +14,6 @@ namespace contour::platform
 
 namespace
 {
-    /// libxcb hands every reply to the caller as a malloc'd block the caller must free.
-    struct FreeDeleter
-    {
-        void operator()(void* p) const noexcept { free(p); } // NOLINT(cppcoreguidelines-no-malloc)
-    };
-
-    template <typename T>
-    using XcbReply = std::unique_ptr<T, FreeDeleter>;
-
     xcb_connection_t* x11Connection()
     {
         if (!qApp)

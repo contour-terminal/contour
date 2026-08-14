@@ -41,6 +41,7 @@ add_library(contour_platform STATIC
     NativeWindowFrame.cpp NativeWindowFrame.hpp
     WaylandWindowShadow.cpp WaylandWindowShadow.hpp
     Win32WindowFrame.cpp Win32WindowFrame.hpp
+    WindowDecoration.hpp
     WindowShadow.cpp WindowShadow.hpp
     WindowShadowController.hpp
     WindowShadowGeometry.hpp

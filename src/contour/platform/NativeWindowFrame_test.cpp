@@ -11,7 +11,7 @@ namespace
 {
 constexpr auto AllPlatforms =
     std::array { FramePlatform::Other, FramePlatform::Windows, FramePlatform::MacOS };
-constexpr auto AllDecorations = std::array { TitleBarDecoration::Client, TitleBarDecoration::Native };
+constexpr auto AllDecorations = std::array { WindowDecoration::Client, WindowDecoration::Server };
 } // namespace
 
 TEST_CASE("framePolicyFor keeps a native frame wherever one carries a shadow", "[contour][frame]")
@@ -24,20 +24,22 @@ TEST_CASE("framePolicyFor keeps a native frame wherever one carries a shadow", "
         // The regression. Qt::FramelessWindowHint is exactly what costs an HWND its DWM shadow, its
         // Win11 rounded corners and its Aero snap; keeping the frame and zeroing it in WM_NCCALCSIZE
         // gets all three back while the client area still covers the whole window.
-        CHECK(framePolicyFor(FramePlatform::Windows, TitleBarDecoration::Client)
+        CHECK(framePolicyFor(FramePlatform::Windows, WindowDecoration::Client)
               == FramePolicy { .shadow = FrameShadowStrategy::NativeFrameKept,
-                               .resize = ResizeAffordance::ClientDrawn,
-                               .controls = WindowControlsOwner::Client,
+                               .affordances = FrameAffordances::Client,
+                               .controlPlacement = ControlPlacement::OwnBar,
                                .framelessHint = FramelessHint::Withhold });
     }
 
     SECTION("macOS keeps a decorated window and yields its controls in the same breath")
     {
-        // These two move TOGETHER or not at all: a full-size-content NSWindow still draws the real
-        // traffic lights, so a policy that kept ours would show both sets.
-        auto const policy = framePolicyFor(FramePlatform::MacOS, TitleBarDecoration::Client);
+        // These move TOGETHER or not at all: a full-size-content NSWindow still draws the real
+        // traffic lights, so a policy that kept ours would show both sets -- and the content view
+        // extends UNDER them, so the tab strip must also be told to leave their corner clear.
+        auto const policy = framePolicyFor(FramePlatform::MacOS, WindowDecoration::Client);
         CHECK(policy.shadow == FrameShadowStrategy::FullSizeContent);
-        CHECK(policy.controls == WindowControlsOwner::Native);
+        CHECK(policy.affordances == FrameAffordances::Native);
+        CHECK(policy.controlPlacement == ControlPlacement::OverChrome);
         CHECK(policy.framelessHint == FramelessHint::Withhold);
     }
 
@@ -45,10 +47,10 @@ TEST_CASE("framePolicyFor keeps a native frame wherever one carries a shadow", "
     {
         // Which is what leaves the Linux/BSD shadow to the compositor, @see makeWindowShadow -- and
         // pins that none of the Windows or macOS work above changed the platform this ships on most.
-        CHECK(framePolicyFor(FramePlatform::Other, TitleBarDecoration::Client)
+        CHECK(framePolicyFor(FramePlatform::Other, WindowDecoration::Client)
               == FramePolicy { .shadow = FrameShadowStrategy::None,
-                               .resize = ResizeAffordance::ClientDrawn,
-                               .controls = WindowControlsOwner::Client,
+                               .affordances = FrameAffordances::Client,
+                               .controlPlacement = ControlPlacement::OwnBar,
                                .framelessHint = FramelessHint::Apply });
     }
 }
@@ -62,9 +64,9 @@ TEST_CASE("framePolicyFor gives the whole frame to whoever draws it", "[contour]
         for (auto const platform: AllPlatforms)
         {
             INFO("platform " << static_cast<int>(platform));
-            auto const policy = framePolicyFor(platform, TitleBarDecoration::Native);
-            CHECK(policy.resize == ResizeAffordance::Native);
-            CHECK(policy.controls == WindowControlsOwner::Native);
+            auto const policy = framePolicyFor(platform, WindowDecoration::Server);
+            CHECK(policy.affordances == FrameAffordances::Native);
+            CHECK(policy.controlPlacement == ControlPlacement::OwnBar);
             CHECK(policy.framelessHint == FramelessHint::Withhold);
             CHECK(policy.shadow == FrameShadowStrategy::None);
         }
@@ -85,18 +87,19 @@ TEST_CASE("framePolicyFor gives the whole frame to whoever draws it", "[contour]
             }
     }
 
-    SECTION("whoever owns the controls owns the resize affordance")
+    SECTION("controls drawn over our chrome are always the OS's own")
     {
-        // Splitting these would either duplicate the window controls or leave the window unresizable,
-        // depending which way round the split fell.
+        // The converse cannot occur: only the OS can paint over its own content view, so a row
+        // claiming OverChrome while WE draw the controls would be asking the tab strip to inset for
+        // itself. This is what stops a platform added later inheriting the macOS answer by accident.
         for (auto const platform: AllPlatforms)
             for (auto const decoration: AllDecorations)
             {
                 INFO("platform " << static_cast<int>(platform) << ", decoration "
                                  << static_cast<int>(decoration));
                 auto const policy = framePolicyFor(platform, decoration);
-                CHECK((policy.controls == WindowControlsOwner::Native)
-                      == (policy.resize == ResizeAffordance::Native));
+                if (policy.controlPlacement == ControlPlacement::OverChrome)
+                    CHECK(policy.affordances == FrameAffordances::Native);
             }
     }
 }

@@ -51,7 +51,7 @@ TEST_CASE("WindowShadowController publishes only when a shadow is wanted", "[con
     {
         auto harness = Harness::make();
         harness.controller.refresh(
-            WindowPresentation::Windowed, WindowDecoration::ClientSide, ShadowSize::Large);
+            WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::Large);
 
         CHECK(harness.recorder->calls == std::vector<std::string> { "apply" });
         CHECK(harness.recorder->lastOffsets.bottom > harness.recorder->lastOffsets.top);
@@ -63,9 +63,9 @@ TEST_CASE("WindowShadowController publishes only when a shadow is wanted", "[con
         // take its shadow back, or the compositor keeps reserving space beyond the work area.
         auto harness = Harness::make();
         harness.controller.refresh(
-            WindowPresentation::Windowed, WindowDecoration::ClientSide, ShadowSize::Large);
+            WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::Large);
         harness.controller.refresh(
-            WindowPresentation::Maximized, WindowDecoration::ClientSide, ShadowSize::Large);
+            WindowPresentation::Maximized, WindowDecoration::Client, ShadowSize::Large);
 
         CHECK(harness.recorder->calls == std::vector<std::string> { "apply", "withdraw" });
     }
@@ -74,11 +74,11 @@ TEST_CASE("WindowShadowController publishes only when a shadow is wanted", "[con
     {
         auto harness = Harness::make();
         harness.controller.refresh(
-            WindowPresentation::Windowed, WindowDecoration::ClientSide, ShadowSize::Large);
+            WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::Large);
         harness.controller.refresh(
-            WindowPresentation::FullScreen, WindowDecoration::ClientSide, ShadowSize::Large);
+            WindowPresentation::FullScreen, WindowDecoration::Client, ShadowSize::Large);
         harness.controller.refresh(
-            WindowPresentation::Windowed, WindowDecoration::ClientSide, ShadowSize::Large);
+            WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::Large);
 
         CHECK(harness.recorder->calls == std::vector<std::string> { "apply", "withdraw", "apply" });
     }
@@ -88,9 +88,9 @@ TEST_CASE("WindowShadowController publishes only when a shadow is wanted", "[con
         // The window manager draws its own shadow with its own decoration; a second one stacks.
         auto harness = Harness::make();
         harness.controller.refresh(
-            WindowPresentation::Windowed, WindowDecoration::ClientSide, ShadowSize::Large);
+            WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::Large);
         harness.controller.refresh(
-            WindowPresentation::Windowed, WindowDecoration::ServerSide, ShadowSize::Large);
+            WindowPresentation::Windowed, WindowDecoration::Server, ShadowSize::Large);
 
         CHECK(harness.recorder->calls == std::vector<std::string> { "apply", "withdraw" });
     }
@@ -99,9 +99,9 @@ TEST_CASE("WindowShadowController publishes only when a shadow is wanted", "[con
     {
         auto harness = Harness::make();
         harness.controller.refresh(
-            WindowPresentation::Windowed, WindowDecoration::ClientSide, ShadowSize::Large);
+            WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::Large);
         harness.controller.refresh(
-            WindowPresentation::Windowed, WindowDecoration::ClientSide, ShadowSize::None);
+            WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::None);
 
         CHECK(harness.recorder->calls == std::vector<std::string> { "apply", "withdraw" });
     }
@@ -110,7 +110,7 @@ TEST_CASE("WindowShadowController publishes only when a shadow is wanted", "[con
     {
         auto harness = Harness::make();
         harness.controller.refresh(
-            WindowPresentation::Tiled, WindowDecoration::ClientSide, ShadowSize::Large);
+            WindowPresentation::Tiled, WindowDecoration::Client, ShadowSize::Large);
 
         CHECK(harness.recorder->calls == std::vector<std::string> { "withdraw" });
     }
@@ -126,7 +126,7 @@ TEST_CASE("WindowShadowController re-renders only when the size changes", "[cont
         // arrive per resize; re-rendering the tiles each time would blur a megabyte per event.
         for (auto i = 0; i < 5; ++i)
             harness.controller.refresh(
-                WindowPresentation::Windowed, WindowDecoration::ClientSide, ShadowSize::Large);
+                WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::Large);
 
         CHECK(harness.recorder->applyCount == 5);
         CHECK(harness.recorder->lastOffsets
@@ -136,11 +136,11 @@ TEST_CASE("WindowShadowController re-renders only when the size changes", "[cont
     SECTION("a different size produces a different shadow")
     {
         harness.controller.refresh(
-            WindowPresentation::Windowed, WindowDecoration::ClientSide, ShadowSize::Small);
+            WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::Small);
         auto const small = harness.recorder->lastOffsets;
 
         harness.controller.refresh(
-            WindowPresentation::Windowed, WindowDecoration::ClientSide, ShadowSize::VeryLarge);
+            WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::VeryLarge);
 
         CHECK(harness.recorder->lastOffsets.bottom > small.bottom);
     }
@@ -150,7 +150,7 @@ TEST_CASE("WindowShadowController withdraws on demand", "[contour][shadow]")
 {
     // What the window's owner calls before closing, while the handle is still live.
     auto harness = Harness::make();
-    harness.controller.refresh(WindowPresentation::Windowed, WindowDecoration::ClientSide, ShadowSize::Large);
+    harness.controller.refresh(WindowPresentation::Windowed, WindowDecoration::Client, ShadowSize::Large);
     harness.controller.withdraw();
 
     CHECK(harness.recorder->calls == std::vector<std::string> { "apply", "withdraw" });

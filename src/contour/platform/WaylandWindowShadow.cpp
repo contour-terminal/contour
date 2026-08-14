@@ -165,11 +165,11 @@ namespace
 std::unique_ptr<WindowShadow> makeWaylandWindowShadow(QWindow& window)
 {
     if (QGuiApplication::platformName() != "wayland")
-        return std::make_unique<NullWindowShadow>();
+        return nullptr;
 
     auto* manager = kwinShadowManager();
     if (manager == nullptr || !manager->isActive())
-        return std::make_unique<NullWindowShadow>();
+        return nullptr;
 
     return std::make_unique<WaylandWindowShadow>(window);
 }

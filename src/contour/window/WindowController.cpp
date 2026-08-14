@@ -719,34 +719,39 @@ void WindowController::seedTitleBarVisible(bool visible)
     setTitleBarVisible(visible);
 }
 
-platform::TitleBarDecoration WindowController::decoration() const noexcept
+platform::WindowDecoration WindowController::decoration() const noexcept
 {
-    return _titleBarVisible ? platform::TitleBarDecoration::Native : platform::TitleBarDecoration::Client;
+    return _titleBarVisible ? platform::WindowDecoration::Server : platform::WindowDecoration::Client;
+}
+
+platform::FramePolicy WindowController::framePolicy() const noexcept
+{
+    return framePolicyFor(platform::currentFramePlatform(), decoration());
 }
 
 bool WindowController::needsFramelessHint() const noexcept
 {
-    return framePolicyFor(platform::currentFramePlatform(), decoration()).framelessHint
-           == platform::FramelessHint::Apply;
+    return framePolicy().framelessHint == platform::FramelessHint::Apply;
 }
 
 bool WindowController::needsClientResizeBorder() const noexcept
 {
-    return framePolicyFor(platform::currentFramePlatform(), decoration()).resize
-           == platform::ResizeAffordance::ClientDrawn;
+    return framePolicy().affordances == platform::FrameAffordances::Client;
 }
 
 bool WindowController::needsClientWindowControls() const noexcept
 {
-    return framePolicyFor(platform::currentFramePlatform(), decoration()).controls
-           == platform::WindowControlsOwner::Client;
+    return framePolicy().affordances == platform::FrameAffordances::Client;
 }
 
-bool WindowController::hasNativeControlsOverChrome() const noexcept
+qreal WindowController::nativeControlsInset() const noexcept
 {
-    // Only when OUR title bar is the one showing: with the native frame the OS draws its controls in
-    // its own bar above our chrome, which costs us no space.
-    return decoration() == platform::TitleBarDecoration::Client && !needsClientWindowControls();
+    // Only where the OS paints its controls over our chrome; elsewhere it has its own bar and costs
+    // us nothing. The number itself is the adapter's, not ours -- see the declaration.
+    if (_osWindow == nullptr || !_nativeFrame
+        || framePolicy().controlPlacement != platform::ControlPlacement::OverChrome)
+        return 0.0;
+    return _nativeFrame->nativeControlsInset(*_osWindow);
 }
 
 void WindowController::setTitleBarVisible(bool visible)
@@ -761,7 +766,7 @@ void WindowController::setTitleBarVisible(bool visible)
     if (_osWindow != nullptr)
     {
         auto const target =
-            visible ? platform::TitleBarDecoration::Native : platform::TitleBarDecoration::Client;
+            visible ? platform::WindowDecoration::Server : platform::WindowDecoration::Client;
         auto const policy = framePolicyFor(platform::currentFramePlatform(), target);
         _osWindow->setFlag(Qt::FramelessWindowHint, policy.framelessHint == platform::FramelessHint::Apply);
         _nativeFrame->apply(*_osWindow, target);
@@ -963,19 +968,15 @@ void WindowController::refreshWindowShadow()
     auto const* session = activeSession();
     // Before the first session attaches there is no profile to read; the ConfigEntry default is the
     // same value the profile would carry, so a window shown that early still gets its shadow.
-    auto const size =
-        session != nullptr ? session->profile().windowShadow.value() : config::ShadowSize::Large;
+    // The profile's own default, not a restated enumerator: a literal here would be a second place
+    // to edit the day config::TerminalProfile's default changes, and it would drift silently.
+    auto const size = session != nullptr ? session->profile().windowShadow.value()
+                                         : config::TerminalProfile {}.windowShadow.value();
 
     _windowShadow->refresh(_presentation,
-                           _titleBarVisible ? platform::WindowDecoration::ServerSide
-                                            : platform::WindowDecoration::ClientSide,
+                           _titleBarVisible ? platform::WindowDecoration::Server
+                                            : platform::WindowDecoration::Client,
                            size);
-}
-
-void WindowController::applyWindowPresentation(platform::WindowPresentation presentation)
-{
-    _presentation = presentation;
-    refreshWindowShadow();
 }
 
 void WindowController::onWindowVisibilityChanged()
@@ -989,14 +990,11 @@ void WindowController::onWindowVisibilityChanged()
     switch (_osWindow->visibility())
     {
         case QQuickWindow::Visibility::Windowed:
-            applyWindowPresentation(platform::WindowPresentation::Windowed);
-            break;
+                    break;
         case QQuickWindow::Visibility::Maximized:
-            applyWindowPresentation(platform::WindowPresentation::Maximized);
-            break;
+                    break;
         case QQuickWindow::Visibility::FullScreen:
-            applyWindowPresentation(platform::WindowPresentation::FullScreen);
-            break;
+                    break;
         default: break;
     }
 }
@@ -1028,7 +1026,6 @@ void WindowController::showInitial()
         // Never leave the user windowless: map at whatever size the window has.
         display::displayLog()("showInitial: no display metrics available; showing at default size.");
         _osWindow->show();
-        refreshWindowShadow();
         return;
     }
 
@@ -1211,7 +1208,6 @@ void WindowController::setWindowFullScreen(session::DisplaySurface& requester)
     if (osWindow == nullptr)
         return;
     showWithoutSizeIncrements(*osWindow, &QWindow::showFullScreen);
-    applyWindowPresentation(platform::WindowPresentation::FullScreen);
 }
 
 void WindowController::setWindowMaximized(session::DisplaySurface& requester)
@@ -1221,7 +1217,6 @@ void WindowController::setWindowMaximized(session::DisplaySurface& requester)
         return;
     showWithoutSizeIncrements(*osWindow, &QWindow::showMaximized);
     _maximizedState = true;
-    applyWindowPresentation(platform::WindowPresentation::Maximized);
 }
 
 void WindowController::setWindowNormal(session::DisplaySurface& requester)
@@ -1235,7 +1230,6 @@ void WindowController::setWindowNormal(session::DisplaySurface& requester)
     updateSizeHintsFor(requester, HintApplyMode::Full);
     osWindow->showNormal();
     _maximizedState = false;
-    applyWindowPresentation(platform::WindowPresentation::Windowed);
 }
 
 void WindowController::toggleMaximized()

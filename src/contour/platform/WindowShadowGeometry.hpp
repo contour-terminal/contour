@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/config/WindowShadow.hpp>
+#include <contour/platform/WindowDecoration.hpp>
 
 #include <algorithm>
 #include <array>
@@ -32,6 +33,15 @@ enum class ShadowTile : uint8_t
 };
 
 inline constexpr auto ShadowTileCount = size_t { 8 };
+
+/// Every tile, in wire order.
+///
+/// The list itself, so the adapters and the tests iterate one table rather than each spelling out
+/// eight enumerators -- which is what would otherwise make "add a ninth" a three-file edit.
+inline constexpr auto AllShadowTiles = std::array<ShadowTile, ShadowTileCount> {
+    ShadowTile::Top,    ShadowTile::TopRight,   ShadowTile::Right, ShadowTile::BottomRight,
+    ShadowTile::Bottom, ShadowTile::BottomLeft, ShadowTile::Left,  ShadowTile::TopLeft,
+};
 
 /// One blurred layer of the composite.
 struct ShadowLayer
@@ -150,6 +160,13 @@ struct ShadowGeometry
     int atlasWidth = 0;
     int atlasHeight = 0;
 
+    /// Side of the synthetic square window the atlas is the shadow of.
+    ///
+    /// Kept rather than left to be recovered as `atlasHeight - offsets.top - offsets.bottom`: the
+    /// renderer needs it, and inverting the layout formula at a distance is a second place that has
+    /// to agree with this one.
+    int windowExtent = 0;
+
     [[nodiscard]] constexpr bool operator==(ShadowGeometry const&) const noexcept = default;
 };
 
@@ -230,9 +247,11 @@ struct ShadowGeometry
                                    .height = offsets.bottom + corner };
     at(ShadowTile::Left) = { .x = 0, .y = midY, .width = offsets.left, .height = 1 };
 
-    return ShadowGeometry {
-        .offsets = offsets, .tiles = tiles, .atlasWidth = atlasWidth, .atlasHeight = atlasHeight
-    };
+    return ShadowGeometry { .offsets = offsets,
+                            .tiles = tiles,
+                            .atlasWidth = atlasWidth,
+                            .atlasHeight = atlasHeight,
+                            .windowExtent = windowExtent };
 }
 
 /// Whether a window in a given state should carry a compositor drop shadow.
@@ -254,13 +273,6 @@ enum class WindowPresentation : uint8_t
     Tiled,
 };
 
-/// Who draws the window's frame.
-enum class WindowDecoration : uint8_t
-{
-    ClientSide, //!< We do -- the frameless, custom-title-bar case, which is what needs a shadow.
-    ServerSide, //!< The window manager does, and draws its own shadow with it.
-};
-
 /// Whether to publish a shadow for a window in this state.
 ///
 /// A server-side-decorated window already has the window manager's shadow; publishing a second one
@@ -271,7 +283,7 @@ enum class WindowDecoration : uint8_t
                                                              WindowDecoration decoration,
                                                              ShadowSize size) noexcept
 {
-    if (size == ShadowSize::None || decoration == WindowDecoration::ServerSide)
+    if (size == ShadowSize::None || decoration == WindowDecoration::Server)
         return ShadowVisibility::Hidden;
 
     switch (presentation)

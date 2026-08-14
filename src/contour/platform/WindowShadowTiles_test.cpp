@@ -8,13 +8,6 @@
 using namespace contour::platform;
 using contour::config::ShadowSize;
 
-namespace
-{
-constexpr auto AllTiles =
-    std::array { ShadowTile::Top,    ShadowTile::TopRight,   ShadowTile::Right, ShadowTile::BottomRight,
-                 ShadowTile::Bottom, ShadowTile::BottomLeft, ShadowTile::Left,  ShadowTile::TopLeft };
-} // namespace
-
 TEST_CASE("renderWindowShadowTiles produces uploadable tiles", "[contour][shadow]")
 {
     // No QGuiApplication anywhere in this file: QImage and QPainter need no paint device and no
@@ -26,7 +19,7 @@ TEST_CASE("renderWindowShadowTiles produces uploadable tiles", "[contour][shadow
         // The adapters upload geometry.tiles[i].width x height worth of bytes; a mismatch here is a
         // buffer overrun on the Wayland path and a corrupt pixmap on the X11 one.
         REQUIRE_FALSE(tiles.isEmpty());
-        for (auto const tile: AllTiles)
+        for (auto const tile: AllShadowTiles)
         {
             auto const& rect = tileRect(tiles.geometry, tile);
             auto const& image = tileImage(tiles, tile);
@@ -45,7 +38,7 @@ TEST_CASE("renderWindowShadowTiles produces uploadable tiles", "[contour][shadow
         // Counted rather than asserted per pixel: an assertion inside the loop would report a
         // quarter of a million results for one property, drowning every other check in the suite.
         auto violations = 0;
-        for (auto const tile: AllTiles)
+        for (auto const tile: AllShadowTiles)
         {
             auto const& image = tileImage(tiles, tile);
             for (auto const y: std::views::iota(0, image.height()))
@@ -89,7 +82,7 @@ TEST_CASE("renderWindowShadowTiles produces uploadable tiles", "[contour][shadow
         // What lets the controller cache tiles and skip an upload. If this ever fails, every
         // refresh re-uploads eight pixmaps.
         auto const again = renderWindowShadowTiles(shadowMetricsFor(ShadowSize::Large), Qt::black);
-        for (auto const tile: AllTiles)
+        for (auto const tile: AllShadowTiles)
             CHECK(tileImage(tiles, tile) == tileImage(again, tile));
     }
 
@@ -109,7 +102,7 @@ TEST_CASE("renderWindowShadowTiles draws nothing when asked for no shadow", "[co
     auto const tiles = renderWindowShadowTiles(shadowMetricsFor(ShadowSize::None), Qt::black);
 
     CHECK(tiles.isEmpty());
-    for (auto const tile: AllTiles)
+    for (auto const tile: AllShadowTiles)
         CHECK(tileImage(tiles, tile).isNull());
 }
 
@@ -126,7 +119,7 @@ TEST_CASE("every shadow size renders", "[contour][shadow]")
             continue;
         }
         REQUIRE_FALSE(tiles.isEmpty());
-        for (auto const tile: AllTiles)
+        for (auto const tile: AllShadowTiles)
             CHECK_FALSE(tileImage(tiles, tile).isNull());
     }
 }

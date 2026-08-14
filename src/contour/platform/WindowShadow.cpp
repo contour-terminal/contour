@@ -15,17 +15,16 @@ namespace contour::platform
 std::unique_ptr<WindowShadow> makeWindowShadow([[maybe_unused]] QWindow& window)
 {
     // Each backend decides for itself whether it applies -- it knows the platform name and, on
-    // Wayland, whether the compositor even offers the protocol -- and answers with a
-    // NullWindowShadow when it does not. So this is an ordered list of candidates, not a switch on
-    // the platform, and a build with neither backend compiled in still returns something usable.
+    // Wayland, whether the compositor even offers the protocol -- and answers nullptr when it does
+    // not. So this is an ordered list of candidates, not a switch on the platform, and a build with
+    // neither backend compiled in still returns something usable.
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    if (auto shadow = makeWaylandWindowShadow(window);
-        dynamic_cast<NullWindowShadow*>(shadow.get()) == nullptr)
+    if (auto shadow = makeWaylandWindowShadow(window))
         return shadow;
 #endif
 
 #ifdef CONTOUR_FRONTEND_XCB
-    if (auto shadow = makeX11WindowShadow(window); dynamic_cast<NullWindowShadow*>(shadow.get()) == nullptr)
+    if (auto shadow = makeX11WindowShadow(window))
         return shadow;
 #endif
 

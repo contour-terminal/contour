@@ -12,11 +12,6 @@ using contour::config::ShadowSize;
 
 namespace
 {
-/// Every tile, so a test can loop rather than name eight cases and forget the ninth.
-constexpr auto AllTiles =
-    std::array { ShadowTile::Top,    ShadowTile::TopRight,   ShadowTile::Right, ShadowTile::BottomRight,
-                 ShadowTile::Bottom, ShadowTile::BottomLeft, ShadowTile::Left,  ShadowTile::TopLeft };
-
 [[nodiscard]] bool overlaps(ShadowTileRect const& a, ShadowTileRect const& b) noexcept
 {
     return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
@@ -87,7 +82,7 @@ TEST_CASE("shadowGeometryFor lays out a stretchable nine-patch", "[contour][shad
         auto const geometry = shadowGeometryFor(shadowMetricsFor(ShadowSize::None));
         CHECK(geometry == ShadowGeometry {});
         CHECK(geometry.atlasWidth == 0);
-        for (auto const tile: AllTiles)
+        for (auto const tile: AllShadowTiles)
             CHECK(tileRect(geometry, tile) == ShadowTileRect {});
     }
 
@@ -104,14 +99,16 @@ TEST_CASE("shadowGeometryFor lays out a stretchable nine-patch", "[contour][shad
 
     SECTION("the atlas is exactly the offsets plus the synthetic window")
     {
-        auto const windowExtent = geometry.atlasHeight - geometry.offsets.top - geometry.offsets.bottom;
-        CHECK(geometry.atlasWidth == geometry.offsets.left + windowExtent + geometry.offsets.right);
-        CHECK(windowExtent > 0);
+        CHECK(geometry.atlasWidth
+              == geometry.offsets.left + geometry.windowExtent + geometry.offsets.right);
+        CHECK(geometry.atlasHeight
+              == geometry.offsets.top + geometry.windowExtent + geometry.offsets.bottom);
+        CHECK(geometry.windowExtent > 0);
     }
 
     SECTION("every tile lies inside the atlas")
     {
-        for (auto const tile: AllTiles)
+        for (auto const tile: AllShadowTiles)
         {
             auto const& rect = tileRect(geometry, tile);
             INFO("tile " << static_cast<int>(tile));
@@ -127,11 +124,11 @@ TEST_CASE("shadowGeometryFor lays out a stretchable nine-patch", "[contour][shad
     SECTION("no two tiles overlap")
     {
         // Written as a loop over pairs so a ninth tile is covered without editing the test.
-        for (auto const i: std::views::iota(size_t { 0 }, AllTiles.size()))
-            for (auto const j: std::views::iota(i + 1, AllTiles.size()))
+        for (auto const i: std::views::iota(size_t { 0 }, AllShadowTiles.size()))
+            for (auto const j: std::views::iota(i + 1, AllShadowTiles.size()))
             {
-                INFO("tiles " << static_cast<int>(AllTiles[i]) << " and " << static_cast<int>(AllTiles[j]));
-                CHECK_FALSE(overlaps(tileRect(geometry, AllTiles[i]), tileRect(geometry, AllTiles[j])));
+                INFO("tiles " << static_cast<int>(AllShadowTiles[i]) << " and " << static_cast<int>(AllShadowTiles[j]));
+                CHECK_FALSE(overlaps(tileRect(geometry, AllShadowTiles[i]), tileRect(geometry, AllShadowTiles[j])));
             }
     }
 
@@ -184,7 +181,7 @@ TEST_CASE("shadowGeometryFor lays out a stretchable nine-patch", "[contour][shad
             auto const each = shadowGeometryFor(shadowMetricsFor(info.value));
             CHECK(each.atlasWidth > 0);
             CHECK(each.offsets.bottom > each.offsets.top);
-            for (auto const tile: AllTiles)
+            for (auto const tile: AllShadowTiles)
                 CHECK(tileRect(each, tile).width > 0);
         }
     }
@@ -196,7 +193,7 @@ TEST_CASE("shadowVisibilityFor covers every window state", "[contour][shadow]")
                                                    WindowPresentation::Maximized,
                                                    WindowPresentation::FullScreen,
                                                    WindowPresentation::Tiled };
-    constexpr auto AllDecorations = std::array { WindowDecoration::ClientSide, WindowDecoration::ServerSide };
+    constexpr auto AllDecorations = std::array { WindowDecoration::Client, WindowDecoration::Server };
 
     SECTION("only a windowed, client-decorated window with a real size gets a shadow")
     {
@@ -207,7 +204,7 @@ TEST_CASE("shadowVisibilityFor covers every window state", "[contour][shadow]")
                 for (auto const& info: configEnumValues<ShadowSize>())
                 {
                     auto const expected = presentation == WindowPresentation::Windowed
-                                                  && decoration == WindowDecoration::ClientSide
+                                                  && decoration == WindowDecoration::Client
                                                   && info.value != ShadowSize::None
                                               ? ShadowVisibility::Shown
                                               : ShadowVisibility::Hidden;
@@ -222,7 +219,7 @@ TEST_CASE("shadowVisibilityFor covers every window state", "[contour][shadow]")
         // Two shadows stack into one visibly wrong one, so this is the rule that keeps
         // show_title_bar: true looking native.
         for (auto const& info: configEnumValues<ShadowSize>())
-            CHECK(shadowVisibilityFor(WindowPresentation::Windowed, WindowDecoration::ServerSide, info.value)
+            CHECK(shadowVisibilityFor(WindowPresentation::Windowed, WindowDecoration::Server, info.value)
                   == ShadowVisibility::Hidden);
     }
 }

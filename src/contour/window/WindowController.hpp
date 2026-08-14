@@ -92,8 +92,7 @@ class WindowController:
     Q_PROPERTY(bool needsFramelessHint READ needsFramelessHint NOTIFY titleBarVisibleChanged)
     Q_PROPERTY(bool needsClientResizeBorder READ needsClientResizeBorder NOTIFY titleBarVisibleChanged)
     Q_PROPERTY(bool needsClientWindowControls READ needsClientWindowControls NOTIFY titleBarVisibleChanged)
-    Q_PROPERTY(
-        bool hasNativeControlsOverChrome READ hasNativeControlsOverChrome NOTIFY titleBarVisibleChanged)
+    Q_PROPERTY(qreal nativeControlsInset READ nativeControlsInset NOTIFY titleBarVisibleChanged)
     // Tab-strip (tab bar) placement + visibility, exposed to Main.qml. `tabBarPosition` is an int
     // (0 = Top, 1 = Bottom) matching the TabBarPosition enumerator order. `tabBarShouldShow`
     // is the resolved gate (mode + live tab count) the QML binds its `visible` to.
@@ -387,13 +386,14 @@ class WindowController:
     /// Whether the tab strip should draw its own min/max/close controls, or the OS draws them.
     [[nodiscard]] bool needsClientWindowControls() const noexcept;
 
-    /// Whether the OS paints its window controls ON TOP of our own chrome.
+    /// Leading space the tab strip must leave clear for the OS's own window controls.
     ///
-    /// True on macOS with our title bar: a full-size-content NSWindow keeps drawing the real traffic
-    /// lights, and its content view extends underneath them -- so the tab strip has to leave that
-    /// corner clear or the first tab sits under the buttons. False where the OS draws its controls in
-    /// a frame of its own ABOVE our chrome, which needs no inset from us.
-    [[nodiscard]] bool hasNativeControlsOverChrome() const noexcept;
+    /// Zero unless the frame policy says the OS paints them OVER our chrome, which today is macOS:
+    /// a full-size-content NSWindow keeps drawing the real traffic lights and its content view
+    /// extends underneath them. The MAGNITUDE comes from the frame adapter rather than from our
+    /// chrome tokens, because it is the operating system's number -- AppKit's buttons are a fixed
+    /// size whatever font or `ui_style` Contour is using.
+    [[nodiscard]] qreal nativeControlsInset() const noexcept;
     // }}}
 
     // {{{ Tab strip (tab bar) placement + visibility
@@ -652,7 +652,7 @@ class WindowController:
     void onOSWindowActiveChanged();
 
     /// Which decoration this window is currently showing, as the frame policy names it.
-    [[nodiscard]] platform::TitleBarDecoration decoration() const noexcept;
+    [[nodiscard]] platform::WindowDecoration decoration() const noexcept;
 
     /// Re-publishes the window's drop shadow for the state it is now in.
     ///
@@ -666,17 +666,17 @@ class WindowController:
     /// still-unmapped window is exactly the premature realization WindowGeometry.hpp warns about.
     void refreshWindowShadow();
 
-    /// Records the presentation the window is being MOVED to, then re-publishes the shadow.
+    /// QWindow::visibilityChanged handler: the SOLE writer of _presentation.
     ///
-    /// The intent, not a live read of QWindow::visibility(): visibility settles asynchronously, so
-    /// during the transition it still reports the state being left — the same reason the size-hint
-    /// path takes an explicit HintApplyMode rather than reading it back.
-    void applyWindowPresentation(platform::WindowPresentation presentation);
-
-    /// QWindow::visibilityChanged handler: a maximize driven from outside the application — a
-    /// window-manager keybinding, a title-bar double click on the native frame — reaches none of the
-    /// entry points above, so the shadow would otherwise survive into a maximized window.
+    /// Every way the window changes presentation ends in this signal — our own setWindowMaximized
+    /// and friends, the toggles, and the ones driven from outside the application entirely (a
+    /// window-manager keybinding, a double click on the native frame). Recording the intent at each
+    /// of those call sites as well would be a partial duplicate of a mechanism that already covers
+    /// all of them, and the two would drift at whichever site was added next.
     void onWindowVisibilityChanged();
+
+    /// The frame policy for this window's platform and current decoration.
+    [[nodiscard]] platform::FramePolicy framePolicy() const noexcept;
 
     session::TerminalSessionManager& _manager;
     vtworkspace::WindowId _windowId;
