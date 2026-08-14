@@ -17,6 +17,7 @@
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
 
+using vthost::client::composeAnchoredClientArea;
 using vthost::client::composeClientArea;
 using vthost::client::WireLayout;
 using vthost::client::wireToLayout;
@@ -259,6 +260,51 @@ TEST_CASE("composeClientArea sums a split's axis and spans the other", "[vthost]
     {
         auto const root = split(2, 5000, leaf(100), leaf(101));
         CHECK_FALSE(composeClientArea(root, sizesOf({ { 100, cells(50, 30) } })).has_value());
+    }
+}
+
+TEST_CASE("composeAnchoredClientArea reports the anchoring tab's area", "[vthost][layout]")
+{
+    // Two mirrored windows, each one tab: window A is 80x24, window B is 100x30. The wire carries
+    // ONE client area per client, so exactly one of them has to speak for both.
+    auto const roots = std::vector { leaf(100), leaf(200) };
+    auto const sizes = sizesOf({ { 100, cells(80, 24) }, { 200, cells(100, 30) } });
+
+    SECTION("the anchor selects its own tab, not the first one")
+    {
+        CHECK(composeAnchoredClientArea(roots, 200, sizes) == cells(100, 30));
+        CHECK(composeAnchoredClientArea(roots, 100, sizes) == cells(80, 24));
+    }
+
+    SECTION("no anchor falls back to the first tab that composes")
+    {
+        CHECK(composeAnchoredClientArea(roots, std::nullopt, sizes) == cells(80, 24));
+    }
+
+    SECTION("an anchor naming no mirrored pane falls back rather than reporting nothing")
+    {
+        // Regression: `NativeController::unbind` clears `_geometryAnchor` when the anchoring pane
+        // goes away, so this state is transient — but a flush queued before the unbind still
+        // observes it, and it must degrade to the fallback instead of dropping the report.
+        CHECK(composeAnchoredClientArea(roots, 999, sizes) == cells(80, 24));
+    }
+
+    SECTION("an anchored tab that cannot compose yields to a tab that can")
+    {
+        // The anchoring pane was unbound (its extent is gone) while its leaf is still on the wire:
+        // the layout push that removes it has not arrived yet.
+        auto const partial = sizesOf({ { 100, cells(80, 24) } });
+        CHECK(composeAnchoredClientArea(roots, 200, partial) == cells(80, 24));
+    }
+
+    SECTION("no tab composing at all is no report")
+    {
+        CHECK_FALSE(composeAnchoredClientArea(roots, 100, sizesOf({})).has_value());
+    }
+
+    SECTION("an empty layout set is no report")
+    {
+        CHECK_FALSE(composeAnchoredClientArea(std::vector<proto::WirePane> {}, 100, sizes).has_value());
     }
 }
 
