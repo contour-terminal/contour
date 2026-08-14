@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib> // std::abs -- libstdc++ leaks it in through <algorithm>, libc++ does not
 
 namespace contour::platform
 {
