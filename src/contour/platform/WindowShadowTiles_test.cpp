@@ -45,7 +45,7 @@ TEST_CASE("renderWindowShadowTiles produces uploadable tiles", "[contour][shadow
                 for (auto const x: std::views::iota(0, image.width()))
                 {
                     auto const pixel = image.pixel(x, y);
-                    auto const alpha = static_cast<int>(qAlpha(pixel));
+                    auto const alpha = qAlpha(pixel);
                     if (qRed(pixel) > alpha || qGreen(pixel) > alpha || qBlue(pixel) > alpha)
                         ++violations;
                 }
@@ -65,7 +65,7 @@ TEST_CASE("renderWindowShadowTiles produces uploadable tiles", "[contour][shadow
         auto previous = -1;
         for (auto const x: std::views::iota(0, left.width()))
         {
-            auto const alpha = static_cast<int>(qAlpha(left.pixel(x, 0)));
+            auto const alpha = qAlpha(left.pixel(x, 0));
             INFO("x " << x);
             CHECK(alpha >= previous);
             previous = alpha;

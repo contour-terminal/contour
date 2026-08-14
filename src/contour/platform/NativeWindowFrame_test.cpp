@@ -106,11 +106,11 @@ TEST_CASE("framePolicyFor gives the whole frame to whoever draws it", "[contour]
 
 TEST_CASE("ncCalcSizeInset only insets a maximized window", "[contour][frame]")
 {
-    constexpr auto frame = FrameInset { .left = 8, .top = 8, .right = 8, .bottom = 8 };
+    constexpr auto Frame = FrameInset { .left = 8, .top = 8, .right = 8, .bottom = 8 };
 
     SECTION("a normal window gets none, which is what makes the client area full-bleed")
     {
-        CHECK(ncCalcSizeInset(WindowMaximized::No, frame) == FrameInset {});
+        CHECK(ncCalcSizeInset(WindowMaximized::No, Frame) == FrameInset {});
         // Independent of the frame thickness, so it cannot go wrong on a DPI change.
         CHECK(ncCalcSizeInset(WindowMaximized::No, FrameInset { .left = 99 }) == FrameInset {});
     }
@@ -119,15 +119,15 @@ TEST_CASE("ncCalcSizeInset only insets a maximized window", "[contour][frame]")
     {
         // Windows sizes a maximized window to the work area PLUS the frame; without this the
         // terminal's content spills onto the neighbouring monitor.
-        CHECK(ncCalcSizeInset(WindowMaximized::Yes, frame) == frame);
+        CHECK(ncCalcSizeInset(WindowMaximized::Yes, Frame) == Frame);
     }
 }
 
 TEST_CASE("currentFramePlatform names the platform this binary was built for", "[contour][frame]")
 {
-#if defined(_WIN32)
+#ifdef _WIN32
     CHECK(currentFramePlatform() == FramePlatform::Windows);
-#elif defined(__APPLE__)
+#elifdef __APPLE__
     CHECK(currentFramePlatform() == FramePlatform::MacOS);
 #else
     CHECK(currentFramePlatform() == FramePlatform::Other);

@@ -7,6 +7,7 @@
 
     #include <QtCore/QAbstractNativeEventFilter>
     #include <QtCore/QCoreApplication>
+    #include <QtGui/QGuiApplication>
     #include <QtGui/QWindow>
 
     #include <map>
@@ -239,8 +240,15 @@ namespace
 
 std::unique_ptr<NativeWindowFrame> makeWin32WindowFrame(std::function<Qt::ColorScheme()> const& colorScheme)
 {
+    // Only under the Windows platform plugin: QWindow::winId() is an HWND there and something else
+    // anywhere else, and handing a non-HWND to SetWindowLongPtr is undefined. The same guard the
+    // Cocoa adapter and both shadow backends carry.
+    if (QGuiApplication::platformName() != QStringLiteral("windows"))
+        return std::make_unique<NullWindowFrame>();
+
     if (!dwmApi().isUsable())
         return std::make_unique<NullWindowFrame>();
+
     return std::make_unique<Win32WindowFrame>(colorScheme);
 }
 

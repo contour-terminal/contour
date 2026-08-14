@@ -3,6 +3,7 @@
 
 #ifdef __APPLE__
 
+    #include <QtGui/QGuiApplication>
     #include <QtGui/QWindow>
 
     #include <map>
@@ -100,6 +101,13 @@ class CocoaWindowFrame final: public NativeWindowFrame
 
 std::unique_ptr<NativeWindowFrame> makeCocoaWindowFrame()
 {
+    // Only under the Cocoa platform plugin. QWindow::winId() is an NSView* THERE and something else
+    // entirely anywhere else -- offscreen, minimal, vnc -- so reinterpret_cast'ing it and sending it
+    // an Objective-C message is a segmentation fault, which is exactly what the offscreen GUI tests
+    // hit. The shadow backends guard the same way for the same reason.
+    if (QGuiApplication::platformName() != QStringLiteral("cocoa"))
+        return std::make_unique<NullWindowFrame>();
+
     return std::make_unique<CocoaWindowFrame>();
 }
 
