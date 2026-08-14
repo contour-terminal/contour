@@ -956,6 +956,47 @@ TEST_CASE("The SetTabColor action opens the tab's color flyout (offscreen)", "[c
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
 
+TEST_CASE("A context menu actually opens, with its surface (offscreen)", "[contour][gui][qml]")
+{
+    // The gap that let a broken menu ship. Every existing menu test INSTANTIATES a menu and counts
+    // its rows; none ever opened one. A menu whose background or margins fail only at popup() time
+    // therefore passed the whole suite while being unusable in the application.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const host = makeTabItemHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    auto* tab = qobject_cast<QQuickItem*>(host->property("tabItem").value<QObject*>());
+    REQUIRE(tab != nullptr);
+
+    auto* menu = tab->findChild<QObject*>(QStringLiteral("tabContextMenu"));
+    REQUIRE(menu != nullptr);
+
+    REQUIRE(QMetaObject::invokeMethod(menu, "open"));
+    QCoreApplication::processEvents();
+
+    CHECK(menu->property("opened").toBool());
+
+    // The surface it opens on. A null background is what a failed PopupSurface leaves behind, and a
+    // menu with no background is an unreadable stack of text over the terminal.
+    auto* background = menu->property("background").value<QObject*>();
+    REQUIRE(background != nullptr);
+    CHECK(background->property("width").toReal() > 0.0);
+    CHECK(background->property("height").toReal() > 0.0);
+
+    // And its rows are laid out, not collapsed to nothing.
+    CHECK(menu->property("count").toInt() > 0);
+    CHECK(menu->property("width").toReal() > 0.0);
+    CHECK(menu->property("height").toReal() > 0.0);
+
+    QMetaObject::invokeMethod(menu, "close");
+    QCoreApplication::processEvents();
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
 TEST_CASE("The tab color flyout opens inside the window, wherever the tab strip sits (offscreen)",
           "[contour][gui][qml]")
 {

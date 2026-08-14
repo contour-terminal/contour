@@ -15,10 +15,18 @@
 // process. Four popups here already replaced their background with a near-identical Rectangle for
 // the same reason, so this also collapses those four copies into one.
 //
+// Why it is drawn with plain Rectangles and NOT with QtQuick.Effects' MultiEffect, which is the
+// obvious tool for a soft shadow. MultiEffect has to be fed from `layer.enabled`, which puts the
+// popup's whole background through an offscreen render target -- and this application does not own
+// its compositing: the terminal paints OVER the QML scene graph in an afterRendering pass
+// (TerminalDisplay), scissor-clipped to its item rect. A popup that renders through an FBO does not
+// reliably survive that, and a context menu that opens but cannot be SEEN is far worse than a
+// shadow with a little banding. Stacked translucent rectangles need no layer, no shader and no
+// extra Qt module, and they compose exactly the way every other chrome item already does.
+//
 // Every shape and colour still comes from chromeStyle, so this file never learns which style is
 // active.
 import QtQuick
-import QtQuick.Effects
 
 Rectangle {
     id: root
@@ -31,10 +39,44 @@ Rectangle {
     border.width: chromeStyle.borderWidth
     border.color: root.palette.mid
 
-    // A hard-edged shadow is just an offset rectangle, so it is drawn as one. Only a BLURRED shadow
-    // goes through MultiEffect, which costs an offscreen render target and a shader pass per popup --
-    // `layer.enabled` puts the whole surface through an FBO. The terminal chrome's shadow has no
-    // blur at all, and would otherwise have paid for a shader that does nothing but translate.
+    // The shadow's colour at full strength. Read once: each layer below takes an equal share of it.
+    readonly property color _tint: chromeStyle.shadowTint(root.palette.shadow)
+
+    // How many rectangles the falloff is built from. Enough that the banding stays under what the
+    // eye picks out at this opacity, capped because each one is another rectangle to rasterize.
+    readonly property int _layers: Math.min(10, Math.max(3, Math.round(chromeStyle.shadowBlur / 3)))
+
+    // A child with negative z draws BEHIND its parent in Qt Quick, which is what puts these under
+    // the opaque surface without a second item to hold them.
+    //
+    // Each is a filled rounded rectangle, larger than the last and all at the same low alpha, so
+    // where many overlap -- close to the surface -- they sum to a strong shadow, and where only the
+    // outermost reaches they sum to almost nothing. That accumulation IS the falloff.
+    Repeater {
+        model: (chromeStyle.hasPopupShadow && chromeStyle.shadowBlur > 0) ? root._layers : 0
+
+        delegate: Rectangle {
+            required property int index
+
+            z: -1
+
+            // Innermost layer is tight to the surface, outermost reaches the full blur radius.
+            readonly property real spread: ((index + 1) / root._layers) * chromeStyle.shadowBlur
+
+            anchors.fill: parent
+            anchors.leftMargin: -spread
+            anchors.rightMargin: -spread
+            anchors.topMargin: -spread + chromeStyle.shadowOffsetY
+            anchors.bottomMargin: -spread - chromeStyle.shadowOffsetY
+
+            radius: root.radius + spread
+            // An equal share each, so the overlap near the surface sums back to the style's opacity.
+            color: Qt.rgba(root._tint.r, root._tint.g, root._tint.b, root._tint.a / root._layers)
+        }
+    }
+
+    // The hard-edged case: no blur means no falloff to build, just the offset block a text-mode UI
+    // casts. One filled rectangle at the style's full shadow opacity.
     Rectangle {
         visible: chromeStyle.hasPopupShadow && chromeStyle.shadowBlur <= 0
         z: -1
@@ -43,19 +85,7 @@ Rectangle {
         anchors.leftMargin: chromeStyle.shadowOffsetY
         anchors.bottomMargin: -chromeStyle.shadowOffsetY
         anchors.rightMargin: -chromeStyle.shadowOffsetY
-        color: chromeStyle.shadowTint(root.palette.shadow)
+        color: root._tint
         radius: root.radius
-    }
-
-    layer.enabled: chromeStyle.hasPopupShadow && chromeStyle.shadowBlur > 0
-    layer.effect: MultiEffect {
-        shadowEnabled: true
-        shadowBlur: 1.0
-        blurMax: chromeStyle.shadowBlur
-        shadowVerticalOffset: chromeStyle.shadowOffsetY
-        shadowColor: chromeStyle.shadowTint(root.palette.shadow)
-        // The blur reaches beyond the rectangle that cast it; without this it would be cut off at
-        // the source item's own bounds and the shadow would stop square at the popup's edge.
-        autoPaddingEnabled: true
     }
 }

@@ -304,15 +304,22 @@ TEST_CASE("PopupSurface carries a drop shadow in the DEFAULT configuration", "[c
         CHECK(provider->hasPopupShadow());
         CHECK(surface->property("radius").toReal() == provider->radius());
 
-        // Only a BLURRED shadow goes through the offscreen layer and its shader; a hard-edged one
-        // is drawn as a plain offset rectangle, which is what the terminal chrome asks for. So the
-        // layer follows the blur, not merely "is there a shadow".
-        //
-        // `layer` is a grouped property object, so it has to be fetched and then read -- a dotted
-        // property("layer.enabled") resolves to nothing and silently answers false.
+        // The shadow is drawn as plain child rectangles, NOT through layer.enabled and a shader:
+        // this application paints the terminal over the QML scene, and a popup that renders through
+        // an offscreen target does not reliably survive that. Pin it, because reaching for
+        // MultiEffect is the obvious thing to do here and it costs a visible context menu.
         auto* layer = surface->property("layer").value<QObject*>();
         REQUIRE(layer != nullptr);
-        CHECK(layer->property("enabled").toBool() == (provider->shadowBlur() > 0));
+        CHECK_FALSE(layer->property("enabled").toBool());
+
+        // The shadow is nonetheless there: children behind the surface, which is what draws it.
+        auto* item = qobject_cast<QQuickItem*>(surface.get());
+        REQUIRE(item != nullptr);
+        auto behind = 0;
+        for (auto* child: item->childItems())
+            if (child->z() < 0 && child->isVisible())
+                ++behind;
+        CHECK(behind > 0);
 
         // The gutter every popup keeps against the window edge. Without it the shadow of a popup
         // opened near an edge is clipped away by the window and none of the above is visible.

@@ -4,6 +4,7 @@
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
 
     #include <QtGui/QGuiApplication>
+    #include <QtGui/QPainter>
     #include <QtGui/QWindow>
     #include <QtWaylandClient/QWaylandClientExtension>
     #include <QtWaylandClient/private/qwaylandshmbackingstore_p.h>
@@ -85,9 +86,21 @@ namespace
                 // X11 path needs, hence the conversion there and none here.
                 auto buffer = std::make_unique<QtWaylandClient::QWaylandShmBuffer>(
                     waylandWindow->display(), image.size(), QImage::Format_ARGB32_Premultiplied);
-                if (buffer->image() == nullptr || buffer->image()->isNull())
+                auto* target = buffer->image();
+                if (target == nullptr || target->isNull())
                     return;
-                *buffer->image() = image;
+
+                // PAINTED into, not assigned. QWaylandShmBuffer::image() hands back a QImage that
+                // merely wraps the shared-memory mapping the compositor reads, and QImage assignment
+                // is a shallow, implicitly-shared rebind -- `*target = image` would repoint that
+                // member at the tile's own pixels and abandon the mapping, leaving the compositor
+                // reading the buffer exactly as allocated: fully transparent. The protocol traffic
+                // looks perfect and no shadow appears.
+                auto painter = QPainter { target };
+                painter.setCompositionMode(QPainter::CompositionMode_Source);
+                painter.drawImage(0, 0, image);
+                painter.end();
+
                 buffers[i] = std::move(buffer);
             }
 
