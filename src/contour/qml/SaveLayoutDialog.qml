@@ -39,12 +39,7 @@ Popup {
         colorGroup: SystemPalette.Active
     }
 
-    background: Rectangle {
-        color: systemPalette.window
-        border.color: systemPalette.mid
-        border.width: 1
-        radius: 6
-    }
+    background: PopupSurface {}
 
     // Start empty with the caret already in the field on every open, so the user can type immediately.
     onOpened: {

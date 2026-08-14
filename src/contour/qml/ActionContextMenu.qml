@@ -18,6 +18,14 @@ Menu {
     // app-wide in ContourGuiApp) then draws an opaque, themed surface on every platform.
     popupType: Popup.Item
 
+    background: PopupSurface {}
+
+    // A minimum distance to the window edge, so a menu popped near one still has room to cast its
+    // drop shadow -- an in-scene popup is clipped by the window it lives in. Qt's default (-1) lets a
+    // menu overflow the window instead, which would cut the shadow off.
+    margins: chromeStyle.shadowMargin
+
+
     // Raised when a command row is picked, carrying that row's actionId. A SIGNAL rather than a
     // controller call, so one component serves every menu surface: the terminal pane's and the title
     // bar's differ only in which controller method their host wires this to.
@@ -58,6 +66,7 @@ Menu {
         // popupType is per-Popup, so a sub-menu needs the same in-scene treatment as the root does.
         Menu {
             popupType: Popup.Item
+            background: PopupSurface {}
         }
     }
 

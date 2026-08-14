@@ -33,12 +33,7 @@ Dialog {
         colorGroup: SystemPalette.Active
     }
 
-    background: Rectangle {
-        color: sys.window
-        border.color: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.22)
-        border.width: 1
-        radius: 8
-    }
+    background: PopupSurface {}
 
     contentItem: ColumnLayout {
         spacing: 12

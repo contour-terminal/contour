@@ -33,11 +33,16 @@ Popup {
     // bottom edge. Being modal, it would then be invisible AND still swallow every click, leaving the user
     // unable to color the tab at all. Two lines, one per axis:
     //
-    //   - `margins: 0` lets Qt shift the popup inwards on any axis it overflows on (a narrow window would
+    //   - `margins` lets Qt shift the popup inwards on any axis it overflows on (a narrow window would
     //     otherwise clip it off the right edge), and is the backstop if the placement below is ever wrong;
     //   - placeAgainstParent() picks the vertical side, so a bottom strip opens the picker ABOVE its tab
     //     rather than leaving Qt to shove it up over the tab it belongs to.
-    margins: 0
+    //
+    // The value is the style's shadow margin rather than 0: `margins` is a MINIMUM distance to the
+    // overlay edge, so raising it keeps the shift-inwards behaviour above exactly as it was while
+    // also buying the gutter the drop shadow needs -- an in-scene popup is clipped by the window, so
+    // a flyout flush against the edge would simply have no room to cast one.
+    margins: chromeStyle.shadowMargin
 
     // Placed per open, not as a binding on y: the tab's position in the window is reached through
     // mapToItem(), which is a snapshot rather than something QML re-evaluates the binding on — and at
@@ -50,8 +55,11 @@ Popup {
         const overlay = root.Overlay.overlay; // the window, in the coordinates a Popup is placed in
         if (!root.parent || !overlay)
             return;
+        // Measured against the margin, not the raw overlay edge, so "fits below" means it fits with
+        // its shadow. Without this the flyout would sit where Qt then has to shove it back inwards.
+        const margin = chromeStyle.shadowMargin;
         const tabBottom = root.parent.mapToItem(overlay, 0, root.parent.height).y;
-        const fitsBelow = tabBottom + root.implicitHeight <= overlay.height;
+        const fitsBelow = tabBottom + root.implicitHeight + margin <= overlay.height;
         root.y = fitsBelow ? root.parent.height : -root.implicitHeight;
     }
 
@@ -74,12 +82,7 @@ Popup {
         windowText: systemPalette.windowText
     }
 
-    background: Rectangle {
-        color: systemPalette.window
-        border.color: systemPalette.mid
-        border.width: 1
-        radius: 4
-    }
+    background: PopupSurface {}
 
     contentItem: Column {
         spacing: 8

@@ -995,6 +995,25 @@ TEST_CASE("The tab color flyout opens inside the window, wherever the tab strip 
     REQUIRE(flyoutRect.height() > 0); // i.e. the popup materialized at all
     CHECK(windowRect.contains(flyoutRect));
 
+    // Inside the window is not enough: the flyout is an in-scene popup, so the window CLIPS it, and a
+    // flyout flush against an edge would have its drop shadow cut away entirely. Assert the gutter the
+    // style asks for, which is the only thing that can catch "the shadow is drawn but nobody sees it".
+    //
+    // On one axis it is unavoidable. The flyout hangs off a tab that can sit at the very top or the
+    // very bottom of the window (tab_bar_position), so the side facing the strip is against the tab by
+    // construction -- hence the containment below is the horizontal gutter plus the side away from it.
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+    auto const margin = provider->shadowMargin();
+    CHECK(flyoutRect.left() >= windowRect.left() + margin);
+    CHECK(flyoutRect.right() <= windowRect.right() - margin);
+    if (stripAt == TabStripAt::Bottom)
+        CHECK(flyoutRect.top() >= windowRect.top() + margin);
+    else
+        CHECK(flyoutRect.bottom() <= windowRect.bottom() - margin);
+
     // And it still hugs the tab it belongs to: above it when it cannot go below, rather than being parked
     // in some arbitrary corner that happens to be on screen.
     auto const tabRect = QRectF(tab->mapToScene(QPointF(0, 0)), QSizeF(tab->width(), tab->height()));
@@ -2741,6 +2760,9 @@ struct PaletteHost
 /// Builds the host, opens the palette, and pumps the event loop so the Popup materializes its content.
 [[nodiscard]] PaletteHost openPalette(QQmlEngine& engine, MockPaletteController& controller)
 {
+    // The popup's background is a PopupSurface, which takes its shape and its drop shadow from
+    // the design tokens -- so the engine needs them, as every other chrome component's does.
+    contour::test::installChromeStyle(engine);
     engine.rootContext()->setContextProperty("paletteController", &controller);
 
     QQmlComponent component(&engine);
@@ -3076,6 +3098,9 @@ struct SaveLayoutHost
 /// request, which is the path Main.qml takes).
 [[nodiscard]] SaveLayoutHost makeSaveLayoutHost(QQmlEngine& engine, MockSaveLayoutController& controller)
 {
+    // The popup's background is a PopupSurface, which takes its shape and its drop shadow from
+    // the design tokens -- so the engine needs them, as every other chrome component's does.
+    contour::test::installChromeStyle(engine);
     engine.rootContext()->setContextProperty("saveLayoutController", &controller);
 
     QQmlComponent component(&engine);

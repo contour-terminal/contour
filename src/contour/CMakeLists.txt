@@ -45,7 +45,10 @@ if(CONTOUR_FRONTEND_GUI)
     # Gating GuiPrivate needs Qt6_VERSION, which nothing but find_package(Qt6) sets -- hence this
     # lookup, one line ahead of the gate that reads it.
     find_package(Qt6 COMPONENTS Core REQUIRED)
-    set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets DBus)
+    # QuickEffects supplies MultiEffect, which draws the popup drop shadows (qml/PopupSurface.qml).
+    # No optional-feature gate for it, unlike TextToSpeech below: it ships inside qtdeclarative, so
+    # it cannot be missing anywhere Qt6::Quick is present.
+    set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 QuickEffects Network Multimedia Widgets DBus)
     if(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
         list(APPEND QT_COMPONENTS GuiPrivate)
     endif()
@@ -285,6 +288,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SettingsNavItem.qml
         qml/SettingsListItem.qml
         qml/ConfirmDialog.qml
+        qml/PopupSurface.qml
         qml/SettingRow.qml
         qml/SettingsSection.qml
         qml/ColorSchemeEditor.qml
@@ -524,6 +528,7 @@ if(CONTOUR_FRONTEND_GUI)
         Qt6::Network
         Qt6::Qml
         Qt6::QuickControls2
+        Qt6::QuickEffects
         Qt6::Widgets
         Qt6::QuickTemplates2
     )

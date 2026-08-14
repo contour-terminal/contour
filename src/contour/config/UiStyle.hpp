@@ -86,6 +86,28 @@ struct UiStyleTokens
     /// that", not "that is unreachable".
     int modelessScrimPercent;
 
+    /// Blur radius of the drop shadow under a popup or menu. 0 draws none.
+    ///
+    /// Drawn rather than asked of the compositor, unlike the window's own shadow: every menu in the
+    /// application is an in-scene popup (@c popupType: @c Popup.Item, forced because a native
+    /// platform menu cannot host the sub-menus built at runtime), and an in-scene popup has no OS
+    /// surface for any compositor to cast a shadow around.
+    int shadowBlurPixels;
+
+    /// How far the popup's shadow is displaced downward, so it reads as lying over the window.
+    int shadowOffsetUnits;
+
+    /// Alpha of the shadow color, as a percentage. Same reasoning as the scrims above: how heavy a
+    /// popup's shadow reads is one number rather than a literal in every popup.
+    int shadowOpacityPercent;
+
+    /// Clear space a popup keeps between itself and the window edge.
+    ///
+    /// An in-scene popup is clipped by the window it lives in, so without a gutter the shadow of a
+    /// popup opened near an edge is simply not drawn. Counted in @c unit rather than pixels,
+    /// because it has to clear @c shadowOffsetUnits, which is.
+    int shadowMarginUnits;
+
     int chromeHeightUnits; ///< Height of the whole title bar / tab strip.
     int tabHeightUnits;    ///< A tab's own natural height.
     int labelPaddingUnits; ///< Inset from a tab's leading edge to its label.
@@ -220,6 +242,12 @@ namespace detail
             // wherever the user has met one before.
             .modalScrimPercent = 50,
             .modelessScrimPercent = 12,
+            // A soft, clearly displaced shadow -- what a desktop menu casts everywhere else. The
+            // margin is generous enough that the blur is not cut off against the window edge.
+            .shadowBlurPixels = 24,
+            .shadowOffsetUnits = 4,
+            .shadowOpacityPercent = 35,
+            .shadowMarginUnits = 12,
             .chromeHeightUnits = 34,
             .tabHeightUnits = 32,
             .labelPaddingUnits = 10,
@@ -287,6 +315,13 @@ namespace detail
             // wherever the user has met one before.
             .modalScrimPercent = 50,
             .modelessScrimPercent = 12,
+            // No blur, one cell of offset: the hard-edged drop shadow a text-mode UI casts, which is
+            // what this style is quoting. A soft 24px halo would be the one thing in the chrome not
+            // aligned to the character grid.
+            .shadowBlurPixels = 0,
+            .shadowOffsetUnits = 1,
+            .shadowOpacityPercent = 60,
+            .shadowMarginUnits = 1,
             .chromeHeightUnits = 1,
             .tabHeightUnits = 1,
             .labelPaddingUnits = 1,

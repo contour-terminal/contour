@@ -17,6 +17,14 @@ Menu {
     // Force the in-scene (item) popup rather than a native OS menu (see ActionContextMenu for the why).
     popupType: Popup.Item
 
+    background: PopupSurface {}
+
+    // A minimum distance to the window edge, so a menu popped near one still has room to cast its
+    // drop shadow -- an in-scene popup is clipped by the window it lives in. Qt's default (-1) lets a
+    // menu overflow the window instead, which would cut the shadow off.
+    margins: chromeStyle.shadowMargin
+
+
     // The WindowController. Null-guarded throughout: it is torn down before this QML tree on window close.
     required property var controller
 

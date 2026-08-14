@@ -17,6 +17,8 @@ import QtQuick.Layouts
 Popup {
     id: root
 
+    background: PopupSurface {}
+
     /// Every cell flag an item may carry, as [{ key, label }], from SettingsController::indicatorFlags.
     property var flagCatalog: []
 

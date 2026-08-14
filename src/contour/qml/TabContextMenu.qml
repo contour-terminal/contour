@@ -15,6 +15,14 @@ Menu {
     // transparent, but Fusion's own menu background is opaque).
     popupType: Popup.Item
 
+    background: PopupSurface {}
+
+    // A minimum distance to the window edge, so a menu popped near one still has room to cast its
+    // drop shadow -- an in-scene popup is clipped by the window it lives in. Qt's default (-1) lets a
+    // menu overflow the window instead, which would cut the shadow off.
+    margins: chromeStyle.shadowMargin
+
+
     required property var controller
     required property int tabIndex
 

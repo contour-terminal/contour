@@ -142,6 +142,8 @@ Rectangle {
         padding: 10
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
 
+        background: PopupSurface {}
+
         ColumnLayout {
             anchors.fill: parent
             spacing: 6

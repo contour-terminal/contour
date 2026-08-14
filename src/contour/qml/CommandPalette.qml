@@ -43,12 +43,7 @@ Popup {
         colorGroup: SystemPalette.Active
     }
 
-    background: Rectangle {
-        color: systemPalette.window
-        border.color: systemPalette.mid
-        border.width: 1
-        radius: 6
-    }
+    background: PopupSurface {}
 
     // Refresh + focus on every open, not just the first: the model's rows are rebuilt by the
     // controller (open tabs change), and the filter must start empty with the caret already in it so
