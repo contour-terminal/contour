@@ -25,9 +25,7 @@ class WindowShadowController
 {
   public:
     /// @param shadow The attachment to publish through, @see makeWindowShadow. Never null.
-    explicit WindowShadowController(std::unique_ptr<WindowShadow> shadow): _shadow { std::move(shadow) }
-    {
-    }
+    explicit WindowShadowController(std::unique_ptr<WindowShadow> shadow): _shadow { std::move(shadow) } {}
 
     /// Re-publishes the shadow for the state the window is now in.
     ///

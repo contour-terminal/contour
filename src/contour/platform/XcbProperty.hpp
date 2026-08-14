@@ -33,10 +33,7 @@ namespace contour::platform
 /// the same way instead of hand-writing free() with a clang-tidy suppression.
 struct XcbReplyDeleter
 {
-    void operator()(void* reply) const noexcept
-    {
-        std::free(reply);
-    }
+    void operator()(void* reply) const noexcept { std::free(reply); }
 };
 
 template <typename T>

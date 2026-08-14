@@ -765,8 +765,7 @@ void WindowController::setTitleBarVisible(bool visible)
     // `flags` binding, which reads the same policy through needsFramelessHint.
     if (_osWindow != nullptr)
     {
-        auto const target =
-            visible ? platform::WindowDecoration::Server : platform::WindowDecoration::Client;
+        auto const target = visible ? platform::WindowDecoration::Server : platform::WindowDecoration::Client;
         auto const policy = framePolicyFor(platform::currentFramePlatform(), target);
         _osWindow->setFlag(Qt::FramelessWindowHint, policy.framelessHint == platform::FramelessHint::Apply);
         _nativeFrame->apply(*_osWindow, target);
@@ -989,12 +988,9 @@ void WindowController::onWindowVisibilityChanged()
     // the way back out is what the restore path already does.
     switch (_osWindow->visibility())
     {
-        case QQuickWindow::Visibility::Windowed:
-                    break;
-        case QQuickWindow::Visibility::Maximized:
-                    break;
-        case QQuickWindow::Visibility::FullScreen:
-                    break;
+        case QQuickWindow::Visibility::Windowed: break;
+        case QQuickWindow::Visibility::Maximized: break;
+        case QQuickWindow::Visibility::FullScreen: break;
         default: break;
     }
 }

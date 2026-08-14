@@ -13,7 +13,6 @@
     #include <ranges>
     #include <span>
 
-
 namespace contour::platform
 {
 
@@ -218,9 +217,8 @@ namespace
         void roundTrip()
         {
             auto const cookie = xcb_get_input_focus(_connection);
-            auto const reply = XcbReply<xcb_get_input_focus_reply_t> {
-                xcb_get_input_focus_reply(_connection, cookie, nullptr)
-            };
+            auto const reply = XcbReply<xcb_get_input_focus_reply_t> { xcb_get_input_focus_reply(
+                _connection, cookie, nullptr) };
         }
 
         void releasePixmaps(std::array<xcb_pixmap_t, ShadowTileCount> const& pixmaps) noexcept

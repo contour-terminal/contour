@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <QtCore/Qt>
-
 #include <contour/platform/WindowDecoration.hpp>
+
+#include <QtCore/Qt>
 
 #include <cstdint>
 #include <functional>
@@ -62,8 +62,8 @@ enum class FrameAffordances : uint8_t
 /// Where the OS puts its window controls, when it is the one drawing them.
 enum class ControlPlacement : uint8_t
 {
-    OwnBar = 0,  //!< In a title bar of its own, above our chrome. Costs us no space.
-    OverChrome,  //!< Over our content, which then has to leave their corner clear. Cocoa does this.
+    OwnBar = 0, //!< In a title bar of its own, above our chrome. Costs us no space.
+    OverChrome, //!< Over our content, which then has to leave their corner clear. Cocoa does this.
 };
 
 /// Whether Qt::FramelessWindowHint may be applied.

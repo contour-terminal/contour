@@ -99,10 +99,8 @@ TEST_CASE("shadowGeometryFor lays out a stretchable nine-patch", "[contour][shad
 
     SECTION("the atlas is exactly the offsets plus the synthetic window")
     {
-        CHECK(geometry.atlasWidth
-              == geometry.offsets.left + geometry.windowExtent + geometry.offsets.right);
-        CHECK(geometry.atlasHeight
-              == geometry.offsets.top + geometry.windowExtent + geometry.offsets.bottom);
+        CHECK(geometry.atlasWidth == geometry.offsets.left + geometry.windowExtent + geometry.offsets.right);
+        CHECK(geometry.atlasHeight == geometry.offsets.top + geometry.windowExtent + geometry.offsets.bottom);
         CHECK(geometry.windowExtent > 0);
     }
 
@@ -127,8 +125,10 @@ TEST_CASE("shadowGeometryFor lays out a stretchable nine-patch", "[contour][shad
         for (auto const i: std::views::iota(size_t { 0 }, AllShadowTiles.size()))
             for (auto const j: std::views::iota(i + 1, AllShadowTiles.size()))
             {
-                INFO("tiles " << static_cast<int>(AllShadowTiles[i]) << " and " << static_cast<int>(AllShadowTiles[j]));
-                CHECK_FALSE(overlaps(tileRect(geometry, AllShadowTiles[i]), tileRect(geometry, AllShadowTiles[j])));
+                INFO("tiles " << static_cast<int>(AllShadowTiles[i]) << " and "
+                              << static_cast<int>(AllShadowTiles[j]));
+                CHECK_FALSE(
+                    overlaps(tileRect(geometry, AllShadowTiles[i]), tileRect(geometry, AllShadowTiles[j])));
             }
     }
 

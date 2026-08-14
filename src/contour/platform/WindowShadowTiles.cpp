@@ -118,8 +118,7 @@ namespace
         auto const top = geometry.offsets.top + compositeOffsetY + layer.offsetY;
 
         auto const extent = geometry.windowExtent;
-        for (auto const y:
-             std::views::iota(std::max(0, top), std::min(geometry.atlasHeight, top + extent)))
+        for (auto const y: std::views::iota(std::max(0, top), std::min(geometry.atlasHeight, top + extent)))
             for (auto const x:
                  std::views::iota(std::max(0, left), std::min(geometry.atlasWidth, left + extent)))
                 plane.at(x, y) = 255;

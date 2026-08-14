@@ -664,8 +664,7 @@ TEST_CASE("The terminal context menu opens, sub-menus and all (offscreen)", "[co
     // Open at a size that can actually show its entries. `> 0` is NOT enough -- a menu collapsed to
     // a two-pixel sliver passes that while being, on screen, a vertical line.
     QQuickItem* firstItem = nullptr;
-    REQUIRE(QMetaObject::invokeMethod(
-        menu, "itemAt", Q_RETURN_ARG(QQuickItem*, firstItem), Q_ARG(int, 0)));
+    REQUIRE(QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem*, firstItem), Q_ARG(int, 0)));
     REQUIRE(firstItem != nullptr);
     auto const widest = firstItem->property("implicitWidth").toReal();
     INFO("menu " << menu->property("width").toReal() << "x" << menu->property("height").toReal()
@@ -1071,8 +1070,7 @@ TEST_CASE("A context menu actually opens, with its surface (offscreen)", "[conto
     // to a two-pixel sliver passes that while being, on screen, a vertical line.
     CHECK(menu->property("count").toInt() > 0);
     QQuickItem* firstItem = nullptr;
-    REQUIRE(QMetaObject::invokeMethod(
-        menu, "itemAt", Q_RETURN_ARG(QQuickItem*, firstItem), Q_ARG(int, 0)));
+    REQUIRE(QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem*, firstItem), Q_ARG(int, 0)));
     REQUIRE(firstItem != nullptr);
     auto const widest = firstItem->property("implicitWidth").toReal();
     REQUIRE(widest > 0.0);
