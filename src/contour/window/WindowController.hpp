@@ -92,6 +92,8 @@ class WindowController:
     Q_PROPERTY(bool needsFramelessHint READ needsFramelessHint NOTIFY titleBarVisibleChanged)
     Q_PROPERTY(bool needsClientResizeBorder READ needsClientResizeBorder NOTIFY titleBarVisibleChanged)
     Q_PROPERTY(bool needsClientWindowControls READ needsClientWindowControls NOTIFY titleBarVisibleChanged)
+    Q_PROPERTY(
+        bool hasNativeControlsOverChrome READ hasNativeControlsOverChrome NOTIFY titleBarVisibleChanged)
     // Tab-strip (tab bar) placement + visibility, exposed to Main.qml. `tabBarPosition` is an int
     // (0 = Top, 1 = Bottom) matching the TabBarPosition enumerator order. `tabBarShouldShow`
     // is the resolved gate (mode + live tab count) the QML binds its `visible` to.
@@ -384,6 +386,14 @@ class WindowController:
 
     /// Whether the tab strip should draw its own min/max/close controls, or the OS draws them.
     [[nodiscard]] bool needsClientWindowControls() const noexcept;
+
+    /// Whether the OS paints its window controls ON TOP of our own chrome.
+    ///
+    /// True on macOS with our title bar: a full-size-content NSWindow keeps drawing the real traffic
+    /// lights, and its content view extends underneath them -- so the tab strip has to leave that
+    /// corner clear or the first tab sits under the buttons. False where the OS draws its controls in
+    /// a frame of its own ABOVE our chrome, which needs no inset from us.
+    [[nodiscard]] bool hasNativeControlsOverChrome() const noexcept;
     // }}}
 
     // {{{ Tab strip (tab bar) placement + visibility

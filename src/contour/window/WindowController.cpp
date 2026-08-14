@@ -742,6 +742,13 @@ bool WindowController::needsClientWindowControls() const noexcept
            == platform::WindowControlsOwner::Client;
 }
 
+bool WindowController::hasNativeControlsOverChrome() const noexcept
+{
+    // Only when OUR title bar is the one showing: with the native frame the OS draws its controls in
+    // its own bar above our chrome, which costs us no space.
+    return decoration() == platform::TitleBarDecoration::Client && !needsClientWindowControls();
+}
+
 void WindowController::setTitleBarVisible(bool visible)
 {
     // Apply the native window-frame decoration unconditionally (not only on change) so a seed
@@ -1100,6 +1107,13 @@ void WindowController::onWindowScaleMaybeChanged()
 
     auto const pageBefore = session->terminal().totalPageSize();
     display::displayLog()("Content scale settled to {} (page {}).", newScale, pageBefore);
+
+    // A settled scale means the window is about to be resized to match. Where the OS derives the
+    // window's shadow from its alpha and recomputes it lazily -- AppKit does -- that leaves the
+    // previous outline behind, so it is re-asserted here rather than per resize frame: this handler
+    // already carries the latch that makes it fire once per settlement.
+    if (_osWindow != nullptr && _nativeFrame)
+        _nativeFrame->invalidateShadow(*_osWindow);
 
     // New scale => new font DPI => new cell size; this reflows the grid in place (unconditionally
     // correct: the grid always fits the item) and guarantees cellSize() is fresh even when the scale

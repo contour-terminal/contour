@@ -169,6 +169,7 @@ ApplicationWindow
         // OWN traffic lights are drawn even with our tab strip, so ours must yield there too or both
         // sets appear. The policy decides; this only asks.
         useCustomWindowControls: !!(appWindow.win && appWindow.win.needsClientWindowControls)
+        nativeControlsOverChrome: !!(appWindow.win && appWindow.win.hasNativeControlsOverChrome)
     }
 
     // Content area: the active tab's pane tree is the SOLE renderer for every case — a single unsplit

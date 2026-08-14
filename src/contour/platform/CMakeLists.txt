@@ -36,6 +36,7 @@ add_library(contour_platform STATIC
     # The per-OS window frame and the two compositor shadow adapters. Each of the platform-specific
     # ones is wholly inside a platform #ifdef, so it compiles to nothing where it does not apply --
     # listed unconditionally all the same, as the notification pair above is.
+    CocoaWindowFrame.hpp
     Dwmapi.hpp
     NativeWindowFrame.cpp NativeWindowFrame.hpp
     WaylandWindowShadow.cpp WaylandWindowShadow.hpp
@@ -48,6 +49,17 @@ add_library(contour_platform STATIC
     XcbProperty.cpp XcbProperty.hpp
 )
 set_target_properties(contour_platform PROPERTIES AUTOMOC ON)
+
+# The Cocoa frame adapter is the tree's only Objective-C++ translation unit, so the language is
+# enabled here and nowhere else -- and INSIDE the APPLE guard, because enabling OBJCXX on a host
+# with no Objective-C compiler fails the configure step outright. The .mm is added the same way,
+# rather than listed unconditionally like the platform .cpp files above: CMake would try to compile
+# it as C++ elsewhere rather than preprocess it away.
+if(APPLE)
+    enable_language(OBJCXX)
+    target_sources(contour_platform PRIVATE CocoaWindowFrame.mm)
+    target_link_libraries(contour_platform PUBLIC "-framework AppKit")
+endif()
 
 # contour_config, because GuiTheme.hpp resolves a configured theme and ColorConversion.hpp converts the
 # palette the configuration model owns.
