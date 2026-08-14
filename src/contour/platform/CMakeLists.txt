@@ -33,8 +33,10 @@ add_library(contour_platform STATIC
     QtPath.hpp
     SpeechSynthesizer.cpp SpeechSynthesizer.hpp
     TaskbarProgressRouter.hpp
-    # Both shadow adapters are wholly inside a platform #ifdef, so they compile to nothing where
-    # they do not apply -- listed unconditionally all the same, as the notification pair above is.
+    # The per-OS window frame and the two compositor shadow adapters. Each of the platform-specific
+    # ones is wholly inside a platform #ifdef, so it compiles to nothing where it does not apply --
+    # listed unconditionally all the same, as the notification pair above is.
+    NativeWindowFrame.cpp NativeWindowFrame.hpp
     WaylandWindowShadow.cpp WaylandWindowShadow.hpp
     WindowShadow.cpp WindowShadow.hpp
     WindowShadowController.hpp

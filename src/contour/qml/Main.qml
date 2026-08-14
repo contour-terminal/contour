@@ -29,7 +29,14 @@ ApplicationWindow
     // guard with `win &&` / `win ?` so they evaluate safely during the brief startup window.
     property var win: null
 
-    flags: (win && win.titleBarVisible) ? Qt.Window : (Qt.Window | Qt.FramelessWindowHint)
+    // Whether the window goes frameless is no longer the negation of show_title_bar: it is per-OS,
+    // and comes from the frame policy the controller applies (platform/NativeWindowFrame.hpp).
+    // Qt.FramelessWindowHint is exactly what costs a window its system drop shadow and its rounded
+    // corners, so Windows and macOS withhold it and keep a real frame instead -- Windows zeroes that
+    // frame in WM_NCCALCSIZE, macOS lets the content fill a transparent title bar. Only the
+    // Linux/BSD desktops go genuinely frameless, and there the shadow comes from the compositor
+    // (platform/WindowShadow.hpp) rather than from the frame.
+    flags: Qt.Window | ((win && win.needsFramelessHint) ? Qt.FramelessWindowHint : 0)
 
     // Application window's background must be transparent in order to support transparent/semi-transparent
     // background in the terminal widgets.
@@ -158,7 +165,10 @@ ApplicationWindow
         window: appWindow
         // Draw our own min/max/close controls only in frameless (CSD) mode. When the native frame is
         // shown (titleBarVisible), the OS draws those controls, so ours would duplicate them.
-        useCustomWindowControls: !(appWindow.win && appWindow.win.titleBarVisible)
+        // Not the negation of titleBarVisible: on macOS the window stays a decorated NSWindow whose
+        // OWN traffic lights are drawn even with our tab strip, so ours must yield there too or both
+        // sets appear. The policy decides; this only asks.
+        useCustomWindowControls: !!(appWindow.win && appWindow.win.needsClientWindowControls)
     }
 
     // Content area: the active tab's pane tree is the SOLE renderer for every case — a single unsplit
@@ -262,7 +272,9 @@ ApplicationWindow
     // hit-testing the MouseAreas, so the border is fully inert in native-frame mode.
     ResizeBorder {
         window: appWindow
-        visible: !(appWindow.win && appWindow.win.titleBarVisible)
+        // Same policy as the window controls: where the OS keeps a real frame it resizes the window
+        // itself, and our hit zones would only compete with it.
+        visible: !!(appWindow.win && appWindow.win.needsClientResizeBorder)
     }
     // }}}
 

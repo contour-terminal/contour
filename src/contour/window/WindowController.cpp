@@ -7,6 +7,7 @@
 #include <contour/display/Logging.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/platform/GuiTheme.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSession.hpp>
@@ -21,6 +22,7 @@
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
+#include <QtGui/QStyleHints>
 #include <QtQml/QQmlEngine>
 
 #include <cstdlib>
@@ -49,6 +51,16 @@ WindowController::WindowController(session::TerminalSessionManager& manager, vtw
 {
     _commandPalette->setSources(
         { &_tabCommands, &_profileCommands, &_layoutCommands, &_boundCommands, &_actionCommands });
+
+    // The OS-frame adapter, given a way to ask what the EFFECTIVE color scheme is. `theme: system`
+    // resolves to nothing configured, so it falls back to what Qt reports the platform is doing --
+    // which is the answer Win32 needs for the border DWM draws around the rounded corners, and the
+    // reason this is injected rather than read from a global at the point of use.
+    _nativeFrame = platform::makeNativeWindowFrame([this]() -> Qt::ColorScheme {
+        if (auto const configured = platform::qtColorSchemeFor(_manager.app().config().theme.value()))
+            return *configured;
+        return QGuiApplication::styleHints()->colorScheme();
+    });
 
     // The editable settings bridge. Its collaborators are injected so the whole workflow is testable:
     // a config accessor into the app's live (reload-in-place) Config, a file-backed side-file store
@@ -707,16 +719,46 @@ void WindowController::seedTitleBarVisible(bool visible)
     setTitleBarVisible(visible);
 }
 
+platform::TitleBarDecoration WindowController::decoration() const noexcept
+{
+    return _titleBarVisible ? platform::TitleBarDecoration::Native : platform::TitleBarDecoration::Client;
+}
+
+bool WindowController::needsFramelessHint() const noexcept
+{
+    return framePolicyFor(platform::currentFramePlatform(), decoration()).framelessHint
+           == platform::FramelessHint::Apply;
+}
+
+bool WindowController::needsClientResizeBorder() const noexcept
+{
+    return framePolicyFor(platform::currentFramePlatform(), decoration()).resize
+           == platform::ResizeAffordance::ClientDrawn;
+}
+
+bool WindowController::needsClientWindowControls() const noexcept
+{
+    return framePolicyFor(platform::currentFramePlatform(), decoration()).controls
+           == platform::WindowControlsOwner::Client;
+}
+
 void WindowController::setTitleBarVisible(bool visible)
 {
     // Apply the native window-frame decoration unconditionally (not only on change) so a seed
-    // re-asserts the frame on a freshly adopted window even when the value already matched: shown =>
-    // keep the native frame, hidden => frameless so the custom client-side TitleBar is the only
-    // decoration. This is the C++ counterpart of Main.qml's `flags` binding (both keyed on the same
-    // titleBarVisible value); Main.qml drops our custom min/max/close controls whenever the native
-    // frame shows, so the two decorations never stack.
+    // re-asserts the frame on a freshly adopted window even when the value already matched. What
+    // "apply" means is now per-OS and comes from the frame policy rather than from negating
+    // `visible`: Linux goes genuinely frameless, but Windows KEEPS its frame (and zeroes it in
+    // WM_NCCALCSIZE) and macOS keeps a decorated NSWindow, because on both the frameless hint is
+    // exactly what costs the window its system shadow. This is the C++ counterpart of Main.qml's
+    // `flags` binding, which reads the same policy through needsFramelessHint.
     if (_osWindow != nullptr)
-        _osWindow->setFlag(Qt::FramelessWindowHint, !visible);
+    {
+        auto const target =
+            visible ? platform::TitleBarDecoration::Native : platform::TitleBarDecoration::Client;
+        auto const policy = framePolicyFor(platform::currentFramePlatform(), target);
+        _osWindow->setFlag(Qt::FramelessWindowHint, policy.framelessHint == platform::FramelessHint::Apply);
+        _nativeFrame->apply(*_osWindow, target);
+    }
 
     if (_titleBarVisible == visible)
         return;

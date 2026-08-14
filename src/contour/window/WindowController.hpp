@@ -5,6 +5,7 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
+#include <contour/platform/NativeWindowFrame.hpp>
 #include <contour/platform/WindowShadowController.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
@@ -87,6 +88,10 @@ class WindowController:
     Q_PROPERTY(
         contour::session::TerminalSession* activeSession READ activeSession NOTIFY activeSessionChanged)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
+    // All three follow titleBarVisible, so they re-evaluate on the same signal.
+    Q_PROPERTY(bool needsFramelessHint READ needsFramelessHint NOTIFY titleBarVisibleChanged)
+    Q_PROPERTY(bool needsClientResizeBorder READ needsClientResizeBorder NOTIFY titleBarVisibleChanged)
+    Q_PROPERTY(bool needsClientWindowControls READ needsClientWindowControls NOTIFY titleBarVisibleChanged)
     // Tab-strip (tab bar) placement + visibility, exposed to Main.qml. `tabBarPosition` is an int
     // (0 = Top, 1 = Bottom) matching the TabBarPosition enumerator order. `tabBarShouldShow`
     // is the resolved gate (mode + live tab count) the QML binds its `visible` to.
@@ -360,6 +365,25 @@ class WindowController:
 
     /// Flips the window's title-bar visibility (the ToggleTitleBar action, routed here by the display).
     void toggleTitleBar() override;
+
+    // The three gates Main.qml used to derive by negating titleBarVisible. They come off the frame
+    // POLICY instead (platform::framePolicyFor), because the answer is no longer the same on every
+    // OS: Windows keeps a real frame and zeroes it, and macOS keeps a decorated NSWindow whose own
+    // traffic lights ours must then yield to. Bools, as the QML-facing carve-out allows, but each
+    // reads as the question its use site asks.
+
+    /// Whether the window should carry Qt::FramelessWindowHint.
+    ///
+    /// False on Windows and macOS even with our own title bar: the hint is exactly what costs a
+    /// window its system shadow and rounded corners, and both platforms have a way to keep the frame
+    /// while still giving the client area the whole window.
+    [[nodiscard]] bool needsFramelessHint() const noexcept;
+
+    /// Whether ResizeBorder.qml should draw its own hit zones, or the OS frame resizes the window.
+    [[nodiscard]] bool needsClientResizeBorder() const noexcept;
+
+    /// Whether the tab strip should draw its own min/max/close controls, or the OS draws them.
+    [[nodiscard]] bool needsClientWindowControls() const noexcept;
     // }}}
 
     // {{{ Tab strip (tab bar) placement + visibility
@@ -617,6 +641,9 @@ class WindowController:
     /// away from Contour notifies the shell (DECSET 1004) even when no display holds Qt item focus.
     void onOSWindowActiveChanged();
 
+    /// Which decoration this window is currently showing, as the frame policy names it.
+    [[nodiscard]] platform::TitleBarDecoration decoration() const noexcept;
+
     /// Re-publishes the window's drop shadow for the state it is now in.
     ///
     /// A frameless window gets no server-side decoration, and on KWin the shadow is drawn as part of
@@ -717,6 +744,10 @@ class WindowController:
     // as every other client-decorated application does.
     std::unique_ptr<platform::WindowShadowController> _windowShadow;
     platform::WindowPresentation _presentation = platform::WindowPresentation::Windowed;
+
+    // The OS-frame adapter. Never null: platforms with nothing to offer get a NullWindowFrame, so
+    // every call site can apply the policy unconditionally rather than guarding on the platform.
+    std::unique_ptr<platform::NativeWindowFrame> _nativeFrame;
 
     // Window-scoped title-bar visibility (see the decoration block above). Seeded once from the
     // profile's show_title_bar (first display attach), flipped by ToggleTitleBar.
