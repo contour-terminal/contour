@@ -578,6 +578,8 @@ if(CONTOUR_FRONTEND_GUI)
             platform/FreeDesktopNotifier_test.cpp
             platform/NotificationRouter_test.cpp
             platform/TaskbarProgressRouter_test.cpp
+            platform/WindowShadowGeometry_test.cpp
+            platform/WindowShadowTiles_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
             display/RenderingBackendSelection_test.cpp
             display/ScissorRect_test.cpp
