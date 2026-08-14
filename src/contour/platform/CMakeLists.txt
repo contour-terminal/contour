@@ -36,8 +36,10 @@ add_library(contour_platform STATIC
     # The per-OS window frame and the two compositor shadow adapters. Each of the platform-specific
     # ones is wholly inside a platform #ifdef, so it compiles to nothing where it does not apply --
     # listed unconditionally all the same, as the notification pair above is.
+    Dwmapi.hpp
     NativeWindowFrame.cpp NativeWindowFrame.hpp
     WaylandWindowShadow.cpp WaylandWindowShadow.hpp
+    Win32WindowFrame.cpp Win32WindowFrame.hpp
     WindowShadow.cpp WindowShadow.hpp
     WindowShadowController.hpp
     WindowShadowGeometry.hpp

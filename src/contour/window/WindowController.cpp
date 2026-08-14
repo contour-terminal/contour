@@ -1072,8 +1072,11 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                 break;
 
             case QEvent::Expose:
-                // The one point where the platform window is guaranteed to exist. Cheap to repeat:
-                // both the controller and the attachment skip work whose result would be unchanged.
+                // The one point where the platform window is guaranteed to exist. Both of these are
+                // cheap to repeat, and both NEED this: the frame adapter refuses to realize a window
+                // that has no handle yet (it must not disturb the pre-show sizing), and the shadow
+                // attachment has to be rebuilt whenever the platform window was recreated.
+                _nativeFrame->apply(*_osWindow, decoration());
                 refreshWindowShadow();
                 break;
 

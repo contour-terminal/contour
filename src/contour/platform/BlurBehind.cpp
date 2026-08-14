@@ -10,6 +10,8 @@
 #include <QtGui/QWindow>
 
 #ifdef _WIN32
+    #include <contour/platform/Dwmapi.hpp>
+
     #include <Windows.h>
 #endif
 
@@ -130,33 +132,23 @@ void setBlurBehind(QWindow* window, bool enable, QRegion const& region)
     if (HWND hwnd = (HWND) window->winId(); hwnd != nullptr)
     {
         // 1. Attempt DWM-based blur (Windows 11+)
-        const HMODULE hDwm = LoadLibrary(TEXT("dwmapi.dll"));
-        if (hDwm)
+        //
+        // This used to force DWMWA_USE_IMMERSIVE_DARK_MODE on here, unconditionally and regardless
+        // of the configured `theme`, which put a dark window border on a light-themed window. It is
+        // a FRAME attribute rather than a blur one -- and now that the frame is kept rather than
+        // discarded it also tints the border around the rounded corners -- so it moved to
+        // Win32WindowFrame, which is told what the effective color scheme actually is.
+        if (auto const& api = dwmApi(); api.setWindowAttribute != nullptr)
         {
-            typedef HRESULT(WINAPI * P_DwmSetWindowAttribute)(HWND, DWORD, LPCVOID, DWORD);
-            auto const pDwmSetWindowAttribute =
-                (P_DwmSetWindowAttribute) GetProcAddress(hDwm, "DwmSetWindowAttribute");
+            const DWORD DWMWA_SYSTEMBACKDROP_TYPE = 38;
+            const DWORD DWMSBT_NONE = 1;
+            const DWORD DWMSBT_TRANSIENTWINDOW = 3; // Acrylic
 
-            if (pDwmSetWindowAttribute)
-            {
-                const DWORD DWMWA_SYSTEMBACKDROP_TYPE = 38;
-                const DWORD DWMSBT_NONE = 1;
-                const DWORD DWMSBT_TRANSIENTWINDOW = 3; // Acrylic
-                const DWORD DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
-
-                BOOL dark = TRUE;
-                pDwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
-
-                DWORD backdropType = enable ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE;
-                HRESULT hr = pDwmSetWindowAttribute(
-                    hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
-                if (SUCCEEDED(hr))
-                {
-                    FreeLibrary(hDwm);
-                    return;
-                }
-            }
-            FreeLibrary(hDwm);
+            DWORD backdropType = enable ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE;
+            HRESULT hr =
+                api.setWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
+            if (SUCCEEDED(hr))
+                return;
         }
 
         // 2. Fallback to undocumented SetWindowCompositionAttribute (Windows 10)
