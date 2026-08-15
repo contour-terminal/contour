@@ -3,6 +3,7 @@
 
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/window/PopupShadowImageProvider.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 
@@ -44,6 +45,10 @@ inline void installChromeStyle(
 
     auto* controls = new contour::window::WindowControlStyleProvider(windowControlStyle, &engine);
     engine.rootContext()->setContextProperty(QStringLiteral("windowControls"), controls);
+
+    // The popups' drop shadow is served as an image, exactly as ContourGuiApp serves it: without
+    // this every popup logs "Invalid image provider", which the run-wide gate turns into a failure.
+    engine.addImageProvider(QStringLiteral("popupshadow"), new contour::window::PopupShadowImageProvider());
 }
 
 } // namespace contour::test

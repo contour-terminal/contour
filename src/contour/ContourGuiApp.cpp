@@ -18,6 +18,7 @@
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
+#include <contour/window/PopupShadowImageProvider.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -1143,6 +1144,10 @@ int ContourGuiApp::terminalGuiAction()
         // A second provider beside chromeStyle rather than more properties on it: this one changes
         // live and chromeStyle's are CONSTANT by contract. See WindowControlStyleProvider.hpp.
         context->setContextProperty("windowControls", _windowControlStyleProvider.get());
+        // The popups' drop shadow, as a nine-patch image. An image provider rather than more chrome
+        // tokens because what QML needs here is a TEXTURE: a real Gaussian cannot be assembled from
+        // QML primitives without banding, and the engine takes ownership of this.
+        _qmlEngine->addImageProvider(QStringLiteral("popupshadow"), new window::PopupShadowImageProvider());
     }
 
     // auto const HTS = "\033H";

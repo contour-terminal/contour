@@ -50,56 +50,51 @@ Rectangle {
     border.width: chromeStyle.borderWidth
     border.color: root.palette.mid
 
-    // The shadow's colour at full strength. Read once: each layer below takes an equal share of it.
+    // The shadow, as ONE nine-patch image carrying a real Gaussian.
+    //
+    // Stacked translucent rectangles were tried here first and are what this replaces: eight layers
+    // across a twenty-four pixel blur are invisible against a dark terminal background and plainly
+    // BANDED against a light one, and closing that gap by stacking more costs an item and a set of
+    // bindings each while still only approaching what one blurred image gives exactly. The blur is
+    // the same C++ one the window's own shadow is built from (platform/AlphaBlur.hpp), served
+    // through an image provider because what QML needs here is a texture, not primitives.
+    //
+    // MultiEffect is the other obvious answer and is the one thing that must NOT be used: it has to
+    // be fed from `layer.enabled`, which puts the popup through an offscreen render target, and this
+    // application paints the terminal OVER the QML scene in an afterRendering pass -- a popup that
+    // renders through an FBO does not reliably survive that, and a context menu that opens but
+    // cannot be seen is far worse than any shadow.
     readonly property color _tint: chromeStyle.shadowTint(root.palette.shadow)
 
-    // How many rectangles the falloff is built from. One for a hard-edged shadow -- the terminal
-    // chrome's, which has no blur at all -- and otherwise enough that the banding stays under what
-    // the eye picks out at this opacity.
-    readonly property int _layers: chromeStyle.shadowBlur > 0
-                                 ? Math.max(2, Math.round(chromeStyle.shadowBlur / 3))
-                                 : 1
+    // How far the shadow reaches beyond the surface, and the unstretched corner. Both are functions
+    // of the same parameters the provider renders from, so the two cannot disagree.
+    readonly property int _reach: chromeStyle.shadowBlur > 0
+                                ? 3 * Math.max(1, Math.round((chromeStyle.shadowBlur + 1) / 2))
+                                : 0
+    readonly property int _margin: root._reach + Math.abs(chromeStyle.shadowOffsetY)
+    readonly property int _corner: root._margin + chromeStyle.radius
 
-    // A hard-edged shadow is displaced sideways as well as down -- the offset block a text-mode UI
-    // casts. A blurred one spreads evenly and is displaced only vertically.
-    readonly property real _shiftX: chromeStyle.shadowBlur > 0 ? 0 : chromeStyle.shadowOffsetY
+    BorderImage {
+        visible: chromeStyle.hasPopupShadow && root._margin > 0
+        // A child with negative z draws BEHIND its parent in Qt Quick, which is what puts this under
+        // the opaque surface without a second item to hold it.
+        z: -1
 
-    // A child with negative z draws BEHIND its parent in Qt Quick, which is what puts these under
-    // the opaque surface without a second item to hold them.
-    //
-    // Each is a filled rounded rectangle, larger than the last and all at the same low alpha, so
-    // where many overlap -- close to the surface -- they sum to a strong shadow, and where only the
-    // outermost reaches they sum to almost nothing. That accumulation IS the falloff, and the
-    // hard-edged case is simply its one-layer, zero-spread degenerate form rather than a second
-    // rectangle that has to keep agreeing about z-order, radius and tint.
-    Repeater {
-        model: chromeStyle.hasPopupShadow ? root._layers : 0
+        anchors.fill: parent
+        anchors.margins: -root._margin
 
-        delegate: Rectangle {
-            required property int index
+        source: "image://popupshadow/" + chromeStyle.shadowBlur
+              + "/" + Math.round(chromeStyle.shadowOffsetY)
+              + "/" + chromeStyle.radius
+              // The colour WITHOUT its leading '#': that character starts a URL fragment, and Qt
+              // would strip everything after it before the provider ever saw the id.
+              + "/" + root._tint.toString().substring(1)
 
-            z: -1
-
-            // A rounded Rectangle turns antialiasing on implicitly, which emits the fringe geometry
-            // and a smooth-material node for an edge drawn here at a few percent alpha -- where no
-            // one can see it. Eight layers per popup paid that for nothing.
-            antialiasing: false
-
-            // Innermost layer is tight to the surface, outermost reaches the full blur radius.
-            readonly property real spread: ((index + 1) / root._layers) * chromeStyle.shadowBlur
-
-            anchors.fill: parent
-            anchors.leftMargin: -spread + root._shiftX
-            anchors.rightMargin: -spread - root._shiftX
-            anchors.topMargin: -spread + chromeStyle.shadowOffsetY
-            anchors.bottomMargin: -spread - chromeStyle.shadowOffsetY
-
-            radius: root.radius + spread
-            // An equal share each, so the overlap near the surface sums back to the style's opacity.
-            color: Qt.rgba(root._tint.r,
-                           root._tint.g,
-                           root._tint.b,
-                           root._tint.a / root._layers)
-        }
+        // Corners drawn at their natural size, edges stretched between them -- the same nine-patch
+        // arrangement the compositor assembles the window's shadow from, and for the same reason: a
+        // popup is any size, and the falloff along an edge does not vary with its length.
+        border { left: root._corner; top: root._corner; right: root._corner; bottom: root._corner }
+        horizontalTileMode: BorderImage.Stretch
+        verticalTileMode: BorderImage.Stretch
     }
 }

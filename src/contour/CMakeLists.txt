@@ -229,6 +229,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
         session/TerminalSessionManager.cpp
+        window/PopupShadowImageProvider.cpp
         window/UiStyleProvider.cpp
         window/WindowControlStyleProvider.cpp
         window/WindowController.cpp
@@ -581,6 +582,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/NotificationRouter_test.cpp
             platform/TaskbarProgressRouter_test.cpp
             platform/NativeWindowFrame_test.cpp
+            platform/PopupShadow_test.cpp
             platform/WindowShadowController_test.cpp
             platform/WindowShadowGeometry_test.cpp
             platform/WindowShadowTiles_test.cpp
