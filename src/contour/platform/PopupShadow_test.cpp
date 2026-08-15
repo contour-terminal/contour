@@ -36,7 +36,7 @@ TEST_CASE("renderPopupShadow fades smoothly", "[contour][shadow]")
     auto previous = -1;
     for (auto const x: std::views::iota(0, shadow.margin + 1))
     {
-        auto const alpha = static_cast<int>(qAlpha(shadow.image.pixel(x, y)));
+        auto const alpha = qAlpha(shadow.image.pixel(x, y));
         if (previous >= 0)
             largestStep = std::max(largestStep, std::abs(alpha - previous));
         previous = alpha;
@@ -64,7 +64,7 @@ TEST_CASE("renderPopupShadow is shaped like a shadow", "[contour][shadow]")
         auto previous = 0;
         for (auto const x: std::views::iota(0, shadow.margin))
         {
-            auto const alpha = static_cast<int>(qAlpha(shadow.image.pixel(x, y)));
+            auto const alpha = qAlpha(shadow.image.pixel(x, y));
             INFO("x " << x);
             CHECK(alpha >= previous);
             previous = alpha;
@@ -89,7 +89,7 @@ TEST_CASE("renderPopupShadow is shaped like a shadow", "[contour][shadow]")
             for (auto const x: std::views::iota(0, shadow.image.width()))
             {
                 auto const pixel = shadow.image.pixel(x, y);
-                auto const alpha = static_cast<int>(qAlpha(pixel));
+                auto const alpha = qAlpha(pixel);
                 if (qRed(pixel) > alpha || qGreen(pixel) > alpha || qBlue(pixel) > alpha)
                     ++violations;
             }
