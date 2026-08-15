@@ -734,12 +734,7 @@ bool WindowController::needsFramelessHint() const noexcept
     return framePolicy().framelessHint == platform::FramelessHint::Apply;
 }
 
-bool WindowController::needsClientResizeBorder() const noexcept
-{
-    return framePolicy().affordances == platform::FrameAffordances::Client;
-}
-
-bool WindowController::needsClientWindowControls() const noexcept
+bool WindowController::needsClientFrameAffordances() const noexcept
 {
     return framePolicy().affordances == platform::FrameAffordances::Client;
 }
@@ -972,27 +967,14 @@ void WindowController::refreshWindowShadow()
     auto const size = session != nullptr ? session->profile().windowShadow.value()
                                          : config::TerminalProfile {}.windowShadow.value();
 
-    _windowShadow->refresh(_presentation,
-                           _titleBarVisible ? platform::WindowDecoration::Server
-                                            : platform::WindowDecoration::Client,
-                           size);
+    _windowShadow->refresh(platform::presentationFor(_osWindow->visibility()), decoration(), size);
 }
 
 void WindowController::onWindowVisibilityChanged()
 {
-    if (_osWindow == nullptr)
-        return;
-
-    // Only the states the window manager can put us in on its own. Hidden and Minimized are left
-    // alone deliberately: an unmapped window has nothing to cast a shadow on, and re-publishing on
-    // the way back out is what the restore path already does.
-    switch (_osWindow->visibility())
-    {
-        case QQuickWindow::Visibility::Windowed: break;
-        case QQuickWindow::Visibility::Maximized: break;
-        case QQuickWindow::Visibility::FullScreen: break;
-        default: break;
-    }
+    // The window's presentation is READ from it (@see platform::presentationFor) rather than
+    // mirrored into a member here, so this handler only has to say "look again".
+    refreshWindowShadow();
 }
 
 void WindowController::onOSWindowActiveChanged()
@@ -1078,6 +1060,10 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                 // attachment has to be rebuilt whenever the platform window was recreated.
                 _nativeFrame->apply(*_osWindow, decoration());
                 refreshWindowShadow();
+                // The OS's own window controls exist only once the window is realized, so the inset
+                // measured from them is only answerable now -- long after titleBarVisibleChanged,
+                // which the other frame gates ride on, has been and gone.
+                emit nativeControlsInsetChanged();
                 break;
 
             default: break;

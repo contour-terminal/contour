@@ -88,9 +88,10 @@ Item {
             // of three controls forever -- and after a live style change that would leave the
             // vacated corner reserving space for buttons that moved to the other one.
             // @see the trailing slot below.
-            Layout.preferredWidth: active
-                                 ? implicitWidth
-                                 : (windowControls.side === "leading" ? root.nativeControlsInset : 0)
+            // No side test: nativeControlsInset is already zero unless the OS is drawing its own
+            // controls over this corner. Asking where OUR hidden controls would have sat is a
+            // different question, and answers it wrong when the two disagree.
+            Layout.preferredWidth: active ? implicitWidth : root.nativeControlsInset
             sourceComponent: windowControlsComponent
         }
 

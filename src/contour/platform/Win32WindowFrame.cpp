@@ -10,7 +10,6 @@
     #include <QtGui/QGuiApplication>
     #include <QtGui/QWindow>
 
-    #include <map>
     #include <set>
     #include <utility>
 
@@ -97,10 +96,13 @@ namespace
                     // The thickness is looked up only when it will be used: ncCalcSizeInset
                     // discards it for a normal window, and this message arrives on every step of a
                     // drag-resize.
+                    // The thickness is looked up only when the answer uses it -- this message
+                    // arrives on every step of a drag-resize, and AdjustWindowRectExForDpi is four
+                    // calls deep. ncCalcSizeInset still owns the DECISION; this owns the laziness.
                     auto const maximized = IsZoomed(msg->hwnd) ? WindowMaximized::Yes : WindowMaximized::No;
-                    auto const inset = ncCalcSizeInset(
-                        maximized,
-                        maximized == WindowMaximized::Yes ? frameThicknessOf(msg->hwnd) : FrameInset {});
+                    auto const thickness =
+                        maximized == WindowMaximized::Yes ? frameThicknessOf(msg->hwnd) : FrameInset {};
+                    auto const inset = ncCalcSizeInset(maximized, thickness);
 
                     auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(msg->lParam);
                     params->rgrc[0].left += inset.left;
@@ -176,12 +178,8 @@ namespace
             if (hwnd == nullptr)
                 return;
 
-            // Idempotent, and it has to be: this is re-applied on every expose, and the work below
-            // is not free -- SWP_FRAMECHANGED forces a fresh WM_NCCALCSIZE round and can queue the
-            // repaint that produces the next expose, which would feed itself during a drag-resize.
-            if (auto const seen = _applied.find(hwnd); seen != _applied.end() && seen->second == decoration)
+            if (!needsFrameApplied(window, decoration))
                 return;
-            _applied[hwnd] = decoration;
 
             auto const policy = framePolicyFor(FramePlatform::Windows, decoration);
             if (policy.shadow != FrameShadowStrategy::NativeFrameKept)
@@ -234,7 +232,6 @@ namespace
 
       private:
         std::function<Qt::ColorScheme()> _colorScheme;
-        std::map<HWND, WindowDecoration> _applied;
     };
 } // namespace
 
@@ -244,10 +241,10 @@ std::unique_ptr<NativeWindowFrame> makeWin32WindowFrame(std::function<Qt::ColorS
     // anywhere else, and handing a non-HWND to SetWindowLongPtr is undefined. The same guard the
     // Cocoa adapter and both shadow backends carry.
     if (QGuiApplication::platformName() != QStringLiteral("windows"))
-        return std::make_unique<NullWindowFrame>();
+        return nullptr;
 
     if (!dwmApi().isUsable())
-        return std::make_unique<NullWindowFrame>();
+        return nullptr;
 
     return std::make_unique<Win32WindowFrame>(colorScheme);
 }

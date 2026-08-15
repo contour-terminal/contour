@@ -14,9 +14,6 @@ import QtQuick.Controls
 ContourMenu {
     id: root
 
-    // Force the in-scene (item) popup rather than a native OS menu (see ActionContextMenu for the why).
-
-
     // The WindowController. Null-guarded throughout: it is torn down before this QML tree on window close.
     required property var controller
 

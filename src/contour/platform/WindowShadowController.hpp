@@ -4,12 +4,37 @@
 #include <contour/platform/WindowShadow.hpp>
 
 #include <QtGui/QColor>
+#include <QtGui/QWindow>
 
 #include <memory>
 #include <utility>
 
 namespace contour::platform
 {
+
+/// What @p visibility means for a shadow.
+///
+/// A pure mapping rather than a member mirrored at every transition. The mirror this replaced needed
+/// a writer at each of seven call sites, and a refactor silently left it with NONE -- so the window
+/// stayed permanently "Windowed" and never withdrew its shadow on maximize. Deriving it from the
+/// window cannot be forgotten, and being pure it is testable without a window at all.
+///
+/// Minimized and Hidden map to Windowed deliberately: an unmapped window shows no shadow whatever we
+/// publish, so withdrawing one would be churn for no visible difference, and republishing on the way
+/// back out is a transition we would then have to handle.
+[[nodiscard]] constexpr WindowPresentation presentationFor(QWindow::Visibility visibility) noexcept
+{
+    switch (visibility)
+    {
+        case QWindow::Maximized: return WindowPresentation::Maximized;
+        case QWindow::FullScreen: return WindowPresentation::FullScreen;
+        case QWindow::Windowed:
+        case QWindow::AutomaticVisibility:
+        case QWindow::Minimized:
+        case QWindow::Hidden: break;
+    }
+    return WindowPresentation::Windowed;
+}
 
 /// Keeps one window's published shadow in step with the state the window is actually in.
 ///

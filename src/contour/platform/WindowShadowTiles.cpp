@@ -2,7 +2,6 @@
 #include <contour/platform/WindowShadowTiles.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <ranges>
 #include <vector>
@@ -55,9 +54,15 @@ namespace
             sum += static_cast<int>(read(length - 1)) * (radius + 1 - length);
 
         auto const window = (2 * radius) + 1;
+        // Divide by a reciprocal rather than by `window`: this is the innermost statement of six
+        // passes over the whole atlas, and a runtime integer division here is about a fifth of the
+        // render. The ceil-reciprocal at 24 fractional bits reproduces the truncating division
+        // exactly for every value a sum can take (at most 255 * window), so the tiles come out
+        // byte-for-byte identical -- which the determinism test would otherwise catch.
+        auto const reciprocal = ((uint64_t { 1 } << 24) + window - 1) / static_cast<uint64_t>(window);
         for (auto const i: std::views::iota(0, length))
         {
-            write(i, static_cast<uint8_t>(sum / window));
+            write(i, static_cast<uint8_t>((static_cast<uint64_t>(sum) * reciprocal) >> 24));
             auto const leaving = read(std::max(0, i - radius));
             auto const entering = read(std::min(length - 1, i + radius + 1));
             sum += static_cast<int>(entering) - static_cast<int>(leaving);

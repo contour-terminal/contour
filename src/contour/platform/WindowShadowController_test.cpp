@@ -145,3 +145,33 @@ TEST_CASE("WindowShadowController withdraws on demand", "[contour][shadow]")
 
     CHECK(harness.recorder->calls == std::vector<std::string> { "apply", "withdraw" });
 }
+
+TEST_CASE("presentationFor reads the presentation off the window", "[contour][shadow]")
+{
+    // The half that was missing, and the reason a broken shadow shipped: every case above supplies
+    // WindowPresentation by hand, so they all passed while the application fed a constant. This is
+    // the one mapping that stands between a real window and those cases.
+    CHECK(presentationFor(QWindow::Maximized) == WindowPresentation::Maximized);
+    CHECK(presentationFor(QWindow::FullScreen) == WindowPresentation::FullScreen);
+    CHECK(presentationFor(QWindow::Windowed) == WindowPresentation::Windowed);
+
+    SECTION("an unmapped window is treated as windowed, not as a state of its own")
+    {
+        // It shows no shadow whatever we publish, so withdrawing one would be churn -- and would
+        // add a republish-on-restore transition we would then have to get right.
+        CHECK(presentationFor(QWindow::Minimized) == WindowPresentation::Windowed);
+        CHECK(presentationFor(QWindow::Hidden) == WindowPresentation::Windowed);
+        CHECK(presentationFor(QWindow::AutomaticVisibility) == WindowPresentation::Windowed);
+    }
+
+    SECTION("and it composes with the visibility rule the way the window does")
+    {
+        // The end-to-end statement the controller makes: a maximized window publishes no shadow.
+        CHECK(shadowVisibilityFor(
+                  presentationFor(QWindow::Maximized), WindowDecoration::Client, ShadowSize::Large)
+              == ShadowVisibility::Hidden);
+        CHECK(shadowVisibilityFor(
+                  presentationFor(QWindow::Windowed), WindowDecoration::Client, ShadowSize::Large)
+              == ShadowVisibility::Shown);
+    }
+}

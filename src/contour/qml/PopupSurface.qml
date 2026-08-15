@@ -36,7 +36,10 @@ Rectangle {
     // implicit size is ZERO. Replacing a style's background without restoring this is what collapsed
     // every menu to a two-pixel vertical line -- the width of its own border and nothing else.
     // The numbers mirror ContourTui/Menu.qml's background, which states the same contract.
-    implicitWidth: chromeStyle.widthQuantum * 12
+    // cellWidth, NOT widthQuantum: the quantum is 1.0 in the default style, so twelve of them is
+    // twelve PIXELS rather than the twelve character widths ContourTui/Menu.qml's background means.
+    // Menus escape that through their own contentWidth; a popup that falls back to this would not.
+    implicitWidth: chromeStyle.cellWidth * 12
     implicitHeight: chromeStyle.controlHeight
 
     // Opaque, for the reason ContourTui/Popup.qml states: the application window is transparent so
@@ -50,50 +53,53 @@ Rectangle {
     // The shadow's colour at full strength. Read once: each layer below takes an equal share of it.
     readonly property color _tint: chromeStyle.shadowTint(root.palette.shadow)
 
-    // How many rectangles the falloff is built from. Enough that the banding stays under what the
-    // eye picks out at this opacity, capped because each one is another rectangle to rasterize.
-    readonly property int _layers: Math.min(10, Math.max(3, Math.round(chromeStyle.shadowBlur / 3)))
+    // How many rectangles the falloff is built from. One for a hard-edged shadow -- the terminal
+    // chrome's, which has no blur at all -- and otherwise enough that the banding stays under what
+    // the eye picks out at this opacity.
+    readonly property int _layers: chromeStyle.shadowBlur > 0
+                                 ? Math.max(2, Math.round(chromeStyle.shadowBlur / 3))
+                                 : 1
+
+    // A hard-edged shadow is displaced sideways as well as down -- the offset block a text-mode UI
+    // casts. A blurred one spreads evenly and is displaced only vertically.
+    readonly property real _shiftX: chromeStyle.shadowBlur > 0 ? 0 : chromeStyle.shadowOffsetY
 
     // A child with negative z draws BEHIND its parent in Qt Quick, which is what puts these under
     // the opaque surface without a second item to hold them.
     //
     // Each is a filled rounded rectangle, larger than the last and all at the same low alpha, so
     // where many overlap -- close to the surface -- they sum to a strong shadow, and where only the
-    // outermost reaches they sum to almost nothing. That accumulation IS the falloff.
+    // outermost reaches they sum to almost nothing. That accumulation IS the falloff, and the
+    // hard-edged case is simply its one-layer, zero-spread degenerate form rather than a second
+    // rectangle that has to keep agreeing about z-order, radius and tint.
     Repeater {
-        model: (chromeStyle.hasPopupShadow && chromeStyle.shadowBlur > 0) ? root._layers : 0
+        model: chromeStyle.hasPopupShadow ? root._layers : 0
 
         delegate: Rectangle {
             required property int index
 
             z: -1
 
+            // A rounded Rectangle turns antialiasing on implicitly, which emits the fringe geometry
+            // and a smooth-material node for an edge drawn here at a few percent alpha -- where no
+            // one can see it. Eight layers per popup paid that for nothing.
+            antialiasing: false
+
             // Innermost layer is tight to the surface, outermost reaches the full blur radius.
             readonly property real spread: ((index + 1) / root._layers) * chromeStyle.shadowBlur
 
             anchors.fill: parent
-            anchors.leftMargin: -spread
-            anchors.rightMargin: -spread
+            anchors.leftMargin: -spread + root._shiftX
+            anchors.rightMargin: -spread - root._shiftX
             anchors.topMargin: -spread + chromeStyle.shadowOffsetY
             anchors.bottomMargin: -spread - chromeStyle.shadowOffsetY
 
             radius: root.radius + spread
             // An equal share each, so the overlap near the surface sums back to the style's opacity.
-            color: Qt.rgba(root._tint.r, root._tint.g, root._tint.b, root._tint.a / root._layers)
+            color: Qt.rgba(root._tint.r,
+                           root._tint.g,
+                           root._tint.b,
+                           root._tint.a / root._layers)
         }
-    }
-
-    // The hard-edged case: no blur means no falloff to build, just the offset block a text-mode UI
-    // casts. One filled rectangle at the style's full shadow opacity.
-    Rectangle {
-        visible: chromeStyle.hasPopupShadow && chromeStyle.shadowBlur <= 0
-        z: -1
-        anchors.fill: parent
-        anchors.topMargin: chromeStyle.shadowOffsetY
-        anchors.leftMargin: chromeStyle.shadowOffsetY
-        anchors.bottomMargin: -chromeStyle.shadowOffsetY
-        anchors.rightMargin: -chromeStyle.shadowOffsetY
-        color: root._tint
-        radius: root.radius
     }
 }

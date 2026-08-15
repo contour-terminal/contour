@@ -604,6 +604,39 @@ TEST_CASE("Tab context menu exposes all its actions (offscreen)", "[contour][gui
     CHECK(count.toInt() >= 5);
 }
 
+namespace
+{
+/// Asserts that @p menu is open at a size that can actually show its entries.
+///
+/// Shared by both menu-open cases, because the rule they exist to enforce is one rule: `width > 0`
+/// is NOT enough. A menu collapsed to a two-pixel sliver -- which is what a background with no
+/// implicit size produced -- passes that while being, on screen, a vertical line. Its height was
+/// right throughout, since the entries stack vertically.
+void checkMenuOpensAtUsableSize(QObject& menu)
+{
+    CHECK(menu.property("opened").toBool());
+    CHECK(menu.property("count").toInt() > 0);
+
+    QQuickItem* firstItem = nullptr;
+    REQUIRE(QMetaObject::invokeMethod(&menu, "itemAt", Q_RETURN_ARG(QQuickItem*, firstItem), Q_ARG(int, 0)));
+    REQUIRE(firstItem != nullptr);
+    auto const widest = firstItem->property("implicitWidth").toReal();
+    REQUIRE(widest > 0.0);
+
+    INFO("menu " << menu.property("width").toReal() << "x" << menu.property("height").toReal()
+                 << ", widest item " << widest);
+    CHECK(menu.property("width").toReal() >= widest);
+    CHECK(menu.property("height").toReal() > 0.0);
+
+    // A null background is what a failed surface leaves behind, and a menu with no background is an
+    // unreadable stack of text over the terminal.
+    auto* background = menu.property("background").value<QObject*>();
+    REQUIRE(background != nullptr);
+    CHECK(background->property("width").toReal() > 0.0);
+    CHECK(background->property("height").toReal() > 0.0);
+}
+} // namespace
+
 TEST_CASE("The terminal context menu opens, sub-menus and all (offscreen)", "[contour][gui][qml]")
 {
     // The gap that let a broken right-click menu ship. The case below builds this same menu and
@@ -658,25 +691,22 @@ TEST_CASE("The terminal context menu opens, sub-menus and all (offscreen)", "[co
     REQUIRE(QMetaObject::invokeMethod(menu, "popup"));
     QCoreApplication::processEvents();
 
-    CHECK(menu->property("opened").toBool());
+    checkMenuOpensAtUsableSize(*menu);
     CHECK(menu->property("count").toInt() == model.size());
 
-    // Open at a size that can actually show its entries. `> 0` is NOT enough -- a menu collapsed to
-    // a two-pixel sliver passes that while being, on screen, a vertical line.
-    QQuickItem* firstItem = nullptr;
-    REQUIRE(QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem*, firstItem), Q_ARG(int, 0)));
-    REQUIRE(firstItem != nullptr);
-    auto const widest = firstItem->property("implicitWidth").toReal();
-    INFO("menu " << menu->property("width").toReal() << "x" << menu->property("height").toReal()
-                 << ", widest item " << widest);
-    REQUIRE(widest > 0.0);
-    CHECK(menu->property("width").toReal() >= widest);
-    CHECK(menu->property("height").toReal() > 0.0);
-
-    auto* background = menu->property("background").value<QObject*>();
-    REQUIRE(background != nullptr);
-    CHECK(background->property("width").toReal() > 0.0);
-    CHECK(background->property("height").toReal() > 0.0);
+    // And the sub-menus this case exists for. They are ContourMenus of their own, built at runtime,
+    // and get none of the parent's treatment for free -- which is exactly how one of them shipped
+    // with a background but no margin, casting a shadow into the window edge where nobody saw it.
+    auto submenus = 0;
+    for (auto const i: std::views::iota(0, menu->property("count").toInt()))
+    {
+        QQuickItem* row = nullptr;
+        REQUIRE(QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem*, row), Q_ARG(int, i)));
+        if (row != nullptr && row->property("subMenu").value<QObject*>() != nullptr)
+            ++submenus;
+    }
+    INFO("sub-menus found: " << submenus);
+    CHECK(submenus > 0);
 
     QMetaObject::invokeMethod(menu, "close");
     QCoreApplication::processEvents();
@@ -1057,26 +1087,7 @@ TEST_CASE("A context menu actually opens, with its surface (offscreen)", "[conto
     REQUIRE(QMetaObject::invokeMethod(menu, "open"));
     QCoreApplication::processEvents();
 
-    CHECK(menu->property("opened").toBool());
-
-    // The surface it opens on. A null background is what a failed PopupSurface leaves behind, and a
-    // menu with no background is an unreadable stack of text over the terminal.
-    auto* background = menu->property("background").value<QObject*>();
-    REQUIRE(background != nullptr);
-    CHECK(background->property("width").toReal() > 0.0);
-    CHECK(background->property("height").toReal() > 0.0);
-
-    // And its rows are laid out at a size that can show them. `> 0` is NOT enough: a menu collapsed
-    // to a two-pixel sliver passes that while being, on screen, a vertical line.
-    CHECK(menu->property("count").toInt() > 0);
-    QQuickItem* firstItem = nullptr;
-    REQUIRE(QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem*, firstItem), Q_ARG(int, 0)));
-    REQUIRE(firstItem != nullptr);
-    auto const widest = firstItem->property("implicitWidth").toReal();
-    REQUIRE(widest > 0.0);
-    INFO("menu " << menu->property("width").toReal() << " wide, widest item " << widest);
-    CHECK(menu->property("width").toReal() >= widest);
-    CHECK(menu->property("height").toReal() > 0.0);
+    checkMenuOpensAtUsableSize(*menu);
 
     QMetaObject::invokeMethod(menu, "close");
     QCoreApplication::processEvents();

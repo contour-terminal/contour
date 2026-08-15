@@ -6,8 +6,6 @@
     #include <QtGui/QGuiApplication>
     #include <QtGui/QWindow>
 
-    #include <map>
-
     #import <AppKit/AppKit.h>
 
 namespace contour::platform
@@ -40,6 +38,9 @@ class CocoaWindowFrame final: public NativeWindowFrame
         if (nsWindow == nil)
             return;
 
+        if (!needsFrameApplied(window, decoration))
+            return;
+
         auto const policy = framePolicyFor(FramePlatform::MacOS, decoration);
         if (policy.shadow != FrameShadowStrategy::FullSizeContent)
         {
@@ -53,7 +54,7 @@ class CocoaWindowFrame final: public NativeWindowFrame
         // The content view covers the whole window, including where the title bar would be, but the
         // window stays DECORATED -- which is what keeps the shadow, the rounded corners and the
         // traffic lights. Our own tab strip then draws into that area, and reserves the corner the
-        // traffic lights occupy (TitleBar.nativeControlsOverChrome).
+        // traffic lights occupy (TitleBar.nativeControlsInset).
         nsWindow.styleMask |= NSWindowStyleMaskFullSizeContentView;
         nsWindow.titlebarAppearsTransparent = YES;
         nsWindow.titleVisibility = NSWindowTitleHidden;
@@ -94,9 +95,6 @@ class CocoaWindowFrame final: public NativeWindowFrame
         auto const trailing = NSMaxX(zoom.frame);
         return static_cast<qreal>(trailing + leading);
     }
-
-  private:
-    std::map<NSWindow*, WindowDecoration> _applied;
 };
 
 std::unique_ptr<NativeWindowFrame> makeCocoaWindowFrame()
@@ -106,7 +104,7 @@ std::unique_ptr<NativeWindowFrame> makeCocoaWindowFrame()
     // an Objective-C message is a segmentation fault, which is exactly what the offscreen GUI tests
     // hit. The shadow backends guard the same way for the same reason.
     if (QGuiApplication::platformName() != QStringLiteral("cocoa"))
-        return std::make_unique<NullWindowFrame>();
+        return nullptr;
 
     return std::make_unique<CocoaWindowFrame>();
 }

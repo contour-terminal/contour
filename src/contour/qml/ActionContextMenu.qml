@@ -12,12 +12,6 @@ import QtQuick.Controls
 ContourMenu {
     id: root
 
-    // Force the in-scene (item) popup rather than a native OS menu. Since Qt 6.8 a Controls Menu defaults
-    // to a native platform menu where one exists, and a native menu cannot host the sub-menus this file
-    // creates at runtime — the same trap that made TabContextMenu come up EMPTY on Windows. Fusion (pinned
-    // app-wide in ContourGuiApp) then draws an opaque, themed surface on every platform.
-
-
     // Raised when a command row is picked, carrying that row's actionId. A SIGNAL rather than a
     // controller call, so one component serves every menu surface: the terminal pane's and the title
     // bar's differ only in which controller method their host wires this to.
@@ -55,9 +49,9 @@ ContourMenu {
 
     Component {
         id: submenuEntry
-        // Every one of ContourMenu's three properties is per-Popup, so a sub-menu needs exactly
-        // the same treatment the root does -- including the margin, which it silently went without
-        // while these were copied by hand.
+        // Every property ContourMenu sets is per-Popup, so a sub-menu needs exactly the same
+        // treatment the root does -- including the margin, which it silently went without while
+        // these were copied by hand.
         ContourMenu {}
     }
 

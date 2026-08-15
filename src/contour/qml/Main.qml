@@ -168,7 +168,7 @@ ApplicationWindow
         // Not the negation of titleBarVisible: on macOS the window stays a decorated NSWindow whose
         // OWN traffic lights are drawn even with our tab strip, so ours must yield there too or both
         // sets appear. The policy decides; this only asks.
-        useCustomWindowControls: !!(appWindow.win && appWindow.win.needsClientWindowControls)
+        useCustomWindowControls: !!(appWindow.win && appWindow.win.needsClientFrameAffordances)
         // `|| 0` for the same reason the gates above use `!!`: a controller that predates this
         // property answers undefined, and assigning that to a real is a QML error.
         nativeControlsInset: (appWindow.win && appWindow.win.nativeControlsInset) || 0
@@ -277,7 +277,7 @@ ApplicationWindow
         window: appWindow
         // Same policy as the window controls: where the OS keeps a real frame it resizes the window
         // itself, and our hit zones would only compete with it.
-        visible: !!(appWindow.win && appWindow.win.needsClientResizeBorder)
+        visible: !!(appWindow.win && appWindow.win.needsClientFrameAffordances)
     }
     // }}}
 

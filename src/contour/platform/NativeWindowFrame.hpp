@@ -3,13 +3,13 @@
 
 #include <contour/platform/WindowDecoration.hpp>
 
+#include <QtCore/QVariant>
 #include <QtCore/Qt>
+#include <QtGui/QWindow>
 
 #include <cstdint>
 #include <functional>
 #include <memory>
-
-class QWindow;
 
 namespace contour::platform
 {
@@ -216,6 +216,27 @@ class NativeWindowFrame
     /// tokens are counted in character cells.
     [[nodiscard]] virtual qreal nativeControlsInset(QWindow& window) const = 0;
 };
+
+/// Whether @p window still needs @p decoration applied, recording it if so.
+///
+/// The adapters re-apply on every expose, and neither platform's apply() is free -- Win32's forces a
+/// fresh WM_NCCALCSIZE round that can queue the repaint producing the next expose, and Cocoa's makes
+/// AppKit recompute the frame view and re-derive the shadow's alpha mask.
+///
+/// The record lives ON THE WINDOW rather than in a table inside the adapter. A table keyed on the
+/// native handle outlives the window it describes, and both platforms recycle handles -- so a later
+/// window inheriting a stale entry with a matching decoration would be skipped and never decorated.
+/// This dies with the window, and one helper serves both adapters instead of two copies.
+[[nodiscard]] inline bool needsFrameApplied(QWindow& window, WindowDecoration decoration)
+{
+    static constexpr auto Key = "contour_applied_frame_decoration";
+    // +1 so "never applied" (an absent property, which converts to 0) is distinct from Client's 0.
+    auto const wanted = static_cast<int>(decoration) + 1;
+    if (window.property(Key).toInt() == wanted)
+        return false;
+    window.setProperty(Key, wanted);
+    return true;
+}
 
 /// The frame that does nothing, for platforms with no OS frame service to ask.
 class NullWindowFrame final: public NativeWindowFrame

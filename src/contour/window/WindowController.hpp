@@ -90,9 +90,11 @@ class WindowController:
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
     // All three follow titleBarVisible, so they re-evaluate on the same signal.
     Q_PROPERTY(bool needsFramelessHint READ needsFramelessHint NOTIFY titleBarVisibleChanged)
-    Q_PROPERTY(bool needsClientResizeBorder READ needsClientResizeBorder NOTIFY titleBarVisibleChanged)
-    Q_PROPERTY(bool needsClientWindowControls READ needsClientWindowControls NOTIFY titleBarVisibleChanged)
-    Q_PROPERTY(qreal nativeControlsInset READ nativeControlsInset NOTIFY titleBarVisibleChanged)
+    Q_PROPERTY(
+        bool needsClientFrameAffordances READ needsClientFrameAffordances NOTIFY titleBarVisibleChanged)
+    // NOT on titleBarVisibleChanged: this one is measured from the OS's own buttons, which only
+    // exist once the window is realized -- long after the title-bar value is seeded.
+    Q_PROPERTY(qreal nativeControlsInset READ nativeControlsInset NOTIFY nativeControlsInsetChanged)
     // Tab-strip (tab bar) placement + visibility, exposed to Main.qml. `tabBarPosition` is an int
     // (0 = Top, 1 = Bottom) matching the TabBarPosition enumerator order. `tabBarShouldShow`
     // is the resolved gate (mode + live tab count) the QML binds its `visible` to.
@@ -380,11 +382,12 @@ class WindowController:
     /// while still giving the client area the whole window.
     [[nodiscard]] bool needsFramelessHint() const noexcept;
 
-    /// Whether ResizeBorder.qml should draw its own hit zones, or the OS frame resizes the window.
-    [[nodiscard]] bool needsClientResizeBorder() const noexcept;
-
-    /// Whether the tab strip should draw its own min/max/close controls, or the OS draws them.
-    [[nodiscard]] bool needsClientWindowControls() const noexcept;
+    /// Whether WE supply the window's frame affordances -- ResizeBorder.qml's hit zones and the tab
+    /// strip's own min/max/close controls -- or the OS frame does.
+    ///
+    /// One question, not two: the frame that resizes the window is the frame that carries its
+    /// buttons, which is why @ref platform::FrameAffordances is one field.
+    [[nodiscard]] bool needsClientFrameAffordances() const noexcept;
 
     /// Leading space the tab strip must leave clear for the OS's own window controls.
     ///
@@ -596,6 +599,7 @@ class WindowController:
     void multimediaReadyChanged();
     void activeTabRootPaneChanged();
     void titleBarVisibleChanged();
+    void nativeControlsInsetChanged();
     void tabBarPositionChanged();
     void tabBarVisibilityChanged();
     void tabBarShouldShowChanged();
@@ -666,13 +670,13 @@ class WindowController:
     /// still-unmapped window is exactly the premature realization WindowGeometry.hpp warns about.
     void refreshWindowShadow();
 
-    /// QWindow::visibilityChanged handler: the SOLE writer of _presentation.
+    /// QWindow::visibilityChanged handler.
     ///
     /// Every way the window changes presentation ends in this signal — our own setWindowMaximized
     /// and friends, the toggles, and the ones driven from outside the application entirely (a
-    /// window-manager keybinding, a double click on the native frame). Recording the intent at each
-    /// of those call sites as well would be a partial duplicate of a mechanism that already covers
-    /// all of them, and the two would drift at whichever site was added next.
+    /// window-manager keybinding, a double click on the native frame) — so this one connection
+    /// covers all of them, and the shadow reads the presentation back off the window rather than
+    /// having it recorded at each site.
     void onWindowVisibilityChanged();
 
     /// The frame policy for this window's platform and current decoration.
@@ -743,17 +747,15 @@ class WindowController:
     // Carries beginMoveRows()'s result from onTabAboutToBeMoved() to onTabMoved().
     bool _tabMoveInProgress = false;
 
-    // The window's drop shadow, and the presentation it was last published for. Created lazily on
-    // the first refresh (see refreshWindowShadow) and destroyed before the window closes, while its
-    // handle is still live enough to withdraw through.
+    // The window's drop shadow. Created lazily on the first refresh (see refreshWindowShadow) and
+    // destroyed before the window closes, while its handle is still live enough to withdraw through.
     //
-    // _presentation is written from INTENT by applyWindowPresentation and from the
-    // visibilityChanged signal for changes the window manager drives; it is never read back off
-    // QWindow::visibility(), which settles too late to be the authority here. Tiled is unreachable
-    // today: Qt reports no such visibility, so a KWin quick-tiled window keeps its shadow — the same
-    // as every other client-decorated application does.
+    // The presentation it is published for is DERIVED from the window on each refresh rather than
+    // held here: a mirrored member needs a writer at every transition, and one refactor away from
+    // having none it silently stops withdrawing the shadow at all. WindowPresentation::Tiled is
+    // unreachable today — Qt reports no such visibility, so a KWin quick-tiled window keeps its
+    // shadow, as every other client-decorated application does.
     std::unique_ptr<platform::WindowShadowController> _windowShadow;
-    platform::WindowPresentation _presentation = platform::WindowPresentation::Windowed;
 
     // The OS-frame adapter. Never null: platforms with nothing to offer get a NullWindowFrame, so
     // every call site can apply the policy unconditionally rather than guarding on the platform.
