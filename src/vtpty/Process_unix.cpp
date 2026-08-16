@@ -44,11 +44,20 @@
 
 #include <unistd.h>
 
-// A shared library on macOS cannot link against `environ` directly; everywhere else <unistd.h>
-// already declares it.
+// POSIX requires no header to declare `environ`; each platform is left to differ, and all three we
+// build on do.
+//
+// macOS: a shared library cannot link against the symbol directly, so it goes through
+// _NSGetEnviron(). Linux: glibc's <unistd.h> declares it, so nothing is needed. FreeBSD: its
+// <unistd.h> does NOT declare it in the configuration this tree builds with, which is why the
+// FreeBSD job failed with "use of undeclared identifier 'environ'" -- so the declaration is
+// supplied here, as POSIX intends. `extern "C"` rather than a bare `extern`: the symbol has C
+// linkage, and declaring it with C++ linkage would name a different entity and fail to link.
 #ifdef __APPLE__
     #include <crt_externs.h>
     #define environ (*_NSGetEnviron())
+#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+extern "C" char** environ;
 #endif
 
 using namespace std;
