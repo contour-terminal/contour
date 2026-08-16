@@ -27,6 +27,24 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_COLOR_DIAGNOSTICS ON)
 
+# Ninja starts as many link steps as there are cores, and the tail of this build is a dozen test
+# executables that each pull the whole tree in with debug info. Four of those linking at once
+# exhausted the 16 GB x86_64 GitHub runner: the kernel took the runner agent with it, and the job
+# reported "The runner has received a shutdown signal" and exit 143 -- a message that reads like
+# infrastructure and is not. It struck four times out of five, always between ninja steps 608 and
+# 610 of 623, i.e. always in the concurrent-link phase, while the arm64 GCC and x86_64 Clang jobs
+# of the very same runs passed (Clang's debug info is smaller, and it never tipped over).
+#
+# The cap is on LINK steps only, which is where the memory goes; compiling still uses every core,
+# and that is where the build actually spends its time. CONTOUR_LINK_JOBS raises or lowers it for
+# a machine that wants something else.
+set(CONTOUR_LINK_JOBS "2" CACHE STRING "Maximum number of concurrent link steps (Ninja generators)")
+if(CMAKE_GENERATOR MATCHES "Ninja")
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS contour_link_pool=${CONTOUR_LINK_JOBS})
+    # Read when each target is created, so it must be set before any add_subdirectory() below.
+    set(CMAKE_JOB_POOL_LINK contour_link_pool)
+endif()
+
 if((CMAKE_CXX_COMPILER_ID STREQUAL "Clang") OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
     set(CMAKE_CXX_FLAGS_DEBUG "-Og -g")
 endif()
