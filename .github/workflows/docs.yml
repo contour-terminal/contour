@@ -37,7 +37,10 @@ jobs:
       - name: "update APT database"
         run: sudo apt -q update
       - name: "Install GCC"
-        run: sudo apt -y install g++-14
+        # gcc-14 as well as g++-14: the compiler is named explicitly at configure time below, so the
+        # C driver has to exist under that name too (g++-14 does depend on it, but the build should
+        # not lean on a transitive dependency for a tool it invokes by name).
+        run: sudo apt -y install gcc-14 g++-14
       - name: "install dependencies"
         run: sudo env QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
@@ -53,11 +56,20 @@ jobs:
       # instead. CMAKE_DISABLE_FIND_PACKAGE_Qt6 makes every find_package(Qt6 ...) fail, so the build
       # cannot merely happen to pick up whichever Qt is lying around -- same assertion as the
       # "Ubuntu Linux (no GUI frontend)" job in build.yml.
+      #
+      # The compiler is named rather than left to the default: this job installs g++-14, but that
+      # does not make it the default -- Ubuntu 24.04's `g++` is 13.3, whose libstdc++ has no
+      # std::ranges::to (C++23, and GCC 14 is where it arrived), so vtbackend/Color.cpp fails with
+      # "'to' is not a member of 'std::ranges'". This job takes the gcc-debug preset's
+      # PEDANTIC_COMPILER_WERROR=ON, which the build matrix passes OFF, so it is the strictest GCC
+      # build in the tree and the only one that has to be told which GCC to be.
       - name: "Install-contour"
         run: |
           cmake --preset gcc-debug \
                 -B build \
                 -G Ninja \
+                -D CMAKE_C_COMPILER=gcc-14 \
+                -D CMAKE_CXX_COMPILER=g++-14 \
                 -D CONTOUR_WAYLAND=OFF \
                 -D CONTOUR_FRONTEND_GUI=OFF \
                 -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
