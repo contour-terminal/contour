@@ -15,6 +15,7 @@
 #include <array>
 #include <cerrno>
 
+#include <net/detail/WouldBlock.hpp>
 #include <net/platform/WindowsLoopback.hpp>
 #include <net/platform/WinsockInit.hpp>
 
@@ -63,7 +64,7 @@ namespace
         [[nodiscard]] IoResult write(void const* data, std::size_t size) override
         {
             auto const n = ::send(_writeFd, data, size, MSG_NOSIGNAL);
-            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            if (n < 0 && net::detail::isWouldBlock(errno))
                 // The pair is non-blocking: a full buffer means a wakeup is already
                 // pending, which is all this byte would have signaled. Report the
                 // write as done so a busy loop never stalls a producer thread.
