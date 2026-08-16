@@ -94,6 +94,48 @@ if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexperimental-library")
 endif()
 
+# src/coro/Cancellation.hpp is built on C++20 <stop_token> and refuses to compile without it. One
+# standard library we target ships it switched off: libc++ guards stop_token and jthread with
+# _LIBCPP_HAS_NO_EXPERIMENTAL_STOP_TOKEN, which __config defines unless _LIBCPP_ENABLE_EXPERIMENTAL
+# is -- and that is what -fexperimental-library sets. libc++ 20 dropped the guard, so this reaches
+# libc++ 18 and 19 only; FreeBSD 15's base Clang 19 is where CI meets it, and so does anyone
+# building there with the base toolchain.
+#
+# Global rather than a property of the `coro` target, which is what this was first written as: coro
+# is header-only, and its headers are pulled in through several layers of other headers -- contour's
+# ReactorThread.hpp reaches Cancellation.hpp, so contour_gui_test compiled it while linking no coro
+# target and got none of its INTERFACE flags. Whether the standard library needs this switch is a
+# property of the toolchain, not of any one target, so every translation unit gets the same answer.
+#
+# Probed, not version-tested: what matters is the standard library the compiler actually uses, which
+# its version number does not name -- and a probe stops adding the flag by itself once a platform
+# moves on to libc++ 20, instead of pinning a workaround to a version range someone must curate.
+include(CheckCXXSourceCompiles)
+set(_stop_token_probe "
+#include <version>
+#if !defined(__cpp_lib_jthread) || __cpp_lib_jthread < 201911L
+#error stop_token unavailable
+#endif
+int main() { return 0; }
+")
+check_cxx_source_compiles("${_stop_token_probe}" CONTOUR_HAS_STOP_TOKEN)
+if(NOT CONTOUR_HAS_STOP_TOKEN)
+    set(CMAKE_REQUIRED_FLAGS "-fexperimental-library")
+    check_cxx_source_compiles("${_stop_token_probe}" CONTOUR_HAS_STOP_TOKEN_WHEN_EXPERIMENTAL)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(NOT CONTOUR_HAS_STOP_TOKEN_WHEN_EXPERIMENTAL)
+        message(FATAL_ERROR
+            "coro requires C++20 <stop_token> (__cpp_lib_jthread), which this standard library does "
+            "not provide even with -fexperimental-library. Use libstdc++ 11+, libc++ 18+, or MSVC "
+            "STL -- or add the minimal fallback that src/coro/Cancellation.hpp describes.")
+    endif()
+    # Compile AND link: -fexperimental-library also selects the matching libc++experimental.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexperimental-library")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fexperimental-library")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fexperimental-library")
+    message(STATUS "<stop_token>: enabling -fexperimental-library (libc++ keeps it gated)")
+endif()
+
 if (CONTOUR_BUILD_WITH_MIMALLOC)
     add_definitions(-DCONTOUR_BUILD_WITH_MIMALLOC)
 endif()

@@ -66,7 +66,17 @@ if(NOT MSVC)
 endif()
 
 target_compile_features(crispy-core PUBLIC cxx_std_17)
-target_link_libraries(crispy-core PUBLIC ${CRISPY_CORE_LIBS})
+# Threads::Threads is PUBLIC because threading is part of crispy-core's INTERFACE and not merely its
+# implementation: BufferObject.hpp, LogSink.hpp, ReadSelector.hpp, FileDescriptor.hpp and
+# Environment.hpp all expose std::mutex / std::condition_variable / std::thread, so every consumer
+# instantiates them and every consumer needs the threading library on its link line.
+#
+# On glibc that link is free -- pthread_create has lived in libc since glibc 2.34 -- so no Linux job
+# ever noticed it missing. FreeBSD keeps those symbols in libthr, where the omission is fatal:
+# `ld: error: undefined symbol: pthread_create`, linking crispy_test. Declaring it here rather than
+# on each test target also carries it to vtpty, vthost and vtrasterizer, which reach threading
+# through this same header set.
+target_link_libraries(crispy-core PUBLIC ${CRISPY_CORE_LIBS} Threads::Threads)
 target_include_directories(crispy-core PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>

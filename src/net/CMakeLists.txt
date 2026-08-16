@@ -68,7 +68,11 @@ add_library(net STATIC ${net_SOURCES})
 # OpenSSL backs the TLS ISocket decorator (net/Tls.*). It stays behind the
 # ITlsContext DI seam, so it is PRIVATE: no OpenSSL type crosses net's headers.
 find_package(OpenSSL REQUIRED)
-target_link_libraries(net PUBLIC coro)
+# Threads::Threads, and PUBLIC for the same reason crispy-core declares it: net's own headers
+# (EventLoop.hpp above all) expose std::mutex and std::thread, so consumers instantiate them too.
+# net deliberately does not depend on crispy, so it cannot inherit the declaration from there and
+# has to make it itself. Free on glibc, fatal on FreeBSD, where the symbols live in libthr.
+target_link_libraries(net PUBLIC coro Threads::Threads)
 target_link_libraries(net PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 if(WIN32)
     target_link_libraries(net PUBLIC ws2_32)
