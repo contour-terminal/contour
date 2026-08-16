@@ -12,6 +12,7 @@
     #include <fcntl.h>
     #include <unistd.h>
 
+    #include <net/detail/WouldBlock.hpp>
     #include <net/posix/FdUtils.hpp> // MSG_NOSIGNAL fallback, makeNonBlockingCloexec
 
     // macOS / BSD also lack MSG_CMSG_CLOEXEC (atomic close-on-exec for received
@@ -25,14 +26,10 @@
 namespace net
 {
 
+using detail::isWouldBlock;
+
 namespace
 {
-    /// @return True if @p err is the transient "retry when ready" errno.
-    [[nodiscard]] bool isWouldBlock(int err) noexcept
-    {
-        return err == EAGAIN || err == EWOULDBLOCK;
-    }
-
     /// Maps an errno from a socket call to a NetError category.
     [[nodiscard]] NetError fromErrno(int err, std::string context)
     {

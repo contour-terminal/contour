@@ -12,6 +12,7 @@
 
     #include <unistd.h>
 
+    #include <net/detail/WouldBlock.hpp>
     #include <net/posix/AcceptLoop.hpp>
     #include <net/posix/FdUtils.hpp>
 
@@ -65,7 +66,7 @@ namespace
 
         auto const rc = ::connect(fd.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address));
         auto const err = errno;
-        if (rc == 0 || err == EINPROGRESS || err == EAGAIN || err == EWOULDBLOCK)
+        if (rc == 0 || err == EINPROGRESS || net::detail::isWouldBlock(err))
             // Connected, or a connect pending against a live listener: it is alive.
             return std::unexpected(
                 makeNetError(NetErrorCode::AddressInUse, EADDRINUSE, "a daemon is already serving " + path));
