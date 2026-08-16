@@ -12,6 +12,7 @@
 
     #include <coro/Cancellation.hpp>
     #include <net/EventLoop.hpp>
+    #include <net/detail/WouldBlock.hpp>
     #include <net/platform/PeerAddress.hpp>
     #include <net/posix/PosixSocket.hpp>
 
@@ -46,7 +47,7 @@ coro::Task<AcceptResult> acceptOne(EventLoop* loop, int const* fd, bool const* c
         }
 
         auto const err = errno;
-        if (err == EAGAIN || err == EWOULDBLOCK)
+        if (net::detail::isWouldBlock(err))
         {
             // Park until the listener fd is readable (a connection is pending). A
             // cancelled wait (listener closed / stop requested) throws
