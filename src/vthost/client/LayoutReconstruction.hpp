@@ -15,7 +15,9 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <ranges>
 #include <unordered_map>
+#include <utility>
 
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/LayoutTree.hpp>
@@ -75,5 +77,45 @@ using LeafCellSize = std::function<std::optional<vtpty::PageSize>(uint64_t sessi
 /// @return The composed area, or nullopt if any leaf is unresolved (nothing meaningful to report).
 [[nodiscard]] std::optional<vtpty::PageSize> composeClientArea(proto::WirePane const& root,
                                                                LeafCellSize const& leafSize);
+
+/// Picks WHICH tab @ref composeClientArea is applied to, across every window a client mirrors.
+///
+/// The wire carries one client area per CLIENT (`proto::ResizeRequest`), while a client may mirror
+/// several daemon windows — so one tab has to speak for all of them. The anchor names the session
+/// whose pane just resized, and the tab hosting it is the one whose extent actually changed; any
+/// other tab would report an area no one asked about. When the anchor resolves to nothing — no pane
+/// has reported yet, or the anchoring pane has since been unbound — the first tab that composes
+/// stands in, which is the right answer for the single-window case (every tab of a window fills the
+/// same content area) and a stable guess otherwise.
+///
+/// @param roots     Every mirrored tab's wire pane tree, in a deterministic order.
+/// @param anchor    The session whose pane last reported a grid, if any.
+/// @param leafSize  Resolves one leaf's rendered extent, @see LeafCellSize.
+/// @return The composed area, or nullopt when no tab composes.
+template <std::ranges::input_range Roots>
+    requires std::same_as<std::remove_cvref_t<std::ranges::range_reference_t<Roots>>, proto::WirePane>
+[[nodiscard]] std::optional<vtpty::PageSize> composeAnchoredClientArea(Roots&& roots,
+                                                                       std::optional<uint64_t> anchor,
+                                                                       LeafCellSize const& leafSize)
+{
+    // The anchor test is a plain tree walk, so it gates the (more expensive) composition rather
+    // than the other way round; only the first otherwise-usable tab is composed as a fallback.
+    auto fallback = std::optional<vtpty::PageSize> {};
+    // Forwarded rather than iterated directly: `Roots` is a forwarding reference, and the call site
+    // passes a range adaptor pipeline whose const-iterability is not guaranteed in general -- a
+    // `views::filter` inserted into that pipeline later would have no const `begin()`. Forwarding
+    // preserves the caller's value category, which is what makes such a view iterable here.
+    for (proto::WirePane const& root: std::forward<Roots>(roots))
+    {
+        if (anchor.has_value() && paneTreeHosts(root, *anchor))
+        {
+            if (auto const composed = composeClientArea(root, leafSize))
+                return composed;
+        }
+        else if (!fallback.has_value())
+            fallback = composeClientArea(root, leafSize);
+    }
+    return fallback;
+}
 
 } // namespace vthost::client

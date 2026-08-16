@@ -372,7 +372,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// snapshot per followed session.
     std::optional<vtpty::PageSize> _lastReportedArea;
     std::unordered_map<uint64_t, vtpty::PageSize> _lastReportedPaneSizes;
-    /// The session whose report is pending; anchors which tab the client area is composed from.
+    /// The session whose pane last reported a grid; anchors which tab the client area is composed
+    /// from, @see vthost::client::composeAnchoredClientArea. Outlives the individual flush it was
+    /// set for — a report is not "consumed" — but never its pane: `unbind` clears it, so it either
+    /// names a live pane or nothing.
     std::optional<uint64_t> _geometryAnchor;
     bool _geometryFlushScheduled = false;            ///< A coalesced flush is already queued.
     vthost::client::NativeClient* _client = nullptr; ///< Reactor-owned; valid while serving.
