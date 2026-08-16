@@ -4,6 +4,18 @@ FROM yaraslaut/static_qt:$VERSION
 #FROM qt_static:$VERSION
 ARG ARCH="x86_64"
 
+# Two additions over the plain build-dependency list, each answering a failure this job hit:
+#
+# libssl-dev -- src/net does find_package(OpenSSL REQUIRED) for the TLS decorator behind its
+# ITlsContext seam, so its absence fails the configure step outright rather than at link time. This
+# image installs its packages by hand instead of through scripts/install-deps.sh, whose Ubuntu list
+# does carry libssl-dev, so the two lists have to be kept in step and were not.
+#
+# g++-14 -- Ubuntu 24.04's default g++ is 13.3, whose libstdc++ has no std::ranges::to; that is C++23
+# and arrived in GCC 14. Every other Linux job already builds with GCC 14 or Clang, so this image was
+# the one place still on 13.3, and vtbackend/Color.cpp failed there with "'to' is not a member of
+# 'std::ranges'". The compiler is then named explicitly at configure time below, because installing
+# it does not make it the default.
 RUN apt-get update && apt-get install -y \
     lsb-release software-properties-common gnupg \
     wget gcc g++ \
@@ -11,7 +23,8 @@ RUN apt-get update && apt-get install -y \
     g++ libc6-dev make ninja-build git zlib1g-dev libx11-xcb-dev \
     build-essential pkg-config libxcb-render-util0-dev libfontconfig1-dev \
     libxcb-*-dev libglib2.0-dev libgl1-mesa-dev libxkbcommon-x11-dev \
-    libdouble-conversion-dev libb2-dev libharfbuzz-dev libcairo2-dev
+    libdouble-conversion-dev libb2-dev libharfbuzz-dev libcairo2-dev \
+    libssl-dev gcc-14 g++-14
 
 WORKDIR /
 COPY . /contour
@@ -19,6 +32,8 @@ RUN LD_LIBRARY_PATH=/usr/local/lib sh /contour/scripts/install-static.sh
 
 WORKDIR /contour
 RUN LD_LIBRARY_PATH=/usr/local/lib cmake -S . -B build -G Ninja \
+    -D CMAKE_C_COMPILER=gcc-14 \
+    -D CMAKE_CXX_COMPILER=g++-14 \
     -D CONTOUR_BUILD_STATIC=ON \
     -D CONTOUR_USE_CPM=ON \
     -D CONTOUR_WITH_UTEMPTER=OFF \
