@@ -389,21 +389,14 @@ std::optional<vtpty::PageSize> NativeController::composedClientArea() const
         return std::nullopt;
     };
 
-    // The anchor test is a plain tree walk, so it gates the (more expensive) composition rather
-    // than the other way round; only the first otherwise-usable tab is composed as a fallback.
-    auto fallback = std::optional<vtpty::PageSize> {};
-    for (auto const& layout: _layouts | std::views::values)
-        for (auto const& tab: layout.tabs)
-        {
-            if (_geometryAnchor.has_value() && vthost::client::paneTreeHosts(tab.root, *_geometryAnchor))
-            {
-                if (auto const composed = vthost::client::composeClientArea(tab.root, resolve))
-                    return composed;
-            }
-            else if (!fallback.has_value())
-                fallback = vthost::client::composeClientArea(tab.root, resolve);
-        }
-    return fallback;
+    // Every mirrored tab, in window-id then tab order — `_layouts` is ordered, so the fallback the
+    // composer picks is deterministic rather than a hash-order accident.
+    auto const roots =
+        _layouts | std::views::values
+        | std::views::transform([](auto const& layout) -> auto const& { return layout.tabs; })
+        | std::views::join
+        | std::views::transform([](auto const& tab) -> vthost::proto::WirePane const& { return tab.root; });
+    return vthost::client::composeAnchoredClientArea(roots, _geometryAnchor, resolve);
 }
 
 void NativeController::primeBinding(uint64_t session)
@@ -481,6 +474,13 @@ void NativeController::unbind(uint64_t session)
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _paneSizes.erase(session);
         _lastReportedPaneSizes.erase(session);
+        // The anchor is the third thing this pane owned: it selects WHICH tab the client area is
+        // composed from, and a session id is never reused, so once the pane is gone the anchor can
+        // only ever miss. Left set, a flush already queued when this ran would compose the fallback
+        // tab while still believing it had anchored — reporting a client area for a window the user
+        // never touched, which the daemon answers by re-projecting every pane of every window.
+        if (_geometryAnchor == session)
+            _geometryAnchor.reset();
     }
     // Tombstone while the connection lives, so a remote session that outlives its local pane cannot
     // resurrect it through a later delta. Whether that session should also be ENDED on the daemon is
