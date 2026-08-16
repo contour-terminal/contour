@@ -36,10 +36,25 @@ jobs:
         run: sudo find _deps/sources -exec chown $UID {} \;
       - name: "create build directory"
         run: mkdir build
+      # Every `contour documentation ...` verb below is registered by ContourApp and reads only
+      # Qt-free sources (vtbackend's function table, contour::actions, contour::config), so docs
+      # generation has no use for the GUI frontend -- and building it here is what broke this
+      # workflow: Ubuntu 24.04's distro Qt is 6.4.2, whose Qt6::QmlPrivate names an include path it
+      # does not ship, which fails the configure step outright. The build matrix works around that
+      # by installing a modern Qt over the distro one; this job needs no Qt at all, so it opts out
+      # instead. CMAKE_DISABLE_FIND_PACKAGE_Qt6 makes every find_package(Qt6 ...) fail, so the build
+      # cannot merely happen to pick up whichever Qt is lying around -- same assertion as the
+      # "Ubuntu Linux (no GUI frontend)" job in build.yml.
       - name: "Install-contour"
-        run: cmake --preset gcc-debug -B build -G Ninja -D CONTOUR_WAYLAND=OFF
+        run: |
+          cmake --preset gcc-debug \
+                -B build \
+                -G Ninja \
+                -D CONTOUR_WAYLAND=OFF \
+                -D CONTOUR_FRONTEND_GUI=OFF \
+                -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
       - name: "build"
-        run: cmake --build build
+        run: cmake --build build --target contour
       - name: "create vt-sequence directory"
         run: mkdir docs/vt-sequence
       - name: "Generate documentation for global config"

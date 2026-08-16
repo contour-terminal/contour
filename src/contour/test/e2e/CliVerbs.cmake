@@ -23,8 +23,11 @@ if(NOT FRONTEND STREQUAL "gui" AND NOT FRONTEND STREQUAL "headless")
 endif()
 
 # Verbs that must be present in EVERY configuration: the crispy::App base plus everything
-# ContourApp registers. `daemon` is the one that makes this test worth running.
-set(ALWAYS_PRESENT version license help capture cat daemon list-debug-tags)
+# ContourApp registers. `daemon` is the one that makes this test worth running; `documentation` is
+# the one the Docs workflow runs, and it runs it against a CONTOUR_FRONTEND_GUI=OFF build -- so a
+# guard slipping around that verb would not fail a build, it would silently stop the website from
+# updating.
+set(ALWAYS_PRESENT version license help capture cat daemon list-debug-tags documentation)
 # Verbs ContourGuiApp registers, which exist only when the GUI frontend is built.
 set(GUI_ONLY client font-locator)
 
