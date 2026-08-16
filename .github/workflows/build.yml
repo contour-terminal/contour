@@ -427,7 +427,11 @@ jobs:
   freebsd:
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
-    name: FreeBSD 13
+    # Unversioned deliberately: the VM's release is whatever vmactions/freebsd-vm defaults to, which
+    # has moved on to 15.1-RELEASE. This job was named "FreeBSD 13" long after that stopped being
+    # true, and a name that states a version nothing pins is worse than none -- it invites reading
+    # a failure as an old-toolchain problem when the VM is in fact running a current one.
+    name: FreeBSD
     # env:
     #   MYTOKEN: "value1"
     #   MYTOKEN2: "value2"
