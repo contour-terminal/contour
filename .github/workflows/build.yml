@@ -109,10 +109,33 @@ jobs:
       run: sudo find _deps/sources -exec chown $UID {} \;
     # Ubuntu 24.04's distro Qt (6.4.2) lacks the Qt6::GuiPrivate CMake package the RHI renderer needs;
     # install a modern Qt6 over it (see the build matrix job for the same rationale).
+    #
+    # Pinned to 6.11.1 rather than tracking 6.11.*: 6.11.2's Linux AARCH64 qttools archive is
+    # corrupt where it is published, so unpacking it dies with
+    # `zipfile.BadZipFile: Bad offset for central directory` and takes the whole install with it.
+    # Every arm64 job started failing the moment 6.11.2 appeared, while yesterday's runs on 6.11.1
+    # were green and today's x86_64 runs on 6.11.2 still are -- only the AARCH64 archive is bad.
+    # Raise this once a later 6.11 publishes an archive that unpacks. See the retry below for why
+    # re-running does not help here.
+    #
+    # Attempted twice all the same: aqtinstall pulls each archive from whichever mirror
+    # download.qt.io redirects it to, so a mirror that serves a truncated file is a verdict on the
+    # mirror, not on the commit under test, and re-resolving the redirect usually lands elsewhere.
+    # It buys nothing against a corrupt *upstream* archive -- both attempts fetched the bad qttools
+    # from two different mirrors -- which is what the pin above is for. Only a repeated failure
+    # fails the job.
     - name: "Install Qt (GuiPrivate-capable)"
+      id: install_qt
+      continue-on-error: true
       uses: jurplel/install-qt-action@v4
       with:
-        version: "6.11.*"
+        version: "6.11.1"
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
+    - name: "Install Qt (GuiPrivate-capable) -- retry past a bad mirror"
+      if: steps.install_qt.outcome == 'failure'
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: "6.11.1"
         modules: qtmultimedia qt5compat qtshadertools qtspeech
     - name: Install clang
       run: |
@@ -608,9 +631,22 @@ jobs:
         # splits Qt across ~40 per-module prefixes and macdeployqt only follows one of
         # them, so a brew-Qt bundle ships missing frameworks and unresolvable @rpath
         # references. That is the defect this job used to hand to users as a .dmg.
+        #
+        # Version pinned and the install attempted twice, both for the reasons documented at the
+        # clang-tidy job's copy of this step. Pinned here too so every platform is measured against
+        # one Qt, even though the corrupt archive is Linux AARCH64 only.
+        id: install_qt
+        continue-on-error: true
         uses: jurplel/install-qt-action@v4
         with:
-          version: 6.11.*
+          version: 6.11.1
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
+          cache: true
+      - name: Install Qt -- retry past a bad mirror
+        if: steps.install_qt.outcome == 'failure'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.1
           modules: qtmultimedia qt5compat qtshadertools qtspeech
           cache: true
       - name: "Install dependencies"
@@ -853,6 +889,10 @@ jobs:
           ./scripts/install-deps.ps1 --skip-vcpkg
           type ./_deps/sources/CMakeLists.txt
       - name: Install Qt
+        # Attempted twice, for the bad-mirror failure documented at the clang-tidy job's copy of
+        # this step; only a repeated failure fails the job.
+        id: install_qt
+        continue-on-error: true
         uses: jurplel/install-qt-action@v4
         with:
           # 6.10, not the 6.11 the other platforms pin: Qt restructured its Windows package
@@ -868,6 +908,12 @@ jobs:
           # this to "6.11.*" once aqtinstall learns the new layout.
           version: "6.10.*"
           #version: "5.15.*"
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
+      - name: Install Qt -- retry past a bad mirror
+        if: steps.install_qt.outcome == 'failure'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.10.*"
           modules: qtmultimedia qt5compat qtshadertools qtspeech
       - name: "Setup NuGet for vcpkg caching"
         shell: bash
@@ -1081,10 +1127,22 @@ jobs:
       # the RHI renderer needs (rhi/qrhi.h). Install a modern Qt6 over it; install-qt-action prepends
       # its Qt to CMAKE_PREFIX_PATH via the Qt6_DIR/QT_ROOT_DIR env vars it exports, so find_package
       # resolves this one ahead of the distro package.
+      #
+      # Version pinned and the install attempted twice, both for the reasons documented at the
+      # clang-tidy job's copy of this step. These are the jobs that forced it: both ubuntu-24.04-arm
+      # matrix entries are exactly the AARCH64 install that 6.11.2's corrupt qttools archive breaks.
       - name: "Install Qt (GuiPrivate-capable)"
+        id: install_qt
+        continue-on-error: true
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.11.*"
+          version: "6.11.1"
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
+      - name: "Install Qt (GuiPrivate-capable) -- retry past a bad mirror"
+        if: steps.install_qt.outcome == 'failure'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.11.1"
           modules: qtmultimedia qt5compat qtshadertools qtspeech
       - name: Install GCC
         if: ${{ startsWith(matrix.compiler, 'GCC') }}
