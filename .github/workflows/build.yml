@@ -448,13 +448,7 @@ jobs:
   # }}}
   # {{{ FreeBSD
   freebsd:
-    # TEMPORARY, REVERTED BEFORE MERGE: also run on this branch. The FreeBSD build has not compiled
-    # since src/coro landed and is being repaired one layer at a time (<stop_token>, then environ,
-    # now the threading library); with the job gated on master, each layer costs a merge and a full
-    # master run to discover the next. Restore this line to
-    #     if: github.ref == 'refs/heads/master'
-    # once the job is green here.
-    if: github.ref == 'refs/heads/master' || github.head_ref == 'fix/freebsd-link-threads'
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     # Unversioned deliberately: the VM's release is whatever vmactions/freebsd-vm defaults to, which
     # has moved on to 15.1-RELEASE. This job was named "FreeBSD 13" long after that stopped being
