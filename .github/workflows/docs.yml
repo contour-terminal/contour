@@ -2,6 +2,14 @@ name: Docs
 
 on:
   merge_group:
+  # Redeploying the docs is sometimes necessary after a commit that touches no documentation at all:
+  # this job builds `contour` to generate half the site, so anything that breaks or fixes the build
+  # decides whether the site can be published, while the paths filter below -- rightly -- does not
+  # fire for it. That is not hypothetical; it is exactly the situation this was added in, with the
+  # last run red from a compile error whose fix touched only src/net. Re-running the old run is no
+  # answer either, since it replays the commit that failed. Without a manual trigger the only way to
+  # redeploy was to invent a commit under docs/.
+  workflow_dispatch:
   push:
     paths:
       - 'docs/**'
