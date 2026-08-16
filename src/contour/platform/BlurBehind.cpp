@@ -1,23 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.hpp>
 #include <contour/platform/BlurBehind.hpp>
+#include <contour/platform/XcbProperty.hpp>
 
 #include <crispy/Utils.hpp>
 
 #include <QtCore/QDebug>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
 
 #ifdef _WIN32
+    #include <contour/platform/Dwmapi.hpp>
+
     #include <Windows.h>
-#endif
-
-#if !defined(Q_OS_WINDOWS) && !defined(Q_OS_DARWIN)
-    #define CONTOUR_FRONTEND_XCB
-    #include <xcb/xproto.h>
-#endif
-
-#ifdef CONTOUR_FRONTEND_XCB
-    #include <QtGui/QGuiApplication>
 #endif
 
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
@@ -33,99 +28,6 @@
 
 namespace contour::platform
 {
-
-using std::nullopt;
-using std::optional;
-using std::string;
-
-#ifdef CONTOUR_FRONTEND_XCB
-namespace
-{
-    struct XcbPropertyInfo
-    {
-        xcb_connection_t* connection;
-        xcb_window_t window;
-        xcb_atom_t propertyAtom;
-    };
-
-    xcb_connection_t* x11Connection()
-    {
-        if (!qApp)
-            return nullptr;
-
-        auto* native = qApp->nativeInterface<QNativeInterface::QX11Application>();
-        if (!native)
-            return nullptr;
-
-        return native->connection();
-    }
-
-    optional<XcbPropertyInfo> queryXcbPropertyInfo(QWindow* window, string const& name)
-    {
-        auto const winId = static_cast<xcb_window_t>(window->winId());
-
-        xcb_connection_t* xcbConnection = x11Connection();
-        if (!xcbConnection)
-            return nullopt;
-
-        auto const atomNameCookie =
-            xcb_intern_atom(xcbConnection, 0, static_cast<uint16_t>(name.size()), name.c_str());
-        xcb_intern_atom_reply_t const* reply = xcb_intern_atom_reply(xcbConnection, atomNameCookie, nullptr);
-        if (!reply)
-            return nullopt;
-        auto const atomName = reply->atom;
-
-        return XcbPropertyInfo { .connection = xcbConnection, .window = winId, .propertyAtom = atomName };
-    }
-
-    void setPropertyX11(QWindow* window, string const& name, uint32_t value)
-    {
-        if (auto infoOpt = queryXcbPropertyInfo(window, name))
-        {
-            xcb_change_property(infoOpt.value().connection,
-                                XCB_PROP_MODE_REPLACE,
-                                infoOpt.value().window,
-                                infoOpt.value().propertyAtom,
-                                XCB_ATOM_CARDINAL,
-                                32,
-                                1,
-                                &value);
-            xcb_flush(infoOpt.value().connection);
-        }
-        else
-            errorLog()(R"(Could not set X11 property info for "{}" to {}.)", name, value);
-    }
-
-    void setPropertyX11(QWindow* window, string const& name, string const& value)
-    {
-        if (auto infoOpt = queryXcbPropertyInfo(window, name))
-        {
-            xcb_change_property(infoOpt.value().connection,
-                                XCB_PROP_MODE_REPLACE,
-                                infoOpt.value().window,
-                                infoOpt.value().propertyAtom,
-                                XCB_ATOM_STRING,
-                                8,
-                                static_cast<uint32_t>(value.size()),
-                                value.data());
-
-            xcb_flush(infoOpt.value().connection);
-        }
-        else
-            errorLog()(R"(Could not set X11 property info for "{}" to "{}".)", name, value);
-    }
-
-    void unsetPropertyX11(QWindow* window, string const& name)
-    {
-        if (auto infoOpt = queryXcbPropertyInfo(window, name))
-        {
-            xcb_delete_property(
-                infoOpt.value().connection, infoOpt.value().window, infoOpt.value().propertyAtom);
-        }
-    }
-
-} // namespace
-#endif
 
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
 namespace
@@ -210,7 +112,10 @@ void setBlurBehind(QWindow* window, bool enable, QRegion const& region)
         }
         else
         {
-            unsetPropertyX11(window, "kwin_blur");
+            // Unset exactly what the branch above sets. This used to delete an atom named
+            // "kwin_blur", which nothing ever creates -- so _KDE_NET_WM_BLUR_BEHIND_REGION
+            // survived, and blur could never be switched off again for the window's lifetime.
+            unsetPropertyX11(window, "_KDE_NET_WM_BLUR_BEHIND_REGION");
             unsetPropertyX11(window, "_MUTTER_HINTS");
         }
         return;
@@ -227,33 +132,23 @@ void setBlurBehind(QWindow* window, bool enable, QRegion const& region)
     if (HWND hwnd = (HWND) window->winId(); hwnd != nullptr)
     {
         // 1. Attempt DWM-based blur (Windows 11+)
-        const HMODULE hDwm = LoadLibrary(TEXT("dwmapi.dll"));
-        if (hDwm)
+        //
+        // This used to force DWMWA_USE_IMMERSIVE_DARK_MODE on here, unconditionally and regardless
+        // of the configured `theme`, which put a dark window border on a light-themed window. It is
+        // a FRAME attribute rather than a blur one -- and now that the frame is kept rather than
+        // discarded it also tints the border around the rounded corners -- so it moved to
+        // Win32WindowFrame, which is told what the effective color scheme actually is.
+        if (auto const& api = dwmApi(); api.setWindowAttribute != nullptr)
         {
-            typedef HRESULT(WINAPI * P_DwmSetWindowAttribute)(HWND, DWORD, LPCVOID, DWORD);
-            auto const pDwmSetWindowAttribute =
-                (P_DwmSetWindowAttribute) GetProcAddress(hDwm, "DwmSetWindowAttribute");
+            const DWORD DWMWA_SYSTEMBACKDROP_TYPE = 38;
+            const DWORD DWMSBT_NONE = 1;
+            const DWORD DWMSBT_TRANSIENTWINDOW = 3; // Acrylic
 
-            if (pDwmSetWindowAttribute)
-            {
-                const DWORD DWMWA_SYSTEMBACKDROP_TYPE = 38;
-                const DWORD DWMSBT_NONE = 1;
-                const DWORD DWMSBT_TRANSIENTWINDOW = 3; // Acrylic
-                const DWORD DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
-
-                BOOL dark = TRUE;
-                pDwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
-
-                DWORD backdropType = enable ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE;
-                HRESULT hr = pDwmSetWindowAttribute(
-                    hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
-                if (SUCCEEDED(hr))
-                {
-                    FreeLibrary(hDwm);
-                    return;
-                }
-            }
-            FreeLibrary(hDwm);
+            DWORD backdropType = enable ? DWMSBT_TRANSIENTWINDOW : DWMSBT_NONE;
+            HRESULT hr =
+                api.setWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
+            if (SUCCEEDED(hr))
+                return;
         }
 
         // 2. Fallback to undocumented SetWindowCompositionAttribute (Windows 10)

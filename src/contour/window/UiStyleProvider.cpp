@@ -75,6 +75,10 @@ namespace
             .trafficLightGap = tokens.trafficLightGapUnits * horizontal,
             .badgeWidth = tokens.badgeUnits * horizontal,
             .badgeHeight = tokens.badgeUnits * vertical,
+            // Vertical for the offset, since it displaces the shadow downward. The margin has to
+            // clear that offset on the axis it acts, so it takes the same unit.
+            .shadowOffsetY = tokens.shadowOffsetUnits * vertical,
+            .shadowMargin = tokens.shadowMarginUnits * vertical,
         };
     }
 
@@ -158,6 +162,11 @@ QColor UiStyleProvider::modalScrim(QColor const& base) const
 QColor UiStyleProvider::modelessScrim(QColor const& base) const
 {
     return atOpacity(base, _tokens.modelessScrimPercent);
+}
+
+QColor UiStyleProvider::shadowTint(QColor const& base) const
+{
+    return atOpacity(base, _tokens.shadowOpacityPercent);
 }
 
 QColor UiStyleProvider::progressColor(int state) const

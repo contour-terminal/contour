@@ -30,6 +30,17 @@ Item {
     // window_control_style's job, not this flag's.
     property bool useCustomWindowControls: true
 
+    // Leading space to leave clear for the OPERATING SYSTEM's own window controls, where it paints
+    // them over our chrome rather than in a bar of its own above it -- macOS, whose
+    // full-size-content window keeps drawing the real traffic lights while the content view extends
+    // underneath them. Zero everywhere else.
+    //
+    // The number comes from the frame adapter (WindowController.nativeControlsInset), NOT from our
+    // chrome tokens: AppKit's buttons are a fixed size whatever font Contour is set in, so composing
+    // it from windowControlInset/trafficLightDotSize would be wrong by whatever the style says --
+    // badly wrong under `ui_style: terminal`, where those are counted in character cells.
+    property real nativeControlsInset: 0
+
     // The whole bar's height, and so the window's chrome height (Main.qml declares it to the
     // WindowController, which feeds the WM size hints). One character row in the terminal style,
     // the historical 34px in the native one -- see UiStyleProvider.
@@ -77,7 +88,10 @@ Item {
             // of three controls forever -- and after a live style change that would leave the
             // vacated corner reserving space for buttons that moved to the other one.
             // @see the trailing slot below.
-            Layout.preferredWidth: active ? implicitWidth : 0
+            // No side test: nativeControlsInset is already zero unless the OS is drawing its own
+            // controls over this corner. Asking where OUR hidden controls would have sat is a
+            // different question, and answers it wrong when the two disagree.
+            Layout.preferredWidth: active ? implicitWidth : root.nativeControlsInset
             sourceComponent: windowControlsComponent
         }
 

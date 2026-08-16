@@ -8,6 +8,7 @@
 #include <QtCore/QString>
 #include <QtCore/QUrl>
 #include <QtGui/QFont>
+#include <QtGui/QGuiApplication>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
@@ -273,4 +274,83 @@ TEST_CASE("A ContourTui combo box popup is sized before it has a window", "[cont
     // would size the popup to that. Its content is empty here, so all that is left to see is the
     // border -- but a positive height is the whole assertion, and the unguarded form has none.
     CHECK(popup->property("height").toReal() > 0.0);
+}
+
+TEST_CASE("PopupSurface carries a drop shadow in the DEFAULT configuration", "[contour][gui][style]")
+{
+    // The point of this case. Every menu and popup in the application is an in-scene popup, so its
+    // shadow has to be drawn rather than asked of the compositor -- and the obvious place to draw it,
+    // the two style files under styles/ContourTui/, would only ever be reached by `ui_style: terminal`.
+    // `ui_style` defaults to Native, which pins Fusion, whose control files are Qt's and not ours. So
+    // the shadow lives on PopupSurface.qml, which every popup assigns as its background, and this
+    // asserts it is really there under the style almost everyone runs.
+    auto check = [](contour::config::UiStyle style) {
+        QQmlEngine engine;
+        contour::test::installChromeStyle(engine, style);
+
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PopupSurface.qml")));
+        INFO("PopupSurface errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+
+        std::unique_ptr<QObject> surface(component.create());
+        REQUIRE(surface != nullptr);
+
+        auto const* provider = engine.rootContext()
+                                   ->contextProperty(QStringLiteral("chromeStyle"))
+                                   .value<contour::window::UiStyleProvider*>();
+        REQUIRE(provider != nullptr);
+
+        // A shadow at all, and the style's own shape rather than a hardcoded one.
+        CHECK(provider->hasPopupShadow());
+        CHECK(surface->property("radius").toReal() == provider->radius());
+
+        // The shadow is drawn as plain child rectangles, NOT through layer.enabled and a shader:
+        // this application paints the terminal over the QML scene, and a popup that renders through
+        // an offscreen target does not reliably survive that. Pin it, because reaching for
+        // MultiEffect is the obvious thing to do here and it costs a visible context menu.
+        auto* layer = surface->property("layer").value<QObject*>();
+        REQUIRE(layer != nullptr);
+        CHECK_FALSE(layer->property("enabled").toBool());
+
+        // The shadow is nonetheless there: children behind the surface, which is what draws it.
+        auto* item = qobject_cast<QQuickItem*>(surface.get());
+        REQUIRE(item != nullptr);
+        auto behind = 0;
+        for (auto* child: item->childItems())
+            if (child->z() < 0 && child->isVisible())
+                ++behind;
+        CHECK(behind > 0);
+
+        // The gutter every popup keeps against the window edge. Without it the shadow of a popup
+        // opened near an edge is clipped away by the window and none of the above is visible.
+        CHECK(provider->shadowMargin() > 0.0);
+    };
+
+    SECTION("native")
+    {
+        check(contour::config::UiStyle::Native);
+    }
+    SECTION("terminal")
+    {
+        check(contour::config::UiStyle::Terminal);
+    }
+}
+
+TEST_CASE("The two chrome styles cast recognisably different shadows", "[contour][gui][style]")
+{
+    // Not a preference check: the terminal style quotes a text-mode UI, whose drop shadow is a hard
+    // offset block rather than a soft halo. A blurred one would be the single thing in that chrome not
+    // aligned to the character grid.
+    auto const native =
+        contour::window::UiStyleProvider(contour::config::UiStyle::Native, QGuiApplication::font(), nullptr);
+    auto const terminal = contour::window::UiStyleProvider(
+        contour::config::UiStyle::Terminal, QGuiApplication::font(), nullptr);
+
+    CHECK(native.shadowBlur() > 0);
+    CHECK(terminal.shadowBlur() == 0);
+    CHECK(terminal.shadowOffsetY() > 0.0);
+
+    // Both must actually ask for one, or the styles differ by having no shadow rather than by shape.
+    CHECK(native.hasPopupShadow());
+    CHECK(terminal.hasPopupShadow());
 }

@@ -3,17 +3,9 @@
 import QtQuick
 import QtQuick.Controls
 
-Menu {
+ContourMenu {
     id: menu
 
-    // Force the in-scene (item) popup rather than a native OS menu. Since Qt 6.8 a Controls Menu
-    // defaults to a native platform menu where one exists — on Windows that native menu could not
-    // represent this menu's custom surface, and it came up EMPTY. Rendering in-scene makes Windows
-    // behave like Linux (which has no native popup menu and already used this path); the app-pinned
-    // Fusion style then gives the menu an opaque, themed surface with readable item text on every
-    // platform, so no custom background/palette override is needed here (the ApplicationWindow is
-    // transparent, but Fusion's own menu background is opaque).
-    popupType: Popup.Item
 
     required property var controller
     required property int tabIndex

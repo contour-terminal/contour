@@ -156,9 +156,8 @@ Item {
         }
     }
 
-    Menu {
+    ContourMenu {
         id: contextMenu
-        popupType: Popup.Item
         MenuItem {
             text: qsTr("Set as default")
             height: visible ? implicitHeight : 0

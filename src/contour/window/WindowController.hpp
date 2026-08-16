@@ -5,6 +5,8 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
+#include <contour/platform/NativeWindowFrame.hpp>
+#include <contour/platform/WindowShadowController.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
@@ -86,6 +88,13 @@ class WindowController:
     Q_PROPERTY(
         contour::session::TerminalSession* activeSession READ activeSession NOTIFY activeSessionChanged)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
+    // All three follow titleBarVisible, so they re-evaluate on the same signal.
+    Q_PROPERTY(bool needsFramelessHint READ needsFramelessHint NOTIFY titleBarVisibleChanged)
+    Q_PROPERTY(
+        bool needsClientFrameAffordances READ needsClientFrameAffordances NOTIFY titleBarVisibleChanged)
+    // NOT on titleBarVisibleChanged: this one is measured from the OS's own buttons, which only
+    // exist once the window is realized -- long after the title-bar value is seeded.
+    Q_PROPERTY(qreal nativeControlsInset READ nativeControlsInset NOTIFY nativeControlsInsetChanged)
     // Tab-strip (tab bar) placement + visibility, exposed to Main.qml. `tabBarPosition` is an int
     // (0 = Top, 1 = Bottom) matching the TabBarPosition enumerator order. `tabBarShouldShow`
     // is the resolved gate (mode + live tab count) the QML binds its `visible` to.
@@ -359,6 +368,35 @@ class WindowController:
 
     /// Flips the window's title-bar visibility (the ToggleTitleBar action, routed here by the display).
     void toggleTitleBar() override;
+
+    // The three gates Main.qml used to derive by negating titleBarVisible. They come off the frame
+    // POLICY instead (platform::framePolicyFor), because the answer is no longer the same on every
+    // OS: Windows keeps a real frame and zeroes it, and macOS keeps a decorated NSWindow whose own
+    // traffic lights ours must then yield to. Bools, as the QML-facing carve-out allows, but each
+    // reads as the question its use site asks.
+
+    /// Whether the window should carry Qt::FramelessWindowHint.
+    ///
+    /// False on Windows and macOS even with our own title bar: the hint is exactly what costs a
+    /// window its system shadow and rounded corners, and both platforms have a way to keep the frame
+    /// while still giving the client area the whole window.
+    [[nodiscard]] bool needsFramelessHint() const noexcept;
+
+    /// Whether WE supply the window's frame affordances -- ResizeBorder.qml's hit zones and the tab
+    /// strip's own min/max/close controls -- or the OS frame does.
+    ///
+    /// One question, not two: the frame that resizes the window is the frame that carries its
+    /// buttons, which is why @ref platform::FrameAffordances is one field.
+    [[nodiscard]] bool needsClientFrameAffordances() const noexcept;
+
+    /// Leading space the tab strip must leave clear for the OS's own window controls.
+    ///
+    /// Zero unless the frame policy says the OS paints them OVER our chrome, which today is macOS:
+    /// a full-size-content NSWindow keeps drawing the real traffic lights and its content view
+    /// extends underneath them. The MAGNITUDE comes from the frame adapter rather than from our
+    /// chrome tokens, because it is the operating system's number -- AppKit's buttons are a fixed
+    /// size whatever font or `ui_style` Contour is using.
+    [[nodiscard]] qreal nativeControlsInset() const noexcept;
     // }}}
 
     // {{{ Tab strip (tab bar) placement + visibility
@@ -561,6 +599,7 @@ class WindowController:
     void multimediaReadyChanged();
     void activeTabRootPaneChanged();
     void titleBarVisibleChanged();
+    void nativeControlsInsetChanged();
     void tabBarPositionChanged();
     void tabBarVisibilityChanged();
     void tabBarShouldShowChanged();
@@ -615,6 +654,33 @@ class WindowController:
     /// when it becomes the active OS window and revokes it when it stops being active, so alt-tabbing
     /// away from Contour notifies the shell (DECSET 1004) even when no display holds Qt item focus.
     void onOSWindowActiveChanged();
+
+    /// Which decoration this window is currently showing, as the frame policy names it.
+    [[nodiscard]] platform::WindowDecoration decoration() const noexcept;
+
+    /// Re-publishes the window's drop shadow for the state it is now in.
+    ///
+    /// A frameless window gets no server-side decoration, and on KWin the shadow is drawn as part of
+    /// that decoration — so the window has to hand the compositor its own. Called from every place
+    /// that changes an input to the decision: the first map, the presentation transitions, the
+    /// title-bar toggle, and a window-manager-driven maximize.
+    ///
+    /// Creates the attachment on first use rather than in bindWindow(), because resolving it needs
+    /// the platform window, and forcing that into existence before showInitial() has sized the
+    /// still-unmapped window is exactly the premature realization WindowGeometry.hpp warns about.
+    void refreshWindowShadow();
+
+    /// QWindow::visibilityChanged handler.
+    ///
+    /// Every way the window changes presentation ends in this signal — our own setWindowMaximized
+    /// and friends, the toggles, and the ones driven from outside the application entirely (a
+    /// window-manager keybinding, a double click on the native frame) — so this one connection
+    /// covers all of them, and the shadow reads the presentation back off the window rather than
+    /// having it recorded at each site.
+    void onWindowVisibilityChanged();
+
+    /// The frame policy for this window's platform and current decoration.
+    [[nodiscard]] platform::FramePolicy framePolicy() const noexcept;
 
     session::TerminalSessionManager& _manager;
     vtworkspace::WindowId _windowId;
@@ -680,6 +746,20 @@ class WindowController:
 
     // Carries beginMoveRows()'s result from onTabAboutToBeMoved() to onTabMoved().
     bool _tabMoveInProgress = false;
+
+    // The window's drop shadow. Created lazily on the first refresh (see refreshWindowShadow) and
+    // destroyed before the window closes, while its handle is still live enough to withdraw through.
+    //
+    // The presentation it is published for is DERIVED from the window on each refresh rather than
+    // held here: a mirrored member needs a writer at every transition, and one refactor away from
+    // having none it silently stops withdrawing the shadow at all. WindowPresentation::Tiled is
+    // unreachable today — Qt reports no such visibility, so a KWin quick-tiled window keeps its
+    // shadow, as every other client-decorated application does.
+    std::unique_ptr<platform::WindowShadowController> _windowShadow;
+
+    // The OS-frame adapter. Never null: platforms with nothing to offer get a NullWindowFrame, so
+    // every call site can apply the policy unconditionally rather than guarding on the platform.
+    std::unique_ptr<platform::NativeWindowFrame> _nativeFrame;
 
     // Window-scoped title-bar visibility (see the decoration block above). Seeded once from the
     // profile's show_title_bar (first display attach), flipped by ToggleTitleBar.

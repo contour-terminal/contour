@@ -604,6 +604,116 @@ TEST_CASE("Tab context menu exposes all its actions (offscreen)", "[contour][gui
     CHECK(count.toInt() >= 5);
 }
 
+namespace
+{
+/// Asserts that @p menu is open at a size that can actually show its entries.
+///
+/// Shared by both menu-open cases, because the rule they exist to enforce is one rule: `width > 0`
+/// is NOT enough. A menu collapsed to a two-pixel sliver -- which is what a background with no
+/// implicit size produced -- passes that while being, on screen, a vertical line. Its height was
+/// right throughout, since the entries stack vertically.
+void checkMenuOpensAtUsableSize(QObject& menu)
+{
+    CHECK(menu.property("opened").toBool());
+    CHECK(menu.property("count").toInt() > 0);
+
+    QQuickItem* firstItem = nullptr;
+    REQUIRE(QMetaObject::invokeMethod(&menu, "itemAt", Q_RETURN_ARG(QQuickItem*, firstItem), Q_ARG(int, 0)));
+    REQUIRE(firstItem != nullptr);
+    auto const widest = firstItem->property("implicitWidth").toReal();
+    REQUIRE(widest > 0.0);
+
+    INFO("menu " << menu.property("width").toReal() << "x" << menu.property("height").toReal()
+                 << ", widest item " << widest);
+    CHECK(menu.property("width").toReal() >= widest);
+    CHECK(menu.property("height").toReal() > 0.0);
+
+    // A null background is what a failed surface leaves behind, and a menu with no background is an
+    // unreadable stack of text over the terminal.
+    auto* background = menu.property("background").value<QObject*>();
+    REQUIRE(background != nullptr);
+    CHECK(background->property("width").toReal() > 0.0);
+    CHECK(background->property("height").toReal() > 0.0);
+}
+} // namespace
+
+TEST_CASE("The terminal context menu opens, sub-menus and all (offscreen)", "[contour][gui][qml]")
+{
+    // The gap that let a broken right-click menu ship. The case below builds this same menu and
+    // asserts its rows, but says outright that it never popup()s it -- so everything that can only
+    // fail once a menu is OPEN went uncovered: its background, its margins, and the runtime-built
+    // sub-menus, which are popups of their own and get none of the parent's treatment for free.
+    //
+    // Opening one offscreen needs a window to open INTO, which is the whole difference from the case
+    // below: hosted in a Window, popup() works under the offscreen platform.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+
+    // A state that produces sub-menus: profileNames is what "Change Profile" expands into.
+    auto const state = contour::command::ContextMenuState {
+        .hasSelection = true,
+        .clipboardHasText = true,
+        .hasLastCommand = false,
+        .hasLocalWorkingDirectory = true,
+        .hasSplits = false,
+        .hyperlinkUnderCursor = "",
+        .activeProfile = "dark",
+        .profileNames = { "dark", "light" },
+    };
+    auto actions = std::vector<contour::actions::Action> {};
+    auto const model =
+        contour::window::toContextMenuModel(contour::command::buildContextMenu(state), actions);
+    REQUIRE_FALSE(model.isEmpty());
+
+    QQmlComponent hostComponent(&engine);
+    hostComponent.setData(QByteArrayLiteral("import QtQuick\n"
+                                            "import QtQuick.Window\n"
+                                            "import Contour.Ui\n"
+                                            "Window {\n"
+                                            "  width: 800; height: 600; visible: true\n"
+                                            "  property alias menu: contextMenu\n"
+                                            "  ActionContextMenu { id: contextMenu }\n"
+                                            "}\n"),
+                          QUrl(QStringLiteral("qrc:/contour/test/TerminalMenuHost.qml")));
+    INFO("host errors: " << hostComponent.errorString().toStdString());
+    REQUIRE(hostComponent.isReady());
+
+    std::unique_ptr<QObject> host(hostComponent.create());
+    REQUIRE(host != nullptr);
+    auto* menu = host->property("menu").value<QObject*>();
+    REQUIRE(menu != nullptr);
+    menu->setProperty("entries", model);
+    QCoreApplication::processEvents();
+
+    REQUIRE(QMetaObject::invokeMethod(menu, "popup"));
+    QCoreApplication::processEvents();
+
+    checkMenuOpensAtUsableSize(*menu);
+    CHECK(menu->property("count").toInt() == model.size());
+
+    // And the sub-menus this case exists for. They are ContourMenus of their own, built at runtime,
+    // and get none of the parent's treatment for free -- which is exactly how one of them shipped
+    // with a background but no margin, casting a shadow into the window edge where nobody saw it.
+    auto submenus = 0;
+    for (auto const i: std::views::iota(0, menu->property("count").toInt()))
+    {
+        QQuickItem* row = nullptr;
+        REQUIRE(QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem*, row), Q_ARG(int, i)));
+        if (row != nullptr && row->property("subMenu").value<QObject*>() != nullptr)
+            ++submenus;
+    }
+    INFO("sub-menus found: " << submenus);
+    CHECK(submenus > 0);
+
+    QMetaObject::invokeMethod(menu, "close");
+    QCoreApplication::processEvents();
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
 TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)", "[contour][gui][qml]")
 {
     // End-to-end over the real bridge: the pure table (ContextMenu.h) -> the Qt model (ContextMenuModel.h)
@@ -956,6 +1066,35 @@ TEST_CASE("The SetTabColor action opens the tab's color flyout (offscreen)", "[c
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
 
+TEST_CASE("A context menu actually opens, with its surface (offscreen)", "[contour][gui][qml]")
+{
+    // The gap that let a broken menu ship. Every existing menu test INSTANTIATES a menu and counts
+    // its rows; none ever opened one. A menu whose background or margins fail only at popup() time
+    // therefore passed the whole suite while being unusable in the application.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const host = makeTabItemHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    auto* tab = qobject_cast<QQuickItem*>(host->property("tabItem").value<QObject*>());
+    REQUIRE(tab != nullptr);
+
+    auto* menu = tab->findChild<QObject*>(QStringLiteral("tabContextMenu"));
+    REQUIRE(menu != nullptr);
+
+    REQUIRE(QMetaObject::invokeMethod(menu, "open"));
+    QCoreApplication::processEvents();
+
+    checkMenuOpensAtUsableSize(*menu);
+
+    QMetaObject::invokeMethod(menu, "close");
+    QCoreApplication::processEvents();
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
 TEST_CASE("The tab color flyout opens inside the window, wherever the tab strip sits (offscreen)",
           "[contour][gui][qml]")
 {
@@ -994,6 +1133,25 @@ TEST_CASE("The tab color flyout opens inside the window, wherever the tab strip 
 
     REQUIRE(flyoutRect.height() > 0); // i.e. the popup materialized at all
     CHECK(windowRect.contains(flyoutRect));
+
+    // Inside the window is not enough: the flyout is an in-scene popup, so the window CLIPS it, and a
+    // flyout flush against an edge would have its drop shadow cut away entirely. Assert the gutter the
+    // style asks for, which is the only thing that can catch "the shadow is drawn but nobody sees it".
+    //
+    // On one axis it is unavoidable. The flyout hangs off a tab that can sit at the very top or the
+    // very bottom of the window (tab_bar_position), so the side facing the strip is against the tab by
+    // construction -- hence the containment below is the horizontal gutter plus the side away from it.
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+    auto const margin = provider->shadowMargin();
+    CHECK(flyoutRect.left() >= windowRect.left() + margin);
+    CHECK(flyoutRect.right() <= windowRect.right() - margin);
+    if (stripAt == TabStripAt::Bottom)
+        CHECK(flyoutRect.top() >= windowRect.top() + margin);
+    else
+        CHECK(flyoutRect.bottom() <= windowRect.bottom() - margin);
 
     // And it still hugs the tab it belongs to: above it when it cannot go below, rather than being parked
     // in some arbitrary corner that happens to be on screen.
@@ -2741,6 +2899,9 @@ struct PaletteHost
 /// Builds the host, opens the palette, and pumps the event loop so the Popup materializes its content.
 [[nodiscard]] PaletteHost openPalette(QQmlEngine& engine, MockPaletteController& controller)
 {
+    // The popup's background is a PopupSurface, which takes its shape and its drop shadow from
+    // the design tokens -- so the engine needs them, as every other chrome component's does.
+    contour::test::installChromeStyle(engine);
     engine.rootContext()->setContextProperty("paletteController", &controller);
 
     QQmlComponent component(&engine);
@@ -3076,6 +3237,9 @@ struct SaveLayoutHost
 /// request, which is the path Main.qml takes).
 [[nodiscard]] SaveLayoutHost makeSaveLayoutHost(QQmlEngine& engine, MockSaveLayoutController& controller)
 {
+    // The popup's background is a PopupSurface, which takes its shape and its drop shadow from
+    // the design tokens -- so the engine needs them, as every other chrome component's does.
+    contour::test::installChromeStyle(engine);
     engine.rootContext()->setContextProperty("saveLayoutController", &controller);
 
     QQmlComponent component(&engine);

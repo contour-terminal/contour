@@ -7,6 +7,7 @@
 #include <contour/display/Logging.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/platform/GuiTheme.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSession.hpp>
@@ -21,6 +22,7 @@
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
+#include <QtGui/QStyleHints>
 #include <QtQml/QQmlEngine>
 
 #include <cstdlib>
@@ -49,6 +51,16 @@ WindowController::WindowController(session::TerminalSessionManager& manager, vtw
 {
     _commandPalette->setSources(
         { &_tabCommands, &_profileCommands, &_layoutCommands, &_boundCommands, &_actionCommands });
+
+    // The OS-frame adapter, given a way to ask what the EFFECTIVE color scheme is. `theme: system`
+    // resolves to nothing configured, so it falls back to what Qt reports the platform is doing --
+    // which is the answer Win32 needs for the border DWM draws around the rounded corners, and the
+    // reason this is injected rather than read from a global at the point of use.
+    _nativeFrame = platform::makeNativeWindowFrame([this]() -> Qt::ColorScheme {
+        if (auto const configured = platform::qtColorSchemeFor(_manager.app().config().theme.value()))
+            return *configured;
+        return QGuiApplication::styleHints()->colorScheme();
+    });
 
     // The editable settings bridge. Its collaborators are injected so the whole workflow is testable:
     // a config accessor into the app's live (reload-in-place) Config, a file-backed side-file store
@@ -651,6 +663,10 @@ void WindowController::closeWindow()
     // tab was dragged out), this is what actually removes the lingering window — otherwise its title bar
     // / tab strip stays on screen as a ghost. The re-entrant onClosing -> closeWindow() is absorbed by
     // the _closing guard above.
+    // Before the close, not after: withdrawing the shadow needs a live connection and a live window
+    // id, and close() takes both away. The destructor would otherwise be talking to a dead handle.
+    _windowShadow.reset();
+
     if (_osWindow != nullptr)
         _osWindow->close();
 
@@ -703,21 +719,63 @@ void WindowController::seedTitleBarVisible(bool visible)
     setTitleBarVisible(visible);
 }
 
+platform::WindowDecoration WindowController::decoration() const noexcept
+{
+    return _titleBarVisible ? platform::WindowDecoration::Server : platform::WindowDecoration::Client;
+}
+
+platform::FramePolicy WindowController::framePolicy() const noexcept
+{
+    return framePolicyFor(platform::currentFramePlatform(), decoration());
+}
+
+bool WindowController::needsFramelessHint() const noexcept
+{
+    return framePolicy().framelessHint == platform::FramelessHint::Apply;
+}
+
+bool WindowController::needsClientFrameAffordances() const noexcept
+{
+    return framePolicy().affordances == platform::FrameAffordances::Client;
+}
+
+qreal WindowController::nativeControlsInset() const noexcept
+{
+    // Only where the OS paints its controls over our chrome; elsewhere it has its own bar and costs
+    // us nothing. The number itself is the adapter's, not ours -- see the declaration.
+    if (_osWindow == nullptr || !_nativeFrame
+        || framePolicy().controlPlacement != platform::ControlPlacement::OverChrome)
+        return 0.0;
+    return _nativeFrame->nativeControlsInset(*_osWindow);
+}
+
 void WindowController::setTitleBarVisible(bool visible)
 {
     // Apply the native window-frame decoration unconditionally (not only on change) so a seed
-    // re-asserts the frame on a freshly adopted window even when the value already matched: shown =>
-    // keep the native frame, hidden => frameless so the custom client-side TitleBar is the only
-    // decoration. This is the C++ counterpart of Main.qml's `flags` binding (both keyed on the same
-    // titleBarVisible value); Main.qml drops our custom min/max/close controls whenever the native
-    // frame shows, so the two decorations never stack.
+    // re-asserts the frame on a freshly adopted window even when the value already matched. What
+    // "apply" means is now per-OS and comes from the frame policy rather than from negating
+    // `visible`: Linux goes genuinely frameless, but Windows KEEPS its frame (and zeroes it in
+    // WM_NCCALCSIZE) and macOS keeps a decorated NSWindow, because on both the frameless hint is
+    // exactly what costs the window its system shadow. This is the C++ counterpart of Main.qml's
+    // `flags` binding, which reads the same policy through needsFramelessHint.
     if (_osWindow != nullptr)
-        _osWindow->setFlag(Qt::FramelessWindowHint, !visible);
+    {
+        auto const target = visible ? platform::WindowDecoration::Server : platform::WindowDecoration::Client;
+        auto const policy = framePolicyFor(platform::currentFramePlatform(), target);
+        _osWindow->setFlag(Qt::FramelessWindowHint, policy.framelessHint == platform::FramelessHint::Apply);
+        _nativeFrame->apply(*_osWindow, target);
+    }
 
     if (_titleBarVisible == visible)
         return;
     _titleBarVisible = visible;
     emit titleBarVisibleChanged();
+
+    // Which decoration is showing decides whether we publish a shadow at all: with the native frame
+    // the window manager draws its own, and a second would stack on it. If setFlag() above recreated
+    // the platform window, the surface events have already dropped the stale attachment and this
+    // rebuilds it against the new one.
+    refreshWindowShadow();
 }
 
 void WindowController::toggleTitleBar()
@@ -790,6 +848,10 @@ void WindowController::applyTabBarFromConfig(config::TabBarPosition position,
         emit tabBarVisibilityChanged();
         emit tabBarShouldShowChanged();
     }
+
+    // window_shadow is read straight off the active profile rather than passed in, so a reload only
+    // has to say "look again". Same reason the tab bar values above win over the current state.
+    refreshWindowShadow();
 }
 
 void WindowController::seedTabBarPosition(config::TabBarPosition position)
@@ -878,6 +940,41 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
             this,
             &WindowController::onOSWindowActiveChanged,
             Qt::UniqueConnection);
+
+    // A maximize the window manager drives — its own keybinding, a double click on the native frame —
+    // reaches none of the presentation entry points, so the shadow is re-decided from here too.
+    connect(osWindow,
+            &QWindow::visibilityChanged,
+            this,
+            &WindowController::onWindowVisibilityChanged,
+            Qt::UniqueConnection);
+}
+
+void WindowController::refreshWindowShadow()
+{
+    if (_osWindow == nullptr)
+        return;
+
+    if (!_windowShadow)
+        _windowShadow =
+            std::make_unique<platform::WindowShadowController>(platform::makeWindowShadow(*_osWindow));
+
+    auto const* session = activeSession();
+    // Before the first session attaches there is no profile to read; the ConfigEntry default is the
+    // same value the profile would carry, so a window shown that early still gets its shadow.
+    // The profile's own default, not a restated enumerator: a literal here would be a second place
+    // to edit the day config::TerminalProfile's default changes, and it would drift silently.
+    auto const size = session != nullptr ? session->profile().windowShadow.value()
+                                         : config::TerminalProfile {}.windowShadow.value();
+
+    _windowShadow->refresh(platform::presentationFor(_osWindow->visibility()), decoration(), size);
+}
+
+void WindowController::onWindowVisibilityChanged()
+{
+    // The window's presentation is READ from it (@see platform::presentationFor) rather than
+    // mirrored into a member here, so this handler only has to say "look again".
+    refreshWindowShadow();
 }
 
 void WindowController::onOSWindowActiveChanged()
@@ -940,8 +1037,38 @@ void WindowController::showInitial()
 
 bool WindowController::eventFilter(QObject* watched, QEvent* event)
 {
-    if (watched == _osWindow && event->type() == QEvent::DevicePixelRatioChange)
-        onWindowScaleMaybeChanged();
+    if (watched == _osWindow)
+    {
+        switch (event->type())
+        {
+            case QEvent::DevicePixelRatioChange: onWindowScaleMaybeChanged(); break;
+
+            case QEvent::PlatformSurface:
+                // The shadow attachment holds the platform window's identity — an X11 window id, or a
+                // wl_surface — and toggling Qt::FramelessWindowHint destroys and recreates it. Drop the
+                // attachment while that identity is still valid to withdraw through; leaving it would
+                // publish the next shadow against a dead handle. Expose below rebuilds it.
+                if (static_cast<QPlatformSurfaceEvent*>(event)->surfaceEventType()
+                    == QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)
+                    _windowShadow.reset();
+                break;
+
+            case QEvent::Expose:
+                // The one point where the platform window is guaranteed to exist. Both of these are
+                // cheap to repeat, and both NEED this: the frame adapter refuses to realize a window
+                // that has no handle yet (it must not disturb the pre-show sizing), and the shadow
+                // attachment has to be rebuilt whenever the platform window was recreated.
+                _nativeFrame->apply(*_osWindow, decoration());
+                refreshWindowShadow();
+                // The OS's own window controls exist only once the window is realized, so the inset
+                // measured from them is only answerable now -- long after titleBarVisibleChanged,
+                // which the other frame gates ride on, has been and gone.
+                emit nativeControlsInsetChanged();
+                break;
+
+            default: break;
+        }
+    }
     return QAbstractListModel::eventFilter(watched, event);
 }
 
@@ -959,6 +1086,13 @@ void WindowController::onWindowScaleMaybeChanged()
 
     auto const pageBefore = session->terminal().totalPageSize();
     display::displayLog()("Content scale settled to {} (page {}).", newScale, pageBefore);
+
+    // A settled scale means the window is about to be resized to match. Where the OS derives the
+    // window's shadow from its alpha and recomputes it lazily -- AppKit does -- that leaves the
+    // previous outline behind, so it is re-asserted here rather than per resize frame: this handler
+    // already carries the latch that makes it fire once per settlement.
+    if (_osWindow != nullptr && _nativeFrame)
+        _nativeFrame->invalidateShadow(*_osWindow);
 
     // New scale => new font DPI => new cell size; this reflows the grid in place (unconditionally
     // correct: the grid always fits the item) and guarantees cellSize() is fresh even when the scale

@@ -446,6 +446,8 @@ Item {
 
     TabContextMenu {
         id: contextMenu
+        // findChild() handle for the GUI test that opens it.
+        objectName: "tabContextMenu"
         controller: root.controller
         tabIndex: root.tabIndex
         onRenameRequested: renameLoader.start()

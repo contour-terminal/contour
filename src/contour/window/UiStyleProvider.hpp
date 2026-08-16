@@ -47,6 +47,8 @@ struct ChromeMetrics
     qreal trafficLightGap = 0.0;
     qreal badgeWidth = 0.0;
     qreal badgeHeight = 0.0;
+    qreal shadowOffsetY = 0.0;
+    qreal shadowMargin = 0.0;
 };
 
 /// The fonts the chrome draws with. A style pins a control's own size only where it wants one
@@ -126,6 +128,11 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(int borderWidth READ borderWidth CONSTANT)
     Q_PROPERTY(int dropCaretWidth READ dropCaretWidth CONSTANT)
 
+    Q_PROPERTY(int shadowBlur READ shadowBlur CONSTANT)
+    Q_PROPERTY(qreal shadowOffsetY READ shadowOffsetY CONSTANT)
+    Q_PROPERTY(qreal shadowMargin READ shadowMargin CONSTANT)
+    Q_PROPERTY(bool hasPopupShadow READ hasPopupShadow CONSTANT)
+
     Q_PROPERTY(QString tabSeparator READ tabSeparator CONSTANT)
     Q_PROPERTY(QString trafficLightGlyph READ trafficLightGlyph CONSTANT)
     Q_PROPERTY(QString closeGlyph READ closeGlyph CONSTANT)
@@ -176,6 +183,20 @@ class UiStyleProvider: public QObject
     [[nodiscard]] int borderWidth() const noexcept { return _tokens.borderWidthPixels; }
     [[nodiscard]] int dropCaretWidth() const noexcept { return _tokens.dropCaretPixels; }
 
+    /// Blur radius of a popup's drop shadow, in logical pixels. 0 draws a hard-edged one.
+    [[nodiscard]] int shadowBlur() const noexcept { return _tokens.shadowBlurPixels; }
+    [[nodiscard]] qreal shadowOffsetY() const noexcept { return _metrics.shadowOffsetY; }
+    [[nodiscard]] qreal shadowMargin() const noexcept { return _metrics.shadowMargin; }
+
+    /// Whether this style asks for a popup shadow at all.
+    ///
+    /// A style may cast a hard-edged shadow (no blur, some offset) or a soft one with no offset, so
+    /// neither token alone answers it -- which is why the QML asks this rather than testing one.
+    [[nodiscard]] bool hasPopupShadow() const noexcept
+    {
+        return _tokens.shadowBlurPixels > 0 || _tokens.shadowOffsetUnits > 0;
+    }
+
     /// The color a tab's OSC 9;4 progress bar is painted in for @p state.
     ///
     /// @param state A vtbackend::ProgressState as its underlying value, as the tab model reports it.
@@ -214,6 +235,12 @@ class UiStyleProvider: public QObject
     /// @param base The color to dim with, conventionally the palette's shadow.
     /// @return @p base at the style's modeless-scrim alpha.
     [[nodiscard]] Q_INVOKABLE QColor modelessScrim(QColor const& base) const;
+
+    /// The color a popup's drop shadow is drawn in: @p base at the style's shadow alpha.
+    ///
+    /// Same shape and same reason as @ref modalScrim -- how heavy a shadow reads is one number in
+    /// the token table rather than a literal repeated in every popup surface.
+    [[nodiscard]] Q_INVOKABLE QColor shadowTint(QColor const& base) const;
 
   private:
     // By value rather than by reference: the rows have static storage duration, but a reference member
