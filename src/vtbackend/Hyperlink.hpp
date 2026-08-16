@@ -31,33 +31,9 @@ struct HyperlinkInfo
     URI uri;
     mutable HyperlinkState state = HyperlinkState::Inactive;
 
-    bool isLocal() const noexcept { return uri.size() >= 7 && uri.starts_with("file://"); }
-
-    [[nodiscard]] std::string_view host() const noexcept
-    {
-        if (auto const i = uri.find("://"); i != vtbackend::URI::npos)
-            if (auto const j = uri.find('/', i + 3); j != vtbackend::URI::npos)
-                return std::string_view { uri.data() + i + 3, j - i - 3 };
-
-        return "";
-    }
-
-    [[nodiscard]] std::string_view path() const noexcept
-    {
-        if (auto const i = uri.find("://"); i != vtbackend::URI::npos)
-            if (auto const j = uri.find('/', i + 3); j != vtbackend::URI::npos)
-                return std::string_view { uri.data() + j };
-
-        return "";
-    }
-
-    [[nodiscard]] std::string_view scheme() const noexcept
-    {
-        if (auto const i = uri.find("://"); i != vtbackend::URI::npos)
-            return std::string_view { uri.data(), i };
-        else
-            return {};
-    }
+    /// Whether this link targets a file rather than a network resource. Which machine's file it is takes
+    /// the host name to answer -- see @ref vtbackend::isLocalHost in FileUrl.hpp.
+    [[nodiscard]] bool isLocal() const noexcept { return uri.starts_with("file://"); }
 };
 
 namespace detail
@@ -67,8 +43,6 @@ namespace detail
     };
 } // namespace detail
 using HyperlinkId = boxed::boxed<uint16_t, detail::HyperlinkTag>;
-
-bool isLocal(HyperlinkInfo const& hyperlink);
 
 using HyperlinkCache = crispy::LRUCache<HyperlinkId, std::shared_ptr<HyperlinkInfo>>;
 

@@ -23,10 +23,12 @@ struct SpawnTerminalCommand
 /// @param configPath The active config file (added as `config <path>` when non-empty).
 /// @param profileName The profile to open (added as `profile <name>` when non-empty).
 /// @param cwdUrl The working directory as a file URL; only a local-host path is forwarded.
+/// @param localHost This machine's host name, injected so the host filtering stays testable.
 /// @return The program + arguments to hand to a detached-process launcher.
 [[nodiscard]] SpawnTerminalCommand buildSpawnTerminalCommand(std::string const& programPath,
                                                              std::string const& configPath,
                                                              std::string const& profileName,
-                                                             std::string const& cwdUrl);
+                                                             std::string const& cwdUrl,
+                                                             std::string const& localHost);
 
 } // namespace contour::session

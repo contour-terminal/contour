@@ -35,6 +35,7 @@
 #include <QtNetwork/QHostInfo>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -1978,17 +1979,73 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         CHECK(launcher.executed.empty());
     }
 
+    // A file:// URL that survives with its authority intact is read by the desktop's URL handler as a
+    // network location ("//host/path"), which does not exist -- issue #2057. Every spelling of THIS
+    // machine must therefore reach openUrl() as a plain local file URL.
+    SECTION("every spelling of this host resolves to a plain local file URL")
+    {
+        auto const shortName = QHostInfo::localHostName().toStdString();
+
+        auto const uri = GENERATE_COPY(
+            // The authority-free form. Its host is "", which the old exact-match check never accepted.
+            std::string { "file:///tmp/x.log" },
+            // The literal loopback name.
+            std::string { "file://localhost/tmp/x.log" },
+            // The short host name -- the only form that used to be classified as local.
+            "file://" + shortName + "/tmp/x.log",
+            // The same name in a different case.
+            "file://" + QString::fromStdString(shortName).toUpper().toStdString() + "/tmp/x.log",
+            // The fully-qualified name, as gethostname(2) reports it on the reporter's machine.
+            "file://" + shortName + ".example.invalid/tmp/x.log");
+
+        INFO("URI: " << uri);
+        contour::test::TestApp testApp;
+        auto session = makeDisplaylessSession(testApp.app());
+        auto& launcher = testApp.launcher();
+
+        seedHoveredHyperlink(*session, uri);
+        REQUIRE(session->terminal().tryGetHoveringHyperlink() != nullptr);
+        CHECK((*session)(actions::FollowHyperlink {}));
+        REQUIRE(launcher.openedUrls.size() == 1);
+        // The host authority is gone: a local file URL, not a //host network path.
+        CHECK(launcher.openedUrls.back().host().isEmpty());
+        CHECK(launcher.openedUrls.back().isLocalFile());
+        CHECK(launcher.openedUrls.back().toLocalFile() == QStringLiteral("/tmp/x.log"));
+    }
+
+    SECTION("a file:// link naming ANOTHER host keeps its authority")
+    {
+        contour::test::TestApp testApp;
+        auto session = makeDisplaylessSession(testApp.app());
+        auto& launcher = testApp.launcher();
+
+        // Not this machine, so there is no local path to resolve it to: hand it over as written and let
+        // the desktop's URL handler decide (it may know how to mount it; we do not).
+        seedHoveredHyperlink(*session, "file://some-other-host.invalid/tmp/x.log");
+        REQUIRE(session->terminal().tryGetHoveringHyperlink() != nullptr);
+        CHECK((*session)(actions::FollowHyperlink {}));
+        REQUIRE(launcher.openedUrls.size() == 1);
+        CHECK(launcher.openedUrls.back().host() == QStringLiteral("some-other-host.invalid"));
+        CHECK(launcher.executed.empty());
+    }
+
 #ifndef _WIN32
     // The "is this an executable file" branch of followHyperlink() keys off POSIX owner-execute
     // permission; Windows determines executability by extension, not filesystem perms, so this Unix
     // semantics section does not apply there.
     SECTION("a local file:// link to an executable file runs `contour config` via execute()")
     {
+        // The authority-free form reaches the executable branch too: it used to be classified as remote
+        // (its host is ""), so a file:///path link to a script fell through to openUrl() instead.
+        auto const authority =
+            GENERATE(std::string {}, QHostInfo::localHostName().toStdString() + ".example.invalid");
+
+        INFO("authority: " << authority);
         contour::test::TestApp testApp;
         auto session = makeDisplaylessSession(testApp.app());
         auto& launcher = testApp.launcher();
 
-        // Create a real executable file and hover a file://<localhost>/<path> link to it.
+        // Create a real executable file and hover a file://<authority>/<path> link to it.
         QTemporaryDir const tmp;
         REQUIRE(tmp.isValid());
         auto const exePath = std::filesystem::path(tmp.path().toStdString()) / "script.sh";
@@ -1998,13 +2055,15 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         }
         std::filesystem::permissions(
             exePath, std::filesystem::perms::owner_all, std::filesystem::perm_options::add);
-        auto const uri = "file://" + QHostInfo::localHostName().toStdString() + exePath.string();
+        auto const uri = "file://" + authority + exePath.string();
 
         seedHoveredHyperlink(*session, uri);
         REQUIRE(session->terminal().tryGetHoveringHyperlink() != nullptr);
         CHECK((*session)(actions::FollowHyperlink {}));
         REQUIRE(launcher.executed.size() == 1);
         CHECK(launcher.executed.back().arguments.contains(QStringLiteral("config")));
+        // The path reaches `contour config` as the filesystem spells it, not as a URL.
+        CHECK(launcher.executed.back().arguments.back() == QString::fromStdString(exePath.generic_string()));
     }
 #endif
 }

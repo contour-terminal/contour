@@ -26,6 +26,7 @@ set(vtbackend_HEADERS
     Functions.hpp
     GraphicsAttributes.hpp
     Grid.hpp
+    FileUrl.hpp
     HintModeHandler.hpp
     Hyperlink.hpp
     KittyClipboard.hpp
@@ -82,6 +83,7 @@ set(vtbackend_SOURCES
     PromptRegion.cpp
     Functions.cpp
     Grid.cpp
+    FileUrl.cpp
     HintModeHandler.cpp
     Image.cpp
     InputBinding.cpp
@@ -174,6 +176,7 @@ if(LIBTERMINAL_TESTING)
         Selector_test.cpp
         Functions_test.cpp
         Grid_test.cpp
+        FileUrl_test.cpp
         HintModeHandler_test.cpp
         Line_test.cpp
         MessageParser_test.cpp

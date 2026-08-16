@@ -426,7 +426,7 @@ TEST_CASE("buildSpawnTerminalCommand assembles arguments and resolves the workin
     // Full set: config + profile + a local-host cwd URL all forwarded, in order.
     {
         auto const cmd = contour::session::buildSpawnTerminalCommand(
-            "/usr/bin/contour", "/tmp/c.yml", "main", "file:///tmp");
+            "/usr/bin/contour", "/tmp/c.yml", "main", "file:///tmp", "fedora");
         CHECK(cmd.program == "/usr/bin/contour");
         CHECK(cmd.arguments
               == QStringList { "config", "/tmp/c.yml", "profile", "main", "working-directory", "/tmp" });
@@ -435,16 +435,24 @@ TEST_CASE("buildSpawnTerminalCommand assembles arguments and resolves the workin
     // Empty config + empty profile omit those flags; a non-local host drops the working directory.
     {
         auto const cmd = contour::session::buildSpawnTerminalCommand(
-            "/usr/bin/contour", "", "", "file://not-this-host.invalid/somewhere");
+            "/usr/bin/contour", "", "", "file://not-this-host.invalid/somewhere", "fedora");
         CHECK(cmd.program == "/usr/bin/contour");
         CHECK(cmd.arguments.isEmpty());
     }
 
     // A bare (host-less) path URL is forwarded as the working directory.
     {
-        auto const cmd =
-            contour::session::buildSpawnTerminalCommand("/usr/bin/contour", "", "work", "file:///home/x");
+        auto const cmd = contour::session::buildSpawnTerminalCommand(
+            "/usr/bin/contour", "", "work", "file:///home/x", "fedora");
         CHECK(cmd.arguments == QStringList { "profile", "work", "working-directory", "/home/x" });
+    }
+
+    // A fully-qualified authority is still THIS machine, and used to be rejected. The full set of
+    // spellings is owned by vtbackend's FileUrl_test; this only pins that the wiring reaches it.
+    {
+        auto const cmd = contour::session::buildSpawnTerminalCommand(
+            "/usr/bin/contour", "", "", "file://fedora.corp.example/home/x", "fedora");
+        CHECK(cmd.arguments == QStringList { "working-directory", "/home/x" });
     }
 }
 
