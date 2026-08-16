@@ -18,6 +18,7 @@ set(net_SOURCES
     KqueueEventSource.cpp
     KqueueEventSource.hpp
     detail/ScopeGuard.hpp
+    detail/WouldBlock.hpp
     WriteQueue.cpp
     WriteQueue.hpp
     PollEventSource.cpp
