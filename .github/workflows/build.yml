@@ -735,10 +735,26 @@ jobs:
           # bundled dylibs demand anything newer, the package step fails rather than
           # shipping a .dmg that cannot launch. Configuring also triggers the vcpkg
           # manifest install, which builds those dylibs against that same target.
-          cmake --preset macos-package \
-                -DCODE_SIGN_CERTIFICATE_ID="${{ steps.set_vars.outputs.CODE_SIGN_CERTIFICATE_ID }}" \
-                -DCONTOUR_MACOS_NOTARIZE="${{ steps.set_vars.outputs.NOTARIZE }}" \
-                -DCONTOUR_MACOS_STAPLE_APP="${{ steps.set_vars.outputs.STAPLE_APP }}"
+          #
+          # Attempted twice. Configuring is where the vcpkg manifest install runs, and that builds
+          # its dependencies from source, so this step's success depends on hosts nobody here
+          # controls being up: it has failed repeatedly on 502/503/504 from
+          # gitlab.freedesktop.org (cairo, fontconfig) and once on a 404 from ftpmirror.gnu.org.
+          # vcpkg already retries an individual download three times; what it cannot retry is the
+          # whole install once a port has given up. None of it is a verdict on the commit under
+          # test, and this job is a required check, so a single bad minute upstream otherwise
+          # blocks every pull request. Only a repeated failure fails the job.
+          configure() {
+            cmake --preset macos-package \
+                  -DCODE_SIGN_CERTIFICATE_ID="${{ steps.set_vars.outputs.CODE_SIGN_CERTIFICATE_ID }}" \
+                  -DCONTOUR_MACOS_NOTARIZE="${{ steps.set_vars.outputs.NOTARIZE }}" \
+                  -DCONTOUR_MACOS_STAPLE_APP="${{ steps.set_vars.outputs.STAPLE_APP }}"
+          }
+          configure || {
+            echo "::warning::configure failed (typically an upstream source download); retrying once"
+            sleep 30
+            configure
+          }
       - name: "Build"
         run: cmake --build --preset macos-package
       - name: "tests"
@@ -776,7 +792,27 @@ jobs:
           set -ex
           echo killing...; sudo pkill -9 XProtect >/dev/null || true; # see https://github.com/actions/runner-images/issues/7522
           echo waiting...; while pgrep XProtect; do sleep 3; done;
-          cpack --preset macos-package --verbose
+          # Attempted twice. CPack's DragNDrop generator mounts a temporary image and detaches it
+          # again, and the detach loses a race against whatever is still walking the volume --
+          # Spotlight's indexer, or XProtect rescanning the freshly written bundle. CPack reports it
+          # as:
+          #     CPack Error: Error executing: /usr/bin/hdiutil detach "/Volumes/Contour"
+          #     CPack Error: Error detaching temporary disk image.
+          # which has cost this job several runs. The killing of XProtect above is the same class of
+          # workaround and does not cover it, because the rescan can start after that wait.
+          #
+          # Before retrying, force-detach anything still mounted: a leftover /Volumes/Contour would
+          # otherwise make the second attempt fail for a different reason, mounting as
+          # "Contour 1" and defeating the fixed path the mv below expects.
+          package() { cpack --preset macos-package --verbose; }
+          package || {
+            echo "::warning::cpack failed (typically the hdiutil detach race); retrying once"
+            hdiutil detach "/Volumes/Contour" -force || true
+            sudo pkill -9 XProtect >/dev/null || true
+            while pgrep XProtect; do sleep 3; done
+            sleep 10
+            package
+          }
           BASENAME="contour-${{ steps.set_vars.outputs.VERSION_STRING }}-macOS-arm"
           mv -vf "out/macos-package/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
           echo "DMG=${BASENAME}.dmg" >> "$GITHUB_ENV"
