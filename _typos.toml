@@ -78,6 +78,15 @@ rin = "rin"   # Scroll back n lines.
 Fo = "Fo"     # Function key 15.
 FO = "FO"     # Function key 41.
 
+# MSVC requires its flags be written attached to their argument, so the compile-cache probe's
+# `/Fo${_dir}/probe.obj` reads as the word "Fo". Branch 2 does not apply: the spelling is
+# Microsoft's, not ours to rename. Scoped to the one file that shells out to a compiler this way.
+[type.msvc-flags]
+extend-glob = ["CompileCache.cmake"]
+
+[type.msvc-flags.extend-words]
+Fo = "Fo" # Names the object file to write.
+
 # The spell-checking documentation has to quote misspellings to explain itself -- it cites the
 # words the old allow-list had absorbed. Its code spans are therefore exempt; its prose is not.
 [type.spelling-docs]
