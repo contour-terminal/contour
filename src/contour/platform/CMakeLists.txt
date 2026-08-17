@@ -94,8 +94,10 @@ elseif(NOT WIN32 AND NOT APPLE)
     target_link_libraries(contour_platform PUBLIC xcb)
 endif()
 
+# Qt6::WaylandClient{,Private} are found one directory up, in src/contour/CMakeLists.txt, so that
+# they are declared in the scope that finalizes the contour executable; that gate also clears
+# CONTOUR_WAYLAND when the module is absent, so reaching this block means the targets exist.
 if(LINUX AND CONTOUR_WAYLAND)
-    find_package(Qt6 COMPONENTS WaylandClient WaylandClientPrivate)
     target_compile_definitions(contour_platform PUBLIC CONTOUR_WAYLAND)
     target_link_libraries(contour_platform PUBLIC Qt6::WaylandClient Qt6::WaylandClientPrivate)
     qt6_generate_wayland_protocol_client_sources(contour_platform

@@ -97,6 +97,27 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 # }}}
 
+# {{{ Optional: Qt's WaylandClient, for blur-behind and the window shadow
+# Looked up here rather than in platform/, which is the only directory that consumes it, because
+# imported targets are directory scoped: a find_package() down there leaves Qt6::WaylandClient
+# undeclared in *this* scope, where the deferred qt6_finalize_target(contour) walks
+# contour_platform's dependencies -- and Qt then warns, four times, that the linking might be
+# incomplete. Found here, the targets are visible to platform/ (a child scope) as well.
+#
+# QUIET and degrading rather than REQUIRED, for the same reason as TextToSpeech above: two
+# decorations must not make every Linux packager carry Qt's Wayland module. Shadowing the
+# CONTOUR_WAYLAND cache option with a normal variable is how that reaches the consumer -- the guard
+# in platform/CMakeLists.txt reads the shadow, because a child scope sees it in place of the cache
+# entry, and the C++ side is already guarded on the matching compile definition.
+if(CONTOUR_FRONTEND_GUI AND LINUX AND CONTOUR_WAYLAND)
+    find_package(Qt6 COMPONENTS WaylandClient WaylandClientPrivate QUIET)
+    if(NOT Qt6WaylandClient_FOUND)
+        set(CONTOUR_WAYLAND OFF)
+        contour_note_excluded_feature("Wayland blur & shadow" "Qt6::WaylandClient not found")
+    endif()
+endif()
+# }}}
+
 # The imported-target name differs between a vendored yaml-cpp and a system one, so
 # resolve it once here -- before add_subdirectory(config), which puts it in contour_config's
 # PUBLIC interface (Config.hpp exposes yaml-cpp's headers).
