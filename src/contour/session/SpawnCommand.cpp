@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/session/SpawnCommand.hpp>
 
+#include <vtbackend/FileUrl.hpp>
+
 #include <QtCore/QUrl>
-#include <QtNetwork/QHostInfo>
 
 using std::string;
 
@@ -12,19 +13,13 @@ namespace contour::session
 SpawnTerminalCommand buildSpawnTerminalCommand(string const& programPath,
                                                string const& configPath,
                                                string const& profileName,
-                                               string const& cwdUrl)
+                                               string const& cwdUrl,
+                                               string const& localHost)
 {
-    auto const wd = [&]() -> QString {
-        auto const url = QUrl(QString::fromUtf8(cwdUrl.c_str()));
-
-        if (url.host().isEmpty())
-            return url.path();
-
-        if (url.host() == QHostInfo::localHostName())
-            return url.path();
-        else
-            return {};
-    }();
+    // OSC 7 reports the cwd as file://HOST/PATH. Only a directory on THIS machine exists for the new
+    // process, whichever way the host was spelled (@see vtbackend::isLocalHost).
+    auto const url = QUrl(QString::fromStdString(cwdUrl));
+    auto const wd = vtbackend::isLocalHost(url.host().toStdString(), localHost) ? url.path() : QString {};
 
     SpawnTerminalCommand command;
     command.program = QString::fromUtf8(programPath.c_str());

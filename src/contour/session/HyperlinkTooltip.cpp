@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/session/HyperlinkTooltip.hpp>
 
-#include <algorithm>
+#include <vtbackend/FileUrl.hpp>
+
+#include <crispy/Utils.hpp>
+
+#include <optional>
 #include <ranges>
 #include <vector>
 
@@ -33,54 +37,16 @@ namespace
         return offsets;
     }
 
-    /// Whether @p uri names a path on THIS host, i.e. one whose authority is absent or "localhost".
-    [[nodiscard]] bool isLocalFileUri(std::string_view uri)
+    /// The path a file:// URI names on THIS host, decoded for reading, or nullopt when it names anything
+    /// else. A truncated or malformed escape is left as written rather than dropped: showing the user what
+    /// the application actually sent beats silently swallowing it (@see crispy::unescapeURL).
+    [[nodiscard]] std::optional<std::string> localFilePath(std::string_view uri, std::string_view localHost)
     {
-        constexpr auto Scheme = std::string_view { "file://" };
-        if (!uri.starts_with(Scheme))
-            return false;
-        auto const rest = uri.substr(Scheme.size());
-        return rest.starts_with('/') || rest.starts_with("localhost/");
-    }
+        if (!uri.starts_with("file://"))
+            return std::nullopt;
 
-    /// The path part of a local file:// URI, with its percent-escapes decoded.
-    [[nodiscard]] std::string decodedLocalPath(std::string_view uri)
-    {
-        constexpr auto Scheme = std::string_view { "file://" };
-        auto rest = uri.substr(Scheme.size());
-        if (rest.starts_with("localhost/"))
-            rest.remove_prefix(std::string_view { "localhost" }.size());
-
-        auto out = std::string {};
-        out.reserve(rest.size());
-        for (auto i = size_t { 0 }; i < rest.size(); ++i)
-        {
-            // A truncated escape at the very end is left as written rather than dropped: showing the
-            // user what the application actually sent beats silently swallowing it.
-            if (rest[i] == '%' && i + 2 < rest.size())
-            {
-                auto const hex = rest.substr(i + 1, 2);
-                auto const digit = [](char ch) -> int {
-                    if (ch >= '0' && ch <= '9')
-                        return ch - '0';
-                    if (ch >= 'a' && ch <= 'f')
-                        return ch - 'a' + 10;
-                    if (ch >= 'A' && ch <= 'F')
-                        return ch - 'A' + 10;
-                    return -1;
-                };
-                auto const high = digit(hex[0]);
-                auto const low = digit(hex[1]);
-                if (high >= 0 && low >= 0)
-                {
-                    out.push_back(static_cast<char>((high * 16) + low));
-                    i += 2;
-                    continue;
-                }
-            }
-            out.push_back(rest[i]);
-        }
-        return out;
+        return vtbackend::localWorkingDirectory(std::string { uri }, localHost)
+            .transform([](std::string const& path) { return crispy::unescapeURL(path); });
     }
 } // namespace
 
@@ -105,12 +71,12 @@ std::string elideMiddle(std::string_view text, size_t maxLength)
     return out;
 }
 
-std::string hyperlinkTooltipText(std::string_view uri, size_t maxLength)
+std::string hyperlinkTooltipText(std::string_view uri, std::string_view localHost, size_t maxLength)
 {
     if (uri.empty())
         return {};
 
-    return elideMiddle(isLocalFileUri(uri) ? decodedLocalPath(uri) : std::string { uri }, maxLength);
+    return elideMiddle(localFilePath(uri, localHost).value_or(std::string { uri }), maxLength);
 }
 
 HyperlinkHoverTracker::Change HyperlinkHoverTracker::update(std::string_view uri,
@@ -127,7 +93,7 @@ HyperlinkHoverTracker::Change HyperlinkHoverTracker::update(std::string_view uri
 
     _uri = std::string { uri };
     _anchor = cell;
-    return { .changed = true, .text = hyperlinkTooltipText(uri, maxLength), .anchor = _anchor };
+    return { .changed = true, .text = hyperlinkTooltipText(uri, _localHost, maxLength), .anchor = _anchor };
 }
 
 HyperlinkHoverTracker::Change HyperlinkHoverTracker::clear()

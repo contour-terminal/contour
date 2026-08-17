@@ -2,6 +2,7 @@
 #include <vtbackend/Terminal.hpp>
 
 #include <vtbackend/ControlCode.hpp>
+#include <vtbackend/FileUrl.hpp>
 #include <vtbackend/Functions.hpp>
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/Logging.hpp>

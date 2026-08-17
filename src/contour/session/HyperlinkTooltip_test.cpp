@@ -83,40 +83,52 @@ TEST_CASE("elideMiddle never splits a codepoint", "[contour][hyperlink]")
 
 TEST_CASE("hyperlinkTooltipText says the useful part of a target", "[contour][hyperlink]")
 {
+    constexpr auto LocalHost = std::string_view { "fedora" };
+
     SECTION("no hyperlink means no tooltip")
     {
-        CHECK(hyperlinkTooltipText("", 64).empty());
+        CHECK(hyperlinkTooltipText("", LocalHost, 64).empty());
     }
 
     SECTION("a remote target is shown as written")
     {
         // The scheme and host are exactly what is worth reading before following a link.
-        CHECK(hyperlinkTooltipText("https://example.com/x", 64) == "https://example.com/x");
-        CHECK(hyperlinkTooltipText("mailto:someone@example.com", 64) == "mailto:someone@example.com");
+        CHECK(hyperlinkTooltipText("https://example.com/x", LocalHost, 64) == "https://example.com/x");
+        CHECK(hyperlinkTooltipText("mailto:someone@example.com", LocalHost, 64)
+              == "mailto:someone@example.com");
     }
 
     SECTION("a local file is shown as a path, with its escapes decoded")
     {
-        CHECK(hyperlinkTooltipText("file:///home/user/notes.txt", 64) == "/home/user/notes.txt");
-        CHECK(hyperlinkTooltipText("file://localhost/tmp/x.log", 64) == "/tmp/x.log");
-        CHECK(hyperlinkTooltipText("file:///home/user/my%20file.txt", 64) == "/home/user/my file.txt");
+        CHECK(hyperlinkTooltipText("file:///home/user/notes.txt", LocalHost, 64) == "/home/user/notes.txt");
+        CHECK(hyperlinkTooltipText("file://localhost/tmp/x.log", LocalHost, 64) == "/tmp/x.log");
+        CHECK(hyperlinkTooltipText("file:///home/user/my%20file.txt", LocalHost, 64)
+              == "/home/user/my file.txt");
+    }
+
+    SECTION("this machine's own name is a local path, however the application spelled it")
+    {
+        // The full set of accepted spellings is owned by vtbackend's FileUrl_test; these pin that the
+        // tooltip is wired to it, rather than to the empty-or-"localhost" rule it used to apply.
+        CHECK(hyperlinkTooltipText("file://fedora/tmp/x.log", LocalHost, 64) == "/tmp/x.log");
+        CHECK(hyperlinkTooltipText("file://fedora.corp.example/tmp/x.log", LocalHost, 64) == "/tmp/x.log");
     }
 
     SECTION("a file on another host keeps its scheme, because the path alone would mislead")
     {
-        CHECK(hyperlinkTooltipText("file://remote/tmp/x.log", 64) == "file://remote/tmp/x.log");
+        CHECK(hyperlinkTooltipText("file://remote/tmp/x.log", LocalHost, 64) == "file://remote/tmp/x.log");
     }
 
     SECTION("a malformed escape is shown as written rather than swallowed")
     {
-        CHECK(hyperlinkTooltipText("file:///tmp/a%zz", 64) == "/tmp/a%zz");
-        CHECK(hyperlinkTooltipText("file:///tmp/trailing%", 64) == "/tmp/trailing%");
+        CHECK(hyperlinkTooltipText("file:///tmp/a%zz", LocalHost, 64) == "/tmp/a%zz");
+        CHECK(hyperlinkTooltipText("file:///tmp/trailing%", LocalHost, 64) == "/tmp/trailing%");
     }
 }
 
 TEST_CASE("HyperlinkHoverTracker announces only real transitions", "[contour][hyperlink]")
 {
-    auto tracker = HyperlinkHoverTracker {};
+    auto tracker = HyperlinkHoverTracker { "fedora" };
 
     SECTION("entering a link announces it, anchored where it was entered")
     {

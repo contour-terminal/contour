@@ -14,6 +14,7 @@
 #include <contour/session/SpawnCommand.hpp>
 #include <contour/session/TerminalSession.hpp>
 
+#include <vtbackend/FileUrl.hpp>
 #include <vtbackend/HintModeHandler.hpp>
 #include <vtbackend/MatchModes.hpp>
 #include <vtbackend/Terminal.hpp>
@@ -288,8 +289,10 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _profile { *_config.profile(_profileName) },
     _app { app },
     _currentColorPreference { app.colorPreference() },
+    _localHostName { QHostInfo::localHostName().toStdString() },
     _accumulatedPixelScroll {},
     _accumulatedAngleScroll {},
+    _hyperlinkHover { _localHostName },
     _terminal { *this,
                 app.processEnvironment(),
                 std::move(pty),
@@ -1931,10 +1934,6 @@ command::ContextMenuState TerminalSession::contextMenuState()
     auto const* mimeData = clipboard != nullptr ? clipboard->mimeData(QClipboard::Clipboard) : nullptr;
     auto const clipboardHasText = mimeData != nullptr && mimeData->hasText();
 
-    // This machine's host name, so the working-directory row can be grayed out for a remote (SSH) cwd
-    // whose path the local file manager cannot open. Read outside the terminal lock (it is not grid state).
-    auto const localHost = QHostInfo::localHostName().toStdString();
-
     // One lock for the whole snapshot. The parser thread mutates the grid concurrently, so a menu that
     // asked the terminal a fresh question per row would be reading a moving target — and a QML binding
     // that reached into the terminal on its own schedule would be a plain data race.
@@ -1952,7 +1951,8 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // Only a working directory on this host can be opened by the local file manager. OSC 7 gives a
             // file://HOST/PATH; a remote (SSH) cwd resolves to nullopt and grays the "Open Current Folder".
             .hasLocalWorkingDirectory =
-                vtbackend::localWorkingDirectory(terminal().currentWorkingDirectory(), localHost).has_value(),
+                vtbackend::localWorkingDirectory(terminal().currentWorkingDirectory(), _localHostName)
+                    .has_value(),
             // Left for the window to fill in: whether this tab holds more than one pane is not something
             // a session knows about itself.
             .hasSplits = false,
@@ -2288,13 +2288,12 @@ bool TerminalSession::operator()(actions::OpenFileManager)
     // host authority is read as a network share ("//fedora/home/..."), which does not exist locally.
     // Resolve it to a plain local path first, and only when it is on THIS host — a remote (SSH) cwd is
     // not openable here (its menu row is grayed out, but a keybinding could still reach this handler).
-    auto const localHost = QHostInfo::localHostName().toStdString();
     auto localPath = std::optional<std::string> {};
     auto cwd = std::string {};
     {
         auto const l = scoped_lock { terminal() };
         cwd = terminal().currentWorkingDirectory();
-        localPath = vtbackend::localWorkingDirectory(cwd, localHost);
+        localPath = vtbackend::localWorkingDirectory(cwd, _localHostName);
     }
 
     if (!localPath)
@@ -3117,7 +3116,7 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     {
         sessionLog()("spawning new process");
         auto const command = buildSpawnTerminalCommand(
-            _app.programPath(), _config.configFile.generic_string(), profileName, wd);
+            _app.programPath(), _config.configFile.generic_string(), profileName, wd, _localHostName);
         _app.externalLauncher().runDetached(command.program, command.arguments);
     }
     else
@@ -3449,33 +3448,39 @@ bool TerminalSession::resetConfig()
 
 void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
 {
-    auto const fileInfo = QFileInfo(QString::fromStdString(string(hyperlink.path())));
-    auto const isLocal = hyperlink.isLocal() && hyperlink.host() == QHostInfo::localHostName().toStdString();
-    // qEnvironmentVariable() rather than getenv(): this runs on the GUI thread while the PTY and
-    // render threads are live, and getenv() is not thread safe.
-    auto const editorEnv = qEnvironmentVariable("EDITOR");
+    auto url = QUrl(QString::fromStdString(hyperlink.uri));
 
-    if (isLocal && fileInfo.isFile() && fileInfo.isExecutable())
+    // A file:// URL naming THIS machine is a local path, whichever way the application spelled the
+    // authority (@see vtbackend::isLocalHost). isValid() keeps the openUrl() pass-through below for URIs
+    // Qt cannot parse, such as the non-standard Windows form file://C:/dir.
+    if (hyperlink.isLocal() && url.isValid()
+        && vtbackend::isLocalHost(url.host().toStdString(), _localHostName))
     {
-        QStringList args;
-        args.append("config");
-        args.append(QString::fromStdString(_config.configFile.string()));
-        args.append(QString::fromUtf8(hyperlink.path().data(), static_cast<int>(hyperlink.path().size())));
-        _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
+        // An authority that survives is read by the desktop's URL handler as a network location, so
+        // file://host/tmp is looked up as //host/tmp and does not exist. Drop it, as OpenFileManager does.
+        url.setHost(QString {});
+
+        // Percent-escapes decoded, and the authority already gone: the path as the filesystem spells it.
+        auto const localPath = url.toLocalFile();
+        // qEnvironmentVariable() rather than getenv(): this runs on the GUI thread while the PTY and
+        // render threads are live, and getenv() is not thread safe.
+        auto const editorEnv = qEnvironmentVariable("EDITOR");
+        auto const fileInfo = QFileInfo(localPath);
+
+        // An executable file is run through `contour config <path>`; any other file is handed to $EDITOR
+        // the same way. Anything else -- a directory, a missing path -- goes to the desktop below.
+        if (fileInfo.isFile() && (fileInfo.isExecutable() || !editorEnv.isEmpty()))
+        {
+            auto args = QStringList { "config", QString::fromStdString(_config.configFile.string()) };
+            if (!fileInfo.isExecutable())
+                args << editorEnv;
+            args << localPath;
+            _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
+            return;
+        }
     }
-    else if (isLocal && fileInfo.isFile() && !editorEnv.isEmpty())
-    {
-        QStringList args;
-        args.append("config");
-        args.append(QString::fromStdString(_config.configFile.string()));
-        args.append(editorEnv);
-        args.append(QString::fromUtf8(hyperlink.path().data(), static_cast<int>(hyperlink.path().size())));
-        _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
-    }
-    else if (isLocal)
-        (void) _app.externalLauncher().openUrl(QUrl(hyperlink.uri.c_str()));
-    else
-        (void) _app.externalLauncher().openUrl(QUrl(QString::fromUtf8(hyperlink.uri.c_str())));
+
+    (void) _app.externalLauncher().openUrl(url);
 }
 
 void TerminalSession::onConfigReload()

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/HintModeHandler.hpp>
 
+#include <vtbackend/Hyperlink.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <ranges>
@@ -369,86 +371,6 @@ vector<HintPattern> HintModeHandler::builtinPatterns()
             .transformer = {} },
     };
     return cached;
-}
-
-auto extractPathFromFileUrl(std::string const& url) -> std::string
-{
-    constexpr auto Prefix = std::string_view("file://");
-    if (!url.starts_with(Prefix))
-        return url;
-    auto remainder = url.substr(Prefix.size());
-
-    // A Windows drive-letter authority (e.g. file://C:/path) is not a real host: keep it.
-    auto const isDriveLetterPath = [](std::string_view path) {
-        return path.size() >= 2 && (std::isalpha(static_cast<unsigned char>(path[0])) != 0) && path[1] == ':';
-    };
-
-    // file:///path → /path  ;  file://host/path → /path  ;  file://C:/path → C:/path
-    if (!remainder.empty() && remainder[0] != '/')
-    {
-        if (isDriveLetterPath(remainder))
-            return remainder;
-        if (auto const pos = remainder.find('/'); pos != std::string::npos)
-        {
-            // file://host/C:/path → C:/path : strip the leading slash before a Windows drive
-            // letter so a host-qualified URL still yields a valid native absolute path.
-            auto pathPart = remainder.substr(pos);
-            if (pathPart.size() >= 3 && isDriveLetterPath(pathPart.substr(1)))
-                return pathPart.substr(1);
-            return pathPart;
-        }
-        return {};
-    }
-
-    // file:///C:/path → C:/path : strip the leading slash before a Windows drive letter so the
-    // resulting string is a valid native absolute path rather than a rooted POSIX-looking one.
-    if (remainder.size() >= 3 && remainder[0] == '/' && isDriveLetterPath(remainder.substr(1)))
-        return remainder.substr(1);
-
-    return remainder;
-}
-
-namespace
-{
-    /// The DNS label before the first '.', lower-cased: the bare machine name of a possibly-qualified
-    /// host, so "fedora" and "fedora.corp.example" compare equal.
-    [[nodiscard]] std::string bareHostLabel(std::string_view host)
-    {
-        auto label = std::string(host.substr(0, host.find('.')));
-        std::ranges::transform(
-            label, label.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        return label;
-    }
-} // namespace
-
-auto localWorkingDirectory(std::string const& url, std::string_view localHost) -> std::optional<std::string>
-{
-    constexpr auto Prefix = std::string_view("file://");
-    if (url.starts_with(Prefix))
-    {
-        auto const remainder = std::string_view(url).substr(Prefix.size());
-
-        // The host is the authority up to the first '/'. file:///path is rooted (no host), and a Windows
-        // drive-letter authority (file://C:/path) is a path, not a host.
-        auto const isDriveLetter = remainder.size() >= 2
-                                   && (std::isalpha(static_cast<unsigned char>(remainder[0])) != 0)
-                                   && remainder[1] == ':';
-        auto host = std::string_view {};
-        if (!remainder.empty() && remainder.front() != '/' && !isDriveLetter)
-            host = remainder.substr(0, remainder.find('/'));
-
-        if (!host.empty())
-        {
-            auto const label = bareHostLabel(host);
-            if (label != "localhost" && label != bareHostLabel(localHost))
-                return std::nullopt; // a different host: this is a remote working directory
-        }
-    }
-
-    auto path = extractPathFromFileUrl(url);
-    if (path.empty())
-        return std::nullopt;
-    return path;
 }
 
 } // namespace vtbackend

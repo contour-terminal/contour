@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace contour::session
 {
@@ -25,14 +26,17 @@ namespace contour::session
 
 /// What to show for a hovered OSC 8 target, or empty for "say nothing".
 ///
-/// A local file:// URI shows its decoded path, because the scheme and an empty authority are noise to
-/// someone looking at a path they may want to open. Everything else shows the URI as written: for a
-/// remote target the scheme and host are exactly the part worth reading before clicking.
+/// A local file:// URI shows its decoded path, because the scheme and the authority naming this very
+/// machine are noise to someone looking at a path they may want to open. Everything else shows the URI as
+/// written: for a remote target the scheme and host are exactly the part worth reading before clicking.
 ///
 /// @param uri       The hyperlink's target, as the application set it.
+/// @param localHost This machine's host name, against which the URI's authority is measured.
 /// @param maxLength Maximum number of codepoints to show.
 /// @return The tooltip text, or empty when there is nothing worth showing.
-[[nodiscard]] std::string hyperlinkTooltipText(std::string_view uri, size_t maxLength);
+[[nodiscard]] std::string hyperlinkTooltipText(std::string_view uri,
+                                               std::string_view localHost,
+                                               size_t maxLength);
 
 /// Tracks which hyperlink the pointer is over, and says when a tooltip should appear or vanish.
 ///
@@ -41,6 +45,9 @@ namespace contour::session
 class HyperlinkHoverTracker
 {
   public:
+    /// @param localHost This machine's host name, telling a local file:// target from a remote one.
+    explicit HyperlinkHoverTracker(std::string localHost): _localHost { std::move(localHost) } {}
+
     /// What the GUI should do about the tooltip, if anything.
     struct Change
     {
@@ -68,7 +75,8 @@ class HyperlinkHoverTracker
     [[nodiscard]] Change clear();
 
   private:
-    std::string _uri;
+    std::string _localHost {};
+    std::string _uri {};
     vtbackend::CellLocation _anchor {};
 };
 

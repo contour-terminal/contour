@@ -826,6 +826,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;
+    /// This machine's host name, asked once because one of the file:// URLs measured against it is
+    /// resolved on the GUI thread under the terminal lock. @see vtbackend::isLocalHost
+    std::string _localHostName;
 
     crispy::Point _accumulatedPixelScroll;
     crispy::Point _accumulatedAngleScroll;

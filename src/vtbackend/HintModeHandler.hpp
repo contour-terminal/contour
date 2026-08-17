@@ -235,28 +235,6 @@ class HintModeHandler
     std::string _filter;
 };
 
-/// Extracts a local filesystem path from a file:// URL (as set by OSC 7).
-/// Returns the URL unchanged if it does not start with "file://".
-[[nodiscard]] auto extractPathFromFileUrl(std::string const& url) -> std::string;
-
-/// The local filesystem path a working-directory URL points at, or nullopt when the URL names a host
-/// other than @p localHost — a remote (e.g. SSH) working directory that does not exist on this machine.
-///
-/// OSC 7 reports the working directory as file://HOST/PATH. A host that is empty, "localhost", or that
-/// shares its first DNS label with @p localHost — case-insensitively, so "host" matches "host.example.com"
-/// — is this machine; the returned path has the file:// scheme, the host authority and the leading "//"
-/// stripped (see @ref extractPathFromFileUrl). Any other host is remote and yields nullopt, as does a URL
-/// that carries no path at all.
-///
-/// The local host name is a parameter rather than read here so the decision stays pure and unit-testable;
-/// the caller injects it (QHostInfo::localHostName() in the GUI).
-///
-/// @param url       The working-directory URL: an OSC 7 file:// URL, or a bare local path.
-/// @param localHost This machine's host name.
-/// @return The local path to open, or nullopt when @p url is remote or path-less.
-[[nodiscard]] auto localWorkingDirectory(std::string const& url, std::string_view localHost)
-    -> std::optional<std::string>;
-
 /// Converts a UTF-8 byte offset within @p text to the corresponding codepoint index.
 ///
 /// In the column-aligned UTF-8 strings the hint scanner uses (see @ref Line::toUtf8ColumnAligned),
