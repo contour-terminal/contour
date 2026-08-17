@@ -43,11 +43,11 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 #     is not to render -- and on a platform where Qt6 does not exist, in the way of building at all.
 if(CONTOUR_FRONTEND_GUI)
     # Qt warns, once per private module and on every configure, that a project using private headers
-    # is tied to the exact Qt build it compiled against. That is true and it is deliberate: we take
-    # rhi/qrhi.h from GuiPrivate for the display's RHI resource model, and QWaylandWindow from
-    # WaylandClientPrivate to reach the wl_surface that blur-behind and the window shadow attach to.
-    # Neither has a public equivalent. So the statement is recorded here, where it is read once,
-    # rather than reprinted as ~20 lines of configure output that teach the reader to skim warnings.
+    # is tied to the exact Qt build it compiled against. That is true and it is deliberate: rhi/qrhi.h
+    # comes from GuiPrivate (see the NB above), and QWaylandWindow from WaylandClientPrivate, to reach
+    # the wl_surface that blur-behind and the window shadow attach to. Neither has a public
+    # equivalent. So the statement is recorded here, where it is read once, rather than reprinted as
+    # ~20 lines of configure output that teach the reader to skim warnings.
     #
     # The consequence is real and belongs to packaging, not to the build: a Contour binary must be
     # run against the Qt minor release it was built against. That is why CONTOUR_QT_VALIDATED_VERSION
