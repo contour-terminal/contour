@@ -15,7 +15,13 @@ fi
 echo "### $version_string ($release_type)"
 echo ""
 
-# Changelog items
-xmllint --xpath '/component/releases/release[1]/description/ul/li' $metainfo_xml |
+# Release summary, if the release carries one, stripped of its XML indentation
+xmllint --xpath 'string(/component/releases/release[1]/description/p[1])' $metainfo_xml |
+    sed -e 's/^[[:space:]]*//' -e '/^$/d'
+
+# Changelog items, with the section heading each <ul> is introduced by
+xmllint --xpath '/component/releases/release[1]/description/p[position()>1]|/component/releases/release[1]/description/ul/li' $metainfo_xml |
+    sed 's,<p>,\n#### ,g' |
+    sed 's,</p>,\n,g' |
     sed 's/<li>/ - /g' |
     sed 's,</li>,\n,g'

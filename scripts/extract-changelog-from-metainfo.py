@@ -13,16 +13,31 @@ class Change:
     def __str__(self) -> str:
         return f"- {self.text}"
 
-class Release:
-    def __init__(self, version: str, date: str, summary: str, changes: list[Change]):
-        self.version = version
-        self.date = date if date != "" else "unreleased"
-        self.summary = summary
+class Section:
+    """A group of changes, optionally introduced by a heading."""
+    def __init__(self, title: str, changes: list[Change]):
+        self.title = title
         self.changes = changes
 
     def __str__(self) -> str:
         joined_changelog_list = "\n".join([str(change) for change in self.changes])
-        return f"## {self.version} ({self.date})\n\n{self.summary}{joined_changelog_list}\n\n"
+        if self.title == "":
+            return f"{joined_changelog_list}\n"
+        return f"### {self.title}\n\n{joined_changelog_list}\n"
+
+class Release:
+    def __init__(self, version: str, date: str, summary: str, sections: list[Section]):
+        self.version = version
+        self.date = date if date != "" else "unreleased"
+        self.summary = summary
+        self.sections = sections
+
+    def change_count(self) -> int:
+        return sum(len(section.changes) for section in self.sections)
+
+    def __str__(self) -> str:
+        joined_sections = "\n".join([str(section) for section in self.sections])
+        return f"## {self.version} ({self.date})\n\n{self.summary}{joined_sections}\n"
 
 def extract_changelog_from_metainfo(metainfo_file: str) -> list[Release]:
     """
@@ -32,32 +47,44 @@ def extract_changelog_from_metainfo(metainfo_file: str) -> list[Release]:
     tree = ET.parse(metainfo_file)
     root = tree.getroot()
 
+    def normalized(text: str) -> str:
+        # Strip leading and trailing whitespaces
+        stripped_lines = [line.strip() for line in text.strip().split("\n")]
+        # Normalize repeative spaces (but retain newlines)
+        return "\n".join([line for line in stripped_lines if len(line) > 0])
+
     for release in root.findall(".//releases/release"):
         version = release.attrib.get("version", "")
         date = release.attrib.get("date", "")
-        changes = list[Change]()
+        sections = list[Section]()
 
+        # Walk the description in document order: the first <p> is the release summary, every
+        # later <p> introduces the section that the following <ul> belongs to.
         summary = ""
-        # Check if we've a leading <p> tag and use this as summary
-        for p in release.findall(".//p"):
-            if p.text is not None:
-                # Strip leading and trailing whitespaces
-                text = p.text.strip()
-                stripped_lines = [line.strip() for line in text.split("\n")]
-                # Normalize repeative spaces (but retain newlines)
-                text = "\n".join([line for line in stripped_lines if len(line) > 0])
-                # Append it to summary
-                summary = summary + text + "\n"
+        pending_title = ""
+        seen_summary = False
+        for description in release.findall("description"):
+            for element in description:
+                if element.tag == "p" and element.text is not None:
+                    if not seen_summary:
+                        summary = normalized(element.text) + "\n"
+                        seen_summary = True
+                    else:
+                        pending_title = normalized(element.text)
+                elif element.tag == "ul":
+                    changes = [Change(li.text) for li in element.findall("li")
+                               if li.text is not None]
+                    if len(changes) != 0:
+                        sections.append(Section(pending_title, changes))
+                    pending_title = ""
         if len(summary) != 0:
             summary = summary + "\n"
 
-        for change in release.findall(".//ul/li"):
-            if change.text is not None:
-                changes.append(Change(change.text))
-        if (len(changes) == 0):
+        release_entry = Release(version, date, summary, sections)
+        if release_entry.change_count() == 0:
             print(f"Warning: No changes found for version {version} from {date}", file=sys.stderr)
         else:
-            result.append(Release(version, date, summary, changes))
+            result.append(release_entry)
 
     return result
 
