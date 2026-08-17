@@ -36,9 +36,19 @@ fi
 # TODO: pass "/path/to/version.txt" target filename via CLI param "${1}", and only write that if given.
 echo "${VERSION_STRING}" >version.txt
 
-RELEASEBODY=$(xmllint --xpath '/component/releases/release[1]/description/ul/li' $metainfo_xml |
+# The first <p> is the release summary; every later <p> is a section heading for the <ul> that
+# follows it. The union XPath yields all of them in document order.
+# NB: the summary is stripped of its XML indentation, which markdown would render as a code block.
+release_summary=$(xmllint --xpath 'string(/component/releases/release[1]/description/p[1])' $metainfo_xml |
+                    sed -e 's/^[[:space:]]*//' -e '/^$/d')
+RELEASEBODY=$(xmllint --xpath '/component/releases/release[1]/description/p[position()>1]|/component/releases/release[1]/description/ul/li' $metainfo_xml |
+                    sed 's,<p>,\n### ,g' |
+                    sed 's,</p>,\n,g' |
                     sed 's/<li>/ - /g' |
                     sed 's,</li>,,g')
+if [[ "${release_summary}" != "" ]]; then
+    RELEASEBODY="${release_summary}"$'\n'"${RELEASEBODY}"
+fi
 RELEASEBODY="${RELEASEBODY//\"/\\\"}"
 RELEASEBODY="${RELEASEBODY//$'\r'/''}"
 
