@@ -273,9 +273,9 @@ if(CONTOUR_USE_CPM)
     # download CPM.cmake
     file(
         DOWNLOAD
-        https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.38.3/CPM.cmake
+        https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.43.1/CPM.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake
-        EXPECTED_HASH SHA256=cc155ce02e7945e7b8967ddfaff0b050e958a723ef7aad3766d368940cb15494
+        EXPECTED_HASH SHA256=1c40fc102ce9625d7de7eb14f541cab30cc3138dca627f0b0ec40293ce6c2934
     )
     include(${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake)
 endif()

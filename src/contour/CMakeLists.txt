@@ -42,6 +42,18 @@ NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
 #     Qt for that build would put a Qt that renders in the way of the very configuration whose point
 #     is not to render -- and on a platform where Qt6 does not exist, in the way of building at all.
 if(CONTOUR_FRONTEND_GUI)
+    # Qt warns, once per private module and on every configure, that a project using private headers
+    # is tied to the exact Qt build it compiled against. That is true and it is deliberate: rhi/qrhi.h
+    # comes from GuiPrivate (see the NB above), and QWaylandWindow from WaylandClientPrivate, to reach
+    # the wl_surface that blur-behind and the window shadow attach to. Neither has a public
+    # equivalent. So the statement is recorded here, where it is read once, rather than reprinted as
+    # ~20 lines of configure output that teach the reader to skim warnings.
+    #
+    # The consequence is real and belongs to packaging, not to the build: a Contour binary must be
+    # run against the Qt minor release it was built against. That is why CONTOUR_QT_VALIDATED_VERSION
+    # below exists and why the bundles ship their own Qt.
+    set(QT_NO_PRIVATE_MODULE_WARNING ON)
+
     # Gating GuiPrivate needs Qt6_VERSION, which nothing but find_package(Qt6) sets -- hence this
     # lookup, one line ahead of the gate that reads it.
     find_package(Qt6 COMPONENTS Core REQUIRED)
@@ -93,6 +105,27 @@ if(CONTOUR_FRONTEND_GUI)
         set(CONTOUR_WITH_TTS ON)
     else()
         contour_note_excluded_feature("Read selection aloud" "Qt6::TextToSpeech not found")
+    endif()
+endif()
+# }}}
+
+# {{{ Optional: Qt's WaylandClient, for blur-behind and the window shadow
+# Looked up here rather than in platform/, which is the only directory that consumes it, because
+# imported targets are directory scoped: a find_package() down there leaves Qt6::WaylandClient
+# undeclared in *this* scope, where the deferred qt6_finalize_target(contour) walks
+# contour_platform's dependencies -- and Qt then warns, four times, that the linking might be
+# incomplete. Found here, the targets are visible to platform/ (a child scope) as well.
+#
+# QUIET and degrading rather than REQUIRED, for the same reason as TextToSpeech above: two
+# decorations must not make every Linux packager carry Qt's Wayland module. Shadowing the
+# CONTOUR_WAYLAND cache option with a normal variable is how that reaches the consumer -- the guard
+# in platform/CMakeLists.txt reads the shadow, because a child scope sees it in place of the cache
+# entry, and the C++ side is already guarded on the matching compile definition.
+if(CONTOUR_FRONTEND_GUI AND LINUX AND CONTOUR_WAYLAND)
+    find_package(Qt6 COMPONENTS WaylandClient WaylandClientPrivate QUIET)
+    if(NOT Qt6WaylandClient_FOUND)
+        set(CONTOUR_WAYLAND OFF)
+        contour_note_excluded_feature("Wayland blur & shadow" "Qt6::WaylandClient not found")
     endif()
 endif()
 # }}}

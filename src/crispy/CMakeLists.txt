@@ -103,7 +103,11 @@ if(UNIX)
     check_function_exists(dladdr HAVE_DLADDR)
     check_function_exists(dlsym HAVE_DLSYM)
     check_include_files(dlfcn.h HAVE_DLFCN_H)
-    check_include_files(cxxabi.h HAVE_CXXABI_H)
+    # cxxabi.h is a C++ header (libstdc++ ships it under /usr/include/c++/<ver>/), so it must be
+    # probed with the C++ compiler. check_include_files() compiles a C translation unit and would
+    # never find it -- and the failure is silent: StackTrace::demangleSymbol() compiles out and
+    # every frame prints its mangled name instead.
+    check_include_file_cxx(cxxabi.h HAVE_CXXABI_H)
     check_include_files(execinfo.h HAVE_EXECINFO_H)
     check_include_files(sys/select.h HAVE_SYS_SELECT_H)
     check_include_files(unwind.h HAVE_UNWIND_H)
