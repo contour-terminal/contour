@@ -1423,6 +1423,39 @@ TEST_CASE("TerminalSession: desktop notification wiring is display-safe and repo
         CHECK_FALSE(written.contains(":p=close;"));
         CHECK_FALSE(written.contains(":p=activated;"));
     }
+
+    SECTION("another notification's events do not retire this one's reporting")
+    {
+        // Several notifications are live at once routinely -- OSC 99 identifies them precisely so
+        // an application can have more than one. A handler wired with Qt::SingleShotConnection
+        // would be broken by the FIRST emission whatever it was about, so the events below would
+        // silently swallow n2's, and an application waiting on `c=1` would wait forever.
+        (void) writtenAfter([&] {
+            raised->fireClosed("n1", 2);
+            raised->fireActivated("n1");
+        });
+
+        auto const written = writtenAfter([&] {
+            raised->fireClosed("n2", 2);
+            raised->fireActivated("n2");
+        });
+
+        CHECK(written.contains("\033]99;i=n2:p=close;\033\\"));
+        CHECK(written.contains("\033]99;i=n2:p=activated;"));
+    }
+
+    SECTION("a notification is reported on once, not once per event")
+    {
+        auto const written = writtenAfter([&] {
+            raised->fireClosed("n2", 2);
+            raised->fireClosed("n2", 2);
+            raised->fireActivated("n2");
+            raised->fireActivated("n2");
+        });
+
+        CHECK(written.find("p=close;") == written.rfind("p=close;"));
+        CHECK(written.find("p=activated;") == written.rfind("p=activated;"));
+    }
 #endif
 }
 

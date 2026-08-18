@@ -992,52 +992,63 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
 #ifdef __linux__
     _desktopNotifier->notify(notification);
 
+    // Deliberately NOT Qt::SingleShotConnection. That breaks the connection on the first EMISSION of
+    // the signal, whichever notification it was about -- so with two notifications outstanding, the
+    // one that closes (or is clicked) first silently retires the OTHER one's handler, and the report
+    // it was waiting for is never sent. Several notifications are live at once routinely: OSC 99
+    // identifies them precisely so an application can have more than one. So the connection is
+    // broken by the handler that matched, and only once it has matched.
+    auto const identifier = notification.identifier;
+
     // Connect close event reporting if requested.
     if (notification.closeEventRequested)
     {
-        auto const identifier = notification.identifier;
-        QObject::connect(
+        auto const connection = std::make_shared<QMetaObject::Connection>();
+        *connection = QObject::connect(
             _desktopNotifier.get(),
             &platform::Notifier::notificationClosed,
             this,
-            [this, identifier](QString const& closedId, uint /*reason*/, vtbackend::CloseReport report) {
-                if (closedId.toStdString() == identifier)
-                {
-                    _terminal.reply("\033]{}\033\\", vtbackend::buildOSC99CloseResponse(identifier, report));
-                    _terminal.desktopNotificationManager().removeActiveNotification(identifier);
-                }
-            },
-            Qt::SingleShotConnection);
-    }
+            [this, identifier, connection](
+                QString const& closedId, uint /*reason*/, vtbackend::CloseReport report) {
+                if (closedId.toStdString() != identifier)
+                    return;
 
-    auto const identifier = notification.identifier;
+                QObject::disconnect(*connection);
+                _terminal.reply("\033]{}\033\\", vtbackend::buildOSC99CloseResponse(identifier, report));
+                _terminal.desktopNotificationManager().removeActiveNotification(identifier);
+            });
+    }
 
     // Connect activation reporting if requested.
     if (notification.reportOnActivation)
     {
-        QObject::connect(
-            _desktopNotifier.get(),
-            &platform::Notifier::actionInvoked,
-            this,
-            [this, identifier](QString const& activatedId) {
-                if (activatedId.toStdString() == identifier)
-                    _terminal.reply("\033]99;i={}:p=activated;\033\\", identifier);
-            },
-            Qt::SingleShotConnection);
+        auto const connection = std::make_shared<QMetaObject::Connection>();
+        *connection = QObject::connect(_desktopNotifier.get(),
+                                       &platform::Notifier::actionInvoked,
+                                       this,
+                                       [this, identifier, connection](QString const& activatedId) {
+                                           if (activatedId.toStdString() != identifier)
+                                               return;
+
+                                           QObject::disconnect(*connection);
+                                           _terminal.reply("\033]99;i={}:p=activated;\033\\", identifier);
+                                       });
     }
 
     // Focus terminal on activation if requested.
     if (notification.focusOnActivation)
     {
-        QObject::connect(
-            _desktopNotifier.get(),
-            &platform::Notifier::actionInvoked,
-            this,
-            [this, identifier](QString const& activatedId) {
-                if (activatedId.toStdString() == identifier)
-                    focusTerminalWindow();
-            },
-            Qt::SingleShotConnection);
+        auto const connection = std::make_shared<QMetaObject::Connection>();
+        *connection = QObject::connect(_desktopNotifier.get(),
+                                       &platform::Notifier::actionInvoked,
+                                       this,
+                                       [this, identifier, connection](QString const& activatedId) {
+                                           if (activatedId.toStdString() != identifier)
+                                               return;
+
+                                           QObject::disconnect(*connection);
+                                           focusTerminalWindow();
+                                       });
     }
 #else
     // On non-Linux platforms, fall back to the simple notification mechanism.
