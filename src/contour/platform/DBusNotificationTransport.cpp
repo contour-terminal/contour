@@ -57,7 +57,7 @@ DBusNotificationTransport::DBusNotificationTransport(QObject* parent):
 
 DBusNotificationTransport::~DBusNotificationTransport()
 {
-    if (!_onClosed)
+    if (_subscription == DBusSubscriptionState::NotSubscribed)
         return;
 
     unsubscribeFromDBusSignals(_bus, NotificationsSource, this, signalSubscriptions());
@@ -137,6 +137,7 @@ void DBusNotificationTransport::subscribe(ClosedHandler onClosed, ActivatedHandl
     _onActivated = std::move(onActivated);
 
     subscribeToDBusSignals(_bus, NotificationsSource, this, signalSubscriptions());
+    _subscription = DBusSubscriptionState::Subscribed;
 }
 
 void DBusNotificationTransport::onNotificationClosed(uint id, uint reason)

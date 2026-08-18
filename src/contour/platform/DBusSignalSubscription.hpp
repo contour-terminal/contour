@@ -7,6 +7,7 @@
     #include <QtCore/QObject>
     #include <QtDBus/QDBusConnection>
 
+    #include <cstdint>
     #include <span>
 
 namespace contour::platform
@@ -25,6 +26,19 @@ struct DBusSignalSubscription
     /// reconstructs from the slot's parameters, so a slot taking fewer arguments does not fail
     /// loudly -- it is simply never called.
     char const* slot = nullptr;
+};
+
+/// Whether a client has installed its match rules yet.
+///
+/// A state of its own rather than something inferred from a handler being non-empty: those are two
+/// different questions, and answering the second in place of the first leaves the match rule
+/// installed whenever a client subscribes with only the handlers it has a use for -- the portal
+/// transport, for one, has no close signal to hand a handler to. A rule that outlives its receiver
+/// is a teardown race, not merely a leak. @see unsubscribeFromDBusSignals().
+enum class DBusSubscriptionState : uint8_t
+{
+    NotSubscribed = 0,
+    Subscribed = 1,
 };
 
 /// The one service, path and interface a set of subscriptions is addressed with.

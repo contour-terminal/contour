@@ -3,6 +3,7 @@
 
 #ifdef __linux__
 
+    #include <contour/platform/DBusSignalSubscription.hpp>
     #include <contour/platform/NotificationTransport.hpp>
 
     #include <QtCore/QLatin1StringView>
@@ -175,7 +176,10 @@ class PortalNotificationTransport final: public QObject, public NotificationTran
     std::unordered_map<ServerId, std::string> _portalIds;
     std::unordered_map<std::string, ServerId> _serverIds;
 
-    /// The subscription handlers; their emptiness IS the "not subscribed yet" state.
+    /// Whether subscribe() has installed the match rule, so the destructor knows to remove it.
+    DBusSubscriptionState _subscription = DBusSubscriptionState::NotSubscribed;
+
+    /// The subscription handlers.
     ClosedHandler _onClosed;
     ActivatedHandler _onActivated;
 };

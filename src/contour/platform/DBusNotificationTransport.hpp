@@ -3,6 +3,7 @@
 
 #ifdef __linux__
 
+    #include <contour/platform/DBusSignalSubscription.hpp>
     #include <contour/platform/NotificationTransport.hpp>
 
     #include <QtCore/QObject>
@@ -70,8 +71,10 @@ class DBusNotificationTransport final: public QObject, public NotificationTransp
     /// obtaining it costs a Hello round-trip to the bus daemon, which always answers at once.
     QDBusConnection _bus;
 
-    /// The subscription handlers. Their emptiness IS the "not subscribed yet" state, which is why
-    /// there is no separate flag: the destructor removes the match rules only when one is set.
+    /// Whether subscribe() has installed the match rules, so the destructor knows to remove them.
+    DBusSubscriptionState _subscription = DBusSubscriptionState::NotSubscribed;
+
+    /// The subscription handlers.
     ClosedHandler _onClosed;
     ActivatedHandler _onActivated;
 };
