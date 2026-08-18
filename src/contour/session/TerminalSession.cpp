@@ -122,17 +122,18 @@ namespace
         // Held indirectly because the handler must be able to break its own connection, which does
         // not exist yet when the handler is built.
         auto const connection = std::make_shared<QMetaObject::Connection>();
-        *connection = QObject::connect(
-            notifier,
-            signal,
-            context,
-            [identifier = std::move(identifier), connection, action](QString const& emitted, Args... args) {
-                if (emitted.toStdString() != identifier)
-                    return;
+        *connection =
+            QObject::connect(notifier,
+                             signal,
+                             context,
+                             [identifier = std::move(identifier), connection, action = std::move(action)](
+                                 QString const& emitted, Args... args) {
+                                 if (emitted.toStdString() != identifier)
+                                     return;
 
-                QObject::disconnect(*connection);
-                action(args...);
-            });
+                                 QObject::disconnect(*connection);
+                                 action(args...);
+                             });
     }
 #endif
 
