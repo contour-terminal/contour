@@ -30,6 +30,18 @@ enum class NotificationUrgency : uint8_t
     Critical = 2,
 };
 
+/// How the terminal came to know a notification was closed.
+///
+/// Not every desktop can say. org.freedesktop.Notifications emits a close signal, but
+/// org.freedesktop.portal.Notification -- the only service a Flatpak sandbox can reach -- has no
+/// equivalent, so there the terminal can at best assume the popup was retired once enough time has
+/// passed. OSC 99 has a word for exactly that case, and this is what selects it.
+enum class CloseReport : uint8_t
+{
+    Observed = 0,  ///< The desktop reported the close.
+    Untracked = 1, ///< Nobody reported it; a timer expired.
+};
+
 /// When to display the notification based on terminal focus state.
 enum class DisplayOccasion : uint8_t
 {
@@ -68,6 +80,17 @@ struct DesktopNotification
 /// @param identifier the notification identifier from the query.
 /// @return a formatted OSC 99 response string (without OSC prefix/terminator).
 [[nodiscard]] std::string buildOSC99QueryResponse(std::string_view identifier);
+
+/// Builds the close report for a notification the desktop retired.
+///
+/// A close the terminal could not observe is marked `untracked`, which is what the protocol defines
+/// for a platform whose desktop does not report closure. Reporting it as a bare close instead would
+/// tell the application the popup is gone as though we had watched it happen.
+///
+/// @param identifier the notification identifier being reported on.
+/// @param report how the terminal came to know about the close.
+/// @return a formatted OSC 99 response string (without OSC prefix/terminator).
+[[nodiscard]] std::string buildOSC99CloseResponse(std::string_view identifier, CloseReport report);
 
 /// Manages OSC 99 desktop notification state including chunking and active notification tracking.
 class DesktopNotificationManager

@@ -203,6 +203,20 @@ string buildOSC99QueryResponse(string_view identifier)
                        identifier);
 }
 
+string buildOSC99CloseResponse(string_view identifier, CloseReport report)
+{
+    auto const payload = [report]() -> string_view {
+        switch (report)
+        {
+            case CloseReport::Observed: return "";
+            case CloseReport::Untracked: return "untracked";
+        }
+        return "";
+    }();
+
+    return std::format("99;i={}:p=close;{}", identifier, payload);
+}
+
 void DesktopNotificationManager::handleOSC99(string_view payload, Terminal& terminal)
 {
     auto notification = parseOSC99(payload);
