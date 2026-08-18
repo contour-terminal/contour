@@ -303,6 +303,39 @@ TEST_CASE("PortalNotificationTransport reuses the portal id to replace in place"
     CHECK(fixture.recorder.calls[2].method == QStringLiteral("RemoveNotification"));
 }
 
+TEST_CASE("PortalNotificationTransport survives a second send before the first was answered",
+          "[contour][notification]")
+{
+    // notify() returns without waiting, so a second notification carrying the same OSC identifier
+    // can be issued while the first AddNotification is still outstanding -- and it arrives with
+    // replacesId 0, because nothing upstream has a server id to name yet. Both land on the SAME
+    // portal id all the same, so the two maps must not be left believing two server ids are live
+    // under it: the stale one's timer would otherwise retire the live one, dropping its activation
+    // on the floor and reporting a close for a popup still on screen.
+    auto fixture = Fixture {};
+
+    fixture.transport.notify(
+        aNotification("osc-1"), 0, [&](auto serverId) { fixture.sent.push_back(serverId); });
+    fixture.transport.notify(
+        aNotification("osc-1"), 0, [&](auto serverId) { fixture.sent.push_back(serverId); });
+
+    fixture.recorder.completeCall(0, CallOutcome::Accepted);
+    fixture.recorder.completeCall(1, CallOutcome::Accepted);
+
+    REQUIRE(fixture.sent.size() == 2);
+    auto const live = fixture.sent[1].value();
+
+    // The superseded notification says nothing when its timer comes up.
+    REQUIRE(fixture.recorder.scheduled.size() == 2);
+    fixture.recorder.fireScheduled(0);
+    CHECK(fixture.closed.empty());
+
+    // ... and the live one is still reachable, in both directions.
+    fireActionInvoked(fixture.transport, QStringLiteral("contour-test/osc-1"));
+    REQUIRE(fixture.activated.size() == 1);
+    CHECK(fixture.activated[0] == live);
+}
+
 TEST_CASE("PortalNotificationTransport withdraws only what is live", "[contour][notification]")
 {
     auto fixture = Fixture {};

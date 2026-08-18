@@ -160,6 +160,15 @@ void PortalNotificationTransport::notify(vtbackend::DesktopNotification const& n
             // Recorded only now, and only on success -- exactly when NotificationRouter records
             // its own mapping, so a failed send leaves the previous notification still live and
             // still replaceable.
+            //
+            // Retired by PORTAL ID rather than by replacesId alone, because the two maps must stay
+            // exact mutual inverses and the caller cannot always see the collision: a second send
+            // of the same OSC identifier issued before the first AddNotification was answered
+            // carries replacesId 0, yet lands on the very same portal id. Keying on the id the
+            // portal itself replaces by is what makes "one portal id, one live server id"
+            // structural instead of something the caller has to get right.
+            if (auto const previous = _serverIds.find(portalId); previous != _serverIds.end())
+                retire(previous->second);
             if (replacesId != 0)
                 retire(replacesId);
             _portalIds[serverId] = portalId;
