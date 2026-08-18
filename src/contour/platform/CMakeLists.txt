@@ -27,6 +27,7 @@ add_library(contour_platform STATIC
     FreeDesktopNotifier.cpp FreeDesktopNotifier.hpp
     PortalNotificationTransport.cpp PortalNotificationTransport.hpp
     GuiTheme.hpp
+    NotificationIdMap.hpp
     NotificationRouter.hpp
     NotificationTransport.hpp
     Notifier.cpp Notifier.hpp

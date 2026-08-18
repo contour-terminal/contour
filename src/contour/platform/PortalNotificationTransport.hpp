@@ -4,6 +4,7 @@
 #ifdef __linux__
 
     #include <contour/platform/DBusSignalSubscription.hpp>
+    #include <contour/platform/NotificationIdMap.hpp>
     #include <contour/platform/NotificationTransport.hpp>
 
     #include <QtCore/QLatin1StringView>
@@ -17,7 +18,6 @@
     #include <functional>
     #include <optional>
     #include <string>
-    #include <unordered_map>
 
 namespace contour::platform
 {
@@ -148,10 +148,6 @@ class PortalNotificationTransport final: public QObject, public NotificationTran
     void onActionInvoked(QString const& identifier, QString const& action, QVariantList const& parameters);
 
   private:
-    /// Forgets a notification, in both directions.
-    /// @param serverId The id to forget.
-    void retire(ServerId serverId);
-
     /// The session bus, held rather than fetched per call. @see DBusNotificationTransport.
     QDBusConnection _bus;
 
@@ -172,9 +168,10 @@ class PortalNotificationTransport final: public QObject, public NotificationTran
     /// that -- so a real notification must never wear it.
     ServerId _lastServerId = 0;
 
-    /// The minted-id ⇄ portal-id mapping, kept as exact mutual inverses.
-    std::unordered_map<ServerId, std::string> _portalIds;
-    std::unordered_map<std::string, ServerId> _serverIds;
+    /// The minted-id ⇄ portal-id bookkeeping. The same relation NotificationRouter keeps one layer
+    /// up between the OSC identifier and the id a server assigns, so it is the same type. @see
+    /// NotificationIdMap.
+    NotificationIdMap _ids;
 
     /// Whether subscribe() has installed the match rule, so the destructor knows to remove it.
     DBusSubscriptionState _subscription = DBusSubscriptionState::NotSubscribed;

@@ -159,20 +159,11 @@ void PortalNotificationTransport::notify(vtbackend::DesktopNotification const& n
 
             // Recorded only now, and only on success -- exactly when NotificationRouter records
             // its own mapping, so a failed send leaves the previous notification still live and
-            // still replaceable.
-            //
-            // Retired by PORTAL ID rather than by replacesId alone, because the two maps must stay
-            // exact mutual inverses and the caller cannot always see the collision: a second send
-            // of the same OSC identifier issued before the first AddNotification was answered
-            // carries replacesId 0, yet lands on the very same portal id. Keying on the id the
-            // portal itself replaces by is what makes "one portal id, one live server id"
-            // structural instead of something the caller has to get right.
-            if (auto const previous = _serverIds.find(portalId); previous != _serverIds.end())
-                retire(previous->second);
-            if (replacesId != 0)
-                retire(replacesId);
-            _portalIds[serverId] = portalId;
-            _serverIds[portalId] = serverId;
+            // still replaceable. record() retires by portal id as well as by replacesId, which is
+            // what makes "one portal id, one live server id" hold even for a second send issued
+            // before the first was answered: that one carries replacesId 0 and lands on the very
+            // same portal id.
+            _ids.record(portalId, serverId, replacesId);
 
             notifierLog()("Notification sent: portal_id='{}' -> id={}", portalId, serverId);
             onSent(serverId);
@@ -183,10 +174,9 @@ void PortalNotificationTransport::notify(vtbackend::DesktopNotification const& n
             _schedule(this, closeDelay, [this, serverId] {
                 // The notification may have been withdrawn, superseded or activated while the
                 // timer ran; all three retire it, so finding it gone is how the timer cancels.
-                if (!_portalIds.contains(serverId))
+                if (!_ids.takeByServerId(serverId).has_value())
                     return;
 
-                retire(serverId);
                 if (_onClosed)
                     _onClosed(serverId, ExpiredReason, vtbackend::CloseReport::Untracked);
             });
@@ -195,15 +185,12 @@ void PortalNotificationTransport::notify(vtbackend::DesktopNotification const& n
 
 void PortalNotificationTransport::close(ServerId serverId)
 {
-    auto const it = _portalIds.find(serverId);
-    if (it == _portalIds.end())
+    auto const portalId = _ids.takeByServerId(serverId);
+    if (!portalId.has_value())
         return; // Never sent, or already retired: nothing to withdraw and no traffic to make.
 
-    auto const portalId = it->second;
-    retire(serverId);
-
     // No reply handler: nothing in RemoveNotification's reply is acted on.
-    _call(this, QLatin1StringView("RemoveNotification"), { QString::fromStdString(portalId) }, {});
+    _call(this, QLatin1StringView("RemoveNotification"), { QString::fromStdString(*portalId) }, {});
 }
 
 void PortalNotificationTransport::subscribe(ClosedHandler onClosed, ActivatedHandler onActivated)
@@ -224,25 +211,12 @@ void PortalNotificationTransport::onActionInvoked(QString const& identifier,
     (void) action;     // We only register the "default" action.
     (void) parameters; // Carries the action target and the activation token; neither is used.
 
-    auto const it = _serverIds.find(identifier.toStdString());
-    if (it == _serverIds.end())
+    auto const serverId = _ids.takeByIdentifier(identifier.toStdString());
+    if (!serverId.has_value())
         return; // Another application's notification: this signal is broadcast.
 
-    auto const serverId = it->second;
-    retire(serverId);
-
     if (_onActivated)
-        _onActivated(serverId);
-}
-
-void PortalNotificationTransport::retire(ServerId serverId)
-{
-    auto const it = _portalIds.find(serverId);
-    if (it == _portalIds.end())
-        return;
-
-    _serverIds.erase(it->second);
-    _portalIds.erase(it);
+        _onActivated(*serverId);
 }
 
 } // namespace contour::platform

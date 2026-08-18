@@ -110,6 +110,24 @@ TEST_CASE("NotificationRouter drops the stale reverse entry of a re-sent identif
     CHECK(*oscId == "osc-a");
 }
 
+TEST_CASE("NotificationRouter accepts a server id reissued under a new identifier", "[notification]")
+{
+    // A notification server is free to hand out an id again once the notification wearing it is
+    // gone, and nothing obliges it to tell us the first one closed -- an assumed close retires our
+    // side only. The incoming id must therefore arrive cleared of whatever it used to name, or the
+    // two directions disagree about who owns it.
+    NotificationRouter router;
+    router.onSent("osc-a", 100, /*replacedId*/ 0);
+    router.onSent("osc-b", 100, /*replacedId*/ 0);
+
+    CHECK(router.replacementFor("osc-a") == 0);
+    CHECK(router.replacementFor("osc-b") == 100);
+
+    auto const oscId = router.takeForServerEvent(100);
+    REQUIRE(oscId.has_value());
+    CHECK(*oscId == "osc-b");
+}
+
 TEST_CASE("NotificationRouter close resolves and forgets the mapping", "[notification]")
 {
     NotificationRouter router;
