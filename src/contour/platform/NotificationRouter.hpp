@@ -3,9 +3,11 @@
 
 #include <vtbackend/DesktopNotification.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace contour::platform
@@ -35,6 +37,44 @@ class NotificationRouter
             case vtbackend::NotificationUrgency::Critical: return 2;
         }
         return 1;
+    }
+
+    /// Maps a notification urgency onto the xdg-desktop-portal `priority` string.
+    ///
+    /// The portal names four levels where freedesktop has three, so its `high` has no counterpart
+    /// here and stays unused; Critical maps to `urgent`, the level that survives Do-Not-Disturb.
+    /// @param urgency The backend urgency level.
+    /// @return The portal priority string; `normal` for any unrecognized value.
+    [[nodiscard]] static constexpr std::string_view toPortalPriority(
+        vtbackend::NotificationUrgency urgency) noexcept
+    {
+        switch (urgency)
+        {
+            case vtbackend::NotificationUrgency::Low: return "low";
+            case vtbackend::NotificationUrgency::Normal: return "normal";
+            case vtbackend::NotificationUrgency::Critical: return "urgent";
+        }
+        return "normal";
+    }
+
+    /// How long to wait before ASSUMING a notification was closed, where the desktop cannot say so.
+    ///
+    /// A notification states its own lifetime through OSC 99's `w=`, and that always wins: the
+    /// application knows what it asked for. Only `w=-1` -- "use whatever the desktop does" -- has
+    /// nothing to go on, and falls back to the configured guess.
+    ///
+    /// @param timeout The notification's `w=` in milliseconds: >0 an explicit lifetime, 0 "never
+    ///                auto-close" (kitty's meaning), <0 "the desktop's default".
+    /// @param configured The configured fallback; zero disables the assumption entirely.
+    /// @return How long to wait, or zero for "never assume it closed".
+    [[nodiscard]] static constexpr std::chrono::milliseconds resolveCloseDelay(
+        int timeout, std::chrono::milliseconds configured) noexcept
+    {
+        if (timeout > 0)
+            return std::chrono::milliseconds { timeout };
+        if (timeout == 0)
+            return std::chrono::milliseconds { 0 };
+        return configured;
     }
 
     /// The server id an outgoing notification should REPLACE, if one with the same OSC identifier is

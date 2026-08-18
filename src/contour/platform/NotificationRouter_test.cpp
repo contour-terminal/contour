@@ -11,13 +11,45 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+
 using contour::platform::NotificationRouter;
+using namespace std::chrono_literals;
 
 TEST_CASE("NotificationRouter maps urgency onto the freedesktop byte", "[notification]")
 {
     STATIC_CHECK(NotificationRouter::toFreedesktopUrgency(vtbackend::NotificationUrgency::Low) == 0);
     STATIC_CHECK(NotificationRouter::toFreedesktopUrgency(vtbackend::NotificationUrgency::Normal) == 1);
     STATIC_CHECK(NotificationRouter::toFreedesktopUrgency(vtbackend::NotificationUrgency::Critical) == 2);
+}
+
+TEST_CASE("NotificationRouter maps urgency onto the portal priority string", "[notification]")
+{
+    // The portal names four levels to freedesktop's three, so Critical lands on `urgent` -- the one
+    // that survives Do-Not-Disturb -- and the portal's `high` has no source to come from.
+    STATIC_CHECK(NotificationRouter::toPortalPriority(vtbackend::NotificationUrgency::Low) == "low");
+    STATIC_CHECK(NotificationRouter::toPortalPriority(vtbackend::NotificationUrgency::Normal) == "normal");
+    STATIC_CHECK(NotificationRouter::toPortalPriority(vtbackend::NotificationUrgency::Critical) == "urgent");
+}
+
+TEST_CASE("NotificationRouter resolves how long before a close is assumed", "[notification]")
+{
+    // A notification that stated its own lifetime is answered on that, whatever the configuration
+    // says: the application already told us what it wanted.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*w=*/4200, 10000ms) == 4200ms);
+
+    // OSC 99 `w=0` means "never auto-close", so there is nothing to assume, ever.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*w=*/0, 10000ms) == 0ms);
+
+    // `w=-1` is "whatever the desktop does" -- the only case with nothing to go on, and so the only
+    // one the configured fallback answers.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*w=*/-1, 10000ms) == 10000ms);
+
+    // A zero fallback disables the assumption rather than making it instant.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*w=*/-1, 0ms) == 0ms);
+
+    // ... but an explicit `w=` still wins over a disabled fallback.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*w=*/500, 0ms) == 500ms);
 }
 
 TEST_CASE("NotificationRouter tracks a fresh notification and resolves its server event", "[notification]")

@@ -299,7 +299,11 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 createSettingsFromConfig(_config, _profile, _currentColorPreference, initialPageSize),
                 std::chrono::steady_clock::now() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
-    _desktopNotifier { notifier ? std::move(notifier) : platform::makeDesktopNotifier() }
+    // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is
+    // fixed for the notifier's life: it decides how a backend that cannot observe a close behaves,
+    // which is configuration, not state.
+    _desktopNotifier { notifier ? std::move(notifier)
+                                : platform::makeDesktopNotifier(_config.notificationCloseTimeout.value()) }
 {
     if (app.liveConfig())
     {
@@ -996,10 +1000,10 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
             _desktopNotifier.get(),
             &platform::Notifier::notificationClosed,
             this,
-            [this, identifier](QString const& closedId, uint /*reason*/) {
+            [this, identifier](QString const& closedId, uint /*reason*/, vtbackend::CloseReport report) {
                 if (closedId.toStdString() == identifier)
                 {
-                    _terminal.reply("\033]99;i={}:p=close;\033\\", identifier);
+                    _terminal.reply("\033]{}\033\\", vtbackend::buildOSC99CloseResponse(identifier, report));
                     _terminal.desktopNotificationManager().removeActiveNotification(identifier);
                 }
             },

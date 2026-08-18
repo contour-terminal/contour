@@ -101,9 +101,13 @@ class RecordingNotifier final: public contour::platform::Notifier
     void close(std::string const& identifier) override { closed.push_back(identifier); }
 
     /// Plays back what the desktop would report once the user (or a timeout) retired a notification.
-    void fireClosed(std::string const& identifier, uint reason)
+    /// @param report Whether the backend observed the close or a timer merely assumed it; the
+    ///               portal backend can only ever produce the latter.
+    void fireClosed(std::string const& identifier,
+                    uint reason,
+                    vtbackend::CloseReport report = vtbackend::CloseReport::Observed)
     {
-        emit notificationClosed(QString::fromStdString(identifier), reason);
+        emit notificationClosed(QString::fromStdString(identifier), reason, report);
     }
 
     /// Plays back what the desktop would report when the user clicked a notification.
@@ -1387,7 +1391,19 @@ TEST_CASE("TerminalSession: desktop notification wiring is display-safe and repo
     {
         auto const written = writtenAfter([&] { raised->fireClosed("n2", /*reason*/ 2); });
 
-        CHECK(written.contains("\033]99;i=n2:p=close;"));
+        CHECK(written.contains("\033]99;i=n2:p=close;\033\\"));
+    }
+
+    SECTION("a close the backend only assumed is reported back as untracked")
+    {
+        // What a sandboxed Contour produces: org.freedesktop.portal.Notification has no close
+        // signal at all, so the close is a timer expiring rather than something observed. Saying
+        // so is the difference between an honest report and claiming to have watched it happen.
+        // @see issue #2074.
+        auto const written =
+            writtenAfter([&] { raised->fireClosed("n2", /*reason*/ 1, vtbackend::CloseReport::Untracked); });
+
+        CHECK(written.contains("\033]99;i=n2:p=close;untracked\033\\"));
     }
 
     SECTION("an activation is reported back as p=activated")

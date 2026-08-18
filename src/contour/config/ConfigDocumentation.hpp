@@ -230,6 +230,14 @@ constexpr StringLiteral ProgressTimeoutConfig {
     "\n"
 };
 
+constexpr StringLiteral NotificationCloseTimeoutConfig {
+    "{comment} How long after showing a desktop notification the terminal assumes it was closed,\n"
+    "{comment} in milliseconds, on desktops that cannot report a close. A notification that states\n"
+    "{comment} its own lifetime (OSC 99 `w=`) wins; 0 disables the assumption, reporting nothing.\n"
+    "notification_close_timeout: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarPositionConfig {
     "{comment} Where the GUI tab strip (tab bar) is placed within the window (ignore-case):\n"
     "{comment}   Top    = above the terminal content (default).\n"
@@ -1755,6 +1763,33 @@ constexpr StringLiteral ProgressTimeoutWeb {
     "\n"
 };
 
+constexpr StringLiteral NotificationCloseTimeoutWeb {
+    "\n"
+    "How long after showing a desktop notification the terminal waits before assuming the desktop "
+    "closed it, in milliseconds.\n"
+    "\n"
+    "This only applies where a close cannot be observed. Contour normally learns that a notification "
+    "was dismissed or expired from the desktop itself and reports it back to the application as the "
+    "OSC 99 `p=close` event. Inside a Flatpak sandbox that is impossible: the only reachable service "
+    "is the `org.freedesktop.portal.Notification` portal, which has no close signal of any kind, so "
+    "an application that asked for close events (`c=1`) would otherwise wait forever.\n"
+    "\n"
+    "A notification that states its own lifetime through `w=` is answered after that instead -- the "
+    "application already said what it wanted. Only `w=-1`, \"whatever the desktop does\", falls back "
+    "to this value.\n"
+    "\n"
+    "Two cases are deliberately never answered, because there is no moment at which an answer would "
+    "be true: `0` here, which disables the assumption outright, and `w=0` on the notification, which "
+    "asks for a popup that never expires on its own. An application that requested close events in "
+    "either case is not told.\n"
+    "\n"
+    "Read once per terminal session, so a changed value reaches sessions opened after the reload.\n"
+    "\n"
+    "Because the report is a timer rather than an observation, it is marked `untracked` on the wire, "
+    "so an application can tell the two apart.\n"
+    "\n"
+};
+
 constexpr StringLiteral TabBarPositionWeb {
     "\n"
     "Selects where the GUI tab strip (tab bar) is placed within the window. Valid values (ignore-case):\n"
@@ -2394,6 +2429,8 @@ using AccessibilityCaretReporting =
     DocumentationEntry<AccessibilityCaretReportingConfig, AccessibilityCaretReportingWeb>;
 using HyperlinkHoverTooltip = DocumentationEntry<HyperlinkHoverTooltipConfig, HyperlinkHoverTooltipWeb>;
 using ProgressTimeout = DocumentationEntry<ProgressTimeoutConfig, ProgressTimeoutWeb>;
+using NotificationCloseTimeout =
+    DocumentationEntry<NotificationCloseTimeoutConfig, NotificationCloseTimeoutWeb>;
 using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
 using UiStyle = DocumentationEntry<UiStyleConfig, UiStyleWeb>;

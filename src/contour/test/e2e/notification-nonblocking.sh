@@ -1,5 +1,5 @@
 #! /usr/bin/env bash
-# Asserts that a wedged desktop-notification daemon does not stall Contour -- the regression behind
+# Asserts that a wedged desktop-notification service does not stall Contour -- the regression behind
 # issue #2051, where starting Contour with dunst disabled took about two minutes.
 #
 # The setup reproduces "disabled notification daemon" the way a real desktop presents it: a private
@@ -7,6 +7,9 @@
 # whose activation never claims the name. Every synchronous D-Bus call towards it therefore sits
 # until the reply timeout expires -- Qt's default is 25 s -- and returns NoReply, which is exactly
 # the error the issue reports.
+#
+# org.freedesktop.portal.Desktop is wedged the same way, because a sandboxed Contour talks to the
+# notification portal instead and inherits the same requirement not to wait.
 #
 # Usage: notification-nonblocking.sh <path-to-contour_gui_test>
 
@@ -34,6 +37,16 @@ mkdir -p "$WORK_DIR/services"
 cat >"$WORK_DIR/services/org.freedesktop.Notifications.service" <<EOF
 [D-BUS Service]
 Name=org.freedesktop.Notifications
+Exec=/bin/sleep 600
+EOF
+
+# The same trap, set for the portal: a sandboxed Contour speaks org.freedesktop.portal.Notification
+# instead, and it must be no more willing to wait than the session-bus backend is. A desktop whose
+# xdg-desktop-portal is installed but not answering is the same failure, one bus name over.
+# @see issue #2074.
+cat >"$WORK_DIR/services/org.freedesktop.portal.Desktop.service" <<EOF
+[D-BUS Service]
+Name=org.freedesktop.portal.Desktop
 Exec=/bin/sleep 600
 EOF
 

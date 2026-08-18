@@ -78,6 +78,7 @@ default_profile: main
 early_exit_threshold: 11
 live_config: true
 reflow_on_resize: false
+notification_close_timeout: 2500
 profiles:
     main:
         shell: /bin/sh
@@ -87,6 +88,22 @@ profiles:
     CHECK(config.earlyExitThreshold.value() == 11);
     CHECK(config.live.value() == true);
     CHECK(config.reflowOnResize.value() == false);
+    CHECK(config.notificationCloseTimeout.value() == std::chrono::milliseconds { 2500 });
+}
+
+TEST_CASE("Config: the desktop-notification close timeout defaults to ten seconds", "[config]")
+{
+    // Only consulted where a close cannot be observed -- today the portal backend a sandboxed
+    // Contour must use. Comfortably past a typical desktop's own expiry, so the assumed close lands
+    // after the popup is realistically gone rather than while it is still on screen.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    CHECK(config.notificationCloseTimeout.value() == std::chrono::milliseconds { 10000 });
 }
 
 TEST_CASE("Config: grapheme clustering defaults on and can be turned off", "[config]")
