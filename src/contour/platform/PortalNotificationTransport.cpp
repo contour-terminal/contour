@@ -82,11 +82,11 @@ PortalCaller qtPortalCaller()
 {
     return [bus = QDBusConnection::sessionBus()](QObject* context,
                                                  QLatin1StringView method,
-                                                 QVariantList arguments,
+                                                 QVariantList const& arguments,
                                                  std::function<void(CallOutcome)> onReply) {
         auto message = QDBusMessage::createMethodCall(
             PortalSource.service, PortalSource.path, PortalSource.interface, method);
-        message.setArguments(std::move(arguments));
+        message.setArguments(arguments);
 
         auto pending = bus.asyncCall(message, CallTimeoutMilliseconds);
         if (!onReply)
