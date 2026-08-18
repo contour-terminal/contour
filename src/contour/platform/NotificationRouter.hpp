@@ -100,6 +100,16 @@ class NotificationRouter
     {
         if (replacedId != 0)
             _serverToOsc.erase(replacedId);
+
+        // Whatever this identifier last resolved to goes too, even where the caller did not know to
+        // name it: a second notification sent under the same identifier before the first reply
+        // arrived carries replacedId 0, and would otherwise leave the earlier server id mapped to an
+        // identifier that no longer points back at it. That stale entry answers the earlier
+        // notification's close by retiring the LIVE one -- which can then neither be closed nor
+        // replaced, and whose close is reported against an instance that is already gone.
+        if (auto const previous = _oscToServer.find(oscIdentifier); previous != _oscToServer.end())
+            _serverToOsc.erase(previous->second);
+
         _serverToOsc[serverId] = oscIdentifier;
         _oscToServer[oscIdentifier] = serverId;
     }

@@ -90,6 +90,26 @@ TEST_CASE("NotificationRouter replaces a live notification in place", "[notifica
     CHECK(*oscId == "osc-a");
 }
 
+TEST_CASE("NotificationRouter drops the stale reverse entry of a re-sent identifier", "[notification]")
+{
+    // A transport does not wait for a reply, so a second notification carrying the same identifier
+    // can be sent while the first is still in flight -- and it is recorded with replacedId 0,
+    // because there was no server id to name when it was sent. Were the earlier server id left
+    // mapped, its close event would retire the LIVE notification: the popup still on screen could
+    // then be neither closed nor replaced, and its close would be reported for an instance that is
+    // already gone.
+    NotificationRouter router;
+    router.onSent("osc-a", 100, /*replacedId*/ 0);
+    router.onSent("osc-a", 200, /*replacedId*/ 0);
+
+    CHECK_FALSE(router.takeForServerEvent(100).has_value());
+    CHECK(router.replacementFor("osc-a") == 200);
+
+    auto const oscId = router.takeForServerEvent(200);
+    REQUIRE(oscId.has_value());
+    CHECK(*oscId == "osc-a");
+}
+
 TEST_CASE("NotificationRouter close resolves and forgets the mapping", "[notification]")
 {
     NotificationRouter router;
