@@ -3,7 +3,10 @@
 
     #include <contour/Logging.hpp>
     #include <contour/platform/DBusNotificationTransport.hpp>
+    #include <contour/platform/DBusSignalSubscription.hpp>
 
+    #include <QtCore/QStringList>
+    #include <QtCore/QVariantMap>
     #include <QtDBus/QDBusMessage>
     #include <QtDBus/QDBusPendingCallWatcher>
     #include <QtDBus/QDBusPendingReply>
@@ -17,48 +20,33 @@ namespace contour::platform
 namespace
 {
     // The one string trio every call and every match rule is addressed with.
-    constexpr auto NotificationsService = QLatin1StringView("org.freedesktop.Notifications");
-    constexpr auto NotificationsPath = QLatin1StringView("/org/freedesktop/Notifications");
-    constexpr auto NotificationsInterface = QLatin1StringView("org.freedesktop.Notifications");
-
-    /// How long a call may stay outstanding before D-Bus reports NoReply.
-    ///
-    /// Qt's default is 25 seconds, which is a long time to hold a watcher open against a desktop
-    /// that is not answering. Nothing here needs its reply urgently: losing a Notify reply costs
-    /// only the replace-in-place bookkeeping for that one notification, and CloseNotification's
-    /// reply is not read at all.
-    constexpr auto CallTimeoutMilliseconds = 5000;
-
-    /// A server signal, and the slot it is delivered to.
-    struct SignalSubscription
-    {
-        QLatin1StringView name;
-        char const* slot = nullptr;
+    constexpr auto NotificationsSource = DBusSignalSource {
+        .service = QLatin1StringView("org.freedesktop.Notifications"),
+        .path = QLatin1StringView("/org/freedesktop/Notifications"),
+        .interface = QLatin1StringView("org.freedesktop.Notifications"),
     };
 
-    /// The signals this transport listens for.
-    ///
-    /// A table rather than four hand-written calls, because subscribe() and the destructor must pass
-    /// D-Bus byte-for-byte identical arguments or the match rule is added in one shape and looked for
-    /// in another -- which fails silently and leaks the rule for the life of the process. Walking one
-    /// table makes that structural instead of something two code blocks have to agree about.
-    ///
-    /// A function rather than a constant, because SLOT() expands to a qFlagLocation() call: it is
-    /// neither constexpr nor safe to run before main().
-    [[nodiscard]] std::array<SignalSubscription, 2> signalSubscriptions()
+    // Deliberately below Qt's 25-second default: losing a Notify reply costs only the
+    // replace-in-place bookkeeping for that one notification, and CloseNotification's reply is not
+    // read at all. A desktop that is not answering must not be able to hold anything of ours open.
+    constexpr auto CallTimeoutMilliseconds = 5000;
+
+    // A function rather than a constant because SLOT() expands to qFlagLocation(), which is neither
+    // constexpr nor safe to run before main().
+    [[nodiscard]] std::array<DBusSignalSubscription, 2> signalSubscriptions()
     {
         return {
-            SignalSubscription { QLatin1StringView("NotificationClosed"),
-                                 SLOT(onNotificationClosed(uint, uint)) },
-            SignalSubscription { QLatin1StringView("ActionInvoked"), SLOT(onActionInvoked(uint, QString)) },
+            DBusSignalSubscription { QLatin1StringView("NotificationClosed"),
+                                     SLOT(onNotificationClosed(uint, uint)) },
+            DBusSignalSubscription { QLatin1StringView("ActionInvoked"),
+                                     SLOT(onActionInvoked(uint, QString)) },
         };
     }
 
-    /// The one method-call shape: same service, same object, same interface, every time.
     [[nodiscard]] QDBusMessage notificationCall(QLatin1StringView method)
     {
         return QDBusMessage::createMethodCall(
-            NotificationsService, NotificationsPath, NotificationsInterface, method);
+            NotificationsSource.service, NotificationsSource.path, NotificationsSource.interface, method);
     }
 } // namespace
 
@@ -72,20 +60,46 @@ DBusNotificationTransport::~DBusNotificationTransport()
     if (!_onClosed)
         return;
 
-    // Mirror image of subscribe(). @see the declaration for why this cannot be defaulted.
-    for (auto const& subscription: signalSubscriptions())
-        _bus.disconnect(NotificationsService,
-                        NotificationsPath,
-                        NotificationsInterface,
-                        subscription.name,
-                        this,
-                        subscription.slot);
+    unsubscribeFromDBusSignals(_bus, NotificationsSource, this, signalSubscriptions());
 }
 
-void DBusNotificationTransport::notify(QVariantList arguments, SentHandler onSent)
+QVariantList buildFreedesktopNotifyArguments(vtbackend::DesktopNotification const& notification,
+                                             NotificationTransport::ServerId replacesId)
+{
+    auto const appName = notification.applicationName.empty()
+                             ? QStringLiteral("contour")
+                             : QString::fromStdString(notification.applicationName);
+
+    auto hints = QVariantMap {};
+    hints["urgency"] = QVariant::fromValue(NotificationRouter::toFreedesktopUrgency(notification.urgency));
+
+    // The default action is what a click on the popup triggers.
+    auto const actions = QStringList { QStringLiteral("default"), QStringLiteral("Activate") };
+
+    // org.freedesktop.Notifications.Notify, signature susssasa{sv}i:
+    // STRING app_name, UINT32 replaces_id, STRING app_icon, STRING summary,
+    // STRING body, ARRAY actions, DICT hints, INT32 expire_timeout.
+    // The casts are load-bearing: QDBusInterface::call used to deduce the wire types from the C++
+    // argument types, and a QVariant built from the wrong integer type marshals as the wrong D-Bus
+    // type, which the notification server rejects outright.
+    return QVariantList {
+        appName,
+        QVariant::fromValue(static_cast<quint32>(replacesId)),
+        QStringLiteral(""), // app_icon (empty)
+        QString::fromStdString(notification.title),
+        QString::fromStdString(notification.body),
+        actions,
+        hints,
+        QVariant::fromValue(static_cast<int>(notification.timeout)),
+    };
+}
+
+void DBusNotificationTransport::notify(vtbackend::DesktopNotification const& notification,
+                                       ServerId replacesId,
+                                       SentHandler onSent)
 {
     auto message = notificationCall(QLatin1StringView("Notify"));
-    message.setArguments(arguments);
+    message.setArguments(buildFreedesktopNotifyArguments(notification, replacesId));
 
     // Parented to this, so a transport destroyed with a call in flight takes its watcher with it and
     // the handler -- which reaches back into the notifier that owns us -- is simply never run.
@@ -122,22 +136,15 @@ void DBusNotificationTransport::subscribe(ClosedHandler onClosed, ActivatedHandl
     _onClosed = std::move(onClosed);
     _onActivated = std::move(onActivated);
 
-    // Registering a match rule does not wait for the bus: Qt hands AddMatch a null error pointer,
-    // making it fire-and-forget. Installed unconditionally, with no check that anyone is listening
-    // for us to talk to -- the notification daemon may well start after this session did.
-    for (auto const& subscription: signalSubscriptions())
-        _bus.connect(NotificationsService,
-                     NotificationsPath,
-                     NotificationsInterface,
-                     subscription.name,
-                     this,
-                     subscription.slot);
+    subscribeToDBusSignals(_bus, NotificationsSource, this, signalSubscriptions());
 }
 
 void DBusNotificationTransport::onNotificationClosed(uint id, uint reason)
 {
+    // Observed: the notification daemon is telling us this happened, so the close report Contour
+    // sends back over the PTY is a fact rather than an assumption.
     if (_onClosed)
-        _onClosed(id, reason);
+        _onClosed(id, reason, vtbackend::CloseReport::Observed);
 }
 
 void DBusNotificationTransport::onActionInvoked(uint id, QString const& actionKey)

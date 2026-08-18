@@ -6,10 +6,23 @@
     #include <contour/platform/NotificationTransport.hpp>
 
     #include <QtCore/QObject>
+    #include <QtCore/QVariantList>
     #include <QtDBus/QDBusConnection>
 
 namespace contour::platform
 {
+
+/// Builds the positional argument tuple for org.freedesktop.Notifications.Notify.
+///
+/// A free function rather than a member, because it is the one part of this transport a headless
+/// test can check head-on: no bus, no daemon, no waiting -- just the notification in and the wire
+/// tuple out.
+///
+/// @param notification The notification to send.
+/// @param replacesId A live server id this supersedes, or 0 for a fresh notification.
+/// @return The eight Notify arguments, in wire order.
+[[nodiscard]] QVariantList buildFreedesktopNotifyArguments(vtbackend::DesktopNotification const& notification,
+                                                           NotificationTransport::ServerId replacesId);
 
 /// Speaks org.freedesktop.Notifications over the session bus, asynchronously.
 ///
@@ -39,7 +52,9 @@ class DBusNotificationTransport final: public QObject, public NotificationTransp
     /// teardown race and not merely a leak.
     ~DBusNotificationTransport() override;
 
-    void notify(QVariantList arguments, SentHandler onSent) override;
+    void notify(vtbackend::DesktopNotification const& notification,
+                ServerId replacesId,
+                SentHandler onSent) override;
     void close(ServerId serverId) override;
     void subscribe(ClosedHandler onClosed, ActivatedHandler onActivated) override;
 

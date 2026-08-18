@@ -12,6 +12,7 @@
 
 #ifdef __linux__
 
+    #include <contour/platform/DBusNotificationTransport.hpp>
     #include <contour/platform/FreeDesktopNotifier.hpp>
 
     #include <QtCore/QCoreApplication>
@@ -27,6 +28,7 @@
 
 using contour::platform::FreeDesktopNotifier;
 using contour::platform::NotificationTransport;
+using vtbackend::CloseReport;
 
 namespace
 {
@@ -34,20 +36,23 @@ namespace
 /// A NotificationTransport that sends nothing and remembers everything.
 ///
 /// Deliberately not a mock framework: the recorded vectors ARE the assertions. It also never replies
-/// on its own — @c completeLast() is what delivers a reply — which is how a test can observe that
+/// on its own — @c completeNotify() is what delivers a reply — which is how a test can observe that
 /// notify() returned before any reply existed.
 class RecordingNotificationTransport final: public NotificationTransport
 {
   public:
     struct NotifyCall
     {
-        QVariantList arguments;
+        vtbackend::DesktopNotification notification;
+        ServerId replacesId;
         SentHandler onSent;
     };
 
-    void notify(QVariantList arguments, SentHandler onSent) override
+    void notify(vtbackend::DesktopNotification const& notification,
+                ServerId replacesId,
+                SentHandler onSent) override
     {
-        notifyCalls.emplace_back(NotifyCall { std::move(arguments), std::move(onSent) });
+        notifyCalls.emplace_back(NotifyCall { notification, replacesId, std::move(onSent) });
     }
 
     void close(ServerId serverId) override { closedServerIds.push_back(serverId); }
@@ -66,7 +71,10 @@ class RecordingNotificationTransport final: public NotificationTransport
     }
 
     /// Drives the server-side signals the transport would otherwise receive over the bus.
-    void emitClosed(ServerId serverId, uint32_t reason) { _onClosed(serverId, reason); }
+    void emitClosed(ServerId serverId, uint32_t reason, CloseReport report = CloseReport::Observed)
+    {
+        _onClosed(serverId, reason, report);
+    }
     void emitActivated(ServerId serverId) { _onActivated(serverId); }
 
     std::vector<NotifyCall> notifyCalls;
@@ -137,21 +145,18 @@ TEST_CASE("FreeDesktopNotifier does not wait for a reply", "[contour][notificati
     pump();
     REQUIRE(transport->notifyCalls.size() == 2);
     // Still 0 == "a fresh notification": without a reply there is no server id to replace.
-    CHECK(transport->notifyCalls[1].arguments[1].value<quint32>() == 0);
+    CHECK(transport->notifyCalls[1].replacesId == 0);
 }
 
-TEST_CASE("FreeDesktopNotifier builds the freedesktop Notify argument tuple", "[contour][notification]")
+TEST_CASE("buildFreedesktopNotifyArguments builds the Notify tuple", "[contour][notification]")
 {
-    auto const [notifier, transport] = makeNotifier();
-
+    // Checked head-on rather than through the notifier: the tuple is what the D-Bus transport puts
+    // on the wire, and nothing about building it needs a bus, a daemon or an event loop.
     auto notification = aNotification("osc-1");
     notification.urgency = vtbackend::NotificationUrgency::Critical;
     notification.timeout = 4200;
-    notifier->notify(notification);
-    pump();
 
-    REQUIRE(transport->notifyCalls.size() == 1);
-    auto const& arguments = transport->notifyCalls[0].arguments;
+    auto const arguments = contour::platform::buildFreedesktopNotifyArguments(notification, /*replacesId*/ 0);
 
     // Signature susssasa{sv}i, in wire order. The types matter as much as the values: a QVariant
     // built from the wrong integer type marshals as the wrong D-Bus type and the server rejects it.
@@ -170,14 +175,35 @@ TEST_CASE("FreeDesktopNotifier builds the freedesktop Notify argument tuple", "[
 
     SECTION("an explicit application name wins over the default")
     {
-        auto named = aNotification("osc-2");
-        named.applicationName = "my-app";
-        notifier->notify(named);
-        pump();
-
-        REQUIRE(transport->notifyCalls.size() == 2);
-        CHECK(transport->notifyCalls[1].arguments[0].toString() == QStringLiteral("my-app"));
+        notification.applicationName = "my-app";
+        auto const named = contour::platform::buildFreedesktopNotifyArguments(notification, 0);
+        CHECK(named[0].toString() == QStringLiteral("my-app"));
     }
+
+    SECTION("the replaced id is carried as replaces_id")
+    {
+        auto const replacing = contour::platform::buildFreedesktopNotifyArguments(notification, 77);
+        CHECK(replacing[1].value<quint32>() == 77);
+    }
+}
+
+TEST_CASE("FreeDesktopNotifier hands the transport the notification, not a wire tuple",
+          "[contour][notification]")
+{
+    // The seam is stated in the domain type, so the portal transport never has to read a shape it
+    // does not speak. @see issue #2074.
+    auto const [notifier, transport] = makeNotifier();
+
+    auto notification = aNotification("osc-1");
+    notification.urgency = vtbackend::NotificationUrgency::Critical;
+    notifier->notify(notification);
+    pump();
+
+    REQUIRE(transport->notifyCalls.size() == 1);
+    CHECK(transport->notifyCalls[0].notification.identifier == "osc-1");
+    CHECK(transport->notifyCalls[0].notification.title == "Title");
+    CHECK(transport->notifyCalls[0].notification.urgency == vtbackend::NotificationUrgency::Critical);
+    CHECK(transport->notifyCalls[0].replacesId == 0);
 }
 
 TEST_CASE("FreeDesktopNotifier replaces in place once the reply arrives", "[contour][notification]")
@@ -195,7 +221,7 @@ TEST_CASE("FreeDesktopNotifier replaces in place once the reply arrives", "[cont
     notifier->notify(aNotification("osc-1"));
     pump();
     REQUIRE(transport->notifyCalls.size() == 2);
-    CHECK(transport->notifyCalls[1].arguments[1].value<quint32>() == 77);
+    CHECK(transport->notifyCalls[1].replacesId == 77);
 
     SECTION("a failed send records nothing, so the next one is fresh again")
     {
@@ -205,7 +231,7 @@ TEST_CASE("FreeDesktopNotifier replaces in place once the reply arrives", "[cont
         pump();
         REQUIRE(transport->notifyCalls.size() == 3);
         // Still 77: the failed call did not overwrite the live mapping.
-        CHECK(transport->notifyCalls[2].arguments[1].value<quint32>() == 77);
+        CHECK(transport->notifyCalls[2].replacesId == 77);
     }
 }
 
@@ -245,7 +271,7 @@ TEST_CASE("FreeDesktopNotifier drives the real D-Bus transport without waiting",
     // its notification daemon disabled looks like, and what used to cost 25 seconds per session.
     auto const startedAt = std::chrono::steady_clock::now();
 
-    auto notifier = contour::platform::makeDesktopNotifier();
+    auto notifier = contour::platform::makeDesktopNotifier(std::chrono::milliseconds { 10000 });
     REQUIRE(notifier != nullptr);
 
     // Actually sending is gated, so that a run on a developer's own desktop does not pop a
@@ -267,12 +293,19 @@ TEST_CASE("FreeDesktopNotifier reports server-side close and activation", "[cont
 {
     auto const [notifier, transport] = makeNotifier();
 
-    auto closed = std::vector<std::pair<QString, uint>> {};
+    struct ClosedEvent
+    {
+        QString identifier;
+        uint reason;
+        CloseReport report;
+    };
+    auto closed = std::vector<ClosedEvent> {};
     auto activated = std::vector<QString> {};
-    QObject::connect(
-        notifier.get(),
-        &contour::platform::Notifier::notificationClosed,
-        [&](QString const& identifier, uint reason) { closed.emplace_back(identifier, reason); });
+    QObject::connect(notifier.get(),
+                     &contour::platform::Notifier::notificationClosed,
+                     [&](QString const& identifier, uint reason, CloseReport report) {
+                         closed.emplace_back(ClosedEvent { identifier, reason, report });
+                     });
     QObject::connect(notifier.get(),
                      &contour::platform::Notifier::actionInvoked,
                      [&](QString const& identifier) { activated.push_back(identifier); });
@@ -286,12 +319,24 @@ TEST_CASE("FreeDesktopNotifier reports server-side close and activation", "[cont
         transport->emitClosed(12, /*reason*/ 2);
 
         REQUIRE(closed.size() == 1);
-        CHECK(closed[0].first == QStringLiteral("osc-1"));
-        CHECK(closed[0].second == 2);
+        CHECK(closed[0].identifier == QStringLiteral("osc-1"));
+        CHECK(closed[0].reason == 2);
+        CHECK(closed[0].report == CloseReport::Observed);
 
         // The notification is retired, so a repeat of the same server id says nothing.
         transport->emitClosed(12, 2);
         CHECK(closed.size() == 1);
+    }
+
+    SECTION("a close the backend only assumed is forwarded as such")
+    {
+        // What the portal backend produces: nothing observed the close, a timer expired. The
+        // provenance travels with the event, so the session can report it honestly.
+        transport->emitClosed(12, /*reason*/ 1, CloseReport::Untracked);
+
+        REQUIRE(closed.size() == 1);
+        CHECK(closed[0].identifier == QStringLiteral("osc-1"));
+        CHECK(closed[0].report == CloseReport::Untracked);
     }
 
     SECTION("an activation carries the OSC identifier")

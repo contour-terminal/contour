@@ -20,10 +20,12 @@ add_library(contour_platform STATIC
     Clipboard.cpp Clipboard.hpp
     ColorConversion.hpp
     ExternalLauncher.hpp
-    # Both translation units are wholly inside `#ifdef __linux__`, so they compile to nothing
+    # These translation units are wholly inside `#ifdef __linux__`, so they compile to nothing
     # elsewhere. Listed unconditionally all the same: AUTOMOC must still see the Q_OBJECT.
     DBusNotificationTransport.cpp DBusNotificationTransport.hpp
+    DBusSignalSubscription.hpp
     FreeDesktopNotifier.cpp FreeDesktopNotifier.hpp
+    PortalNotificationTransport.cpp PortalNotificationTransport.hpp
     GuiTheme.hpp
     NotificationRouter.hpp
     NotificationTransport.hpp
