@@ -63,8 +63,10 @@ class NotificationRouter
         return _ids.serverIdFor(oscIdentifier);
     }
 
-    /// Records the server id the transport returned for a sent notification, updating the
-    /// bidirectional mapping and dropping the stale reverse entry when this replaced @p replacedId.
+    /// Records the server id the transport returned for a sent notification.
+    ///
+    /// What that entails -- which stale entries go, and why the caller cannot always name them --
+    /// is stated once, at NotificationIdMap::record().
     /// @param oscIdentifier The OSC 99 identifier that was sent.
     /// @param serverId The id the notification server assigned.
     /// @param replacedId The server id this notification replaced (0 if it was new).

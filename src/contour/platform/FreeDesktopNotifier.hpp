@@ -44,10 +44,11 @@ class FreeDesktopNotifier final: public Notifier
     void close(std::string const& identifier) override;
 
   private:
-    /// Builds and dispatches the freedesktop Notify call. Runs on this object's own thread.
+    /// Resolves what this notification replaces and hands it to the transport, which decides what
+    /// that means on the wire. Runs on this object's own thread.
     void sendNotification(vtbackend::DesktopNotification const& notification);
 
-    /// Resolves @p identifier to a live server id and dispatches CloseNotification for it, if any.
+    /// Resolves @p identifier to a live server id and asks the transport to withdraw it, if any.
     void sendClose(std::string const& identifier);
 
     /// The transport-independent OSC-id <-> server-id bookkeeping and urgency policy. Only ever

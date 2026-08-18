@@ -17,14 +17,12 @@
     #include <contour/platform/PortalNotificationTransport.hpp>
     #include <contour/test/NotificationFixtures.hpp>
 
-    #include <QtCore/QCoreApplication>
     #include <QtCore/QMetaObject>
 
     #include <catch2/catch_test_macros.hpp>
 
     #include <chrono>
     #include <optional>
-    #include <string>
     #include <utility>
     #include <vector>
 
@@ -116,12 +114,19 @@ struct Fixture
             [this](auto serverId) { activated.push_back(serverId); });
     }
 
+    /// Sends @p notification, leaving the portal's reply outstanding.
+    void send(vtbackend::DesktopNotification const& notification,
+              NotificationTransport::ServerId replacesId = 0)
+    {
+        transport.notify(notification, replacesId, [this](auto serverId) { sent.push_back(serverId); });
+    }
+
     /// Sends @p notification and lets the portal accept it, returning the id it was recorded under.
     [[nodiscard]] NotificationTransport::ServerId sendAccepted(
         vtbackend::DesktopNotification const& notification, NotificationTransport::ServerId replacesId = 0)
     {
         auto const index = recorder.calls.size();
-        transport.notify(notification, replacesId, [this](auto serverId) { sent.push_back(serverId); });
+        send(notification, replacesId);
         recorder.completeCall(index, CallOutcome::Accepted);
         return sent.back().value();
     }
@@ -214,8 +219,7 @@ TEST_CASE("PortalNotificationTransport sends AddNotification with the id and opt
 {
     auto fixture = Fixture {};
 
-    fixture.transport.notify(
-        aNotification("osc-1"), 0, [&](auto serverId) { fixture.sent.push_back(serverId); });
+    fixture.send(aNotification("osc-1"));
 
     REQUIRE(fixture.recorder.calls.size() == 1);
     CHECK(fixture.recorder.calls[0].method == QStringLiteral("AddNotification"));
@@ -233,8 +237,7 @@ TEST_CASE("PortalNotificationTransport records nothing when the portal refuses",
 {
     auto fixture = Fixture {};
 
-    fixture.transport.notify(
-        aNotification("osc-1"), 0, [&](auto serverId) { fixture.sent.push_back(serverId); });
+    fixture.send(aNotification("osc-1"));
     fixture.recorder.completeCall(0, CallOutcome::Failed);
 
     REQUIRE(fixture.sent.size() == 1);
@@ -329,15 +332,13 @@ TEST_CASE("PortalNotificationTransport survives a second send before the first w
     // notify() returns without waiting, so a second notification carrying the same OSC identifier
     // can be issued while the first AddNotification is still outstanding -- and it arrives with
     // replacesId 0, because nothing upstream has a server id to name yet. Both land on the SAME
-    // portal id all the same, so the two maps must not be left believing two server ids are live
+    // portal id all the same, so the id map must not be left believing two server ids are live
     // under it: the stale one's timer would otherwise retire the live one, dropping its activation
     // on the floor and reporting a close for a popup still on screen.
     auto fixture = Fixture {};
 
-    fixture.transport.notify(
-        aNotification("osc-1"), 0, [&](auto serverId) { fixture.sent.push_back(serverId); });
-    fixture.transport.notify(
-        aNotification("osc-1"), 0, [&](auto serverId) { fixture.sent.push_back(serverId); });
+    fixture.send(aNotification("osc-1"));
+    fixture.send(aNotification("osc-1"));
 
     fixture.recorder.completeCall(0, CallOutcome::Accepted);
     fixture.recorder.completeCall(1, CallOutcome::Accepted);

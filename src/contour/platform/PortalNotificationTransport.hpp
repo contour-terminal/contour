@@ -170,10 +170,8 @@ class PortalNotificationTransport final: public QObject, public NotificationTran
   private slots:
     /// Handles the portal's ActionInvoked signal.
     ///
-    /// All three parameters are declared even though only the id is used, because QtDBus matches a
-    /// hook to an incoming signal by comparing the signature it reconstructs from the SLOT's
-    /// parameters against the message's own. A slot taking fewer arguments does not fail loudly --
-    /// it is simply never called.
+    /// All three parameters are declared even though only the id is used. @see
+    /// DBusSignalSubscription::slot for why a slot declaring fewer is simply never called.
     void onActionInvoked(QString const& identifier, QString const& action, QVariantList const& parameters);
 
   private:

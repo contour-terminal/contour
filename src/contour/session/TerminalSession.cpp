@@ -1034,7 +1034,6 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
 
     auto const identifier = notification.identifier;
 
-    // Connect close event reporting if requested.
     if (notification.closeEventRequested)
         connectOnceMatching(_desktopNotifier.get(),
                             this,
@@ -1046,14 +1045,12 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
                                 _terminal.desktopNotificationManager().removeActiveNotification(identifier);
                             });
 
-    // Connect activation reporting if requested.
     if (notification.reportOnActivation)
         connectOnceMatching(
             _desktopNotifier.get(), this, &platform::Notifier::actionInvoked, identifier, [this, identifier] {
                 _terminal.reply("\033]99;i={}:p=activated;\033\\", identifier);
             });
 
-    // Focus terminal on activation if requested.
     if (notification.focusOnActivation)
         connectOnceMatching(
             _desktopNotifier.get(), this, &platform::Notifier::actionInvoked, identifier, [this] {

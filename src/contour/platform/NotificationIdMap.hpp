@@ -38,11 +38,6 @@ class NotificationIdMap
         return it != _byIdentifier.end() ? it->second : ServerId { 0 };
     }
 
-    /// Whether @p serverId names a live notification.
-    /// @param serverId The id to test.
-    /// @return Whether it is live.
-    [[nodiscard]] bool contains(ServerId serverId) const noexcept { return _byServerId.contains(serverId); }
-
     /// Records @p serverId as the notification live under @p identifier, retiring whatever was live
     /// under either name before.
     ///
@@ -98,6 +93,7 @@ class NotificationIdMap
         return identifier;
     }
 
+  private:
     /// Retires @p serverId in both directions; a no-op where it names nothing live.
     /// @param serverId The id to forget.
     void forget(ServerId serverId)
@@ -110,7 +106,6 @@ class NotificationIdMap
         _byServerId.erase(it);
     }
 
-  private:
     std::unordered_map<ServerId, std::string> _byServerId;
     std::unordered_map<std::string, ServerId> _byIdentifier;
 };

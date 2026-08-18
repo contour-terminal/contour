@@ -111,11 +111,8 @@ PortalCaller qtPortalCaller()
 
 std::string makePortalIdPrefix()
 {
-    // A random per-process component rather than the process id, because the process id is exactly
-    // what a sandbox takes away: Flatpak runs every instance in its own PID namespace, so two
-    // Contour instances -- the only case where a collision between processes is possible at all --
-    // both report a small, identical pid. A UUID is unique wherever a pid is, and stays unique
-    // where a pid stops being.
+    // Random rather than the process id, for the reason the declaration gives: a sandbox is
+    // exactly where a pid stops identifying anything.
     static auto const processNamespace = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
 
     // A plain counter rather than anything meaningful: the only requirement is that no two
