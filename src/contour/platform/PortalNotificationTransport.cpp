@@ -27,10 +27,6 @@ namespace
         .interface = QLatin1StringView("org.freedesktop.portal.Notification"),
     };
 
-    // Below Qt's 25-second default, for the reason DBusNotificationTransport gives: losing an
-    // AddNotification reply costs only this notification's bookkeeping.
-    constexpr auto CallTimeoutMilliseconds = 5000;
-
     // The freedesktop close reason reported for an assumed close. There is no "we guessed" reason
     // in that enumeration, and "expired" is the closest true statement: the time we waited is up.
     // What actually distinguishes it is the CloseReport carried alongside.
@@ -88,7 +84,7 @@ PortalCaller qtPortalCaller()
             PortalSource.service, PortalSource.path, PortalSource.interface, method);
         message.setArguments(arguments);
 
-        auto pending = bus.asyncCall(message, CallTimeoutMilliseconds);
+        auto pending = bus.asyncCall(message, DBusCallTimeoutMilliseconds);
         if (!onReply)
             return; // Sent and forgotten: nothing in this reply is acted on.
 

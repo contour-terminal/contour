@@ -14,6 +14,7 @@
 
     #include <contour/platform/DBusNotificationTransport.hpp>
     #include <contour/platform/FreeDesktopNotifier.hpp>
+    #include <contour/test/NotificationFixtures.hpp>
 
     #include <QtCore/QCoreApplication>
     #include <QtCore/QStringList>
@@ -28,6 +29,7 @@
 
 using contour::platform::FreeDesktopNotifier;
 using contour::platform::NotificationTransport;
+using contour::test::aNotification;
 using vtbackend::CloseReport;
 
 namespace
@@ -102,15 +104,6 @@ class RecordingNotificationTransport final: public NotificationTransport
 void pump()
 {
     QCoreApplication::processEvents();
-}
-
-[[nodiscard]] vtbackend::DesktopNotification aNotification(std::string identifier)
-{
-    auto notification = vtbackend::DesktopNotification {};
-    notification.identifier = std::move(identifier);
-    notification.title = "Title";
-    notification.body = "Body";
-    return notification;
 }
 
 } // namespace
@@ -262,31 +255,19 @@ TEST_CASE("FreeDesktopNotifier closes only what is live", "[contour][notificatio
 TEST_CASE("FreeDesktopNotifier drives the real D-Bus transport without waiting",
           "[contour][notification][dbus]")
 {
-    // Everything above talks to a recorder, which cannot catch the bug this file exists for: that
-    // was in the D-Bus adapter, and specifically in it waiting. So this one case builds the notifier
-    // exactly as production does, against whatever session bus the machine running it has.
-    //
-    // test/e2e/notification-nonblocking.sh is what makes that bus interesting: there
-    // org.freedesktop.Notifications is activatable and never answers, which is what a desktop with
-    // its notification daemon disabled looks like, and what used to cost 25 seconds per session.
-    auto const startedAt = std::chrono::steady_clock::now();
-
+    // Built exactly as production does, against whatever session bus is there. @see
+    // contour::test::checkReturnsWithoutWaiting for what this is guarding and why the bound is what
+    // it is.
     auto notifier = contour::platform::makeDesktopNotifier(std::chrono::milliseconds { 10000 });
     REQUIRE(notifier != nullptr);
 
-    // Actually sending is gated, so that a run on a developer's own desktop does not pop a
-    // notification up at them and leave it there. The wedged-bus harness, where by construction
-    // nothing can be displayed, sets this and so covers the send path too.
-    if (qEnvironmentVariableIsSet("CONTOUR_TEST_NOTIFICATION_SEND"))
-    {
+    contour::test::checkReturnsWithoutWaiting([&](bool maySend) {
+        if (!maySend)
+            return;
+
         notifier->notify(aNotification("osc-real"));
         notifier->close("osc-real");
-    }
-    QCoreApplication::processEvents();
-
-    // Deliberately generous: this separates "returned promptly" from "waited out a 25-second D-Bus
-    // reply timeout", and is not trying to measure anything finer than that.
-    CHECK(std::chrono::steady_clock::now() - startedAt < std::chrono::seconds { 5 });
+    });
 }
 
 TEST_CASE("FreeDesktopNotifier reports server-side close and activation", "[contour][notification]")

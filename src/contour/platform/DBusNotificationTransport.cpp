@@ -26,11 +26,6 @@ namespace
         .interface = QLatin1StringView("org.freedesktop.Notifications"),
     };
 
-    // Deliberately below Qt's 25-second default: losing a Notify reply costs only the
-    // replace-in-place bookkeeping for that one notification, and CloseNotification's reply is not
-    // read at all. A desktop that is not answering must not be able to hold anything of ours open.
-    constexpr auto CallTimeoutMilliseconds = 5000;
-
     // A function rather than a constant because SLOT() expands to qFlagLocation(), which is neither
     // constexpr nor safe to run before main().
     [[nodiscard]] std::array<DBusSignalSubscription, 2> signalSubscriptions()
@@ -103,7 +98,8 @@ void DBusNotificationTransport::notify(vtbackend::DesktopNotification const& not
 
     // Parented to this, so a transport destroyed with a call in flight takes its watcher with it and
     // the handler -- which reaches back into the notifier that owns us -- is simply never run.
-    auto* const watcher = new QDBusPendingCallWatcher(_bus.asyncCall(message, CallTimeoutMilliseconds), this);
+    auto* const watcher =
+        new QDBusPendingCallWatcher(_bus.asyncCall(message, DBusCallTimeoutMilliseconds), this);
 
     QObject::connect(
         watcher, &QDBusPendingCallWatcher::finished, this, [onSent = std::move(onSent)](auto* self) {
@@ -128,7 +124,7 @@ void DBusNotificationTransport::close(ServerId serverId)
 
     // Sent and forgotten: there is nothing in the reply the caller acts on, and waiting for it was
     // what made closing a notification able to stall the terminal thread.
-    _bus.asyncCall(message, CallTimeoutMilliseconds);
+    _bus.asyncCall(message, DBusCallTimeoutMilliseconds);
 }
 
 void DBusNotificationTransport::subscribe(ClosedHandler onClosed, ActivatedHandler onActivated)

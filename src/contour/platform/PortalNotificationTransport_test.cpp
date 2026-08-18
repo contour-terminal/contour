@@ -15,6 +15,7 @@
 #ifdef __linux__
 
     #include <contour/platform/PortalNotificationTransport.hpp>
+    #include <contour/test/NotificationFixtures.hpp>
 
     #include <QtCore/QCoreApplication>
     #include <QtCore/QMetaObject>
@@ -30,6 +31,7 @@
 using contour::platform::CallOutcome;
 using contour::platform::NotificationTransport;
 using contour::platform::PortalNotificationTransport;
+using contour::test::aNotification;
 using vtbackend::CloseReport;
 using namespace std::chrono_literals;
 
@@ -138,15 +140,6 @@ void fireActionInvoked(PortalNotificationTransport& transport, QString const& id
                                                    Q_ARG(QString, QStringLiteral("default")),
                                                    Q_ARG(QVariantList, QVariantList {}));
     REQUIRE(invoked);
-}
-
-[[nodiscard]] vtbackend::DesktopNotification aNotification(std::string identifier)
-{
-    auto notification = vtbackend::DesktopNotification {};
-    notification.identifier = std::move(identifier);
-    notification.title = "Title";
-    notification.body = "Body";
-    return notification;
 }
 
 } // namespace
@@ -413,26 +406,18 @@ TEST_CASE("PortalNotificationTransport ignores another application's notificatio
 TEST_CASE("PortalNotificationTransport drives the real portal without waiting",
           "[contour][notification][dbus]")
 {
-    // Everything above talks to a recorder, which by construction cannot catch a transport that
-    // WAITS -- and waiting is the regression the whole seam exists to prevent (issue #2051). So
-    // this one case builds the transport exactly as production does, against whatever session bus
-    // the machine running it has.
-    //
-    // test/e2e/notification-nonblocking.sh is what makes that bus interesting: there
-    // org.freedesktop.portal.Desktop is activatable and never answers, which is what a desktop with
-    // no working portal looks like.
-    auto const startedAt = std::chrono::steady_clock::now();
-
+    // Built exactly as production does, against whatever session bus is there. @see
+    // contour::test::checkReturnsWithoutWaiting for what this is guarding and why the bound is what
+    // it is.
     auto transport = PortalNotificationTransport {
         10000ms, "contour-test", contour::platform::qtDelayScheduler(), contour::platform::qtPortalCaller()
     };
     transport.subscribe([](auto, auto, auto) {}, [](auto) {});
 
-    // Actually sending is gated, so a run on a developer's own desktop does not pop a notification
-    // up at them and leave it there. The wedged-bus harness, where by construction nothing can be
-    // displayed, sets this and so covers the send path too.
-    if (qEnvironmentVariableIsSet("CONTOUR_TEST_NOTIFICATION_SEND"))
-    {
+    contour::test::checkReturnsWithoutWaiting([&](bool maySend) {
+        if (!maySend)
+            return;
+
         transport.notify(aNotification("osc-real"), 0, [](auto) {});
 
         // close() short-circuits on an id it holds no mapping for, and on a bus that never answers
@@ -442,12 +427,7 @@ TEST_CASE("PortalNotificationTransport drives the real portal without waiting",
                                             QLatin1StringView("RemoveNotification"),
                                             { QStringLiteral("contour-test/osc-real") },
                                             {});
-    }
-    QCoreApplication::processEvents();
-
-    // Deliberately generous: this separates "returned promptly" from "waited out a 25-second D-Bus
-    // reply timeout", and is not trying to measure anything finer than that.
-    CHECK(std::chrono::steady_clock::now() - startedAt < std::chrono::seconds { 5 });
+    });
 }
 
 #endif // defined(__linux__)
