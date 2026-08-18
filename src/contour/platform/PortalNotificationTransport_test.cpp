@@ -130,11 +130,14 @@ struct Fixture
 /// surface of one of them.
 void fireActionInvoked(PortalNotificationTransport& transport, QString const& identifier)
 {
-    QMetaObject::invokeMethod(&transport,
-                              "onActionInvoked",
-                              Q_ARG(QString, identifier),
-                              Q_ARG(QString, QStringLiteral("default")),
-                              Q_ARG(QVariantList, QVariantList {}));
+    // Checked, because a name resolved at run time can stop resolving: were the slot renamed, every
+    // "and nothing was reported" case below would keep passing while reporting nothing at all.
+    auto const invoked = QMetaObject::invokeMethod(&transport,
+                                                   "onActionInvoked",
+                                                   Q_ARG(QString, identifier),
+                                                   Q_ARG(QString, QStringLiteral("default")),
+                                                   Q_ARG(QVariantList, QVariantList {}));
+    REQUIRE(invoked);
 }
 
 [[nodiscard]] vtbackend::DesktopNotification aNotification(std::string identifier)
@@ -431,7 +434,14 @@ TEST_CASE("PortalNotificationTransport drives the real portal without waiting",
     if (qEnvironmentVariableIsSet("CONTOUR_TEST_NOTIFICATION_SEND"))
     {
         transport.notify(aNotification("osc-real"), 0, [](auto) {});
-        transport.close(1);
+
+        // close() short-circuits on an id it holds no mapping for, and on a bus that never answers
+        // no mapping is ever recorded -- so the withdraw path is put on the wire through the caller
+        // itself. Sending it, not skipping it, is what this case is here to time.
+        contour::platform::qtPortalCaller()(&transport,
+                                            QLatin1StringView("RemoveNotification"),
+                                            { QStringLiteral("contour-test/osc-real") },
+                                            {});
     }
     QCoreApplication::processEvents();
 
