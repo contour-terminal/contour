@@ -50,6 +50,10 @@ TEST_CASE("NotificationRouter resolves how long before a close is assumed", "[no
 
     // ... but an explicit `w=` still wins over a disabled fallback.
     STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*timeout=*/500, 0ms) == 500ms);
+
+    // A configuration file is free to say -1. That must read as "disabled" rather than travel on to
+    // become a negative timer interval, which Qt refuses to start and complains about instead.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*timeout=*/-1, -1ms) == 0ms);
 }
 
 TEST_CASE("NotificationRouter tracks a fresh notification and resolves its server event", "[notification]")

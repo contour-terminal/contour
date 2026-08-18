@@ -3,6 +3,7 @@
 
 #include <vtbackend/DesktopNotification.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -65,8 +66,8 @@ class NotificationRouter
     ///
     /// @param timeout The notification's `w=` in milliseconds: >0 an explicit lifetime, 0 "never
     ///                auto-close" (kitty's meaning), <0 "the desktop's default".
-    /// @param configured The configured fallback; zero disables the assumption entirely.
-    /// @return How long to wait, or zero for "never assume it closed".
+    /// @param configured The configured fallback; zero or less disables the assumption entirely.
+    /// @return How long to wait, never negative; zero means "never assume it closed".
     [[nodiscard]] static constexpr std::chrono::milliseconds resolveCloseDelay(
         int timeout, std::chrono::milliseconds configured) noexcept
     {
@@ -74,7 +75,10 @@ class NotificationRouter
             return std::chrono::milliseconds { timeout };
         if (timeout == 0)
             return std::chrono::milliseconds { 0 };
-        return configured;
+
+        // A negative configuration value reads as "disabled" rather than travelling on to become a
+        // negative timer interval, which Qt refuses to start and complains about instead.
+        return std::max(configured, std::chrono::milliseconds { 0 });
     }
 
     /// The server id an outgoing notification should REPLACE, if one with the same OSC identifier is
