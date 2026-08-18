@@ -140,14 +140,6 @@ PortalNotificationTransport::PortalNotificationTransport(std::chrono::millisecon
 {
 }
 
-PortalNotificationTransport::~PortalNotificationTransport()
-{
-    if (_subscription == DBusSubscriptionState::NotSubscribed)
-        return;
-
-    unsubscribeFromDBusSignals(_bus, PortalSource, this, signalSubscriptions());
-}
-
 std::string PortalNotificationTransport::portalIdFor(std::string const& identifier) const
 {
     return std::format("{}/{}", _idPrefix, identifier);
@@ -215,8 +207,7 @@ void PortalNotificationTransport::subscribe(ClosedHandler onClosed, ActivatedHan
 
     // Only the activation signal exists to subscribe to; the portal has no close signal at all, so
     // _onClosed is driven by the timer instead.
-    subscribeToDBusSignals(_bus, PortalSource, this, signalSubscriptions());
-    _subscription = DBusSubscriptionState::Subscribed;
+    _subscription = subscribeToDBusSignals(_bus, PortalSource, this, signalSubscriptions());
 }
 
 void PortalNotificationTransport::onActionInvoked(QString const& identifier,

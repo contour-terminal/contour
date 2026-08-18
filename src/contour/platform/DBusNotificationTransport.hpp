@@ -58,15 +58,6 @@ class DBusNotificationTransport final: public QObject, public NotificationTransp
   public:
     explicit DBusNotificationTransport(QObject* parent = nullptr);
 
-    /// Removes the session-bus signal subscriptions that subscribe() installed.
-    ///
-    /// Not defaulted: QDBusConnection::connect() registers a match rule on the process-wide session
-    /// bus, and there is one transport per terminal session. Without the matching disconnect the
-    /// rules accumulate for the life of the process, and the bus keeps delivering those signals
-    /// towards an object that is being destroyed -- the bus runs its own thread, so that is a
-    /// teardown race and not merely a leak.
-    ~DBusNotificationTransport() override;
-
     void notify(vtbackend::DesktopNotification const& notification,
                 ServerId replacesId,
                 SentHandler onSent) override;
@@ -85,8 +76,8 @@ class DBusNotificationTransport final: public QObject, public NotificationTransp
     /// obtaining it costs a Hello round-trip to the bus daemon, which always answers at once.
     QDBusConnection _bus;
 
-    /// Whether subscribe() has installed the match rules, so the destructor knows to remove them.
-    DBusSubscriptionState _subscription = DBusSubscriptionState::NotSubscribed;
+    /// The installed match rules, removed when this dies. @see DBusSignalSubscriptionGuard.
+    DBusSignalSubscriptionGuard _subscription;
 
     /// The subscription handlers.
     ClosedHandler _onClosed;

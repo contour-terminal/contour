@@ -152,11 +152,6 @@ class PortalNotificationTransport final: public QObject, public NotificationTran
                                          PortalCaller caller,
                                          QObject* parent = nullptr);
 
-    /// Removes the session-bus signal subscription that subscribe() installed. Not defaulted, for
-    /// the reason DBusNotificationTransport's destructor gives: one match rule per terminal session
-    /// on a process-wide bus that runs its own thread.
-    ~PortalNotificationTransport() override;
-
     void notify(vtbackend::DesktopNotification const& notification,
                 ServerId replacesId,
                 SentHandler onSent) override;
@@ -207,8 +202,8 @@ class PortalNotificationTransport final: public QObject, public NotificationTran
     /// NotificationIdMap.
     NotificationIdMap _ids;
 
-    /// Whether subscribe() has installed the match rule, so the destructor knows to remove it.
-    DBusSubscriptionState _subscription = DBusSubscriptionState::NotSubscribed;
+    /// The installed match rule, removed when this dies. @see DBusSignalSubscriptionGuard.
+    DBusSignalSubscriptionGuard _subscription;
 
     /// The subscription handlers.
     ClosedHandler _onClosed;

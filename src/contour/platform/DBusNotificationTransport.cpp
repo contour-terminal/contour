@@ -50,14 +50,6 @@ DBusNotificationTransport::DBusNotificationTransport(QObject* parent):
 {
 }
 
-DBusNotificationTransport::~DBusNotificationTransport()
-{
-    if (_subscription == DBusSubscriptionState::NotSubscribed)
-        return;
-
-    unsubscribeFromDBusSignals(_bus, NotificationsSource, this, signalSubscriptions());
-}
-
 QVariantList buildFreedesktopNotifyArguments(vtbackend::DesktopNotification const& notification,
                                              NotificationTransport::ServerId replacesId)
 {
@@ -132,8 +124,7 @@ void DBusNotificationTransport::subscribe(ClosedHandler onClosed, ActivatedHandl
     _onClosed = std::move(onClosed);
     _onActivated = std::move(onActivated);
 
-    subscribeToDBusSignals(_bus, NotificationsSource, this, signalSubscriptions());
-    _subscription = DBusSubscriptionState::Subscribed;
+    _subscription = subscribeToDBusSignals(_bus, NotificationsSource, this, signalSubscriptions());
 }
 
 void DBusNotificationTransport::onNotificationClosed(uint id, uint reason)
