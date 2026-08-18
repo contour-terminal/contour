@@ -13,6 +13,20 @@
 namespace contour::platform
 {
 
+/// Maps a notification urgency onto the freedesktop.org urgency byte (0=low, 1=normal, 2=critical).
+/// @param urgency The backend urgency level.
+/// @return The freedesktop urgency byte; Normal (1) for any unrecognized value.
+[[nodiscard]] constexpr uint8_t toFreedesktopUrgency(vtbackend::NotificationUrgency urgency) noexcept
+{
+    switch (urgency)
+    {
+        case vtbackend::NotificationUrgency::Low: return 0;
+        case vtbackend::NotificationUrgency::Normal: return 1;
+        case vtbackend::NotificationUrgency::Critical: return 2;
+    }
+    return 1;
+}
+
 /// Builds the positional argument tuple for org.freedesktop.Notifications.Notify.
 ///
 /// A free function rather than a member, because it is the one part of this transport a headless

@@ -66,7 +66,7 @@ QVariantList buildFreedesktopNotifyArguments(vtbackend::DesktopNotification cons
                              : QString::fromStdString(notification.applicationName);
 
     auto hints = QVariantMap {};
-    hints["urgency"] = QVariant::fromValue(NotificationRouter::toFreedesktopUrgency(notification.urgency));
+    hints["urgency"] = QVariant::fromValue(toFreedesktopUrgency(notification.urgency));
 
     // The default action is what a click on the popup triggers.
     auto const actions = QStringList { QStringLiteral("default"), QStringLiteral("Activate") };

@@ -12,7 +12,6 @@
 #include <chrono>
 
 using contour::platform::makeNotificationTransport;
-using contour::platform::makePortalIdPrefix;
 using contour::platform::NotificationBackend;
 using contour::platform::SandboxState;
 using contour::platform::selectNotificationBackend;
@@ -42,17 +41,4 @@ TEST_CASE("makeNotificationTransport builds every backend it names", "[contour][
 
     CHECK(makeNotificationTransport(NotificationBackend::FreeDesktop, 10000ms) != nullptr);
     CHECK(makeNotificationTransport(NotificationBackend::Portal, 10000ms) != nullptr);
-}
-
-TEST_CASE("makePortalIdPrefix hands out a fresh namespace every time", "[contour][notification]")
-{
-    // A transport is built per terminal session, and two panes are free to pick the same OSC 99
-    // identifier. Were the namespace merely per-process, their portal ids would be equal: the portal
-    // would replace one pane's popup with the other's, and because ActionInvoked is broadcast, a
-    // click on either would be reported back by BOTH sessions.
-    auto const first = makePortalIdPrefix();
-    auto const second = makePortalIdPrefix();
-
-    CHECK(first != second);
-    CHECK(first.starts_with("contour-"));
 }

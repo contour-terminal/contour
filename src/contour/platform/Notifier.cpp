@@ -2,9 +2,6 @@
 #include <contour/platform/NotificationTransport.hpp>
 #include <contour/platform/Notifier.hpp>
 
-#include <QtCore/QUuid>
-
-#include <atomic>
 #include <format>
 
 #ifdef __linux__
@@ -33,23 +30,6 @@ namespace
 
 } // namespace
 #endif
-
-std::string makePortalIdPrefix()
-{
-    // A random per-process component rather than the process id, because the process id is exactly
-    // what a sandbox takes away: Flatpak runs every instance in its own PID namespace, so two
-    // Contour instances -- the only case where a collision between processes is possible at all --
-    // both report a small, identical pid. A UUID is unique wherever a pid is, and stays unique
-    // where a pid stops being.
-    static auto const processNamespace = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
-
-    // A plain counter rather than anything meaningful: the only requirement is that no two
-    // transports in this process share a namespace. Atomic because sessions are created from more
-    // than one thread.
-    static auto nextNamespace = std::atomic<uint64_t> { 0 };
-
-    return std::format("contour-{}-{}", processNamespace, ++nextNamespace);
-}
 
 std::unique_ptr<NotificationTransport> makeNotificationTransport(
     [[maybe_unused]] NotificationBackend backend, [[maybe_unused]] std::chrono::milliseconds closeDelay)

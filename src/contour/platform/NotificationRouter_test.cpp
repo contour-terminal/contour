@@ -16,22 +16,6 @@
 using contour::platform::NotificationRouter;
 using namespace std::chrono_literals;
 
-TEST_CASE("NotificationRouter maps urgency onto the freedesktop byte", "[notification]")
-{
-    STATIC_CHECK(NotificationRouter::toFreedesktopUrgency(vtbackend::NotificationUrgency::Low) == 0);
-    STATIC_CHECK(NotificationRouter::toFreedesktopUrgency(vtbackend::NotificationUrgency::Normal) == 1);
-    STATIC_CHECK(NotificationRouter::toFreedesktopUrgency(vtbackend::NotificationUrgency::Critical) == 2);
-}
-
-TEST_CASE("NotificationRouter maps urgency onto the portal priority string", "[notification]")
-{
-    // The portal names four levels to freedesktop's three, so Critical lands on `urgent` -- the one
-    // that survives Do-Not-Disturb -- and the portal's `high` has no source to come from.
-    STATIC_CHECK(NotificationRouter::toPortalPriority(vtbackend::NotificationUrgency::Low) == "low");
-    STATIC_CHECK(NotificationRouter::toPortalPriority(vtbackend::NotificationUrgency::Normal) == "normal");
-    STATIC_CHECK(NotificationRouter::toPortalPriority(vtbackend::NotificationUrgency::Critical) == "urgent");
-}
-
 TEST_CASE("NotificationRouter resolves how long before a close is assumed", "[notification]")
 {
     // A notification that stated its own lifetime is answered on that, whatever the configuration

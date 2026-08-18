@@ -29,8 +29,10 @@
     #include <vector>
 
 using contour::platform::CallOutcome;
+using contour::platform::makePortalIdPrefix;
 using contour::platform::NotificationTransport;
 using contour::platform::PortalNotificationTransport;
+using contour::platform::toPortalPriority;
 using contour::test::aNotification;
 using vtbackend::CloseReport;
 using namespace std::chrono_literals;
@@ -143,6 +145,28 @@ void fireActionInvoked(PortalNotificationTransport& transport, QString const& id
 }
 
 } // namespace
+
+TEST_CASE("makePortalIdPrefix hands out a fresh namespace every time", "[contour][notification]")
+{
+    // A transport is built per terminal session, and two panes are free to pick the same OSC 99
+    // identifier. Were the namespace merely per-process, their portal ids would be equal: the portal
+    // would replace one pane's popup with the other's, and because ActionInvoked is broadcast, a
+    // click on either would be reported back by BOTH sessions.
+    auto const first = makePortalIdPrefix();
+    auto const second = makePortalIdPrefix();
+
+    CHECK(first != second);
+    CHECK(first.starts_with("contour-"));
+}
+TEST_CASE("buildPortalNotificationOptions maps urgency onto the portal priority string",
+          "[contour][notification]")
+{
+    // The portal names four levels to freedesktop's three, so Critical lands on `urgent` -- the one
+    // that survives Do-Not-Disturb -- and the portal's `high` has no source to come from.
+    STATIC_CHECK(toPortalPriority(vtbackend::NotificationUrgency::Low) == "low");
+    STATIC_CHECK(toPortalPriority(vtbackend::NotificationUrgency::Normal) == "normal");
+    STATIC_CHECK(toPortalPriority(vtbackend::NotificationUrgency::Critical) == "urgent");
+}
 
 TEST_CASE("buildPortalNotificationOptions builds the AddNotification dictionary", "[contour][notification]")
 {

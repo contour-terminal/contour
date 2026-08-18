@@ -18,9 +18,43 @@
     #include <functional>
     #include <optional>
     #include <string>
+    #include <string_view>
 
 namespace contour::platform
 {
+
+/// A fresh portal-notification id namespace, unique within this process and across calls.
+///
+/// Portal notification ids are chosen by the application, and two things make a namespace
+/// necessary. Between processes: the portal's ActionInvoked signal is broadcast and carries no app
+/// id, so another sandboxed application's notification "1" would be indistinguishable from ours.
+/// WITHIN one process: a transport is built per terminal session, and two panes are free to use the
+/// same OSC 99 identifier -- so a per-process prefix alone would have them collide, replacing each
+/// other's popups and each answering the other's activation. Hence unique per call, not per process.
+///
+/// The per-process half is random rather than the process id, because a sandbox is precisely where
+/// a process id stops identifying anything: Flatpak gives every instance its own PID namespace, so
+/// two sandboxed Contours both see a small, identical pid.
+///
+/// @return The prefix, of the shape `contour-<uuid>-<n>`.
+[[nodiscard]] std::string makePortalIdPrefix();
+
+/// Maps a notification urgency onto the xdg-desktop-portal `priority` string.
+///
+/// The portal names four levels where freedesktop has three, so its `high` has no counterpart
+/// here and stays unused; Critical maps to `urgent`, the level that survives Do-Not-Disturb.
+/// @param urgency The backend urgency level.
+/// @return The portal priority string; `normal` for any unrecognized value.
+[[nodiscard]] constexpr std::string_view toPortalPriority(vtbackend::NotificationUrgency urgency) noexcept
+{
+    switch (urgency)
+    {
+        case vtbackend::NotificationUrgency::Low: return "low";
+        case vtbackend::NotificationUrgency::Normal: return "normal";
+        case vtbackend::NotificationUrgency::Critical: return "urgent";
+    }
+    return "normal";
+}
 
 /// Builds the options dictionary for org.freedesktop.portal.Notification.AddNotification.
 ///

@@ -29,6 +29,7 @@
 
 using contour::platform::FreeDesktopNotifier;
 using contour::platform::NotificationTransport;
+using contour::platform::toFreedesktopUrgency;
 using contour::test::aNotification;
 using vtbackend::CloseReport;
 
@@ -107,6 +108,13 @@ void pump()
 }
 
 } // namespace
+
+TEST_CASE("buildFreedesktopNotifyArguments maps urgency onto the freedesktop byte", "[contour][notification]")
+{
+    STATIC_CHECK(toFreedesktopUrgency(vtbackend::NotificationUrgency::Low) == 0);
+    STATIC_CHECK(toFreedesktopUrgency(vtbackend::NotificationUrgency::Normal) == 1);
+    STATIC_CHECK(toFreedesktopUrgency(vtbackend::NotificationUrgency::Critical) == 2);
+}
 
 TEST_CASE("FreeDesktopNotifier sends nothing while being constructed", "[contour][notification]")
 {

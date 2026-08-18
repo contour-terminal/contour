@@ -10,7 +10,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <string_view>
 
 namespace contour::platform
 {
@@ -21,44 +20,16 @@ namespace contour::platform
 /// bookkeeping underneath is NotificationIdMap; this names it in the protocol's own vocabulary, so
 /// the routing logic is unit-testable without a D-Bus session.
 ///
+/// It speaks NEITHER wire format. How an urgency is spelled is the sending transport's business and
+/// lives beside the call that carries it -- @see buildFreedesktopNotifyArguments() and
+/// buildPortalNotificationOptions() -- so a third backend adds its table to its own header rather
+/// than to this one.
+///
 /// The transport-specific numeric id type is @p ServerId (a D-Bus notification id is a uint32).
 class NotificationRouter
 {
   public:
     using ServerId = NotificationIdMap::ServerId;
-
-    /// Maps a notification urgency onto the freedesktop.org urgency byte (0=low, 1=normal, 2=critical).
-    /// @param urgency The backend urgency level.
-    /// @return The freedesktop urgency byte; Normal (1) for any unrecognized value.
-    [[nodiscard]] static constexpr uint8_t toFreedesktopUrgency(
-        vtbackend::NotificationUrgency urgency) noexcept
-    {
-        switch (urgency)
-        {
-            case vtbackend::NotificationUrgency::Low: return 0;
-            case vtbackend::NotificationUrgency::Normal: return 1;
-            case vtbackend::NotificationUrgency::Critical: return 2;
-        }
-        return 1;
-    }
-
-    /// Maps a notification urgency onto the xdg-desktop-portal `priority` string.
-    ///
-    /// The portal names four levels where freedesktop has three, so its `high` has no counterpart
-    /// here and stays unused; Critical maps to `urgent`, the level that survives Do-Not-Disturb.
-    /// @param urgency The backend urgency level.
-    /// @return The portal priority string; `normal` for any unrecognized value.
-    [[nodiscard]] static constexpr std::string_view toPortalPriority(
-        vtbackend::NotificationUrgency urgency) noexcept
-    {
-        switch (urgency)
-        {
-            case vtbackend::NotificationUrgency::Low: return "low";
-            case vtbackend::NotificationUrgency::Normal: return "normal";
-            case vtbackend::NotificationUrgency::Critical: return "urgent";
-        }
-        return "normal";
-    }
 
     /// How long to wait before ASSUMING a notification was closed, where the desktop cannot say so.
     ///
