@@ -51,13 +51,19 @@ namespace contour::test
 /// The bound is deliberately generous: it separates "returned promptly" from "waited out a
 /// 25-second D-Bus reply timeout", and is not trying to measure anything finer than that.
 ///
-/// @param exercise What to drive, taking whether it may actually send.
+/// @p exercise runs only where sending is permitted, so the gate lives here rather than as a
+/// prologue every future timed case has to remember -- forgetting it is what pops a notification up
+/// at whoever ran the suite. The timing bracket is taken either way: returning promptly with
+/// nothing to send is still the property under test.
+///
+/// @param exercise What to drive against the real bus.
 template <typename Exercise>
 void checkReturnsWithoutWaiting(Exercise exercise)
 {
     auto const startedAt = std::chrono::steady_clock::now();
 
-    exercise(notificationSendingEnabled());
+    if (notificationSendingEnabled())
+        exercise();
     QCoreApplication::processEvents();
 
     CHECK(std::chrono::steady_clock::now() - startedAt < std::chrono::seconds { 5 });

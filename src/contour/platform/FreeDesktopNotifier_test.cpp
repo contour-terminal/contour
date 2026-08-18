@@ -269,10 +269,7 @@ TEST_CASE("FreeDesktopNotifier drives the real D-Bus transport without waiting",
     auto notifier = contour::platform::makeDesktopNotifier(std::chrono::milliseconds { 10000 });
     REQUIRE(notifier != nullptr);
 
-    contour::test::checkReturnsWithoutWaiting([&](bool maySend) {
-        if (!maySend)
-            return;
-
+    contour::test::checkReturnsWithoutWaiting([&] {
         notifier->notify(aNotification("osc-real"));
         notifier->close("osc-real");
     });

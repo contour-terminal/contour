@@ -438,10 +438,7 @@ TEST_CASE("PortalNotificationTransport drives the real portal without waiting",
     };
     transport.subscribe([](auto, auto, auto) {}, [](auto) {});
 
-    contour::test::checkReturnsWithoutWaiting([&](bool maySend) {
-        if (!maySend)
-            return;
-
+    contour::test::checkReturnsWithoutWaiting([&] {
         transport.notify(aNotification("osc-real"), 0, [](auto) {});
 
         // close() short-circuits on an id it holds no mapping for, and on a bus that never answers
