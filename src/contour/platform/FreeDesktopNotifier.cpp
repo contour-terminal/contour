@@ -26,7 +26,7 @@ FreeDesktopNotifier::FreeDesktopNotifier(std::unique_ptr<NotificationTransport> 
             notifierLog()("Notification closed: id={} reason={} report={}",
                           serverId,
                           reason,
-                          report == vtbackend::CloseReport::Observed ? "observed" : "untracked");
+                          vtbackend::closeReportName(report));
             emit notificationClosed(QString::fromStdString(*oscIdentifier), reason, report);
         },
         [this](NotificationTransport::ServerId serverId) {

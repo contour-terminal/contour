@@ -42,6 +42,22 @@ enum class CloseReport : uint8_t
     Untracked = 1, ///< Nobody reported it; a timer expired.
 };
 
+/// Names a CloseReport, for diagnostics.
+///
+/// A switch rather than a conditional at each use site: a third way of coming to know about a close
+/// would then be a compile error here instead of a log line that quietly says the wrong word.
+/// @param report the provenance to name.
+/// @return the label.
+[[nodiscard]] constexpr std::string_view closeReportName(CloseReport report) noexcept
+{
+    switch (report)
+    {
+        case CloseReport::Observed: return "observed";
+        case CloseReport::Untracked: return "untracked";
+    }
+    return "observed";
+}
+
 /// When to display the notification based on terminal focus state.
 enum class DisplayOccasion : uint8_t
 {
