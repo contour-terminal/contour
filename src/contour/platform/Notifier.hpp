@@ -112,7 +112,11 @@ enum class NotificationBackend : uint8_t
 /// same OSC 99 identifier -- so a per-process prefix alone would have them collide, replacing each
 /// other's popups and each answering the other's activation. Hence unique per call, not per process.
 ///
-/// @return The prefix, of the shape `contour-<pid>-<n>`.
+/// The per-process half is random rather than the process id, because a sandbox is precisely where
+/// a process id stops identifying anything: Flatpak gives every instance its own PID namespace, so
+/// two sandboxed Contours both see a small, identical pid.
+///
+/// @return The prefix, of the shape `contour-<uuid>-<n>`.
 [[nodiscard]] std::string makePortalIdPrefix();
 
 /// The transport for a given backend.
