@@ -13,6 +13,7 @@
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
+#include <vtbackend/vt/HierarchicalContext.hpp>
 #include <vtbackend/vt/ModifyKeys.hpp>
 #include <vtbackend/vt/RectangularAreaChecksum.hpp>
 #include <vtbackend/vt/SgrWriter.hpp>
@@ -6074,6 +6075,21 @@ void Screen::setMark()
     markLogicalLineAtCursor(LineFlag::Marked);
 }
 
+ApplyResult Screen::processHierarchicalContext(std::string_view payload)
+{
+    auto const command = parseContextSequence(payload, _contextScratch);
+    if (!command)
+    {
+        errorLog()("Ignoring malformed OSC 3008 sequence: {}", toString(command.error()));
+        return ApplyResult::Invalid;
+    }
+
+    // The stack is terminal-global rather than per-screen: the ancestry describes the APPLICATION's
+    // process tree, which an alternate-screen switch or a page change does not touch.
+    (void) _terminal->applyContextCommand(*command);
+    return ApplyResult::Ok;
+}
+
 void Screen::processShellIntegration(Sequence const& seq)
 {
     auto const& cmd = seq.intermediateCharacters();
@@ -7067,6 +7083,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case TEXTSIZING: return processTextSizing(seq.intermediateCharacters());
         case KITTYCLIPBOARD: return processKittyClipboard(seq.intermediateCharacters());
         case POINTERSHAPE: return processPointerShape(seq.intermediateCharacters());
+        case HIERCONTEXT: return processHierarchicalContext(seq.intermediateCharacters());
         case DESKTOPNOTIFY: return impl::DESKTOPNOTIFY(seq, *_terminal);
         case DUMPSTATE: inspect(); break;
         case SEMA: processShellIntegration(seq); break;

@@ -3680,6 +3680,36 @@ void Terminal::setProgress(Progress progress)
     _eventListener.progressChanged(progress);
 }
 
+ContextTransition Terminal::applyContextCommand(ContextCommand const& command)
+{
+    auto const transition = _contexts.apply(command);
+
+    // Only when something a frontend can SEE moved. The systemd hot path -- a shell context
+    // re-announced on every prompt with byte-identical metadata -- is an Updated transition that
+    // usually changes nothing, and notifying for it would be a redraw per prompt.
+    if (transition.change == ContextChange::Yes)
+    {
+        // Lock-free for the same reason setProgress() above is: the OSC 3008 dispatch in Screen reaches
+        // this from inside writeToScreen()'s _stateMutex hold, and _stateMutex is not recursive.
+        _eventListener.contextChanged(_contexts.activeId());
+    }
+
+    return transition;
+}
+
+void Terminal::adoptContext(TerminalContext record)
+{
+    _contexts.adopt(std::move(record));
+}
+
+void Terminal::setContextChain(std::span<ContextId const> ids)
+{
+    auto const before = _contexts.activeId();
+    _contexts.setChain(ids);
+    if (_contexts.activeId() != before)
+        _eventListener.contextChanged(_contexts.activeId());
+}
+
 Progress Terminal::resolvedProgress() const
 {
     auto const l = std::lock_guard { _stateMutex };
@@ -4117,6 +4147,7 @@ void Terminal::moveCursorTo(LineOffset line, ColumnOffset column)
 void Terminal::softReset()
 {
     // https://vt100.net/docs/vt510-rm/DECSTR.html
+    // NB: the OSC 3008 context ancestry is deliberately left alone here; hardReset() below says why.
     setMode(DECMode::BatchedRendering, false);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setGraphicsRendition(GraphicsRendition::Reset); // SGR
@@ -4301,6 +4332,18 @@ void Terminal::hardReset()
     // holding a hand cursor must not leave the user with one. The stack keeps its bottom entry -- the
     // terminal's own default -- exactly as popPointerShape does.
     resetPointerShape();
+    // The OSC 3008 context ancestry is deliberately NOT reset here, and neither does softReset() touch
+    // it. UAPI.15 makes that a safety property rather than a convenience: a program running down the
+    // ancestry must not be able to erase the context a program above it established, and RIS is
+    // something any program can send. A shell that has announced "you are inside container X" must
+    // still be able to say so after a program inside that container resets the terminal.
+    //
+    // The full reset the specification DOES name is vhangup(), which has no equivalent here: closing
+    // the PTY destroys the TerminalSession and this Terminal with it, so the ancestry dies with the
+    // object and needs no mechanism. ContextStack::clear() exists for that teardown alone and is
+    // reachable from no escape sequence.
+    //
+    // @see Screen_context_test.cpp, "osc3008 survives a hard reset".
 
     resetColorPalette();
 

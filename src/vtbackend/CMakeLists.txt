@@ -186,6 +186,7 @@ if(LIBTERMINAL_TESTING)
         core/ColorPalette_test.cpp
         core/TerminalContext_test.cpp
         vt/HierarchicalContext_test.cpp
+        screen/Screen_context_test.cpp
         shell/CommandBlocks_test.cpp
         shell/Folding_test.cpp
         shell/PromptRegion_test.cpp

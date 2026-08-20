@@ -5,6 +5,7 @@
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/InputHandler.hpp>
@@ -310,6 +311,18 @@ class Terminal
         /// nor synchronously re-enter code that does. Defer to the GUI thread instead.
         /// @param progress The state now in effect; ProgressState::Inactive means "show nothing".
         virtual void progressChanged(Progress /*progress*/) {}
+
+        /// The application's hierarchical context ancestry changed (`OSC 3008`).
+        ///
+        /// Raised on the parser thread with Terminal::_stateMutex ALREADY HELD, with the same
+        /// consequence progressChanged() above documents: do not read terminal state here, and do not
+        /// synchronously re-enter code that does.
+        ///
+        /// Raised only when something a frontend can SEE moved. systemd re-announces the shell context
+        /// on every prompt with byte-identical metadata, and notifying for that would be a redraw per
+        /// prompt for no change.
+        /// @param activeContext The context now in effect; a zero id means the ancestry is empty.
+        virtual void contextChanged(ContextId /*activeContext*/) {}
         virtual void focusTerminalWindow() {}
         virtual void onClosed() {}
         virtual void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) {}
@@ -386,6 +399,7 @@ class Terminal
         void showDesktopNotification(DesktopNotification const& /*notification*/) override {}
         void discardDesktopNotification(std::string_view /*identifier*/) override {}
         void progressChanged(Progress /*progress*/) override {}
+        void contextChanged(ContextId /*activeContext*/) override {}
         void focusTerminalWindow() override {}
         void onClosed() override {}
         void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) override {}
@@ -1302,6 +1316,20 @@ class Terminal
     {
         _shellIntegration = std::move(newShellIntegration);
     }
+
+    /// The application's hierarchical context ancestry (OSC 3008), for reading.
+    /// Mutated only through applyContextCommand().
+    [[nodiscard]] ContextStack const& contexts() const noexcept { return _contexts; }
+
+    /// Applies one decoded OSC 3008 command: updates the ancestry, mirrors the new active id into
+    /// every screen so freshly written lines are stamped with it, and announces an observable change.
+    ContextTransition applyContextCommand(ContextCommand const& command);
+
+    /// Adopts a context record replicated from a daemon host. @see ContextStack::adopt.
+    void adoptContext(TerminalContext record);
+
+    /// Replaces the ancestry with @p ids, for the same mirroring reason as @ref adoptContext.
+    void setContextChain(std::span<ContextId const> ids);
 
     [[nodiscard]] SemanticBlockTracker& semanticBlockTracker() noexcept { return _semanticBlockTracker; }
     [[nodiscard]] SemanticBlockTracker const& semanticBlockTracker() const noexcept
@@ -2703,6 +2731,13 @@ class Terminal
 
     std::unique_ptr<ShellIntegration> _shellIntegration;
     SemanticBlockTracker _semanticBlockTracker;
+
+    /// The application's hierarchical context ancestry (OSC 3008), and the records the scrollback still
+    /// points at. Limits are fixed at construction; a session configured differently is a different
+    /// session, so there is no setter.
+    ///
+    /// Deliberately NOT reset by RIS or DECSTR. @see hardReset().
+    ContextStack _contexts;
 
     // {{{ Output folding
     mutable FoldState _foldState;

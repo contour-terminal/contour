@@ -246,6 +246,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Lays out one `OSC 66` (kitty text sizing) request.
     [[nodiscard]] ApplyResult processTextSizing(std::string_view payload);
 
+    /// Applies one `OSC 3008` (hierarchical context signalling) sequence.
+    [[nodiscard]] ApplyResult processHierarchicalContext(std::string_view payload);
+
     /// Erases the whole multi-cell block that @p position belongs to, however many rows and columns
     /// it covers, and wherever within it @p position happens to be.
     void eraseMulticellBlockAt(CellLocation position);
@@ -998,6 +1001,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     Cursor _cursor {};
     Cursor _savedCursor {};
+
+    /// Scratch for the OSC 3008 decoder, owned here so the per-prompt hot path allocates once per
+    /// session rather than once per sequence. @see parseContextSequence.
+    std::string _contextScratch {};
 
     /// Payload accumulated across a chunked kitty graphics transmission (`m=1`), plus the command
     /// that opened it -- the continuation chunks carry no control data of their own.
