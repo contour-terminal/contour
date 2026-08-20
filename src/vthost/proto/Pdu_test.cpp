@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <limits>
 #include <ranges>
@@ -683,4 +684,114 @@ TEST_CASE("Delta::hasChanges answers for every gated field", "[vthost][proto]")
     moved.cursorLine = 4;
     moved.setModes = { 1049 };
     CHECK_FALSE(moved.hasChanges());
+}
+
+TEST_CASE("a row's size estimate tracks what the encoder actually writes", "[vthost][proto]")
+{
+    // The estimate exists so a splitter need not encode a row twice. That only holds while it
+    // stays in the encoder's neighbourhood — a field added to encodeCell and forgotten here turns
+    // a byte budget into a wish. Pinned as a FACTOR, not a number: the estimate is deliberately
+    // approximate (it rounds, and it does not model varint widths), so an exact assertion would
+    // fail on every harmless encoding change while missing the drift that matters.
+    auto const rowOf = [](std::size_t cells) {
+        auto line = WireLine {};
+        line.stableId = 7;
+        line.columns = static_cast<uint32_t>(cells);
+        for (auto const column: std::views::iota(std::size_t { 0 }, cells))
+        {
+            auto cell = WireCell {};
+            cell.codepoint = U'x';
+            cell.hyperlink = static_cast<uint16_t>(column);
+            line.cells.push_back(cell);
+        }
+        return line;
+    };
+
+    for (auto const cells: { std::size_t { 0 }, std::size_t { 1 }, std::size_t { 80 }, std::size_t { 400 } })
+    {
+        auto sink = Writer {};
+        auto const line = rowOf(cells);
+        auto delta = Delta {};
+        delta.lines.push_back(line);
+        encodePdu(sink, 1, DecodedPdu { delta });
+        auto const actual = sink.view().size();
+        auto const estimate = estimatedEncodedSize(line);
+        // Never wildly under (a budget that under-counts overshoots the frame it was sizing) and
+        // never wildly over (one that over-counts splits more than it needs to).
+        CHECK(estimate * 4 >= actual);
+        CHECK(actual * 4 >= estimate);
+    }
+}
+
+TEST_CASE("partitionSnapshotRows covers every row exactly once, in order", "[vthost][proto]")
+{
+    auto lines = std::vector<WireLine> {};
+    for (auto const row: std::views::iota(0, 20))
+    {
+        auto line = WireLine {};
+        line.stableId = row;
+        line.cells.resize(10);
+        lines.push_back(line);
+    }
+    auto const perRow = estimatedEncodedSize(lines.front());
+
+    SECTION("a budget holding three rows yields pieces of three")
+    {
+        auto const spans = partitionSnapshotRows(lines, perRow * 3);
+        REQUIRE(spans.size() == 7); // 6 full pieces plus the remaining 2 rows
+        CHECK(spans.front().count == 3);
+        CHECK(spans.back().count == 2);
+
+        // The spans tile the input: consecutive, gapless, no row named twice.
+        auto next = std::size_t { 0 };
+        for (auto const& span: spans)
+        {
+            CHECK(span.begin == next);
+            next += span.count;
+        }
+        CHECK(next == lines.size());
+    }
+
+    SECTION("each piece is marked with its place in the run")
+    {
+        auto const spans = partitionSnapshotRows(lines, perRow * 3);
+        REQUIRE(spans.size() > 2);
+        CHECK(spans.front().part == SnapshotPart::First);
+        CHECK(spans.back().part == SnapshotPart::Last);
+        for (auto const& middle: spans | std::views::drop(1) | std::views::take(spans.size() - 2))
+            CHECK(middle.part == SnapshotPart::Middle);
+    }
+
+    SECTION("a run of one is Whole, never a First whose Last never comes")
+    {
+        // The marker a receiver acts on: First tells it to clear and wait, and a lone piece that
+        // said First would leave it waiting for a terminator that is never sent.
+        CHECK(partitionSnapshotRows(lines, perRow * lines.size()).front().part == SnapshotPart::Whole);
+        CHECK(partitionSnapshotRows({}, 1024).front().part == SnapshotPart::Whole);
+    }
+
+    SECTION("a row larger than the budget still travels, alone")
+    {
+        // A row is the smallest thing the wire can address, so the budget has to yield to it.
+        // Refusing instead would make a wide enough grid unsendable at any budget.
+        auto const spans = partitionSnapshotRows(lines, 1);
+        REQUIRE(spans.size() == lines.size());
+        CHECK(std::ranges::all_of(spans, [](auto const& span) { return span.count == 1; }));
+    }
+
+    SECTION("one budget-sized piece is not split")
+    {
+        auto const spans = partitionSnapshotRows(lines, perRow * lines.size());
+        REQUIRE(spans.size() == 1);
+        CHECK(spans.front().count == lines.size());
+    }
+
+    SECTION("no rows still yields one piece")
+    {
+        // A payload with no rows is still a payload: its sender has state to deliver, and a
+        // caller that emits one PDU per span must emit exactly one.
+        auto const spans = partitionSnapshotRows({}, 1024);
+        REQUIRE(spans.size() == 1);
+        CHECK(spans.front().count == 0);
+    }
 }

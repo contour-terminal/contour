@@ -114,13 +114,14 @@ namespace
                        auto const& value = std::get<Delta>(pdu);
                        // Counts and the ACTIVE ID only -- never a record's fields. @see the
                        // SessionState row above.
-                       return std::format("session={} gen={} seq={} snapshot={} lines={} links={} "
+                       return std::format("session={} gen={} seq={} snapshot={}/{} lines={} links={} "
                                           "imagecells={} statuslines={} progress={}/{} contexts={} "
                                           "activecontext={}",
                                           value.session,
                                           value.generation,
                                           value.seqno,
                                           value.snapshot,
+                                          value.snapshotPart,
                                           value.lines.size(),
                                           value.hyperlinks.size(),
                                           value.imageCells.size(),
