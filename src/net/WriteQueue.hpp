@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <deque>
 #include <format>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -98,6 +99,29 @@ class WriteQueue
     /// needs. The owner still closes and out-lives the SOCKET afterwards, per
     /// the lifetime note above.
     [[nodiscard]] coro::Task<void> flushThenClose();
+
+    /// Parks until the backlog falls below @p watermark, or the queue fails or closes.
+    ///
+    /// The bound above detects a peer that stopped draining, and refusing is the right answer
+    /// to that. It is the wrong answer to a producer that merely emitted faster than one loop
+    /// turn could drain — which is what a producer enqueuing a burst WITHOUT suspending does,
+    /// since the drain is spawned onto the loop and cannot run until that producer yields. Such
+    /// a producer never gives the queue the chance to empty that the bound assumes it had.
+    ///
+    /// A producer that can pace itself should therefore wait for room between frames rather
+    /// than be refused: an attach snapshot has nothing to supersede and no smaller form to fall
+    /// back to, so refusing it costs the connection for a condition the producer created.
+    ///
+    /// Returning on close/failure is what keeps a caller from parking forever against a queue
+    /// that will never drain again — the poll must not outlive the connection it paces.
+    /// @param watermark The backlog size to get below; the caller's own pacing budget.
+    /// @param callerDone Also ends the wait when it returns true; empty means "queue state only".
+    ///        A connection tearing down needs this, because closing the queue is not available to
+    ///        it as the signal: an owner that waits for its producers to let go before closing,
+    ///        and producers that wait for the close, wait for each other. The owner's own
+    ///        already-set "finished" flag breaks that cycle.
+    [[nodiscard]] coro::Task<void> waitUntilBacklogBelow(std::size_t watermark,
+                                                         std::function<bool()> callerDone = {});
 
     /// @return The write error that stopped the queue, if any. Once set, every
     ///         subsequent enqueue fails; the caller should drop the connection.
