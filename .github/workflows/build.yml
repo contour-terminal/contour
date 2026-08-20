@@ -1229,16 +1229,25 @@ jobs:
       - name: "build"
         # -j$(nproc) rather than a hardcoded -j3: a quarter of a 4-vCPU runner was sitting idle.
         #
-        # The memory sampler is temporary. ubuntu-24.04-arm (GCC 14) is killed by a runner
-        # shutdown signal at the same handful of targets every time -- the final GUI links -- and
-        # an OOM-killed runner agent leaves nothing in the build log by construction. Streaming
-        # free(1) is the only way to tell "the host ran out of memory" from "the lease expired".
+        # The memory sampling is temporary. ubuntu-24.04-arm (GCC 14) is killed by a runner
+        # shutdown signal during the final GUI links, and an OOM-killed runner agent leaves
+        # nothing in the build log by construction -- so the absence of an OOM message proves
+        # nothing either way. free(1) alongside the build is what settles it.
+        #
+        # The build runs in the background and the sampler in the foreground, NOT the other way
+        # round: a backgrounded `while sleep` loop keeps stdout open, which hangs "Complete job"
+        # long enough for the runner to give up and discard the log with it. This way the loop
+        # ends when the build does, and `wait` still yields the build's exit code.
         run: |
-          echo "cores=$(nproc)"; free -h
-          ( while sleep 10; do echo "[mem] $(free -m | awk '/^Mem:/{printf "used=%sM avail=%sM", $3, $7}')"; done ) &
-          sampler=$!
-          trap 'kill $sampler 2>/dev/null || true' EXIT
-          cmake --build --preset gcc-debug -- -j$(nproc)
+          echo "cores=$(nproc)"
+          free -h
+          cmake --build --preset gcc-debug -- -j$(nproc) &
+          build=$!
+          while kill -0 "$build" 2>/dev/null; do
+            echo "[mem] $(free -m | awk '/^Mem:/{printf "used=%sM avail=%sM", $3, $7}')"
+            sleep 10
+          done
+          wait "$build"
       - name: "tests"
         # A hung test (e.g. a dead-loop) must fail the matrix fast, not stall for hours.
         #
