@@ -5,7 +5,7 @@
 #include <cassert>
 #include <chrono>
 
-namespace vtbackend
+namespace crispy
 {
 
 /// Linear easing: identity mapping.
@@ -56,4 +56,4 @@ struct AnimationState
     }
 };
 
-} // namespace vtbackend
+} // namespace crispy

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Animation.hpp>
 #include <vtbackend/ColorPalette.hpp>
 #include <vtbackend/Cursor.hpp>
 #include <vtbackend/DesktopNotification.hpp>
@@ -31,6 +30,7 @@
 
 #include <vtpty/Pty.hpp>
 
+#include <crispy/Animation.hpp>
 #include <crispy/Assert.hpp>
 #include <crispy/BufferObject.hpp>
 #include <crispy/Defines.hpp>
@@ -2340,7 +2340,7 @@ class Terminal
 
     // {{{ Screen transition state (crossfade between primary/alternate screens)
     /// Holds state for an ongoing crossfade transition between screen buffers.
-    struct ScreenTransitionState: AnimationState<LinearEasing>
+    struct ScreenTransitionState: crispy::AnimationState<crispy::LinearEasing>
     {
         std::vector<RenderCell> snapshotCells {};
         std::optional<RenderCursor> snapshotCursor {};
@@ -2350,7 +2350,7 @@ class Terminal
 
     // {{{ Cursor motion animation state
     /// Holds state for an ongoing cursor motion animation between grid cells.
-    struct CursorMotionState: AnimationState<EaseOutCubic>
+    struct CursorMotionState: crispy::AnimationState<crispy::EaseOutCubic>
     {
         CellLocation fromPosition {};
         CellLocation toPosition {};

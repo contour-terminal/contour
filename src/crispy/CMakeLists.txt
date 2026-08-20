@@ -18,6 +18,7 @@ set(crispy_SOURCES
     StackTrace.cpp StackTrace.hpp
     TrieMap.hpp
     AlignedAllocator.hpp
+    Animation.hpp
     ASCII.hpp
     Assert.hpp
     Base64.hpp
@@ -147,6 +148,7 @@ if(CRISPY_TESTING)
         StrongLRUCache_test.cpp
         StrongLRUHashtable_test.cpp
         TrieMap_test.cpp
+        Animation_test.cpp
         Base64_test.cpp
         Compose_test.cpp
         Environment_test.cpp

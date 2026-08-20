@@ -12,7 +12,6 @@ option(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE "Updates the render buffer withi
 option(LIBTERMINAL_BUILD_BENCH_HEADLESS "Builds bench-headless CLI tool to benchmark libvtbackend [default: OFF]" OFF)
 
 set(vtbackend_HEADERS
-    Animation.hpp
     Capabilities.hpp
     CellFlags.hpp
     CellProxy.hpp
@@ -173,7 +172,6 @@ if(LIBTERMINAL_TESTING)
     enable_testing()
     add_executable(vtbackend_test
         test_main.cpp
-        Animation_test.cpp
         Capabilities_test.cpp
         DesktopNotification_test.cpp
         ProgressState_test.cpp
