@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/InputGenerator.hpp>
 
-#include <vtbackend/ControlCode.hpp>
 #include <vtbackend/Logging.hpp>
+#include <vtbackend/vt/ControlCode.hpp>
 
 #include <crispy/Assert.hpp>
 #include <crispy/Utils.hpp>

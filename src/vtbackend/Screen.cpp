@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Screen.hpp>
 
-#include <vtbackend/ControlCode.hpp>
-#include <vtbackend/DesktopNotification.hpp>
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/MessageParser.hpp>
-#include <vtbackend/ModifyKeys.hpp>
-#include <vtbackend/RectangularAreaChecksum.hpp>
-#include <vtbackend/SgrWriter.hpp>
 #include <vtbackend/SixelParser.hpp>
 #include <vtbackend/Terminal.hpp>
-#include <vtbackend/VTType.hpp>
-#include <vtbackend/VTWriter.hpp>
 #include <vtbackend/grid/SoAClusterWriter.hpp>
 #include <vtbackend/regis/ReGISContext.hpp>
 #include <vtbackend/regis/ReGISParser.hpp>
 #include <vtbackend/regis/ReGISRasterizer.hpp>
 #include <vtbackend/regis/ReGISTextRasterizer.hpp>
+#include <vtbackend/vt/ControlCode.hpp>
+#include <vtbackend/vt/DesktopNotification.hpp>
+#include <vtbackend/vt/ModifyKeys.hpp>
+#include <vtbackend/vt/RectangularAreaChecksum.hpp>
+#include <vtbackend/vt/SgrWriter.hpp>
+#include <vtbackend/vt/VTType.hpp>
+#include <vtbackend/vt/VTWriter.hpp>
 
 #include <crispy/App.hpp>
 #include <crispy/Base64.hpp>

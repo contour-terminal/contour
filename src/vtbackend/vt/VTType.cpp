@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/VTType.hpp>
+#include <vtbackend/vt/VTType.hpp>
 
 #include <array>
 #include <utility>

@@ -11,7 +11,7 @@
 /// bytes a peer chose, and a `ProgressState` no enumerator has would reach the status-line renderer's
 /// switch, which ends in `crispy::unreachable()` — undefined behaviour in the attached client.
 
-#include <vtbackend/ProgressState.hpp>
+#include <vtbackend/vt/ProgressState.hpp>
 
 #include <cstdint>
 #include <optional>

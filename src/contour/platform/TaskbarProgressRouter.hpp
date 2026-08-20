@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/ProgressState.hpp>
+#include <vtbackend/vt/ProgressState.hpp>
 
 #include <algorithm>
 #include <chrono>

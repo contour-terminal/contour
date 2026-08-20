@@ -3,7 +3,7 @@
 
 #include <contour/platform/NotificationIdMap.hpp>
 
-#include <vtbackend/DesktopNotification.hpp>
+#include <vtbackend/vt/DesktopNotification.hpp>
 
 #include <algorithm>
 #include <chrono>

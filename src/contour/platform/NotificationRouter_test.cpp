@@ -7,7 +7,7 @@
 
 #include <contour/platform/NotificationRouter.hpp>
 
-#include <vtbackend/DesktopNotification.hpp>
+#include <vtbackend/vt/DesktopNotification.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

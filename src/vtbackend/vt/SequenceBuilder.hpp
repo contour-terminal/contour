@@ -2,8 +2,8 @@
 #pragma once
 
 #include <vtbackend/Logging.hpp>
-#include <vtbackend/Sequence.hpp>
 #include <vtbackend/SixelParser.hpp>
+#include <vtbackend/vt/Sequence.hpp>
 
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserExtension.hpp>

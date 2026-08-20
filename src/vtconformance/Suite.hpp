@@ -2,8 +2,8 @@
 #pragma once
 
 #include <vtbackend/InputGenerator.hpp>
-#include <vtbackend/RectangularAreaChecksum.hpp>
-#include <vtbackend/VTType.hpp>
+#include <vtbackend/vt/RectangularAreaChecksum.hpp>
+#include <vtbackend/vt/VTType.hpp>
 
 #include <vtpty/PageSize.hpp>
 

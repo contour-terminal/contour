@@ -7,7 +7,7 @@
 
 #include <contour/cli/CaptureScreen.hpp>
 
-#include <vtbackend/Functions.hpp>
+#include <vtbackend/vt/Functions.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

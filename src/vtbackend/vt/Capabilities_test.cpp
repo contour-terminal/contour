@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Capabilities.hpp>
+#include <vtbackend/vt/Capabilities.hpp>
 
 #include <crispy/Utils.hpp>
 

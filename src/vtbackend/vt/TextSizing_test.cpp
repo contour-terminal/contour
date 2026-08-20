@@ -4,7 +4,7 @@
 // it implies, and the grid effect of laying text out through it.
 
 #include <vtbackend/MockTerm.hpp>
-#include <vtbackend/TextSizing.hpp>
+#include <vtbackend/vt/TextSizing.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -2,8 +2,8 @@
 #pragma once
 
 #include <vtbackend/Terminal.hpp>
-#include <vtbackend/VTType.hpp>
 #include <vtbackend/core/WindowSizeStack.hpp>
+#include <vtbackend/vt/VTType.hpp>
 
 #include <vtpty/PageSize.hpp>
 #include <vtpty/Pty.hpp>

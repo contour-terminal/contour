@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Charset.hpp>
 #include <vtbackend/core/GraphicsAttributes.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/vt/Charset.hpp>
 
 namespace vtbackend
 {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Functions.hpp>
+#include <vtbackend/vt/Functions.hpp>
 
 #include <gsl/pointers>
 #include <gsl/span>

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/CaptureScreen.hpp>
 
-#include <vtbackend/Functions.hpp>
+#include <vtbackend/vt/Functions.hpp>
 
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserEvents.hpp>

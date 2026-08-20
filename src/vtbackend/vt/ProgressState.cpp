@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/ProgressState.hpp>
+#include <vtbackend/vt/ProgressState.hpp>
 
 #include <crispy/Assert.hpp>
 #include <crispy/Utils.hpp>

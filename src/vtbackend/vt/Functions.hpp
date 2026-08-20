@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/VTType.hpp>
+#include <vtbackend/vt/VTType.hpp>
 
 #include <crispy/Defines.hpp>
 #include <crispy/Escape.hpp>

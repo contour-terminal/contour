@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/TextSizing.hpp>
+#include <vtbackend/vt/TextSizing.hpp>
 
 #include <algorithm>
 #include <array>

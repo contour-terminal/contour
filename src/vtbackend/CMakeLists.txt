@@ -12,20 +12,20 @@ option(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE "Updates the render buffer withi
 option(LIBTERMINAL_BUILD_BENCH_HEADLESS "Builds bench-headless CLI tool to benchmark libvtbackend [default: OFF]" OFF)
 
 set(vtbackend_HEADERS
-    Capabilities.hpp
+    vt/Capabilities.hpp
     core/CellFlags.hpp
     grid/CellProxy.hpp
     grid/CellUtil.hpp
-    Charset.hpp
+    vt/Charset.hpp
     core/Color.hpp
     core/ColorPalette.hpp
     CommandBlocks.hpp
-    ControlCode.hpp
+    vt/ControlCode.hpp
     Cursor.hpp
-    DesktopNotification.hpp
+    vt/DesktopNotification.hpp
     core/FileUrl.hpp
     Folding.hpp
-    Functions.hpp
+    vt/Functions.hpp
     core/GraphicsAttributes.hpp
     grid/Grid.hpp
     HintModeHandler.hpp
@@ -35,7 +35,7 @@ set(vtbackend_HEADERS
     InputGenerator.hpp
     InputHandler.hpp
     JumpHistory.hpp
-    KittyClipboard.hpp
+    vt/KittyClipboard.hpp
     KittyGraphics.hpp
     grid/Line.hpp
     core/LineFlags.hpp
@@ -44,21 +44,21 @@ set(vtbackend_HEADERS
     MatchModes.hpp
     MessageParser.hpp
     MockTerm.hpp
-    ModifyKeys.hpp
-    PointerShape.hpp
+    vt/ModifyKeys.hpp
+    vt/PointerShape.hpp
     core/Primitives.hpp
-    ProgressState.hpp
+    vt/ProgressState.hpp
     PromptRegion.hpp
-    RectangularAreaChecksum.hpp
+    vt/RectangularAreaChecksum.hpp
     RenderBuffer.hpp
     RenderBufferBuilder.hpp
     Screen.hpp
     Selector.hpp
     SemanticBlockTracker.hpp
-    Sequence.hpp
-    SequenceBuilder.hpp
+    vt/Sequence.hpp
+    vt/SequenceBuilder.hpp
     Settings.hpp
-    SgrWriter.hpp
+    vt/SgrWriter.hpp
     ShellIntegration.hpp
     SixelParser.hpp
     grid/SoAClusterWriter.hpp
@@ -66,9 +66,9 @@ set(vtbackend_HEADERS
     Terminal.hpp
     TestHelpers.hpp
     core/TextScale.hpp
-    TextSizing.hpp
-    VTType.hpp
-    VTWriter.hpp
+    vt/TextSizing.hpp
+    vt/VTType.hpp
+    vt/VTWriter.hpp
     ViCommands.hpp
     ViInputHandler.hpp
     Viewport.hpp
@@ -83,16 +83,16 @@ set(vtbackend_HEADERS
 )
 
 set(vtbackend_SOURCES
-    Capabilities.cpp
-    Charset.cpp
-    DesktopNotification.cpp
-    ProgressState.cpp
+    vt/Capabilities.cpp
+    vt/Charset.cpp
+    vt/DesktopNotification.cpp
+    vt/ProgressState.cpp
     core/Color.cpp
     core/ColorPalette.cpp
     CommandBlocks.cpp
     Folding.cpp
     PromptRegion.cpp
-    Functions.cpp
+    vt/Functions.cpp
     grid/Grid.cpp
     core/FileUrl.cpp
     HintModeHandler.cpp
@@ -104,14 +104,14 @@ set(vtbackend_SOURCES
     MockTerm.cpp
     RenderBuffer.cpp
     RenderBufferBuilder.cpp
-    KittyClipboard.cpp
+    vt/KittyClipboard.cpp
     KittyGraphics.cpp
-    TextSizing.cpp
+    vt/TextSizing.cpp
     Screen.cpp
     SemanticBlockTracker.cpp
     Selector.cpp
     grid/SoAClusterWriter.cpp
-    Sequence.cpp
+    vt/Sequence.cpp
     SixelParser.cpp
     regis/ReGISColor.cpp
     regis/ReGISRasterizer.cpp
@@ -121,8 +121,8 @@ set(vtbackend_SOURCES
     regis/ReGISParser.cpp
     StatusLineBuilder.cpp
     Terminal.cpp
-    VTType.cpp
-    VTWriter.cpp
+    vt/VTType.cpp
+    vt/VTWriter.cpp
     Viewport.cpp
     ViInputHandler.cpp
     ViCommands.cpp
@@ -172,9 +172,9 @@ if(LIBTERMINAL_TESTING)
     enable_testing()
     add_executable(vtbackend_test
         test_main.cpp
-        Capabilities_test.cpp
-        DesktopNotification_test.cpp
-        ProgressState_test.cpp
+        vt/Capabilities_test.cpp
+        vt/DesktopNotification_test.cpp
+        vt/ProgressState_test.cpp
         core/Color_test.cpp
         core/ColorPalette_test.cpp
         CommandBlocks_test.cpp
@@ -184,22 +184,22 @@ if(LIBTERMINAL_TESTING)
         XtSmGraphics_test.cpp
         InputGenerator_test.cpp
         Selector_test.cpp
-        Functions_test.cpp
+        vt/Functions_test.cpp
         grid/Grid_test.cpp
         core/FileUrl_test.cpp
         HintModeHandler_test.cpp
         grid/Line_test.cpp
         MessageParser_test.cpp
-        ModifyKeys_test.cpp
-        VTType_test.cpp
-        RectangularAreaChecksum_test.cpp
-        KittyClipboard_test.cpp
-        PointerShape_test.cpp
+        vt/ModifyKeys_test.cpp
+        vt/VTType_test.cpp
+        vt/RectangularAreaChecksum_test.cpp
+        vt/KittyClipboard_test.cpp
+        vt/PointerShape_test.cpp
         KittyGraphics_test.cpp
-        TextSizing_test.cpp
+        vt/TextSizing_test.cpp
         Screen_test.cpp
         core/Image_test.cpp
-        Sequence_test.cpp
+        vt/Sequence_test.cpp
         StatusLineBuilder_test.cpp
         core/WindowSizeStack_test.cpp
         Terminal_test.cpp
@@ -215,7 +215,7 @@ if(LIBTERMINAL_TESTING)
         regis/ReGISTextRasterizer_test.cpp
         regis/ReGISParser_test.cpp
         ViCommands_test.cpp
-        VTWriter_test.cpp
+        vt/VTWriter_test.cpp
     )
     target_link_libraries(vtbackend_test Catch2::Catch2 vtbackend)
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)

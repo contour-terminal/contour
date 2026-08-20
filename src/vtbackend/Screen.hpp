@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Capabilities.hpp>
-#include <vtbackend/Charset.hpp>
 #include <vtbackend/CommandBlocks.hpp>
 #include <vtbackend/Cursor.hpp>
 #include <vtbackend/Folding.hpp>
-#include <vtbackend/KittyClipboard.hpp>
 #include <vtbackend/KittyGraphics.hpp>
 #include <vtbackend/MessageParser.hpp>
 #include <vtbackend/PromptRegion.hpp>
-#include <vtbackend/Sequence.hpp>
-#include <vtbackend/TextSizing.hpp>
-#include <vtbackend/VTType.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/grid/CellUtil.hpp>
 #include <vtbackend/grid/Grid.hpp>
+#include <vtbackend/vt/Capabilities.hpp>
+#include <vtbackend/vt/Charset.hpp>
+#include <vtbackend/vt/KittyClipboard.hpp>
+#include <vtbackend/vt/Sequence.hpp>
+#include <vtbackend/vt/TextSizing.hpp>
+#include <vtbackend/vt/VTType.hpp>
 
 #include <vtparser/ParserExtension.hpp>
 

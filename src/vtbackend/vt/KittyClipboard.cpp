@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/KittyClipboard.hpp>
+#include <vtbackend/vt/KittyClipboard.hpp>
 
 #include <crispy/Base64.hpp>
 

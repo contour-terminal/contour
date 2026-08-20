@@ -7,7 +7,7 @@
     #include <contour/platform/NotificationTransport.hpp>
     #include <contour/platform/Notifier.hpp>
 
-    #include <vtbackend/DesktopNotification.hpp>
+    #include <vtbackend/vt/DesktopNotification.hpp>
 
     #include <memory>
     #include <string>

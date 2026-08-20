@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Functions.hpp>
+#include <vtbackend/vt/Functions.hpp>
 
 #include <format>
 #include <string_view>

@@ -2,8 +2,8 @@
 //
 // Unit tests for the kitty clipboard protocol (OSC 5522) and its paste-notification mode (5522).
 
-#include <vtbackend/KittyClipboard.hpp>
 #include <vtbackend/MockTerm.hpp>
+#include <vtbackend/vt/KittyClipboard.hpp>
 
 #include <crispy/Base64.hpp>
 
