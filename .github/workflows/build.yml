@@ -1227,7 +1227,9 @@ jobs:
               -DPEDANTIC_COMPILER_WERROR=OFF \
               --preset gcc-debug
       - name: "build"
-        run: cmake --build --preset gcc-debug -- -j3
+        # -j$(nproc), not a hardcoded -j3: this entry has to fit inside the ARM runner's
+        # lease, and a quarter of the cores sitting idle is the cheapest minute to buy back.
+        run: cmake --build --preset gcc-debug -- -j$(nproc)
       - name: "tests"
         # A hung test (e.g. a dead-loop) must fail the matrix fast, not stall for hours.
         #
