@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/MockTerm.hpp>
-#include <vtbackend/TestHelpers.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/grid/CellUtil.hpp>
 #include <vtbackend/input/vi/HintModeHandler.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/testing/MockTerm.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <vtpty/MockPty.hpp>
 

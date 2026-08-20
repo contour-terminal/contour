@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/MockTerm.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/testing/MockTerm.hpp>
 
 #include <crispy/Escape.hpp>
 

@@ -1,6 +1,6 @@
 
-#include <vtbackend/TestHelpers.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>

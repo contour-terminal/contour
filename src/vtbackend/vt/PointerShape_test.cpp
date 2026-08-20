@@ -2,7 +2,7 @@
 //
 // Unit tests for the kitty pointer shape protocol (OSC 22).
 
-#include <vtbackend/MockTerm.hpp>
+#include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/vt/PointerShape.hpp>
 
 #include <catch2/catch_test_macros.hpp>

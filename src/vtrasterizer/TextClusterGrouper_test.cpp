@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/TestHelpers.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <vtrasterizer/FontDescriptions.hpp>
 #include <vtrasterizer/TextClusterGrouper.hpp>

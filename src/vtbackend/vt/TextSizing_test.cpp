@@ -3,7 +3,7 @@
 // Unit tests for the kitty text sizing protocol (OSC 66): its metadata parser, the column arithmetic
 // it implies, and the grid effect of laying text out through it.
 
-#include <vtbackend/MockTerm.hpp>
+#include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/vt/TextSizing.hpp>
 
 #include <catch2/catch_test_macros.hpp>

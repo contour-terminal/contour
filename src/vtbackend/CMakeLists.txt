@@ -43,7 +43,7 @@ set(vtbackend_HEADERS
     Logging.hpp
     input/MatchModes.hpp
     graphics/MessageParser.hpp
-    MockTerm.hpp
+    testing/MockTerm.hpp
     vt/ModifyKeys.hpp
     vt/PointerShape.hpp
     core/Primitives.hpp
@@ -64,7 +64,7 @@ set(vtbackend_HEADERS
     grid/SoAClusterWriter.hpp
     screen/StatusLineBuilder.hpp
     screen/Terminal.hpp
-    TestHelpers.hpp
+    testing/TestHelpers.hpp
     core/TextScale.hpp
     vt/TextSizing.hpp
     vt/VTType.hpp
@@ -101,7 +101,7 @@ set(vtbackend_SOURCES
     grid/Line.cpp
     grid/LineSoA.cpp
     graphics/MessageParser.cpp
-    MockTerm.cpp
+    testing/MockTerm.cpp
     render/RenderBuffer.cpp
     screen/RenderBufferBuilder.cpp
     vt/KittyClipboard.cpp
@@ -171,7 +171,7 @@ endif()
 if(LIBTERMINAL_TESTING)
     enable_testing()
     add_executable(vtbackend_test
-        test_main.cpp
+        testing/test_main.cpp
         vt/Capabilities_test.cpp
         vt/DesktopNotification_test.cpp
         vt/ProgressState_test.cpp

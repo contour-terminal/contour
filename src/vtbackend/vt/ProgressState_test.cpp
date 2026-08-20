@@ -3,8 +3,8 @@
 // Unit tests for the ConEmu-style progress extension (OSC 9;4): the state table it defines, what
 // each state does to the percentage already in effect, and the payloads it must reject.
 
-#include <vtbackend/MockTerm.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
+#include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/vt/ProgressState.hpp>
 
 #include <catch2/catch_test_macros.hpp>
