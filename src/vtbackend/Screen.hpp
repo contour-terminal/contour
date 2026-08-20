@@ -2,12 +2,10 @@
 #pragma once
 
 #include <vtbackend/Capabilities.hpp>
-#include <vtbackend/CellUtil.hpp>
 #include <vtbackend/Charset.hpp>
 #include <vtbackend/CommandBlocks.hpp>
 #include <vtbackend/Cursor.hpp>
 #include <vtbackend/Folding.hpp>
-#include <vtbackend/Grid.hpp>
 #include <vtbackend/KittyClipboard.hpp>
 #include <vtbackend/KittyGraphics.hpp>
 #include <vtbackend/MessageParser.hpp>
@@ -18,6 +16,8 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/grid/CellUtil.hpp>
+#include <vtbackend/grid/Grid.hpp>
 
 #include <vtparser/ParserExtension.hpp>
 

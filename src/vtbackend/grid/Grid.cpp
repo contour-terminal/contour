@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Grid.hpp>
+#include <vtbackend/grid/Grid.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/NativeSession.hpp>
 
-#include <vtbackend/Line.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/grid/Line.hpp>
 
 #include <algorithm>
 #include <bit>

@@ -14,8 +14,8 @@ option(LIBTERMINAL_BUILD_BENCH_HEADLESS "Builds bench-headless CLI tool to bench
 set(vtbackend_HEADERS
     Capabilities.hpp
     core/CellFlags.hpp
-    CellProxy.hpp
-    CellUtil.hpp
+    grid/CellProxy.hpp
+    grid/CellUtil.hpp
     Charset.hpp
     core/Color.hpp
     core/ColorPalette.hpp
@@ -27,7 +27,7 @@ set(vtbackend_HEADERS
     Folding.hpp
     Functions.hpp
     core/GraphicsAttributes.hpp
-    Grid.hpp
+    grid/Grid.hpp
     HintModeHandler.hpp
     core/Hyperlink.hpp
     core/Image.hpp
@@ -37,9 +37,9 @@ set(vtbackend_HEADERS
     JumpHistory.hpp
     KittyClipboard.hpp
     KittyGraphics.hpp
-    Line.hpp
+    grid/Line.hpp
     core/LineFlags.hpp
-    LineSoA.hpp
+    grid/LineSoA.hpp
     Logging.hpp
     MatchModes.hpp
     MessageParser.hpp
@@ -61,7 +61,7 @@ set(vtbackend_HEADERS
     SgrWriter.hpp
     ShellIntegration.hpp
     SixelParser.hpp
-    SoAClusterWriter.hpp
+    grid/SoAClusterWriter.hpp
     StatusLineBuilder.hpp
     Terminal.hpp
     TestHelpers.hpp
@@ -93,13 +93,13 @@ set(vtbackend_SOURCES
     Folding.cpp
     PromptRegion.cpp
     Functions.cpp
-    Grid.cpp
+    grid/Grid.cpp
     core/FileUrl.cpp
     HintModeHandler.cpp
     core/Image.cpp
     InputGenerator.cpp
-    Line.cpp
-    LineSoA.cpp
+    grid/Line.cpp
+    grid/LineSoA.cpp
     MessageParser.cpp
     MockTerm.cpp
     RenderBuffer.cpp
@@ -110,7 +110,7 @@ set(vtbackend_SOURCES
     Screen.cpp
     SemanticBlockTracker.cpp
     Selector.cpp
-    SoAClusterWriter.cpp
+    grid/SoAClusterWriter.cpp
     Sequence.cpp
     SixelParser.cpp
     regis/ReGISColor.cpp
@@ -185,10 +185,10 @@ if(LIBTERMINAL_TESTING)
         InputGenerator_test.cpp
         Selector_test.cpp
         Functions_test.cpp
-        Grid_test.cpp
+        grid/Grid_test.cpp
         core/FileUrl_test.cpp
         HintModeHandler_test.cpp
-        Line_test.cpp
+        grid/Line_test.cpp
         MessageParser_test.cpp
         ModifyKeys_test.cpp
         VTType_test.cpp
@@ -204,8 +204,8 @@ if(LIBTERMINAL_TESTING)
         core/WindowSizeStack_test.cpp
         Terminal_test.cpp
         ShellIntegration_test.cpp
-        LineSoA_test.cpp
-        SoAClusterWriter_test.cpp
+        grid/LineSoA_test.cpp
+        grid/SoAClusterWriter_test.cpp
         SixelParser_test.cpp
         ReGIS_test.cpp
         regis/ReGISTables_test.cpp

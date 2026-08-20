@@ -2,9 +2,9 @@
 
 #include <vtbackend/RenderBufferBuilder.hpp>
 
-#include <vtbackend/CellUtil.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/grid/CellUtil.hpp>
 
 #include <crispy/Utils.hpp>
 

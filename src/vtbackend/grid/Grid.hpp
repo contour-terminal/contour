@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/CellProxy.hpp>
-#include <vtbackend/Line.hpp>
 #include <vtbackend/core/GraphicsAttributes.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/grid/CellProxy.hpp>
+#include <vtbackend/grid/Line.hpp>
 
 #include <crispy/Assert.hpp>
 #include <crispy/Defines.hpp>

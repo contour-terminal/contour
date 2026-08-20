@@ -10,10 +10,10 @@
 #include <vtbackend/RectangularAreaChecksum.hpp>
 #include <vtbackend/SgrWriter.hpp>
 #include <vtbackend/SixelParser.hpp>
-#include <vtbackend/SoAClusterWriter.hpp>
 #include <vtbackend/Terminal.hpp>
 #include <vtbackend/VTType.hpp>
 #include <vtbackend/VTWriter.hpp>
+#include <vtbackend/grid/SoAClusterWriter.hpp>
 #include <vtbackend/regis/ReGISContext.hpp>
 #include <vtbackend/regis/ReGISParser.hpp>
 #include <vtbackend/regis/ReGISRasterizer.hpp>

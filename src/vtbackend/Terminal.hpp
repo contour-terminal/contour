@@ -4,7 +4,6 @@
 #include <vtbackend/Cursor.hpp>
 #include <vtbackend/DesktopNotification.hpp>
 #include <vtbackend/Folding.hpp>
-#include <vtbackend/Grid.hpp>
 #include <vtbackend/HintModeHandler.hpp>
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/InputHandler.hpp>
@@ -25,6 +24,7 @@
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/grid/Grid.hpp>
 
 #include <vtparser/Parser.hpp>
 

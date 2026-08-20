@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Line.hpp>
 #include <vtbackend/VTWriter.hpp>
+#include <vtbackend/grid/Line.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

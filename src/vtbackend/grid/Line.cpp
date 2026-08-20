@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Line.hpp>
+#include <vtbackend/grid/Line.hpp>
 
 #include <vtbackend/SgrWriter.hpp>
 

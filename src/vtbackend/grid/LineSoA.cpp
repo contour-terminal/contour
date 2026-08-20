@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/LineSoA.hpp>
+#include <vtbackend/grid/LineSoA.hpp>
 
 #include <libunicode/width.h>
 

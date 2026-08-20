@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Line.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/grid/Line.hpp>
 
 #include <libunicode/convert.h>
 
