@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/ViInputHandler.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
+#include <vtbackend/input/vi/ViInputHandler.hpp>
 
 #include <crispy/Size.hpp>
 #include <crispy/Times.hpp>

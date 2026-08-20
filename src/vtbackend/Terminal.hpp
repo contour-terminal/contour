@@ -3,16 +3,12 @@
 
 #include <vtbackend/Cursor.hpp>
 #include <vtbackend/Folding.hpp>
-#include <vtbackend/HintModeHandler.hpp>
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/RenderBuffer.hpp>
-#include <vtbackend/Selector.hpp>
 #include <vtbackend/SemanticBlockTracker.hpp>
 #include <vtbackend/Settings.hpp>
 #include <vtbackend/ShellIntegration.hpp>
 #include <vtbackend/StatusLineBuilder.hpp>
-#include <vtbackend/ViCommands.hpp>
-#include <vtbackend/ViInputHandler.hpp>
 #include <vtbackend/Viewport.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
@@ -20,6 +16,10 @@
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/InputHandler.hpp>
+#include <vtbackend/input/vi/HintModeHandler.hpp>
+#include <vtbackend/input/vi/Selector.hpp>
+#include <vtbackend/input/vi/ViCommands.hpp>
+#include <vtbackend/input/vi/ViInputHandler.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
 #include <vtbackend/vt/PointerShape.hpp>
 #include <vtbackend/vt/ProgressState.hpp>

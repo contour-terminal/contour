@@ -3,8 +3,8 @@
 
 #include <contour/config/TabBarMode.hpp>
 
-#include <vtbackend/HintModeHandler.hpp>
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/input/vi/HintModeHandler.hpp>
 
 #include <crispy/Assert.hpp>
 #include <crispy/Utils.hpp>

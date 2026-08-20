@@ -2,9 +2,9 @@
 #pragma once
 
 #include <vtbackend/Folding.hpp>
-#include <vtbackend/JumpHistory.hpp>
-#include <vtbackend/ViInputHandler.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/input/vi/JumpHistory.hpp>
+#include <vtbackend/input/vi/ViInputHandler.hpp>
 
 #include <gsl/pointers>
 

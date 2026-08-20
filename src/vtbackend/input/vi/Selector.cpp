@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Selector.hpp>
+#include <vtbackend/input/vi/Selector.hpp>
 
 #include <vtbackend/Screen.hpp>
 #include <vtbackend/Terminal.hpp>

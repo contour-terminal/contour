@@ -28,13 +28,13 @@ set(vtbackend_HEADERS
     vt/Functions.hpp
     core/GraphicsAttributes.hpp
     grid/Grid.hpp
-    HintModeHandler.hpp
+    input/vi/HintModeHandler.hpp
     core/Hyperlink.hpp
     core/Image.hpp
     input/InputBinding.hpp
     input/InputGenerator.hpp
     input/InputHandler.hpp
-    JumpHistory.hpp
+    input/vi/JumpHistory.hpp
     vt/KittyClipboard.hpp
     graphics/KittyGraphics.hpp
     grid/Line.hpp
@@ -53,7 +53,7 @@ set(vtbackend_HEADERS
     RenderBuffer.hpp
     RenderBufferBuilder.hpp
     Screen.hpp
-    Selector.hpp
+    input/vi/Selector.hpp
     SemanticBlockTracker.hpp
     vt/Sequence.hpp
     vt/SequenceBuilder.hpp
@@ -69,8 +69,8 @@ set(vtbackend_HEADERS
     vt/TextSizing.hpp
     vt/VTType.hpp
     vt/VTWriter.hpp
-    ViCommands.hpp
-    ViInputHandler.hpp
+    input/vi/ViCommands.hpp
+    input/vi/ViInputHandler.hpp
     Viewport.hpp
     core/WindowSizeStack.hpp
     graphics/regis/ReGISColor.hpp
@@ -95,7 +95,7 @@ set(vtbackend_SOURCES
     vt/Functions.cpp
     grid/Grid.cpp
     core/FileUrl.cpp
-    HintModeHandler.cpp
+    input/vi/HintModeHandler.cpp
     core/Image.cpp
     input/InputGenerator.cpp
     grid/Line.cpp
@@ -109,7 +109,7 @@ set(vtbackend_SOURCES
     vt/TextSizing.cpp
     Screen.cpp
     SemanticBlockTracker.cpp
-    Selector.cpp
+    input/vi/Selector.cpp
     grid/SoAClusterWriter.cpp
     vt/Sequence.cpp
     graphics/SixelParser.cpp
@@ -124,9 +124,9 @@ set(vtbackend_SOURCES
     vt/VTType.cpp
     vt/VTWriter.cpp
     Viewport.cpp
-    ViInputHandler.cpp
-    ViCommands.cpp
-    JumpHistory.cpp
+    input/vi/ViInputHandler.cpp
+    input/vi/ViCommands.cpp
+    input/vi/JumpHistory.cpp
     core/Primitives.cpp
 )
 
@@ -183,11 +183,11 @@ if(LIBTERMINAL_TESTING)
         graphics/GoodImageProtocol_test.cpp
         graphics/XtSmGraphics_test.cpp
         input/InputGenerator_test.cpp
-        Selector_test.cpp
+        input/vi/Selector_test.cpp
         vt/Functions_test.cpp
         grid/Grid_test.cpp
         core/FileUrl_test.cpp
-        HintModeHandler_test.cpp
+        input/vi/HintModeHandler_test.cpp
         grid/Line_test.cpp
         graphics/MessageParser_test.cpp
         vt/ModifyKeys_test.cpp
@@ -214,7 +214,7 @@ if(LIBTERMINAL_TESTING)
         graphics/regis/ReGISFont_test.cpp
         graphics/regis/ReGISTextRasterizer_test.cpp
         graphics/regis/ReGISParser_test.cpp
-        ViCommands_test.cpp
+        input/vi/ViCommands_test.cpp
         vt/VTWriter_test.cpp
     )
     target_link_libraries(vtbackend_test Catch2::Catch2 vtbackend)
