@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/CellProxy.hpp>
+#include <vtbackend/Folding.hpp>
 #include <vtbackend/GraphicsAttributes.hpp>
 #include <vtbackend/Line.hpp>
 #include <vtbackend/Primitives.hpp>
@@ -16,6 +17,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -717,12 +719,27 @@ class Grid
     // }}}
 
     // {{{ Rendering API
+    /// Passes every cell of the visible rows to @p render.
+    ///
+    /// @param render        The render pass (RenderBufferBuilder in production).
+    /// @param scrollOffset  How far the viewport is scrolled into the history.
+    /// @param highlightSearchMatches  Whether the pass highlights search matches.
+    /// @param extraLines    Rows to draw ABOVE the page, for smooth scrolling. Ignored when @p rows is
+    ///                      given, which names its own extra rows.
+    /// @param rows          The exact rows to draw, top first, when the caller needs a NON-CONTIGUOUS
+    ///                      selection of them -- which is what output folding needs, its collapsed
+    ///                      blocks leaving gaps a linear walk cannot express. Empty (the default) walks
+    ///                      the page linearly, as it always has. Rows beyond the page count are drawn
+    ///                      above it, exactly as @p extraLines does, so smooth scrolling works either
+    ///                      way. Grid deliberately knows nothing about folding: it draws the rows it is
+    ///                      handed and the decision of WHICH stays with the caller.
     template <typename RendererT>
     [[nodiscard]] RenderPassHints render(
         RendererT&& render,
         ScrollOffset scrollOffset = {},
         HighlightSearchMatches highlightSearchMatches = HighlightSearchMatches::Yes,
-        LineCount extraLines = LineCount(0)) const;
+        LineCount extraLines = LineCount(0),
+        std::span<LineOffset const> rows = {}) const;
 
     [[nodiscard]] std::string renderMainPageText() const;
     [[nodiscard]] std::string renderAllText() const;
@@ -1142,18 +1159,14 @@ template <typename RendererT>
     RendererT&& render, // NOLINT(cppcoreguidelines-missing-std-forward)
     ScrollOffset scrollOffset,
     HighlightSearchMatches highlightSearchMatches,
-    LineCount extraLines) const
+    LineCount extraLines,
+    std::span<LineOffset const> rows) const
 {
     assert(!scrollOffset || unbox<LineCount>(scrollOffset) <= historyLineCount());
 
-    auto const availableAbove = *historyLineCount() - *scrollOffset;
-    auto const extraOffset = std::min(*extraLines, std::max(0, availableAbove));
-    auto y = LineOffset(-extraOffset);
     auto hints = RenderPassHints {};
-    for (int i = -*scrollOffset - extraOffset, e = i + *_pageSize.lines + extraOffset; i != e; ++i, ++y)
-    {
-        Line const& line = _lines[i];
 
+    auto const renderRow = [&](Line const& line, LineOffset y) {
         // Fast path: uniform-attribute line — render as a single batch. Blank lines have no
         // codepoints, so no search pattern can match them; always use the trivial path for
         // blanks to avoid constructing ConstCellProxy on un-materialized SoA arrays.
@@ -1185,7 +1198,25 @@ template <typename RendererT>
             }
             render.endLine();
         }
+    };
+
+    if (rows.empty())
+    {
+        auto const availableAbove = *historyLineCount() - *scrollOffset;
+        auto const extraOffset = std::min(*extraLines, std::max(0, availableAbove));
+        auto y = LineOffset(-extraOffset);
+        for (int i = -*scrollOffset - extraOffset, e = i + *_pageSize.lines + extraOffset; i != e; ++i, ++y)
+            renderRow(_lines[i], y);
     }
+    else
+    {
+        // Placed by the one statement of the rule, which Viewport's coordinate translation reads as well
+        // (@see foldedRowsTopRow): those two disagreeing is precisely what misplaces a selection.
+        auto y = foldedRowsTopRow(_pageSize.lines, rows.size());
+        for (auto const row: rows)
+            renderRow(lineAt(row), y++);
+    }
+
     render.finish();
     return hints;
 }
