@@ -763,6 +763,115 @@ color_schemes:
     CHECK(scheme.backgroundImage->blur == true);
 }
 
+TEST_CASE("Config: the fold column's colors load and are written back", "[config]")
+{
+    QTemporaryDir dir;
+
+    auto const schemeOf = [](contour::config::Config const& config) {
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        REQUIRE(std::holds_alternative<contour::config::SimpleColorConfig>(profile->colors.value()));
+        return std::get<contour::config::SimpleColorConfig>(profile->colors.value()).colors;
+    };
+
+    SECTION("unset by default, so the column derives from the scheme")
+    {
+        // Deliberately optional: a scheme that says nothing about folding must not have to, and gets
+        // the column derived from the palette's own foreground/background -- the glyph faded at rest
+        // and at full strength under the pointer.
+        auto const scheme = schemeOf(loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: coverage
+color_schemes:
+    coverage:
+        default:
+            background: '#102030'
+            foreground: '#D0D0D0'
+)"sv));
+        CHECK_FALSE(scheme.foldMarker.has_value());
+        CHECK_FALSE(scheme.foldMarkerHover.has_value());
+    }
+
+    SECTION("both pairs load")
+    {
+        // Deliberately NOT the colours the derivation produces, and not each other's inverse: this
+        // section has to tell "read the configured value" apart from "fell back to the palette".
+
+        auto const scheme = schemeOf(loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: coverage
+color_schemes:
+    coverage:
+        default:
+            background: '#102030'
+            foreground: '#D0D0D0'
+        fold_marker:
+            default:
+                foreground: '#909090'
+                background: '#101010'
+            hover:
+                foreground: '#FFD080'
+                background: '#303030'
+)"sv));
+        REQUIRE(scheme.foldMarker.has_value());
+        CHECK(scheme.foldMarker->foreground == vtbackend::RGBColor(0x90, 0x90, 0x90));
+        CHECK(scheme.foldMarker->background == vtbackend::RGBColor(0x10, 0x10, 0x10));
+        REQUIRE(scheme.foldMarkerHover.has_value());
+        CHECK(scheme.foldMarkerHover->foreground == vtbackend::RGBColor(0xFF, 0xD0, 0x80));
+        CHECK(scheme.foldMarkerHover->background == vtbackend::RGBColor(0x30, 0x30, 0x30));
+    }
+
+    SECTION("one pair alone loads, and the other stays unset")
+    {
+        auto const scheme = schemeOf(loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: coverage
+color_schemes:
+    coverage:
+        default:
+            background: '#102030'
+            foreground: '#D0D0D0'
+        fold_marker:
+            hover:
+                foreground: '#010203'
+                background: '#040506'
+)"sv));
+        CHECK_FALSE(scheme.foldMarker.has_value());
+        REQUIRE(scheme.foldMarkerHover.has_value());
+        CHECK(scheme.foldMarkerHover->foreground == vtbackend::RGBColor(0x01, 0x02, 0x03));
+    }
+
+    SECTION("the writer emits what was set, and only that")
+    {
+        // Every other palette entry hands the writer its live values; this one used to emit a fully
+        // commented example whatever the scheme said, so a configured fold column did not survive a
+        // write. Emitting the full block instead would be the opposite error -- it would PIN colours
+        // an unset pair deliberately derives.
+        auto config = contour::config::Config {};
+        auto& scheme = config.colorschemes.value()["default"];
+        scheme.foldMarker = vtbackend::RGBColorPair { .foreground = vtbackend::RGBColor(0x90, 0x90, 0x90),
+                                                      .background = vtbackend::RGBColor(0x1A, 0x1A, 0x1A) };
+
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        REQUIRE(written.contains("fold_marker:"));
+
+        auto const reloaded = schemeOf(loadFromYaml(dir, written));
+        REQUIRE(reloaded.foldMarker.has_value());
+        CHECK(reloaded.foldMarker->foreground == vtbackend::RGBColor(0x90, 0x90, 0x90));
+        CHECK(reloaded.foldMarker->background == vtbackend::RGBColor(0x1A, 0x1A, 0x1A));
+        CHECK_FALSE(reloaded.foldMarkerHover.has_value());
+    }
+}
+
 TEST_CASE("Config: findProfile reports a missing profile instead of asserting", "[config]")
 {
     // findProfile() is the fallible lookup for runtime input (a keybinding naming a removed
@@ -846,6 +955,78 @@ profiles:
     CHECK(profile->permissions.value().changeFont == contour::config::Permission::Allow);
     CHECK(profile->permissions.value().captureBuffer == contour::config::Permission::Deny);
     CHECK(profile->permissions.value().displayHostWritableStatusLine == contour::config::Permission::Ask);
+}
+
+TEST_CASE("Config: folding loads from YAML and reaches the emulation settings", "[config]")
+{
+    QTemporaryDir dir;
+    // Folding is a GLOBAL section, not a per-profile one: a fold is a property of how the user reads
+    // output, not of which shell produced it, so it sits beside `images` rather than inside a profile.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+folding:
+    enabled: true
+    show_markers: false
+    auto_collapse_on_new_command: true
+    on_jump_into_fold: skip
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    CHECK(config.folding.value().enabled == true);
+    CHECK(config.folding.value().showMarkers == false);
+    CHECK(config.folding.value().autoCollapseOnNewCommand == true);
+    CHECK(config.folding.value().onJumpIntoFold == vtbackend::FoldJumpBehavior::Skip);
+
+    // auto_collapse is what vtbackend actually needs to know about, and it is conjoined with `enabled`
+    // at the boundary so the emulation never has to consult two flags.
+    auto const settings = contour::config::emulationSettings(config, *profile);
+    CHECK(settings.autoCollapseFoldOnNewCommand == true);
+    CHECK(settings.foldJumpBehavior == vtbackend::FoldJumpBehavior::Skip);
+}
+
+TEST_CASE("Config: folding defaults, and disabling it never auto-collapses", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+folding:
+    enabled: false
+    auto_collapse_on_new_command: true
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    // Unspecified keys keep their defaults.
+    CHECK(config.folding.value().showMarkers == true);
+    CHECK(config.folding.value().onJumpIntoFold == vtbackend::FoldJumpBehavior::Expand);
+
+    // `enabled: false` wins over `auto_collapse_on_new_command: true`: a feature that is off does not
+    // get to fold anything away behind the user's back.
+    CHECK(contour::config::emulationSettings(config, *profile).autoCollapseFoldOnNewCommand == false);
+}
+
+TEST_CASE("Config: an unknown on_jump_into_fold value keeps the default", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+folding:
+    on_jump_into_fold: sideways
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    CHECK(config.folding.value().onJumpIntoFold == vtbackend::FoldJumpBehavior::Expand);
 }
 
 TEST_CASE("Config: cursor, bell, mouse and modes load from YAML", "[config]")

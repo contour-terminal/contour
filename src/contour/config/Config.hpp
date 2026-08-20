@@ -297,6 +297,35 @@ struct HistoryConfig
     bool autoScrollOnUpdate { true };
 };
 
+/// Output folding: collapsing a finished command's output down to the prompt line it was entered at.
+///
+/// The fold ranges come from the OSC 133 semantic marks a shell with shell integration emits, so a shell
+/// that emits none simply has nothing to fold. Only FINISHED commands fold, which is why the prompt the
+/// user is typing at never does.
+///
+/// Plain bools rather than enum classes because these are YAML schema fields, converted at the boundary
+/// -- the documented carve-out in AGENT.md. The one enum below is not a bool in disguise: it selects
+/// between two NAMED outcomes, which is exactly what that carve-out does not cover.
+struct FoldingConfig
+{
+    bool enabled { true };                   ///< Whether folding is available at all.
+    bool showMarkers { true };               ///< Reserve a gutter column and draw a marker in it.
+    bool autoCollapseOnNewCommand { false }; ///< Collapse a command as soon as the next prompt starts.
+
+    /// What a targeted Vi-mode jump does when its target sits inside a collapsed fold.
+    vtbackend::FoldJumpBehavior onJumpIntoFold { vtbackend::FoldJumpBehavior::Expand };
+
+    /// Whether the fold gutter is drawn, and therefore whether a column must be reserved for it.
+    ///
+    /// Spelled once because two independent layers ask it: the renderer, deciding whether to draw a
+    /// marker, and the window geometry, deciding whether to reserve the column one would occupy. They
+    /// must always agree -- a marker drawn into a column nobody reserved lands on top of the grid --
+    /// and a third condition added to only one of them is a silent desync.
+    ///
+    /// @return Whether markers are shown.
+    [[nodiscard]] constexpr bool markersVisible() const noexcept { return enabled && showMarkers; }
+};
+
 struct ScrollBarConfig
 {
     ScrollBarPosition position { ScrollBarPosition::Hidden };
@@ -1193,6 +1222,7 @@ struct Config
     ConfigEntry<bool, documentation::Live> live { false };
     ConfigEntry<std::set<std::string>, documentation::ExperimentalFeatures> experimentalFeatures {};
     ConfigEntry<ImagesConfig, documentation::Images> images {};
+    ConfigEntry<FoldingConfig, documentation::Folding> folding {};
 
     ConfigEntry<std::unordered_map<std::string, TerminalProfile>, documentation::Profiles> profiles {
         { { "main", TerminalProfile {} } }
@@ -1506,6 +1536,10 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, FoldingConfig& where);
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       vtbackend::FoldJumpBehavior& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, MouseConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, StatusLineConfig& where);
@@ -1801,6 +1835,11 @@ struct Writer
     [[nodiscard]] std::string format(std::string_view doc, WindowMargins const& v)
     {
         return format(doc, v.horizontal, v.vertical);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, FoldingConfig const& v)
+    {
+        return format(doc, v.enabled, v.showMarkers, v.autoCollapseOnNewCommand, v.onJumpIntoFold);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, HistoryConfig const& v)

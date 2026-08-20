@@ -360,6 +360,28 @@ constexpr StringLiteral HistoryConfig {
 
 };
 
+constexpr StringLiteral FoldingConfig {
+
+    "folding:\n"
+    "    {comment} Whether a finished command's output can be collapsed to its prompt line.\n"
+    "    {comment} Requires shell integration: the fold ranges come from the OSC 133 marks a\n"
+    "    {comment} shell leaves behind, so a shell that emits none has nothing to fold.\n"
+    "    enabled: {}\n"
+    "    {comment} Whether to reserve a gutter column left of the grid and draw a marker there\n"
+    "    {comment} on every foldable prompt line. Costs one column of terminal width.\n"
+    "    show_markers: {}\n"
+    "    {comment} Whether to collapse the previous command automatically when a new prompt starts.\n"
+    "    auto_collapse_on_new_command: {}\n"
+    "    {comment} What a Vi-mode jump that targets a line inside a collapsed block does:\n"
+    "    {comment}   expand - open the block so the cursor lands on what it was aiming at\n"
+    "    {comment}   skip   - leave the block collapsed and stop at its prompt line instead\n"
+    "    {comment} Plain motions (j, k, {{, }}, Ctrl-D, Ctrl-U) always step over a collapsed block\n"
+    "    {comment} regardless of this setting.\n"
+    "    on_jump_into_fold: {}\n"
+    "\n"
+
+};
+
 constexpr StringLiteral ScrollbarConfig {
 
     "scrollbar:\n"
@@ -1335,6 +1357,41 @@ constexpr StringLiteral IndicatorStatusLineConfig {
     "        background: {}\n"
 };
 
+constexpr StringLiteral FoldMarkerConfig {
+    "\n"
+    "{comment} Colors for the fold column drawn in the gutter left of the grid (output folding).\n"
+    "{comment} Unset by default, and deliberately: the column is then derived from this scheme's own\n"
+    "{comment} foreground/background -- a faded glyph at rest, coming up to full strength under the\n"
+    "{comment} pointer -- so it stays legible in any theme without every theme having to know the\n"
+    "{comment} feature exists. Uncomment to override.\n"
+    "{comment} The values shown are what the default scheme derives, so uncommenting them as-is\n"
+    "{comment} changes nothing -- they are a starting point to edit, not a second opinion.\n"
+    "{comment} fold_marker:\n"
+    "{comment}     default:\n"
+    "{comment}         foreground: '#7e7c7c'\n"
+    "{comment}         background: '#1a1716'\n"
+    "{comment}     hover:\n"
+    "{comment}         foreground: '#d0d0d0'\n"
+    "{comment}         background: '#1a1716'\n"
+};
+
+constexpr StringLiteral FoldMarkerHeaderConfig {
+    "\n"
+    "{comment} Colors for the fold column drawn in the gutter left of the grid (output folding).\n"
+    "{comment} Written back because this scheme sets them; remove the block to go back to deriving the\n"
+    "{comment} column from this scheme's own foreground/background, faded at rest and at full strength\n"
+    "{comment} under the pointer.\n"
+    "fold_marker:\n"
+};
+
+constexpr StringLiteral FoldMarkerDefaultConfig { "    default:\n"
+                                                  "        foreground: {}\n"
+                                                  "        background: {}\n" };
+
+constexpr StringLiteral FoldMarkerHoverConfig { "    hover:\n"
+                                                "        foreground: {}\n"
+                                                "        background: {}\n" };
+
 constexpr StringLiteral InputMethodEditorConfig { "\n"
                                                   "{comment} Colors for the IME (Input Method Editor) area.\n"
                                                   "input_method_editor:\n"
@@ -1932,6 +1989,41 @@ constexpr StringLiteral HistoryWeb {
     "\n"
 };
 
+constexpr StringLiteral FoldingWeb {
+    "configuration controls output folding: collapsing a finished command's output down to the prompt "
+    "line it was entered at, and expanding it again.\n"
+    "``` yaml\n"
+    "folding:\n"
+    "  enabled: true\n"
+    "  show_markers: true\n"
+    "  auto_collapse_on_new_command: false\n"
+    "  on_jump_into_fold: expand\n"
+    "```\n"
+    "Folding is driven entirely by the OSC 133 semantic marks a shell with shell integration emits, so "
+    "no additional escape sequence is involved and any shell that already speaks OSC 133 works. Only "
+    "FINISHED commands fold, which is why the prompt you are typing at never does.\n"
+    ":octicons-horizontal-rule-16: ==enabled== Whether folding is available at all. When false the "
+    "actions below do nothing and no gutter is reserved. <br/>\n"
+    ":octicons-horizontal-rule-16: ==show_markers== Whether to reserve a one-column gutter to the left "
+    "of the grid and draw a fold column in it: a boxed minus on a foldable prompt line whose output is "
+    "showing, a boxed plus once it is collapsed, and a bar down the side of the block joining the two. "
+    "Clicking anywhere on that column toggles the fold. Note that the gutter costs one column of "
+    "terminal width. <br/>\n"
+    ":octicons-horizontal-rule-16: ==auto_collapse_on_new_command== Whether a command's output is "
+    "collapsed automatically as soon as the next prompt appears, so that only the command you are "
+    "running now is shown in full. <br/>\n"
+    ":octicons-horizontal-rule-16: ==on_jump_into_fold== What a Vi-mode jump that targets a line "
+    "inside a collapsed block does: `expand` opens the block so the cursor lands on what it was "
+    "aiming at, `skip` leaves it collapsed and stops at its prompt line instead. Plain motions "
+    "(`j`, `k`, `{{`, `}}`, ++ctrl+d++, ++ctrl+u++) always step over a collapsed block regardless of "
+    "this setting. <br/>\n"
+    "\n"
+    "The actions ==CollapseAllFolds==, ==ExpandAllFolds==, ==CollapseLastFold==, ==ToggleLastFold== and "
+    "==ToggleFold== can be bound to keys; ==ScrollMarkUp== and ==ScrollMarkDown== already move the "
+    "viewport from one prompt to the next.\n"
+    "\n"
+};
+
 constexpr StringLiteral ScrollbarWeb {
     "configuration allows you to customize the appearance and behavior of the visual scrollbar in the "
     "terminal.\n"
@@ -2441,6 +2533,7 @@ using Margins = DocumentationEntry<MarginsConfig, MarginsWeb>;
 using TerminalSize = DocumentationEntry<TerminalSizeConfig, TerminalSizeWeb>;
 using TerminalId = DocumentationEntry<TerminalIdConfig, TerminalIdWeb>;
 using History = DocumentationEntry<HistoryConfig, HistoryWeb>;
+using Folding = DocumentationEntry<FoldingConfig, FoldingWeb>;
 using Scrollbar = DocumentationEntry<ScrollbarConfig, ScrollbarWeb>;
 using StatusLine = DocumentationEntry<StatusLineConfig, StatusLineWeb>;
 using OptionKeyAsAlt = DocumentationEntry<OptionKeyAsAltConfig, OptionKeyAsAltWeb>;
@@ -2612,6 +2705,10 @@ using HintMatch = DocumentationEntry<HintMatchConfig, Dummy>;
 using HintPatterns = DocumentationEntry<HintPatternsConfig, Dummy>;
 using HintScrollbackLines = DocumentationEntry<HintScrollbackLinesConfig, Dummy>;
 using IndicatorStatusLine = DocumentationEntry<IndicatorStatusLineConfig, Dummy>;
+using FoldMarker = DocumentationEntry<FoldMarkerConfig, Dummy>;
+using FoldMarkerHeader = DocumentationEntry<FoldMarkerHeaderConfig, Dummy>;
+using FoldMarkerDefault = DocumentationEntry<FoldMarkerDefaultConfig, Dummy>;
+using FoldMarkerHover = DocumentationEntry<FoldMarkerHoverConfig, Dummy>;
 using InputMethodEditor = DocumentationEntry<InputMethodEditorConfig, Dummy>;
 using InputMethodEditorSupport = DocumentationEntry<InputMethodEditorSupportConfig, Dummy>;
 using NormalColors = DocumentationEntry<NormalColorsConfig, Dummy>;

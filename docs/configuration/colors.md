@@ -186,6 +186,37 @@ color_schemes:
           background: '#000000'
 ```
 
+### `fold_marker`
+Defines the colors of the fold column drawn in the one-column gutter left of the grid, when output
+folding is enabled (see `folding.show_markers`). Two independent sections, `default` and `hover`,
+each with `foreground` and `background`; `hover` applies to the whole run of the fold the pointer is
+currently over, not just the row under it.
+
+Both are **optional**, and left unset by default. When a section is missing, its colors are derived
+from this scheme's own `default` foreground and background: at rest the glyph is faded partway
+toward the background so it stays quieter than the text beside it, and on hover it comes up to the
+full foreground. Only the glyph changes — the background stays the page's own in both states, so the
+gutter never paints over a transparent window. That is what lets a scheme which has never heard of
+folding still draw a legible, obviously-clickable column, in light and dark themes alike — so only
+set these if you actively want something else.
+
+``` yaml
+color_schemes:
+  default:
+    fold_marker:
+        default:
+          foreground: '#7e7c7c'
+          background: '#1a1716'
+        hover:
+          foreground: '#d0d0d0'
+          background: '#1a1716'
+```
+
+:octicons-horizontal-rule-16: ==default== Colors of the fold column at rest. Set the background to
+this scheme's own background to keep the gutter transparent along with the rest of the window. <br/>
+:octicons-horizontal-rule-16: ==hover== Colors of the fold run under the pointer — the whole run of
+the hovered fold, not just the row beneath it. <br/>
+
 ### Palette Presets 
 When choosing a palette from a preset as the color scheme  (in `profiles`) it is possible to tweak any configuration:
 ``` yaml
@@ -326,6 +357,13 @@ color_schemes:
             visual_mode:
               foreground: '#FFFFFF'
               background: '#0270C0'
+        # fold_marker:
+        #     default:
+        #         foreground: '#7e7c7c'
+        #         background: '#1a1716'
+        #     hover:
+        #         foreground: '#d0d0d0'
+        #         background: '#1a1716'
         input_method_editor:
             foreground: '#FFFFFF'
             background: '#FF0000'

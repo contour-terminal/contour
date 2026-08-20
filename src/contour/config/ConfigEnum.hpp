@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/Folding.hpp> // FoldJumpBehavior
+
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <ranges>
@@ -89,6 +92,26 @@ template <typename Enum>
         if (info.value == value)
             return info.label;
     return {};
+}
+
+namespace detail
+{
+    /// What a targeted Vi jump does when its target sits inside a collapsed fold.
+    ///
+    /// Owned by vtbackend, so the table hangs off the type from here -- the reader, the settings-page
+    /// combo box and the written-back spelling then all come from this one row set.
+    inline constexpr auto FoldJumpBehaviorTable = std::array {
+        ConfigEnumInfo<vtbackend::FoldJumpBehavior> {
+            vtbackend::FoldJumpBehavior::Expand, "expand", "Expand the block" },
+        ConfigEnumInfo<vtbackend::FoldJumpBehavior> {
+            vtbackend::FoldJumpBehavior::Skip, "skip", "Stop at the prompt line" },
+    };
+} // namespace detail
+
+template <>
+constexpr std::span<ConfigEnumInfo<vtbackend::FoldJumpBehavior> const> configEnumValues() noexcept
+{
+    return detail::FoldJumpBehaviorTable;
 }
 
 } // namespace contour::config
