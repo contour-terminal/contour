@@ -59,7 +59,7 @@ jobs:
       #
       # The compiler is named rather than left to the default: this job installs g++-14, but that
       # does not make it the default -- Ubuntu 24.04's `g++` is 13.3, whose libstdc++ has no
-      # std::ranges::to (C++23, and GCC 14 is where it arrived), so vtbackend/Color.cpp fails with
+      # std::ranges::to (C++23, and GCC 14 is where it arrived), so vtbackend/core/Color.cpp fails with
       # "'to' is not a member of 'std::ranges'". This job takes the gcc-debug preset's
       # PEDANTIC_COMPILER_WERROR=ON, which the build matrix passes OFF, so it is the strictest GCC
       # build in the tree and the only one that has to be told which GCC to be.

@@ -4,8 +4,8 @@ CMake:
     - "**CMakeLists.txt"
     - cmake/**
 "VT: backend":
-    - src/vtbackend/*.cpp
-    - src/vtbackend/*.hpp
+    - src/vtbackend/**/*.cpp
+    - src/vtbackend/**/*.hpp
     - src/vtpty/*.cpp
     - src/vtpty/*.hpp
     - src/vtparser/*.cpp

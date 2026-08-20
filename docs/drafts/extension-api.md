@@ -38,11 +38,11 @@ changed, because the architecture underneath moved:
   to a monolithic GUI — which is what gives extensions a well-defined answer to "which process am I
   in, and what can I see from there".
 - **`Grid` grew a change stream** — stable row ids plus per-line dirty bits, consumed through
-  `Grid::forEachLineChangedSince` (`src/vtbackend/Grid.hpp:756`) with a per-consumer
+  `Grid::forEachLineChangedSince` (`src/vtbackend/grid/Grid.hpp:756`) with a per-consumer
   `GridDeltaCursor`. Built for the daemon's cell tap, it is exactly the event source a
   grid-observing extension needs, and it already costs one byte store per mutation on the hot paths.
 - **Shell integration became an interface.** `vtbackend::ShellIntegration`
-  (`src/vtbackend/ShellIntegration.hpp:10`) is pure-virtual with precisely the four OSC 133 events,
+  (`src/vtbackend/shell/ShellIntegration.hpp:10`) is pure-virtual with precisely the four OSC 133 events,
   and there is a `NullShellIntegration` for "nobody is listening". The single most valuable
   extension surface in this whole document therefore needs *no new hook* — only a fan-out decorator.
 - **WASI 0.3.0 shipped on 2026-06-11** with native async in the Component Model (`async func`,
@@ -65,11 +65,11 @@ It is to let a sandboxed guest **contribute rows to registries that already acce
 | --- | --- | --- |
 | `contour::CommandSource` | `src/contour/Command.hpp:33` | *"a sixth kind of command is therefore a new class, not an edit to the palette"* |
 | `detail::MenuTable<State>` | `src/contour/ContextMenuTable.hpp` | *"Adding an entry to a context menu is adding one of these to that menu's table, and nothing else"* |
-| `StatusLineDefinitions::Item` | `src/vtbackend/StatusLineBuilder.hpp` | a `std::variant` of 16 item kinds; a new kind is a new struct |
-| `HintPattern` | `src/vtbackend/HintModeHandler.hpp:27` | pattern + action, pure data, with an `Executor` seam |
+| `StatusLineDefinitions::Item` | `src/vtbackend/screen/StatusLineBuilder.hpp` | a `std::variant` of 16 item kinds; a new kind is a new struct |
+| `HintPattern` | `src/vtbackend/input/vi/HintModeHandler.hpp:27` | pattern + action, pure data, with an `Executor` seam |
 | `actions::Action` | `src/contour/Actions.hpp` | one variant that the keymap, the command palette **and** every context menu read |
 | `vtpty::Pty` | `src/vtpty/Pty.hpp:52` | already a pure-virtual transport interface |
-| `vtbackend::ShellIntegration` | `src/vtbackend/ShellIntegration.hpp:10` | already a pure-virtual observer interface |
+| `vtbackend::ShellIntegration` | `src/vtbackend/shell/ShellIntegration.hpp:10` | already a pure-virtual observer interface |
 | `vtworkspace::SessionModel` | `src/vtworkspace/SessionModel.hpp` | a complete tab/pane/window verb set, Qt-free |
 
 The consequence for scope: **milestone 1 is small**, because for several interfaces the work is a
@@ -401,7 +401,7 @@ Use cases: error triage, redaction, the recorder's replay verification, the agen
 `NullShellIntegration` stays installed until someone subscribes
 
 The most valuable interface in this document, and the cheapest to build, because
-`vtbackend::ShellIntegration` (`src/vtbackend/ShellIntegration.hpp:10`) is already a pure-virtual
+`vtbackend::ShellIntegration` (`src/vtbackend/shell/ShellIntegration.hpp:10`) is already a pure-virtual
 observer with exactly the four OSC 133 events: `promptStart`, `promptEnd`, `commandOutputStart`
 (carrying the command line, when the shell sent one), `commandFinished(exitCode)`. Subscribing means
 swapping the null implementation for a fan-out decorator.
@@ -412,7 +412,7 @@ On top of those raw events the interface offers the semantics extensions actuall
   the logical line range the output occupied.
 - **Block queries** — the block at a position, the last N blocks, a block's prompt / command /
   output text. Backed by `scanCommandBlocksBackward` and `textOf`
-  (`src/vtbackend/CommandBlocks.hpp`), which are already written against a
+  (`src/vtbackend/shell/CommandBlocks.hpp`), which are already written against a
   `CommandBlockLineSource` DI seam and are therefore already testable without a Grid.
 - **The live prompt span** — where the shell's prompt is *right now*, or why there isn't one.
   Backed by `Terminal::livePromptSpan()`, which returns
@@ -621,7 +621,7 @@ Use cases: recent directories, git branches, k8s contexts, saved SSH hosts, "att
 **Permission:** `ui:hints` · **Placement:** client · **Cost unused:** nil — patterns are scanned only
 while hint mode is active
 
-Register `HintPattern`s (`src/vtbackend/HintModeHandler.hpp:27`) with a custom handler through the
+Register `HintPattern`s (`src/vtbackend/input/vi/HintModeHandler.hpp:27`) with a custom handler through the
 existing `HintModeHandler::Executor` seam: recognize `ABC-123` and open the ticket, recognize
 `file.cpp:42:17` and open the editor there, recognize a container id and offer `exec`. Patterns join
 `builtinPatterns()` rather than replacing them.

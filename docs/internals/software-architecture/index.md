@@ -115,6 +115,80 @@ graph TD
 *   **Key Classes:** `Terminal`, `Screen`, `Grid`, `Viewport`.
 *   **Key Dependencies:** `crispy`, `vtparser`, `vtpty`.
 
+#### Internal layering
+
+`src/vtbackend/` is layered, one directory per concern. Unlike `src/contour/`, the **namespace
+stays flat** — everything is `vtbackend` — so the directories are about finding code, not naming
+it, and moving a header changes no consumer's code beyond its `#include` line.
+
+```mermaid
+graph TD
+    Screen["screen/ — Screen, Terminal, the builders"]
+    Render["render/ — RenderBuffer"]
+    Shell["shell/ — OSC 133, folding"]
+    Input["input/ — key + mouse encoding"]
+    Vi["input/vi/ — the modal overlay"]
+    Graphics["graphics/ — Sixel, kitty, ReGIS"]
+    Vt["vt/ — what a sequence means"]
+    Grid["grid/ — the buffer"]
+    Core["core/ — the vocabulary"]
+
+    Screen --> Render
+    Screen --> Shell
+    Screen --> Vi
+    Screen --> Graphics
+    Screen --> Vt
+    Screen --> Grid
+    Vi --> Input
+    Render --> Grid
+    Graphics --> Core
+    Shell --> Core
+    Input --> Core
+    Vt --> Grid
+    Grid --> Core
+```
+
+| Directory | Holds |
+|---|---|
+| `core/` | coordinates, colors, cell and line attributes, hyperlinks, images, file URLs |
+| `grid/` | the scrollback ring, its reflow, and a row in trivial and inflated form |
+| `vt/` | the sequence table, the payload decoders, and the writers that phrase a reply |
+| `graphics/` | the protocols that produce an `Image`; `graphics/regis/` beneath it |
+| `input/` | key and mouse events to PTY bytes; `input/vi/` beneath it for vi mode |
+| `shell/` | OSC 133 semantic prompts, command blocks, prompt regions, folding |
+| `render/` | `RenderBuffer` — what `vtrasterizer` consumes, and nothing else |
+| `screen/` | `Screen`, `Terminal`, and everything that walks them |
+| `testing/` | `MockTerm` and `TestHelpers`, used by `vtconformance` and `vtrasterizer` tests |
+
+Two rules keep it honest, and both are a `grep` rather than a review question:
+
+*   **`core/` may include nothing but `core/`.** A header also earns its place there only by being
+    named from two other directories, or from another module. Together those decide the cases that
+    are not obvious: `CellFlags` and `LineFlags` are vocabulary rather than grid storage, `Image`
+    is vocabulary rather than a graphics protocol, and `Cursor` is *not* vocabulary because it
+    includes `Charset`.
+
+    ```sh
+    grep '#include <vtbackend/' src/vtbackend/core/*.hpp | grep -v 'vtbackend/core/'
+    grep -rn '#include <vtbackend/screen/' src/vtbackend/render/
+    grep -n '#include <vtbackend/input/vi/' src/vtbackend/input/*.hpp
+    ```
+
+*   **A builder lives with what it walks, not with what it fills.** `RenderBufferBuilder` calls 15
+    members of `Terminal` and 7 of `Screen`; `StatusLineBuilder`'s serializer reads 14 more. Filing
+    them under `render/` — beside the `RenderBuffer` they produce — is what made `render/` and
+    `screen/` mutually dependent in the first place. `render/` therefore holds the *vocabulary*
+    the rasterizer consumes, and the builders sit in `screen/`.
+
+    The alternative was to hand the builders a frame-context struct so they could stay in
+    `render/`. It was rejected on cost: severing the edge needs all 22 members abstracted, putting
+    nine indirect calls on the per-cell path — and that path runs under `_stateMutex`, which the
+    parser thread holds for the full duration of an output burst. Trading VT-thread latency for a
+    directory boundary is the wrong way round.
+
+These are **concerns, not enforced layers**: `vtbackend` is a single CMake target, so nothing but
+the greps above gates them, and `Terminal.hpp` still includes 25 sibling headers.
+
 ### 6. `vtrasterizer` (Rendering)
 **Location:** `src/vtrasterizer/`
 

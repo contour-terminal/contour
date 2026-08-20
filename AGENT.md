@@ -240,6 +240,32 @@ First-party modules under `src/`, roughly bottom-up (later depends on earlier):
 Respect these boundaries: lower layers must not depend on higher ones, and the GUI must not
 reach around `vtbackend`/`vtworkspace` into rendering internals.
 
+`src/vtbackend/` is layered too, one directory per concern, lowest first. Unlike `src/contour/`
+the namespace stays flat — everything is `vtbackend`, so the directories are about *finding* code,
+not about naming it:
+
+- `core/` — the vocabulary every other directory speaks: coordinates, colors, cell and line
+  attributes, hyperlinks, images, file URLs. **`core/` may include nothing but `core/`**, and a
+  header earns a place here only if two other directories, or another module, name it. Both halves
+  are greppable, and the first is the one that keeps it from becoming a junk drawer.
+- `grid/` — the scrollback ring, its reflow, and a row in both its trivial and inflated forms.
+- `vt/` — what a sequence *means*: the table that names them, the decoders that turn a payload
+  into a value, and the writers that phrase a reply. **`vt/` includes nothing above it.** There is
+  deliberately no `osc/`: a wire prefix is not a concern, and such a directory could say nothing
+  about what may not enter it.
+- `graphics/` — the protocols that produce an `Image`: Sixel, kitty, Contour's own, and
+  `graphics/regis/` for the one that needs seven units instead of one.
+- `input/` — key and mouse events to the bytes written to the PTY, with `input/vi/` beneath it for
+  the modal overlay. The nesting is one-way and checked: nothing in `input/` includes `input/vi/`.
+- `shell/` — OSC 133 semantic prompts and what is built on them (command blocks, folding).
+- `render/` — `RenderBuffer`, what `vtrasterizer` consumes, and nothing else.
+- `screen/` — the engine, and everything that walks it: `Screen`, `Terminal`, and the builders.
+- `testing/` — `MockTerm` and `TestHelpers`, consumed by `vtconformance` and a `vtrasterizer` test.
+
+The graph is acyclic — `core/ → grid/ → vt/ → render/ → screen/` — and it stays that way because
+the builders live with the engine they walk rather than with the buffer they fill. Only
+`Logging.hpp` and the two optional tools sit at the top level.
+
 `src/contour/` is itself layered, one directory per concern, and **each directory names the
 namespace it holds** — `src/contour/config/` is `contour::config`, and so on for every one. Only
 `main.cpp` and `ContourGuiApp` (the composition root) sit at the top. Lowest first:
