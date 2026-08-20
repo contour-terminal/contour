@@ -1331,6 +1331,9 @@ class Terminal
     /// Replaces the ancestry with @p ids, for the same mirroring reason as @ref adoptContext.
     void setContextChain(std::span<ContextId const> ids);
 
+    /// Mirrors the active context id into every screen, so lines written next carry it.
+    void publishActiveContext() noexcept;
+
     [[nodiscard]] SemanticBlockTracker& semanticBlockTracker() noexcept { return _semanticBlockTracker; }
     [[nodiscard]] SemanticBlockTracker const& semanticBlockTracker() const noexcept
     {

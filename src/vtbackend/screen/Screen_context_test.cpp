@@ -261,3 +261,155 @@ TEST_CASE("Screen.osc3008 the effective working directory walks up the ancestry"
 }
 
 // }}}
+
+// {{{ line association
+
+TEST_CASE("Screen.osc3008 lines carry the context that wrote them", "[context]")
+{
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=one;type=command"));
+    auto const first = mock.terminal.contexts().activeId();
+    mock.writeToScreen("first\r\n");
+
+    mock.writeToScreen(osc3008("end=one;exit=success"));
+    mock.writeToScreen(osc3008("start=two;type=command"));
+    auto const second = mock.terminal.contexts().activeId();
+    mock.writeToScreen("second\r\n");
+
+    auto const& screen = mock.terminal.primaryScreen();
+    CHECK(screen.contextIdAt(LineOffset(0)) == first);
+    CHECK(screen.contextIdAt(LineOffset(1)) == second);
+    CHECK(first != second);
+}
+
+TEST_CASE("Screen.osc3008 a line written before any context carries none", "[context]")
+{
+    auto mock = makeTerm();
+    mock.writeToScreen("before\r\n");
+    mock.writeToScreen(osc3008("start=one;type=command"));
+    mock.writeToScreen("after\r\n");
+
+    auto const& screen = mock.terminal.primaryScreen();
+    CHECK(!screen.contextIdAt(LineOffset(0)));
+    CHECK(!!screen.contextIdAt(LineOffset(1)));
+}
+
+TEST_CASE("Screen.osc3008 a blank line inherits from the output above it", "[context]")
+{
+    // A run of blank lines below some output reads to a user as belonging to that output, and a line
+    // the cursor never moved onto carries no stamp of its own.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=one;type=command"));
+    auto const id = mock.terminal.contexts().activeId();
+    mock.writeToScreen("output\r\n");
+
+    auto const& screen = mock.terminal.primaryScreen();
+    CHECK(screen.contextIdAt(LineOffset(0)) == id);
+    CHECK(screen.contextIdAt(LineOffset(2)) == id); // never written to
+}
+
+TEST_CASE("Screen.osc3008 the stamp survives a scroll into history", "[context]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10) };
+    mock.writeToScreen(osc3008("start=one;type=command"));
+    auto const id = mock.terminal.contexts().activeId();
+    mock.writeToScreen("scrolled\r\n");
+    mock.writeToScreen("a\r\nb\r\nc\r\nd\r\n");
+
+    REQUIRE(mock.terminal.primaryScreen().historyLineCount() > LineCount(0));
+    CHECK(mock.terminal.primaryScreen().grid().lineAt(LineOffset(-3)).contextId() == id);
+}
+
+TEST_CASE("Screen.osc3008 a retired context still resolves for the lines it wrote", "[context]")
+{
+    // The record has to outlive end=, or the tint would vanish retroactively the moment a command
+    // exits.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=one;type=command;cwd=/tmp"));
+    auto const id = mock.terminal.contexts().activeId();
+    mock.writeToScreen("output\r\n");
+    mock.writeToScreen(osc3008("end=one;exit=success"));
+
+    REQUIRE(mock.terminal.contexts().depth() == 0);
+    auto const* const record = mock.terminal.contexts().find(id);
+    REQUIRE(record != nullptr);
+    CHECK(record->workingDirectory == "/tmp");
+    CHECK(record->outcome.exit == ContextExit::Success);
+}
+
+TEST_CASE("Screen.osc3008 line association survives a reflow", "[context]")
+{
+    // Unlike the two column offsets, the context is NOT head-only: it names who WROTE the line, and
+    // re-chopping a logical line into different physical pieces does not change the author of any
+    // piece. So every physical row of a wrapped logical line must still resolve after a resize.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(10) }, LineCount(20) };
+    mock.terminal.setMode(DECMode::TextReflow, true);
+
+    mock.writeToScreen(osc3008("start=one;type=command"));
+    auto const id = mock.terminal.contexts().activeId();
+    mock.writeToScreen("aaaaaaaaaabbbbbbbbbbcccccccccc"); // three physical rows at 10 columns
+
+    // Only rows holding part of the logical line: the row the cursor sits on is stamped too, and the
+    // property under test is that no PIECE of the wrapped line loses its author.
+    auto physicalRowsCarrying = [&](ContextId wanted) {
+        auto count = 0;
+        auto const& grid = mock.terminal.primaryScreen().grid();
+        auto const top = -unbox<int>(grid.historyLineCount());
+        for (auto i = top; i < unbox<int>(mock.terminal.pageSize().lines); ++i)
+        {
+            if (grid.lineText(LineOffset(i)).find_first_of("abc") == std::string::npos)
+                continue;
+            CHECK(grid.lineAt(LineOffset(i)).contextId() == wanted);
+            ++count;
+        }
+        return count;
+    };
+    REQUIRE(physicalRowsCarrying(id) == 3);
+
+    // Narrower: the logical line is re-split into more physical rows, all still that context's.
+    mock.terminal.resizeScreen(PageSize { LineCount(6), ColumnCount(5) });
+    CHECK(physicalRowsCarrying(id) == 6);
+
+    // Wider again: rejoined and re-split, and still that context's.
+    mock.terminal.resizeScreen(PageSize { LineCount(6), ColumnCount(15) });
+    CHECK(physicalRowsCarrying(id) == 2);
+}
+
+TEST_CASE("Screen.osc3008 a reflow keeps two contexts apart", "[context]")
+{
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(10) }, LineCount(20) };
+    mock.terminal.setMode(DECMode::TextReflow, true);
+
+    mock.writeToScreen(osc3008("start=one;type=command"));
+    auto const first = mock.terminal.contexts().activeId();
+    mock.writeToScreen("aaaaaaaaaaaaaaa\r\n");
+    mock.writeToScreen(osc3008("end=one;exit=success"));
+    mock.writeToScreen(osc3008("start=two;type=command"));
+    auto const second = mock.terminal.contexts().activeId();
+    mock.writeToScreen("bbbbbbbbbbbbbbb\r\n");
+
+    mock.terminal.resizeScreen(PageSize { LineCount(8), ColumnCount(5) });
+
+    // Counting only rows that hold content: the cursor's landing row is stamped too -- correctly, since
+    // it is where the next output goes -- and that is not what this case is about.
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    auto seenFirst = 0;
+    auto seenSecond = 0;
+    auto const top = -unbox<int>(grid.historyLineCount());
+    for (auto i = top; i < unbox<int>(mock.terminal.pageSize().lines); ++i)
+    {
+        auto const text = grid.lineText(LineOffset(i));
+        if (text.find_first_of("ab") == std::string::npos)
+            continue;
+        auto const id = grid.lineAt(LineOffset(i)).contextId();
+        CHECK(id == (text.front() == 'a' ? first : second));
+        if (id == first)
+            ++seenFirst;
+        else if (id == second)
+            ++seenSecond;
+    }
+    CHECK(seenFirst == 3);
+    CHECK(seenSecond == 3);
+}
+
+// }}}

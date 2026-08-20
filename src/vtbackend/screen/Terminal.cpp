@@ -3689,12 +3689,27 @@ ContextTransition Terminal::applyContextCommand(ContextCommand const& command)
     // usually changes nothing, and notifying for it would be a redraw per prompt.
     if (transition.change == ContextChange::Yes)
     {
+        publishActiveContext();
+
         // Lock-free for the same reason setProgress() above is: the OSC 3008 dispatch in Screen reaches
         // this from inside writeToScreen()'s _stateMutex hold, and _stateMutex is not recursive.
         _eventListener.contextChanged(_contexts.activeId());
     }
 
     return transition;
+}
+
+void Terminal::publishActiveContext() noexcept
+{
+    // Every screen, not just the current one: an application may switch screens or flip pages between
+    // one context announcement and the next, and a line written on whichever screen is current then has
+    // to be stamped with the context that is actually in effect. The same shape hardReset() uses when
+    // it walks _pages.
+    auto const id = _contexts.activeId();
+    for (auto& page: _pages)
+        page->setActiveContextId(id);
+    _hostWritableStatusLineScreen.setActiveContextId(id);
+    _indicatorStatusScreen.setActiveContextId(id);
 }
 
 void Terminal::adoptContext(TerminalContext record)
@@ -3707,7 +3722,10 @@ void Terminal::setContextChain(std::span<ContextId const> ids)
     auto const before = _contexts.activeId();
     _contexts.setChain(ids);
     if (_contexts.activeId() != before)
+    {
+        publishActiveContext();
         _eventListener.contextChanged(_contexts.activeId());
+    }
 }
 
 Progress Terminal::resolvedProgress() const
