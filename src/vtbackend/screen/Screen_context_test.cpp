@@ -413,3 +413,201 @@ TEST_CASE("Screen.osc3008 a reflow keeps two contexts apart", "[context]")
 }
 
 // }}}
+
+// {{{ synthesised semantic marks
+
+namespace
+{
+
+/// The systemd prompt cycle for one command, as PROMPT_COMMAND and PS0 actually emit it.
+void systemdCycle(MockTerm<>& mock, std::string_view commandId, std::string_view previousCommandId = {})
+{
+    // The real order, which is what makes the synthesised marks land where OSC 133's would:
+    //   PROMPT_COMMAND closes the previous command, then re-announces the shell context (before the
+    //   prompt is painted), the prompt is painted, the user's command line and its Enter are echoed,
+    //   and only THEN does PS0 fire -- with the cursor already at the start of the output area.
+    if (!previousCommandId.empty())
+        mock.writeToScreen(osc3008("end=" + std::string { previousCommandId } + ";exit=success"));
+    mock.writeToScreen(osc3008("start=shell-uuid;type=shell;cwd=/home/user"));
+    mock.writeToScreen("$ ls\r\n");
+    mock.writeToScreen(osc3008("start=" + std::string { commandId } + ";type=command;cwd=/home/user"));
+    mock.writeToScreen("output\r\n");
+}
+
+/// Whether the logical line at @p line carries @p flag.
+bool lineHas(MockTerm<>& mock, int line, LineFlag flag)
+{
+    return mock.terminal.primaryScreen().isLogicalLineFlagEnabled(LineOffset(line), flag);
+}
+
+} // namespace
+
+TEST_CASE("Screen.osc3008 synthesises the OSC 133 marks when 133 is silent", "[context]")
+{
+    auto mock = makeTerm();
+
+    // The FIRST cycle pushes the shell context, and a push marks nothing: systemd opens it when
+    // profile.d is sourced, which can be arbitrarily far above the prompt. So the prompt mark appears
+    // from the second cycle on, where the shell context is UPDATED.
+    systemdCycle(mock, "cmd-1");
+    // Line 0 is the prompt+command line; line 1 is where output begins.
+    CHECK(lineHas(mock, 1, LineFlag::OutputStart)); // type=command start stands in for 133;C
+    CHECK(!lineHas(mock, 0, LineFlag::Marked));     // the shell context was PUSHED, not updated
+
+    mock.writeToScreen(osc3008("end=cmd-1;exit=success"));
+    CHECK(lineHas(mock, 2, LineFlag::CommandEnd)); // where the output left the cursor -> 133;D
+
+    // Second cycle: the shell context is re-announced, which IS the prompt boundary -> 133;A.
+    systemdCycle(mock, "cmd-2");
+    CHECK(lineHas(mock, 2, LineFlag::Marked));
+    CHECK(lineHas(mock, 3, LineFlag::OutputStart));
+}
+
+TEST_CASE("Screen.osc3008 never synthesises PromptEnd", "[context]")
+{
+    // OSC 3008 has no event at the prompt/input border: its type=command context is announced from
+    // PS0, after the user pressed Enter, by which time the cursor has left the prompt line. Guessing
+    // would put the mark on the wrong line AND the wrong column.
+    auto mock = makeTerm();
+    systemdCycle(mock, "cmd-1");
+    mock.writeToScreen(osc3008("end=cmd-1;exit=success"));
+    systemdCycle(mock, "cmd-2");
+
+    for (auto line = 0; line < 5; ++line)
+        CHECK(!lineHas(mock, line, LineFlag::PromptEnd));
+}
+
+TEST_CASE("Screen.osc3008 stamps nothing once OSC 133 has spoken", "[context]")
+{
+    auto mock = makeTerm();
+    mock.writeToScreen("\033]133;A\033\\"); // a shell integration is installed
+    mock.writeToScreen("$ ");
+    mock.writeToScreen("\033]133;B\033\\");
+    mock.writeToScreen("\r\n");
+
+    // Now the systemd stream arrives too, on a fresh line that 133 has not marked.
+    mock.writeToScreen(osc3008("start=shell-uuid;type=shell"));
+    mock.writeToScreen(osc3008("start=cmd-1;type=command"));
+
+    CHECK(!lineHas(mock, 1, LineFlag::Marked));
+    CHECK(!lineHas(mock, 1, LineFlag::OutputStart));
+    CHECK(mock.terminal.markArbiter().owner() == MarkOwner::ShellIntegration);
+}
+
+TEST_CASE("Screen.osc3008 the initial shell context push marks nothing", "[context]")
+{
+    // systemd opens the shell context when profile.d is sourced, which can be arbitrarily far above
+    // the first prompt -- above the motd. A mark there would land on it.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=shell-uuid;type=shell"));
+
+    CHECK(!lineHas(mock, 0, LineFlag::Marked));
+}
+
+TEST_CASE("Screen.osc3008 a boundary context never synthesises a mark", "[context]")
+{
+    // run0's elevate and systemd-nspawn's container contexts are announced wherever the cursor happens
+    // to be, so they carry no positional guarantee at all.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=box;type=container"));
+    mock.writeToScreen(osc3008("start=root;type=elevate"));
+    mock.writeToScreen(osc3008("start=ssh;type=remote"));
+
+    CHECK(!lineHas(mock, 0, LineFlag::Marked));
+    CHECK(!lineHas(mock, 0, LineFlag::OutputStart));
+    CHECK(!lineHas(mock, 0, LineFlag::CommandEnd));
+}
+
+TEST_CASE("Screen.osc3008 the arbiter survives RIS and DECSTR", "[context]")
+{
+    // Like the ancestry, it describes the shells attached to the pty rather than the screen: a program
+    // emitting RIS must not be able to flip which protocol owns the user's markers.
+    auto mock = makeTerm();
+    mock.writeToScreen("\033]133;A\033\\");
+    REQUIRE(mock.terminal.markArbiter().owner() == MarkOwner::ShellIntegration);
+
+    mock.writeToScreen("\033c");
+    CHECK(mock.terminal.markArbiter().owner() == MarkOwner::ShellIntegration);
+
+    mock.writeToScreen("\033[!p");
+    CHECK(mock.terminal.markArbiter().owner() == MarkOwner::ShellIntegration);
+}
+
+TEST_CASE("Screen.osc3008 the first prompt race resolves to shell integration either way", "[context]")
+{
+    SECTION("133 first, then 3008 -- the shipped Fedora ordering")
+    {
+        auto mock = makeTerm();
+        mock.writeToScreen("\033]133;A\033\\");
+        mock.writeToScreen(osc3008("start=shell-uuid;type=shell"));
+        mock.writeToScreen(osc3008("start=cmd-1;type=command"));
+        mock.writeToScreen(osc3008("end=cmd-1;exit=success"));
+
+        CHECK(mock.terminal.markArbiter().owner() == MarkOwner::ShellIntegration);
+    }
+
+    SECTION("3008 first, then 133 -- a user integration appended after systemd's")
+    {
+        auto mock = makeTerm();
+        mock.writeToScreen(osc3008("start=shell-uuid;type=shell"));
+        mock.writeToScreen(osc3008("start=cmd-1;type=command"));
+        mock.writeToScreen("\033]133;A\033\\");
+        mock.writeToScreen(osc3008("end=cmd-1;exit=success"));
+
+        // 3008 stamped a flag or two before 133 spoke, which is harmless -- both land on the same
+        // logical line head, and a flag is an idempotent bit. What matters is that 133 owns it now.
+        CHECK(mock.terminal.markArbiter().owner() == MarkOwner::ShellIntegration);
+    }
+}
+
+TEST_CASE("Screen.osc3008 synthesised marks drive folding", "[context]")
+{
+    // The payoff: a Fedora user with no shell integration installed gets fold ranges, mark navigation
+    // and "copy last command output" for free. computeFoldRanges reads exactly the three flags OSC
+    // 3008 can supply and never touches PromptEnd, so folding is fully correct on synthesised marks.
+    auto mock = MockTerm { PageSize { LineCount(12), ColumnCount(40) } };
+    systemdCycle(mock, "cmd-1");
+    mock.writeToScreen(osc3008("end=cmd-1;exit=success"));
+    systemdCycle(mock, "cmd-2");
+    mock.writeToScreen(osc3008("end=cmd-2;exit=success"));
+    systemdCycle(mock, "cmd-3");
+
+    CHECK(!mock.terminal.foldRanges().empty());
+}
+
+TEST_CASE("Screen.osc3008 drives the semantic block tracker once it owns the session", "[context]")
+{
+    auto mock = makeTerm();
+    mock.terminal.semanticBlockTracker().setEnabled(true);
+
+    systemdCycle(mock, "cmd-1");
+    mock.writeToScreen(osc3008("end=cmd-1;exit=success"));
+    // The first cycle only DECIDES; the callbacks start with the second.
+    systemdCycle(mock, "cmd-2");
+    mock.writeToScreen(osc3008("end=cmd-2;exit=failure;status=139;signal=SIGSEGV"));
+
+    // commandFinished() marks the CURRENT block; it moves to completedBlocks on the next prompt.
+    auto const& current = mock.terminal.semanticBlockTracker().currentBlock();
+    REQUIRE(current.has_value());
+    CHECK(current->finished);
+    // 128+11, as every POSIX shell spells a SIGSEGV death -- which OSC 133;D, carrying only a numeric
+    // exit code, cannot distinguish from a command that merely returned 139.
+    CHECK(current->exitCode == 139);
+}
+
+TEST_CASE("Screen.osc3008 fires no callbacks during its first, undecided cycle", "[context]")
+{
+    // The cost of deferring, stated plainly: with no OSC 133 anywhere, the session's FIRST command
+    // block gets line flags but no tracker entry. One block, once, in a protocol that is off by
+    // default -- cheaper than letting a cmdline-less 3008 command clobber a good cmdline_url.
+    auto mock = makeTerm();
+    mock.terminal.semanticBlockTracker().setEnabled(true);
+
+    systemdCycle(mock, "cmd-1");
+    mock.writeToScreen(osc3008("end=cmd-1;exit=success"));
+
+    CHECK(mock.terminal.semanticBlockTracker().completedBlocks().empty());
+    CHECK(mock.terminal.markArbiter().owner() == MarkOwner::ContextSignalling);
+}
+
+// }}}

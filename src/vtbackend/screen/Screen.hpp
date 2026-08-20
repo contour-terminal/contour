@@ -4,6 +4,7 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/graphics/KittyGraphics.hpp>
 #include <vtbackend/graphics/MessageParser.hpp>
 #include <vtbackend/grid/CellUtil.hpp>
@@ -248,6 +249,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Applies one `OSC 3008` (hierarchical context signalling) sequence.
     [[nodiscard]] ApplyResult processHierarchicalContext(std::string_view payload);
+
+    /// Stamps the OSC-133-equivalent marks an OSC 3008 transition stands in for, when the arbiter says
+    /// this session's marks are OSC 3008's to stamp. @see MarkArbiter.
+    void synthesizeSemanticMarks(ContextTransition const& transition, ContextCommand const& command);
 
     /// Erases the whole multi-cell block that @p position belongs to, however many rows and columns
     /// it covers, and wherever within it @p position happens to be.

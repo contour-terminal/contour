@@ -43,6 +43,7 @@ set(vtbackend_HEADERS
     core/LineFlags.hpp
     grid/LineSoA.hpp
     Logging.hpp
+    shell/MarkArbiter.hpp
     input/MatchModes.hpp
     graphics/MessageParser.hpp
     testing/MockTerm.hpp
@@ -187,6 +188,7 @@ if(LIBTERMINAL_TESTING)
         core/TerminalContext_test.cpp
         vt/HierarchicalContext_test.cpp
         screen/Screen_context_test.cpp
+        shell/MarkArbiter_test.cpp
         shell/CommandBlocks_test.cpp
         shell/Folding_test.cpp
         shell/PromptRegion_test.cpp

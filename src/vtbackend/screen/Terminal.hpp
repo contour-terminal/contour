@@ -19,6 +19,7 @@
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/Viewport.hpp>
 #include <vtbackend/shell/Folding.hpp>
+#include <vtbackend/shell/MarkArbiter.hpp>
 #include <vtbackend/shell/SemanticBlockTracker.hpp>
 #include <vtbackend/shell/ShellIntegration.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
@@ -1333,6 +1334,10 @@ class Terminal
 
     /// Mirrors the active context id into every screen, so lines written next carry it.
     void publishActiveContext() noexcept;
+
+    /// Decides whether OSC 3008 may synthesise OSC-133-equivalent marks in this session.
+    [[nodiscard]] MarkArbiter& markArbiter() noexcept { return _markArbiter; }
+    [[nodiscard]] MarkArbiter const& markArbiter() const noexcept { return _markArbiter; }
 
     [[nodiscard]] SemanticBlockTracker& semanticBlockTracker() noexcept { return _semanticBlockTracker; }
     [[nodiscard]] SemanticBlockTracker const& semanticBlockTracker() const noexcept
@@ -2741,6 +2746,11 @@ class Terminal
     ///
     /// Deliberately NOT reset by RIS or DECSTR. @see hardReset().
     ContextStack _contexts;
+
+    /// Which of OSC 133 and OSC 3008 owns this session's semantic marks. Like the ancestry itself,
+    /// deliberately NOT reset by RIS or DECSTR: it describes the shells attached to the pty, not the
+    /// screen, and a program that emits RIS must not be able to flip it.
+    MarkArbiter _markArbiter;
 
     // {{{ Output folding
     mutable FoldState _foldState;

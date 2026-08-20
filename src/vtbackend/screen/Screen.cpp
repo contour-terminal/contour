@@ -6101,8 +6101,91 @@ ApplyResult Screen::processHierarchicalContext(std::string_view payload)
 
     // The stack is terminal-global rather than per-screen: the ancestry describes the APPLICATION's
     // process tree, which an alternate-screen switch or a page change does not touch.
-    (void) _terminal->applyContextCommand(*command);
+    auto const transition = _terminal->applyContextCommand(*command);
+    synthesizeSemanticMarks(transition, *command);
     return ApplyResult::Ok;
+}
+
+void Screen::synthesizeSemanticMarks(ContextTransition const& transition, ContextCommand const& command)
+{
+    // Only the shell/command cycle carries a positional guarantee. run0's `elevate` and
+    // systemd-nspawn's `container` contexts are announced wherever the cursor happens to be, so a mark
+    // derived from one would land on an arbitrary line.
+    if (transition.subjectType != ContextType::Shell && transition.subjectType != ContextType::Command)
+        return;
+
+    auto& arbiter = _terminal->markArbiter();
+    if (transition.subjectType == ContextType::Command)
+    {
+        if (command.verb == ContextVerb::Start)
+            arbiter.observedContextCommandStart();
+        else
+            arbiter.observedContextCommandEnd();
+    }
+
+    if (!arbiter.contextMayMark())
+        return;
+
+    // Which OSC 133 mark each transition stands in for, and why it lands where it does. The positions
+    // are not a guess: they are where systemd's own PROMPT_COMMAND/PS0 hooks put these sequences.
+    //
+    //   type=shell, UPDATE   -> 133;A   emitted from PROMPT_COMMAND, before the prompt is painted, so
+    //                                   the cursor is where the prompt is about to begin.
+    //   type=command, start  -> 133;C   emitted from PS0, after the user pressed Enter, so the cursor
+    //                                   is at the start of the output area.
+    //   type=command, end    -> 133;D   emitted from PROMPT_COMMAND, so the cursor is still standing
+    //                                   where the output left it -- which is why the column is
+    //                                   recoverable here and worth recording.
+    //
+    // There is deliberately NO 133;B equivalent: OSC 3008 has no event at the prompt/input border, so
+    // PromptRegion::inputBegin stays nullopt -- a state PromptRegion documents as supported for shells
+    // that emit only ;A.
+    //
+    // A type=shell PUSH marks nothing: systemd opens that context when profile.d is sourced, which can
+    // be arbitrarily far above the first prompt, and a mark there would land on the motd.
+    auto const notify = arbiter.contextMayNotify();
+    switch (transition.subjectType)
+    {
+        case ContextType::Shell:
+            if (transition.kind != ContextTransitionKind::Updated
+                && transition.kind != ContextTransitionKind::ReturnedTo)
+                return;
+            setMark();
+            if (notify)
+            {
+                _terminal->shellIntegration().promptStart();
+                _terminal->semanticBlockTracker().promptStart();
+                _terminal->autoCollapseOnNewPrompt();
+            }
+            return;
+        case ContextType::Command:
+            if (command.verb == ContextVerb::Start)
+            {
+                // No DepthExceeded guard here: a refused push carries no subject, so its transition
+                // reports ContextType::None and the type test at the top of this function has already
+                // returned. Restating it read as a second gate and was dead code.
+                markLogicalLineAtCursor(LineFlag::OutputStart);
+                if (notify)
+                {
+                    // No cmdline: the systemd shim sends none, and 3008 may FILL a command line but
+                    // never overwrite one OSC 133;C already supplied.
+                    _terminal->shellIntegration().commandOutputStart(std::nullopt);
+                    _terminal->semanticBlockTracker().commandOutputStart(std::nullopt);
+                }
+            }
+            else if (transition.kind == ContextTransitionKind::Ended)
+            {
+                markLogicalLineAtCursorWithColumn(ColumnMark::CommandEnd);
+                if (notify)
+                {
+                    auto const exitCode = command.outcome.asShellExitCode();
+                    _terminal->shellIntegration().commandFinished(exitCode);
+                    _terminal->semanticBlockTracker().commandFinished(exitCode);
+                }
+            }
+            return;
+        default: return;
+    }
 }
 
 void Screen::processShellIntegration(Sequence const& seq)
@@ -6110,6 +6193,11 @@ void Screen::processShellIntegration(Sequence const& seq)
     auto const& cmd = seq.intermediateCharacters();
     if (cmd.empty())
         return;
+
+    // The shell speaks OSC 133 itself, so it owns this session's marks from here on and OSC 3008
+    // contributes metadata only. Recorded before the switch, so every one of the four sub-commands
+    // counts -- a shell integration that emits only ;A still settles the question.
+    _terminal->markArbiter().observedShellIntegration();
 
     auto const forEachKeyValue = []<typename Callback>(std::string_view text, Callback&& callback) {
         crispy::forEachKeyValue(
