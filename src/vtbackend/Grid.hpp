@@ -753,8 +753,20 @@ class Grid
     // limit change, reset) and clients must resync. Plain ints, guarded by the terminal
     // lock like all grid state.
 
-    /// The wholesale-rebuild counter: a change invalidates every stable id.
+    /// The wholesale-rebuild counter: a change tells a mirror to resync from scratch.
     [[nodiscard]] uint64_t generation() const noexcept { return _generation; }
+
+    /// The counter that invalidates stable ids, and a STRICT SUBSET of generation().
+    ///
+    /// The two were one counter, and that cost more than it said: a change of LINE count alone --
+    /// a status line appearing, a window growing taller -- rotates the ring through the stable-id
+    /// primitives, so every row keeps the id it had, yet it bumps the generation because a mirror
+    /// still has to resync its geometry. A consumer that STORES ids across frames, as output folding
+    /// does, read that as "your ids are worthless" and dropped everything the user had collapsed.
+    ///
+    /// Bumped only where identity truly dies: a column change (which reflows, rebuilding the ring),
+    /// a history-limit change, a reset, and a reverse scroll past the addressable history.
+    [[nodiscard]] uint64_t stableIdGeneration() const noexcept { return _stableIdGeneration; }
 
     /// The stable id of the (existing) row at @p offset.
     [[nodiscard]] int64_t stableLineIdOf(LineOffset offset) const noexcept
@@ -966,7 +978,7 @@ class Grid
             // Every history row that was still valid provably lands in the caller's
             // blanked region, so after the bump the page is the entire valid range.
             _stableFloor = _stableBase;
-            bumpGeneration(); // re-syncs the floor itself
+            bumpGeneration(RowIdentity::Destroyed); // re-syncs the floor itself
             return;
         }
         syncStableFloor();
@@ -1019,11 +1031,21 @@ class Grid
         _stableFloor = std::max(_stableFloor, _stableBase - unbox<int64_t>(historyLineCount()));
     }
 
-    /// Destroys stable row identity wholesale (resize/reflow, history-limit change,
-    /// reset): clients observe the change and resync.
-    void bumpGeneration() noexcept
+    /// Whether a rebuild left the rows' stable ids naming the rows they named before.
+    enum class RowIdentity : uint8_t
+    {
+        Preserved = 0, ///< The ring rotated; every row kept its id.
+        Destroyed,     ///< The ring was rebuilt; no id names what it did.
+    };
+
+    /// Tells mirrors to resync, and consumers holding stable ids whether those ids survived it.
+    ///
+    /// @param identity Whether the rebuild kept stable row identity (@see stableIdGeneration).
+    void bumpGeneration(RowIdentity identity) noexcept
     {
         ++_generation;
+        if (identity == RowIdentity::Destroyed)
+            ++_stableIdGeneration;
         syncStableFloor();
         // Row identity is gone, so an id-keyed history watermark means nothing now. Consumers
         // resync on the generation mismatch anyway.
@@ -1056,6 +1078,7 @@ class Grid
     // Stable row identity (see the accessors above): maintained exclusively by the
     // ring-rotation primitives, syncStableFloor() and bumpGeneration().
     uint64_t _generation = 0;
+    uint64_t _stableIdGeneration = 0;
     int64_t _stableBase = 0;  ///< Stable id of page row 0; signed — SD/unscroll push it down.
     int64_t _stableFloor = 0; ///< Oldest addressable id; monotonic within a generation.
 

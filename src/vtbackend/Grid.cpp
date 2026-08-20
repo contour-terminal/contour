@@ -133,7 +133,7 @@ void Grid::setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount)
     _lines.resize(unbox<size_t>(_pageSize.lines + this->maxHistoryLineCount()),
                   Line(_pageSize.columns, defaultLineFlags(), GraphicsAttributes {}));
     _linesUsed = min(_linesUsed, _pageSize.lines + this->maxHistoryLineCount());
-    bumpGeneration();
+    bumpGeneration(RowIdentity::Destroyed);
     verifyState();
 }
 
@@ -650,7 +650,7 @@ void Grid::reset()
     _lines.rotateRight(_lines.zeroIndex());
     for (int i = 0; i < unbox(_pageSize.lines); ++i)
         _lines[i].reset(defaultLineFlags(), GraphicsAttributes {});
-    bumpGeneration();
+    bumpGeneration(RowIdentity::Destroyed);
     verifyState();
 }
 
@@ -984,6 +984,10 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
 
     CellLocation cursor = currentCursorPos;
 
+    // Read before either resize below moves it: only a COLUMN change reflows, and reflow is the half
+    // of this that rebuilds the ring and with it every row's identity.
+    auto const columnsChanged = newSize.columns != _pageSize.columns;
+
     using crispy::Comparison;
     switch (crispy::strongCompare(newSize.columns, _pageSize.columns))
     {
@@ -1000,9 +1004,12 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
     }
 
     Ensures(_pageSize == newSize);
-    // Any page-size change destroys physical row identity (a non-reflow column resize
-    // mutates history in place; reflow rebuilds the whole ring): one bump, clients resync.
-    bumpGeneration();
+    // Any page-size change makes a mirror resync, so the generation bumps either way. Stable ids are
+    // the narrower question: growLines/shrinkLines rotate through the ring primitives that carry the
+    // id accounting, so a pure LINE-count change leaves every row naming what it named -- which is
+    // what lets a collapsed fold survive a status line appearing or a window growing taller. A column
+    // change is the one that rebuilds the ring.
+    bumpGeneration(columnsChanged ? RowIdentity::Destroyed : RowIdentity::Preserved);
     verifyState();
 
     return cursor;
