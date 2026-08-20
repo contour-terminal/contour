@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/regis/ReGISFont.hpp>
+#include <vtbackend/graphics/regis/ReGISFont.hpp>
 
 #include <vtpty/ImageSize.hpp>
 

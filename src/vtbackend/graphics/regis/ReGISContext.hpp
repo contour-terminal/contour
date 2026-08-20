@@ -2,9 +2,9 @@
 #pragma once
 
 #include <vtbackend/core/Color.hpp>
-#include <vtbackend/regis/ReGISColor.hpp>
-#include <vtbackend/regis/ReGISRasterizer.hpp>
-#include <vtbackend/regis/ReGISTables.hpp>
+#include <vtbackend/graphics/regis/ReGISColor.hpp>
+#include <vtbackend/graphics/regis/ReGISRasterizer.hpp>
+#include <vtbackend/graphics/regis/ReGISTables.hpp>
 
 #include <crispy/Point.hpp>
 

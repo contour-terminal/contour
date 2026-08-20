@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/MessageParser.hpp>
+#include <vtbackend/graphics/MessageParser.hpp>
 
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserEvents.hpp>

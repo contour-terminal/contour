@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/regis/ReGISFont.hpp>
+#include <vtbackend/graphics/regis/ReGISFont.hpp>
 
 namespace vtbackend::regis
 {

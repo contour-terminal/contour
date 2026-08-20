@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/Primitives.hpp>
-#include <vtbackend/regis/ReGISTextRasterizer.hpp>
+#include <vtbackend/graphics/regis/ReGISTextRasterizer.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -3,8 +3,8 @@
 // Unit tests for the kitty graphics protocol's control-data parser, and for the grid effect of the
 // commands that place an image.
 
-#include <vtbackend/KittyGraphics.hpp>
 #include <vtbackend/MockTerm.hpp>
+#include <vtbackend/graphics/KittyGraphics.hpp>
 
 #include <crispy/Base64.hpp>
 

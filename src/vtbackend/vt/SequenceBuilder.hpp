@@ -2,7 +2,7 @@
 #pragma once
 
 #include <vtbackend/Logging.hpp>
-#include <vtbackend/SixelParser.hpp>
+#include <vtbackend/graphics/SixelParser.hpp>
 #include <vtbackend/vt/Sequence.hpp>
 
 #include <vtparser/Parser.hpp>

@@ -36,13 +36,13 @@ set(vtbackend_HEADERS
     InputHandler.hpp
     JumpHistory.hpp
     vt/KittyClipboard.hpp
-    KittyGraphics.hpp
+    graphics/KittyGraphics.hpp
     grid/Line.hpp
     core/LineFlags.hpp
     grid/LineSoA.hpp
     Logging.hpp
     MatchModes.hpp
-    MessageParser.hpp
+    graphics/MessageParser.hpp
     MockTerm.hpp
     vt/ModifyKeys.hpp
     vt/PointerShape.hpp
@@ -60,7 +60,7 @@ set(vtbackend_HEADERS
     Settings.hpp
     vt/SgrWriter.hpp
     ShellIntegration.hpp
-    SixelParser.hpp
+    graphics/SixelParser.hpp
     grid/SoAClusterWriter.hpp
     StatusLineBuilder.hpp
     Terminal.hpp
@@ -73,13 +73,13 @@ set(vtbackend_HEADERS
     ViInputHandler.hpp
     Viewport.hpp
     core/WindowSizeStack.hpp
-    regis/ReGISColor.hpp
-    regis/ReGISContext.hpp
-    regis/ReGISFont.hpp
-    regis/ReGISParser.hpp
-    regis/ReGISRasterizer.hpp
-    regis/ReGISTables.hpp
-    regis/ReGISTextRasterizer.hpp
+    graphics/regis/ReGISColor.hpp
+    graphics/regis/ReGISContext.hpp
+    graphics/regis/ReGISFont.hpp
+    graphics/regis/ReGISParser.hpp
+    graphics/regis/ReGISRasterizer.hpp
+    graphics/regis/ReGISTables.hpp
+    graphics/regis/ReGISTextRasterizer.hpp
 )
 
 set(vtbackend_SOURCES
@@ -100,25 +100,25 @@ set(vtbackend_SOURCES
     InputGenerator.cpp
     grid/Line.cpp
     grid/LineSoA.cpp
-    MessageParser.cpp
+    graphics/MessageParser.cpp
     MockTerm.cpp
     RenderBuffer.cpp
     RenderBufferBuilder.cpp
     vt/KittyClipboard.cpp
-    KittyGraphics.cpp
+    graphics/KittyGraphics.cpp
     vt/TextSizing.cpp
     Screen.cpp
     SemanticBlockTracker.cpp
     Selector.cpp
     grid/SoAClusterWriter.cpp
     vt/Sequence.cpp
-    SixelParser.cpp
-    regis/ReGISColor.cpp
-    regis/ReGISRasterizer.cpp
-    regis/ReGISContext.cpp
-    regis/ReGISFont.cpp
-    regis/ReGISTextRasterizer.cpp
-    regis/ReGISParser.cpp
+    graphics/SixelParser.cpp
+    graphics/regis/ReGISColor.cpp
+    graphics/regis/ReGISRasterizer.cpp
+    graphics/regis/ReGISContext.cpp
+    graphics/regis/ReGISFont.cpp
+    graphics/regis/ReGISTextRasterizer.cpp
+    graphics/regis/ReGISParser.cpp
     StatusLineBuilder.cpp
     Terminal.cpp
     vt/VTType.cpp
@@ -180,8 +180,8 @@ if(LIBTERMINAL_TESTING)
         CommandBlocks_test.cpp
         Folding_test.cpp
         PromptRegion_test.cpp
-        GoodImageProtocol_test.cpp
-        XtSmGraphics_test.cpp
+        graphics/GoodImageProtocol_test.cpp
+        graphics/XtSmGraphics_test.cpp
         InputGenerator_test.cpp
         Selector_test.cpp
         vt/Functions_test.cpp
@@ -189,13 +189,13 @@ if(LIBTERMINAL_TESTING)
         core/FileUrl_test.cpp
         HintModeHandler_test.cpp
         grid/Line_test.cpp
-        MessageParser_test.cpp
+        graphics/MessageParser_test.cpp
         vt/ModifyKeys_test.cpp
         vt/VTType_test.cpp
         vt/RectangularAreaChecksum_test.cpp
         vt/KittyClipboard_test.cpp
         vt/PointerShape_test.cpp
-        KittyGraphics_test.cpp
+        graphics/KittyGraphics_test.cpp
         vt/TextSizing_test.cpp
         Screen_test.cpp
         core/Image_test.cpp
@@ -206,14 +206,14 @@ if(LIBTERMINAL_TESTING)
         ShellIntegration_test.cpp
         grid/LineSoA_test.cpp
         grid/SoAClusterWriter_test.cpp
-        SixelParser_test.cpp
-        ReGIS_test.cpp
-        regis/ReGISTables_test.cpp
-        regis/ReGISColor_test.cpp
-        regis/ReGISRasterizer_test.cpp
-        regis/ReGISFont_test.cpp
-        regis/ReGISTextRasterizer_test.cpp
-        regis/ReGISParser_test.cpp
+        graphics/SixelParser_test.cpp
+        graphics/regis/ReGISScreen_test.cpp
+        graphics/regis/ReGISTables_test.cpp
+        graphics/regis/ReGISColor_test.cpp
+        graphics/regis/ReGISRasterizer_test.cpp
+        graphics/regis/ReGISFont_test.cpp
+        graphics/regis/ReGISTextRasterizer_test.cpp
+        graphics/regis/ReGISParser_test.cpp
         ViCommands_test.cpp
         vt/VTWriter_test.cpp
     )

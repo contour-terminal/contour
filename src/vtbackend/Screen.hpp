@@ -4,12 +4,12 @@
 #include <vtbackend/CommandBlocks.hpp>
 #include <vtbackend/Cursor.hpp>
 #include <vtbackend/Folding.hpp>
-#include <vtbackend/KittyGraphics.hpp>
-#include <vtbackend/MessageParser.hpp>
 #include <vtbackend/PromptRegion.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/graphics/KittyGraphics.hpp>
+#include <vtbackend/graphics/MessageParser.hpp>
 #include <vtbackend/grid/CellUtil.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/vt/Capabilities.hpp>

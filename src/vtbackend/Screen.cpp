@@ -3,14 +3,14 @@
 
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/Logging.hpp>
-#include <vtbackend/MessageParser.hpp>
-#include <vtbackend/SixelParser.hpp>
 #include <vtbackend/Terminal.hpp>
+#include <vtbackend/graphics/MessageParser.hpp>
+#include <vtbackend/graphics/SixelParser.hpp>
+#include <vtbackend/graphics/regis/ReGISContext.hpp>
+#include <vtbackend/graphics/regis/ReGISParser.hpp>
+#include <vtbackend/graphics/regis/ReGISRasterizer.hpp>
+#include <vtbackend/graphics/regis/ReGISTextRasterizer.hpp>
 #include <vtbackend/grid/SoAClusterWriter.hpp>
-#include <vtbackend/regis/ReGISContext.hpp>
-#include <vtbackend/regis/ReGISParser.hpp>
-#include <vtbackend/regis/ReGISRasterizer.hpp>
-#include <vtbackend/regis/ReGISTextRasterizer.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
 #include <vtbackend/vt/ModifyKeys.hpp>

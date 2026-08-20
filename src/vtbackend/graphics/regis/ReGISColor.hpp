@@ -2,7 +2,7 @@
 #pragma once
 
 #include <vtbackend/core/Color.hpp>
-#include <vtbackend/regis/ReGISTables.hpp>
+#include <vtbackend/graphics/regis/ReGISTables.hpp>
 
 #include <array>
 

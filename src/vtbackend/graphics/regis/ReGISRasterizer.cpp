@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/regis/ReGISRasterizer.hpp>
+#include <vtbackend/graphics/regis/ReGISRasterizer.hpp>
 
 #include <algorithm>
 #include <cmath>

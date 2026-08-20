@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/SixelParser.hpp>
+#include <vtbackend/graphics/SixelParser.hpp>
 
 #include <crispy/Times.hpp>
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/KittyGraphics.hpp>
+#include <vtbackend/graphics/KittyGraphics.hpp>
 
 #include <charconv>
 #include <cstdlib>

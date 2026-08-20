@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/regis/ReGISTables.hpp>
+#include <vtbackend/graphics/regis/ReGISTables.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

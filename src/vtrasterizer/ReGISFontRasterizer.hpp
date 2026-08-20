@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/regis/ReGISTextRasterizer.hpp>
+#include <vtbackend/graphics/regis/ReGISTextRasterizer.hpp>
 
 #include <text_shaper/Font.hpp>
 #include <text_shaper/Shaper.hpp>

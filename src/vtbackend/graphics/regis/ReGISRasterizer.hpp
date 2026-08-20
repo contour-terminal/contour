@@ -3,7 +3,7 @@
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Image.hpp>
-#include <vtbackend/regis/ReGISTables.hpp>
+#include <vtbackend/graphics/regis/ReGISTables.hpp>
 
 #include <crispy/Point.hpp>
 

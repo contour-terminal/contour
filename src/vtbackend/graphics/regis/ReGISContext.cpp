@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/regis/ReGISContext.hpp>
+#include <vtbackend/graphics/regis/ReGISContext.hpp>
 
 #include <cmath>
 
