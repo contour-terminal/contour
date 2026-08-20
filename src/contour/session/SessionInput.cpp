@@ -3,6 +3,7 @@
 #include <contour/input/KeyMapping.hpp>
 #include <contour/input/Logging.hpp>
 #include <contour/input/MouseMapping.hpp>
+#include <contour/session/FontControl.hpp>
 #include <contour/session/Logging.hpp>
 #include <contour/session/SessionInput.hpp>
 #include <contour/session/TerminalSession.hpp>
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <mutex>
 
 using std::array;
 using std::clamp;
@@ -35,9 +37,40 @@ namespace contour::session
 
 namespace
 {
+    /// The device-pixel y of @p yLogical, with the smooth-scroll shift taken out.
+    ///
+    /// Content is shifted DOWN by the smooth-scroll offset, so the offset comes off the pointer to
+    /// map back onto the cell that is actually drawn there.
+    [[nodiscard]] int mouseDeviceY(double yLogical, TerminalSession const& session) noexcept
+    {
+        auto const dpr = session.display()->devicePixelRatio();
+        return static_cast<int>(yLogical * dpr)
+               - static_cast<int>(session.terminal().smoothScrollPixelOffset());
+    }
+
+    /// The main-page row under @p yLogical, or nullopt when the pointer is not over the grid.
+    ///
+    /// The one row hit-test in the GUI: the cell mapping and the fold gutter both come through here,
+    /// so they cannot disagree about where the grid starts -- which, with a status line above it, is
+    /// not screen row zero.
+    [[nodiscard]] std::optional<vtbackend::LineOffset> mouseGridRow(double yLogical,
+                                                                    TerminalSession const& session) noexcept
+    {
+        auto const& terminal = session.terminal();
+        auto const row = geometry::mainPageRowAt(mouseDeviceY(yLogical, session),
+                                                 session.display()->gridMetrics().pageMargin.top,
+                                                 session.display()->cellSize().height.as<int>(),
+                                                 unbox<int>(terminal.mainPageTopRow()),
+                                                 unbox<int>(terminal.pageSize().lines));
+        return row ? std::optional { vtbackend::LineOffset(*row) } : std::nullopt;
+    }
+
     vtbackend::CellLocation makeMouseCellLocation(int x, int y, TerminalSession const& session) noexcept
     {
-        auto const pageSize = session.terminal().totalPageSize();
+        // The MAIN page, not the total: the row this returns is main-page relative -- which is the
+        // space Viewport's coordinate translation speaks -- so clamping it against a total that
+        // includes the status line would let it name a row past the end of the grid.
+        auto const pageSize = session.terminal().pageSize();
         auto const cellSize = session.display()->cellSize();
         auto const dpr = session.display()->devicePixelRatio();
 
@@ -55,19 +88,61 @@ namespace
         auto const marginLeft = pageMargin.left;
 
         auto const sx = int(double(x) * dpr);
-        auto sy = int(double(y) * dpr);
+        auto const sy = mouseDeviceY(y, session);
 
-        // Adjust for smooth scroll pixel offset: content is shifted down by pixelOffset,
-        // so subtract the offset from the mouse position to map to the correct cell.
-        sy -= static_cast<int>(session.terminal().smoothScrollPixelOffset());
-
-        auto const row = vtbackend::LineOffset(
-            clamp((sy - marginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
+        // Clamped to the main page, so a drag that leaves the grid keeps naming its nearest row --
+        // auto-scroll depends on that. Off the MAIN page (over a status line) the nearest row is the
+        // grid edge, which mouseGridRow() declines to invent and the move path therefore skips.
+        //
+        // Through the same tested header the declining hit-test uses, so the two cannot disagree about
+        // where the grid starts (@see geometry::mainPageRowNear).
+        auto const row =
+            vtbackend::LineOffset(geometry::mainPageRowNear(sy,
+                                                            marginTop,
+                                                            cellSize.height.as<int>(),
+                                                            unbox<int>(session.terminal().mainPageTopRow()),
+                                                            *pageSize.lines));
 
         auto const col = vtbackend::ColumnOffset(
             clamp((sx - marginLeft) / cellSize.width.as<int>(), 0, *pageSize.columns - 1));
 
         return { .line = row, .column = col };
+    }
+
+    /// The grid line under @p positionPx, when that position lies over the fold gutter.
+    ///
+    /// The one place that decides where the gutter IS and which row a point on it names -- shared by
+    /// the click that toggles a fold and the hover that highlights one, because those two disagreeing
+    /// would light up one block and toggle another.
+    ///
+    /// Deliberately NOT routed through makeMouseCellLocation(): that clamps the column onto the page,
+    /// so a gutter position would come back reading as column 0 of the grid.
+    ///
+    /// @param positionPx The pointer position in logical pixels, relative to the item's top-left.
+    /// @param session The session it belongs to; must have a display.
+    /// @return The grid line, or nullopt when the position is not over the gutter.
+    [[nodiscard]] std::optional<vtbackend::LineOffset> gutterLineAt(QPointF positionPx,
+                                                                    TerminalSession const& session)
+    {
+        auto const& display = *session.display();
+        auto const dpr = display.devicePixelRatio();
+        auto const cellSize = display.gridMetrics().cellSize;
+        auto const pageMargin = display.gridMetrics().pageMargin;
+        auto const gutter = gutterWidthFor(session.config().folding.value(), cellSize);
+
+        auto const sx = static_cast<int>(positionPx.x() * dpr);
+        if (!geometry::isInGutter(sx, pageMargin.left, gutter))
+            return std::nullopt;
+
+        // Through the shared row hit-test, so the gutter and the grid agree about where the page
+        // begins. They did not: this used to feed a raw SCREEN row to a translation that speaks
+        // main-page rows, so with a status line above the grid every fold click landed one block off.
+        auto const row = mouseGridRow(positionPx.y(), session);
+        if (!row)
+            return std::nullopt;
+
+        auto const l = std::scoped_lock { session.terminal() };
+        return session.terminal().viewport().translateScreenToGridLine(*row);
     }
 
     /// @param event The Qt event to take the position from.
@@ -607,6 +682,15 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
     // display-dependent event paths' guards.
     if (session.display() == nullptr)
         return;
+
+    if (session.sendGutterPressEvent(gutterLineAt(event->position(), session),
+                                     input::makeMouseButton(event->button()))
+        == ConsumedByGutter::Yes)
+    {
+        event->accept();
+        return;
+    }
+
     session.sendMousePressEvent(input::makeModifiers(event->modifiers()).chord,
                                 input::makeMouseButton(event->button()),
                                 makeMousePixelPosition(event,
@@ -622,6 +706,13 @@ void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session)
     // display-dependent event paths' guards.
     if (session.display() == nullptr)
         return;
+
+    if (session.sendGutterReleaseEvent() == ConsumedByGutter::Yes)
+    {
+        event->accept();
+        return;
+    }
+
     session.sendMouseReleaseEvent(input::makeModifiers(event->modifiers()).chord,
                                   input::makeMouseButton(event->button()),
                                   makeMousePixelPosition(event,
@@ -637,6 +728,13 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
     // display-dependent event paths' guards.
     if (session.display() == nullptr)
         return;
+
+    if (session.sendGutterHoverEvent(gutterLineAt(event->position(), session)) == ConsumedByGutter::Yes)
+    {
+        event->accept();
+        return;
+    }
+
     session.sendMouseMoveEvent(input::makeModifiers(event->modifiers()).chord,
                                makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
                                makeMousePixelPosition(event,
@@ -652,6 +750,13 @@ void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session)
     // display-dependent event paths' guards.
     if (session.display() == nullptr)
         return;
+
+    if (session.sendGutterHoverEvent(gutterLineAt(event->position(), session)) == ConsumedByGutter::Yes)
+    {
+        event->accept();
+        return;
+    }
+
     auto const position = event->position().toPoint();
     session.sendMouseMoveEvent(input::makeModifiers(event->modifiers()).chord,
                                makeMouseCellLocation(position.x(), position.y(), session),

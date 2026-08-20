@@ -660,6 +660,7 @@ TEST_CASE("The terminal context menu opens, sub-menus and all (offscreen)", "[co
         .hasLocalWorkingDirectory = true,
         .hasSplits = false,
         .hyperlinkUnderCursor = "",
+        .foldLine = std::nullopt,
         .activeProfile = "dark",
         .profileNames = { "dark", "light" },
     };
@@ -736,6 +737,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
         .hasLocalWorkingDirectory = true,
         .hasSplits = false,
         .hyperlinkUnderCursor = "", // the two hyperlink rows must be absent
+        .foldLine = std::nullopt,   // the fold row must be present but grayed
         .activeProfile = "dark",
         .profileNames = { "dark", "light" },
     };

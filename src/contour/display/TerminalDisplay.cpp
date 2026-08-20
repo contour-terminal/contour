@@ -2178,11 +2178,14 @@ void TerminalDisplay::onSelectionCompleted()
 
 void TerminalDisplay::bufferChanged(vtbackend::ScreenType type)
 {
+    // Through the shape enum rather than setCursor() directly, so this agrees with every other place
+    // that decides the pointer shape -- a raw setCursor() here stomps a hand cursor the fold column or
+    // a hyperlink has just asked for.
     using Type = vtbackend::ScreenType;
     switch (type)
     {
-        case Type::Primary: setCursor(Qt::IBeamCursor); break;
-        case Type::Alternate: setCursor(Qt::ArrowCursor); break;
+        case Type::Primary: setMouseCursorShape(input::MouseCursorShape::IBeam); break;
+        case Type::Alternate: setMouseCursorShape(input::MouseCursorShape::Arrow); break;
     }
     emit terminalBufferChanged(type);
     // scheduleRedraw();

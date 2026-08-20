@@ -75,6 +75,16 @@ enum class GuardedRole : uint8_t
  */
 using PermissionCache = std::map<GuardedRole, bool>;
 
+/// Whether the fold gutter took an input event, and the grid must therefore not also see it.
+///
+/// Named rather than left to a bool because the call sites read as a question about routing, not about
+/// truth: a bare `true` there says nothing about which of the two paths it selects.
+enum class ConsumedByGutter : uint8_t
+{
+    No = 0,
+    Yes,
+};
+
 /// Whether a folding action is subject to the folding.enabled setting.
 ///
 /// Named rather than left to a bool because the exception reads as a rule, not as a negation: turning
@@ -561,6 +571,32 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void sendMouseMoveEvent(vtbackend::Modifiers modifiers,
                             vtbackend::CellLocation pos,
                             vtbackend::PixelCoordinate pixelPosition);
+
+    /// Reports where the pointer is over the fold gutter, or that it is not over it at all.
+    ///
+    /// Consulted BEFORE the ordinary move path and, when it claims the event, instead of it: the
+    /// gutter is not part of the grid, so a move there must not reach the mouse protocol, extend a
+    /// selection, or hover a hyperlink at the column-0 cell it would otherwise be clamped onto.
+    ///
+    /// @param gridLine The grid line under the pointer, or nullopt when it is not over the gutter.
+    /// @return Whether the gutter consumed the event.
+    ConsumedByGutter sendGutterHoverEvent(std::optional<vtbackend::LineOffset> gridLine);
+
+    /// Toggles the fold at @p gridLine when the press landed on the fold column.
+    ///
+    /// The press half of the gutter's click handshake, and the only place that arms it: a press the
+    /// child never saw must be followed by a release it never sees either, and leaving that to the
+    /// caller means a third event path re-deriving the rule (@see sendGutterReleaseEvent).
+    ///
+    /// @param gridLine The grid line under the pointer, or nullopt when it is not over the gutter.
+    /// @param button The button that went down.
+    /// @return Whether the gutter consumed the event.
+    ConsumedByGutter sendGutterPressEvent(std::optional<vtbackend::LineOffset> gridLine,
+                                          vtbackend::MouseButton button);
+
+    /// Swallows the release matching a press the fold column consumed.
+    /// @return Whether the gutter consumed the event.
+    ConsumedByGutter sendGutterReleaseEvent();
     void sendMouseReleaseEvent(vtbackend::Modifiers modifiers,
                                vtbackend::MouseButton button,
                                vtbackend::PixelCoordinate pixelPosition);
@@ -797,6 +833,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// next key press (see sendKeyEvent) or by closing the tab (see terminate).
     void reportDeviceStartFailure(vtpty::StartFailure const& failure);
 
+    /// Ends a gutter hover, if one is in effect.
+    ///
+    /// The one place _gutterHovered is cleared, so the flag and the terminal's own hover line cannot
+    /// disagree -- clearing one without the other left a hover the next motion had to undo.
+    void clearGutterHover();
+
     /// Publishes @p scrollable as the scrollbar's travel, announcing it when it moved.
     ///
     /// The historyLineCount property reads what this stored rather than computing a count of its
@@ -915,6 +957,28 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     //
     vtbackend::ScreenType _currentScreenType = vtbackend::ScreenType::Primary;
     vtbackend::CellLocation _currentMousePosition = vtbackend::CellLocation {};
+
+    /// Whether the pointer was last seen over the fold gutter rather than over the grid.
+    ///
+    /// Kept here so the common case -- pointer over the grid -- can be answered without taking
+    /// the terminal lock on every single motion event, while still clearing a hover that was set.
+    bool _gutterHovered = false;
+
+    /// Whether this pane's last press was consumed by the fold column, so its release must be too.
+    ///
+    /// A press the child never saw must not be followed by a release it does see: that leaves the
+    /// application holding a button down that was never pressed. Per SESSION rather than per process:
+    /// every pane and every window shares the GUI thread, so a press in one pane's gutter followed by
+    /// a release delivered to another would otherwise swallow the second pane's release.
+    bool _gutterClickPending = false;
+
+    /// Whether the mouse cursor shape must be re-decided on the next motion, even over the same cell.
+    ///
+    /// The move path changes the shape only when the pointer changes grid CELL, that being the only
+    /// thing that can change its answer -- but the fold gutter sets the shape without going through
+    /// it, and leaving the gutter lands the pointer back on the cell it came from. @see
+    /// clearGutterHover(), which raises this.
+    bool _isPointerShapeStale = false;
 
     /// The shape the application last asked for via `OSC 22`, or nullopt while it has asked for
     /// none. Recorded whether or not a display is attached: a session between displays -- a split
