@@ -101,9 +101,13 @@ class RecordingNotifier final: public contour::platform::Notifier
     void close(std::string const& identifier) override { closed.push_back(identifier); }
 
     /// Plays back what the desktop would report once the user (or a timeout) retired a notification.
-    void fireClosed(std::string const& identifier, uint reason)
+    /// @param report Whether the backend observed the close or a timer merely assumed it; the
+    ///               portal backend can only ever produce the latter.
+    void fireClosed(std::string const& identifier,
+                    uint reason,
+                    vtbackend::CloseReport report = vtbackend::CloseReport::Observed)
     {
-        emit notificationClosed(QString::fromStdString(identifier), reason);
+        emit notificationClosed(QString::fromStdString(identifier), reason, report);
     }
 
     /// Plays back what the desktop would report when the user clicked a notification.
@@ -1387,7 +1391,19 @@ TEST_CASE("TerminalSession: desktop notification wiring is display-safe and repo
     {
         auto const written = writtenAfter([&] { raised->fireClosed("n2", /*reason*/ 2); });
 
-        CHECK(written.contains("\033]99;i=n2:p=close;"));
+        CHECK(written.contains("\033]99;i=n2:p=close;\033\\"));
+    }
+
+    SECTION("a close the backend only assumed is reported back as untracked")
+    {
+        // What a sandboxed Contour produces: org.freedesktop.portal.Notification has no close
+        // signal at all, so the close is a timer expiring rather than something observed. Saying
+        // so is the difference between an honest report and claiming to have watched it happen.
+        // @see issue #2074.
+        auto const written =
+            writtenAfter([&] { raised->fireClosed("n2", /*reason*/ 1, vtbackend::CloseReport::Untracked); });
+
+        CHECK(written.contains("\033]99;i=n2:p=close;untracked\033\\"));
     }
 
     SECTION("an activation is reported back as p=activated")
@@ -1406,6 +1422,39 @@ TEST_CASE("TerminalSession: desktop notification wiring is display-safe and repo
 
         CHECK_FALSE(written.contains(":p=close;"));
         CHECK_FALSE(written.contains(":p=activated;"));
+    }
+
+    SECTION("another notification's events do not retire this one's reporting")
+    {
+        // Several notifications are live at once routinely -- OSC 99 identifies them precisely so
+        // an application can have more than one. A handler wired with Qt::SingleShotConnection
+        // would be broken by the FIRST emission whatever it was about, so the events below would
+        // silently swallow n2's, and an application waiting on `c=1` would wait forever.
+        (void) writtenAfter([&] {
+            raised->fireClosed("n1", 2);
+            raised->fireActivated("n1");
+        });
+
+        auto const written = writtenAfter([&] {
+            raised->fireClosed("n2", 2);
+            raised->fireActivated("n2");
+        });
+
+        CHECK(written.contains("\033]99;i=n2:p=close;\033\\"));
+        CHECK(written.contains("\033]99;i=n2:p=activated;"));
+    }
+
+    SECTION("a notification is reported on once, not once per event")
+    {
+        auto const written = writtenAfter([&] {
+            raised->fireClosed("n2", 2);
+            raised->fireClosed("n2", 2);
+            raised->fireActivated("n2");
+            raised->fireActivated("n2");
+        });
+
+        CHECK(written.find("p=close;") == written.rfind("p=close;"));
+        CHECK(written.find("p=activated;") == written.rfind("p=activated;"));
     }
 #endif
 }

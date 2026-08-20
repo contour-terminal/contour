@@ -5,9 +5,6 @@
     #include <contour/platform/FreeDesktopNotifier.hpp>
     #include <contour/platform/QtInvoke.hpp>
 
-    #include <QtCore/QStringList>
-    #include <QtCore/QVariantMap>
-
     #include <utility>
 
 namespace contour::platform
@@ -21,20 +18,23 @@ FreeDesktopNotifier::FreeDesktopNotifier(std::unique_ptr<NotificationTransport> 
     // old code probed the service synchronously and, when that probe failed, left the session unable
     // to notify for the rest of the process's life.
     _transport->subscribe(
-        [this](NotificationTransport::ServerId serverId, uint32_t reason) {
+        [this](NotificationTransport::ServerId serverId, uint32_t reason, vtbackend::CloseReport report) {
             auto const oscIdentifier = _router.takeForServerEvent(serverId);
             if (!oscIdentifier.has_value())
                 return;
 
-            notifierLog()("Notification closed: dbus_id={} reason={}", serverId, reason);
-            emit notificationClosed(QString::fromStdString(*oscIdentifier), reason);
+            notifierLog()("Notification closed: id={} reason={} report={}",
+                          serverId,
+                          reason,
+                          vtbackend::closeReportName(report));
+            emit notificationClosed(QString::fromStdString(*oscIdentifier), reason, report);
         },
         [this](NotificationTransport::ServerId serverId) {
             auto const oscIdentifier = _router.takeForServerEvent(serverId);
             if (!oscIdentifier.has_value())
                 return;
 
-            notifierLog()("Notification activated: dbus_id={}", serverId);
+            notifierLog()("Notification activated: id={}", serverId);
             emit actionInvoked(QString::fromStdString(*oscIdentifier));
         });
 }
@@ -55,43 +55,19 @@ void FreeDesktopNotifier::close(std::string const& identifier)
 
 void FreeDesktopNotifier::sendNotification(vtbackend::DesktopNotification const& notification)
 {
-    auto const appName = notification.applicationName.empty()
-                             ? QStringLiteral("contour")
-                             : QString::fromStdString(notification.applicationName);
-
-    auto hints = QVariantMap {};
-    hints["urgency"] = QVariant::fromValue(NotificationRouter::toFreedesktopUrgency(notification.urgency));
-
-    // The default action is what a click on the popup triggers.
-    auto const actions = QStringList { QStringLiteral("default"), QStringLiteral("Activate") };
-
-    // Whether this replaces a notification of ours that is still on screen.
+    // Whether this replaces a notification of ours that is still on screen. What that means on the
+    // wire is the transport's business: freedesktop's Notify carries it as replaces_id, while the
+    // portal gets replacement for free from reusing the notification's id.
     auto const replacesId = _router.replacementFor(notification.identifier);
 
-    // org.freedesktop.Notifications.Notify, signature susssasa{sv}i:
-    // STRING app_name, UINT32 replaces_id, STRING app_icon, STRING summary,
-    // STRING body, ARRAY actions, DICT hints, INT32 expire_timeout.
-    // The casts are load-bearing: QDBusInterface::call used to deduce the wire types from the C++
-    // argument types, and a QVariant built from the wrong integer type marshals as the wrong D-Bus
-    // type, which the notification server rejects outright.
-    auto arguments = QVariantList {
-        appName,
-        QVariant::fromValue(static_cast<quint32>(replacesId)),
-        QStringLiteral(""), // app_icon (empty)
-        QString::fromStdString(notification.title),
-        QString::fromStdString(notification.body),
-        actions,
-        hints,
-        QVariant::fromValue(static_cast<int>(notification.timeout)),
-    };
-
     auto const identifier = notification.identifier;
-    _transport->notify(std::move(arguments),
+    _transport->notify(notification,
+                       replacesId,
                        [this, identifier, replacesId](std::optional<NotificationRouter::ServerId> serverId) {
                            if (!serverId.has_value())
                                return;
 
-                           notifierLog()("Notification sent: id='{}' -> dbus_id={}", identifier, *serverId);
+                           notifierLog()("Notification sent: id='{}' -> {}", identifier, *serverId);
                            _router.onSent(identifier, *serverId, replacesId);
                        });
 }

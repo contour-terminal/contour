@@ -193,3 +193,17 @@ TEST_CASE("DesktopNotification.QueryResponse", "[DesktopNotification]")
     CHECK(response.contains("c=1"));
     CHECK(response.contains("w=1"));
 }
+
+TEST_CASE("DesktopNotification.CloseResponseObserved", "[DesktopNotification]")
+{
+    // A close the terminal watched happen carries no extra payload, and must not start carrying one.
+    CHECK(buildOSC99CloseResponse("test-id", CloseReport::Observed) == "99;i=test-id:p=close;");
+}
+
+TEST_CASE("DesktopNotification.CloseResponseUntracked", "[DesktopNotification]")
+{
+    // A close nobody reported is marked as such. The protocol defines `untracked` for a platform
+    // whose desktop cannot report closure -- which is every sandboxed Contour, because
+    // org.freedesktop.portal.Notification has no close signal at all.
+    CHECK(buildOSC99CloseResponse("test-id", CloseReport::Untracked) == "99;i=test-id:p=close;untracked");
+}

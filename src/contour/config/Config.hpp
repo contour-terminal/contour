@@ -1140,6 +1140,14 @@ struct Config
     ConfigEntry<std::chrono::milliseconds, documentation::ProgressTimeout> progressTimeout {
         std::chrono::milliseconds { 0 }
     };
+
+    /// How long after showing a desktop notification the terminal assumes it was closed, where the
+    /// desktop cannot say. Only the portal backend a sandboxed Contour must use is in that
+    /// position; on the session bus a close is observed and this is never consulted. A
+    /// notification's own OSC 99 `w=` wins where it states one, and zero reports nothing at all.
+    ConfigEntry<std::chrono::milliseconds, documentation::NotificationCloseTimeout> notificationCloseTimeout {
+        std::chrono::milliseconds { 10000 }
+    };
     ConfigEntry<bool, documentation::AccessibilityAnnouncements> accessibilityAnnouncements { true };
     ConfigEntry<bool, documentation::AccessibilityCaretReporting> accessibilityCaretReporting { true };
     // The tab bar belongs to the WINDOW, not to the profile a pane happens to run: a window shows one

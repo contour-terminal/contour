@@ -613,6 +613,8 @@ if(CONTOUR_FRONTEND_GUI)
             window/MultiWindow_test.cpp
             platform/FreeDesktopNotifier_test.cpp
             platform/NotificationRouter_test.cpp
+            platform/Notifier_test.cpp
+            platform/PortalNotificationTransport_test.cpp
             platform/TaskbarProgressRouter_test.cpp
             platform/NativeWindowFrame_test.cpp
             platform/PopupShadow_test.cpp

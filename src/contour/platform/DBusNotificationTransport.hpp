@@ -3,13 +3,41 @@
 
 #ifdef __linux__
 
+    #include <contour/platform/DBusSignalSubscription.hpp>
     #include <contour/platform/NotificationTransport.hpp>
 
     #include <QtCore/QObject>
+    #include <QtCore/QVariantList>
     #include <QtDBus/QDBusConnection>
 
 namespace contour::platform
 {
+
+/// Maps a notification urgency onto the freedesktop.org urgency byte (0=low, 1=normal, 2=critical).
+/// @param urgency The backend urgency level.
+/// @return The freedesktop urgency byte; Normal (1) for any unrecognized value.
+[[nodiscard]] constexpr uint8_t toFreedesktopUrgency(vtbackend::NotificationUrgency urgency) noexcept
+{
+    switch (urgency)
+    {
+        case vtbackend::NotificationUrgency::Low: return 0;
+        case vtbackend::NotificationUrgency::Normal: return 1;
+        case vtbackend::NotificationUrgency::Critical: return 2;
+    }
+    return 1;
+}
+
+/// Builds the positional argument tuple for org.freedesktop.Notifications.Notify.
+///
+/// A free function rather than a member, because it is the one part of this transport a headless
+/// test can check head-on: no bus, no daemon, no waiting -- just the notification in and the wire
+/// tuple out.
+///
+/// @param notification The notification to send.
+/// @param replacesId A live server id this supersedes, or 0 for a fresh notification.
+/// @return The eight Notify arguments, in wire order.
+[[nodiscard]] QVariantList buildFreedesktopNotifyArguments(vtbackend::DesktopNotification const& notification,
+                                                           NotificationTransport::ServerId replacesId);
 
 /// Speaks org.freedesktop.Notifications over the session bus, asynchronously.
 ///
@@ -30,16 +58,9 @@ class DBusNotificationTransport final: public QObject, public NotificationTransp
   public:
     explicit DBusNotificationTransport(QObject* parent = nullptr);
 
-    /// Removes the session-bus signal subscriptions that subscribe() installed.
-    ///
-    /// Not defaulted: QDBusConnection::connect() registers a match rule on the process-wide session
-    /// bus, and there is one transport per terminal session. Without the matching disconnect the
-    /// rules accumulate for the life of the process, and the bus keeps delivering those signals
-    /// towards an object that is being destroyed -- the bus runs its own thread, so that is a
-    /// teardown race and not merely a leak.
-    ~DBusNotificationTransport() override;
-
-    void notify(QVariantList arguments, SentHandler onSent) override;
+    void notify(vtbackend::DesktopNotification const& notification,
+                ServerId replacesId,
+                SentHandler onSent) override;
     void close(ServerId serverId) override;
     void subscribe(ClosedHandler onClosed, ActivatedHandler onActivated) override;
 
@@ -55,8 +76,10 @@ class DBusNotificationTransport final: public QObject, public NotificationTransp
     /// obtaining it costs a Hello round-trip to the bus daemon, which always answers at once.
     QDBusConnection _bus;
 
-    /// The subscription handlers. Their emptiness IS the "not subscribed yet" state, which is why
-    /// there is no separate flag: the destructor removes the match rules only when one is set.
+    /// The installed match rules, removed when this dies. @see DBusSignalSubscriptionGuard.
+    DBusSignalSubscriptionGuard _subscription;
+
+    /// The subscription handlers.
     ClosedHandler _onClosed;
     ActivatedHandler _onActivated;
 };

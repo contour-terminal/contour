@@ -6,11 +6,15 @@
 #include <QtCore/QObject>
 #include <QtCore/QString>
 
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <string>
 
 namespace contour::platform
 {
+
+class NotificationTransport;
 
 /// The desktop-notification capability a terminal session reaches for.
 ///
@@ -43,7 +47,8 @@ class Notifier: public QObject
     ///
     /// @param identifier the OSC 99 identifier of the closed notification.
     /// @param reason the D-Bus close reason code (1=expired, 2=dismissed, 3=closed, 4=undefined).
-    void notificationClosed(QString identifier, uint reason);
+    /// @param report whether the desktop reported the close, or a timer merely assumed it.
+    void notificationClosed(QString identifier, uint reason, vtbackend::CloseReport report);
 
     /// Emitted when the user interacts with a notification.
     ///
@@ -65,11 +70,64 @@ class NullNotifier final: public Notifier
     void close(std::string const& /*identifier*/) override {}
 };
 
+/// Whether this process runs inside an application sandbox, and which.
+enum class SandboxState : uint8_t
+{
+    Host = 0,    ///< No sandbox: the session bus is reachable by name.
+    Flatpak = 1, ///< A Flatpak sandbox: only the portals are reachable without a static permission.
+};
+
+/// Which service a notifier should talk to.
+enum class NotificationBackend : uint8_t
+{
+    FreeDesktop = 0, ///< org.freedesktop.Notifications on the session bus.
+    Portal = 1,      ///< org.freedesktop.portal.Notification.
+};
+
+/// The notification service a given sandbox state can reach.
+///
+/// The portal is chosen ONLY when sandboxed, not wherever it happens to exist. On the host,
+/// org.freedesktop.Notifications is strictly the more capable of the two: it reports that a
+/// notification was dismissed, which the portal cannot, so preferring the portal everywhere would
+/// trade away a working OSC 99 `c=1` close report for uniformity.
+///
+/// @param sandbox Where this process is running.
+/// @return The backend to construct.
+[[nodiscard]] constexpr NotificationBackend selectNotificationBackend(SandboxState sandbox) noexcept
+{
+    switch (sandbox)
+    {
+        case SandboxState::Host: return NotificationBackend::FreeDesktop;
+        case SandboxState::Flatpak: return NotificationBackend::Portal;
+    }
+    return NotificationBackend::FreeDesktop;
+}
+
+/// The transport for a given backend.
+///
+/// Separate from makeDesktopNotifier() so the dispatch is reachable without the sandbox that would
+/// otherwise be the only way to select the portal: on Linux every branch is constructible here, and
+/// on other platforms this is always the null transport.
+///
+/// @param backend Which service to talk to.
+/// @param closeDelay Passed to a backend that cannot observe a close; ignored by one that can.
+/// @return The transport; never null.
+[[nodiscard]] std::unique_ptr<NotificationTransport> makeNotificationTransport(
+    NotificationBackend backend, std::chrono::milliseconds closeDelay);
+
 /// The notifier this platform can offer.
 ///
-/// A FreeDesktopNotifier over D-Bus on Linux, a NullNotifier everywhere else. Mirrors
-/// makeSpeechSynthesizer(): the platform split lives here, so nothing above this layer needs an
-/// #ifdef to hold a notifier.
-[[nodiscard]] std::unique_ptr<Notifier> makeDesktopNotifier();
+/// A FreeDesktopNotifier on Linux -- over the session bus or over the portal, depending on whether
+/// this process is sandboxed -- and a NullNotifier everywhere else. Mirrors makeSpeechSynthesizer():
+/// the platform split lives here, so nothing above this layer needs an #ifdef to hold a notifier.
+///
+/// @param closeDelay How long a backend that cannot observe a close should wait before assuming
+///                   one. Zero never assumes. Ignored by backends that can observe it.
+/// @return The notifier; never null.
+[[nodiscard]] std::unique_ptr<Notifier> makeDesktopNotifier(std::chrono::milliseconds closeDelay);
 
 } // namespace contour::platform
+
+// So the notificationClosed signal survives a queued connection, where Qt must copy its arguments
+// through the metatype system rather than pass them on the stack.
+Q_DECLARE_METATYPE(vtbackend::CloseReport)

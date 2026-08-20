@@ -11,13 +11,33 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-using contour::platform::NotificationRouter;
+#include <chrono>
 
-TEST_CASE("NotificationRouter maps urgency onto the freedesktop byte", "[notification]")
+using contour::platform::NotificationRouter;
+using namespace std::chrono_literals;
+
+TEST_CASE("NotificationRouter resolves how long before a close is assumed", "[notification]")
 {
-    STATIC_CHECK(NotificationRouter::toFreedesktopUrgency(vtbackend::NotificationUrgency::Low) == 0);
-    STATIC_CHECK(NotificationRouter::toFreedesktopUrgency(vtbackend::NotificationUrgency::Normal) == 1);
-    STATIC_CHECK(NotificationRouter::toFreedesktopUrgency(vtbackend::NotificationUrgency::Critical) == 2);
+    // A notification that stated its own lifetime is answered on that, whatever the configuration
+    // says: the application already told us what it wanted.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*timeout=*/4200, 10000ms) == 4200ms);
+
+    // OSC 99 `w=0` means "never auto-close", so there is nothing to assume, ever.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*timeout=*/0, 10000ms) == 0ms);
+
+    // `w=-1` is "whatever the desktop does" -- the only case with nothing to go on, and so the only
+    // one the configured fallback answers.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*timeout=*/-1, 10000ms) == 10000ms);
+
+    // A zero fallback disables the assumption rather than making it instant.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*timeout=*/-1, 0ms) == 0ms);
+
+    // ... but an explicit `w=` still wins over a disabled fallback.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*timeout=*/500, 0ms) == 500ms);
+
+    // A configuration file is free to say -1. That must read as "disabled" rather than travel on to
+    // become a negative timer interval, which Qt refuses to start and complains about instead.
+    STATIC_CHECK(NotificationRouter::resolveCloseDelay(/*timeout=*/-1, -1ms) == 0ms);
 }
 
 TEST_CASE("NotificationRouter tracks a fresh notification and resolves its server event", "[notification]")
@@ -52,6 +72,44 @@ TEST_CASE("NotificationRouter replaces a live notification in place", "[notifica
     auto const oscId = router.takeForServerEvent(200);
     REQUIRE(oscId.has_value());
     CHECK(*oscId == "osc-a");
+}
+
+TEST_CASE("NotificationRouter drops the stale reverse entry of a re-sent identifier", "[notification]")
+{
+    // A transport does not wait for a reply, so a second notification carrying the same identifier
+    // can be sent while the first is still in flight -- and it is recorded with replacedId 0,
+    // because there was no server id to name when it was sent. Were the earlier server id left
+    // mapped, its close event would retire the LIVE notification: the popup still on screen could
+    // then be neither closed nor replaced, and its close would be reported for an instance that is
+    // already gone.
+    NotificationRouter router;
+    router.onSent("osc-a", 100, /*replacedId*/ 0);
+    router.onSent("osc-a", 200, /*replacedId*/ 0);
+
+    CHECK_FALSE(router.takeForServerEvent(100).has_value());
+    CHECK(router.replacementFor("osc-a") == 200);
+
+    auto const oscId = router.takeForServerEvent(200);
+    REQUIRE(oscId.has_value());
+    CHECK(*oscId == "osc-a");
+}
+
+TEST_CASE("NotificationRouter accepts a server id reissued under a new identifier", "[notification]")
+{
+    // A notification server is free to hand out an id again once the notification wearing it is
+    // gone, and nothing obliges it to tell us the first one closed -- an assumed close retires our
+    // side only. The incoming id must therefore arrive cleared of whatever it used to name, or the
+    // two directions disagree about who owns it.
+    NotificationRouter router;
+    router.onSent("osc-a", 100, /*replacedId*/ 0);
+    router.onSent("osc-b", 100, /*replacedId*/ 0);
+
+    CHECK(router.replacementFor("osc-a") == 0);
+    CHECK(router.replacementFor("osc-b") == 100);
+
+    auto const oscId = router.takeForServerEvent(100);
+    REQUIRE(oscId.has_value());
+    CHECK(*oscId == "osc-b");
 }
 
 TEST_CASE("NotificationRouter close resolves and forgets the mapping", "[notification]")

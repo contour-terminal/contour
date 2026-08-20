@@ -645,6 +645,7 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             overrides.loadFromEntry("accessibility_caret_reporting", config.accessibilityCaretReporting);
             overrides.loadFromEntry("hyperlink_hover_tooltip", config.hyperlinkHoverTooltip);
             overrides.loadFromEntry("progress_timeout", config.progressTimeout);
+            overrides.loadFromEntry("notification_close_timeout", config.notificationCloseTimeout);
             overrides.loadFromEntry("tab_bar_position", config.tabBarPosition);
             overrides.loadFromEntry("tab_bar_visibility", config.tabBarVisibility);
             overrides.loadFromEntry("theme", config.theme);
@@ -853,6 +854,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("accessibility_caret_reporting", c.accessibilityCaretReporting);
         loadFromEntry("hyperlink_hover_tooltip", c.hyperlinkHoverTooltip);
         loadFromEntry("progress_timeout", c.progressTimeout);
+        loadFromEntry("notification_close_timeout", c.notificationCloseTimeout);
         loadFromEntry("tab_bar_position", c.tabBarPosition);
         loadFromEntry("tab_bar_visibility", c.tabBarVisibility);
         loadFromEntry("text_scaling_method", c.textScalingMethod);

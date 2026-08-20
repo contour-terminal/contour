@@ -97,6 +97,46 @@ namespace
 #endif
     }
 
+#ifdef __linux__
+    /// Connects @p action to @p signal, running it on the first emission naming @p identifier and
+    /// breaking the connection there.
+    ///
+    /// Deliberately NOT Qt::SingleShotConnection: that breaks the connection on the first EMISSION
+    /// of the signal, whichever notification it was about -- so with two notifications outstanding,
+    /// the one that closes (or is clicked) first silently retires the OTHER one's handler, and the
+    /// report it was waiting for is never sent. Several notifications are live at once routinely:
+    /// OSC 99 identifies them precisely so an application can have more than one.
+    ///
+    /// @param notifier   Whose signal to connect to.
+    /// @param context    Whose lifetime the connection is bound to.
+    /// @param signal     The signal, whose first parameter is the identifier emitted.
+    /// @param identifier The notification identifier this connection is about.
+    /// @param action     What to run, taking the signal's remaining parameters.
+    template <typename... Args, typename Action>
+    void connectOnceMatching(platform::Notifier* notifier,
+                             TerminalSession* context,
+                             void (platform::Notifier::*signal)(QString, Args...),
+                             std::string identifier,
+                             Action action)
+    {
+        // Held indirectly because the handler must be able to break its own connection, which does
+        // not exist yet when the handler is built.
+        auto const connection = std::make_shared<QMetaObject::Connection>();
+        *connection =
+            QObject::connect(notifier,
+                             signal,
+                             context,
+                             [identifier = std::move(identifier), connection, action = std::move(action)](
+                                 QString const& emitted, Args... args) {
+                                 if (emitted.toStdString() != identifier)
+                                     return;
+
+                                 QObject::disconnect(*connection);
+                                 action(args...);
+                             });
+    }
+#endif
+
     ColorPalette const* preferredColorPalette(config::ColorConfig const& config,
                                               vtbackend::ColorPreference preference)
     {
@@ -299,7 +339,11 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 createSettingsFromConfig(_config, _profile, _currentColorPreference, initialPageSize),
                 std::chrono::steady_clock::now() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
-    _desktopNotifier { notifier ? std::move(notifier) : platform::makeDesktopNotifier() }
+    // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is
+    // fixed for the notifier's life: it decides how a backend that cannot observe a close behaves,
+    // which is configuration, not state.
+    _desktopNotifier { notifier ? std::move(notifier)
+                                : platform::makeDesktopNotifier(_config.notificationCloseTimeout.value()) }
 {
     if (app.liveConfig())
     {
@@ -988,53 +1032,30 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
 #ifdef __linux__
     _desktopNotifier->notify(notification);
 
-    // Connect close event reporting if requested.
-    if (notification.closeEventRequested)
-    {
-        auto const identifier = notification.identifier;
-        QObject::connect(
-            _desktopNotifier.get(),
-            &platform::Notifier::notificationClosed,
-            this,
-            [this, identifier](QString const& closedId, uint /*reason*/) {
-                if (closedId.toStdString() == identifier)
-                {
-                    _terminal.reply("\033]99;i={}:p=close;\033\\", identifier);
-                    _terminal.desktopNotificationManager().removeActiveNotification(identifier);
-                }
-            },
-            Qt::SingleShotConnection);
-    }
-
     auto const identifier = notification.identifier;
 
-    // Connect activation reporting if requested.
-    if (notification.reportOnActivation)
-    {
-        QObject::connect(
-            _desktopNotifier.get(),
-            &platform::Notifier::actionInvoked,
-            this,
-            [this, identifier](QString const& activatedId) {
-                if (activatedId.toStdString() == identifier)
-                    _terminal.reply("\033]99;i={}:p=activated;\033\\", identifier);
-            },
-            Qt::SingleShotConnection);
-    }
+    if (notification.closeEventRequested)
+        connectOnceMatching(_desktopNotifier.get(),
+                            this,
+                            &platform::Notifier::notificationClosed,
+                            identifier,
+                            [this, identifier](uint /*reason*/, vtbackend::CloseReport report) {
+                                _terminal.reply("\033]{}\033\\",
+                                                vtbackend::buildOSC99CloseResponse(identifier, report));
+                                _terminal.desktopNotificationManager().removeActiveNotification(identifier);
+                            });
 
-    // Focus terminal on activation if requested.
+    if (notification.reportOnActivation)
+        connectOnceMatching(
+            _desktopNotifier.get(), this, &platform::Notifier::actionInvoked, identifier, [this, identifier] {
+                _terminal.reply("\033]99;i={}:p=activated;\033\\", identifier);
+            });
+
     if (notification.focusOnActivation)
-    {
-        QObject::connect(
-            _desktopNotifier.get(),
-            &platform::Notifier::actionInvoked,
-            this,
-            [this, identifier](QString const& activatedId) {
-                if (activatedId.toStdString() == identifier)
-                    focusTerminalWindow();
-            },
-            Qt::SingleShotConnection);
-    }
+        connectOnceMatching(
+            _desktopNotifier.get(), this, &platform::Notifier::actionInvoked, identifier, [this] {
+                focusTerminalWindow();
+            });
 #else
     // On non-Linux platforms, fall back to the simple notification mechanism.
     emit showNotification(QString::fromStdString(notification.title),
