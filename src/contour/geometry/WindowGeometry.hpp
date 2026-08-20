@@ -38,6 +38,18 @@ struct Margins
     int vertical = 0;   ///< Padding applied above AND below the grid.
 };
 
+/// The width of the drawable gutter reserved to the LEFT of the grid, inside the margin.
+///
+/// Asymmetric, which is why it is not part of @ref Margins: it is a strip the renderer draws fold
+/// markers into, not padding, and it exists on one side only. It is subtracted from the width available
+/// to cells and added to the width a page requires, so a page fitted WITH a gutter reports one fewer
+/// column to the shell than the same window without one -- which is the honest answer, the column
+/// genuinely not being there.
+///
+/// Every function below takes it last and defaults it to zero, so a caller that reserves no gutter gets
+/// exactly the arithmetic this header had before one existed.
+using GutterWidth = int;
+
 /// Window chrome OUTSIDE the terminal content area (e.g. the QML title/tab bar), in logical pixels,
 /// DECLARED by the UI layer (Main.qml knows its layout). Never measured from live window-minus-item
 /// deltas — such measurements are transiently wrong during relayout and structurally wrong in splits.
@@ -164,6 +176,30 @@ namespace detail
         auto const unscaled = std::max(0.0, value / scale) + RoundingSlack;
         return static_cast<int>(unscaled); // truncation == floor for non-negative values
     }
+
+    /// The main-page row @p yDevicePx falls on, bounded neither way.
+    ///
+    /// Shared by mainPageRowAt() and mainPageRowNear() so that only their out-of-range policies differ:
+    /// a second spelling of it is how a truncating hit-test came to sit beside a flooring one.
+    ///
+    /// @param yDevicePx      The y coordinate in device pixels, relative to the item's top edge.
+    /// @param pageMarginTop  The renderer's grid origin, in device pixels.
+    /// @param cellHeightPx   The cell height in device pixels; must be positive.
+    /// @param mainPageTopRow The screen row the main page starts on.
+    /// @return The main-page-relative row, which may lie outside the page.
+    [[nodiscard]] constexpr int mainPageRowOf(int yDevicePx,
+                                              int pageMarginTop,
+                                              int cellHeightPx,
+                                              int mainPageTopRow) noexcept
+    {
+        // Floor division, not truncation: a coordinate ABOVE the grid origin is negative, and truncating
+        // it towards zero would fold the first row above the grid onto row 0.
+        auto const offsetPx = yDevicePx - pageMarginTop;
+        auto const screenRow =
+            offsetPx >= 0 ? offsetPx / cellHeightPx : -(((-offsetPx) + cellHeightPx - 1) / cellHeightPx);
+
+        return screenRow - mainPageTopRow;
+    }
 } // namespace detail
 
 /// Scales symmetric margins from logical to device pixels.
@@ -184,13 +220,15 @@ namespace detail
 /// @param availableDevicePx Total available area in device pixels.
 /// @param cellSize          Cell size in device pixels.
 /// @param marginsDevicePx   Symmetric minimum margins in device pixels.
+/// @param gutterDevicePx    Gutter reserved left of the grid, in device pixels (@see GutterWidth).
 /// @return The floored page size, at least 1x1.
 [[nodiscard]] constexpr vtbackend::PageSize pageSizeForPixels(vtbackend::ImageSize availableDevicePx,
                                                               vtbackend::ImageSize cellSize,
-                                                              Margins marginsDevicePx) noexcept
+                                                              Margins marginsDevicePx,
+                                                              GutterWidth gutterDevicePx = 0) noexcept
 {
     auto const usableWidth =
-        std::max(0, unbox<int>(availableDevicePx.width) - (2 * marginsDevicePx.horizontal));
+        std::max(0, unbox<int>(availableDevicePx.width) - (2 * marginsDevicePx.horizontal) - gutterDevicePx);
     auto const usableHeight =
         std::max(0, unbox<int>(availableDevicePx.height) - (2 * marginsDevicePx.vertical));
     auto const cellWidth = std::max(1, unbox<int>(cellSize.width));
@@ -222,13 +260,15 @@ namespace detail
 /// @param totalPageSize   Total page size (main page + status line).
 /// @param cellSize        Cell size in device pixels.
 /// @param marginsDevicePx Symmetric margins in device pixels.
+/// @param gutterDevicePx  Gutter reserved left of the grid, in device pixels (@see GutterWidth).
 /// @return Required area in device pixels.
 [[nodiscard]] constexpr vtbackend::ImageSize requiredPixelsForPage(vtbackend::PageSize totalPageSize,
                                                                    vtbackend::ImageSize cellSize,
-                                                                   Margins marginsDevicePx) noexcept
+                                                                   Margins marginsDevicePx,
+                                                                   GutterWidth gutterDevicePx = 0) noexcept
 {
-    auto const width =
-        (unbox<int>(cellSize.width) * unbox<int>(totalPageSize.columns)) + (2 * marginsDevicePx.horizontal);
+    auto const width = (unbox<int>(cellSize.width) * unbox<int>(totalPageSize.columns))
+                       + (2 * marginsDevicePx.horizontal) + gutterDevicePx;
     auto const height =
         (unbox<int>(cellSize.height) * unbox<int>(totalPageSize.lines)) + (2 * marginsDevicePx.vertical);
     return { .width = vtbackend::Width::cast_from(std::max(0, width)),
@@ -298,6 +338,28 @@ namespace detail
                  vtbackend::Height::cast_from(detail::floorUnscaled(unbox<double>(devicePx.height), scale)) };
 }
 
+/// The renderer's grid origin for the given margins and gutter.
+///
+/// The one statement of where the grid starts: the gutter is folded INTO the left inset, because it is
+/// asymmetric where the configured margin is not, and everything downstream reads that one number --
+/// the mouse hit-test, the gutter hit-test (@see isInGutter), the renderer itself. A second, hand-built
+/// PageMargin beside this one is how a grid origin comes to be short by exactly one gutter.
+///
+/// @param marginsDevicePx The configured margins in device pixels (@see scaled).
+/// @param gutterDevicePx  Gutter reserved left of the grid, in device pixels (@see GutterWidth).
+/// @param bottomDevicePx  The bottom inset; the configured vertical margin when omitted, which is what
+///                        a page that has not yet been fitted to a surface has.
+/// @return The page margin the renderer draws from.
+[[nodiscard]] constexpr vtrasterizer::PageMargin pageMarginFor(
+    Margins marginsDevicePx,
+    GutterWidth gutterDevicePx = 0,
+    std::optional<int> bottomDevicePx = std::nullopt) noexcept
+{
+    return { .left = marginsDevicePx.horizontal + gutterDevicePx,
+             .top = marginsDevicePx.vertical,
+             .bottom = bottomDevicePx.value_or(marginsDevicePx.vertical) };
+}
+
 /// Fits a grid into a device-pixel area: page = clamp(pageSizeForPixels(...)), margin placement computed
 /// against the CLAMPED page so the renderer and the terminal can never disagree (below-minimum windows
 /// previously computed margins for a page the terminal then silently enlarged).
@@ -311,24 +373,104 @@ namespace detail
 /// @param clampTotalPageSize Injected total-page clamp; production passes
 ///                           `Terminal::clampedTotalPageSize` (status-line rule) so this header stays
 ///                           free of vtbackend::Terminal and tests can exercise the contract directly.
+/// @param gutterDevicePx     Gutter reserved left of the grid, in device pixels (@see GutterWidth). It
+///                           lands INSIDE the returned pageMargin.left, so every pixel<->cell
+///                           conversion in the tree -- GridMetrics::map, the mouse hit-test, the
+///                           accessibility bridge -- shifts the grid across by it for free, and the
+///                           strip [horizontal, horizontal + gutter) is what the renderer draws into.
 /// @return The fitted page and the renderer margin placement.
 template <typename ClampFn>
     requires std::is_invocable_r_v<vtbackend::PageSize, ClampFn, vtbackend::PageSize>
 [[nodiscard]] constexpr GridFit fitPageToPixels(vtbackend::ImageSize availableDevicePx,
                                                 vtbackend::ImageSize cellSize,
                                                 Margins marginsDevicePx,
-                                                ClampFn&& clampTotalPageSize) noexcept
+                                                ClampFn&& clampTotalPageSize,
+                                                GutterWidth gutterDevicePx = 0) noexcept
 {
     auto const page = std::forward<ClampFn>(clampTotalPageSize)(
-        pageSizeForPixels(availableDevicePx, cellSize, marginsDevicePx));
+        pageSizeForPixels(availableDevicePx, cellSize, marginsDevicePx, gutterDevicePx));
 
     auto const usedHeight = unbox<int>(page.lines) * unbox<int>(cellSize.height);
     auto const top = marginsDevicePx.vertical;
     auto const leftover = unbox<int>(availableDevicePx.height) - usedHeight - top;
     auto const bottom = std::clamp(leftover, 0, marginsDevicePx.vertical);
 
-    return { .pageSize = page,
-             .pageMargin = { .left = marginsDevicePx.horizontal, .top = top, .bottom = bottom } };
+    return { .pageSize = page, .pageMargin = pageMarginFor(marginsDevicePx, gutterDevicePx, bottom) };
+}
+
+/// The MAIN-PAGE row a device-pixel y coordinate falls on, if it falls on one at all.
+///
+/// Screen rows count from the top of everything the renderer draws, so row 0 is the status line when
+/// one sits above the grid (@see vtbackend::Terminal::mainPageTopRow). Viewport's coordinate
+/// translation, on the other hand, speaks main-page rows -- handing it a screen row shifts every
+/// hit-test down by the height of that status line, which is exactly the bug this exists to prevent.
+///
+/// Returns nullopt rather than clamping when the coordinate is off the main page: a click on the
+/// status line is not a click on the grid, and answering with the nearest grid row would act on a
+/// cell the user did not point at.
+///
+/// Pure, so the mapping is testable without a window -- and stated once, so the fold gutter's
+/// hit-test and the cell hit-test cannot drift apart.
+///
+/// @param yDevicePx       The y coordinate in device pixels, relative to the item's top edge, with
+///                        any smooth-scroll offset already subtracted.
+/// @param pageMarginTop   The renderer's grid origin (@c GridMetrics::pageMargin.top), device pixels.
+/// @param cellHeightPx    The cell height in device pixels; must be positive.
+/// @param mainPageTopRow  The screen row the main page starts on.
+/// @param mainPageLines   How many lines the main page has.
+/// @return The main-page-relative row, or nullopt when the coordinate is not over the main page.
+[[nodiscard]] constexpr std::optional<int> mainPageRowAt(
+    int yDevicePx, int pageMarginTop, int cellHeightPx, int mainPageTopRow, int mainPageLines) noexcept
+{
+    if (cellHeightPx <= 0 || mainPageLines <= 0)
+        return std::nullopt;
+
+    auto const row = detail::mainPageRowOf(yDevicePx, pageMarginTop, cellHeightPx, mainPageTopRow);
+    if (row < 0 || row >= mainPageLines)
+        return std::nullopt;
+
+    return row;
+}
+
+/// The MAIN-PAGE row a device-pixel y coordinate falls on, or the nearest one when it falls off.
+///
+/// The clamping sibling of mainPageRowAt(), over the same arithmetic: a drag that leaves the grid must
+/// keep naming its nearest row, because auto-scroll depends on that, where a click off the grid must not
+/// be answered with a row at all. Only the out-of-range policy differs.
+///
+/// @param yDevicePx       The y coordinate in device pixels, relative to the item's top edge, with
+///                        any smooth-scroll offset already subtracted.
+/// @param pageMarginTop   The renderer's grid origin (@c GridMetrics::pageMargin.top), device pixels.
+/// @param cellHeightPx    The cell height in device pixels; must be positive.
+/// @param mainPageTopRow  The screen row the main page starts on.
+/// @param mainPageLines   How many lines the main page has.
+/// @return The main-page-relative row, clamped to [0, mainPageLines - 1].
+[[nodiscard]] constexpr int mainPageRowNear(
+    int yDevicePx, int pageMarginTop, int cellHeightPx, int mainPageTopRow, int mainPageLines) noexcept
+{
+    if (cellHeightPx <= 0 || mainPageLines <= 0)
+        return 0;
+
+    return std::clamp(
+        detail::mainPageRowOf(yDevicePx, pageMarginTop, cellHeightPx, mainPageTopRow), 0, mainPageLines - 1);
+}
+
+/// Whether the device-pixel x coordinate @p xDevicePx falls inside the gutter.
+///
+/// The gutter is the strip [pageMarginLeft - gutter, pageMarginLeft): fitPageToPixels folds its width
+/// INTO pageMargin.left, so the strip is exactly what that inset gained, and column 0 begins where it
+/// ends. Pure, so the hit-test is testable without a window -- and so the one place that decides where
+/// the gutter IS is the same header that decided how wide to make it.
+///
+/// @param xDevicePx       The x coordinate, in device pixels, relative to the item's left edge.
+/// @param pageMarginLeft  The renderer's grid origin (@c GridMetrics::pageMargin.left), in device pixels.
+/// @param gutterDevicePx  The reserved gutter width in device pixels; 0 means there is no gutter.
+/// @return Whether the coordinate is over the gutter rather than over a cell or the margin left of it.
+[[nodiscard]] constexpr bool isInGutter(int xDevicePx,
+                                        int pageMarginLeft,
+                                        GutterWidth gutterDevicePx) noexcept
+{
+    return gutterDevicePx > 0 && xDevicePx >= pageMarginLeft - gutterDevicePx && xDevicePx < pageMarginLeft;
 }
 
 /// Logical device-pixel availability of an item: floor(logical * scale) per axis (FLOOR side of the law).
@@ -364,14 +506,16 @@ template <typename ClampFn>
 /// @param marginsDevicePx Symmetric margins in device pixels.
 /// @param scale           Content scale (device pixels per logical pixel).
 /// @param chrome          Declared window chrome in logical pixels.
+/// @param gutterDevicePx  Gutter reserved left of the grid, in device pixels (@see GutterWidth).
 /// @return Window size in logical pixels.
 [[nodiscard]] constexpr LogicalSize windowSizeForPage(vtbackend::PageSize totalPageSize,
                                                       vtbackend::ImageSize cellSize,
                                                       Margins marginsDevicePx,
                                                       double scale,
-                                                      Chrome chrome) noexcept
+                                                      Chrome chrome,
+                                                      GutterWidth gutterDevicePx = 0) noexcept
 {
-    auto const required = requiredPixelsForPage(totalPageSize, cellSize, marginsDevicePx);
+    auto const required = requiredPixelsForPage(totalPageSize, cellSize, marginsDevicePx, gutterDevicePx);
     return { .width = detail::ceilUnscaled(unbox<double>(required.width), scale) + chrome.width,
              .height = detail::ceilUnscaled(unbox<double>(required.height), scale) + chrome.height };
 }
@@ -383,15 +527,30 @@ template <typename ClampFn>
 /// @param marginsLogicalPx Symmetric margins in logical pixels (as configured).
 /// @param scale            Content scale (device pixels per logical pixel).
 /// @param chrome           Declared window chrome in logical pixels.
+/// @param gutterDevicePx   Gutter reserved left of the grid, in DEVICE pixels -- the unit it is decided
+///                         in, being a fraction of the cell width (@see GutterWidth). Taken in that
+///                         unit and converted once, here: a caller that unscaled it first would hand
+///                         over a truncated value this would then scale back up, and the base hint
+///                         would be a pixel short of the gutter the renderer actually reserves.
 /// @return The hints, in logical pixels.
 [[nodiscard]] constexpr SizeHints sizeHintsFor(vtbackend::ImageSize cellSizeDevicePx,
                                                Margins marginsLogicalPx,
                                                double scale,
-                                               Chrome chrome) noexcept
+                                               Chrome chrome,
+                                               GutterWidth gutterDevicePx = 0) noexcept
 {
-    auto const minimum = windowSizeForPage(
-        MinimumTotalPageSize, cellSizeDevicePx, scaled(marginsLogicalPx, scale), scale, chrome);
-    auto const base = LogicalSize { .width = (2 * marginsLogicalPx.horizontal) + chrome.width,
+    auto const minimum = windowSizeForPage(MinimumTotalPageSize,
+                                           cellSizeDevicePx,
+                                           scaled(marginsLogicalPx, scale),
+                                           scale,
+                                           chrome,
+                                           gutterDevicePx);
+
+    // Ceiled, like the cell increment beside it: a base rounded DOWN leaves the grid area a device
+    // pixel wider than the window can give it, which the resize snapping then reads as room for a
+    // column that does not fit.
+    auto const base = LogicalSize { .width = (2 * marginsLogicalPx.horizontal) + chrome.width
+                                             + detail::ceilUnscaled(gutterDevicePx, scale),
                                     .height = (2 * marginsLogicalPx.vertical) + chrome.height };
     auto const increment =
         LogicalSize { .width = detail::ceilUnscaled(unbox<double>(cellSizeDevicePx.width), scale),

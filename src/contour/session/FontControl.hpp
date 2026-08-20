@@ -39,6 +39,24 @@ class TerminalSession;
     return { .horizontal = unbox<int>(margins.horizontal), .vertical = unbox<int>(margins.vertical) };
 }
 
+/// The gutter width, in device pixels, a profile asks for.
+///
+/// THE gutter decision, in one place: every geometry call site reads it from here, because a page fitted
+/// with a gutter and a renderer drawing without one (or vice versa) put the grid in two different places.
+/// One cell wide when fold markers are shown, and nothing at all otherwise -- a gutter costs a column of
+/// terminal width, so a user who does not want markers must not pay for it.
+///
+/// @param folding The profile's folding configuration.
+/// @param cellSizeDevicePx The cell size in device pixels.
+/// @return The gutter width in device pixels; 0 when no gutter is wanted.
+[[nodiscard]] constexpr geometry::GutterWidth gutterWidthFor(config::FoldingConfig const& folding,
+                                                             vtbackend::ImageSize cellSizeDevicePx) noexcept
+{
+    if (!folding.markersVisible())
+        return 0;
+    return unbox<int>(cellSizeDevicePx.width);
+}
+
 /// Refits the grid to @p newPixelSize and resizes the child PTY accordingly.
 void applyResize(vtbackend::ImageSize newPixelSize,
                  TerminalSession& session,

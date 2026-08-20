@@ -103,9 +103,12 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
     // total up to statusLineHeight()+1 lines and 1 column, and a fit computed against an unclamped page
     // would permanently defeat the early-out below two cell-rows (re-running resizeScreen() +
     // clearSelection() on every drag frame, wiping the selection and storming SIGWINCH at the child).
-    auto const fit = geometry::fitPageToPixels(newPixelSize, cellSize, marginsDevicePx, [&](auto page) {
-        return terminal.clampedTotalPageSize(page);
-    });
+    auto const fit = geometry::fitPageToPixels(
+        newPixelSize,
+        cellSize,
+        marginsDevicePx,
+        [&](auto page) { return terminal.clampedTotalPageSize(page); },
+        gutterWidthFor(session.config().folding.value(), cellSize));
 
     renderer.applyResize(newPixelSize, fit.pageSize, fit.pageMargin);
 

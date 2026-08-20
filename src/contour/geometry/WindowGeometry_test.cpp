@@ -12,6 +12,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <cmath>
+#include <ranges>
 
 using namespace contour::geometry;
 
@@ -346,6 +347,255 @@ TEST_CASE("WindowGeometry.roundtrip.pageThroughPixels", "[contour][geometry]")
     CHECK(pageSizeForPixels(surplus, cell, margins) == page);
 }
 
+TEST_CASE("WindowGeometry.roundtrip.pageThroughPixelsWithAGutter", "[contour][geometry]")
+{
+    // THE anti-oscillation invariant again, this time with a gutter reserved. It holds for the same
+    // reason it holds for the margins: the gutter is an exact integer subtracted on the availability
+    // side and added on the requirement side, so it cancels. A gutter that broke this would make a
+    // window resize oscillate by a column for as long as the user held the mouse down.
+    auto const cell = GENERATE(imageSize(5, 10), imageSize(8, 16), imageSize(11, 23), imageSize(21, 42));
+    auto const margin = GENERATE(0, 2, 10);
+    auto const gutter = GENERATE(0, 1, 8, 21, 100);
+    auto const page = GENERATE(pageSize(1, 1), pageSize(25, 80), pageSize(50, 132), pageSize(2, 500));
+
+    auto const margins = Margins { .horizontal = margin, .vertical = margin };
+    CAPTURE(cell, margin, gutter, page.lines.value, page.columns.value);
+
+    auto const required = requiredPixelsForPage(page, cell, margins, gutter);
+    CHECK(pageSizeForPixels(required, cell, margins, gutter) == page);
+
+    auto const surplus = imageSize(unbox<int>(required.width) + unbox<int>(cell.width) - 1,
+                                   unbox<int>(required.height) + unbox<int>(cell.height) - 1);
+    CHECK(pageSizeForPixels(surplus, cell, margins, gutter) == page);
+}
+
+TEST_CASE("WindowGeometry.gutter.costsExactlyItsOwnWidth", "[contour][geometry]")
+{
+    // A gutter is width taken from the cells, and nothing else: the same window fits one fewer column
+    // per cell-width of gutter, and the height is untouched.
+    auto const cell = imageSize(10, 20);
+    auto const margins = Margins { .horizontal = 5, .vertical = 5 };
+    auto const available = imageSize(1000, 600);
+
+    auto const without = pageSizeForPixels(available, cell, margins);
+    auto const withGutter = pageSizeForPixels(available, cell, margins, /*gutterDevicePx*/ 10);
+
+    CHECK(without.columns == vtbackend::ColumnCount(99));
+    CHECK(withGutter.columns == vtbackend::ColumnCount(98));
+    CHECK(withGutter.lines == without.lines);
+}
+
+TEST_CASE("WindowGeometry.gutter.landsInsideThePageMarginLeft", "[contour][geometry]")
+{
+    // The load-bearing placement: the gutter is folded into pageMargin.left, which is already the single
+    // left inset every pixel<->cell conversion in the tree reads -- GridMetrics::map, the mouse
+    // hit-test, the accessibility bridge. Folding it in there is what makes all of them correct at once,
+    // and leaves [horizontal, horizontal + gutter) as the strip the renderer owns.
+    auto const cell = imageSize(10, 20);
+    auto const margins = Margins { .horizontal = 5, .vertical = 5 };
+    auto const identity = [](vtbackend::PageSize page) {
+        return page;
+    };
+
+    auto const fit = fitPageToPixels(imageSize(1000, 600), cell, margins, identity, /*gutterDevicePx*/ 10);
+
+    CHECK(fit.pageMargin.left == 15);
+    // Top and bottom are the gutter's business not at all.
+    CHECK(fit.pageMargin.top == 5);
+}
+
+TEST_CASE("WindowGeometry.gutter.widensTheWindowAndItsSizeHintBase", "[contour][geometry]")
+{
+    // A window sized for a page must grow by the gutter, or the grid it was sized for would not fit --
+    // and the WM's base size must grow with it, since the base is the fixed non-grid part.
+    auto const cell = imageSize(10, 20);
+    auto const marginsLogical = Margins { .horizontal = 5, .vertical = 5 };
+    auto const page = pageSize(25, 80);
+    auto const chrome = Chrome { .width = 0, .height = 30 };
+
+    auto const without = windowSizeForPage(page, cell, marginsLogical, 1.0, chrome);
+    auto const withGutter = windowSizeForPage(page, cell, marginsLogical, 1.0, chrome, 10);
+    CHECK(withGutter.width == without.width + 10);
+    CHECK(withGutter.height == without.height);
+
+    auto const hintsWithout = sizeHintsFor(cell, marginsLogical, 1.0, chrome);
+    auto const hintsWith = sizeHintsFor(cell, marginsLogical, 1.0, chrome, 10);
+    CHECK(hintsWith.base.width == hintsWithout.base.width + 10);
+    CHECK(hintsWith.base.height == hintsWithout.base.height);
+    // One cell per column is unchanged -- a gutter is a fixed inset, not part of the resize grid.
+    CHECK(hintsWith.increment == hintsWithout.increment);
+    CHECK(hintsWith.minimum.width == hintsWithout.minimum.width + 10);
+}
+
+TEST_CASE("WindowGeometry.mainPageRowAt.maps pixels onto main-page rows", "[contour][geometry]")
+{
+    // Grid origin at y=10, 20px cells, no status line: screen rows and main-page rows coincide.
+    auto constexpr MarginTop = 10;
+    auto constexpr CellHeight = 20;
+    auto constexpr Lines = 5;
+
+    CHECK(mainPageRowAt(10, MarginTop, CellHeight, /*mainPageTopRow*/ 0, Lines) == 0);
+    CHECK(mainPageRowAt(29, MarginTop, CellHeight, 0, Lines) == 0);
+    CHECK(mainPageRowAt(30, MarginTop, CellHeight, 0, Lines) == 1);
+    CHECK(mainPageRowAt(99, MarginTop, CellHeight, 0, Lines) == 4);
+
+    // Off the grid, above and below: not a row, rather than the nearest one.
+    CHECK(mainPageRowAt(9, MarginTop, CellHeight, 0, Lines) == std::nullopt);
+    CHECK(mainPageRowAt(-100, MarginTop, CellHeight, 0, Lines) == std::nullopt);
+    CHECK(mainPageRowAt(110, MarginTop, CellHeight, 0, Lines) == std::nullopt);
+}
+
+TEST_CASE("WindowGeometry.mainPageRowNear.clamps where its sibling declines", "[contour][geometry]")
+{
+    // The two differ ONLY in what they do off the page: a drag that leaves the grid must keep naming
+    // its nearest row, because auto-scroll depends on that. Where mainPageRowAt() answers, the two
+    // agree -- which is the property that keeps the cell hit-test and the gutter hit-test in step.
+    auto constexpr MarginTop = 10;
+    auto constexpr CellHeight = 20;
+    auto constexpr Lines = 5;
+
+    for (auto const y: { 10, 29, 30, 99, 109 })
+        CHECK(mainPageRowNear(y, MarginTop, CellHeight, 0, Lines)
+              == mainPageRowAt(y, MarginTop, CellHeight, 0, Lines));
+
+    // Above the grid -- including the row immediately above it, which a truncating division would
+    // have folded onto row 0 without ever leaving the page.
+    CHECK(mainPageRowNear(9, MarginTop, CellHeight, 0, Lines) == 0);
+    CHECK(mainPageRowNear(-100, MarginTop, CellHeight, 0, Lines) == 0);
+
+    // Below it.
+    CHECK(mainPageRowNear(110, MarginTop, CellHeight, 0, Lines) == 4);
+    CHECK(mainPageRowNear(10'000, MarginTop, CellHeight, 0, Lines) == 4);
+
+    // A status line above the grid shifts it, exactly as it shifts the declining sibling.
+    CHECK(mainPageRowNear(0, MarginTop, CellHeight, /*mainPageTopRow*/ 1, Lines) == 0);
+    CHECK(mainPageRowNear(30, MarginTop, CellHeight, 1, Lines) == 0);
+
+    // Degenerate inputs answer with the only row that is always safe.
+    CHECK(mainPageRowNear(100, MarginTop, /*cellHeightPx*/ 0, 0, Lines) == 0);
+    CHECK(mainPageRowNear(100, MarginTop, CellHeight, 0, /*mainPageLines*/ 0) == 0);
+}
+
+TEST_CASE("WindowGeometry.pageMarginFor.folds the gutter into the left inset", "[contour][geometry]")
+{
+    // The property every pixel<->cell conversion in the tree depends on: the gutter lands INSIDE
+    // pageMargin.left, so the grid starts past it and isInGutter() names exactly the strip it gained.
+    auto constexpr Margins = contour::geometry::Margins { .horizontal = 6, .vertical = 4 };
+
+    auto const bare = pageMarginFor(Margins);
+    CHECK(bare.left == 6);
+    CHECK(bare.top == 4);
+    CHECK(bare.bottom == 4); // a page not yet fitted to a surface has the configured margin below it
+
+    auto const gutter = pageMarginFor(Margins, /*gutterDevicePx*/ 9);
+    CHECK(gutter.left == 15);
+    CHECK(gutter.top == 4);
+    CHECK(!isInGutter(5, gutter.left, 9));  // the configured margin, left of the gutter
+    CHECK(isInGutter(6, gutter.left, 9));   // the gutter's first pixel
+    CHECK(isInGutter(14, gutter.left, 9));  // its last
+    CHECK(!isInGutter(15, gutter.left, 9)); // column 0
+
+    // The fit supplies a measured bottom; everything else is the same placement.
+    auto const fitted = pageMarginFor(Margins, 9, /*bottomDevicePx*/ 1);
+    CHECK(fitted.left == 15);
+    CHECK(fitted.bottom == 1);
+}
+
+TEST_CASE("WindowGeometry.mainPageRowAt.a top status line shifts the grid down", "[contour][geometry]")
+{
+    // THE regression this exists for. With a one-line status display at the TOP, the renderer draws
+    // it on screen row 0 and the grid starts on row 1 -- so the pixels of the first GRID row belong
+    // to main-page row 0, not row 1. Feeding a raw screen row to Viewport's translation shifted every
+    // hit-test down by the status line's height, and dropped the grid's last row entirely.
+    auto constexpr MarginTop = 0;
+    auto constexpr CellHeight = 20;
+    auto constexpr TopRow = 1;
+    auto constexpr Lines = 5;
+
+    // The status line itself is not part of the grid.
+    CHECK(mainPageRowAt(0, MarginTop, CellHeight, TopRow, Lines) == std::nullopt);
+    CHECK(mainPageRowAt(19, MarginTop, CellHeight, TopRow, Lines) == std::nullopt);
+
+    // The first row BELOW it is main-page row 0.
+    CHECK(mainPageRowAt(20, MarginTop, CellHeight, TopRow, Lines) == 0);
+    CHECK(mainPageRowAt(39, MarginTop, CellHeight, TopRow, Lines) == 0);
+
+    // ...and the last main-page row is reachable, which it was not while the shift was missing.
+    CHECK(mainPageRowAt(100, MarginTop, CellHeight, TopRow, Lines) == 4);
+    CHECK(mainPageRowAt(119, MarginTop, CellHeight, TopRow, Lines) == 4);
+    CHECK(mainPageRowAt(120, MarginTop, CellHeight, TopRow, Lines) == std::nullopt);
+}
+
+TEST_CASE("WindowGeometry.mainPageRowAt.a bottom status line is not the grid", "[contour][geometry]")
+{
+    // A status line BELOW the grid leaves mainPageTopRow at zero; the rows past the page are simply
+    // not on it, which is what keeps a click on the status line from acting on the last grid row.
+    CHECK(mainPageRowAt(0, 0, 20, /*mainPageTopRow*/ 0, /*mainPageLines*/ 3) == 0);
+    CHECK(mainPageRowAt(59, 0, 20, 0, 3) == 2);
+    CHECK(mainPageRowAt(60, 0, 20, 0, 3) == std::nullopt);
+}
+
+TEST_CASE("WindowGeometry.mainPageRowAt.degenerate metrics answer nothing", "[contour][geometry]")
+{
+    // Before the first resize the renderer can hand out a zero cell height; dividing by it would be
+    // undefined rather than merely wrong.
+    CHECK(mainPageRowAt(50, 0, /*cellHeightPx*/ 0, 0, 5) == std::nullopt);
+    CHECK(mainPageRowAt(50, 0, 20, 0, /*mainPageLines*/ 0) == std::nullopt);
+}
+
+TEST_CASE("WindowGeometry.isInGutter.covers the strip and nothing else", "[contour][geometry]")
+{
+    // Margin 5, gutter 10, so pageMargin.left is 15 and the strip is [5, 15). Column 0 starts at 15.
+    auto constexpr MarginLeft = 5;
+    auto constexpr Gutter = 10;
+    auto constexpr PageMarginLeft = MarginLeft + Gutter;
+
+    // The margin to the left of the gutter is not the gutter.
+    CHECK(!isInGutter(0, PageMarginLeft, Gutter));
+    CHECK(!isInGutter(4, PageMarginLeft, Gutter));
+
+    // The strip itself, both edges.
+    CHECK(isInGutter(5, PageMarginLeft, Gutter));
+    CHECK(isInGutter(14, PageMarginLeft, Gutter));
+
+    // The first cell column is past it -- half-open, so 15 is already the grid.
+    CHECK(!isInGutter(15, PageMarginLeft, Gutter));
+    CHECK(!isInGutter(500, PageMarginLeft, Gutter));
+}
+
+TEST_CASE("WindowGeometry.isInGutter.no gutter means nothing is ever in it", "[contour][geometry]")
+{
+    // With markers off there is no strip, and pageMargin.left is the plain margin: every x must fall
+    // through to the ordinary cell hit-test, including the margin the grid does not start at.
+    for (auto const x: { 0, 1, 4, 5, 100 })
+    {
+        CAPTURE(x);
+        CHECK(!isInGutter(x, /*pageMarginLeft*/ 5, /*gutterDevicePx*/ 0));
+    }
+}
+
+TEST_CASE("WindowGeometry.gutter.zeroIsExactlyTheUngutteredArithmetic", "[contour][geometry]")
+{
+    // The default, and what every existing caller passes: a zero gutter must leave every function
+    // byte-for-byte what it was before one existed.
+    auto const cell = imageSize(11, 23);
+    auto const margins = Margins { .horizontal = 7, .vertical = 3 };
+    auto const available = imageSize(999, 601);
+    auto const page = pageSize(25, 80);
+    auto const chrome = Chrome { .width = 4, .height = 30 };
+    auto const identity = [](vtbackend::PageSize p) {
+        return p;
+    };
+
+    CHECK(pageSizeForPixels(available, cell, margins, 0) == pageSizeForPixels(available, cell, margins));
+    CHECK(requiredPixelsForPage(page, cell, margins, 0) == requiredPixelsForPage(page, cell, margins));
+    CHECK(fitPageToPixels(available, cell, margins, identity, 0).pageMargin.left
+          == fitPageToPixels(available, cell, margins, identity).pageMargin.left);
+    CHECK(windowSizeForPage(page, cell, margins, 1.25, chrome, 0)
+          == windowSizeForPage(page, cell, margins, 1.25, chrome));
+    CHECK(sizeHintsFor(cell, margins, 1.25, chrome, 0) == sizeHintsFor(cell, margins, 1.25, chrome));
+}
+
 TEST_CASE("WindowGeometry.roundtrip.pageThroughWindowAtScale", "[contour][geometry]")
 {
     // The full grid->window->grid cycle at every scale: a window sized for a page, converted back through
@@ -397,6 +647,35 @@ TEST_CASE("WindowGeometry.initialPageSize.runningWinsOverProfile", "[contour][ge
     CHECK(initialPageSize(profileDefault, profileDefault) == profileDefault);
     // A brand-new window: no running size -> the profile default is honored.
     CHECK(initialPageSize(std::nullopt, profileDefault) == profileDefault);
+}
+
+TEST_CASE("WindowGeometry.sizeHintsFor.gutterSurvivesFractionalScale", "[contour][geometry]")
+{
+    // The gutter is decided in DEVICE pixels -- a fraction of the cell width -- and the base hint is in
+    // logical ones. Converting it once, here, is what keeps the two agreeing: unscaling it at the call
+    // site first would truncate, and scaling the truncated value back would reserve less than the
+    // renderer does, leaving the resize grid off by a pixel.
+    auto constexpr Chrome = contour::geometry::Chrome { .width = 0, .height = 0 };
+    auto const margins = contour::geometry::Margins { .horizontal = 0, .vertical = 0 };
+    auto const cell = imageSize(15, 30);
+
+    for (auto const scale: { 1.0, 1.25, 1.5, 2.0 })
+    {
+        for (auto const gutterDevicePx: std::views::iota(1, 16))
+        {
+            CAPTURE(scale, gutterDevicePx);
+            auto const bare = sizeHintsFor(cell, margins, scale, Chrome);
+            auto const withGutter = sizeHintsFor(cell, margins, scale, Chrome, gutterDevicePx);
+
+            // Whatever the rounding, the reserved strip must cover the device pixels asked for.
+            auto const reservedLogical = withGutter.base.width - bare.base.width;
+            CHECK(reservedLogical >= 1);
+            CHECK(static_cast<double>(reservedLogical) * scale >= static_cast<double>(gutterDevicePx));
+
+            // ... and it is an inset, never part of the resize grid.
+            CHECK(withGutter.increment == bare.increment);
+        }
+    }
 }
 
 TEST_CASE("WindowGeometry.sizeHintsFor", "[contour][geometry]")

@@ -1013,8 +1013,13 @@ void WindowController::showInitial()
     auto const marginsDevice =
         geometry::scaled(session::toGeometryMargins(session->profile().margins.value()), scale);
     auto const totalPage = session->terminal().totalPageSize();
-    auto const size =
-        geometry::windowSizeForPage(totalPage, display->cellSize(), marginsDevice, scale, chrome());
+    auto const size = geometry::windowSizeForPage(
+        totalPage,
+        display->cellSize(),
+        marginsDevice,
+        scale,
+        chrome(),
+        session::gutterWidthFor(session->config().folding.value(), display->cellSize()));
 
     display::displayLog()("Initial window size {}x{} (page {}, cell {}, scale {}, chrome {}).",
                           size.width,
@@ -1138,7 +1143,11 @@ void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, Hi
     auto const scale = requester.devicePixelRatio();
     auto const cellSize = requester.cellSize();
     auto const margins = session::toGeometryMargins(requester.session().profile().margins.value());
-    auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome());
+    // Handed over in DEVICE pixels, the unit it is decided in: sizeHintsFor converts it once, where
+    // unscaling it here and letting it be scaled back would truncate a pixel off at fractional DPR.
+    auto const gutterDevicePx =
+        session::gutterWidthFor(requester.session().config().folding.value(), cellSize);
+    auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome(), gutterDevicePx);
 
     // The character-cell resize grid (base + increment) is cleared while maximized/fullscreen. An
     // incidental refresh (RespectWindowState) must not re-arm it while the window is non-normal — that
@@ -1260,7 +1269,12 @@ bool WindowController::resizeWindowForPage(session::DisplaySurface& requester,
         geometry::scaled(session::toGeometryMargins(requester.session().profile().margins.value()), scale);
     // The pane's requirement as a logical extent (ceil side of the rounding law; chrome added later).
     auto const leafLogical = geometry::windowSizeForPage(
-        totalPageSize, requester.cellSize(), marginsDevice, scale, geometry::Chrome {});
+        totalPageSize,
+        requester.cellSize(),
+        marginsDevice,
+        scale,
+        geometry::Chrome {},
+        session::gutterWidthFor(requester.session().config().folding.value(), requester.cellSize()));
     return applyContentDrivenResize(requester, leafLogical);
 }
 
