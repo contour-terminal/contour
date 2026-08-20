@@ -34,10 +34,6 @@ function precmd_hook_contour -d "Shell Integration hook to be invoked before eac
     # tell a prompt apart from a command's output, which is what "copy last command output" reads.
     printf "\e]133;A\e\\"
 
-    # Marks the current line (command prompt) so that you can jump to it via key bindings.
-    #printf '\e[>M'
-    printf "\e[>M"
-
     # Informs contour terminal about the current working directory, so that e.g. OpenFileManager works.
     printf "\e]7;$PWD\e\\"
 

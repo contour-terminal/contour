@@ -6749,12 +6749,6 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SD: scrollDown(seq.paramPositiveOr<LineCount>(0, LineCount { 1 })); break;
         case UNSCROLL: unscroll(seq.paramOr<LineCount>(0, LineCount(1))); break;
         case SBQUERY: handleSemanticBlockQuery(seq); break;
-        case SETMARK:
-            // TODO: deprecated. Remove in some future version.
-            // Users should migrate to OSC 133.
-            errorLog()("CSI > M is deprecated. Use OSC 133 instead.");
-            setMark();
-            break;
         case SGR: return impl::applySGR(*this, seq, 0, seq.parameterCount());
         case SGRRESTORE: restoreGraphicsRendition(); return ApplyResult::Ok;
         case SGRSAVE: saveGraphicsRendition(); return ApplyResult::Ok;

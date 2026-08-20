@@ -10,10 +10,14 @@ This is what a shell integration would do, but you can simply
 mark lines yourself by trivially writing to `stdout`, as follows:
 
 ```sh
-printf "\033[>M"
+printf "\033]133;A\033\\"
 ```
 
-This will tell the terminal to remember the line as a jump-target
+This will tell the terminal to remember the line as a jump-target.
+
+`OSC 133 ; A` is the shell-integration sequence for "a new prompt starts here". Contour also
+accepted a dedicated `SETMARK` sequence (`CSI > M`) for this until 0.7.1, when it was removed in
+favour of this one.
 
 ## Jump via shortcut
 
