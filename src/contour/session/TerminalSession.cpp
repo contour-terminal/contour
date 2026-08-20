@@ -492,6 +492,14 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
     // a freshly attached display wants.
     setDefaultCursor();
 
+    // And likewise the scrollbar's travel: screenUpdated() only publishes it while a display is
+    // attached, so a pane that accumulated scrollback in the background carries whatever count was
+    // current when its display went away -- zero, for one that never had one. Nothing else republishes
+    // until the next screen update, which for an idle shell may be never, leaving the freshly bound
+    // scrollbar sized for a history it cannot see.
+    announceScrollableLineCount(
+        crispy::locked(_terminal, [this] { return _terminal.viewport().scrollableLineCount(); }));
+
     scheduleRedraw();
 }
 
@@ -683,18 +691,25 @@ void TerminalSession::screenUpdated()
     if (!_display)
         return;
 
-    if (_profile.history.value().autoScrollOnUpdate && terminal().viewport().scrolled()
-        && terminal().inputHandler().mode() == ViMode::Insert)
-        terminal().viewport().scrollToBottom();
+    // Emphatically NOT under Terminal's state mutex, however much the fold projection below would like
+    // it: this callback is raised BOTH with that mutex held and without it. Terminal::setMode() ends a
+    // synchronized update (DECRST 2026) by calling synchronizedOutput(), which refreshes the render
+    // buffer on the already-locked path and then raises this -- mid-parse, on the parser thread, with
+    // the mutex held. The mutex is a plain non-recursive std::mutex, so taking it here self-deadlocks on
+    // the very sequence neovim, tmux and every other modern TUI ends each frame with. @see
+    // Events::progressChanged for the same contract, stated.
+    if (_profile.history.value().autoScrollOnUpdate && _terminal.viewport().scrolled()
+        && _terminal.inputHandler().mode() == ViMode::Insert)
+        _terminal.viewport().scrollToBottom();
+
+    auto const scrollable = _terminal.viewport().scrollableLineCount();
 
     if (terminal().hasInput())
         _display->post(bind(&TerminalSession::flushInput, this));
 
-    if (_lastHistoryLineCount != _terminal.currentScreen().historyLineCount())
-    {
-        _lastHistoryLineCount = _terminal.currentScreen().historyLineCount();
-        emit historyLineCountChanged(unbox(_lastHistoryLineCount));
-    }
+    // The scrollable count rather than the history depth, so that folding a block -- which moves that
+    // count without touching the depth -- resizes the scrollbar too.
+    announceScrollableLineCount(scrollable);
 
     scheduleRedraw();
 }
@@ -1736,9 +1751,14 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
 
     // The cursor shape lives on the display; a display-less session (background pane, headless
     // test) has no cursor to change.
-    if (pos != _currentMousePosition && _display != nullptr)
+    //
+    // Normally only on a cell CHANGE, since that is the only thing that can change the answer -- but
+    // the gutter changes the shape behind this decision's back, and leaving it lands the pointer on the
+    // cell it came from. The flag is that invalidation: without it the gutter's pointing hand survived
+    // over the grid until the pointer happened to cross into another cell.
+    if ((pos != _currentMousePosition || _isPointerShapeStale) && _display != nullptr)
     {
-        // Change cursor shape only when changing grid cell.
+        _isPointerShapeStale = false;
         _currentMousePosition = pos;
         if (terminal().isMouseHoveringHyperlink()
             || (modifiers.contains(vtbackend::Modifier::Control) && terminal().localPathAtMousePosition()))
@@ -1748,6 +1768,67 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
 
         updateHyperlinkHover(hoveredUri, pos);
     }
+}
+
+ConsumedByGutter TerminalSession::sendGutterHoverEvent(std::optional<vtbackend::LineOffset> gridLine)
+{
+    // A display-less session has no cursor to change and no gutter to be over.
+    if (_display == nullptr)
+        return ConsumedByGutter::No;
+
+    // The overwhelmingly common case -- the pointer is over the GRID, and with folding switched off
+    // it is the only case. Answered before taking the terminal lock, because this runs on every
+    // pointer motion and the ordinary move path is about to take that same lock itself.
+    if (!gridLine)
+    {
+        clearGutterHover();
+        return ConsumedByGutter::No;
+    }
+
+    _gutterHovered = true;
+    auto const overFold = crispy::locked(_terminal, [&] {
+        _terminal.setGutterHoverLine(gridLine);
+        return _terminal.foldContaining(*gridLine).has_value();
+    });
+
+    // Over the gutter but beside a row no fold reaches: still not the grid, so the event is consumed
+    // either way -- only the shape differs, saying whether there is anything here to click.
+    if (overFold)
+        _display->setMouseCursorShape(input::MouseCursorShape::PointingHand);
+    else
+        setDefaultCursor();
+
+    // Leaving the grid ends any hyperlink hover the pointer left behind on its way out.
+    clearHyperlinkHover();
+    return ConsumedByGutter::Yes;
+}
+
+ConsumedByGutter TerminalSession::sendGutterPressEvent(std::optional<vtbackend::LineOffset> gridLine,
+                                                       vtbackend::MouseButton button)
+{
+    // Only a left click acts on a fold; every other button belongs to the application, gutter or not.
+    if (button != vtbackend::MouseButton::Left || !gridLine)
+        return ConsumedByGutter::No;
+
+    // Through the one gate every folding action passes: it takes the lock, honours the folding setting
+    // and republishes the scrollable count, none of which a click on the column wants to restate.
+    if (!withFolding([&](auto& terminal) { return terminal.toggleFoldContaining(*gridLine); }))
+        return ConsumedByGutter::No;
+
+    // Remembered here rather than by the caller, so the two halves of the handshake cannot drift: a
+    // release reported for a press the child never saw leaves it holding a button down that was never
+    // pressed.
+    _gutterClickPending = true;
+    return ConsumedByGutter::Yes;
+}
+
+ConsumedByGutter TerminalSession::sendGutterReleaseEvent()
+{
+    if (!_gutterClickPending)
+        return ConsumedByGutter::No;
+
+    _gutterClickPending = false;
+    return ConsumedByGutter::Yes;
 }
 
 void TerminalSession::updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell)
@@ -1771,9 +1852,38 @@ void TerminalSession::updateHyperlinkHover(std::string_view uri, vtbackend::Cell
     emit hyperlinkHoverChanged();
 }
 
+void TerminalSession::clearGutterHover()
+{
+    // Nothing to clear, and -- the point of the flag -- nothing to lock for: this is the answer on
+    // every pointer motion over the grid, which is nearly all of them.
+    if (!_gutterHovered)
+        return;
+
+    _gutterHovered = false;
+
+    // The gutter set the shape; only the grid can decide what replaces it, and it decides that per
+    // CELL. Leaving the gutter usually lands on the cell the pointer left from, so say the shape is
+    // stale rather than guess at it here -- the very next move then re-decides, hyperlink and all.
+    _isPointerShapeStale = true;
+
+    crispy::locked(_terminal, [&] { _terminal.setGutterHoverLine(std::nullopt); });
+}
+
+void TerminalSession::announceScrollableLineCount(vtbackend::LineCount scrollable)
+{
+    // One exchange rather than a load and a store: two threads can reach this at once (the parser
+    // thread from screenUpdated(), the GUI thread from a folding action), and only the one that
+    // actually moved the value should announce it.
+    if (_lastHistoryLineCount.exchange(unbox(scrollable), std::memory_order_relaxed) == unbox(scrollable))
+        return;
+
+    emit historyLineCountChanged(unbox(scrollable));
+}
+
 void TerminalSession::onPointerLeft()
 {
     clearHyperlinkHover();
+    clearGutterHover();
     setDefaultCursor();
 }
 
@@ -1962,6 +2072,18 @@ command::ContextMenuState TerminalSession::contextMenuState()
         auto const block = terminal().lastCommandBlock();
         auto const hyperlink = terminal().tryGetHoveringHyperlink();
 
+        // The grid line under the pointer, when a fold reaches it. _currentMousePosition is in MAIN-PAGE
+        // rows -- which is the space translateScreenToGridLine() speaks, so it is fed in unadjusted --
+        // and was last written by the move that necessarily preceded this right-click, so it still names
+        // the clicked cell. Adding mainPageTopRow() here would reintroduce the off-by-a-status-line the
+        // gutter hit-test already had (@see gutterLineAt).
+        auto const foldLine = [&]() -> std::optional<vtbackend::LineOffset> {
+            if (!_config.folding.value().enabled)
+                return std::nullopt;
+            auto const line = terminal().viewport().translateScreenToGridLine(_currentMousePosition.line);
+            return terminal().foldContaining(line) ? std::optional { line } : std::nullopt;
+        }();
+
         return command::ContextMenuState {
             .hasSelection = terminal().selectionAvailable(),
             .clipboardHasText = clipboardHasText,
@@ -1984,6 +2106,9 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // Taken now, while the pointer is still on the cell the user clicked. The rows built from this
             // carry the URI with them, because by the time one is picked the pointer has moved to the menu.
             .hyperlinkUnderCursor = hyperlink ? hyperlink->uri : std::string {},
+            // Taken now for the same reason the hyperlink is: the row acts on the line that was
+            // clicked, and the pointer will have left it by the time the row is picked.
+            .foldLine = foldLine,
             .activeProfile = profileName(),
             .profileNames = std::move(profileNames),
         };
@@ -2476,6 +2601,82 @@ bool TerminalSession::operator()(actions::ScrollDown)
 {
     smoothScrollDown(vtbackend::LineCount(*_profile.history.value().historyScrollMultiplier));
     return true;
+}
+
+namespace
+{
+    /// The grid line the folding actions act on: where the user is looking, which is the top of the
+    /// viewport, not where the shell's cursor happens to be. ToggleFold is a viewport action.
+    ///
+    /// Not noexcept: that translation goes through the fold projection, which is built lazily and
+    /// allocates.
+    [[nodiscard]] vtbackend::LineOffset foldAnchorLine(vtbackend::Terminal const& terminal)
+    {
+        return terminal.viewport().topLine();
+    }
+} // namespace
+
+bool TerminalSession::withFolding(std::invocable<vtbackend::Terminal&> auto&& action, FoldingGate gate)
+{
+    // Locked: the actions walk the grid's marks and mutate fold state the render pass reads. See
+    // ScrollMarkDown.
+    auto const [handled, scrollable] =
+        crispy::locked(_terminal, [&]() -> std::pair<bool, vtbackend::LineCount> {
+            // One gate for every folding action rather than one per handler: a seventh action then
+            // cannot be live behind a disabled setting by forgetting to check.
+            auto const ran =
+                (gate == FoldingGate::Always || _config.folding.value().enabled) && action(terminal());
+
+            // Read under the same lock that just moved it: folding a block takes its rows out of the
+            // scrollable range without touching the history depth, and this is the only moment that is
+            // visible -- the property reporting that range may neither compute it nor take this lock.
+            return { ran, _terminal.viewport().scrollableLineCount() };
+        });
+
+    // Outside the lock: the QML binding this wakes runs synchronously on this thread and reaches back
+    // into the session. Announcing a count that did not move is a no-op, so the disabled case needs no
+    // second channel to say so.
+    announceScrollableLineCount(scrollable);
+    return handled;
+}
+
+bool TerminalSession::operator()(actions::CollapseAllFolds)
+{
+    return withFolding([](auto& terminal) { return terminal.collapseAllFolds(); });
+}
+
+bool TerminalSession::operator()(actions::CollapseLastFold)
+{
+    return withFolding([](auto& terminal) { return terminal.collapseLastFold(); });
+}
+
+bool TerminalSession::operator()(actions::ExpandAllFolds)
+{
+    // Ungated, but still through withFolding(): turning the feature off must let a user undo what they
+    // folded while it was on rather than stranding the output behind a disabled setting -- and the
+    // rows this hands BACK to the scrollable range have to be announced just as the ones a collapse
+    // takes away are, or the scrollbar keeps the travel it had while they were hidden.
+    return withFolding([](auto& terminal) { return terminal.expandAllFolds(); }, FoldingGate::Always);
+}
+
+bool TerminalSession::operator()(actions::ToggleFold)
+{
+    return withFolding(
+        [](auto& terminal) { return terminal.toggleFoldContaining(foldAnchorLine(terminal)); });
+}
+
+bool TerminalSession::operator()(actions::ToggleFoldAt action)
+{
+    // The line comes from the context menu, which captured where the user right-clicked -- so this
+    // acts on the block they were pointing at, not on whatever the viewport happens to start with.
+    return withFolding([line = action.line](auto& terminal) {
+        return terminal.toggleFoldContaining(vtbackend::LineOffset(line));
+    });
+}
+
+bool TerminalSession::operator()(actions::ToggleLastFold)
+{
+    return withFolding([](auto& terminal) { return terminal.toggleLastFold(); });
 }
 
 bool TerminalSession::operator()(actions::ScrollMarkDown)

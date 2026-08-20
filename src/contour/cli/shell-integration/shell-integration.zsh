@@ -34,9 +34,6 @@ precmd_hook_contour()
     # tell a prompt apart from a command's output, which is what "copy last command output" reads.
     print -n '\e]133;A\e\\' >$TTY
 
-    # Marks the current line (command prompt) so that you can jump to it via key bindings.
-    echo -n '\e[>M' >$TTY
-
     # Informs contour terminal about the current working directory, so that e.g. OpenFileManager works.
     echo -ne '\e]7;'$(pwd)'\e\\' >$TTY
 

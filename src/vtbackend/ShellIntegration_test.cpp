@@ -195,17 +195,6 @@ TEST_CASE("ShellIntegration.OSC_133")
     }
 }
 
-TEST_CASE("ShellIntegration.SETMARK")
-{
-    auto mc = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
-
-    SECTION("SETMARK triggers promptStart")
-    {
-        mc.writeToScreen("\033[>M");
-        CHECK(mc.terminal.currentScreen().lineFlagsAt(LineOffset(0)).contains(LineFlag::Marked));
-    }
-}
-
 // ==================== Semantic Block Protocol Tests ====================
 
 TEST_CASE("SemanticBlockProtocol.LineFlags")
@@ -302,14 +291,12 @@ namespace
 {
 /// What the bundled shell integration actually puts on the wire between two commands.
 ///
-/// precmd emits ;D (the command finished), then SETMARK, then ;A (a new prompt starts) — all three at the
-/// cursor, back to back, before PS1 prints a single character. So whenever a command's output did not end
-/// in a newline, every one of those marks lands on the output's last line, and the prompt is painted onto
-/// it too.
+/// precmd emits ;D (the command finished) and then ;A (a new prompt starts) back to back at the cursor,
+/// before PS1 prints a single character. So whenever a command's output did not end in a newline, both
+/// marks land on the output's last line, and the prompt is painted onto it too.
 void writePrecmdAndPrompt(MockTerm<>& mc, std::string_view prompt, int exitCode = 0)
 {
     mc.writeToScreen(std::format("\033]133;D;{}\033\\", exitCode));
-    mc.writeToScreen("\033[>M");
     mc.writeToScreen("\033]133;A\033\\");
     mc.writeToScreen(prompt);
 }

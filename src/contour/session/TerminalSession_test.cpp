@@ -1032,6 +1032,75 @@ TEST_CASE("TerminalSession: scroll actions move the viewport over seeded history
     CHECK_NOTHROW((*session)(actions::SearchReverse {}));
 }
 
+TEST_CASE("TerminalSession: folding actions collapse and expand command output",
+          "[contour][session][actions][folding]")
+{
+    // The five folding actions, driven end to end against a session whose scrollback holds two commands
+    // marked up exactly as a shell with OSC 133 integration would mark them.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    namespace actions = contour::actions;
+
+    auto const runCommand = [&](std::string const& command, int outputLines) {
+        session->terminal().writeToScreen("\033]133;A\033\\$ \033]133;B\033\\" + command + "\r\n");
+        session->terminal().writeToScreen("\033]133;C\033\\");
+        for (auto i = 0; i < outputLines; ++i)
+            session->terminal().writeToScreen(std::format("out {}\r\n", i));
+        session->terminal().writeToScreen("\033]133;D;0\033\\");
+    };
+
+    runCommand("ls", 3);
+    runCommand("pwd", 2);
+
+    auto& terminal = session->terminal();
+    REQUIRE(terminal.foldRanges().size() == 2);
+    REQUIRE(terminal.foldState().empty());
+
+    SECTION("CollapseLastFold hides the most recent command, and is idempotent")
+    {
+        CHECK((*session)(actions::CollapseLastFold {}));
+        CHECK(terminal.hiddenLineCount() > vtbackend::LineCount(0));
+        // Already collapsed: nothing to do, and it says so.
+        CHECK(!(*session)(actions::CollapseLastFold {}));
+    }
+
+    SECTION("ToggleLastFold goes both ways")
+    {
+        CHECK((*session)(actions::ToggleLastFold {}));
+        auto const hidden = terminal.hiddenLineCount();
+        CHECK(hidden > vtbackend::LineCount(0));
+
+        CHECK((*session)(actions::ToggleLastFold {}));
+        CHECK(terminal.hiddenLineCount() == vtbackend::LineCount(0));
+    }
+
+    SECTION("CollapseAllFolds then ExpandAllFolds returns to where it started")
+    {
+        CHECK((*session)(actions::CollapseAllFolds {}));
+        auto const allHidden = terminal.hiddenLineCount();
+        CHECK(allHidden > vtbackend::LineCount(0));
+        // Everything is already collapsed, so a second sweep changes nothing.
+        CHECK(!(*session)(actions::CollapseAllFolds {}));
+
+        CHECK((*session)(actions::ExpandAllFolds {}));
+        CHECK(terminal.hiddenLineCount() == vtbackend::LineCount(0));
+        CHECK(!(*session)(actions::ExpandAllFolds {}));
+    }
+
+    SECTION("ToggleFold acts on the block at the top of the viewport")
+    {
+        // Nothing is at the viewport top but the oldest prompt, so this is the fold that toggles.
+        (*session)(actions::ScrollToTop {});
+        auto const marker =
+            terminal.foldMarkerAt(terminal.viewport().translateScreenToGridLine(vtbackend::LineOffset(0)));
+        if (marker != vtbackend::FoldMarker::None)
+        {
+            CHECK((*session)(actions::ToggleFold {}));
+            CHECK(terminal.hiddenLineCount() > vtbackend::LineCount(0));
+        }
+    }
+}
+
 TEST_CASE("TerminalSession: display-guarded toggle actions are safe no-ops without a display",
           "[contour][session][actions]")
 {
@@ -2726,3 +2795,82 @@ TEST_CASE("TerminalSession::attachDisplay releases a surface it is taking the se
     held->detachDisplay(second);
 }
 // }}}
+
+TEST_CASE("TerminalSession survives a synchronized-output frame with a surface attached",
+          "[contour][session][view]")
+{
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+
+    // DECRST 2026 ends a synchronized update, and Terminal::synchronizedOutput() reports the frame to
+    // the event listener while the parser thread still HOLDS the state mutex (it calls
+    // refreshRenderBuffer(true), i.e. "already locked"). A screenUpdated() that takes that same
+    // non-recursive mutex therefore self-deadlocks on the very sequence neovim, tmux and every other
+    // modern TUI ends each frame with.
+    held->terminal().writeToScreen("\033[?2026h");
+    held->terminal().writeToScreen("hello");
+    held->terminal().writeToScreen("\033[?2026l");
+
+    CHECK(held->terminal().primaryScreen().grid().lineText(vtbackend::LineOffset(0)).starts_with("hello"));
+}
+
+TEST_CASE("TerminalSession publishes the scrollbar's travel whenever folding moves it",
+          "[contour][session][actions][folding][view]")
+{
+    // historyLineCount is what QML sizes the scrollbar from, and it reports what was last PUBLISHED
+    // rather than a count of its own. Every action that moves rows into or out of the scrollable range
+    // therefore has to say so -- including the ones that only ever reveal output.
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& terminal = held->terminal();
+    namespace actions = contour::actions;
+
+    auto const runCommand = [&](std::string const& command, int outputLines) {
+        terminal.writeToScreen("\033]133;A\033\\$ \033]133;B\033\\" + command + "\r\n");
+        terminal.writeToScreen("\033]133;C\033\\");
+        for (auto i = 0; i < outputLines; ++i)
+            terminal.writeToScreen(std::format("out {}\r\n", i));
+        terminal.writeToScreen("\033]133;D;0\033\\");
+    };
+
+    // Deep enough that folding the output actually shortens the scrollable range.
+    runCommand("ls", 40);
+    runCommand("pwd", 40);
+    REQUIRE(terminal.foldRanges().size() == 2);
+
+    auto const expanded = held->historyLineCount();
+    REQUIRE(expanded > 0);
+
+    REQUIRE((*held)(actions::CollapseAllFolds {}));
+    auto const collapsed = held->historyLineCount();
+    CHECK(collapsed < expanded);
+
+    // The one that used to bypass the announce: the rows come back, and so must the travel.
+    REQUIRE((*held)(actions::ExpandAllFolds {}));
+    CHECK(held->historyLineCount() == expanded);
+}
+
+TEST_CASE("TerminalSession::attachDisplay publishes the scrollbar's travel it accumulated unseen",
+          "[contour][session][view]")
+{
+    // A background pane has no display, and screenUpdated() -- the only other publisher -- returns
+    // early without one. Binding a display therefore has to publish, or the freshly shown scrollbar is
+    // sized for a history the session had when its display went away: zero, for one that never had a
+    // display, and an idle shell never produces the screen update that would correct it.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    for (auto i = 0; i < 100; ++i)
+        session->terminal().writeToScreen(std::format("line {}\r\n", i));
+
+    REQUIRE(session->terminal().primaryScreen().historyLineCount() > vtbackend::LineCount(0));
+    REQUIRE(session->historyLineCount() == 0);
+
+    auto surface = contour::test::FakeDisplaySurface {};
+    surface.attachedSession = session.get();
+    session->attachDisplay(surface);
+
+    CHECK(session->historyLineCount() == unbox<int>(session->terminal().viewport().scrollableLineCount()));
+    CHECK(session->historyLineCount() > 0);
+
+    session->detachDisplay(surface);
+}

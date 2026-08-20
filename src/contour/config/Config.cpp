@@ -464,6 +464,10 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
     auto settings = vtbackend::Settings {};
     settings.pageSize = profile.terminalSize.value();
     settings.maxHistoryLineCount = profile.history.value().maxHistoryLineCount;
+    auto const& folding = config.folding.value();
+    settings.foldMarkers = folding.markersVisible();
+    settings.autoCollapseFoldOnNewCommand = folding.enabled && folding.autoCollapseOnNewCommand;
+    settings.foldJumpBehavior = folding.onJumpIntoFold;
     settings.terminalId = profile.terminalId.value();
     settings.frozenModes = profile.frozenModes.value();
     settings.maxImageRegisterCount = config.images.value().maxImageColorRegisters;
@@ -845,6 +849,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("read_buffer_size", c.ptyReadBufferSize);
         loadFromEntry("pty_buffer_size", c.ptyBufferObjectSize);
         loadFromEntry("images", c.images);
+        loadFromEntry("folding", c.folding);
         loadFromEntry("live_config", c.live);
         loadFromEntry("early_exit_threshold", c.earlyExitThreshold);
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
@@ -1327,6 +1332,23 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
             }
         }
     }
+    // The fold column, left unset unless the scheme says otherwise: vtbackend then derives it from the
+    // palette's own foreground and background, so a scheme that has never heard of folding still draws
+    // a legible column rather than one hard-coded colour that happens to vanish on half the themes.
+    if (auto const folding = child["fold_marker"])
+    {
+        logger()("*** loading fold_marker");
+        auto const loadPair = [&](std::string const& key, std::optional<vtbackend::RGBColorPair>& target) {
+            if (!folding[key])
+                return;
+            auto colors = vtbackend::RGBColorPair {};
+            loadFromEntry(folding, key, colors);
+            target = colors;
+        };
+        loadPair("default", where.foldMarker);
+        loadPair("hover", where.foldMarkerHover);
+    }
+
     logger()("*** loading palette");
     loadFromEntry(child, "", where.palette);
 }
@@ -1930,6 +1952,28 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "scroll_multiplier", where.historyScrollMultiplier);
         loadFromEntry(child, "auto_scroll_on_update", where.autoScrollOnUpdate);
     }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, FoldingConfig& where)
+{
+    auto const child = node[entry];
+    if (child)
+    {
+        loadFromEntry(child, "enabled", where.enabled);
+        loadFromEntry(child, "show_markers", where.showMarkers);
+        loadFromEntry(child, "auto_collapse_on_new_command", where.autoCollapseOnNewCommand);
+        loadFromEntry(child, "on_jump_into_fold", where.onJumpIntoFold);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::FoldJumpBehavior& where)
+{
+    // Through the shared token table rather than an if-chain of spellings: the settings page builds
+    // its combo box from the very same rows (@see configEnumValues), so a value this reader accepts
+    // is by construction a value the UI can offer and the writer can spell back.
+    (void) loadConfigEnum(node, entry, where, logger);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarConfig& where)
@@ -2945,6 +2989,17 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 return std::nullopt;
         }
 
+        // ToggleFoldAt is built by the context menu from the line that was right-clicked rather than
+        // bound by hand, but it round-trips like any other parameterized action -- a config written by
+        // Contour must be a config Contour can read back.
+        if (holds_alternative<actions::ToggleFoldAt>(action))
+        {
+            if (auto line = node["line"]; line && line.IsScalar())
+                return actions::ToggleFoldAt { line.as<int>() };
+            else
+                return std::nullopt;
+        }
+
         if (holds_alternative<actions::SwitchToTab>(action))
         {
             if (auto position = node["position"]; position && position.IsScalar())
@@ -3579,6 +3634,25 @@ static void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::Co
                    entry.indicatorStatusLineInsertMode.background,
                    entry.indicatorStatusLineInactive.foreground,
                    entry.indicatorStatusLineInactive.background);
+
+    // Written back key by key, and only for what was actually set. The two pairs are independent
+    // optionals -- a scheme that says nothing about folding derives the column from its own
+    // foreground/background -- so emitting a full block would pin colours the scheme never chose, and
+    // emitting the commented example unconditionally would drop the ones it did.
+    if (entry.foldMarker || entry.foldMarkerHover)
+    {
+        processWithDoc(documentation::FoldMarkerHeader {});
+        if (entry.foldMarker)
+            processWithDoc(documentation::FoldMarkerDefault {},
+                           entry.foldMarker->foreground,
+                           entry.foldMarker->background);
+        if (entry.foldMarkerHover)
+            processWithDoc(documentation::FoldMarkerHover {},
+                           entry.foldMarkerHover->foreground,
+                           entry.foldMarkerHover->background);
+    }
+    else
+        processWithDoc(documentation::FoldMarker {});
 
     processWithDoc(documentation::InputMethodEditor {},
                    entry.inputMethodEditor.foreground,

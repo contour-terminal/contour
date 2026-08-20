@@ -280,6 +280,12 @@ void Terminal::onViewportChanged()
     if (_inputHandler.mode() != ViMode::Insert)
         _viCommands.cursorPosition = _viewport.clampCellLocation(_viCommands.cursorPosition);
 
+    // The clamp puts the cursor on a row the viewport DRAWS; this puts it on a line no fold hides. Both
+    // are needed and this order suffices: the clamp's own bounds are drawn rows, and a hidden line
+    // between them belongs to a run that cannot reach past either of them -- they are visible, and no
+    // run contains a visible line -- so snapping out of it stays inside the viewport.
+    snapViCursorOutOfFolds();
+
     if (_hintModeHandler.isActive())
         refreshHints();
 
@@ -604,6 +610,10 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     if (_settings.statusDisplayPosition == StatusDisplayPosition::Top)
         baseLine += fillRenderBufferStatusLine(output, includeSelection, baseLine).as<LineOffset>();
 
+    // The two must agree -- mainPageTopRow() is what every hit-test maps a pixel back through, and a
+    // grid drawn somewhere else would answer for a row the user did not point at.
+    assert(baseLine == mainPageTopRow());
+
     auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, *_currentScreen };
     auto const mainDisplayReverseVideo = isModeEnabled(vtbackend::DECMode::ReverseVideo);
 
@@ -637,7 +647,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
     auto& displayedScreen = pageAt(_displayedPage);
 
-    if (_displayedPage == PageIndex(0))
+    if (foldingAppliesToDisplayedPage())
         _lastRenderPassHints = displayedScreen.render(RenderBufferBuilder { *this,
                                                                             displayedScreen,
                                                                             output,
@@ -650,7 +660,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             includeSelection },
                                                       _viewport.scrollOffset(),
                                                       renderLinesPerCell,
-                                                      smoothScrollExtra);
+                                                      smoothScrollExtra,
+                                                      foldProjection());
     else
         _lastRenderPassHints = displayedScreen.render(RenderBufferBuilder { *this,
                                                                             displayedScreen,
@@ -664,6 +675,10 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             includeSelection },
                                                       _viewport.scrollOffset(),
                                                       renderLinesPerCell);
+
+    // After both branches: the gutter belongs to the main display whichever page it is showing, and
+    // fillGutter is a no-op wherever there is nothing foldable to point at.
+    fillGutter(output, baseLine);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
     auto const mainScreenLine = baseLine;
@@ -699,8 +714,20 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
         return _viCommands.cursorPosition;
     }();
 
-    // The line offset from grid to screen coordinates (accounts for baseLine and scrollOffset).
-    auto const gridToScreenLineOffset = output.cursor->position.line - gridCursorPos.line;
+    // Grid -> screen is a projection LOOKUP, not an addition: with folds collapsed the rows on screen
+    // are a non-contiguous selection of grid rows. Taking the difference at the cursor's own line and
+    // adding it to the animation's start line -- a different grid line -- put the interpolation's
+    // origin on the wrong row, and on a different wrong row each frame as scrolling reshaped the
+    // projection, so the cursor jittered along its path instead of sliding down it.
+    //
+    // The status-line shift IS a constant, so it is recovered by difference against the position
+    // renderCursor() already computed through the very same translation.
+    auto const baseLine =
+        output.cursor->position.line - _viewport.translateGridToScreenCoordinate(gridCursorPos.line);
+    auto const toScreen = [&](CellLocation gridPosition) {
+        return CellLocation { .line = baseLine + _viewport.translateGridToScreenCoordinate(gridPosition.line),
+                              .column = gridPosition.column };
+    };
 
     if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
     {
@@ -719,9 +746,7 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
             _cursorMotion.duration = effectiveDuration;
         }
         // Inject animation data (convert grid -> screen coordinates)
-        auto fromScreen = _cursorMotion.fromPosition;
-        fromScreen.line += gridToScreenLineOffset;
-        output.cursor->animateFrom = fromScreen;
+        output.cursor->animateFrom = toScreen(_cursorMotion.fromPosition);
         output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
         output.cursor->animateFromColor = _cursorMotion.fromColor;
     }
@@ -736,9 +761,7 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
         _cursorMotion.startTime = _currentTime;
         _cursorMotion.duration = effectiveDuration;
 
-        auto fromScreen = _cursorMotion.fromPosition;
-        fromScreen.line += gridToScreenLineOffset;
-        output.cursor->animateFrom = fromScreen;
+        output.cursor->animateFrom = toScreen(_cursorMotion.fromPosition);
         output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
         output.cursor->animateFromColor = _cursorMotion.fromColor;
     }
@@ -764,9 +787,7 @@ void Terminal::applyScreenTransitionBlending(RenderBuffer& output)
     auto const defaultBg = _colorPalette.defaultBackground;
 
     // Determine the line offset range that covers the main display (excluding the status line).
-    auto const mainLineBegin = (_settings.statusDisplayPosition == StatusDisplayPosition::Top)
-                                   ? statusLineHeight().as<LineOffset>()
-                                   : LineOffset(0);
+    auto const mainLineBegin = mainPageTopRow();
     auto const mainLineEnd = mainLineBegin + pageSize().lines.as<LineOffset>();
 
     auto const isMainDisplayCell = [&](CellLocation const& pos) {
@@ -1161,10 +1182,11 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
     _lastClick = _currentTime;
     _speedClicks = ((diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4) + 1;
 
-    auto const startPos = CellLocation {
-        .line = _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
-        .column = _currentMousePosition.column,
-    };
+    // Through the viewport, not by subtracting the scroll offset: with folds collapsed the rows on
+    // screen are a non-contiguous selection of grid rows, and anchoring a selection by the old
+    // arithmetic while extending it by the new one would start the drag on a different line than it
+    // highlights.
+    auto const startPos = _viewport.translateScreenToGridCoordinate(_currentMousePosition);
 
     // Shift+Click extends a completed selection to the new click position.
     // Re-create as LinearSelection to avoid breaking WordWise/FullLine invariants.
@@ -1227,10 +1249,8 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
 void Terminal::triggerWordWiseSelectionWithCustomDelimiters(string const& delimiters)
 {
     verifyState();
-    auto const startPos = CellLocation {
-        .line = _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
-        .column = _currentMousePosition.column,
-    };
+    // Through the viewport, for the reason given in handleMouseSelection above.
+    auto const startPos = _viewport.translateScreenToGridCoordinate(_currentMousePosition);
     if (_inputHandler.mode() != ViMode::Insert)
         _viCommands.cursorPosition = startPos;
     _customSelectionHelper.wordDelimited = [wordDelimiters = unicode::from_utf8(delimiters),
@@ -2033,7 +2053,11 @@ SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
     auto const linesDelta = static_cast<int>(std::floor(totalPixels / cellHeight));
     auto const remainder = totalPixels - (static_cast<float>(linesDelta) * cellHeight);
 
-    auto const maxOffset = boxed_cast<ScrollOffset>(primaryScreen().historyLineCount());
+    // The bound the viewport itself enforces, NOT the raw history depth: a collapsed fold takes its
+    // rows out of the scrollable range, and clamping to the larger number would compute offsets
+    // scrollTo() then rejects -- leaving the scroll offset frozen while the sub-cell remainder below
+    // went on cycling through a whole cell height every frame, which is visible as a flicker.
+    auto const maxOffset = boxed_cast<ScrollOffset>(_viewport.scrollableLineCount());
     auto const unclampedOffset = _viewport.scrollOffset().value + linesDelta;
     auto const newScrollOffset = std::clamp(unclampedOffset, 0, maxOffset.value);
 
@@ -2133,6 +2157,10 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
             boxed_cast<LineOffset>(oldMainDisplayPageSize.lines - mainDisplayPageSize.lines);
 
     _viCommands.cursorPosition = clampToScreen(_viCommands.cursorPosition);
+
+    // clampToScreen keeps the cursor on the page but knows nothing about folds, so the page-delta
+    // shift above can land it inside a collapsed block, where it renders as nothing at all.
+    snapViCursorOutOfFolds();
 
     reportInBandWindowResize();
 
@@ -2370,6 +2398,512 @@ std::optional<CommandBlockText> Terminal::lastCommandBlock() const
 {
     return primaryScreen().lastCommandBlock();
 }
+
+// {{{ Output folding
+void Terminal::refreshFoldState() const
+{
+    auto const& grid = primaryScreen().grid();
+    auto const generation = grid.stableIdGeneration();
+    auto const floor = grid.stableRangeFloor();
+
+    // The answer on all but the calls that follow a reflow or an eviction, and this fronts the
+    // per-cell coordinate translation -- so what runs here is the guard, not the reconciliation.
+    if (generation == _foldStateGeneration && _foldStateFloor == floor)
+        return;
+
+    // A bump means a reflow destroyed row identity wholesale, so every id held names a different row,
+    // or none. There is nothing to salvage and guessing would collapse the wrong block.
+    //
+    // stableIdGeneration(), NOT generation(): the latter also bumps for a pure line-count resize, which
+    // every row survives with the id it had -- so keying on it dropped every collapsed fold the moment
+    // a status line appeared or the window grew a row taller.
+    if (generation != _foldStateGeneration)
+    {
+        _foldState.clear();
+        _foldStateGeneration = generation;
+    }
+
+    // Heads that scrolled out of the scrollback: without pruning the set grows for the life of the
+    // session, and an id the grid later hands out again would come back collapsed.
+    _foldState.prune(floor);
+    _foldStateFloor = floor;
+}
+
+std::optional<FoldRange> Terminal::foldContaining(LineOffset gridLine) const
+{
+    // A query about the page on display -- the gutter draws from it, and a click or a context menu
+    // acts on the row the user pointed at. The same predicate the projection and the render pass use,
+    // so a page whose rows were folded can be asked which fold folded them.
+    if (!foldingAppliesToDisplayedPage())
+        return std::nullopt;
+
+    return foldCovering(foldRanges(), primaryScreen().grid().stableLineIdOf(gridLine));
+}
+
+std::optional<FoldRange> Terminal::foldCovering(std::span<FoldRange const> ranges, int64_t id) noexcept
+{
+    // Ranges come back most recent first, which is DESCENDING by head id -- the walk that produced them
+    // climbs the scrollback. So the search runs against that order rather than sorting a copy per row.
+    //
+    // A range spans [headStableId, lastStableId], the head being the smallest of the three, so the first
+    // range whose head is at or below @p id is the only one that can cover it: ranges do not nest.
+    auto const it = std::ranges::lower_bound(ranges, id, std::greater {}, &FoldRange::headStableId);
+    if (it == ranges.end() || id > it->lastStableId)
+        return std::nullopt;
+
+    return *it;
+}
+
+FoldMarker Terminal::markerIn(FoldRange const& range, int64_t id) const noexcept
+{
+    auto const collapsed = _foldState.isCollapsed(range.headStableId);
+
+    if (id == range.headStableId)
+        return collapsed ? FoldMarker::Collapsed : FoldMarker::Expanded;
+
+    // A collapsed block draws nothing below its head, because there IS nothing below it -- those rows
+    // are the ones it hides.
+    if (collapsed)
+        return FoldMarker::None;
+
+    return id == range.lastStableId ? FoldMarker::BodyEnd : FoldMarker::Body;
+}
+
+FoldMarker Terminal::foldMarkerAt(LineOffset gridLine) const
+{
+    auto const range = foldContaining(gridLine);
+    if (!range)
+        return FoldMarker::None;
+
+    return markerIn(*range, primaryScreen().grid().stableLineIdOf(gridLine));
+}
+
+void Terminal::snapViCursorOutOfFolds()
+{
+    // Motions cannot put the Vi cursor on a hidden line -- they count VISIBLE lines. Collapsing a
+    // block the cursor is standing in can, and a cursor on a hidden line renders as nothing at all.
+    if (_inputHandler.mode() == ViMode::Insert)
+        return;
+
+    _viCommands.cursorPosition.line =
+        snapToVisibleLine(_viCommands.cursorPosition.line, VerticalDirection::Down);
+}
+
+void Terminal::onFoldStateChanged()
+{
+    // The scrollable range is the history less what collapsed folds hide, so collapsing one can leave
+    // the viewport parked above the new top -- where scrollTo() rejects every request and the viewport
+    // can no longer be scrolled away from. Expanding only ever grows the range, which makes this a
+    // no-op, so both directions share the one funnel.
+    //
+    // Not called from onViewportChanged(): _modified() lands there, and a clamp issued from inside it
+    // would re-enter.
+    _viewport.clampScrollOffset();
+    snapViCursorOutOfFolds();
+}
+
+bool Terminal::toggleFoldContaining(LineOffset gridLine)
+{
+    auto const range = foldContaining(gridLine);
+    if (!range)
+        return false;
+
+    _foldState.toggle(range->headStableId);
+    onFoldStateChanged();
+    return true;
+}
+
+bool Terminal::expandFoldContaining(LineOffset gridLine)
+{
+    auto const range = foldContaining(gridLine);
+    if (!range || !_foldState.isCollapsed(range->headStableId))
+        return false;
+
+    _foldState.expand(range->headStableId);
+    onFoldStateChanged();
+    return true;
+}
+
+bool Terminal::toggleLastFold()
+{
+    auto const ranges = foldRanges();
+    if (ranges.empty())
+        return false;
+
+    // Most recent first, so the newest finished command is the front one.
+    _foldState.toggle(ranges.front().headStableId);
+    onFoldStateChanged();
+    return true;
+}
+
+bool Terminal::collapseLastFold()
+{
+    auto const ranges = foldRanges();
+    if (ranges.empty() || _foldState.isCollapsed(ranges.front().headStableId))
+        return false;
+
+    _foldState.collapse(ranges.front().headStableId);
+    onFoldStateChanged();
+    return true;
+}
+
+bool Terminal::collapseAllFolds()
+{
+    auto const revision = _foldState.revision();
+    _foldState.collapseAll(foldRanges());
+    if (_foldState.revision() == revision)
+        return false;
+
+    onFoldStateChanged();
+    return true;
+}
+
+bool Terminal::expandAllFolds()
+{
+    auto const revision = _foldState.revision();
+    _foldState.expandAll();
+    if (_foldState.revision() == revision)
+        return false;
+
+    onFoldStateChanged();
+    return true;
+}
+
+void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
+{
+    // The same predicate the projection and the render pass use: the gutter marks the rows that were
+    // actually folded, so it appears exactly where folding applied.
+    if (!_settings.foldMarkers || !foldingAppliesToDisplayedPage())
+        return;
+
+    // Nothing anywhere in reach is foldable -- the overwhelmingly common case for a shell with no
+    // integration at all, and the one that must cost nothing beyond the cached scan.
+    if (foldRanges().empty())
+        return;
+
+    auto const stableBase = primaryScreen().grid().stableLineIdOf(LineOffset(0));
+
+    // Resolved by the palette itself, so a colour scheme that says nothing about folding still yields
+    // a legible column and every future consumer gets the same answer without re-deriving it.
+    auto const normal = _colorPalette.foldMarkerColors();
+    auto const hovered = _colorPalette.foldMarkerHoverColors();
+
+    // The whole run of the hovered fold lights up, not the one row under the pointer: that run is what a
+    // click acts on, so it is what the highlight has to describe.
+    auto const hoveredHead = _gutterHoverLine
+                                 ? foldCovering(foldRanges(), stableBase + unbox<int64_t>(*_gutterHoverLine))
+                                 : std::nullopt;
+
+    // How far down the page the projection actually reaches, which is NOT always a page-full: collapsed
+    // folds hiding more rows than the history can backfill leave it short, and the rest of the page is
+    // blank. Mapping a blank row anyway extrapolates it onto the last visible line -- every one of them
+    // onto the SAME line -- so each would be handed that line's marker, a column of duplicates hanging
+    // below content Grid::render draws nothing on.
+    //
+    // Held as a count rather than as the span it comes from, because the loop below re-enters the cache
+    // that span points into. An empty projection means nothing is collapsed and the whole page is drawn.
+    auto const pageLines = boxed_cast<LineOffset>(pageSize().lines);
+    auto const projectedRows = foldProjection().size();
+    auto const lastRow =
+        projectedRows == 0
+            ? pageLines
+            : std::min(pageLines, foldProjectionTopRow() + LineOffset::cast_from(projectedRows));
+
+    // The MAIN page, not the total: _settings.pageSize includes the status line, and a gutter marker
+    // does not belong beside it. Shifted by baseLine for the same reason every cell is -- a status line
+    // at the top moves the main page down, and a marker left where it was would point at the wrong row.
+    for (auto y = LineOffset(0); y < lastRow; ++y)
+    {
+        auto const id = stableBase + unbox<int64_t>(_viewport.translateScreenToGridLine(y));
+
+        // Asked for per row rather than held across the loop: foldRanges() hands back a span over a
+        // CACHE, and the translation on the line above re-enters that cache once per row. Holding it
+        // survives only as long as no key input can move inside a frame -- one that could, and the
+        // remaining rows would be reading freed memory. A cache hit here is three integer comparisons.
+        auto const range = foldCovering(foldRanges(), id);
+        if (!range)
+            continue;
+
+        auto const marker = markerIn(*range, id);
+        if (marker == FoldMarker::None)
+            continue;
+
+        auto const& colors =
+            hoveredHead && hoveredHead->headStableId == range->headStableId ? hovered : normal;
+
+        output.gutter.push_back(
+            RenderGutterCell { .lineOffset = baseLine + y,
+                               .codepoint = foldMarkerGlyph(marker),
+                               .attributes = RenderAttributes { .foregroundColor = colors.foreground,
+                                                                .backgroundColor = colors.background,
+                                                                .decorationColor = colors.foreground } });
+    }
+}
+
+void Terminal::setGutterHoverLine(std::optional<LineOffset> gridLine)
+{
+    if (_gutterHoverLine == gridLine)
+        return;
+
+    // What is DRAWN is the highlighted fold, not the hovered row, so the repaint is gated on the fold
+    // changing rather than on the pointer crossing a row boundary. Dragging down a page of gutter
+    // would otherwise force one full render-buffer rebuild -- and one reader wakeup -- per row.
+    auto const headOf = [this](std::optional<LineOffset> line) -> std::optional<int64_t> {
+        if (!line)
+            return std::nullopt;
+        auto const range = foldContaining(*line);
+        return range ? std::optional { range->headStableId } : std::nullopt;
+    };
+
+    auto const before = headOf(_gutterHoverLine);
+    _gutterHoverLine = gridLine;
+    if (before == headOf(gridLine))
+        return;
+
+    // The highlight lives only in the render buffer, so nothing else would notice it changed: without
+    // this the tint appears on the next frame something else happens to dirty, which for an idle
+    // terminal is never.
+    breakLoopAndRefreshRenderBuffer();
+}
+
+void Terminal::autoCollapseOnNewPrompt()
+{
+    if (!_settings.autoCollapseFoldOnNewCommand)
+        return;
+
+    // The scan is driven off the marks, and the ;A that brought us here has already been stamped -- so
+    // the block that just finished is the front one, exactly as it is for CollapseLastFold.
+    collapseLastFold();
+}
+
+std::span<FoldRange const> Terminal::foldRanges() const
+{
+    // Before any range is handed out: every fold MUTATION starts by asking for the ranges, so an id
+    // minted by a previous grid generation is dropped here rather than toggled -- which would have
+    // collapsed whichever block the reused id now names.
+    refreshFoldState();
+
+    // Always the PRIMARY screen: that is where the history and the shell's marks live, and an alt-screen
+    // application (vim, less) owns the page without leaving any.
+    auto const& grid = primaryScreen().grid();
+
+    // stableBase advances on every scroll, which is exactly when a mark may have moved into or out of
+    // reach; a generation bump means row identity is gone. Between those, the marks cannot have changed
+    // position, so the previous scan still stands.
+    auto const key = FoldRangesKey { .generation = grid.generation(),
+                                     .stableBase = grid.stableLineIdOf(LineOffset(0)),
+                                     .markRevision = _semanticMarkRevision };
+    if (_foldRangesKey == key)
+        return _foldRanges;
+
+    _foldRangesKey = key;
+
+    // No mark has ever been stamped, so there is nothing for the scan to find -- every range hangs off a
+    // Marked line, and stamping one goes through invalidateFoldRanges(). A shell with no OSC 133
+    // integration would otherwise climb the whole scrollback on every scroll to be told so again.
+    if (_semanticMarkRevision != 0)
+        _foldRanges = primaryScreen().foldRanges(MaxFoldScanLines);
+    else
+        _foldRanges.clear();
+
+    return _foldRanges;
+}
+
+void Terminal::ensureFoldProjection() const
+{
+    // Before the key is assembled, because reconciliation can empty the state and therefore move the
+    // revision the key is stamped with. Everything that reads the projection, the hidden runs or the
+    // hidden count arrives through here, so this is where a stale generation stops.
+    refreshFoldState();
+
+    auto const& grid = primaryScreen().grid();
+    auto const pageLines = unbox<int>(pageSize().lines);
+    auto const key = FoldProjectionKey { .generation = grid.generation(),
+                                         .stableBase = grid.stableLineIdOf(LineOffset(0)),
+                                         .scrollOffset = unbox<int>(_viewport.scrollOffset()),
+                                         .pageLines = pageLines,
+                                         .foldRevision = _foldState.revision(),
+                                         .markRevision = _semanticMarkRevision,
+                                         .extraLines = unbox<int>(smoothScrollExtraLines()),
+                                         .foldingApplies = foldingAppliesToDisplayedPage() };
+    if (_foldProjectionKey == key)
+        return;
+
+    _foldProjectionKey = key;
+    _foldProjection.clear();
+    _hiddenIntervals.clear();
+    _hiddenLineCount = LineCount(0);
+
+    // The fast path, and the common one: with nothing collapsed the contiguous page IS the projection,
+    // so no ranges are scanned for and no rows are built. Callers read empty as "unfolded".
+    if (_foldState.empty() || !key.foldingApplies)
+        return;
+
+    // Derived ONCE and handed to everything that needs it: the projection walk binary-searches these
+    // runs per row, the count below measures them, and the fold-aware Vi motions step over them.
+    _hiddenIntervals = vtbackend::hiddenIntervals(foldRanges(), _foldState);
+
+    // What the grid still holds, and therefore what a fold can hide: a range whose rows have been partly
+    // evicted hides only the part that is still there, and one entirely evicted hides nothing. Measured
+    // with visibleDistance() rather than by summing clamped runs, so the arithmetic that decides which
+    // rows are reachable is stated once (@see Folding.hpp) and costs the runs CROSSED, not all of them.
+    auto const floor = key.stableBase + unbox<int64_t>(grid.addressableTop());
+    auto const ceiling = key.stableBase + pageLines - 1;
+    auto const addressable = ceiling + 1 - floor;
+    auto const visible = vtbackend::visibleDistance(_hiddenIntervals, floor, ceiling + 1);
+    _hiddenLineCount = LineCount::cast_from(addressable - visible);
+
+    // The rows the viewport shows: a page-full, plus the smooth-scrolling rows, which belong ABOVE the
+    // page -- Grid::render places anything beyond the page count there. Without them a smooth scroll over
+    // collapsed folds would leave the strip at the top of the viewport undrawn while the content slid
+    // down through it.
+    auto const wanted = pageLines + key.extraLines;
+
+    // How far below the top row of the viewport the true bottom lies, in VISIBLE rows -- which is how
+    // far up the grid the walk must START, since what the scroll offset skips depends on what is hidden
+    // along the way. Bounded by what the grid can still supply, so a viewport scrolled further than the
+    // remaining history reaches keeps showing the topmost rows rather than a single one.
+    //
+    // Bounded by the PAGE, not by `wanted`: `visible - pageLines` is precisely the largest offset
+    // Viewport::scrollableLineCount() admits, so bounding by the extra smooth-scroll row too would
+    // refuse the topmost offset and draw the whole page one row further down -- snapping back the moment
+    // the sub-cell offset reached zero. The extra row is dropped instead, which is what happens anyway:
+    // the walk below runs out of grid and returns a page-length list, exactly as the unfolded path drops
+    // it (@see Grid.hpp's extraOffset).
+    //
+    // Found by stepping over the hidden runs rather than by collecting the rows and throwing them away:
+    // scrolled fifty thousand lines into a folded history, the discarded rows alone were a per-frame
+    // allocation and fifty thousand pushes.
+    auto const skipped = std::min<int64_t>(key.scrollOffset, std::max<int64_t>(0, visible - pageLines));
+    auto const bottom =
+        advanceVisibleId(_hiddenIntervals, ceiling, skipped, VerticalDirection::Up, floor, ceiling);
+
+    _foldProjection = projectRows(_hiddenIntervals,
+                                  key.stableBase,
+                                  LineOffset::cast_from(bottom - key.stableBase),
+                                  LineCount(wanted),
+                                  grid.addressableTop());
+}
+
+std::span<LineOffset const> Terminal::foldProjection() const
+{
+    // Checked BEFORE anything is computed, and that placement is load-bearing: Viewport's coordinate
+    // translation calls this once PER CELL of every frame, where it used to be a constexpr addition.
+    // With nothing collapsed -- which is every session that never folds anything, and every moment of
+    // the ones that do until they first fold -- the whole feature costs one load and one branch, rather
+    // than assembling and comparing a cache key two thousand times a frame.
+    if (_foldState.empty())
+        return {};
+
+    ensureFoldProjection();
+    return _foldProjection;
+}
+
+LineOffset Terminal::foldProjectionTopRow() const
+{
+    if (_foldState.empty())
+        return LineOffset(0);
+
+    ensureFoldProjection();
+    if (_foldProjection.empty())
+        return LineOffset(0);
+
+    // The same rule Grid::render places the row list by -- literally, both go through the one function
+    // that states it, which is what keeps Viewport's coordinate translation from drifting away from
+    // where the rows are actually drawn.
+    return foldedRowsTopRow(pageSize().lines, _foldProjection.size());
+}
+
+LineCount Terminal::hiddenLineCount() const
+{
+    if (_foldState.empty())
+        return LineCount(0);
+
+    ensureFoldProjection();
+    return _hiddenLineCount;
+}
+
+std::span<HiddenInterval const> Terminal::hiddenIntervals() const
+{
+    if (_foldState.empty())
+        return {};
+
+    ensureFoldProjection();
+    return _hiddenIntervals;
+}
+
+bool Terminal::isLineHiddenByFold(LineOffset gridLine) const
+{
+    // The fast path, and the common one: nothing collapsed hides nothing.
+    if (_foldState.empty())
+        return false;
+
+    auto const base = currentStableBase();
+    return hidingInterval(hiddenIntervals(), base + unbox<int64_t>(gridLine)).has_value();
+}
+
+int Terminal::visibleDistance(LineOffset from, LineOffset to) const
+{
+    // With nothing collapsed every grid line is a visible line, so the distance is the difference it
+    // has always been.
+    if (_foldState.empty())
+        return unbox<int>(to - from);
+
+    // Ids and LineOffsets both increase downwards, so the base cancels out of a DIFFERENCE entirely --
+    // it is carried only because hiddenIntervals() speaks in ids.
+    auto const base = currentStableBase();
+    return static_cast<int>(vtbackend::visibleDistance(
+        hiddenIntervals(), base + unbox<int64_t>(from), base + unbox<int64_t>(to)));
+}
+
+LineOffset Terminal::advanceVisibleLines(LineOffset line, int count, VerticalDirection direction) const
+{
+    // The grid the caller's cursor is ON, not the primary one -- @see currentStableBase(), which the
+    // walk below uses and which states why.
+    auto const& grid = currentScreen().grid();
+    auto const step = direction == VerticalDirection::Down ? count : -count;
+    auto const top = grid.addressableTop();
+    auto const bottom = boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1);
+
+    // The fast path, and the common one: with nothing collapsed every grid line is a visible line, so
+    // the motion is the addition it has always been.
+    if (_foldState.empty())
+        return std::clamp(line + LineOffset(step), top, bottom);
+
+    // Ids and LineOffsets both increase downwards -- the base cancels -- so the walk is done in id space
+    // and the result shifted back, rather than mapping every intermediate step.
+    auto const base = currentStableBase();
+    auto const id = advanceVisibleId(hiddenIntervals(),
+                                     base + unbox<int64_t>(line),
+                                     count,
+                                     direction,
+                                     base + unbox<int64_t>(top),
+                                     base + unbox<int64_t>(bottom));
+    return LineOffset::cast_from(id - base);
+}
+
+LineOffset Terminal::snapToVisibleLine(LineOffset line, VerticalDirection direction) const
+{
+    // The caller's own grid, for the reason currentStableBase() gives.
+    auto const& grid = currentScreen().grid();
+
+    // Clamped on BOTH paths, so the documented contract ("a line the caller can put a cursor on")
+    // does not quietly depend on whether anything happens to be collapsed right now.
+    auto const clampToGrid = [&](LineOffset value) {
+        return std::clamp(
+            value, grid.addressableTop(), boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1));
+    };
+
+    if (_foldState.empty())
+        return clampToGrid(line);
+
+    auto const base = currentStableBase();
+    auto const id = snapToVisibleId(hiddenIntervals(), base + unbox<int64_t>(line), direction);
+
+    // Snapping out of a run at the very edge of the grid can name a row just past it.
+    return clampToGrid(LineOffset::cast_from(id - base));
+}
+// }}}
 
 std::expected<LivePromptSpan, PromptRegionError> Terminal::livePromptSpan() const
 {
@@ -2622,8 +3156,12 @@ HintScanArea Terminal::collectHintScanArea(HintScope scope, LineCount scrollback
         if (scope == HintScope::Scrollback)
             return HintRowRange { .first = std::max(historyTop, -scrollbackLimit.as<LineOffset>()),
                                   .last = gridBottom };
-        auto const viewportTop = -_viewport.scrollOffset().as<LineOffset>();
-        return HintRowRange { .first = viewportTop, .last = viewportTop + gridBottom };
+        // Through the projection rather than by negating the scroll offset: that offset counts VISIBLE
+        // rows, so with folds collapsed it names a grid line far down the page instead of the one the
+        // viewport starts at -- and the scan would then cover rows the viewport does not draw while
+        // missing ones it does.
+        return HintRowRange { .first = _viewport.topLine(),
+                              .last = _viewport.translateScreenToGridLine(gridBottom) };
     }();
 
     // Extend the scan to whole logical lines: a pattern that wraps across the boundary is then
@@ -2767,15 +3305,24 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
     // matches on the row it is on rather than all of them. A wrapped match lands in every row it
     // covers. Under HintScope::Scrollback the match count is unbounded by the page size, which is
     // what makes this necessary rather than merely tidy.
-    auto const scrollOffset = _viewport.scrollOffset().as<LineOffset>();
     auto const pageLines = pageSize().lines.as<LineOffset>();
     auto const pageColumns = unbox<int>(pageSize().columns);
     auto rowBuckets = std::vector<std::vector<ProjectedMatch>>(unbox<size_t>(pageLines));
 
     for (auto const& match: matches)
     {
-        auto const first = match.start + scrollOffset;
-        auto const last = match.end + scrollOffset;
+        // A match a collapsed fold hides is drawn nowhere at all. Skipped rather than projected,
+        // because the translation below answers for a hidden line with the row standing in its PLACE --
+        // which would paint the label over unrelated text and offer a target the user never saw.
+        if (isLineHiddenByFold(match.start.line))
+            continue;
+
+        // Through the projection, NOT by adding the scroll offset: with folds collapsed the rows on
+        // screen are a non-contiguous selection of grid rows, so the two differ by however many rows
+        // those folds hide, and every label landed that far from the text it names. @see
+        // Viewport::translateGridToScreenCoordinate, which every other consumer already goes through.
+        auto const first = _viewport.translateGridToScreenCoordinate(match.start);
+        auto const last = _viewport.translateGridToScreenCoordinate(match.end);
         auto const projected = ProjectedMatch {
             .body = CellLocationRange { .first = first + baseLine, .second = last + baseLine },
             .labelStart = first + baseLine,

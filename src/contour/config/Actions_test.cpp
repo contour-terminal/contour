@@ -178,6 +178,10 @@ TEST_CASE("actions::isParameterized marks the actions the palette cannot run bar
     CHECK(isParameterized(Action { SendChars {} }));
     CHECK(isParameterized(Action { LaunchLayout {} }));
     CHECK(isParameterized(Action { ResizePane {} }));
+    // ToggleFoldAt's default names grid line 0 -- a REAL line, so a bare palette entry would toggle
+    // whatever fold covers the top of the page rather than doing nothing visible. It is built by the
+    // context menu from the line that was right-clicked, never run bare.
+    CHECK(isParameterized(Action { ToggleFoldAt {} }));
 
     // These have a MEANINGFUL default (copy as text, paste unstripped, current profile), so they run
     // as-is and the palette offers them.

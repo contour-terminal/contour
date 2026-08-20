@@ -5716,9 +5716,12 @@ namespace
     /// before the scan had looked at a single flag, when the scan wants the handful of lines above the
     /// cursor that hold the last command. So it climbs exactly as far as it is asked to, and keeps nothing
     /// but the line it is standing on: the scan is a single forward pass, so nothing older is ever needed.
-    // Implements BOTH line sources: the two scans walk the same lazy, reflow-safe climb over logical
-    // lines, differing only in what they ask about each one. One hasLineAt() override satisfies both.
-    class GridCommandBlockLines final: public CommandBlockLineSource, public PromptRegionLineSource
+    // Implements ALL THREE line sources: the scans walk the same lazy, reflow-safe climb over logical
+    // lines, differing only in what they ask about each one. One hasLineAt() override satisfies them all.
+    class GridCommandBlockLines final:
+        public CommandBlockLineSource,
+        public PromptRegionLineSource,
+        public FoldLineSource
     {
       public:
         /// @param grid The grid to walk. Must outlive this source.
@@ -5750,6 +5753,16 @@ namespace
         [[nodiscard]] std::pair<LineOffset, LineOffset> physicalExtentOf(size_t index) const
         {
             return extentOf(index);
+        }
+
+        [[nodiscard]] int64_t stableIdAt(size_t index) const override
+        {
+            return _grid.stableLineIdOf(headOffsetAt(index));
+        }
+
+        [[nodiscard]] int64_t lastPhysicalStableIdAt(size_t index) const override
+        {
+            return _grid.stableLineIdOf(extentOf(index).second);
         }
 
         [[nodiscard]] std::string textAt(size_t index) const override
@@ -5785,10 +5798,13 @@ namespace
             return true;
         }
 
-        [[nodiscard]] Line const& headAt(size_t index) const
+        [[nodiscard]] Line const& headAt(size_t index) const { return _grid.lineAt(headOffsetAt(index)); }
+
+        /// Where the logical line @p index begins.
+        [[nodiscard]] LineOffset headOffsetAt(size_t index) const
         {
             Require(index == _index); // always preceded by the hasLineAt() that walked us here
-            return _grid.lineAt(_head);
+            return _head;
         }
 
         /// The physical lines the logical line @p index is chopped into: its head, and everything below it
@@ -6033,6 +6049,26 @@ std::expected<LivePromptSpan, PromptRegionError> Screen::livePromptSpan() const
         });
 }
 
+std::vector<FoldRange> Screen::foldRanges(size_t maxScanLines) const
+{
+    // From the bottom of the page upwards, not from the cursor: a fold may hang off a block whose output
+    // is still on the page below the cursor, and the walk has to have seen the CommandEnd that closes a
+    // block before it can open it.
+    return computeFoldRanges(GridCommandBlockLines { _grid, boxed_cast<LineOffset>(pageSize().lines) - 1 },
+                             maxScanLines);
+}
+
+void Screen::setLogicalLineFlags(LineOffset line, LineFlags flags, bool enable) noexcept
+{
+    enableLineFlags(_grid.logicalLineHead(line), flags, enable);
+
+    // The grid's own identity cannot stand in for this: a mark arriving on a page that has not scrolled
+    // moves neither the generation nor the stable base, so a cache keyed on those alone would go on
+    // reporting the ranges from before the command that has just finished.
+    if ((flags & HeadOnlyLineFlags).any())
+        _terminal->invalidateFoldRanges();
+}
+
 void Screen::setMark()
 {
     markLogicalLineAtCursor(LineFlag::Marked);
@@ -6066,6 +6102,7 @@ void Screen::processShellIntegration(Sequence const& seq)
             });
             _terminal->shellIntegration().promptStart(clickEvents);
             _terminal->semanticBlockTracker().promptStart();
+            _terminal->autoCollapseOnNewPrompt();
             break;
         }
         case 'B': {
@@ -6749,12 +6786,6 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SD: scrollDown(seq.paramPositiveOr<LineCount>(0, LineCount { 1 })); break;
         case UNSCROLL: unscroll(seq.paramOr<LineCount>(0, LineCount(1))); break;
         case SBQUERY: handleSemanticBlockQuery(seq); break;
-        case SETMARK:
-            // TODO: deprecated. Remove in some future version.
-            // Users should migrate to OSC 133.
-            errorLog()("CSI > M is deprecated. Use OSC 133 instead.");
-            setMark();
-            break;
         case SGR: return impl::applySGR(*this, seq, 0, seq.parameterCount());
         case SGRRESTORE: restoreGraphicsRendition(); return ApplyResult::Ok;
         case SGRSAVE: saveGraphicsRendition(); return ApplyResult::Ok;

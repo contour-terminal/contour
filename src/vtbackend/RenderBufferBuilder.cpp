@@ -151,9 +151,12 @@ optional<RenderCursor> RenderBufferBuilder::renderCursor() const
     auto constexpr InactiveCursorShape = CursorShape::Rectangle; // TODO configurable
     auto const shape = _terminal->focused() ? _terminal->cursorShape() : InactiveCursorShape;
 
+    // Through the viewport rather than by adding the scroll offset: with folds collapsed the row a grid
+    // line is drawn on is not its line plus an offset, and a cursor placed by the old arithmetic would
+    // be drawn somewhere other than the cell it is in.
     auto const cursorScreenPosition =
-        CellLocation { .line = _baseLine + _cursorPosition->line
-                               + boxed_cast<LineOffset>(_terminal->viewport().scrollOffset()),
+        CellLocation { .line = _baseLine
+                               + _terminal->viewport().translateGridToScreenCoordinate(_cursorPosition->line),
                        .column = _cursorPosition->column };
 
     auto const cellWidth = _screen->cellWidthAt(*_cursorPosition);
@@ -363,22 +366,32 @@ RenderLine RenderBufferBuilder::createRenderLine(TrivialLineBuffer const& lineBu
     return renderLine;
 }
 
-bool RenderBufferBuilder::gridLineContainsCursor(LineOffset lineOffset) const noexcept
+bool RenderBufferBuilder::gridLineContainsCursor(LineOffset screenRow) const
 {
-    // The cursor of the screen being RENDERED. Asking the current screen reports the main cursor's
-    // line while rendering a status line, forcing an unrelated line off the trivial fast path on
-    // every frame and drawing the cursor row in the wrong place.
-    if (_screen->cursor().position.line == lineOffset)
+    // The status-line screens render through this same builder and are handed no cursor position at
+    // all. They have nothing to mark, and the viewport translation below -- which speaks for the main
+    // page -- does not speak for them.
+    if (!_cursorPosition)
+        return false;
+
+    auto const& viewport = _terminal->viewport();
+
+    // BOTH sides in SCREEN rows. A cursor position is a GRID line, and the row it is drawn on is not
+    // that line: scrolling shifts it, and with folds collapsed the rows on screen are a non-contiguous
+    // selection of grid rows, so the two differ even at scroll offset zero. Comparing the two spaces
+    // marked whichever row happened to share the number and left the cursor's OWN row on the trivial
+    // path -- which emits no per-cell data, so a block cursor's cell inversion, which is the whole of
+    // how a block cursor is drawn, was never produced. The cursor vanished, and reappeared on some
+    // unrelated row, changing as the viewport scrolled.
+    //
+    // The cursor of the screen being RENDERED, not the terminal's current one: asking the latter
+    // reports the main cursor's line while a non-displayed page is being built.
+    if (viewport.translateGridToScreenCoordinate(_screen->cursor().position.line) == screenRow)
         return true;
 
-    if (_cursorPosition && _terminal->inputHandler().mode() != ViMode::Insert)
-    {
-        auto const viCursor = _terminal->viewport().translateGridToScreenCoordinate(_cursorPosition->line);
-        if (viCursor == lineOffset)
-            return true;
-    }
-
-    return false;
+    // In Vi mode the cursor drawn is the Vi one, which sits at its own line.
+    return _terminal->inputHandler().mode() != ViMode::Insert
+           && viewport.translateGridToScreenCoordinate(_cursorPosition->line) == screenRow;
 }
 
 void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
@@ -564,7 +577,7 @@ void RenderBufferBuilder::matchSearchPattern(T const& cellText)
     _searchPatternOffset = 0;
 }
 
-void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags) noexcept
+void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags)
 {
     _lineNr = line;
     _currentLineFlags = flags;
@@ -574,7 +587,7 @@ void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags) noexcept
     _useCursorlineColoring = isCursorLine(line);
 }
 
-bool RenderBufferBuilder::isCursorLine(LineOffset line) const noexcept
+bool RenderBufferBuilder::isCursorLine(LineOffset line) const
 {
     return _terminal->inputHandler().mode() != ViMode::Insert && _cursorPosition
            && line

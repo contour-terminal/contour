@@ -55,6 +55,7 @@ namespace
         .hasLocalWorkingDirectory = true,
         .hasSplits = true,
         .hyperlinkUnderCursor = "https://contour-terminal.org/",
+        .foldLine = vtbackend::LineOffset(7),
         .activeProfile = "dark",
         .profileNames = { "dark", "light", "work" },
     };
@@ -146,6 +147,29 @@ TEST_CASE("ContextMenu.hyperlink.onlyUnderTheCursor", "[contextmenu]")
     auto const elsewhere = buildContextMenu(state);
     CHECK(find(elsewhere, "Open Link") == nullptr);
     CHECK(find(elsewhere, "Copy Link Address") == nullptr);
+}
+
+TEST_CASE("ContextMenu.toggleFold.grayedRatherThanHiddenWithoutAFold", "[contextmenu]")
+{
+    auto state = fullyEnabledState();
+
+    // Present and enabled where a fold reaches -- and it must CARRY the clicked line, because by the
+    // time the row is picked the pointer has left that line for the menu itself.
+    state.foldLine = vtbackend::LineOffset(-12);
+    auto const overFold = buildContextMenu(state);
+    auto const* row = find(overFold, "Toggle Output Fold");
+    REQUIRE(row != nullptr);
+    CHECK(row->enabled);
+    REQUIRE(std::holds_alternative<actions::ToggleFoldAt>(row->action));
+    CHECK(std::get<actions::ToggleFoldAt>(row->action).line == -12);
+
+    // Elsewhere the row stays PUT and goes gray. Hiding it would make the menu change shape depending
+    // on where you right-clicked, and would hide the fact that folding exists at all.
+    state.foldLine.reset();
+    auto const elsewhere = buildContextMenu(state);
+    auto const* grayed = find(elsewhere, "Toggle Output Fold");
+    REQUIRE(grayed != nullptr);
+    CHECK(!grayed->enabled);
 }
 
 TEST_CASE("ContextMenu.openCurrentFolder.requiresLocalWorkingDirectory", "[contextmenu]")
@@ -325,6 +349,7 @@ TEST_CASE("ContextMenu.separators.neverLeadingTrailingOrDoubled", "[contextmenu]
                                 .hasLocalWorkingDirectory = true,
                                 .hasSplits = splits,
                                 .hyperlinkUnderCursor = hyperlink ? "https://example.org/" : "",
+                                .foldLine = std::nullopt,
                                 .activeProfile = profiles ? "dark" : "",
                                 .profileNames = profiles ? std::vector<std::string> { "dark" }
                                                          : std::vector<std::string> {},

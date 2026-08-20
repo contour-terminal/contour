@@ -518,7 +518,10 @@ CellLocation ViCommands::prev(CellLocation location) const noexcept
                                    : LineOffset(0);
     if (location.line > topLineOffset)
     {
-        location = getRightMostNonEmptyCellLocation(*_terminal, location.line - 1);
+        // The previous VISIBLE line: wrapping backwards off the start of a line must not drop the
+        // cursor into a collapsed block, where it would simply disappear.
+        location =
+            getRightMostNonEmptyCellLocation(*_terminal, stepVisible(location.line, VerticalDirection::Up));
         if (location.column + 1 < boxed_cast<ColumnOffset>(_terminal->pageSize().columns))
             ++location.column;
     }
@@ -537,7 +540,7 @@ CellLocation ViCommands::next(CellLocation location) const noexcept
 
     if (location.line < boxed_cast<LineOffset>(_terminal->pageSize().lines - 1))
     {
-        location.line++;
+        location.line = stepVisible(location.line, VerticalDirection::Down);
         location.column = ColumnOffset(0);
     }
 
@@ -766,6 +769,50 @@ bool ViCommands::compareCellTextAt(CellLocation position, char32_t codepoint) co
     return _terminal->currentScreen().compareCellTextAt(position, codepoint);
 }
 
+LineOffset ViCommands::stepVisible(LineOffset line, VerticalDirection direction) const noexcept
+{
+    return _terminal->advanceVisibleLines(line, 1, direction);
+}
+
+bool ViCommands::tryStepVisible(LineOffset& line, VerticalDirection direction) const noexcept
+{
+    auto const next = stepVisible(line, direction);
+    if (next == line)
+        return false;
+
+    line = next;
+    return true;
+}
+
+CellLocation ViCommands::revealOrSnap(CellLocation position)
+{
+    // The motions above are computed in visible lines and so cannot land inside a collapsed block. The
+    // jumps that NAME a target can: a search hit, a mark, an entry in the jump history. What should
+    // happen then is a genuine preference, so it is one -- Settings::foldJumpBehavior.
+    //
+    // The question is whether a FOLD hides the target, not whether it happens to be on screen. A plain
+    // `k` past the top of a viewport that can scroll no further names a line which is off screen but
+    // perfectly visible, and answering the wrong question there opened the block it landed on.
+    if (!_terminal->isLineHiddenByFold(position.line))
+        return position;
+
+    switch (_terminal->settings().foldJumpBehavior)
+    {
+        case FoldJumpBehavior::Expand:
+            // Silently skipping a match the user just searched for is worse than revealing the block it
+            // was found in, which is why this is the default -- and why vim's `foldopen` does the same.
+            if (_terminal->expandFoldContaining(position.line))
+                return position;
+            break;
+        case FoldJumpBehavior::Skip: break;
+    }
+
+    // Downwards first, so a target inside a block resolves to the line the block continues at rather
+    // than back to the prompt the user was already standing on.
+    return { .line = _terminal->snapToVisibleLine(position.line, VerticalDirection::Down),
+             .column = position.column };
+}
+
 CellLocation ViCommands::globalCharUp(CellLocation location, char ch, unsigned count) const noexcept
 {
     auto const pageTop = -_terminal->currentScreen().historyLineCount().as<LineOffset>();
@@ -773,13 +820,17 @@ CellLocation ViCommands::globalCharUp(CellLocation location, char ch, unsigned c
     while (count > 0)
     {
         if (location.column == ColumnOffset(0) && result.line > pageTop)
-            --result.line;
+            result.line = stepVisible(result.line, VerticalDirection::Up);
         while (result.line > pageTop)
         {
             auto const& line = _terminal->currentScreen().lineTextAt(result.line, false, true);
             if (line.size() == 1 && line[0] == ch)
                 break;
-            --result.line;
+            // Stepping by VISIBLE lines, so the walk skips a collapsed block whole rather than
+            // searching inside one and stopping the cursor where it cannot be seen. It also means
+            // the step can stall at the edge of the grid, which ends the walk.
+            if (!tryStepVisible(result.line, VerticalDirection::Up))
+                break;
         }
         --count;
     }
@@ -793,13 +844,14 @@ CellLocation ViCommands::globalCharDown(CellLocation location, char ch, unsigned
     while (count > 0)
     {
         if (location.column == ColumnOffset(0) && result.line < pageBottom)
-            ++result.line;
+            result.line = stepVisible(result.line, VerticalDirection::Down);
         while (result.line < pageBottom)
         {
             auto const& line = _terminal->currentScreen().lineTextAt(result.line, false, true);
             if (line.size() == 1 && line[0] == ch)
                 break;
-            ++result.line;
+            if (!tryStepVisible(result.line, VerticalDirection::Down))
+                break;
         }
         --count;
     }
@@ -841,21 +893,30 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
                                 .column = min(ColumnOffset::cast_from(count - 1),
                                               _terminal->pageSize().columns.as<ColumnOffset>() - 1) });
         case ViMotion::FileBegin: // gg
+            // Snapped DOWNWARDS: the oldest addressable line may itself be inside a collapsed block,
+            // and the top of the document the user can see is the first line below it.
             return snapToCell(
-                { .line = LineOffset::cast_from(-_terminal->currentScreen().historyLineCount().as<int>()),
+                { .line = _terminal->snapToVisibleLine(
+                      LineOffset::cast_from(-_terminal->currentScreen().historyLineCount().as<int>()),
+                      VerticalDirection::Down),
                   .column = ColumnOffset(0) });
         case ViMotion::FileEnd: // G
-            return addJumpHistory(snapToCell(
-                { .line = _terminal->pageSize().lines.as<LineOffset>() - 1, .column = ColumnOffset(0) }));
+            return addJumpHistory(
+                snapToCell({ .line = _terminal->snapToVisibleLine(
+                                 _terminal->pageSize().lines.as<LineOffset>() - 1, VerticalDirection::Up),
+                             .column = ColumnOffset(0) }));
         case ViMotion::PageTop: // <S-H>
-            return snapToCell({ .line = boxed_cast<LineOffset>(-_terminal->viewport().scrollOffset())
-                                        + *_terminal->viewport().scrollOff(),
+            // H, M and L name SCREEN rows, so they are computed there and translated -- which is both
+            // shorter than the scroll-offset arithmetic this replaced and the only formulation that
+            // stays right when collapsed folds make screen rows and grid lines disagree.
+            return snapToCell({ .line = _terminal->viewport().translateScreenToGridLine(
+                                    LineOffset::cast_from(*_terminal->viewport().scrollOff())),
                                 .column = ColumnOffset(0) });
         case ViMotion::PageBottom: // <S-L>
-            return snapToCell({ .line = boxed_cast<LineOffset>(-_terminal->viewport().scrollOffset())
-                                        + boxed_cast<LineOffset>(_terminal->pageSize().lines
-                                                                 - *_terminal->viewport().scrollOff() - 1),
-                                .column = ColumnOffset(0) });
+            return snapToCell(
+                { .line = _terminal->viewport().translateScreenToGridLine(boxed_cast<LineOffset>(
+                      _terminal->pageSize().lines - *_terminal->viewport().scrollOff() - 1)),
+                  .column = ColumnOffset(0) });
         case ViMotion::LineBegin: // 0
             return { .line = cursorPosition.line, .column = ColumnOffset(0) };
         case ViMotion::LineTextBegin: // ^
@@ -867,42 +928,43 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
             return result;
         }
         case ViMotion::LineDown: // j
-            return { .line = min(cursorPosition.line + LineOffset::cast_from(count),
-                                 _terminal->pageSize().lines.as<LineOffset>() - 1),
+            // Counted in VISIBLE lines, so a collapsed block is one step rather than however many rows
+            // it hides -- and the cursor never lands on a row that is not on screen.
+            return { .line = _terminal->advanceVisibleLines(
+                         cursorPosition.line, static_cast<int>(count), VerticalDirection::Down),
                      .column = cursorPosition.column };
         case ViMotion::LineEnd: // $
             return getRightMostNonEmptyCellLocation(*_terminal, cursorPosition.line);
         case ViMotion::LineUp: // k
-            return { .line = max(cursorPosition.line - LineOffset::cast_from(count),
-                                 -_terminal->currentScreen().historyLineCount().as<LineOffset>()),
+            return { .line = _terminal->advanceVisibleLines(
+                         cursorPosition.line, static_cast<int>(count), VerticalDirection::Up),
                      .column = cursorPosition.column };
         case ViMotion::LinesCenter: // M
-            return addJumpHistory({ .line = LineOffset::cast_from(_terminal->pageSize().lines / 2 - 1)
-                                            - boxed_cast<LineOffset>(_terminal->viewport().scrollOffset()),
+            return addJumpHistory({ .line = _terminal->viewport().translateScreenToGridLine(
+                                        LineOffset::cast_from((*_terminal->pageSize().lines / 2) - 1)),
                                     .column = cursorPosition.column });
         case ViMotion::PageDown:
-            return { .line = min(cursorPosition.line + LineOffset::cast_from(_terminal->pageSize().lines / 2),
-                                 _terminal->pageSize().lines.as<LineOffset>() - 1),
+            return { .line = _terminal->advanceVisibleLines(
+                         cursorPosition.line, *_terminal->pageSize().lines / 2, VerticalDirection::Down),
                      .column = cursorPosition.column };
         case ViMotion::PageUp:
-            return { .line = max(cursorPosition.line - LineOffset::cast_from(_terminal->pageSize().lines / 2),
-                                 -_terminal->currentScreen().historyLineCount().as<LineOffset>()),
+            return { .line = _terminal->advanceVisibleLines(
+                         cursorPosition.line, *_terminal->pageSize().lines / 2, VerticalDirection::Up),
                      .column = cursorPosition.column };
-            return cursorPosition
-                   - min(cursorPosition.line, LineOffset::cast_from(_terminal->pageSize().lines) / 2);
         case ViMotion::ParagraphBackward: // {
         {
             auto const pageTop = -_terminal->currentScreen().historyLineCount().as<LineOffset>();
             auto prev = CellLocation { .line = cursorPosition.line, .column = ColumnOffset(0) };
             if (prev.line.value > 0)
-                prev.line--;
+                prev.line = stepVisible(prev.line, VerticalDirection::Up);
             auto current = prev;
             while (current.line > pageTop
                    && (!_terminal->currentScreen().isLineEmpty(current.line)
                        || _terminal->currentScreen().isLineEmpty(prev.line)))
             {
                 prev.line = current.line;
-                current.line--;
+                if (!tryStepVisible(current.line, VerticalDirection::Up))
+                    break; // the walk ran out of VISIBLE grid
             }
             return addJumpHistory(snapToCell(current));
         }
@@ -922,10 +984,13 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
             {
                 if (result.line > gridTop
                     && _terminal->currentScreen().isLineFlagEnabledAt(result.line, LineFlag::Marked))
-                    --result.line;
+                    result.line = stepVisible(result.line, VerticalDirection::Up);
                 while (result.line > gridTop
                        && !_terminal->currentScreen().isLineFlagEnabledAt(result.line, LineFlag::Marked))
-                    --result.line;
+                {
+                    if (!tryStepVisible(result.line, VerticalDirection::Up))
+                        break;
+                }
                 --count;
             }
             return addJumpHistory(result);
@@ -937,12 +1002,13 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
             while (count > 0)
             {
                 if (cursorPosition.column == ColumnOffset(0) && result.line < pageBottom)
-                    ++result.line;
+                    result.line = stepVisible(result.line, VerticalDirection::Down);
                 while (result.line < pageBottom)
                 {
                     if (_terminal->currentScreen().lineFlagsAt(result.line).contains(LineFlag::Marked))
                         break;
-                    ++result.line;
+                    if (!tryStepVisible(result.line, VerticalDirection::Down))
+                        break;
                 }
                 --count;
             }
@@ -953,14 +1019,15 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
             auto const pageBottom = _terminal->pageSize().lines.as<LineOffset>() - 1;
             auto prev = CellLocation { .line = cursorPosition.line, .column = ColumnOffset(0) };
             if (prev.line < pageBottom)
-                prev.line++;
+                prev.line = stepVisible(prev.line, VerticalDirection::Down);
             auto current = prev;
             while (current.line < pageBottom
                    && (!_terminal->currentScreen().isLineEmpty(current.line)
                        || _terminal->currentScreen().isLineEmpty(prev.line)))
             {
                 prev.line = current.line;
-                current.line++;
+                if (!tryStepVisible(current.line, VerticalDirection::Down))
+                    break; // the walk ran out of VISIBLE grid
             }
             return addJumpHistory(snapToCell(current));
         }
@@ -1188,7 +1255,7 @@ void ViCommands::moveCursor(ViMotion motion, unsigned count, char32_t lastChar)
 
 void ViCommands::moveCursorTo(CellLocation position)
 {
-    cursorPosition = position;
+    cursorPosition = revealOrSnap(position);
 
     _terminal->viewport().makeVisibleWithinSafeArea(cursorPosition.line);
 

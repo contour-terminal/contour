@@ -22,6 +22,7 @@ set(vtbackend_HEADERS
     Color.hpp
     ColorPalette.hpp
     CommandBlocks.hpp
+    Folding.hpp
     PromptRegion.hpp
     Functions.hpp
     GraphicsAttributes.hpp
@@ -80,6 +81,7 @@ set(vtbackend_SOURCES
     Color.cpp
     ColorPalette.cpp
     CommandBlocks.cpp
+    Folding.cpp
     PromptRegion.cpp
     Functions.cpp
     Grid.cpp
@@ -168,7 +170,9 @@ if(LIBTERMINAL_TESTING)
         DesktopNotification_test.cpp
         ProgressState_test.cpp
         Color_test.cpp
+        ColorPalette_test.cpp
         CommandBlocks_test.cpp
+        Folding_test.cpp
         PromptRegion_test.cpp
         GoodImageProtocol_test.cpp
         XtSmGraphics_test.cpp

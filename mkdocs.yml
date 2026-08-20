@@ -130,6 +130,7 @@ nav:
     - vt-extensions/osc-133-shell-integration.md
     - vt-extensions/osc-9-4-progress.md
     - vt-extensions/semantic-block-query.md
+    - vt-extensions/private-use-glyphs.md
   - Internals:
     - internals/index.md
     - internals/CODING_STYLE.md

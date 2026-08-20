@@ -28,6 +28,20 @@ TEST_CASE("Functions.SCOSC", "[Functions]")
     CHECK(*f == SCOSC);
 }
 
+TEST_CASE("Functions.SETMARK.removed", "[Functions]")
+{
+    // CSI > M was a Contour-only extension for marking a prompt line, deprecated in favour of
+    // OSC 133;A and removed in 0.7.1. It must no longer resolve to anything -- a leftover row here
+    // would keep it working while the docs and the shipped shell integration say it is gone.
+    SupportedSequences const availableSequences;
+    CHECK(vtbackend::selectControl('>', 0, 0, 'M', availableSequences.activeSequences()) == nullptr);
+
+    // DL is `CSI ... M` with NO leader and must be unaffected by the removal.
+    Function const* dl = vtbackend::selectControl(0, 0, 0, 'M', availableSequences.activeSequences());
+    REQUIRE(dl);
+    CHECK(*dl == DL);
+}
+
 TEST_CASE("Functions.DECSLRM", "[Functions]")
 {
     // Maybe it is okay to not care about 0 and 1 arguments? Who's doing that?

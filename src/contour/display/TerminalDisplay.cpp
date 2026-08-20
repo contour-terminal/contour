@@ -319,18 +319,21 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
     if (!_renderer)
     {
         auto const timer = crispy::ScopedTimer(startupLog, "Renderer construction");
-        // The profile's own margin, scaled to device pixels, exactly as applyResize() derives it
-        // (@see geometry::fitPageToPixels, which takes left/top straight from these). Seeded here so
-        // the published grid origin is right from the very first event rather than from the first
-        // geometry change: the mouse hit-test maps through it, and a zero origin under a configured
-        // margin reports the cell the user clicked minus that margin.
+        // The profile's own margin, scaled to device pixels, through the same function applyResize()
+        // places the origin with (@see geometry::pageMarginFor). Seeded here so the published grid
+        // origin is right from the very first event rather than from the first geometry change: the
+        // mouse hit-test maps through it, and a zero origin under a configured margin reports the cell
+        // the user clicked minus that margin.
+        //
+        // WITHOUT the fold gutter, and unavoidably: the gutter is a fraction of the cell, and the cell
+        // size is the renderer's own answer -- there is none to ask until the object being constructed
+        // here exists. The first applyResize() folds it in, which is before any pointer event reaches a
+        // window that has been shown.
         auto const marginsDevicePx =
             geometry::scaled(session::toGeometryMargins(profile().margins.value()), devicePixelRatio());
         _renderer = make_unique<vtrasterizer::Renderer>(
             _session->profile().terminalSize.value(),
-            vtrasterizer::PageMargin { .left = marginsDevicePx.horizontal,
-                                       .top = marginsDevicePx.vertical,
-                                       .bottom = marginsDevicePx.vertical },
+            geometry::pageMarginFor(marginsDevicePx),
             session::sanitizeFontDescription(profile().fonts.value(), fontDPI()),
             _session->terminal().colorPalette(),
             _session->config().renderer.value().textureAtlasHashtableSlots,
@@ -917,9 +920,11 @@ void TerminalDisplay::createRenderer()
         auto const marginsDevicePx =
             geometry::scaled(session::toGeometryMargins(profile().margins.value()), devicePixelRatio());
         auto const fit = geometry::fitPageToPixels(
-            availablePx, gridMetrics().cellSize, marginsDevicePx, [this](auto page) {
-                return _session->terminal().clampedTotalPageSize(page);
-            });
+            availablePx,
+            gridMetrics().cellSize,
+            marginsDevicePx,
+            [this](auto page) { return _session->terminal().clampedTotalPageSize(page); },
+            session::gutterWidthFor(_session->config().folding.value(), gridMetrics().cellSize));
         _renderer->reserveAtlasForPage(fit.pageSize);
     }
 
@@ -1594,11 +1599,12 @@ bool TerminalDisplay::isFullScreen() const
 vtbackend::ImageSize TerminalDisplay::pixelSize() const
 {
     assert(_session);
+    auto const cellSize = _renderer->publishedCellSize();
     return geometry::requiredPixelsForPage(
         _session->terminal().totalPageSize(),
-        _renderer->publishedCellSize(),
-        geometry::scaled(session::toGeometryMargins(_session->profile().margins.value()),
-                         devicePixelRatio()));
+        cellSize,
+        geometry::scaled(session::toGeometryMargins(_session->profile().margins.value()), devicePixelRatio()),
+        session::gutterWidthFor(_session->config().folding.value(), cellSize));
 }
 
 vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize totalPageSize) const
@@ -2172,11 +2178,14 @@ void TerminalDisplay::onSelectionCompleted()
 
 void TerminalDisplay::bufferChanged(vtbackend::ScreenType type)
 {
+    // Through the shape enum rather than setCursor() directly, so this agrees with every other place
+    // that decides the pointer shape -- a raw setCursor() here stomps a hand cursor the fold column or
+    // a hyperlink has just asked for.
     using Type = vtbackend::ScreenType;
     switch (type)
     {
-        case Type::Primary: setCursor(Qt::IBeamCursor); break;
-        case Type::Alternate: setCursor(Qt::ArrowCursor); break;
+        case Type::Primary: setMouseCursorShape(input::MouseCursorShape::IBeam); break;
+        case Type::Alternate: setMouseCursorShape(input::MouseCursorShape::Arrow); break;
     }
     emit terminalBufferChanged(type);
     // scheduleRedraw();

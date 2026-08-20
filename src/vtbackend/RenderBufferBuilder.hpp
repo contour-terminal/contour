@@ -45,7 +45,9 @@ class RenderBufferBuilder
     ///
     /// @see renderTrivialLine
     void renderCell(ConstCellProxy cell, LineOffset line, ColumnOffset column);
-    void startLine(LineOffset line, LineFlags flags) noexcept;
+    /// Not noexcept: the cursor-line decision it makes goes through the viewport's coordinate
+    /// translation, which builds the fold projection lazily and therefore allocates.
+    void startLine(LineOffset line, LineFlags flags);
     void endLine() noexcept;
 
     /// Renders a trivial line.
@@ -65,7 +67,8 @@ class RenderBufferBuilder
     void finish() noexcept {}
 
   private:
-    [[nodiscard]] bool isCursorLine(LineOffset line) const noexcept;
+    /// Not noexcept, for the reason startLine() gives.
+    [[nodiscard]] bool isCursorLine(LineOffset line) const;
 
     [[nodiscard]] std::optional<RenderCursor> renderCursor() const;
 
@@ -155,7 +158,9 @@ class RenderBufferBuilder
     /// Tests if the given screen line offset does contain a cursor (either ANSI cursor or vi cursor, if
     /// shown) and returns false otherwise, which guarantees that no cursor is to be rendered
     /// on the given line offset.
-    [[nodiscard]] bool gridLineContainsCursor(LineOffset screenLineOffset) const noexcept;
+    ///
+    /// Not noexcept, for the reason startLine() gives.
+    [[nodiscard]] bool gridLineContainsCursor(LineOffset screenRow) const;
 
     // clang-format off
     enum class State : uint8_t { Gap, Sequence };

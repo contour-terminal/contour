@@ -158,7 +158,6 @@ constexpr inline auto REP = FunctionDocumentation { .mnemonic = "REP", .comment 
 constexpr inline auto RM = FunctionDocumentation { .mnemonic = "RM", .comment = "Reset Mode" };
 constexpr inline auto SCOSC = FunctionDocumentation { .mnemonic = "SCOSC", .comment = "Save Cursor (available only when DECLRMM is disabled)" };
 constexpr inline auto SD = FunctionDocumentation { .mnemonic = "SD", .comment = "Scroll Down" };
-constexpr inline auto SETMARK = FunctionDocumentation { .mnemonic = "SETMARK", .comment = "Set Mark" };
 constexpr inline auto SGR = FunctionDocumentation { .mnemonic = "SGR", .comment = "Select Graphic Rendition" };
 constexpr inline auto SM = FunctionDocumentation { .mnemonic = "SM", .comment = "Set Mode" };
 constexpr inline auto SU = FunctionDocumentation { .mnemonic = "SU", .comment = "Scroll Up" };
@@ -793,7 +792,6 @@ constexpr inline auto REP         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto RM          = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'l', VTType::VT100, documentation::RM);
 constexpr inline auto SCOSC       = detail::CSI(std::nullopt, 0, 0, std::nullopt, 's', VTType::VT100, documentation::SCOSC);
 constexpr inline auto SD          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'T', VTType::VT100, documentation::SD);
-constexpr inline auto SETMARK     = detail::CSI('>', 0, 0, std::nullopt, 'M', VTExtension::Contour, documentation::SETMARK);
 constexpr inline auto SGR         = detail::CSI(std::nullopt, 0, ArgsMax, std::nullopt, 'm', VTType::VT100, documentation::SGR);
 constexpr inline auto SM          = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'h', VTType::VT100, documentation::SM);
 constexpr inline auto SU          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'S', VTType::VT100, documentation::SU);
@@ -1073,7 +1071,6 @@ constexpr static auto allFunctionsArray() noexcept
         RM,
         SCOSC,
         SD,
-        SETMARK,
         SGR,
         SGRRESTORE,
         SGRSAVE,

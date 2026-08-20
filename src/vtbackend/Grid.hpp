@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/CellProxy.hpp>
+#include <vtbackend/Folding.hpp>
 #include <vtbackend/GraphicsAttributes.hpp>
 #include <vtbackend/Line.hpp>
 #include <vtbackend/Primitives.hpp>
@@ -16,6 +17,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -717,12 +719,27 @@ class Grid
     // }}}
 
     // {{{ Rendering API
+    /// Passes every cell of the visible rows to @p render.
+    ///
+    /// @param render        The render pass (RenderBufferBuilder in production).
+    /// @param scrollOffset  How far the viewport is scrolled into the history.
+    /// @param highlightSearchMatches  Whether the pass highlights search matches.
+    /// @param extraLines    Rows to draw ABOVE the page, for smooth scrolling. Ignored when @p rows is
+    ///                      given, which names its own extra rows.
+    /// @param rows          The exact rows to draw, top first, when the caller needs a NON-CONTIGUOUS
+    ///                      selection of them -- which is what output folding needs, its collapsed
+    ///                      blocks leaving gaps a linear walk cannot express. Empty (the default) walks
+    ///                      the page linearly, as it always has. Rows beyond the page count are drawn
+    ///                      above it, exactly as @p extraLines does, so smooth scrolling works either
+    ///                      way. Grid deliberately knows nothing about folding: it draws the rows it is
+    ///                      handed and the decision of WHICH stays with the caller.
     template <typename RendererT>
     [[nodiscard]] RenderPassHints render(
         RendererT&& render,
         ScrollOffset scrollOffset = {},
         HighlightSearchMatches highlightSearchMatches = HighlightSearchMatches::Yes,
-        LineCount extraLines = LineCount(0)) const;
+        LineCount extraLines = LineCount(0),
+        std::span<LineOffset const> rows = {}) const;
 
     [[nodiscard]] std::string renderMainPageText() const;
     [[nodiscard]] std::string renderAllText() const;
@@ -753,8 +770,20 @@ class Grid
     // limit change, reset) and clients must resync. Plain ints, guarded by the terminal
     // lock like all grid state.
 
-    /// The wholesale-rebuild counter: a change invalidates every stable id.
+    /// The wholesale-rebuild counter: a change tells a mirror to resync from scratch.
     [[nodiscard]] uint64_t generation() const noexcept { return _generation; }
+
+    /// The counter that invalidates stable ids, and a STRICT SUBSET of generation().
+    ///
+    /// The two were one counter, and that cost more than it said: a change of LINE count alone --
+    /// a status line appearing, a window growing taller -- rotates the ring through the stable-id
+    /// primitives, so every row keeps the id it had, yet it bumps the generation because a mirror
+    /// still has to resync its geometry. A consumer that STORES ids across frames, as output folding
+    /// does, read that as "your ids are worthless" and dropped everything the user had collapsed.
+    ///
+    /// Bumped only where identity truly dies: a column change (which reflows, rebuilding the ring),
+    /// a history-limit change, a reset, and a reverse scroll past the addressable history.
+    [[nodiscard]] uint64_t stableIdGeneration() const noexcept { return _stableIdGeneration; }
 
     /// The stable id of the (existing) row at @p offset.
     [[nodiscard]] int64_t stableLineIdOf(LineOffset offset) const noexcept
@@ -966,7 +995,7 @@ class Grid
             // Every history row that was still valid provably lands in the caller's
             // blanked region, so after the bump the page is the entire valid range.
             _stableFloor = _stableBase;
-            bumpGeneration(); // re-syncs the floor itself
+            bumpGeneration(RowIdentity::Destroyed); // re-syncs the floor itself
             return;
         }
         syncStableFloor();
@@ -1019,11 +1048,21 @@ class Grid
         _stableFloor = std::max(_stableFloor, _stableBase - unbox<int64_t>(historyLineCount()));
     }
 
-    /// Destroys stable row identity wholesale (resize/reflow, history-limit change,
-    /// reset): clients observe the change and resync.
-    void bumpGeneration() noexcept
+    /// Whether a rebuild left the rows' stable ids naming the rows they named before.
+    enum class RowIdentity : uint8_t
+    {
+        Preserved = 0, ///< The ring rotated; every row kept its id.
+        Destroyed,     ///< The ring was rebuilt; no id names what it did.
+    };
+
+    /// Tells mirrors to resync, and consumers holding stable ids whether those ids survived it.
+    ///
+    /// @param identity Whether the rebuild kept stable row identity (@see stableIdGeneration).
+    void bumpGeneration(RowIdentity identity) noexcept
     {
         ++_generation;
+        if (identity == RowIdentity::Destroyed)
+            ++_stableIdGeneration;
         syncStableFloor();
         // Row identity is gone, so an id-keyed history watermark means nothing now. Consumers
         // resync on the generation mismatch anyway.
@@ -1056,6 +1095,7 @@ class Grid
     // Stable row identity (see the accessors above): maintained exclusively by the
     // ring-rotation primitives, syncStableFloor() and bumpGeneration().
     uint64_t _generation = 0;
+    uint64_t _stableIdGeneration = 0;
     int64_t _stableBase = 0;  ///< Stable id of page row 0; signed — SD/unscroll push it down.
     int64_t _stableFloor = 0; ///< Oldest addressable id; monotonic within a generation.
 
@@ -1119,18 +1159,14 @@ template <typename RendererT>
     RendererT&& render, // NOLINT(cppcoreguidelines-missing-std-forward)
     ScrollOffset scrollOffset,
     HighlightSearchMatches highlightSearchMatches,
-    LineCount extraLines) const
+    LineCount extraLines,
+    std::span<LineOffset const> rows) const
 {
     assert(!scrollOffset || unbox<LineCount>(scrollOffset) <= historyLineCount());
 
-    auto const availableAbove = *historyLineCount() - *scrollOffset;
-    auto const extraOffset = std::min(*extraLines, std::max(0, availableAbove));
-    auto y = LineOffset(-extraOffset);
     auto hints = RenderPassHints {};
-    for (int i = -*scrollOffset - extraOffset, e = i + *_pageSize.lines + extraOffset; i != e; ++i, ++y)
-    {
-        Line const& line = _lines[i];
 
+    auto const renderRow = [&](Line const& line, LineOffset y) {
         // Fast path: uniform-attribute line — render as a single batch. Blank lines have no
         // codepoints, so no search pattern can match them; always use the trivial path for
         // blanks to avoid constructing ConstCellProxy on un-materialized SoA arrays.
@@ -1162,7 +1198,25 @@ template <typename RendererT>
             }
             render.endLine();
         }
+    };
+
+    if (rows.empty())
+    {
+        auto const availableAbove = *historyLineCount() - *scrollOffset;
+        auto const extraOffset = std::min(*extraLines, std::max(0, availableAbove));
+        auto y = LineOffset(-extraOffset);
+        for (int i = -*scrollOffset - extraOffset, e = i + *_pageSize.lines + extraOffset; i != e; ++i, ++y)
+            renderRow(_lines[i], y);
     }
+    else
+    {
+        // Placed by the one statement of the rule, which Viewport's coordinate translation reads as well
+        // (@see foldedRowsTopRow): those two disagreeing is precisely what misplaces a selection.
+        auto y = foldedRowsTopRow(_pageSize.lines, rows.size());
+        for (auto const row: rows)
+            renderRow(lineAt(row), y++);
+    }
+
     render.finish();
     return hints;
 }

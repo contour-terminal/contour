@@ -4,11 +4,16 @@
 
 #include <crispy/BufferObject.hpp>
 
+#include <libunicode/convert.h>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstddef>
 #include <format>
 #include <ranges>
+#include <span>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -969,6 +974,9 @@ namespace
 struct MockGridRenderer
 {
     std::vector<LineOffset> renderedLines;
+    /// The text of each rendered line, so a test can check WHICH grid row landed on a given y -- the
+    /// only thing that distinguishes an explicit row list from the linear walk.
+    std::vector<std::string> renderedTexts;
     size_t trivialCount = 0;
     size_t perCellCount = 0;
 
@@ -989,9 +997,10 @@ struct MockGridRenderer
     void renderTrivialLine([[maybe_unused]] TrivialLineBuffer const& lineBuffer,
                            LineOffset y,
                            [[maybe_unused]] LineFlags flags,
-                           [[maybe_unused]] std::u32string_view textOverride = {})
+                           std::u32string_view textOverride = {})
     {
         renderedLines.push_back(y);
+        renderedTexts.push_back(unicode::convert_to<char>(textOverride));
         ++trivialCount;
     }
 
@@ -1870,4 +1879,78 @@ TEST_CASE("Grid.delta.growColumnsKeepsItsHistoryAddressable", "[grid][delta]")
     auto reported = 0;
     grid.forEachValidLine([&](LineOffset, Line const&) { ++reported; });
     CHECK(reported == unbox<int>(grid.historyLineCount()) + unbox<int>(grid.pageSize().lines));
+}
+
+TEST_CASE("Grid.render_rows.draws_exactly_the_listed_rows", "[grid]")
+{
+    // A 2-line page over 5 lines of history. An explicit row list picks rows that are NOT contiguous --
+    // which is the whole reason the parameter exists: a collapsed fold leaves a gap no linear walk can
+    // express.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
+    for (auto i = 0; i < 5; ++i)
+    {
+        grid.scrollUp(LineCount(1));
+        grid.setLineText(LineOffset(1), std::format("L{:03}", i));
+    }
+
+    // The writes above leave L000 at offset -3 and L002 at offset -1, with L001 between them: the row
+    // list steps straight over it, which a linear walk could not.
+    auto const rows = std::array { LineOffset(-3), LineOffset(-1) };
+    auto renderer = MockGridRenderer {};
+    (void) grid.render(renderer, ScrollOffset(0), HighlightSearchMatches::No, LineCount(0), rows);
+
+    REQUIRE(renderer.renderedLines.size() == 2);
+    // Two rows for a 2-line page: they fill it, so the first lands at the top.
+    CHECK(renderer.renderedLines[0] == LineOffset(0));
+    CHECK(renderer.renderedLines[1] == LineOffset(1));
+    // ... and they are the rows that were asked for, in order, gap and all.
+    REQUIRE(renderer.renderedTexts.size() == 2);
+    CHECK(renderer.renderedTexts[0] == "L000");
+    CHECK(renderer.renderedTexts[1] == "L002");
+}
+
+TEST_CASE("Grid.render_rows.extra_rows_land_above_the_page", "[grid]")
+{
+    // More rows than the page holds: the surplus are the smooth-scrolling ones and belong ABOVE it, so
+    // the LAST row still lands on the bottom of the page.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
+    for (auto i = 0; i < 5; ++i)
+    {
+        grid.scrollUp(LineCount(1));
+        grid.setLineText(LineOffset(1), std::format("L{:03}", i));
+    }
+
+    auto const rows = std::array { LineOffset(-3), LineOffset(-2), LineOffset(-1) };
+    auto renderer = MockGridRenderer {};
+    (void) grid.render(renderer, ScrollOffset(0), HighlightSearchMatches::No, LineCount(0), rows);
+
+    REQUIRE(renderer.renderedLines.size() == 3);
+    CHECK(renderer.renderedLines[0] == LineOffset(-1));
+    CHECK(renderer.renderedLines[1] == LineOffset(0));
+    CHECK(renderer.renderedLines[2] == LineOffset(1));
+}
+
+TEST_CASE("Grid.render_rows.empty_list_is_the_linear_walk", "[grid]")
+{
+    // The default. An empty row list must be byte-for-byte what the grid always did, extraLines and all
+    // -- every existing render path passes no rows.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
+    for (auto i = 0; i < 5; ++i)
+    {
+        grid.scrollUp(LineCount(1));
+        grid.setLineText(LineOffset(1), std::format("L{:03}", i));
+    }
+
+    auto withDefault = MockGridRenderer {};
+    (void) grid.render(withDefault, ScrollOffset(0), HighlightSearchMatches::No, LineCount(1));
+
+    auto withEmptyRows = MockGridRenderer {};
+    (void) grid.render(withEmptyRows,
+                       ScrollOffset(0),
+                       HighlightSearchMatches::No,
+                       LineCount(1),
+                       std::span<LineOffset const> {});
+
+    CHECK(withDefault.renderedLines == withEmptyRows.renderedLines);
+    CHECK(withDefault.renderedTexts == withEmptyRows.renderedTexts);
 }

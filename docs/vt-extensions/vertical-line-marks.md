@@ -5,13 +5,30 @@ output and you need a way to conveniently scroll the terminal viewport up to the
 command. This is what this feature is there for. You can easily walk up/down your markers
 like you'd walk up code folds or markers in VIM or other editors.
 
-## Set a mark:
+## Set a mark
+
+A mark is set by the `OSC 133 ; A` shell-integration sequence, which says "a new prompt starts on
+this line":
 
 ```sh
-echo -ne "\033[>M"
+printf "\033]133;A\033\\"
 ```
 
-## Example key bindings in Contour:
+!!! note
+
+    Contour used to offer a dedicated `SETMARK` sequence (`CSI > M`) for this. It was deprecated in
+    favour of `OSC 133 ; A` and **removed in 0.7.1** — `OSC 133 ; A` does the same thing and, unlike
+    a Contour-only extension, is understood by other terminals too.
+
+You will usually not write this by hand: Contour's bundled
+[shell integration](osc-133-shell-integration.md) already emits it (along with the rest of OSC 133),
+which is what also drives "copy last command output" and output folding. Install it with:
+
+```sh
+contour generate integration shell zsh to ~/.config/contour/shell-integration.zsh
+```
+
+## Example key bindings in Contour
 
 ```yaml
 input_mapping:
@@ -19,16 +36,16 @@ input_mapping:
     - { mods: [Alt, Shift], key: 'j', mode: '~Alt', action: ScrollMarkDown }
 ```
 
-It is recommended to integrate the marker into your command prompt, such as `$PS1` in bash or sh to
-have automatic markers set.
+If you would rather integrate the mark into your prompt by hand than install the shell integration,
+the sections below show how.
 
-## Integration into ZSH:
+## Integration into ZSH
 
 zsh is way too configurable to give a fully generic answer here, but to show how you can integrate vertical line markers when using [powerlevel9k](https://github.com/Powerlevel9k/powerlevel9k), this is what your `~/.zshrc` config could contain:
 
 ```sh
 prompt_setmark() {
-    echo -ne "%{\033[>M%}"
+    echo -ne "%{\033]133;A\033\\\\%}"
 }
 POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(setmark user dir vcs)
 ```
@@ -39,10 +56,9 @@ Bash is usually highly customized to your needs, but the bottom line would be as
 
 ```sh
 prompt_setmark() {
-    echo -ne "\\[\033[>M\\]"
+    echo -ne "\\[\033]133;A\033\\\\\\]"
 }
 
 # extending existing PS1
 export PS1="`prompt_setmark`${PS1}"
 ```
-

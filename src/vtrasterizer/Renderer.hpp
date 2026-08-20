@@ -387,6 +387,15 @@ class Renderer
     /// @param lines  Contiguous sub-range of RenderLine entries to render.
     void renderLines(std::span<vtbackend::RenderLine const> lines);
 
+    /// Draws the fold markers into the gutter -- the strip the page margin reserves to the LEFT of
+    /// column 0 (@see contour::geometry::fitPageToPixels, which folds the gutter into pageMargin.left).
+    ///
+    /// This is the ONE place in the tree that addresses a negative column, and the reason it can: a
+    /// gutter cell is mapped through the same GridMetrics as any other, and column -1 lands exactly in
+    /// the strip, so no second coordinate system is introduced for it. Keeping that here means nothing
+    /// that walks RenderBuffer::cells -- selection, hit-testing, accessibility -- ever meets one.
+    void renderGutter(std::span<vtbackend::RenderGutterCell const> gutter);
+
     void executeImageDiscards();
 
     /// The atlas sizing the *configuration* asked for, kept apart from the effective sizing below.

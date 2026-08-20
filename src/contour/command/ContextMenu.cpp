@@ -60,6 +60,11 @@ namespace
     {
         return state.canSpeak && state.hasSelection;
     }
+
+    bool hasFoldUnderCursor(ContextMenuState const& state) noexcept
+    {
+        return state.foldLine.has_value();
+    }
     // }}}
 
     /// A row acting on the hyperlink that was RIGHT-CLICKED, carried with the row rather than looked up
@@ -139,6 +144,19 @@ namespace
             Table::command(CopyLastCommandPrompt {}, "Copy Last Prompt").shownWhen(hasLastCommand),
             Table::command(CopyLastCommandOutput {}, "Copy Last Command Output").shownWhen(hasLastCommand),
             Table::command(CopyLastCommandBlock {}, "Copy Last Prompt and Output").shownWhen(hasLastCommand),
+
+            // GRAYED rather than hidden when there is no fold under the pointer, unlike the rows above:
+            // those describe a shell capability that is either there or not, while this one describes
+            // THIS spot. A row that vanished depending on where you right-clicked would make the menu
+            // change shape under the pointer, and hide the fact that folding exists at all.
+            //
+            // Carries the clicked line rather than reading the viewport when picked: by then the pointer
+            // has left that row for the menu, and ToggleFold's own anchor is the top of the viewport.
+            Table::command(ToggleFoldAt {}, "Toggle Output Fold")
+                .enabledWhen(hasFoldUnderCursor)
+                .actionFrom([](ContextMenuState const& state) -> actions::Action {
+                    return ToggleFoldAt { .line = state.foldLine ? state.foldLine->value : 0 };
+                }),
 
             Table::separator(),
 

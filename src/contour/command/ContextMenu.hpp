@@ -3,7 +3,10 @@
 
 #include <contour/config/Actions.hpp>
 
+#include <vtbackend/Primitives.hpp>
+
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -38,6 +41,14 @@ struct ContextMenuState
     /// clicked cell the instant it travels to the menu row the user is reaching for — so an action that
     /// asked again at click time would answer about a cell nobody clicked.
     std::string hyperlinkUnderCursor;
+
+    /// The right-clicked grid line, when a fold covers it -- nullopt means there is nothing to toggle.
+    ///
+    /// One optional rather than a marker plus a line, so "there is a fold" and "which line it is on"
+    /// cannot disagree. Captured at click time for the same reason the hyperlink above is: the pointer
+    /// leaves that cell the moment the user reaches for the menu row, so a row that asked again would
+    /// answer about a line nobody clicked.
+    std::optional<vtbackend::LineOffset> foldLine;
 
     std::string activeProfile;             ///< The profile this session runs under.
     std::vector<std::string> profileNames; ///< Every configured profile, in a stable order.

@@ -109,6 +109,13 @@
         <ul>
           <li>Fixes desktop notifications never appearing in the Flatpak build. Contour asked org.freedesktop.Notifications for them directly, which a sandbox does not permit and which Flathub declines to grant a permission for; a sandboxed Contour now speaks the org.freedesktop.portal.Notification portal instead, which needs no permission at all. Outside a sandbox nothing changes — the session bus is still used, and still reports a dismissal exactly as before</li>
           <li>Adds notification_close_timeout, for the one thing the notification portal cannot do: tell an application that its notification was dismissed. Where a close cannot be observed, Contour now assumes one after this long (10 seconds by default) and reports it back over OSC 99 marked `untracked`, so an application that asked for close events with `c=1` is answered instead of waiting forever, and can still tell a guess from an observation. A notification that states its own lifetime with `w=` is answered on that instead, and 0 disables the assumption entirely</li>
+          <li>Adds output folding: collapse a finished command's output down to its prompt line and expand it again. Driven by the shell's OSC 133 marks, so any shell with shell integration works (#88)</li>
+          <li>Adds a fold column in a one-column gutter left of the grid, marking each foldable block and highlighting under the pointer; clicking it, or the new context-menu entry, toggles that fold</li>
+          <li>Reserves U+10F000..U+10F0FF for Contour's own glyphs and assigns the fold column's two heads, which no Unicode character describes; see docs/vt-extensions/private-use-glyphs.md</li>
+          <li>Adds the global folding config section and the actions CollapseAllFolds, CollapseLastFold, ExpandAllFolds, ToggleFold and ToggleLastFold</li>
+          <li>Vi normal mode moves in visible lines, stepping over collapsed blocks; folding.on_jump_into_fold picks whether a search hit inside one expands it or is skipped</li>
+          <li>Removes the deprecated SETMARK sequence (CSI &gt; M); use OSC 133 ; A instead</li>
+          <li>Draws U+25BC and U+25B6 with the built-in box-drawing renderer, so they no longer depend on the font</li>
         </ul>
       </description>
     </release>

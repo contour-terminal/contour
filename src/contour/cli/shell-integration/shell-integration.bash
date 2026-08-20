@@ -401,7 +401,7 @@ precmd() {
         unset _contour_command_running
     fi
 
-    printf "\\e[?2028l\\e[>M\\e]7;$PWD\\e\\\\";
+    printf "\\e[?2028l\\e]7;$PWD\\e\\\\";
 
     # OSC 133;A -- a new prompt starts on this line. Together with ;C above this is what lets the terminal
     # tell a prompt apart from a command's output, which is what "copy last command output" reads.

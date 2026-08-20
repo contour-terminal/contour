@@ -91,6 +91,19 @@ struct RenderLine
     LineFlags flags = LineFlag::None;
 };
 
+/// One row's gutter content: the fold marker drawn in the strip left of the grid.
+///
+/// A row of its own rather than a RenderCell in @ref RenderBuffer::cells, deliberately: the gutter sits
+/// at a NEGATIVE column, outside the page entirely, and everything that walks the cells -- selection,
+/// hit-testing, the accessibility bridge, screenshots -- is entitled to assume a column is on the page.
+/// Keeping the two apart means none of them has to learn otherwise.
+struct RenderGutterCell
+{
+    LineOffset lineOffset;       ///< The screen row this marker belongs to.
+    char32_t codepoint {};       ///< The marker glyph.
+    RenderAttributes attributes; ///< Its colors.
+};
+
 struct RenderCursor
 {
     CellLocation position;
@@ -106,6 +119,7 @@ struct RenderBuffer
 {
     std::vector<RenderCell> cells {};
     std::vector<RenderLine> lines {};
+    std::vector<RenderGutterCell> gutter {};
     std::optional<RenderCursor> cursor {};
     uint64_t frameID {};
 
@@ -113,6 +127,7 @@ struct RenderBuffer
     {
         cells.clear();
         lines.clear();
+        gutter.clear();
         cursor.reset();
     }
 };
