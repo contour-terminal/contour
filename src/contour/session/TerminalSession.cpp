@@ -14,11 +14,11 @@
 #include <contour/session/SpawnCommand.hpp>
 #include <contour/session/TerminalSession.hpp>
 
-#include <vtbackend/FileUrl.hpp>
-#include <vtbackend/HintModeHandler.hpp>
-#include <vtbackend/MatchModes.hpp>
-#include <vtbackend/Terminal.hpp>
-#include <vtbackend/ViCommands.hpp>
+#include <vtbackend/core/FileUrl.hpp>
+#include <vtbackend/input/MatchModes.hpp>
+#include <vtbackend/input/vi/HintModeHandler.hpp>
+#include <vtbackend/input/vi/ViCommands.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>

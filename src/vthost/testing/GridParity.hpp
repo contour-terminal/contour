@@ -22,7 +22,7 @@
 /// Hyperlinks are compared by URI, never by id: ids are per-terminal counters, so equal ids
 /// would be meaningless and unequal ids a false positive.
 
-#include <vtbackend/Terminal.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <cstdint>
 #include <string>

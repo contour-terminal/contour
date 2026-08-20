@@ -1,6 +1,6 @@
 #pragma once
 
-#include <vtbackend/Color.hpp>
+#include <vtbackend/core/Color.hpp>
 
 #include <text_shaper/Font.hpp>
 

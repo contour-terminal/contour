@@ -22,9 +22,9 @@
 /// it; rendering `cells` alone truncates every filled region at the last column that
 /// happened to be sent. @see proto::WireLine::cells, and the mirror's `renderRow`.
 
-#include <vtbackend/Grid.hpp>
-#include <vtbackend/Line.hpp>
-#include <vtbackend/LineSoA.hpp>
+#include <vtbackend/grid/Grid.hpp>
+#include <vtbackend/grid/Line.hpp>
+#include <vtbackend/grid/LineSoA.hpp>
 
 #include <cstddef>
 #include <cstdint>

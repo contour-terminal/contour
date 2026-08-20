@@ -4,8 +4,8 @@
 #include <contour/config/TabBarMode.hpp>
 #include <contour/input/MouseMapping.hpp>
 
-#include <vtbackend/Image.hpp>
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Image.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <vtrasterizer/Decorator.hpp>
 #include <vtrasterizer/FontDescriptions.hpp>

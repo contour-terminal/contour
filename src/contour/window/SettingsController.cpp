@@ -2,7 +2,7 @@
 #include <contour/platform/QtPath.hpp>
 #include <contour/window/SettingsController.hpp>
 
-#include <vtbackend/StatusLineBuilder.hpp>
+#include <vtbackend/screen/StatusLineBuilder.hpp>
 
 #include <text_shaper/Font.hpp>
 

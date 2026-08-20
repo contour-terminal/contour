@@ -4,7 +4,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
 
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <vtrasterizer/FontDescriptions.hpp>
 

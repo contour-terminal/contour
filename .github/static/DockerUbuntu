@@ -13,7 +13,7 @@ ARG ARCH="x86_64"
 #
 # g++-14 -- Ubuntu 24.04's default g++ is 13.3, whose libstdc++ has no std::ranges::to; that is C++23
 # and arrived in GCC 14. Every other Linux job already builds with GCC 14 or Clang, so this image was
-# the one place still on 13.3, and vtbackend/Color.cpp failed there with "'to' is not a member of
+# the one place still on 13.3, and vtbackend/core/Color.cpp failed there with "'to' is not a member of
 # 'std::ranges'". The compiler is then named explicitly at configure time below, because installing
 # it does not make it the default.
 RUN apt-get update && apt-get install -y \

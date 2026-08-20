@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/RenderBuffer.hpp>
-#include <vtbackend/Screen.hpp>
+#include <vtbackend/render/RenderBuffer.hpp>
+#include <vtbackend/screen/Screen.hpp>
 
 #include <vtrasterizer/RenderTarget.hpp>
 

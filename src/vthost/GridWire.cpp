@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/GridWire.hpp>
 
-#include <vtbackend/CellFlags.hpp>
-#include <vtbackend/LineFlags.hpp>
-#include <vtbackend/SoAClusterWriter.hpp>
+#include <vtbackend/core/CellFlags.hpp>
+#include <vtbackend/core/LineFlags.hpp>
+#include <vtbackend/grid/SoAClusterWriter.hpp>
 
 #include <algorithm>
 #include <array>

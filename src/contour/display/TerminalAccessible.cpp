@@ -5,7 +5,7 @@
 #include <contour/geometry/CellRectangle.hpp>
 #include <contour/session/TerminalSession.hpp>
 
-#include <vtbackend/Terminal.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <QtQuick/QQuickWindow>
 

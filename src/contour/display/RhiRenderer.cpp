@@ -5,7 +5,7 @@
 #include <contour/display/ScreenshotReadback.hpp>
 #include <contour/display/ShaderConfig.hpp>
 
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <vtrasterizer/TextureAtlas.hpp>
 

@@ -1,0 +1,1443 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <vtbackend/vt/VTType.hpp>
+
+#include <crispy/Defines.hpp>
+#include <crispy/Escape.hpp>
+#include <crispy/Sort.hpp>
+
+#include <gsl/pointers>
+#include <gsl/span>
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <format>
+#include <optional>
+#include <string>
+#include <utility>
+
+namespace vtbackend
+{
+
+enum class FunctionCategory : uint8_t
+{
+    C0 = 0,
+    ESC = 1,
+    CSI = 2,
+    OSC = 3,
+    DCS = 4,
+    VT52 = 5, ///< VT52-mode single-character escape commands (their own grammar; see FunctionCategory).
+};
+
+// VT sequence documentation in markdown format
+struct FunctionDocumentation
+{
+    std::string_view mnemonic {};
+    std::string_view comment {};
+    std::string_view parameters {};
+    std::string_view description {};
+    std::string_view notes {};
+    std::string_view examples {};
+};
+
+// {{{ documentation
+// clang-format off
+namespace documentation
+{
+
+// CSI
+constexpr inline auto ANSIDSR = FunctionDocumentation { .mnemonic = "DSR", .comment = "Device Status Report (ANSI)" };
+constexpr inline auto ANSISYSSC = FunctionDocumentation { .mnemonic = "ANSISYSSC", .comment = "Save Cursor (ANSI.SYS)" };
+constexpr inline auto CBT = FunctionDocumentation { .mnemonic = "CBT", .comment = "Cursor Backward Tabulation" };
+constexpr inline auto CHA = FunctionDocumentation { .mnemonic = "CHA", .comment = "Move cursor to column" };
+constexpr inline auto CHT = FunctionDocumentation { .mnemonic = "CHT", .comment = "Cursor Horizontal Forward Tabulation" };
+constexpr inline auto CNL = FunctionDocumentation { .mnemonic = "CNL", .comment = "Move cursor to next line" };
+constexpr inline auto CPL = FunctionDocumentation { .mnemonic = "CPL", .comment = "Move cursor to previous line" };
+constexpr inline auto CSIUENHCE = FunctionDocumentation { .mnemonic = "CSIUENHCE", .comment = "Request enhancement to extended keyboard mode" };
+constexpr inline auto CSIUENTER = FunctionDocumentation { .mnemonic = "CSIUENTER", .comment = "Enter Extended keyboard mode" };
+constexpr inline auto CSIULEAVE = FunctionDocumentation { .mnemonic = "CSIULEAVE", .comment = "Leave Extended keyboard mode" };
+constexpr inline auto CSIUQUERY = FunctionDocumentation { .mnemonic = "CSIUQUERY", .comment = "Query Extended keyboard mode" };
+constexpr inline auto CUB = FunctionDocumentation { .mnemonic = "CUB", .comment = "Move cursor backward" };
+constexpr inline auto CUD = FunctionDocumentation { .mnemonic = "CUD", .comment = "Move cursor down" };
+constexpr inline auto CUF = FunctionDocumentation { .mnemonic = "CUF", .comment = "Move cursor forward" };
+constexpr inline auto CUP = FunctionDocumentation { .mnemonic = "CUP", .comment = "Move cursor to position", .parameters = "row ; column", .description = "This control function moves the cursor to the specified line and column. The " "starting point for lines and columns depends on the setting of origin mode (DECOM). " "CUP applies only to the current page.", .notes = "The CUP sequence is supported by all terminals. The home position is 1,1.", };
+constexpr inline auto CUU = FunctionDocumentation { .mnemonic = "CUU", .comment = "Move cursor up" };
+constexpr inline auto DA1 = FunctionDocumentation { .mnemonic = "DA1", .comment = "Primary Device Attributes" };
+constexpr inline auto DA2 = FunctionDocumentation { .mnemonic = "DA2", .comment = "Secondary Device Attributes" };
+constexpr inline auto DA3 = FunctionDocumentation { .mnemonic = "DA3", .comment = "Tertiary Device Attributes" };
+constexpr inline auto DCH = FunctionDocumentation { .mnemonic = "DCH", .comment = "Delete characters" };
+constexpr inline auto DECAC = FunctionDocumentation { .mnemonic = "DECAC", .comment = "Assign Color", .parameters = "item ; foreground ; background", .description = "Assigns palette colors to a display item. Item 1 sets the normal-text default " "foreground/background (as OSC 10/11 do); item 2 sets the window-frame color, which " "Contour maps to the GUI tab background. The foreground/background parameters are " "palette indices (0..255). Omitting the color parameters resets the item to its host " "default.", .notes = "VT525. See also DECATC. Windows Terminal implements this to color a tab from an application.", };
+constexpr inline auto DECATC = FunctionDocumentation { .mnemonic = "DECATC", .comment = "Alternate Text Color", .parameters = "attribute ; foreground ; background", .description = "Assigns palette colors to a text-attribute combination, for use in the alternate color " "mode selected by DECSTGLT. The attribute selector enumerates the 16 combinations in the " "order given by the VT525 manual: 0 = normal, 1 = bold, 2 = reverse, 3 = underline, " "4 = blink, 5 = bold reverse, 6 = bold underline, 7 = bold blink, 8 = reverse underline, " "9 = reverse blink, 10 = underline blink, 11 = bold reverse underline, 12 = bold reverse " "blink, 13 = bold underline blink, 14 = reverse underline blink, 15 = all four. It is an " "enumeration, not a bitmask. The foreground/background parameters are palette indices " "(0..255). Omitting the color parameters resets that attribute combination to the default " "text colors.", .notes = "VT525. See also DECAC and DECSTGLT.", };
+constexpr inline auto DECCARA = FunctionDocumentation { .mnemonic = "DECCARA", .comment = "Change Attributes in Rectangular Area" };
+constexpr inline auto DECCRA = FunctionDocumentation { .mnemonic = "DECCRA", .comment = "Copy rectangular area" };
+constexpr inline auto DECDC = FunctionDocumentation { .mnemonic = "DECDC", .comment = "Delete column" };
+constexpr inline auto DECDLD = FunctionDocumentation { .mnemonic = "DECDLD", .comment = "Down-Line-Load Character Set (DRCS)" };
+constexpr inline auto DECDMAC = FunctionDocumentation { .mnemonic = "DECDMAC", .comment = "Define Macro" };
+constexpr inline auto DECELR = FunctionDocumentation { .mnemonic = "DECELR", .comment = "Enable Locator Reporting" };
+constexpr inline auto DECRQLP = FunctionDocumentation { .mnemonic = "DECRQLP", .comment = "Request Locator Position" };
+constexpr inline auto DECSLE = FunctionDocumentation { .mnemonic = "DECSLE", .comment = "Select Locator Events" };
+constexpr inline auto DECERA = FunctionDocumentation { .mnemonic = "DECERA", .comment = "Erase rectangular area" };
+constexpr inline auto DECFRA = FunctionDocumentation { .mnemonic = "DECFRA", .comment = "Fill rectangular area" };
+constexpr inline auto DECIC = FunctionDocumentation { .mnemonic = "DECIC", .comment = "Insert column" };
+constexpr inline auto DECINVM = FunctionDocumentation { .mnemonic = "DECINVM", .comment = "Invoke Macro" };
+constexpr inline auto DECPS = FunctionDocumentation { .mnemonic = "DECPS", .comment = "Controls the sound frequency or notes" };
+constexpr inline auto DECRM = FunctionDocumentation { .mnemonic = "DECRM", .comment = "Reset DEC-mode" };
+constexpr inline auto DECREQTPARM = FunctionDocumentation {
+    .mnemonic = "DECREQTPARM",
+    .comment = "Request Terminal Parameters",
+    .parameters = "Ps",
+    .description = "Requests the terminal's communication parameters. The terminal answers with "
+                   "DECREPTPARM: `CSI Psol ; Ppar ; Pnbits ; Pxspeed ; Prspeed ; Pclkmul ; Pflags x`.",
+    .notes = "Ps selects whether the terminal may afterwards send unsolicited reports (0, the default) "
+             "or not (1); Psol echoes that choice back as Ps + 2. The remaining values describe a "
+             "serial line that no longer exists, so every modern terminal reports the same fiction: "
+             "no parity, eight bits, 38400 baud in both directions.\n\n"
+             "xterm answers only below terminal id 200, on the grounds that DEC dropped the sequence "
+             "after the VT100. Contour follows wezterm and answers at every level: vttest offers the "
+             "test regardless of the reported level, and an application that does not want the report "
+             "simply never asks for it.",
+};
+constexpr inline auto DECRQM = FunctionDocumentation { .mnemonic = "DECRQM", .comment = "Request DEC-mode" };
+constexpr inline auto DECRQM_ANSI = FunctionDocumentation { .mnemonic = "DECRQM_ANSI", .comment = "Request ANSI-mode" }; // NOLINT
+constexpr inline auto DECRQPSR = FunctionDocumentation { .mnemonic = "DECRQPSR", .comment = "Request presentation state report" };
+constexpr inline auto DECRQUPSS = FunctionDocumentation { .mnemonic = "DECRQUPSS", .comment = "Request User-Preferred Supplemental Set", .description = "Reports the current User-Preferred Supplemental Set as a DECAUPSS-shaped DCS. The reported `Ps` is the set's own size, not whatever was last sent." };
+constexpr inline auto DECSASD = FunctionDocumentation { .mnemonic = "DECSASD", .comment = "Select Active Status Display" };
+constexpr inline auto DECSCA = FunctionDocumentation { .mnemonic = "DECSCA", .comment = "Select Character Protection Attribute" };
+constexpr inline auto DECSCL = FunctionDocumentation { .mnemonic = "DECSCL", .comment = "Set conformance level (DECSCL), VT220 and up." };
+constexpr inline auto DECSCPP = FunctionDocumentation { .mnemonic = "DECSCPP", .comment = "Select 80 or 132 Columns per Page" };
+constexpr inline auto DECSCUSR = FunctionDocumentation { .mnemonic = "DECSCUSR", .comment = "Set Cursor Style" };
+constexpr inline auto DECSED = FunctionDocumentation { .mnemonic = "DECSED", .comment = "Selective Erase in Display" };
+constexpr inline auto DECSEL = FunctionDocumentation { .mnemonic = "DECSEL", .comment = "Selective Erase in Line" };
+constexpr inline auto DECSERA = FunctionDocumentation { .mnemonic = "DECSERA", .comment = "Selective Erase in Rectangular Area" };
+constexpr inline auto DECSLRM = FunctionDocumentation { .mnemonic = "DECSLRM", .comment = "Set left/right margin" };
+constexpr inline auto DECSM = FunctionDocumentation { .mnemonic = "DECSM", .comment = "Set DEC-mode" };
+constexpr inline auto DECSNLS = FunctionDocumentation { .mnemonic = "DECSNLS", .comment = "Select number of lines per screen." };
+constexpr inline auto DECSPP = FunctionDocumentation { .mnemonic = "DECSPP", .comment = "Set port parameter" };
+constexpr inline auto DECSSCLS = FunctionDocumentation { .mnemonic = "DECSSCLS", .comment = "Set Scroll Speed." };
+constexpr inline auto DECSSDT = FunctionDocumentation { .mnemonic = "DECSSDT", .comment = "Select Status Display (Line) Type" };
+constexpr inline auto DECSTBM = FunctionDocumentation { .mnemonic = "DECSTBM", .comment = "Set top/bottom margin" };
+constexpr inline auto DECSTGLT = FunctionDocumentation { .mnemonic = "DECSTGLT", .comment = "Select Color Look-Up Table", .parameters = "table", .description = "Selects the color mode used to display text: 1 or 2 = alternate color (text color comes from the " "attribute combinations assigned via DECATC, and ANSI SGR color parameters are ignored entirely; a " "combination with no DECATC assignment uses the default text colors), 3 = ANSI SGR color (the " "power-up default, and what an omitted parameter selects). The monochrome table (0) of the original " "VT525 is not supported.", .notes = "VT525. See also DECATC and DECAC.", };
+constexpr inline auto DECSTR = FunctionDocumentation { .mnemonic = "DECSTR", .comment = "Soft terminal reset" };
+constexpr inline auto DECTST = FunctionDocumentation {
+    .mnemonic = "DECTST",
+    .comment = "Invoke Confidence Test",
+    .parameters = "Ps1 ; Ps2 ...",
+    .description =
+        "Runs the terminal's built-in confidence tests. Ps1 selects the invoke opcode and Ps2 onwards "
+        "name the tests: 0 = all, 1 = power-up self test, 2 = RS-232 data loopback, 3 = printer port "
+        "loopback, 4 = speed select, 5 = reserved, 6 = RS-232 modem-control loopback, 7 = EIA-423 "
+        "loopback, 8 = parallel port loopback, 9 = repeat the other tests in the string.\n\n"
+        "Contour is a software terminal, so it has none of the hardware those loopback tests exercise "
+        "and none of it can fail: every test trivially passes and nothing is reported. The one test "
+        "with an effect a program can observe is the power-up self test, which -- being a power-up -- "
+        "resets the terminal.",
+    .notes =
+        "Ps1 differs by generation: a VT100 invokes with 2 (`CSI 2 ; Ps y`), a VT510 and later with 4 "
+        "(`CSI 4 ; Ps y`). Both are accepted, because a terminal that reports VT525 is still driven by "
+        "VT100-era software -- vttest itself sends the VT100 form. Any other Ps1 is not an invocation "
+        "and is ignored.\n\n"
+        "A failure would be reported by DRAWING a diagnostic code, not by replying, so a terminal that "
+        "passes its tests writes nothing at all. No reply is ever sent.",
+    .examples = "CSI 2 ; 1 y   # VT100 form: power-up self test\n"
+                "CSI 4 ; 0 y   # VT510 form: all tests"
+};
+constexpr inline auto DECUDK = FunctionDocumentation { .mnemonic = "DECUDK", .comment = "User-Defined Keys" };
+constexpr inline auto DL = FunctionDocumentation { .mnemonic = "DL", .comment = "Delete lines" };
+constexpr inline auto DSR = FunctionDocumentation { .mnemonic = "DSR", .comment = "Device Status Report (DEC)" };
+constexpr inline auto ECH = FunctionDocumentation { .mnemonic = "ECH", .comment = "Erase characters" };
+constexpr inline auto ED = FunctionDocumentation { .mnemonic = "ED", .comment = "Erase in Display" };
+constexpr inline auto EL = FunctionDocumentation { .mnemonic = "EL", .comment = "Erase in Line" };
+constexpr inline auto HPA = FunctionDocumentation { .mnemonic = "HPA", .comment = "Horizontal Position Absolute" };
+constexpr inline auto HPR = FunctionDocumentation { .mnemonic = "HPR", .comment = "Horizontal Position Relative" };
+constexpr inline auto HVP = FunctionDocumentation { .mnemonic = "HVP", .comment = "Horizontal and Vertical Position" };
+constexpr inline auto ICH = FunctionDocumentation { .mnemonic = "ICH", .comment = "Insert characters" };
+constexpr inline auto IL = FunctionDocumentation { .mnemonic = "IL", .comment = "Insert lines" };
+constexpr inline auto REP = FunctionDocumentation { .mnemonic = "REP", .comment = "Repeat last character" };
+constexpr inline auto RM = FunctionDocumentation { .mnemonic = "RM", .comment = "Reset Mode" };
+constexpr inline auto SCOSC = FunctionDocumentation { .mnemonic = "SCOSC", .comment = "Save Cursor (available only when DECLRMM is disabled)" };
+constexpr inline auto SD = FunctionDocumentation { .mnemonic = "SD", .comment = "Scroll Down" };
+constexpr inline auto SGR = FunctionDocumentation { .mnemonic = "SGR", .comment = "Select Graphic Rendition" };
+constexpr inline auto SM = FunctionDocumentation { .mnemonic = "SM", .comment = "Set Mode" };
+constexpr inline auto SU = FunctionDocumentation { .mnemonic = "SU", .comment = "Scroll Up" };
+constexpr inline auto UNSCROLL = FunctionDocumentation { .mnemonic = "UNSCROLL", .comment = "Scroll Down with Scrollback Fill (kitty unscroll)" };
+constexpr inline auto TBC = FunctionDocumentation { .mnemonic = "TBC", .comment = "Horizontal Tab Clear" };
+constexpr inline auto VPA = FunctionDocumentation { .mnemonic = "VPA", .comment = "Vertical Position Absolute" };
+constexpr inline auto VPR = FunctionDocumentation {
+    .mnemonic = "VPR",
+    .comment = "Vertical Position Relative",
+    .parameters = "Ps",
+    .description = "Moves the cursor down Ps lines (default 1), keeping its column.",
+    .notes = "Behaves as CUD. xterm alone distinguishes the two -- it routes VPR through CursorSet, "
+             "which clamps to the page, while CUD stops at the bottom scroll margin -- but no other "
+             "mainstream terminal makes that distinction and ECMA-48 does not require it.",
+};
+constexpr inline auto WINMANIP = FunctionDocumentation { .mnemonic = "WINMANIP", .comment = "Window Manipulation" };
+constexpr inline auto XTCAPTURE = FunctionDocumentation { .mnemonic = "XTCAPTURE", .comment = "Report screen buffer capture." };
+constexpr inline auto XTSMTITLE = FunctionDocumentation { .mnemonic = "XTSMTITLE", .comment = "Set title mode features (hex/UTF-8 title encoding)." };
+constexpr inline auto XTRMTITLE = FunctionDocumentation { .mnemonic = "XTRMTITLE", .comment = "Reset title mode features (hex/UTF-8 title encoding)." };
+constexpr inline auto XTPOPCOLORS = FunctionDocumentation { .mnemonic = "XTPOPCOLORS", .comment = "Pops the color palette from the palette's saved-stack." };
+constexpr inline auto XTPUSHCOLORS = FunctionDocumentation { .mnemonic = "XTPUSHCOLORS", .comment = "Pushes the color palette onto the palette's saved-stack." };
+constexpr inline auto SGRRESTORE = FunctionDocumentation { .mnemonic = "SGRRESTORE", .comment = "Restores video attributes." };
+constexpr inline auto SGRSAVE = FunctionDocumentation { .mnemonic = "SGRSAVE", .comment = "Saves video attributes onto stack." };
+constexpr inline auto XTREPORTCOLORS = FunctionDocumentation { .mnemonic = "XTREPORTCOLORS", .comment = "Reports number of color palettes on the stack." };
+constexpr inline auto XTRESTORE = FunctionDocumentation { .mnemonic = "XTRESTORE", .comment = "Restore DEC private modes." };
+constexpr inline auto XTSAVE = FunctionDocumentation { .mnemonic = "XTSAVE", .comment = "Save DEC private modes." };
+constexpr inline auto XTSHIFTESCAPE = FunctionDocumentation { .mnemonic = "XTSHIFTESCAPE", .comment = "Set/reset shift-escape options" };
+constexpr inline auto XTSMGRAPHICS = FunctionDocumentation { .mnemonic = "XTSMGRAPHICS", .comment = "Set/request graphics attribute" };
+constexpr inline auto XTVERSION = FunctionDocumentation { .mnemonic = "XTVERSION", .comment = "Report xterm version" };
+
+// DCS
+constexpr inline auto DECAUPSS = FunctionDocumentation { .mnemonic = "DECAUPSS", .comment = "Assign User-Preferred Supplemental Set", .parameters = "Ps", .description = "Names the supplemental character set GR maps to by default, and that the `<` SCS designator resolves to. `Ps` is the set's size (0 = 94-character, 1 = 96-character) rather than a free parameter, so a `Ps` disagreeing with the designator names no set. Contour decodes UTF-8, so the designation is tracked and reported but never re-maps decoded codepoints." };
+constexpr inline auto DECRQSS = FunctionDocumentation { .mnemonic = "DECRQSS", .comment = "Request Status String" };
+constexpr inline auto DECSIXEL = FunctionDocumentation { .mnemonic = "DECSIXEL", .comment = "Sixel Graphics Image" };
+constexpr inline auto STP = FunctionDocumentation { .mnemonic = "STP", .comment = "Set Terminal Profile" };
+constexpr inline auto XTGETTCAP = FunctionDocumentation { .mnemonic = "XTGETTCAP", .comment = "Request Termcap/Terminfo String" };
+
+constexpr inline auto REGIS = FunctionDocumentation { .mnemonic = "REGIS", .comment = "ReGIS Vector Graphics", .parameters = "Pmode", .description = "Enters ReGIS (Remote Graphics Instruction Set) mode, DEC's vector graphics protocol from the " "VT330/VT340. The ReGIS command string that follows (terminated by ST) draws lines, curves, " "circles, filled polygons and text onto a persistent graphics canvas that Contour rasterizes " "and places into the terminal grid. `Pmode` controls state carry-over: 1 or 3 reset the graphics " "state and clear the canvas, 0 (and 2) resume the persistent context (position, colors, write " "controls and address window carry across successive DCS strings).", .notes = "VT330/VT340. See also DECSIXEL for raster graphics." };
+
+// GIP (Good Image Protocol)
+constexpr inline auto GIP = FunctionDocumentation { .mnemonic = "GIP", .comment = "Good Image Protocol (upload, render, release, oneshot, query)." };
+
+// OSC
+constexpr inline auto CLIPBOARD = FunctionDocumentation { .mnemonic = "CLIPBOARD", .comment = "Clipboard management." };
+constexpr inline auto COLORBG = FunctionDocumentation { .mnemonic = "COLORBG", .comment = "Change or request text background color." };
+constexpr inline auto COLORCURSOR = FunctionDocumentation { .mnemonic = "COLORCURSOR", .comment = "Change text cursor color to Pt." };
+constexpr inline auto COLORFG = FunctionDocumentation { .mnemonic = "COLORFG", .comment = "Change or request text foreground color." };
+constexpr inline auto COLORHIGHLIGHTBG = FunctionDocumentation { .mnemonic = "COLORHIGHLIGHTBG", .comment = "Change or request highlight background color." };
+constexpr inline auto COLORHIGHLIGHTFG = FunctionDocumentation { .mnemonic = "COLORHIGHLIGHTFG", .comment = "Change or request highlight foreground color." };
+constexpr inline auto COLORMOUSEBG = FunctionDocumentation { .mnemonic = "COLORMOUSEBG", .comment = "Change mouse background color." };
+constexpr inline auto COLORMOUSEFG = FunctionDocumentation { .mnemonic = "COLORMOUSEFG", .comment = "Change mouse foreground color." };
+constexpr inline auto COLORSPECIAL = FunctionDocumentation { .mnemonic = "COLORSPECIAL", .comment = "Enable/disable Special Color Number c." };
+constexpr inline auto DUMPSTATE = FunctionDocumentation { .mnemonic = "DUMPSTATE", .comment = "Dumps internal state to debug stream." };
+constexpr inline auto HYPERLINK = FunctionDocumentation { .mnemonic = "HYPERLINK", .comment = "Hyperlinked Text" };
+constexpr inline auto NOTIFY = FunctionDocumentation { .mnemonic = "NOTIFY", .comment = "Send Notification." };
+constexpr inline auto RCOLORBG = FunctionDocumentation { .mnemonic = "RCOLORBG", .comment = "Reset VT100 text background color." };
+constexpr inline auto RCOLORCURSOR = FunctionDocumentation { .mnemonic = "RCOLORCURSOR", .comment = "Reset text cursor color." };
+constexpr inline auto RCOLORFG = FunctionDocumentation { .mnemonic = "RCOLORFG", .comment = "Reset VT100 text foreground color." };
+constexpr inline auto RCOLORHIGHLIGHTBG = FunctionDocumentation { .mnemonic = "RCOLORHIGHLIGHTBG", .comment = "Reset highlight background color." };
+constexpr inline auto RCOLORHIGHLIGHTFG = FunctionDocumentation { .mnemonic = "RCOLORHIGHLIGHTFG", .comment = "Reset highlight foreground color." };
+constexpr inline auto RCOLORMOUSEBG = FunctionDocumentation { .mnemonic = "RCOLORMOUSEBG", .comment = "Reset mouse background color." };
+constexpr inline auto RCOLORMOUSEFG = FunctionDocumentation { .mnemonic = "RCOLORMOUSEFG", .comment = "Reset mouse foreground color." };
+constexpr inline auto RCOLPAL = FunctionDocumentation { .mnemonic = "RCOLPAL", .comment = "Reset color full palette or entry" };
+constexpr inline auto SEMA = FunctionDocumentation { .mnemonic = "SEMA", .comment = "Semantic block / shell integration" };
+constexpr inline auto SETCOLPAL = FunctionDocumentation { .mnemonic = "SETCOLPAL", .comment = "Set/Query color palette" };
+constexpr inline auto SETSPECIALCOLPAL = FunctionDocumentation { .mnemonic = "SETSPECIALCOLPAL", .comment = "Set/Query special color palette" };
+constexpr inline auto RCOLSPECIALPAL = FunctionDocumentation { .mnemonic = "RCOLSPECIALPAL", .comment = "Reset special color palette or entry" };
+constexpr inline auto SETCWD = FunctionDocumentation { .mnemonic = "SETCWD", .comment = "Set current working directory" };
+constexpr inline auto SETFONT = FunctionDocumentation { .mnemonic = "SETFONT", .comment = "Get or set font." };
+constexpr inline auto SETFONTALL = FunctionDocumentation { .mnemonic = "SETFONTALL", .comment = "Get or set all font faces, styles, size." };
+constexpr inline auto SETICON = FunctionDocumentation { .mnemonic = "SETICON", .comment = "Change Icon Title" };
+constexpr inline auto SETTITLE = FunctionDocumentation { .mnemonic = "SETTITLE", .comment = "Change Window & Icon Title" };
+constexpr inline auto SETWINTITLE = FunctionDocumentation { .mnemonic = "SETWINTITLE", .comment = "Change Window Title" };
+constexpr inline auto SETXPROP = FunctionDocumentation { .mnemonic = "SETXPROP", .comment = "Set X11 property" };
+constexpr inline auto SETTABNAME = FunctionDocumentation { .mnemonic = "SETTABNAME", .comment = "Set Session/Tab Name" };
+constexpr inline auto CONEMU = FunctionDocumentation { .mnemonic = "CONEMU", .comment = "ConEmu-style notification or progress indicator" };
+constexpr inline auto DESKTOPNOTIFY = FunctionDocumentation { .mnemonic = "DESKTOPNOTIFY", .comment = "Kitty Desktop Notification." };
+constexpr inline auto ITERM2 = FunctionDocumentation { .mnemonic = "ITERM2", .comment = "iTerm2 proprietary extensions: inline images (File=) and capability reporting (Capabilities)." };
+constexpr inline auto TEXTSIZING = FunctionDocumentation { .mnemonic = "TEXTSIZING", .comment = "Kitty text sizing protocol: sized/scaled text.", .parameters = "metadata ; text" };
+constexpr inline auto KITTYCLIPBOARD = FunctionDocumentation { .mnemonic = "KITTYCLIPBOARD", .comment = "Kitty clipboard protocol: chunked, MIME-typed clipboard read/write.", .parameters = "metadata ; base64" };
+constexpr inline auto POINTERSHAPE = FunctionDocumentation { .mnemonic = "POINTERSHAPE", .comment = "Kitty pointer shape protocol: set, push, pop or query the mouse pointer shape.", .parameters = "=|>|<|? name[,name...]" };
+
+// DEC Multi-Page Navigation (VT420)
+constexpr inline auto NP = FunctionDocumentation { .mnemonic = "NP", .comment = "Next Page", .parameters = "Pn", .description = "Moves the cursor to the home position on one of the following pages in page memory." };
+constexpr inline auto PP = FunctionDocumentation { .mnemonic = "PP", .comment = "Previous Page", .parameters = "Pn", .description = "Moves the cursor to the home position on one of the preceding pages in page memory." };
+constexpr inline auto PPA = FunctionDocumentation { .mnemonic = "PPA", .comment = "Page Position Absolute", .parameters = "Pn", .description = "Moves the data cursor to a specific page in page memory. Cursor position is preserved." };
+constexpr inline auto PPR = FunctionDocumentation { .mnemonic = "PPR", .comment = "Page Position Relative", .parameters = "Pn", .description = "Moves the data cursor forward by Pn pages. Cursor position is preserved." };
+constexpr inline auto PPB = FunctionDocumentation { .mnemonic = "PPB", .comment = "Page Position Backward", .parameters = "Pn", .description = "Moves the data cursor backward by Pn pages. Cursor position is preserved." };
+constexpr inline auto DECRQDE = FunctionDocumentation { .mnemonic = "DECRQDE", .comment = "Request Displayed Extent", .description = "Reports the dimensions and position of the displayed page." };
+
+// CSI additions
+constexpr inline auto DECRARA = FunctionDocumentation { .mnemonic = "DECRARA", .comment = "Reverse Attributes in Rectangular Area" };
+constexpr inline auto DECSACE = FunctionDocumentation { .mnemonic = "DECSACE", .comment = "Select Attribute Change Extent" };
+constexpr inline auto DECELF = FunctionDocumentation { .mnemonic = "DECELF", .comment = "Enable Local Functions", .parameters = "Pn", .description = "Selects which local functions (copy, print, etc.) the keyboard may invoke. Contour has no such local functions, so the value is remembered and reported back through DECRQSS but not acted on." };
+constexpr inline auto DECLFKC = FunctionDocumentation { .mnemonic = "DECLFKC", .comment = "Local Function Key Control", .parameters = "Pn", .description = "Controls how the local function keys behave. Remembered and reported through DECRQSS, but not acted on -- Contour has no local function keys." };
+constexpr inline auto DECSMKR = FunctionDocumentation { .mnemonic = "DECSMKR", .comment = "Select Modifier Key Reporting", .parameters = "Pn", .description = "Selects the auto-repeat / modifier-key reporting mode of the keyboard. Remembered and reported through DECRQSS, but not acted on." };
+constexpr inline auto DECRQCRA = FunctionDocumentation { .mnemonic = "DECRQCRA", .comment = "Request Checksum of Rectangular Area", .parameters = "Pid;Pp;Pt;Pl;Pb;Pr", .description = "Reports a 16-bit checksum of the characters in the given rectangle, as `DCS Pid ! ~ xxxx ST`. Pid is echoed back to correlate the answer with the request, Pp is the page (Contour has a single page). Pt;Pl;Pb;Pr is the rectangle, defaulting to the whole page.\n\nBy default the value reported is the two's complement of the sum of the cells' character values, with the video attributes folded in and cells that were never written to left out entirely. XTCHECKSUM selects deviations from that.", .examples = "CSI 1 ; 1 ; 1 ; 1 ; 1 ; 1 * y" };
+constexpr inline auto XTCHECKSUM = FunctionDocumentation { .mnemonic = "XTCHECKSUM", .comment = "Select checksum extension", .parameters = "Ps", .description = "Selects how DECRQCRA computes its checksum. Ps is a bit mask; a zero (the default) is DEC-compatible, and each bit switches one aspect off:\n\n* 1: do not negate the result.\n* 2: do not fold the video attributes in.\n* 4: count blank cells rather than omitting them.\n* 8: count cells never written to (as blanks) rather than skipping them.\n* 16: report the codepoint as-is rather than mapping it into the DEC charset.\n\nThe selection survives a soft reset (DECSTR) and a hard reset (RIS), both of which restore it to the value the terminal was configured with.", .examples = "CSI 10 # y" };
+constexpr inline auto SL = FunctionDocumentation { .mnemonic = "SL", .comment = "Scroll Left" };
+constexpr inline auto SR = FunctionDocumentation { .mnemonic = "SR", .comment = "Scroll Right" };
+constexpr inline auto XTMODKEYS = FunctionDocumentation { .mnemonic = "XTMODKEYS", .comment = "Set/reset key modifier options", .parameters = "Pp;Pv", .description = "Selects how much modifier information the terminal folds into the escape sequence it sends for a key. Pp names the RESOURCE, Pv the value assigned to it:\n\n* 0: modifyKeyboard\n* 1: modifyCursorKeys\n* 2: modifyFunctionKeys\n* 3: modifyKeypadKeys\n* 4: modifyOtherKeys\n* 6: modifyModifierKeys\n* 7: modifySpecialKeys\n\nOmitting Pv resets that one resource to its initial value; omitting both resets every resource. Contour implements modifyOtherKeys (Pp = 4), whose value 1 encodes control- and shift-modified keys as `CSI 27 ; modifier ; codepoint ~` and value 2 extends that to every modifier; the remaining resources are accepted and ignored. The Kitty keyboard protocol supersedes this whenever its flag stack is non-empty.", .examples = "CSI > 4 ; 2 m" };
+constexpr inline auto XTRMMODKEYS = FunctionDocumentation { .mnemonic = "XTRMMODKEYS", .comment = "Disable key modifier options", .parameters = "Ps", .description = "Disables the key-modifier resource Ps names (the same numbering XTMODKEYS uses), which is the resource value -1 that XTMODKEYS itself cannot express. An omitted Ps disables modifyFunctionKeys. For modifyOtherKeys (Ps = 4) this returns Contour to the legacy encoding.", .examples = "CSI > 4 n" };
+constexpr inline auto SBQUERY = FunctionDocumentation { .mnemonic = "SBQUERY", .comment = "Query semantic command blocks." };
+
+} // namespace documentation
+
+// clang-format on
+// }}}
+
+/// Defines a function with all its syntax requirements plus some additional meta information.
+struct Function
+{
+    FunctionCategory category;  // (3 bits) C0, ESC, CSI, OSC, DCS
+    char leader;                // (3 bits) 0x3C..0x3F (one of: < = > ?, or 0x00 for none)
+    char intermediate;          // (4 bits) 0x20..0x2F (intermediates, usually just one, or 0x00 if none)
+    char finalSymbol;           // (7 bits) 0x30..0x7E (final character)
+    uint8_t minimumParameters;  // (4 bits) 0..7
+    uint16_t maximumParameters; // (10 bits) 0..1024 for integer value (OSC function parameter)
+
+    // Conformance level and extension are mutually exclusive.
+    // But it is unclear to me whether or not it is guaranteed to always have a constexpr-aware std::variant.
+    // So keep it the classic way (for now).
+    VTType conformanceLevel;
+    VTExtension extension = VTExtension::None;
+
+    FunctionDocumentation documentation;
+
+    template <typename... Args>
+    std::string operator()(Args&&... parameters) const
+    {
+        assert(static_cast<size_t>(minimumParameters) <= sizeof...(Args));
+        assert(sizeof...(Args) <= static_cast<size_t>(maximumParameters));
+        std::string result;
+        result.reserve(8);
+        switch (category)
+        {
+            case FunctionCategory::C0: break;
+            case FunctionCategory::ESC: result += "\033"; break;
+            case FunctionCategory::VT52: result += "\033"; break; // a VT52 command is ESC + final byte.
+            case FunctionCategory::CSI: result += "\033["; break;
+            case FunctionCategory::OSC: result += "\033]"; break;
+            case FunctionCategory::DCS: result += "\033P"; break;
+        }
+        if (leader)
+            result += leader;
+        if constexpr (sizeof...(Args) > 0)
+        {
+            result.reserve(sizeof...(Args) * 4);
+            ((result += std::format("{};", std::forward<Args>(parameters))), ...);
+            result.pop_back(); // remove trailing ';'
+        }
+        if (intermediate)
+            result += intermediate;
+        result += finalSymbol;
+        return result;
+    }
+
+    using IdType = uint32_t;
+
+    [[nodiscard]] constexpr IdType id() const noexcept
+    {
+        // clang-format off
+        unsigned constexpr CategoryShift     = 0;
+        unsigned constexpr LeaderShift       = 3;
+        unsigned constexpr IntermediateShift = 3 + 3;
+        unsigned constexpr FinalShift        = 3 + 3 + 4;
+        unsigned constexpr MinParamShift     = 3 + 3 + 4 + 7;
+        unsigned constexpr MaxParamShift     = 3 + 3 + 4 + 7 + 4;
+        // clang-format on
+
+        // if (category == FunctionCategory::C0)
+        //     return static_cast<IdType>(category) | finalSymbol << 3;
+
+        auto const maskCat = static_cast<IdType>(category) << CategoryShift;
+
+        // 0x3C..0x3F; (one of: < = > ?, or 0x00 for none)
+        auto const maskLeader = !leader ? 0 : (static_cast<IdType>(leader) - 0x3C) << LeaderShift;
+
+        // 0x20..0x2F: (intermediates, usually just one, or 0x00 if none)
+        auto const maskIntermediate =
+            !intermediate ? 0 : (static_cast<IdType>(intermediate) - 0x20 + 1) << IntermediateShift;
+
+        // 0x40..0x7E: final character
+        auto const maskFinalS = !finalSymbol ? 0 : (static_cast<IdType>(finalSymbol) - 0x40) << FinalShift;
+        auto const maskMinPar = static_cast<IdType>(minimumParameters) << MinParamShift;
+        auto const maskMaxPar = static_cast<IdType>(maximumParameters) << MaxParamShift;
+
+        return maskCat | maskLeader | maskIntermediate | maskFinalS | maskMinPar | maskMaxPar;
+    }
+
+    constexpr operator IdType() const noexcept { return id(); }
+};
+
+constexpr int compare(Function const& a, Function const& b)
+{
+    if (a.category != b.category)
+        return static_cast<int>(a.category) - static_cast<int>(b.category);
+
+    if (a.finalSymbol != b.finalSymbol) // XXX
+        return static_cast<int>(a.finalSymbol) - static_cast<int>(b.finalSymbol);
+
+    if (a.leader != b.leader)
+        return a.leader - b.leader;
+
+    if (a.intermediate != b.intermediate)
+        return static_cast<int>(a.intermediate) - static_cast<int>(b.intermediate);
+
+    if (a.minimumParameters != b.minimumParameters)
+        return static_cast<int>(a.minimumParameters) - static_cast<int>(b.minimumParameters);
+
+    return static_cast<int>(a.maximumParameters) - static_cast<int>(b.maximumParameters);
+}
+
+// clang-format off
+constexpr bool operator==(Function const& a, Function const& b) noexcept { return compare(a, b) == 0; }
+constexpr bool operator!=(Function const& a, Function const& b) noexcept { return compare(a, b) != 0; }
+constexpr bool operator<=(Function const& a, Function const& b) noexcept { return compare(a, b) <= 0; }
+constexpr bool operator>=(Function const& a, Function const& b) noexcept { return compare(a, b) >= 0; }
+constexpr bool operator<(Function const& a, Function const& b) noexcept { return compare(a, b) < 0; }
+constexpr bool operator>(Function const& a, Function const& b) noexcept { return compare(a, b) > 0; }
+// clang-format on
+
+struct FunctionSelector
+{
+    /// represents the corresponding function category.
+    FunctionCategory category;
+    /// an optional value between 0x3C .. 0x3F
+    char leader;
+    /// number of arguments supplied
+    int argc;
+    /// an optional intermediate character between (0x20 .. 0x2F)
+    char intermediate;
+    /// between 0x40 .. 0x7F
+    char finalSymbol;
+};
+
+constexpr int compare(FunctionSelector const& a, Function const& b) noexcept
+{
+    if (a.category != b.category)
+        return static_cast<int>(a.category) - static_cast<int>(b.category);
+
+    if (a.finalSymbol != b.finalSymbol)
+        return a.finalSymbol - b.finalSymbol;
+
+    if (a.leader != b.leader)
+        return a.leader - b.leader;
+
+    if (a.intermediate != b.intermediate)
+        return a.intermediate - b.intermediate;
+
+    if (a.category == FunctionCategory::OSC)
+        return static_cast<int>(a.argc) - static_cast<int>(b.maximumParameters);
+
+    if (std::cmp_less(a.argc, b.minimumParameters))
+        return -1;
+
+    if (std::cmp_greater(a.argc, b.maximumParameters))
+        return +1;
+
+    return 0;
+}
+
+namespace detail // {{{
+{
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+    constexpr auto C0(char finalCharacter,
+                      std::string_view mnemonic,
+                      std::string_view comment,
+                      VTType vt = VTType::VT100) noexcept
+    {
+        return Function { .category = FunctionCategory::C0,
+                          .leader = 0,
+                          .intermediate = 0,
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = 0,
+                          .maximumParameters = 0,
+                          .conformanceLevel = vt,
+                          .extension = VTExtension::None,
+                          .documentation =
+                              FunctionDocumentation { .mnemonic = mnemonic, .comment = comment } };
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+    constexpr auto OSC(uint16_t code, VTExtension ext, FunctionDocumentation documentation) noexcept
+    {
+        return Function { .category = FunctionCategory::OSC,
+                          .leader = 0,
+                          .intermediate = 0,
+                          .finalSymbol = 0,
+                          .minimumParameters = 0,
+                          .maximumParameters = code,
+                          .conformanceLevel = VTType::VT100,
+                          .extension = ext,
+                          .documentation = documentation };
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+    constexpr auto ESC(std::optional<char> intermediate,
+                       char finalCharacter,
+                       VTType vt,
+                       FunctionDocumentation documentation) noexcept
+    {
+        return Function { .category = FunctionCategory::ESC,
+                          .leader = 0,
+                          .intermediate = intermediate.value_or(0),
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = 0,
+                          .maximumParameters = 0,
+                          .conformanceLevel = vt,
+                          .extension = VTExtension::None,
+                          .documentation = documentation };
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+    constexpr auto VT52(char finalCharacter,
+                        uint8_t argc0,
+                        uint8_t argc1,
+                        FunctionDocumentation documentation) noexcept
+    {
+        return Function { .category = FunctionCategory::VT52,
+                          .leader = 0,
+                          .intermediate = 0,
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = argc0,
+                          .maximumParameters = argc1,
+                          .conformanceLevel = VTType::VT100,
+                          .extension = VTExtension::None,
+                          .documentation = documentation };
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+    constexpr auto CSI(std::optional<char> leader,
+                       uint8_t argc0,
+                       uint8_t argc1,
+                       std::optional<char> intermediate,
+                       char finalCharacter,
+                       VTType vt,
+                       FunctionDocumentation documentation) noexcept
+    {
+        // TODO: static_assert on leader/intermediate range-or-null
+        return Function { .category = FunctionCategory::CSI,
+                          .leader = leader.value_or(0),
+                          .intermediate = intermediate.value_or(0),
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = argc0,
+                          .maximumParameters = argc1,
+                          .conformanceLevel = vt,
+                          .extension = VTExtension::None,
+                          .documentation = documentation };
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+    constexpr auto CSI(std::optional<char> leader,
+                       uint8_t argc0,
+                       uint8_t argc1,
+                       std::optional<char> intermediate,
+                       char finalCharacter,
+                       VTExtension ext,
+                       FunctionDocumentation documentation) noexcept
+    {
+        // TODO: static_assert on leader/intermediate range-or-null
+        return Function { .category = FunctionCategory::CSI,
+                          .leader = leader.value_or(0),
+                          .intermediate = intermediate.value_or(0),
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = argc0,
+                          .maximumParameters = argc1,
+                          .conformanceLevel = VTType::VT100,
+                          .extension = ext,
+                          .documentation = documentation };
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+    constexpr auto DCS(std::optional<char> leader,
+                       uint8_t argc0,
+                       uint8_t argc1,
+                       std::optional<char> intermediate,
+                       char finalCharacter,
+                       VTType vt,
+                       FunctionDocumentation documentation) noexcept
+    {
+        // TODO: static_assert on leader/intermediate range-or-null
+        return Function { .category = FunctionCategory::DCS,
+                          .leader = leader.value_or(0),
+                          .intermediate = intermediate.value_or(0),
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = argc0,
+                          .maximumParameters = argc1,
+                          .conformanceLevel = vt,
+                          .extension = VTExtension::None,
+                          .documentation = documentation };
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+    constexpr auto DCS(std::optional<char> leader,
+                       uint8_t argc0,
+                       uint8_t argc1,
+                       std::optional<char> intermediate,
+                       char finalCharacter,
+                       VTExtension ext,
+                       FunctionDocumentation documentation) noexcept
+    {
+        // TODO: static_assert on leader/intermediate range-or-null
+        return Function { .category = FunctionCategory::DCS,
+                          .leader = leader.value_or(0),
+                          .intermediate = intermediate.value_or(0),
+                          .finalSymbol = finalCharacter,
+                          .minimumParameters = argc0,
+                          .maximumParameters = argc1,
+                          .conformanceLevel = VTType::VT100,
+                          .extension = ext,
+                          .documentation = documentation };
+    }
+} // namespace detail
+// }}}
+
+// clang-format off
+// NOLINTBEGIN(readability-identifier-naming)
+
+// C0
+constexpr inline auto EOT = detail::C0('\x04', "EOT", "End of Transmission");
+constexpr inline auto BEL = detail::C0('\x07', "BEL", "Bell");
+constexpr inline auto BS  = detail::C0('\x08', "BS", "Backspace");
+constexpr inline auto TAB = detail::C0('\x09', "TAB", "Tab");
+constexpr inline auto LF  = detail::C0('\x0A', "LF", "Line Feed");
+constexpr inline auto VT  = detail::C0('\x0B', "VT", "Vertical Tab"); // Even though VT means Vertical Tab, it seems that xterm is doing an IND instead.
+constexpr inline auto FF  = detail::C0('\x0C', "FF", "Form Feed");
+constexpr inline auto CR  = detail::C0('\x0D', "CR", "Carriage Return");
+constexpr inline auto LS1 = detail::C0('\x0E', "LS1", "Shift Out; Maps G1 into GL.", VTType::VT220);
+constexpr inline auto LS0 = detail::C0('\x0F', "LS0", "Shift In; Maps G0 into GL (the default).", VTType::VT220);
+
+// SCS to support (G0, G1, G2, G3)
+// A        UK (British), VT100
+// B        USASCII, VT100
+// 4        Dutch, VT200
+// C
+// S        Finnish, VT200
+// R
+// f        French, VT200
+// Q
+// 9        French Canadian, VT200
+// K        VT200
+// " >      Greek VT500
+// % =      Hebrew VT500
+// Y        Italian, VT200
+// `
+// E
+// 6        Norwegian/Danish, VT200
+// % 6      Portuguese, VT300
+// Z        Spanish, VT200.
+// H
+// 7        Swedish, VT200.
+// =        Swiss, VT200.
+// % 2      Turkish, VT500.
+
+// ESC functions
+constexpr inline auto DECALN  = detail::ESC('#', '8', VTType::VT100, { .mnemonic = "DECALN", .comment = "Screen Alignment Pattern"});
+constexpr inline auto S7C1T   = detail::ESC(' ', 'F', VTType::VT220, { .mnemonic = "S7C1T", .comment = "Select 7-bit C1 Control Transmission" }); // NOLINT
+constexpr inline auto S8C1T   = detail::ESC(' ', 'G', VTType::VT220, { .mnemonic = "S8C1T", .comment = "Select 8-bit C1 Control Transmission" }); // NOLINT
+// Designate Other Coding System (DOCS): `ESC % @` selects the ISO 8859-1 default, `ESC % G` selects
+// UTF-8. Contour's parser is always UTF-8, so both are accepted as no-ops for decoding; registering
+// them keeps applications that set their encoding at startup (vttest) out of the unknown-sequence log.
+constexpr inline auto DOCS_DEFAULT = detail::ESC('%', '@', VTType::VT100, { .mnemonic = "DOCS_DEFAULT", .comment = "Select default (ISO 8859-1) character set" });
+constexpr inline auto DOCS_UTF8    = detail::ESC('%', 'G', VTType::VT100, { .mnemonic = "DOCS_UTF8", .comment = "Select UTF-8 character set" });
+constexpr inline auto DECID   = detail::ESC(std::nullopt, 'Z', VTType::VT100, { .mnemonic = "DECID", .comment = "Identify Terminal" }); // NOLINT
+constexpr inline auto DECBI   = detail::ESC(std::nullopt, '6', VTType::VT100, { .mnemonic = "DECBI", .comment = "Back Index"});
+constexpr inline auto DECDHL_Bottom = detail::ESC('#', '4', VTType::VT100, { .mnemonic = "DECDHL_Bottom", .comment = "Double-Height Line (Bottom Half)" });
+constexpr inline auto DECDHL_Top = detail::ESC('#', '3', VTType::VT100, { .mnemonic = "DECDHL_Top", .comment = "Double-Height Line (Top Half)" });
+constexpr inline auto DECDWL  = detail::ESC('#', '6', VTType::VT100, { .mnemonic = "DECDWL", .comment = "Double-Width Line" });
+constexpr inline auto DECFI   = detail::ESC(std::nullopt, '9', VTType::VT100, { .mnemonic = "DECFI", .comment = "Forward Index"});
+constexpr inline auto DECKPAM = detail::ESC(std::nullopt, '=', VTType::VT100, { .mnemonic = "DECKPAM", .comment = "Keypad Application Mode"});
+constexpr inline auto DECKPNM = detail::ESC(std::nullopt, '>', VTType::VT100, { .mnemonic = "DECKPNM", .comment = "Keypad Numeric Mode"});
+constexpr inline auto DECRS   = detail::ESC(std::nullopt, '8', VTType::VT100, { .mnemonic = "DECRS", .comment = "Restore Cursor"});
+constexpr inline auto DECSC   = detail::ESC(std::nullopt, '7', VTType::VT100, { .mnemonic = "DECSC", .comment = "Save Cursor"});
+constexpr inline auto DECSWL  = detail::ESC('#', '5', VTType::VT100, { .mnemonic = "DECSWL", .comment = "Single-Width Line" });
+constexpr inline auto HTS     = detail::ESC(std::nullopt, 'H', VTType::VT100, { .mnemonic = "HTS", .comment = "Horizontal Tab Set"});
+constexpr inline auto IND     = detail::ESC(std::nullopt, 'D', VTType::VT100, { .mnemonic = "IND", .comment = "Index"});
+constexpr inline auto NEL     = detail::ESC(std::nullopt, 'E', VTType::VT100, { .mnemonic = "NEL", .comment = "Next Line"});
+constexpr inline auto RI      = detail::ESC(std::nullopt, 'M', VTType::VT100, { .mnemonic = "RI", .comment = "Reverse Index"});
+constexpr inline auto RIS     = detail::ESC(std::nullopt, 'c', VTType::VT100, { .mnemonic = "RIS", .comment = "Reset to Initial State (Hard Reset)"});
+// SCS (Select Character Set) — G0 designations (ESC ( Dscs)
+constexpr inline auto SCS_G0_SPECIAL       = detail::ESC('(', '0', VTType::VT100, { .mnemonic = "SCS_G0_SPECIAL", .comment = "Set G0 to DEC Special" }); // NOLINT
+constexpr inline auto SCS_G0_BRITISH       = detail::ESC('(', 'A', VTType::VT100, { .mnemonic = "SCS_G0_BRITISH", .comment = "Set G0 to British" }); // NOLINT
+constexpr inline auto SCS_G0_USASCII       = detail::ESC('(', 'B', VTType::VT100, { .mnemonic = "SCS_G0_USASCII", .comment = "Set G0 to USASCII" }); // NOLINT
+constexpr inline auto SCS_G0_FINNISH       = detail::ESC('(', 'C', VTType::VT220, { .mnemonic = "SCS_G0_FINNISH", .comment = "Set G0 to Finnish" }); // NOLINT
+constexpr inline auto SCS_G0_DUTCH         = detail::ESC('(', '4', VTType::VT220, { .mnemonic = "SCS_G0_DUTCH", .comment = "Set G0 to Dutch" }); // NOLINT
+constexpr inline auto SCS_G0_NORWEGIAN     = detail::ESC('(', 'E', VTType::VT220, { .mnemonic = "SCS_G0_NORWEGIAN", .comment = "Set G0 to Norwegian/Danish" }); // NOLINT
+constexpr inline auto SCS_G0_FRENCH        = detail::ESC('(', 'R', VTType::VT220, { .mnemonic = "SCS_G0_FRENCH", .comment = "Set G0 to French" }); // NOLINT
+constexpr inline auto SCS_G0_FRENCHCANADIAN = detail::ESC('(', 'Q', VTType::VT220, { .mnemonic = "SCS_G0_FRENCHCANADIAN", .comment = "Set G0 to French Canadian" }); // NOLINT
+constexpr inline auto SCS_G0_GERMAN        = detail::ESC('(', 'K', VTType::VT220, { .mnemonic = "SCS_G0_GERMAN", .comment = "Set G0 to German" }); // NOLINT
+constexpr inline auto SCS_G0_SPANISH       = detail::ESC('(', 'Z', VTType::VT220, { .mnemonic = "SCS_G0_SPANISH", .comment = "Set G0 to Spanish" }); // NOLINT
+constexpr inline auto SCS_G0_SWEDISH       = detail::ESC('(', 'H', VTType::VT220, { .mnemonic = "SCS_G0_SWEDISH", .comment = "Set G0 to Swedish" }); // NOLINT
+constexpr inline auto SCS_G0_SWISS         = detail::ESC('(', '=', VTType::VT220, { .mnemonic = "SCS_G0_SWISS", .comment = "Set G0 to Swiss" }); // NOLINT
+constexpr inline auto SCS_G0_TECHNICAL     = detail::ESC('(', '>', VTType::VT220, { .mnemonic = "SCS_G0_TECHNICAL", .comment = "Set G0 to DEC Technical" }); // NOLINT
+// SCS — G1 designations (ESC ) Dscs)
+constexpr inline auto SCS_G1_SPECIAL       = detail::ESC(')', '0', VTType::VT100, { .mnemonic = "SCS_G1_SPECIAL", .comment = "Set G1 to DEC Special" }); // NOLINT
+constexpr inline auto SCS_G1_BRITISH       = detail::ESC(')', 'A', VTType::VT100, { .mnemonic = "SCS_G1_BRITISH", .comment = "Set G1 to British" }); // NOLINT
+constexpr inline auto SCS_G1_USASCII       = detail::ESC(')', 'B', VTType::VT100, { .mnemonic = "SCS_G1_USASCII", .comment = "Set G1 to USASCII" }); // NOLINT
+constexpr inline auto SCS_G1_FINNISH       = detail::ESC(')', 'C', VTType::VT220, { .mnemonic = "SCS_G1_FINNISH", .comment = "Set G1 to Finnish" }); // NOLINT
+constexpr inline auto SCS_G1_DUTCH         = detail::ESC(')', '4', VTType::VT220, { .mnemonic = "SCS_G1_DUTCH", .comment = "Set G1 to Dutch" }); // NOLINT
+constexpr inline auto SCS_G1_NORWEGIAN     = detail::ESC(')', 'E', VTType::VT220, { .mnemonic = "SCS_G1_NORWEGIAN", .comment = "Set G1 to Norwegian/Danish" }); // NOLINT
+constexpr inline auto SCS_G1_FRENCH        = detail::ESC(')', 'R', VTType::VT220, { .mnemonic = "SCS_G1_FRENCH", .comment = "Set G1 to French" }); // NOLINT
+constexpr inline auto SCS_G1_FRENCHCANADIAN = detail::ESC(')', 'Q', VTType::VT220, { .mnemonic = "SCS_G1_FRENCHCANADIAN", .comment = "Set G1 to French Canadian" }); // NOLINT
+constexpr inline auto SCS_G1_GERMAN        = detail::ESC(')', 'K', VTType::VT220, { .mnemonic = "SCS_G1_GERMAN", .comment = "Set G1 to German" }); // NOLINT
+constexpr inline auto SCS_G1_SPANISH       = detail::ESC(')', 'Z', VTType::VT220, { .mnemonic = "SCS_G1_SPANISH", .comment = "Set G1 to Spanish" }); // NOLINT
+constexpr inline auto SCS_G1_SWEDISH       = detail::ESC(')', 'H', VTType::VT220, { .mnemonic = "SCS_G1_SWEDISH", .comment = "Set G1 to Swedish" }); // NOLINT
+constexpr inline auto SCS_G1_SWISS         = detail::ESC(')', '=', VTType::VT220, { .mnemonic = "SCS_G1_SWISS", .comment = "Set G1 to Swiss" }); // NOLINT
+constexpr inline auto SCS_G1_TECHNICAL     = detail::ESC(')', '>', VTType::VT220, { .mnemonic = "SCS_G1_TECHNICAL", .comment = "Set G1 to DEC Technical" }); // NOLINT
+// SCS — G2 designations (ESC * Dscs)
+constexpr inline auto SCS_G2_SPECIAL       = detail::ESC('*', '0', VTType::VT220, { .mnemonic = "SCS_G2_SPECIAL", .comment = "Set G2 to DEC Special" }); // NOLINT
+constexpr inline auto SCS_G2_USASCII       = detail::ESC('*', 'B', VTType::VT220, { .mnemonic = "SCS_G2_USASCII", .comment = "Set G2 to USASCII" }); // NOLINT
+constexpr inline auto SCS_G2_BRITISH       = detail::ESC('*', 'A', VTType::VT220, { .mnemonic = "SCS_G2_BRITISH", .comment = "Set G2 to British" }); // NOLINT
+// SCS — G3 designations (ESC + Dscs)
+constexpr inline auto SCS_G3_SPECIAL       = detail::ESC('+', '0', VTType::VT220, { .mnemonic = "SCS_G3_SPECIAL", .comment = "Set G3 to DEC Special" }); // NOLINT
+constexpr inline auto SCS_G3_USASCII       = detail::ESC('+', 'B', VTType::VT220, { .mnemonic = "SCS_G3_USASCII", .comment = "Set G3 to USASCII" }); // NOLINT
+constexpr inline auto SCS_G3_BRITISH       = detail::ESC('+', 'A', VTType::VT220, { .mnemonic = "SCS_G3_BRITISH", .comment = "Set G3 to British" }); // NOLINT
+constexpr inline auto SS2     = detail::ESC(std::nullopt, 'N', VTType::VT220, { .mnemonic = "SS2", .comment = "Single Shift Select (G2 Character Set)"});
+constexpr inline auto SS3     = detail::ESC(std::nullopt, 'O', VTType::VT220, { .mnemonic = "SS3", .comment = "Single Shift Select (G3 Character Set)"});
+
+// Locking shifts — invoke a G-set persistently into GL or GR.
+constexpr inline auto LS2     = detail::ESC(std::nullopt, 'n', VTType::VT220, { .mnemonic = "LS2", .comment = "Locking Shift 2; Maps G2 into GL." });
+constexpr inline auto LS3     = detail::ESC(std::nullopt, 'o', VTType::VT220, { .mnemonic = "LS3", .comment = "Locking Shift 3; Maps G3 into GL." });
+constexpr inline auto LS1R    = detail::ESC(std::nullopt, '~', VTType::VT220, { .mnemonic = "LS1R", .comment = "Locking Shift 1 Right; Maps G1 into GR." });
+constexpr inline auto LS2R    = detail::ESC(std::nullopt, '}', VTType::VT220, { .mnemonic = "LS2R", .comment = "Locking Shift 2 Right; Maps G2 into GR." });
+constexpr inline auto LS3R    = detail::ESC(std::nullopt, '|', VTType::VT220, { .mnemonic = "LS3R", .comment = "Locking Shift 3 Right; Maps G3 into GR." });
+
+// ISO 6429 guarded-area protection (the 8-bit C1 forms 0x96/0x97 fold onto these via the parser).
+constexpr inline auto SPA     = detail::ESC(std::nullopt, 'V', VTType::VT220, { .mnemonic = "SPA", .comment = "Start of Protected Area; protects written cells against erases." });
+constexpr inline auto EPA     = detail::ESC(std::nullopt, 'W', VTType::VT220, { .mnemonic = "EPA", .comment = "End of Protected Area; stops protecting newly written cells." });
+
+// VT52 — the legacy single-character escape grammar, active only in VT52 mode (DECANM reset). These
+// share ESC finals with ANSI functions (e.g. ESC H = home vs HTS), hence their own FunctionCategory.
+constexpr inline auto VT52_CUU        = detail::VT52('A', 0, 0, { .mnemonic = "VT52_CUU", .comment = "VT52: Cursor Up." }); // NOLINT
+constexpr inline auto VT52_CUD        = detail::VT52('B', 0, 0, { .mnemonic = "VT52_CUD", .comment = "VT52: Cursor Down." }); // NOLINT
+constexpr inline auto VT52_CUF        = detail::VT52('C', 0, 0, { .mnemonic = "VT52_CUF", .comment = "VT52: Cursor Right." }); // NOLINT
+constexpr inline auto VT52_CUB        = detail::VT52('D', 0, 0, { .mnemonic = "VT52_CUB", .comment = "VT52: Cursor Left." }); // NOLINT
+constexpr inline auto VT52_GRAPHICS_ON  = detail::VT52('F', 0, 0, { .mnemonic = "VT52_GRAPHICS_ON", .comment = "VT52: Enter graphics mode." }); // NOLINT
+constexpr inline auto VT52_GRAPHICS_OFF = detail::VT52('G', 0, 0, { .mnemonic = "VT52_GRAPHICS_OFF", .comment = "VT52: Exit graphics mode." }); // NOLINT
+constexpr inline auto VT52_HOME       = detail::VT52('H', 0, 0, { .mnemonic = "VT52_HOME", .comment = "VT52: Cursor to home (row 1, column 1)." }); // NOLINT
+constexpr inline auto VT52_RI         = detail::VT52('I', 0, 0, { .mnemonic = "VT52_RI", .comment = "VT52: Reverse line feed." }); // NOLINT
+constexpr inline auto VT52_ED         = detail::VT52('J', 0, 0, { .mnemonic = "VT52_ED", .comment = "VT52: Erase to end of screen." }); // NOLINT
+constexpr inline auto VT52_EL         = detail::VT52('K', 0, 0, { .mnemonic = "VT52_EL", .comment = "VT52: Erase to end of line." }); // NOLINT
+constexpr inline auto VT52_CUP        = detail::VT52('Y', 2, 2, { .mnemonic = "VT52_CUP", .comment = "VT52: Direct cursor address (ESC Y row col)." }); // NOLINT
+constexpr inline auto VT52_DECID      = detail::VT52('Z', 0, 0, { .mnemonic = "VT52_DECID", .comment = "VT52: Identify (responds ESC / Z)." }); // NOLINT
+constexpr inline auto VT52_DECKPAM    = detail::VT52('=', 0, 0, { .mnemonic = "VT52_DECKPAM", .comment = "VT52: Enter alternate keypad mode." }); // NOLINT
+constexpr inline auto VT52_DECKPNM    = detail::VT52('>', 0, 0, { .mnemonic = "VT52_DECKPNM", .comment = "VT52: Exit alternate keypad mode." }); // NOLINT
+constexpr inline auto VT52_ANSI       = detail::VT52('<', 0, 0, { .mnemonic = "VT52_ANSI", .comment = "VT52: Leave VT52, return to ANSI mode." }); // NOLINT
+
+// CSI
+constexpr inline auto ArgsMax = 127; // this is the maximum number that fits into 7 bits.
+
+// CSI functions
+constexpr inline auto ANSIDSR     = detail::CSI(std::nullopt, 1, 1, std::nullopt, 'n', VTType::VT100, documentation::ANSIDSR);
+constexpr inline auto ANSISYSSC   = detail::CSI(std::nullopt, 0, 0, std::nullopt, 'u', VTType::VT100, documentation::ANSISYSSC);
+constexpr inline auto CBT         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'Z', VTType::VT100, documentation::CBT);
+constexpr inline auto CHA         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'G', VTType::VT100, documentation::CHA);
+constexpr inline auto CHT         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'I', VTType::VT100, documentation::CHT);
+constexpr inline auto CNL         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'E', VTType::VT100, documentation::CNL);
+constexpr inline auto CPL         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'F', VTType::VT100, documentation::CPL);
+constexpr inline auto CSIUENHCE   = detail::CSI('=', 0, 2, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIUENHCE);
+constexpr inline auto CSIUENTER   = detail::CSI('>', 0, 1, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIUENTER);
+constexpr inline auto CSIULEAVE   = detail::CSI('<', 0, 1, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIULEAVE);
+constexpr inline auto CSIUQUERY   = detail::CSI('?', 0, 0, std::nullopt, 'u', VTExtension::Unknown, documentation::CSIUQUERY);
+constexpr inline auto CUB         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'D', VTType::VT100, documentation::CUB);
+constexpr inline auto CUD         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'B', VTType::VT100, documentation::CUD);
+constexpr inline auto CUF         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'C', VTType::VT100, documentation::CUF);
+constexpr inline auto CUP         = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'H', VTType::VT100, documentation::CUP);
+constexpr inline auto CUU         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'A', VTType::VT100, documentation::CUU);
+constexpr inline auto DA1         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'c', VTType::VT100, documentation::DA1);
+constexpr inline auto DA2         = detail::CSI('>', 0, 1, std::nullopt, 'c', VTType::VT100, documentation::DA2);
+constexpr inline auto DA3         = detail::CSI('=', 0, 1, std::nullopt, 'c', VTType::VT100, documentation::DA3);
+constexpr inline auto DCH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'P', VTType::VT100, documentation::DCH);
+constexpr inline auto DECAC       = detail::CSI(std::nullopt, 1, 3, ',', '|', VTType::VT525, documentation::DECAC);
+constexpr inline auto DECATC      = detail::CSI(std::nullopt, 0, 3, ',', '}', VTType::VT525, documentation::DECATC);
+constexpr inline auto DECCARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 'r', VTType::VT420, documentation::DECCARA);
+// Nine, not the eight DECCRA defines: a trailing `;` supplies a ninth, omitted parameter, and ECMA-48
+// 5.4.1 makes that legal -- a parameter string is sub-strings separated by `;`, so a trailing one is an
+// empty sub-string taking its default. vttest writes DECCRA exactly that way (esc.c:732,
+// `"%d;%d;%d;%d;%d;%d;%d;%d;$v"`), and an omitted parameter is counted here, so the sequence arrives
+// with nine and matched nothing at all. The handler reads parameters 0..7 by name and never looks at a
+// ninth; a terminal must ignore parameters it does not use.
+constexpr inline auto DECCRA      = detail::CSI(std::nullopt, 0, 9, '$', 'v', VTType::VT420, documentation::DECCRA);
+constexpr inline auto DECDC       = detail::CSI(std::nullopt, 0, 1, '\'', '~', VTType::VT420, documentation::DECDC);
+constexpr inline auto DECELR      = detail::CSI(std::nullopt, 0, 2, '\'', 'z', VTType::VT320, documentation::DECELR);
+constexpr inline auto DECSLE      = detail::CSI(std::nullopt, 0, ArgsMax, '\'', '{', VTType::VT320, documentation::DECSLE);
+constexpr inline auto DECRQLP     = detail::CSI(std::nullopt, 0, 1, '\'', '|', VTType::VT320, documentation::DECRQLP);
+constexpr inline auto DECERA      = detail::CSI(std::nullopt, 0, 4, '$', 'z', VTType::VT420, documentation::DECERA);
+constexpr inline auto DECFRA      = detail::CSI(std::nullopt, 0, 5, '$', 'x', VTType::VT420, documentation::DECFRA);
+constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', VTType::VT420, documentation::DECIC);
+constexpr inline auto DECINVM     = detail::CSI(std::nullopt, 0, 1, '*', 'z', VTType::VT420, documentation::DECINVM);
+constexpr inline auto DECPS       = detail::CSI(std::nullopt, 3, 18, ',', '~', VTType::VT520, documentation::DECPS);
+constexpr inline auto DECRARA     = detail::CSI(std::nullopt, 5, ArgsMax, '$', 't', VTType::VT420, documentation::DECRARA);
+constexpr inline auto DECRQCRA    = detail::CSI(std::nullopt, 0, 6, '*', 'y', VTType::VT420, documentation::DECRQCRA);
+constexpr inline auto DECSACE     = detail::CSI(std::nullopt, 0, 1, '*', 'x', VTType::VT420, documentation::DECSACE);
+constexpr inline auto DECELF      = detail::CSI(std::nullopt, 0, 1, '+', 'q', VTType::VT420, documentation::DECELF);
+constexpr inline auto DECLFKC     = detail::CSI(std::nullopt, 0, 1, '*', '}', VTType::VT420, documentation::DECLFKC);
+constexpr inline auto DECSMKR     = detail::CSI(std::nullopt, 0, 1, '+', 'r', VTType::VT420, documentation::DECSMKR);
+constexpr inline auto DECRM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'l', VTType::VT100, documentation::DECRM);
+constexpr inline auto DECREQTPARM = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'x', VTType::VT100, documentation::DECREQTPARM);
+constexpr inline auto DECRQM      = detail::CSI('?', 1, 1, '$', 'p', VTType::VT320, documentation::DECRQM);
+constexpr inline auto DECRQM_ANSI = detail::CSI(std::nullopt, 1, 1, '$', 'p', VTType::VT320, documentation::DECRQM_ANSI);// NOLINT
+constexpr inline auto DECRQPSR    = detail::CSI(std::nullopt, 1, 1, '$', 'w', VTType::VT320, documentation::DECRQPSR);
+constexpr inline auto DECRQUPSS   = detail::CSI(std::nullopt, 0, 0, '&', 'u', VTType::VT320, documentation::DECRQUPSS);
+constexpr inline auto DECSASD     = detail::CSI(std::nullopt, 0, 1, '$', '}', VTType::VT420, documentation::DECSASD);
+constexpr inline auto DECSCA      = detail::CSI(std::nullopt, 0, 1, '"', 'q', VTType::VT240, documentation::DECSCA);
+constexpr inline auto DECSCL      = detail::CSI(std::nullopt, 1, 2, '"', 'p', VTType::VT220, documentation::DECSCL);
+constexpr inline auto DECSCPP     = detail::CSI(std::nullopt, 0, 1, '$', '|', VTType::VT100, documentation::DECSCPP);
+constexpr inline auto DECSCUSR    = detail::CSI(std::nullopt, 0, 1, ' ', 'q', VTType::VT520, documentation::DECSCUSR);
+constexpr inline auto DECSED      = detail::CSI('?', 0, 1, std::nullopt, 'J', VTType::VT240, documentation::DECSED);
+constexpr inline auto DECSEL      = detail::CSI('?', 0, 1, std::nullopt, 'K', VTType::VT240, documentation::DECSEL);
+constexpr inline auto DECSERA     = detail::CSI(std::nullopt, 0, 4, '$', '{', VTType::VT240, documentation::DECSERA);
+constexpr inline auto DECSLRM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 's', VTType::VT420, documentation::DECSLRM);
+constexpr inline auto DECSM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'h', VTType::VT100, documentation::DECSM);
+constexpr inline auto DECSNLS     = detail::CSI(std::nullopt, 0, 1, '*', '|', VTType::VT420, documentation::DECSNLS);
+constexpr inline auto DECSSCLS    = detail::CSI(std::nullopt, 0, 1, ' ', 'p', VTType::VT510, documentation::DECSSCLS);
+constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VTType::VT320, documentation::DECSSDT);
+constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'r', VTType::VT100, documentation::DECSTBM);
+constexpr inline auto DECSTGLT    = detail::CSI(std::nullopt, 0, 1, ')', '{', VTType::VT525, documentation::DECSTGLT);
+constexpr inline auto DECSTR      = detail::CSI(std::nullopt, 0, 0, '!', 'p', VTType::VT100, documentation::DECSTR);
+constexpr inline auto DECTST      = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'y', VTType::VT100, documentation::DECTST);
+constexpr inline auto DL          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'M', VTType::VT100, documentation::DL);
+constexpr inline auto DSR         = detail::CSI('?', 1, 2, std::nullopt, 'n', VTType::VT100, documentation::DSR);
+constexpr inline auto ECH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'X', VTType::VT420, documentation::ECH);
+constexpr inline auto ED          = detail::CSI(std::nullopt, 0, ArgsMax, std::nullopt, 'J', VTType::VT100, documentation::ED);
+constexpr inline auto EL          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'K', VTType::VT100, documentation::EL);
+constexpr inline auto HPA         = detail::CSI(std::nullopt, 0, 1, std::nullopt, '`', VTType::VT100, documentation::HPA);
+constexpr inline auto HPR         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'a', VTType::VT100, documentation::HPR);
+constexpr inline auto HVP         = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'f', VTType::VT100, documentation::HVP);
+constexpr inline auto ICH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, '@', VTType::VT420, documentation::ICH);
+constexpr inline auto IL          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'L', VTType::VT100, documentation::IL);
+constexpr inline auto REP         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'b', VTType::VT100, documentation::REP);
+constexpr inline auto RM          = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'l', VTType::VT100, documentation::RM);
+constexpr inline auto SCOSC       = detail::CSI(std::nullopt, 0, 0, std::nullopt, 's', VTType::VT100, documentation::SCOSC);
+constexpr inline auto SD          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'T', VTType::VT100, documentation::SD);
+constexpr inline auto SGR         = detail::CSI(std::nullopt, 0, ArgsMax, std::nullopt, 'm', VTType::VT100, documentation::SGR);
+constexpr inline auto SM          = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'h', VTType::VT100, documentation::SM);
+constexpr inline auto SU          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'S', VTType::VT100, documentation::SU);
+constexpr inline auto SL          = detail::CSI(std::nullopt, 0, 1, ' ', '@', VTType::VT420, documentation::SL);
+constexpr inline auto SR          = detail::CSI(std::nullopt, 0, 1, ' ', 'A', VTType::VT420, documentation::SR);
+constexpr inline auto UNSCROLL    = detail::CSI(std::nullopt, 0, 1, '+', 'T', VTExtension::Unknown, documentation::UNSCROLL);
+constexpr inline auto TBC         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'g', VTType::VT100, documentation::TBC);
+constexpr inline auto VPA         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'd', VTType::VT100, documentation::VPA);
+constexpr inline auto VPR         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'e', VTType::VT100, documentation::VPR);
+constexpr inline auto WINMANIP    = detail::CSI(std::nullopt, 1, 3, std::nullopt, 't', VTExtension::XTerm, documentation::WINMANIP);
+// XTCAPTURE is a Contour extension. It historically used the bare `CSI > Ps ; Ps t`, which is xterm's
+// standard XTSMTITLE opcode -- a genuine collision. XTSMTITLE (below) now owns the bare form, and the
+// capture is namespaced by a ',' intermediate (which XTSMTITLE never carries): `CSI > Ps ; Ps , t`.
+constexpr inline auto XTCAPTURE   = detail::CSI('>', 0, 2, ',', 't', VTExtension::Contour, documentation::XTCAPTURE);
+// XTSMTITLE / XTRMTITLE: xterm Set/Reset Title Mode features. Each parameter (0..3) is a title-mode
+// feature; no parameter resets all title modes to their default. @see TitleModeFeature.
+constexpr inline auto XTSMTITLE   = detail::CSI('>', 0, ArgsMax, std::nullopt, 't', VTExtension::XTerm, documentation::XTSMTITLE);
+constexpr inline auto XTRMTITLE   = detail::CSI('>', 0, ArgsMax, std::nullopt, 'T', VTExtension::XTerm, documentation::XTRMTITLE);
+constexpr inline auto XTPOPCOLORS    = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'Q', VTExtension::XTerm, documentation::XTPOPCOLORS);
+constexpr inline auto XTPUSHCOLORS   = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'P', VTExtension::XTerm, documentation::XTPUSHCOLORS);
+constexpr inline auto SGRRESTORE  = detail::CSI(std::nullopt, 0, 0, '#', '}', VTExtension::XTerm, documentation:: SGRRESTORE);
+constexpr inline auto SGRSAVE     = detail::CSI(std::nullopt, 0, 0, '#', '{', VTExtension::XTerm, documentation::SGRSAVE);
+constexpr inline auto XTREPORTCOLORS = detail::CSI(std::nullopt, 0, 0, '#', 'R', VTExtension::XTerm, documentation::XTREPORTCOLORS);
+constexpr inline auto XTRESTORE   = detail::CSI('?', 0, ArgsMax, std::nullopt, 'r', VTExtension::XTerm, documentation::XTRESTORE);
+constexpr inline auto XTSAVE      = detail::CSI('?', 0, ArgsMax, std::nullopt, 's', VTExtension::XTerm, documentation::XTSAVE);
+constexpr inline auto XTSHIFTESCAPE=detail::CSI('>', 0, 1, std::nullopt, 's', VTExtension::XTerm, documentation::XTSHIFTESCAPE);
+constexpr inline auto XTCHECKSUM  = detail::CSI(std::nullopt, 0, 1, '#', 'y', VTExtension::XTerm, documentation::XTCHECKSUM);
+constexpr inline auto XTSMGRAPHICS= detail::CSI('?', 2, 4, std::nullopt, 'S', VTExtension::XTerm, documentation::XTSMGRAPHICS);
+constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VTExtension::XTerm, documentation::XTVERSION);
+// `CSI > Pp ; Pv m` — Pp is the RESOURCE selector, Pv its value; `CSI > Pp m` resets one
+// resource and bare `CSI > m` resets all, so minArgs stays 0 and maxArgs 2.
+// @see ctlseqs.txt "Set/reset key modifier options (XTMODKEYS)".
+constexpr inline auto XTMODKEYS   = detail::CSI('>', 0, 2, std::nullopt, 'm', VTExtension::XTerm, documentation::XTMODKEYS);
+constexpr inline auto XTRMMODKEYS = detail::CSI('>', 0, 1, std::nullopt, 'n', VTExtension::XTerm, documentation::XTRMMODKEYS);
+constexpr inline auto SBQUERY         = detail::CSI('>', 0, 6, std::nullopt, 'b', VTExtension::Contour, documentation::SBQUERY);
+
+// DEC Multi-Page Navigation (VT420)
+constexpr inline auto NP              = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'U', VTType::VT420, documentation::NP);
+constexpr inline auto PP              = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'V', VTType::VT420, documentation::PP);
+constexpr inline auto PPA             = detail::CSI(std::nullopt, 0, 1, ' ', 'P', VTType::VT420, documentation::PPA);
+constexpr inline auto PPR             = detail::CSI(std::nullopt, 0, 1, ' ', 'Q', VTType::VT420, documentation::PPR);
+constexpr inline auto PPB             = detail::CSI(std::nullopt, 0, 1, ' ', 'R', VTType::VT420, documentation::PPB);
+constexpr inline auto DECRQDE         = detail::CSI(std::nullopt, 0, 0, '"', 'v', VTType::VT420, documentation::DECRQDE);
+
+// DCS functions
+constexpr inline auto DECAUPSS    = detail::DCS(std::nullopt, 0, 1, '!', 'u', VTType::VT320, documentation::DECAUPSS);
+constexpr inline auto DECDLD      = detail::DCS(std::nullopt, 0, 8, std::nullopt, '{', VTType::VT220, documentation::DECDLD);
+constexpr inline auto DECDMAC     = detail::DCS(std::nullopt, 0, 3, '!', 'z', VTType::VT420, documentation::DECDMAC);
+constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, documentation::DECRQSS);
+constexpr inline auto DECUDK      = detail::DCS(std::nullopt, 0, 2, std::nullopt, '|', VTType::VT220, documentation::DECUDK);
+constexpr inline auto DECSIXEL    = detail::DCS(std::nullopt, 0, 3, std::nullopt, 'q', VTType::VT330, documentation::DECSIXEL);
+constexpr inline auto REGIS       = detail::DCS(std::nullopt, 0, 1, std::nullopt, 'p', VTType::VT330, documentation::REGIS);
+constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTExtension::Contour, documentation::STP);
+constexpr inline auto XTGETTCAP   = detail::DCS(std::nullopt, 0, 0, '+', 'q', VTExtension::XTerm, documentation::XTGETTCAP);
+
+// OSC
+constexpr inline auto CLIPBOARD         = detail::OSC(52, VTExtension::XTerm, documentation::CLIPBOARD);
+constexpr inline auto COLORBG           = detail::OSC(11, VTExtension::XTerm, documentation::COLORBG);
+constexpr inline auto COLORCURSOR       = detail::OSC(12, VTExtension::XTerm, documentation::COLORCURSOR);
+constexpr inline auto COLORFG           = detail::OSC(10, VTExtension::XTerm, documentation::COLORFG);
+constexpr inline auto COLORHIGHLIGHTBG  = detail::OSC(17, VTExtension::XTerm, documentation::COLORHIGHLIGHTBG);
+constexpr inline auto COLORHIGHLIGHTFG  = detail::OSC(19, VTExtension::XTerm, documentation::COLORHIGHLIGHTFG);
+constexpr inline auto COLORMOUSEBG      = detail::OSC(14, VTExtension::XTerm, documentation::COLORMOUSEBG);
+constexpr inline auto COLORMOUSEFG      = detail::OSC(13, VTExtension::XTerm, documentation::COLORMOUSEFG);
+constexpr inline auto COLORSPECIAL      = detail::OSC(106, VTExtension::XTerm, documentation::COLORSPECIAL);
+constexpr inline auto DUMPSTATE         = detail::OSC(888, VTExtension::Contour, documentation::DUMPSTATE);
+constexpr inline auto CONEMU            = detail::OSC(9, VTExtension::Unknown, documentation::CONEMU);
+constexpr inline auto HYPERLINK         = detail::OSC(8, VTExtension::Unknown, documentation::HYPERLINK);
+constexpr inline auto NOTIFY            = detail::OSC(777, VTExtension::XTerm, documentation::NOTIFY);
+constexpr inline auto SETTABNAME        = detail::OSC(30, VTExtension::XTerm, documentation::SETTABNAME);
+constexpr inline auto RCOLORBG          = detail::OSC(111, VTExtension::XTerm, documentation::RCOLORBG);
+constexpr inline auto RCOLORCURSOR      = detail::OSC(112, VTExtension::XTerm, documentation::RCOLORCURSOR);
+constexpr inline auto RCOLORFG          = detail::OSC(110, VTExtension::XTerm, documentation::RCOLORFG);
+constexpr inline auto RCOLORHIGHLIGHTBG = detail::OSC(117, VTExtension::XTerm, documentation::RCOLORHIGHLIGHTBG);
+constexpr inline auto RCOLORHIGHLIGHTFG = detail::OSC(119, VTExtension::XTerm, documentation::RCOLORHIGHLIGHTFG);
+constexpr inline auto RCOLORMOUSEBG     = detail::OSC(114, VTExtension::XTerm, documentation::RCOLORMOUSEBG);
+constexpr inline auto RCOLORMOUSEFG     = detail::OSC(113, VTExtension::XTerm, documentation::RCOLORMOUSEFG);
+constexpr inline auto RCOLPAL           = detail::OSC(104, VTExtension::XTerm, documentation::RCOLPAL);
+constexpr inline auto SEMA              = detail::OSC(133, VTExtension::Unknown, documentation::SEMA);
+constexpr inline auto SETCOLPAL         = detail::OSC(4, VTExtension::XTerm, documentation::SETCOLPAL);
+constexpr inline auto SETSPECIALCOLPAL  = detail::OSC(5, VTExtension::XTerm, documentation::SETSPECIALCOLPAL);
+constexpr inline auto RCOLSPECIALPAL    = detail::OSC(105, VTExtension::XTerm, documentation::RCOLSPECIALPAL);
+constexpr inline auto SETCWD            = detail::OSC(7, VTExtension::XTerm, documentation::SETCWD);
+constexpr inline auto SETFONT           = detail::OSC(50, VTExtension::XTerm, documentation::SETFONT);
+constexpr inline auto SETFONTALL        = detail::OSC(60, VTExtension::Contour, documentation::SETFONTALL);
+constexpr inline auto SETICON           = detail::OSC(1, VTExtension::XTerm, documentation::SETICON);
+constexpr inline auto SETTITLE          = detail::OSC(0, VTExtension::XTerm, documentation::SETTITLE);
+constexpr inline auto SETWINTITLE       = detail::OSC(2, VTExtension::XTerm, documentation::SETWINTITLE);
+constexpr inline auto SETXPROP          = detail::OSC(3, VTExtension::XTerm, documentation::SETXPROP);
+constexpr inline auto DESKTOPNOTIFY    = detail::OSC(99, VTExtension::Unknown, documentation::DESKTOPNOTIFY);
+constexpr inline auto ITERM2           = detail::OSC(1337, VTExtension::Unknown, documentation::ITERM2);
+constexpr inline auto TEXTSIZING       = detail::OSC(66, VTExtension::Unknown, documentation::TEXTSIZING);
+constexpr inline auto KITTYCLIPBOARD   = detail::OSC(5522, VTExtension::Unknown, documentation::KITTYCLIPBOARD);
+constexpr inline auto POINTERSHAPE     = detail::OSC(22, VTExtension::Unknown, documentation::POINTERSHAPE);
+
+// NOLINTEND(readability-identifier-naming)
+// clang-format on
+
+// DCS: Good Image Protocol (single DCS ! g sequence, operation via 'o' message header)
+constexpr inline auto GIP = detail::DCS(std::nullopt, 0, 0, '!', 'g', VTType::VT525, documentation::GIP);
+
+constexpr inline auto CaptureBufferCode = 314;
+
+// HACK to get older compiler work (GCC 9.4)
+constexpr static auto allFunctionsArray() noexcept
+{
+    auto funcs = std::array {
+        // C0
+        EOT,
+        BEL,
+        BS,
+        TAB,
+        LF,
+        VT,
+        FF,
+        CR,
+        LS0,
+        LS1,
+
+        // ESC
+        DECALN,
+        S7C1T,
+        S8C1T,
+        DOCS_DEFAULT,
+        DOCS_UTF8,
+        DECID,
+        DECBI,
+        DECDHL_Bottom,
+        DECDHL_Top,
+        DECDWL,
+        DECFI,
+        DECKPAM,
+        DECKPNM,
+        DECRS,
+        DECSC,
+        DECSWL,
+        HTS,
+        IND,
+        NEL,
+        RI,
+        RIS,
+        SCS_G0_SPECIAL,
+        SCS_G0_BRITISH,
+        SCS_G0_USASCII,
+        SCS_G0_FINNISH,
+        SCS_G0_DUTCH,
+        SCS_G0_NORWEGIAN,
+        SCS_G0_FRENCH,
+        SCS_G0_FRENCHCANADIAN,
+        SCS_G0_GERMAN,
+        SCS_G0_SPANISH,
+        SCS_G0_SWEDISH,
+        SCS_G0_SWISS,
+        SCS_G0_TECHNICAL,
+        SCS_G1_SPECIAL,
+        SCS_G1_BRITISH,
+        SCS_G1_USASCII,
+        SCS_G1_FINNISH,
+        SCS_G1_DUTCH,
+        SCS_G1_NORWEGIAN,
+        SCS_G1_FRENCH,
+        SCS_G1_FRENCHCANADIAN,
+        SCS_G1_GERMAN,
+        SCS_G1_SPANISH,
+        SCS_G1_SWEDISH,
+        SCS_G1_SWISS,
+        SCS_G1_TECHNICAL,
+        SCS_G2_SPECIAL,
+        SCS_G2_USASCII,
+        SCS_G2_BRITISH,
+        SCS_G3_SPECIAL,
+        SCS_G3_USASCII,
+        SCS_G3_BRITISH,
+        SS2,
+        SS3,
+        LS2,
+        LS3,
+        LS1R,
+        LS2R,
+        LS3R,
+        SPA,
+        EPA,
+        VT52_CUU,
+        VT52_CUD,
+        VT52_CUF,
+        VT52_CUB,
+        VT52_GRAPHICS_ON,
+        VT52_GRAPHICS_OFF,
+        VT52_HOME,
+        VT52_RI,
+        VT52_ED,
+        VT52_EL,
+        VT52_CUP,
+        VT52_DECID,
+        VT52_DECKPAM,
+        VT52_DECKPNM,
+        VT52_ANSI,
+
+        // CSI
+        ANSISYSSC,
+        XTCAPTURE,
+        XTSMTITLE,
+        XTRMTITLE,
+        CBT,
+        CHA,
+        CHT,
+        CNL,
+        CPL,
+        CUB,
+        CUD,
+        CUF,
+        CUP,
+        CUU,
+        DA1,
+        DA2,
+        DA3,
+        DCH,
+        DECAC,
+        DECATC,
+        DECCARA,
+        DECCRA,
+        DECDC,
+        DECELR,
+        DECSLE,
+        DECRQLP,
+        DECERA,
+        DECINVM,
+        DECFRA,
+        DECIC,
+        DECPS,
+        DECRARA,
+        DECREQTPARM,
+        DECRQCRA,
+        DECSACE,
+        DECELF,
+        DECLFKC,
+        DECSMKR,
+        DECSCA,
+        DECSED,
+        DECSERA,
+        DECSEL,
+        ANSIDSR,
+        DSR,
+        XTRESTORE,
+        XTSAVE,
+        CSIUENTER,
+        CSIUQUERY,
+        CSIUENHCE,
+        CSIULEAVE,
+        DECRM,
+        DECRQM,
+        DECRQM_ANSI,
+        DECRQPSR,
+        DECSASD,
+        DECSCL,
+        DECSCPP,
+        DECSCUSR,
+        DECSLRM,
+        DECSSCLS,
+        DECSM,
+        DECSNLS,
+        DECSSDT,
+        DECSTBM,
+        DECSTGLT,
+        DECSTR,
+        DECTST,
+        DL,
+        ECH,
+        ED,
+        EL,
+        HPA,
+        HPR,
+        HVP,
+        ICH,
+        IL,
+        REP,
+        RM,
+        SCOSC,
+        SD,
+        SGR,
+        SGRRESTORE,
+        SGRSAVE,
+        SL,
+        SM,
+        SR,
+        SU,
+        UNSCROLL,
+        TBC,
+        VPA,
+        VPR,
+        WINMANIP,
+        XTPOPCOLORS,
+        XTPUSHCOLORS,
+        XTREPORTCOLORS,
+        XTCHECKSUM,
+        XTSHIFTESCAPE,
+        XTSMGRAPHICS,
+        XTVERSION,
+        XTMODKEYS,
+        XTRMMODKEYS,
+        SBQUERY,
+        NP,
+        PP,
+        PPA,
+        PPR,
+        PPB,
+        DECRQDE,
+        DECRQUPSS,
+
+        // DCS
+        DECAUPSS,
+        DECDLD,
+        DECDMAC,
+        DECUDK,
+        GIP,
+        STP,
+        DECRQSS,
+        DECSIXEL,
+        REGIS,
+        XTGETTCAP,
+
+        // OSC
+        SETICON,
+        SETTITLE,
+        SETWINTITLE,
+        SETXPROP,
+        SETCOLPAL,
+        SETSPECIALCOLPAL,
+        RCOLSPECIALPAL,
+        SETCWD,
+        CONEMU,
+        HYPERLINK,
+        COLORFG,
+        COLORBG,
+        COLORCURSOR,
+        COLORMOUSEFG,
+        COLORMOUSEBG,
+        COLORHIGHLIGHTFG,
+        COLORHIGHLIGHTBG,
+        SEMA,
+        SETFONT,
+        SETFONTALL,
+        CLIPBOARD,
+        RCOLPAL,
+        COLORSPECIAL,
+        RCOLORFG,
+        RCOLORBG,
+        RCOLORCURSOR,
+        RCOLORMOUSEFG,
+        RCOLORMOUSEBG,
+        RCOLORHIGHLIGHTFG,
+        RCOLORHIGHLIGHTBG,
+        SETTABNAME,
+        NOTIFY,
+        DESKTOPNOTIFY,
+        ITERM2,
+        TEXTSIZING,
+        KITTYCLIPBOARD,
+        POINTERSHAPE,
+        DUMPSTATE,
+    };
+    return funcs;
+}
+
+inline auto allFunctions() noexcept
+{
+    static auto const funcs = []() constexpr {
+        auto funcs = allFunctionsArray();
+        crispy::sort(funcs, [](Function const& a, Function const& b) constexpr { return compare(a, b); });
+        return funcs;
+    }();
+
+    return funcs;
+}
+
+// Class to store all supported VT sequence and support properly enabling/disabling them
+// The storage stores all available definition at all time and is partitioned into
+// two parts first part contains all active sequences and last part contains all
+// disabled sequences
+class SupportedSequences
+{
+
+  public:
+    [[nodiscard]] constexpr auto begin() noexcept { return _supportedSequences.data(); }
+
+    [[nodiscard]] constexpr auto end() noexcept { return begin() + _lastIndex; }
+
+    [[nodiscard]] constexpr auto cbegin() const noexcept { return _supportedSequences.data(); }
+
+    [[nodiscard]] constexpr auto cend() const noexcept { return cbegin() + _lastIndex; }
+
+    [[nodiscard]] constexpr gsl::span<Function const> allSequences() const noexcept
+    {
+        return { cbegin(), _supportedSequences.size() };
+    }
+
+    [[nodiscard]] constexpr gsl::span<Function const> activeSequences() const noexcept
+    {
+        return { cbegin(), _lastIndex };
+    }
+
+    CRISPY_CONSTEXPR void reset(VTType vt) noexcept
+    {
+        // Partition the array so the first half holds every sequence available at the given operating
+        // level (conformanceLevel <= vt). Two sequences are always kept available regardless of level:
+        //
+        //  * DECSCL is the very sequence that *sets* the operating level, so gating it by the level it
+        //    controls would be a trap -- `DECSCL 61` (drop to VT100) would deactivate DECSCL itself,
+        //    leaving no way to ever raise the level again. xterm likewise keys DECSCL off terminal_id.
+        //
+        //  * DECRQCRA merely *reports* a checksum of the screen; xterm answers it at any operating level
+        //    (its checksum handler is not level-gated), and conformance tools rely on it to read the
+        //    screen back even after dropping to VT100. Unlike a feature-enabling sequence, answering a
+        //    read request at a lower level corrupts no state -- and unlike DECRQM (which stays gated, as
+        //    esctest's Level2DoesntSupportDECRQM requires), it is a pure measurement.
+        //
+        // Contour's hardware identity is VT525, so both are genuine capabilities at every level.
+        auto* itr = std::partition(begin(),
+                                   _supportedSequences.data() + _supportedSequences.size(),
+                                   [vt](Function const& value) noexcept {
+                                       return value.conformanceLevel <= vt || value.id() == DECSCL.id()
+                                              || value.id() == DECRQCRA.id();
+                                   });
+
+        _lastIndex = std::distance(begin(), itr);
+        gsl::span<Function> availableDefinition(begin(), _lastIndex);
+        crispy::sort(availableDefinition,
+                     [](Function const& a, Function const& b) constexpr { return compare(a, b); });
+    }
+
+    CRISPY_CONSTEXPR void disableSequence(Function seq) noexcept
+    {
+        Function* seqIter = std::ranges::find(*this, seq);
+        if (seqIter != end())
+        {
+            // Move the disabled sequence to the end of array, keep the rest of active sequences sorted
+            std::rotate(seqIter, seqIter + 1, _supportedSequences.data() + _supportedSequences.size());
+            --_lastIndex;
+        }
+    }
+
+    CRISPY_CONSTEXPR void enableSequence(Function seq) noexcept
+    {
+        auto* const endArray = _supportedSequences.data() + _supportedSequences.size();
+        auto* seqIter = std::find(end(), endArray, seq);
+        if (seqIter != endArray)
+        {
+            // Maybe could be done better since rest of the data is sorted
+            std::iter_swap(end(), seqIter);
+            ++_lastIndex;
+            gsl::span<Function> arr(begin(), end());
+            crispy::sort(arr, [](Function const& a, Function const& b) constexpr { return compare(a, b); });
+        }
+    }
+
+  private:
+    std::array<Function, allFunctionsArray().size()> _supportedSequences = allFunctions();
+    size_t _lastIndex = allFunctions().size(); // No of total active sequences
+};
+
+/// Selects a FunctionDefinition based on a FunctionSelector.
+///
+/// @return the matching FunctionDefinition or nullptr if none matched.
+Function const* select(FunctionSelector const& selector,
+                       gsl::span<Function const> availableDefinition) noexcept;
+
+/// Selects a FunctionDefinition based on given input Escape sequence fields.
+///
+/// @p intermediate an optional intermediate character between (0x20 .. 0x2F)
+/// @p finalCharacter between 0x40 .. 0x7F
+///
+/// @notice multi-character intermediates are intentionally not supported.
+///
+/// @return the matching FunctionDefinition or nullptr if none matched.
+inline Function const* selectEscape(char intermediate,
+                                    char finalCharacter,
+                                    gsl::span<Function const> availableDefinition)
+{
+    return select({ .category = FunctionCategory::ESC,
+                    .leader = 0,
+                    .argc = 0,
+                    .intermediate = intermediate,
+                    .finalSymbol = finalCharacter },
+                  availableDefinition);
+}
+
+/// Selects a FunctionDefinition based on given input control sequence fields.
+///
+/// @p leader an optional value between 0x3C .. 0x3F
+/// @p argc number of arguments supplied
+/// @p intermediate an optional intermediate character between (0x20 .. 0x2F)
+/// @p finalCharacter between 0x40 .. 0x7F
+///
+/// @notice multi-character intermediates are intentionally not supported.
+///
+/// @return the matching FunctionDefinition or nullptr if none matched.
+inline Function const* selectControl(char leader,
+                                     int argc,
+                                     char intermediate,
+                                     char finalCharacter,
+                                     gsl::span<Function const> availableDefinition)
+{
+    return select({ .category = FunctionCategory::CSI,
+                    .leader = leader,
+                    .argc = argc,
+                    .intermediate = intermediate,
+                    .finalSymbol = finalCharacter },
+                  availableDefinition);
+}
+
+/// Selects a FunctionDefinition based on given input control sequence fields.
+///
+/// @p id leading numeric identifier (such as 8 for hyperlink)
+///
+/// @notice multi-character intermediates are intentionally not supported.
+///
+/// @return the matching FunctionDefinition or nullptr if none matched.
+inline Function const* selectOSCommand(int id, gsl::span<Function const> availableDefinition)
+{
+    return select(
+        { .category = FunctionCategory::OSC, .leader = 0, .argc = id, .intermediate = 0, .finalSymbol = 0 },
+        availableDefinition);
+}
+
+} // namespace vtbackend
+
+template <>
+struct std::hash<vtbackend::Function>
+{
+    /// This is actually perfect hashing.
+    constexpr uint32_t operator()(vtbackend::Function const& fun) const noexcept { return fun.id(); }
+};
+
+// {{{ fmtlib support
+template <>
+struct std::formatter<vtbackend::FunctionCategory>: std::formatter<std::string_view>
+{
+    auto format(vtbackend::FunctionCategory const value, auto& ctx) const
+    {
+        using vtbackend::FunctionCategory;
+        string_view name;
+        switch (value)
+        {
+            case FunctionCategory::C0:
+                name = "C0";
+                break;
+                ;
+            case FunctionCategory::ESC:
+                name = "ESC";
+                break;
+                ;
+            case FunctionCategory::VT52:
+                name = "VT52";
+                break;
+                ;
+            case FunctionCategory::CSI:
+                name = "CSI";
+                break;
+                ;
+            case FunctionCategory::OSC:
+                name = "OSC";
+                break;
+                ;
+            case FunctionCategory::DCS:
+                name = "DCS";
+                break;
+                ;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::Function>: std::formatter<std::string>
+{
+    auto format(vtbackend::Function const f, auto& ctx) const
+    {
+        std::string value;
+        switch (f.category)
+        {
+            case vtbackend::FunctionCategory::C0:
+                value = std::format("{}", crispy::escape(static_cast<uint8_t>(f.finalSymbol)));
+                break;
+            case vtbackend::FunctionCategory::ESC:
+            case vtbackend::FunctionCategory::VT52:
+                value = std::format("{} {} {}",
+                                    f.category,
+                                    f.intermediate ? f.intermediate : ' ',
+                                    f.finalSymbol ? f.finalSymbol : ' ');
+                break;
+            case vtbackend::FunctionCategory::OSC:
+                value = std::format("{} {}", f.category, f.maximumParameters);
+                break;
+            case vtbackend::FunctionCategory::DCS:
+            case vtbackend::FunctionCategory::CSI:
+                if (f.minimumParameters == f.maximumParameters)
+                    value = std::format("{} {} {}    {} {}",
+                                        f.category,
+                                        f.leader ? f.leader : ' ',
+                                        f.minimumParameters,
+                                        f.intermediate ? f.intermediate : ' ',
+                                        f.finalSymbol);
+                else if (f.maximumParameters == vtbackend::ArgsMax)
+                    value = std::format("{} {} {}..  {} {}",
+                                        f.category,
+                                        f.leader ? f.leader : ' ',
+                                        f.minimumParameters,
+                                        f.intermediate ? f.intermediate : ' ',
+                                        f.finalSymbol);
+                else
+                    value = std::format("{} {} {}..{} {} {}",
+                                        f.category,
+                                        f.leader ? f.leader : ' ',
+                                        f.minimumParameters,
+                                        f.maximumParameters,
+                                        f.intermediate ? f.intermediate : ' ',
+                                        f.finalSymbol);
+                break;
+        }
+        return formatter<std::string>::format(value, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::FunctionSelector>: std::formatter<std::string>
+{
+    auto format(vtbackend::FunctionSelector const f, auto& ctx) const
+    {
+        std::string value;
+        // clang-format off
+        switch (f.category)
+        {
+            case vtbackend::FunctionCategory::OSC:
+                value = std::format("{} {}", f.category, f.argc);
+                break;
+            default:
+                value = std::format("{} {} {} {} {}",
+                                    f.category,
+                                    f.leader ? f.leader : ' ',
+                                    f.argc,
+                                    f.intermediate ? f.intermediate : ' ',
+                                    f.finalSymbol ? f.finalSymbol : ' ');
+                break;
+        }
+        // clang-format on
+        return formatter<std::string>::format(value, ctx);
+    }
+};
+// }}}

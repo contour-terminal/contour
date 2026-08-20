@@ -5,8 +5,8 @@
 #include <contour/cli/ShellIntegration.hpp>
 #include <contour/config/Config.hpp>
 
-#include <vtbackend/Capabilities.hpp>
-#include <vtbackend/Functions.hpp>
+#include <vtbackend/vt/Capabilities.hpp>
+#include <vtbackend/vt/Functions.hpp>
 
 #include <vtparser/Parser.hpp>
 

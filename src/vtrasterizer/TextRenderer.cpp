@@ -110,7 +110,7 @@ Making use of reserved glyph slots
 #include <vtrasterizer/TextRenderer.hpp>
 
 #include <vtbackend/Logging.hpp>
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <vtrasterizer/BoxDrawingRenderer.hpp>
 #include <vtrasterizer/GlyphAdvance.hpp>

@@ -8,7 +8,7 @@
 #include <contour/session/SessionInput.hpp>
 #include <contour/session/TerminalSession.hpp>
 
-#include <vtbackend/Terminal.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <vtrasterizer/Renderer.hpp>
 

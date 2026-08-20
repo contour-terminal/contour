@@ -13,8 +13,8 @@
 /// to the event-loop thread. Session pump threads never touch the model — they
 /// marshal completion (PTY closed) through EventLoop::post().
 
-#include <vtbackend/Settings.hpp>
-#include <vtbackend/Terminal.hpp>
+#include <vtbackend/screen/Settings.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <vtpty/PageSize.hpp>
 #include <vtpty/Pty.hpp>

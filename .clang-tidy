@@ -49,10 +49,10 @@
 #     MatchModes::Flag are bitmask enums whose values are protocol-defined bit
 #     positions, combined with bitwise operators throughout. Scoping them would
 #     require a cast at every use for no gain in type safety.
-#   * `misc-header-include-cycle` (2) -- Parser.hpp includes Parser-impl.hpp at its end,
-#     the usual template-implementation split rather than a real cycle. The
-#     Selector.hpp/ViInputHandler.hpp pair is a genuine mutual dependency and worth
-#     untangling separately; it is not a lint fix.
+#   * `misc-header-include-cycle` (1) -- Parser.hpp includes Parser-impl.hpp at its end,
+#     the usual template-implementation split rather than a real cycle, and the only
+#     report left. The Selector.hpp/ViInputHandler.hpp pair this note used to name was
+#     untangled by dropping two includes ViInputHandler.hpp did not use.
 #   * `clang-analyzer-optin.performance.Padding` (1) -- reordering vtbackend::Settings'
 #     44 fields by size would save 32 bytes on a single long-lived object while
 #     destroying the grouping that makes it readable.

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtconformance/ScreenDump.hpp>
 
-#include <vtbackend/CellProxy.hpp>
-#include <vtbackend/Screen.hpp>
-#include <vtbackend/Terminal.hpp>
+#include <vtbackend/grid/CellProxy.hpp>
+#include <vtbackend/screen/Screen.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <crispy/Utils.hpp>
 

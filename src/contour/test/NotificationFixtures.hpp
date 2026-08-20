@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/DesktopNotification.hpp>
+#include <vtbackend/vt/DesktopNotification.hpp>
 
 #include <QtCore/QCoreApplication>
 

@@ -13,7 +13,7 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 
-#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/input/InputGenerator.hpp>
 
 #include <vtpty/MockPty.hpp>
 

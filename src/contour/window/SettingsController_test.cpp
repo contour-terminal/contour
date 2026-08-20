@@ -10,7 +10,7 @@
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/window/SettingsController.hpp>
 
-#include <vtbackend/Color.hpp>
+#include <vtbackend/core/Color.hpp>
 
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>

@@ -5,7 +5,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/ModifierNames.hpp>
 
-#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/input/InputGenerator.hpp>
 
 #include <array>
 #include <string>

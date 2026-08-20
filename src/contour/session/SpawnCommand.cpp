@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/session/SpawnCommand.hpp>
 
-#include <vtbackend/FileUrl.hpp>
+#include <vtbackend/core/FileUrl.hpp>
 
 #include <QtCore/QUrl>
 

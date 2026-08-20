@@ -22,7 +22,7 @@
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 
-#include <vtbackend/Hyperlink.hpp>
+#include <vtbackend/core/Hyperlink.hpp>
 
 #include <vtpty/MockPty.hpp>
 

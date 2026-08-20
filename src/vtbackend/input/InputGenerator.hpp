@@ -1,0 +1,1138 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <vtbackend/core/Primitives.hpp>
+
+#include <crispy/Escape.hpp>
+#include <crispy/Flags.hpp>
+#include <crispy/Overloaded.hpp>
+
+#include <libunicode/convert.h>
+
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <format>
+#include <optional>
+#include <set>
+#include <string>
+#include <string_view>
+#include <utility>
+
+namespace vtbackend
+{
+
+/// Mutually exclusive mouse protocols.
+enum class MouseProtocol : uint16_t
+{
+    /// Old X10 mouse protocol
+    X10 = 9,
+    /// Normal tracking mode, that's X10 with mouse release events and modifiers
+    NormalTracking = 1000,
+    /// Highlight mouse tracking
+    HighlightTracking = 1001,
+    /// Button-event tracking protocol.
+    ButtonTracking = 1002,
+    /// Like ButtonTracking plus motion events.
+    AnyEventTracking = 1003,
+};
+
+// {{{ Modifier
+/// Chord modifiers — the keys the user is physically holding down while another key is pressed.
+///
+/// These, and only these, take part in key-chord matching. The latched lock toggles live in
+/// LockKey, which is deliberately a distinct type: conflating the two is what repeatedly broke
+/// keyboard input (see #1884, #1901, #1954).
+enum Modifier : uint8_t
+{
+    // NB: These values MUST match the values of the corresponding
+    // the bit positions in the modifier mask in CSIu keyboard protocol.
+    None = 0,
+    Shift = 1,
+    Alt = 2,
+    Control = 4,
+    Super = 8,
+    Hyper = 16,
+    Meta = 32,
+};
+
+using Modifiers = crispy::Flags<Modifier>;
+
+namespace detail
+{
+    /// One row of ChordModifierTable.
+    struct ChordModifierRow
+    {
+        /// The chord modifier this row describes.
+        Modifier modifier;
+        /// The name std::formatter<Modifier> prints for it.
+        std::string_view name;
+    };
+} // namespace detail
+
+/// The chord modifiers, in ascending bit order, each with its display name.
+///
+/// This table is the single source of truth for the chord-modifier set: AllChordModifiers,
+/// ChordModifierBitWidth and std::formatter<Modifier> are all derived from it rather than
+/// restating it. The Modifier enumerators themselves are not derived, because their values are
+/// dictated by the CSI u modifier mask, which closes the set at six bits -- 64 and 128 are the
+/// lock keys below.
+constexpr auto ChordModifierTable = std::array {
+    detail::ChordModifierRow { .modifier = Modifier::Shift, .name = "Shift" },
+    detail::ChordModifierRow { .modifier = Modifier::Alt, .name = "Alt" },
+    detail::ChordModifierRow { .modifier = Modifier::Control, .name = "Control" },
+    detail::ChordModifierRow { .modifier = Modifier::Super, .name = "Super" },
+    detail::ChordModifierRow { .modifier = Modifier::Hyper, .name = "Hyper" },
+    detail::ChordModifierRow { .modifier = Modifier::Meta, .name = "Meta" },
+};
+
+/// Every chord modifier, folded from ChordModifierTable.
+constexpr auto AllChordModifiers = [] {
+    auto result = Modifiers {};
+    for (auto const& row: ChordModifierTable)
+        result.enable(row.modifier);
+    return result;
+}();
+
+/// Number of low bits the chord modifiers occupy, derived from ChordModifierTable. Consumers that
+/// pack a chord next to other data shift by this width, see ViInputHandler's InputMatch.
+constexpr auto ChordModifierBitWidth = static_cast<unsigned>(std::bit_width(AllChordModifiers.value()));
+
+static_assert(static_cast<unsigned>(AllChordModifiers.value()) == (1u << ChordModifierBitWidth) - 1u,
+              "the chord modifiers must occupy a contiguous run of low bits, so that a chord packs "
+              "losslessly into the low ChordModifierBitWidth bits of a larger value");
+
+/// Latched keyboard lock toggles.
+///
+/// A lock is state, not a chord: it says something about the keyboard, not about the key being
+/// pressed. Only the input generator may observe it, in order to report it to the application
+/// (Kitty CSI u, Win32 dwControlKeyState) or to select the numpad's digit function.
+///
+/// The values continue the CSIu modifier bit positions of Modifier, so that the Kitty encoder can
+/// simply add the two together.
+enum LockKey : uint8_t
+{
+    CapsLock = 64,
+    NumLock = 128,
+};
+
+using LockKeys = crispy::Flags<LockKey>;
+
+static_assert(static_cast<unsigned>(LockKey::CapsLock) == (1u << ChordModifierBitWidth)
+                  && static_cast<unsigned>(LockKey::NumLock) == (2u << ChordModifierBitWidth),
+              "the lock keys must begin immediately above the chord modifiers, so that the Kitty "
+              "encoder may add the chord and lock values rather than OR them");
+
+/// The complete modifier state of a keyboard event: the chord being held, plus the latched locks.
+///
+/// The conversion from Modifiers is implicit and one-way. A chord widens to a full keyboard
+/// modifier state (with no locks latched) wherever one is expected, but reaching the chord back out
+/// requires naming @c chord explicitly. Lock bits therefore cannot reach chord logic by accident.
+struct KeyboardModifiers
+{
+    Modifiers chord {}; ///< Modifiers held down (Shift, Alt, Control, Super, Hyper, Meta).
+    LockKeys locks {};  ///< Latched lock toggles (CapsLock, NumLock).
+
+    constexpr KeyboardModifiers() noexcept = default;
+    constexpr KeyboardModifiers(Modifier modifier) noexcept: chord { modifier } {}
+    constexpr KeyboardModifiers(Modifiers chordModifiers) noexcept: chord { chordModifiers } {}
+    constexpr KeyboardModifiers(LockKey lockKey) noexcept: locks { lockKey } {}
+    constexpr KeyboardModifiers(LockKeys lockKeys) noexcept: locks { lockKeys } {}
+    constexpr KeyboardModifiers(Modifiers chordModifiers, LockKeys lockKeys) noexcept:
+        chord { chordModifiers }, locks { lockKeys }
+    {
+    }
+
+    /// @returns a copy with @p modifier added to the chord; the lock state is carried over.
+    [[nodiscard]] constexpr KeyboardModifiers with(Modifier modifier) const noexcept
+    {
+        return { chord.with(modifier), locks };
+    }
+
+    /// @returns a copy with @p modifier removed from the chord; the lock state is carried over.
+    [[nodiscard]] constexpr KeyboardModifiers without(Modifier modifier) const noexcept
+    {
+        return { chord.without(modifier), locks };
+    }
+
+    [[nodiscard]] constexpr bool operator==(KeyboardModifiers const&) const noexcept = default;
+};
+
+/// @returns CSI parameter for given function key modifier
+constexpr size_t makeVirtualTerminalParam(Modifiers modifier) noexcept
+{
+#ifdef __APPLE__
+    // Use option key as a control modifier to use
+    // Ctrl-Left[Right]Arrow for word navigation.
+    if (modifier == Modifier::Alt)
+        return 1 + Modifier::Control;
+#endif
+    return 1 + modifier.value();
+}
+
+std::string toString(Modifiers modifier);
+
+// }}}
+// {{{ KeyInputEvent, Key
+enum class Key : uint8_t
+{
+    // function keys
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24,
+    F25,
+    F26,
+    F27,
+    F28,
+    F29,
+    F30,
+    F31,
+    F32,
+    F33,
+    F34,
+    F35,
+
+    Escape,
+    Enter,
+    Tab,
+    Backspace,
+
+    // cursor keys
+    DownArrow,
+    LeftArrow,
+    RightArrow,
+    UpArrow,
+
+    // 6-key editing pad
+    Insert,
+    Delete,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+
+    // media keys
+    MediaPlay,
+    MediaStop,
+    MediaPrevious,
+    MediaNext,
+    MediaPause,
+    MediaTogglePlayPause,
+
+    VolumeUp,
+    VolumeDown,
+    VolumeMute,
+
+    // modifier keys
+    LeftShift,
+    RightShift,
+    LeftControl,
+    RightControl,
+    LeftAlt,
+    RightAlt,
+    LeftSuper,
+    RightSuper,
+    LeftHyper,
+    RightHyper,
+    LeftMeta,
+    RightMeta,
+    IsoLevel3Shift,
+    IsoLevel5Shift,
+
+    // other special keys
+    CapsLock,
+    ScrollLock,
+    NumLock,
+    PrintScreen,
+    Pause,
+    Menu,
+
+    // numpad keys
+    // NOLINTBEGIN(readability-identifier-naming)
+    Numpad_Divide,
+    Numpad_Multiply,
+    Numpad_Subtract,
+    Numpad_Add,
+    Numpad_Decimal,
+    Numpad_Enter,
+    Numpad_Equal,
+    Numpad_0,
+    Numpad_1,
+    Numpad_2,
+    Numpad_3,
+    Numpad_4,
+    Numpad_5,
+    Numpad_6,
+    Numpad_7,
+    Numpad_8,
+    Numpad_9,
+    // NOLINTEND(readability-identifier-naming)
+};
+
+/// Checks whether the given key is a modifier-only key (e.g. Shift, Control, Alt, etc.).
+///
+/// @param key The key to check.
+/// @return true if the key is a modifier-only key, false otherwise.
+constexpr bool isModifierKey(Key key) noexcept
+{
+    // clang-format off
+    switch (key)
+    {
+        case Key::LeftShift:
+        case Key::LeftControl:
+        case Key::LeftAlt:
+        case Key::LeftSuper:
+        case Key::LeftHyper:
+        case Key::LeftMeta:
+        case Key::RightShift:
+        case Key::RightControl:
+        case Key::RightAlt:
+        case Key::RightSuper:
+        case Key::RightHyper:
+        case Key::RightMeta:
+        case Key::IsoLevel3Shift:
+        case Key::IsoLevel5Shift:
+        case Key::CapsLock:
+        case Key::NumLock:
+            return true;
+        default:
+            return false;
+    }
+    // clang-format on
+}
+
+/// Win32 dwControlKeyState bitmask flags from KEY_EVENT_RECORD.
+/// These map 1:1 to the Windows API constants.
+enum class Win32ControlKeyFlag : uint16_t
+{
+    RightAltPressed = 0x0001,  // RIGHT_ALT_PRESSED
+    LeftAltPressed = 0x0002,   // LEFT_ALT_PRESSED
+    RightCtrlPressed = 0x0004, // RIGHT_CTRL_PRESSED
+    LeftCtrlPressed = 0x0008,  // LEFT_CTRL_PRESSED
+    ShiftPressed = 0x0010,     // SHIFT_PRESSED
+    NumLockOn = 0x0020,        // NUMLOCK_ON
+    ScrollLockOn = 0x0040,     // SCROLLLOCK_ON
+    CapsLockOn = 0x0080,       // CAPSLOCK_ON
+    EnhancedKey = 0x0100,      // ENHANCED_KEY
+};
+
+/// Type-safe bitset for Win32 control key state flags.
+using Win32ControlKeyState = crispy::Flags<Win32ControlKeyFlag>;
+
+std::string toString(Key key);
+
+enum class KeyMode : uint8_t
+{
+    Normal,
+    Application
+};
+// }}}
+// {{{ Mouse
+enum class MouseButton : uint8_t
+{
+    Left,
+    Right,
+    Middle,
+    Release, // Button was released and/or no button is pressed.
+    WheelUp,
+    WheelDown,
+    WheelLeft,
+    WheelRight,
+};
+
+std::string toString(MouseButton button);
+
+/// @return true if @p button is a wheel direction (vertical or horizontal) rather than a physical button.
+[[nodiscard]] constexpr bool isMouseWheel(MouseButton button) noexcept
+{
+    return button == MouseButton::WheelUp || button == MouseButton::WheelDown
+           || button == MouseButton::WheelLeft || button == MouseButton::WheelRight;
+}
+
+enum class MouseTransport : uint8_t
+{
+    // CSI M Cb Cx Cy, with Cb, Cx, Cy incremented by 0x20
+    Default,
+    // CSI M Cb Coords, with Coords being UTF-8 encoded, Coords is a tuple, each value incremented by 0x20.
+    Extended,
+    // `CSI Cb Cx Cy M` and `CSI Cb Cx Cy m` (button release)
+    SGR,
+    // SGR-Pixels (1016), an xterm extension as of Patch #359 - 2020/08/17
+    // This is just like SGR but reports pixels instead of ANSI cursor positions.
+    SGRPixels,
+    // `CSI < Cb Cx Cy M` with Cb += 0x20
+    URXVT,
+};
+// }}}
+
+enum class KeyboardEventType : uint8_t
+{
+    Press = 1,
+    Repeat = 2,
+    Release = 3,
+};
+
+/// Identifies the key behind a character event, beyond the character it produced.
+///
+/// The two members answer different questions for different keyboard protocols and are deliberately
+/// not interchangeable. Both are optional -- zero means the platform did not tell us, and the
+/// encoders then derive what they need from the character itself.
+///
+/// Filling these is the windowing-system boundary's job, because it is the only layer that knows
+/// what its native key identifiers mean; a raw one must never be stored here. What a platform calls
+/// a key is not necessarily a codepoint, nor a VK code (@see contour::KeyboardLayout).
+struct KeyIdentity
+{
+    /// The codepoint this key produces with no modifiers applied, in the *current* keyboard
+    /// layout -- the Kitty keyboard protocol's `unicode-key-code`. For Shift+3 on a US layout
+    /// this is '3', not '#'.
+    char32_t unshiftedKey = 0;
+
+    /// The Win32 virtual-key code (`VK_*`) for this key, as ConPTY's win32-input-mode reports it.
+    /// Zero off Windows: no other platform has a VK code to give, and win32-input-mode is reachable
+    /// everywhere (DECSET 9001 carries no platform guard), so a native value smuggled in here would
+    /// be transmitted as a VK code that it is not.
+    uint32_t nativeVirtualKey = 0;
+};
+
+class KeyboardInputGenerator
+{
+  public:
+    virtual ~KeyboardInputGenerator() = default;
+
+    virtual bool generateChar(char32_t characterEvent,
+                              KeyIdentity keyIdentity,
+                              KeyboardModifiers modifiers,
+                              KeyboardEventType eventType) = 0;
+    virtual bool generateKey(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType) = 0;
+};
+
+class StandardKeyboardInputGenerator: public KeyboardInputGenerator
+{
+  public:
+    bool generateChar(char32_t characterEvent,
+                      KeyIdentity keyIdentity,
+                      KeyboardModifiers modifiers,
+                      KeyboardEventType eventType) override;
+    bool generateKey(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType) override;
+
+    [[nodiscard]] bool normalCursorKeys() const noexcept { return _cursorKeysMode == KeyMode::Normal; }
+    [[nodiscard]] bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
+
+    [[nodiscard]] bool numericKeypad() const noexcept { return _numpadKeysMode == KeyMode::Normal; }
+    [[nodiscard]] bool applicationKeypad() const noexcept { return !numericKeypad(); }
+    void setCursorKeysMode(KeyMode mode) { _cursorKeysMode = mode; }
+    void setNumpadKeysMode(KeyMode mode) { _numpadKeysMode = mode; }
+    void setApplicationKeypadMode(bool enable)
+    {
+        _numpadKeysMode = enable ? KeyMode::Application : KeyMode::Normal;
+    }
+
+    /// Enables or disables DECBKM (Backarrow Key Mode).
+    ///
+    /// When enabled, the Backspace key sends BS (0x08).
+    /// When disabled (default), the Backspace key sends DEL (0x7F).
+    void setBackarrowKeyMode(bool enable) { _backarrowKey = enable; }
+    [[nodiscard]] bool backarrowKey() const noexcept { return _backarrowKey; }
+
+    /// Enables or disables LNM (Line Feed / New Line Mode), the input half.
+    ///
+    /// When enabled, the Return key sends CR LF.
+    /// When disabled (default), it sends CR alone.
+    ///
+    /// The output half lives in `Screen::linefeed()`, where LNM makes LF also return the carriage.
+    void setAutomaticNewLineMode(bool enable) { _automaticNewLine = enable; }
+    [[nodiscard]] bool automaticNewLine() const noexcept { return _automaticNewLine; }
+
+    [[nodiscard]] std::string_view peek() const noexcept { return std::string_view(_pendingSequence); }
+
+    [[nodiscard]] std::string take() noexcept
+    {
+        auto result = std::move(_pendingSequence);
+        _pendingSequence.clear();
+        return result;
+    }
+
+    void reset()
+    {
+        _cursorKeysMode = KeyMode::Normal;
+        _numpadKeysMode = KeyMode::Normal;
+        _backarrowKey = false;
+        _automaticNewLine = false;
+    }
+
+  protected:
+    /// Maps a function key to its corresponding VT sequences based on different modes and modifiers.
+    struct FunctionKeyMapping
+    {
+        /// Standard VT sequence.
+        std::string_view std {};
+        /// VT sequence when modifiers are pressed.
+        std::string_view mods {};
+        /// VT sequence when Application Cursor Keys mode is enabled.
+        std::string_view appCursor {};
+        /// VT sequence when Application Keypad mode is enabled.
+        std::string_view appKeypad {};
+    };
+
+    /// Selects the encoding of a keypad key. This is the only place the lock state is consulted:
+    /// NumLock selects the digit over the navigation function.
+    [[nodiscard]] std::string selectNumpad(KeyboardModifiers modifiers, FunctionKeyMapping mapping) const;
+
+    /// Selects the encoding of a function or navigation key from its chord modifiers alone.
+    [[nodiscard]] std::string select(Modifiers chord, FunctionKeyMapping mapping) const;
+    void append(char ch) { _pendingSequence += ch; }
+    void append(std::string_view sequence) { _pendingSequence += sequence; }
+
+    template <typename... Args>
+    void append(std::string_view const& text, Args... args)
+    {
+        append(std::vformat(text, std::make_format_args(args...)));
+    }
+
+    KeyMode _cursorKeysMode = KeyMode::Normal;
+    KeyMode _numpadKeysMode = KeyMode::Normal;
+    bool _automaticNewLine = false;
+    bool _backarrowKey = false;
+    std::string _pendingSequence {};
+};
+
+enum class KeyboardEventFlag : uint8_t
+{
+    None = 0,
+    DisambiguateEscapeCodes = 1,
+    ReportEventTypes = 2,
+    ReportAlternateKeys = 4,
+    ReportAllKeysAsEscapeCodes = 8,
+    ReportAssociatedText = 16,
+};
+
+using KeyboardEventFlags = crispy::Flags<KeyboardEventFlag>;
+
+// Implements extended CSIu keyboard input mode.
+class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerator
+{
+  public:
+    static constexpr size_t MaxStackDepth = 32;
+
+    constexpr void enter(KeyboardEventFlags flags) noexcept
+    {
+        if (stackDepth() < MaxStackDepth)
+            _flags.at(++_currentStackTop) = flags;
+    }
+
+    [[nodiscard]] constexpr size_t stackDepth() const noexcept { return 1 + _currentStackTop; }
+
+    [[nodiscard]] constexpr KeyboardEventFlags flags() const noexcept { return _flags.at(_currentStackTop); }
+
+    [[nodiscard]] constexpr KeyboardEventFlags& flags() noexcept { return _flags.at(_currentStackTop); }
+
+    [[nodiscard]] constexpr bool enabled(KeyboardEventFlag flag) const noexcept
+    {
+        return flags().contains(flag);
+    }
+
+    /// Returns true if any non-legacy Kitty keyboard flag is active.
+    /// Kitty: legacy_mode = !disambiguate && !report_event_types && !report_all_keys
+    [[nodiscard]] constexpr bool isNonLegacyMode() const noexcept
+    {
+        return enabled(KeyboardEventFlag::DisambiguateEscapeCodes)
+               || enabled(KeyboardEventFlag::ReportEventTypes)
+               || enabled(KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+    }
+
+    [[nodiscard]] constexpr bool enabled(KeyboardEventType eventType) const noexcept
+    {
+        // Press-event is always emitted. The other events are only emitted if the corresponding flag is set.
+        return eventType != KeyboardEventType::Release || enabled(KeyboardEventFlag::ReportEventTypes);
+    }
+
+    constexpr void leave(size_t n = 1) noexcept { _currentStackTop -= std::min(n, _currentStackTop); }
+
+    /// Empties the CSIu flag stack and clears the flags on its remaining bottom entry.
+    ///
+    /// This is deliberately narrower than StandardKeyboardInputGenerator::reset(): it touches only
+    /// the extended-protocol stack and leaves the cursor-keys/keypad/backarrow modes alone.
+    constexpr void resetProtocolStack() noexcept
+    {
+        _currentStackTop = 0;
+        _flags.at(_currentStackTop) = KeyboardEventFlag::None;
+    }
+
+    // {{{ Overrides from StandardKeyboardInputGenerator
+
+    bool generateChar(char32_t characterEvent,
+                      KeyIdentity keyIdentity,
+                      KeyboardModifiers modifiers,
+                      KeyboardEventType eventType) override;
+    bool generateKey(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType) override;
+
+    // }}}
+
+  private:
+    [[nodiscard]] std::string encodeCharacter(char32_t ch, KeyIdentity keyIdentity, Modifiers chord) const;
+    [[nodiscard]] std::string encodeModifiers(KeyboardModifiers modifiers, KeyboardEventType eventType) const;
+
+    std::array<KeyboardEventFlags, MaxStackDepth> _flags = { KeyboardEventFlag::None };
+    size_t _currentStackTop = 0;
+};
+
+class InputGenerator
+{
+  public:
+    using Sequence = std::string;
+
+    /// Changes the input mode for cursor keys.
+    void setCursorKeysMode(KeyMode mode);
+
+    /// Changes the input mode for numpad keys.
+    void setNumpadKeysMode(KeyMode mode);
+
+    void setApplicationKeypadMode(bool enable);
+
+    void setBackarrowKeyMode(bool enable);
+
+    /// Enables or disables LNM (Line Feed / New Line Mode) for the Return key. @see
+    /// KeyboardInputGenerator::setAutomaticNewLineMode.
+    void setAutomaticNewLineMode(bool enable);
+
+    [[nodiscard]] bool normalCursorKeys() const noexcept
+    {
+        return _keyboardInputGenerator.normalCursorKeys();
+    }
+    [[nodiscard]] bool applicationCursorKeys() const noexcept
+    {
+        return _keyboardInputGenerator.applicationCursorKeys();
+    }
+
+    [[nodiscard]] bool numericKeypad() const noexcept { return _keyboardInputGenerator.numericKeypad(); }
+    [[nodiscard]] bool applicationKeypad() const noexcept
+    {
+        return _keyboardInputGenerator.applicationKeypad();
+    }
+
+    [[nodiscard]] bool bracketedPaste() const noexcept { return _bracketedPaste; }
+    void setBracketedPaste(bool enable) { _bracketedPaste = enable; }
+
+    void setMouseProtocol(MouseProtocol mouseProtocol, bool enabled);
+    [[nodiscard]] std::optional<MouseProtocol> mouseProtocol() const noexcept { return _mouseProtocol; }
+
+    // Sets mouse event transport protocol (default, extended, xgr, urxvt)
+    void setMouseTransport(MouseTransport mouseTransport);
+    [[nodiscard]] MouseTransport mouseTransport() const noexcept { return _mouseTransport; }
+
+    enum class MouseWheelMode : uint8_t
+    {
+        // mouse wheel generates mouse wheel events as determined by mouse protocol + transport.
+        Default,
+        // mouse wheel generates normal cursor key events
+        NormalCursorKeys,
+        // mouse wheel generates application cursor key events
+        ApplicationCursorKeys
+    };
+
+    void setMouseWheelMode(MouseWheelMode mode) noexcept;
+    [[nodiscard]] MouseWheelMode mouseWheelMode() const noexcept { return _mouseWheelMode; }
+
+    /// Sets how many cursor-key presses one wheel notch emits during alternate-scroll.
+    /// @param count Presses per notch (values below 1 are treated as 1).
+    void setMouseWheelScrollMultiplier(unsigned count) noexcept { _mouseWheelScrollMultiplier = count; }
+
+    /// @return the number of cursor-key presses emitted per wheel notch (at least 1).
+    [[nodiscard]] unsigned mouseWheelScrollMultiplier() const noexcept
+    {
+        return std::max(1u, _mouseWheelScrollMultiplier);
+    }
+
+    void setGenerateFocusEvents(bool enable) noexcept { _generateFocusEvents = enable; }
+    [[nodiscard]] bool generateFocusEvents() const noexcept { return _generateFocusEvents; }
+
+    void setPassiveMouseTracking(bool v) noexcept { _passiveMouseTracking = v; }
+    [[nodiscard]] bool passiveMouseTracking() const noexcept { return _passiveMouseTracking; }
+
+    /// Enables or disables Win32 Input Mode (DEC private mode 9001).
+    ///
+    /// When enabled, key events are encoded in the Win32 KEY_EVENT_RECORD format
+    /// (CSI Vk;Sc;Uc;Kd;Cs;Rc _) instead of CSI u or legacy VT sequences.
+    /// This is the native input protocol for Windows ConPTY.
+    void setWin32InputMode(bool enable) noexcept { _win32InputMode = enable; }
+    [[nodiscard]] bool win32InputMode() const noexcept { return _win32InputMode; }
+
+    /// Sets the modifyOtherKeys mode (0 = disabled, 1 = mode 1, 2 = mode 2).
+    void setModifyOtherKeys(int mode) noexcept { _modifyOtherKeys = mode; }
+
+    /// @returns the current modifyOtherKeys mode.
+    [[nodiscard]] int modifyOtherKeys() const noexcept { return _modifyOtherKeys; }
+
+    bool generate(char32_t characterEvent,
+                  KeyIdentity keyIdentity,
+                  KeyboardModifiers modifiers,
+                  KeyboardEventType eventType);
+
+    /// Convenience overload for callers that have no windowing system to ask -- tests, and the
+    /// synthetic input paths. It synthesizes the key identity from the character, which is exact
+    /// for an unmodified US-layout ASCII key and close enough for the rest.
+    bool generate(char32_t characterEvent, KeyboardModifiers modifiers, KeyboardEventType eventType)
+    {
+        return generate(characterEvent,
+                        KeyIdentity { .unshiftedKey = characterEvent,
+                                      .nativeVirtualKey = static_cast<uint32_t>(characterEvent) },
+                        modifiers,
+                        eventType);
+    }
+    bool generate(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType);
+    void generatePaste(std::string_view const& text);
+    bool generateMousePress(Modifiers modifier,
+                            MouseButton button,
+                            CellLocation pos,
+                            PixelCoordinate pixelPosition,
+                            bool uiHandled);
+    bool generateMouseMove(Modifiers modifier,
+                           CellLocation pos,
+                           PixelCoordinate pixelPosition,
+                           bool uiHandled);
+    bool generateMouseRelease(Modifiers modifier,
+                              MouseButton button,
+                              CellLocation pos,
+                              PixelCoordinate pixelPosition,
+                              bool uiHandled);
+
+    bool generateFocusInEvent();
+    bool generateFocusOutEvent();
+
+    /// Generates raw input, usually used for sending reply VT sequences.
+    bool generateRaw(std::string_view const& raw);
+
+    /// Peeks into the generated output, returning it as string view.
+    ///
+    /// @return a view into the generated buffer sequence.
+    [[nodiscard]] std::string_view peek() const noexcept
+    {
+        return { _pendingSequence.data() + _consumedBytes,
+                 size_t(_pendingSequence.size() - size_t(_consumedBytes)) };
+    }
+
+    void consume(int n)
+    {
+        _consumedBytes += n;
+        if (std::cmp_equal(_consumedBytes, _pendingSequence.size()))
+        {
+            _consumedBytes = 0;
+            _pendingSequence.clear();
+        }
+    }
+
+    enum class MouseEventType : uint8_t
+    {
+        Press,
+        Drag,
+        Release
+    };
+
+    /// Resets the input generator's state, as required by the RIS (hard reset) VT sequence.
+    void reset();
+
+    [[nodiscard]] ExtendedKeyboardInputGenerator& keyboardProtocol() noexcept
+    {
+        return _keyboardInputGenerator;
+    }
+
+    [[nodiscard]] ExtendedKeyboardInputGenerator const& keyboardProtocol() const noexcept
+    {
+        return _keyboardInputGenerator;
+    }
+
+  private:
+    bool generateMouse(MouseEventType eventType,
+                       Modifiers modifier,
+                       MouseButton button,
+                       CellLocation pos,
+                       PixelCoordinate pixelPosition,
+                       bool uiHandled);
+
+    bool mouseTransport(MouseEventType eventType,
+                        uint8_t button,
+                        uint8_t modifier,
+                        CellLocation pos,
+                        PixelCoordinate pixelPosition,
+                        bool uiHandled);
+
+    bool mouseTransportX10(uint8_t button, uint8_t modifier, CellLocation pos);
+    bool mouseTransportExtended(uint8_t button, uint8_t modifier, CellLocation pos);
+
+    bool mouseTransportSGR(
+        MouseEventType type, uint8_t button, uint8_t modifier, int x, int y, bool uiHandled);
+
+    bool mouseTransportURXVT(MouseEventType type, uint8_t button, uint8_t modifier, CellLocation pos);
+
+    bool generateWin32KeyInput(uint32_t virtualKeyCode,
+                               char32_t unicodeChar,
+                               KeyboardModifiers modifiers,
+                               KeyboardEventType eventType,
+                               Win32ControlKeyState extraControlKeyState = {});
+    static constexpr Win32ControlKeyState buildWin32ControlKeyState(KeyboardModifiers modifiers);
+    static constexpr uint32_t keyToVirtualKeyCode(Key key);
+
+    /// Returns the Unicode character a key carries in a Windows @c KEY_EVENT_RECORD, or 0 for keys
+    /// that have no associated character (navigation, function and modifier keys).
+    ///
+    /// win32 input mode (DEC private mode 9001) transports the OS key record verbatim; ConPTY
+    /// forwards the Unicode-char field as-is and never reconstructs it from the virtual-key code. A
+    /// character-bearing key (Escape, the numpad keys) must therefore report its character here, or
+    /// applications reading the record (e.g. neovim) receive nothing for that key.
+    ///
+    /// @param key       The key that was pressed.
+    /// @param modifiers The active keyboard modifiers; @c LockKey::NumLock selects the numpad's
+    ///                  digit/decimal character function, mirroring the OS @c ToUnicodeEx behaviour.
+    /// @return The associated Unicode character, or 0 when the key carries none.
+    [[nodiscard]] static constexpr char32_t keyToUnicodeChar(Key key, KeyboardModifiers modifiers) noexcept;
+
+    inline bool append(std::string_view sequence);
+    inline bool append(char asciiChar);
+    inline bool append(uint8_t byte);
+    inline bool append(unsigned int asciiChar);
+
+    // private fields
+    //
+    bool _bracketedPaste = false;
+    bool _generateFocusEvents = false;
+    bool _win32InputMode = false;
+    std::optional<MouseProtocol> _mouseProtocol = std::nullopt;
+    bool _passiveMouseTracking = false;
+    MouseTransport _mouseTransport = MouseTransport::Default;
+    MouseWheelMode _mouseWheelMode = MouseWheelMode::Default;
+    unsigned _mouseWheelScrollMultiplier = 1;
+    int _modifyOtherKeys = 0;
+    Sequence _pendingSequence {};
+    int _consumedBytes {};
+
+    std::set<MouseButton> _currentlyPressedMouseButtons {};
+    CellLocation _currentMousePosition {}; // current mouse position
+    ExtendedKeyboardInputGenerator _keyboardInputGenerator {};
+};
+
+inline std::string toString(InputGenerator::MouseEventType value)
+{
+    switch (value)
+    {
+        case InputGenerator::MouseEventType::Press: return "Press";
+        case InputGenerator::MouseEventType::Drag: return "Drag";
+        case InputGenerator::MouseEventType::Release: return "Release";
+    }
+    return "???";
+}
+
+} // namespace vtbackend
+
+// {{{ fmtlib custom formatter support
+
+template <>
+struct std::formatter<vtbackend::KeyboardEventType>: formatter<std::string_view>
+{
+    auto format(vtbackend::KeyboardEventType value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::KeyboardEventType::Press: name = "Press"; break;
+            case vtbackend::KeyboardEventType::Repeat: name = "Repeat"; break;
+            case vtbackend::KeyboardEventType::Release: name = "Release"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::KeyboardEventFlag>: formatter<std::string_view>
+{
+    auto format(vtbackend::KeyboardEventFlag value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+                // clang-format off
+            case vtbackend::KeyboardEventFlag::None: name = "None"; break;
+            case vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes: name = "DisambiguateEscapeCodes"; break;
+            case vtbackend::KeyboardEventFlag::ReportEventTypes: name = "ReportEventTypes"; break;
+            case vtbackend::KeyboardEventFlag::ReportAlternateKeys: name = "ReportAlternateKeys"; break;
+            case vtbackend::KeyboardEventFlag::ReportAllKeysAsEscapeCodes: name = "ReportAllKeysAsEscapeCodes"; break;
+            case vtbackend::KeyboardEventFlag::ReportAssociatedText: name = "ReportAssociatedText"; break;
+                // clang-format on
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::MouseProtocol>: formatter<std::string_view>
+{
+    auto format(vtbackend::MouseProtocol value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::MouseProtocol::X10: name = "X10"; break;
+            case vtbackend::MouseProtocol::HighlightTracking: name = "HighlightTracking"; break;
+            case vtbackend::MouseProtocol::ButtonTracking: name = "ButtonTracking"; break;
+            case vtbackend::MouseProtocol::NormalTracking: name = "NormalTracking"; break;
+            case vtbackend::MouseProtocol::AnyEventTracking: name = "AnyEventTracking"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::Modifier>: formatter<std::string_view>
+{
+    auto format(vtbackend::Modifier value, auto& ctx) const
+    {
+        if (value == vtbackend::Modifier::None)
+            return formatter<std::string_view>::format("None", ctx);
+
+        auto const row = std::ranges::find(
+            vtbackend::ChordModifierTable, value, &vtbackend::detail::ChordModifierRow::modifier);
+
+        // A value that names no chord modifier formats empty on purpose: crispy::Flags's formatter
+        // walks every bit position and skips the ones that yield an empty string.
+        auto const name = row != vtbackend::ChordModifierTable.end() ? row->name : std::string_view {};
+
+        return formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::LockKey>: formatter<std::string_view>
+{
+    auto format(vtbackend::LockKey value, auto& ctx) const
+    {
+        std::string_view name;
+        switch (value)
+        {
+            case vtbackend::LockKey::CapsLock: name = "CapsLock"; break;
+            case vtbackend::LockKey::NumLock: name = "NumLock"; break;
+        }
+        return formatter<std::string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::KeyboardModifiers>: formatter<std::string>
+{
+    auto format(vtbackend::KeyboardModifiers value, auto& ctx) const
+    {
+        // Delegates to the base formatter so that fill/width/align specs are honored, as they are
+        // for the Modifier and LockKey formatters above. Both halves format to "" when empty.
+        auto text = std::format("{}", value.chord);
+        if (value.locks.any())
+        {
+            if (!text.empty())
+                text += '|';
+            text += std::format("{}", value.locks);
+        }
+        return formatter<std::string>::format(text, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::InputGenerator::MouseWheelMode>: formatter<std::string_view>
+{
+    auto format(vtbackend::InputGenerator::MouseWheelMode value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::InputGenerator::MouseWheelMode::Default: name = "Default"; break;
+            case vtbackend::InputGenerator::MouseWheelMode::NormalCursorKeys:
+                name = "NormalCursorKeys";
+                break;
+            case vtbackend::InputGenerator::MouseWheelMode::ApplicationCursorKeys:
+                name = "ApplicationCursorKeys";
+                break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::KeyMode>: public formatter<std::string_view>
+{
+    auto format(vtbackend::KeyMode value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::KeyMode::Normal: name = "Normal"; break;
+            case vtbackend::KeyMode::Application: name = "Application"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::MouseButton>: formatter<std::string_view>
+{
+    auto format(vtbackend::MouseButton value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::MouseButton::Left: name = "Left"; break;
+            case vtbackend::MouseButton::Right: name = "Right"; break;
+            case vtbackend::MouseButton::Middle: name = "Middle"; break;
+            case vtbackend::MouseButton::Release: name = "Release"; break;
+            case vtbackend::MouseButton::WheelUp: name = "WheelUp"; break;
+            case vtbackend::MouseButton::WheelDown: name = "WheelDown"; break;
+            case vtbackend::MouseButton::WheelLeft: name = "WheelLeft"; break;
+            case vtbackend::MouseButton::WheelRight: name = "WheelRight"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::MouseTransport>: formatter<std::string_view>
+{
+    auto format(vtbackend::MouseTransport value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::MouseTransport::Default: name = "Default"; break;
+            case vtbackend::MouseTransport::Extended: name = "Extended"; break;
+            case vtbackend::MouseTransport::SGR: name = "SGR"; break;
+            case vtbackend::MouseTransport::URXVT: name = "URXVT"; break;
+            case vtbackend::MouseTransport::SGRPixels: name = "SGR-Pixels"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
+template <>
+struct std::formatter<vtbackend::Key>: formatter<std::string_view>
+{
+    auto format(vtbackend::Key value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::Key::F1: name = "F1"; break;
+            case vtbackend::Key::F2: name = "F2"; break;
+            case vtbackend::Key::F3: name = "F3"; break;
+            case vtbackend::Key::F4: name = "F4"; break;
+            case vtbackend::Key::F5: name = "F5"; break;
+            case vtbackend::Key::F6: name = "F6"; break;
+            case vtbackend::Key::F7: name = "F7"; break;
+            case vtbackend::Key::F8: name = "F8"; break;
+            case vtbackend::Key::F9: name = "F9"; break;
+            case vtbackend::Key::F10: name = "F10"; break;
+            case vtbackend::Key::F11: name = "F11"; break;
+            case vtbackend::Key::F12: name = "F12"; break;
+            case vtbackend::Key::F13: name = "F13"; break;
+            case vtbackend::Key::F14: name = "F14"; break;
+            case vtbackend::Key::F15: name = "F15"; break;
+            case vtbackend::Key::F16: name = "F16"; break;
+            case vtbackend::Key::F17: name = "F17"; break;
+            case vtbackend::Key::F18: name = "F18"; break;
+            case vtbackend::Key::F19: name = "F19"; break;
+            case vtbackend::Key::F20: name = "F20"; break;
+            case vtbackend::Key::F21: name = "F21"; break;
+            case vtbackend::Key::F22: name = "F22"; break;
+            case vtbackend::Key::F23: name = "F23"; break;
+            case vtbackend::Key::F24: name = "F24"; break;
+            case vtbackend::Key::F25: name = "F25"; break;
+            case vtbackend::Key::F26: name = "F26"; break;
+            case vtbackend::Key::F27: name = "F27"; break;
+            case vtbackend::Key::F28: name = "F28"; break;
+            case vtbackend::Key::F29: name = "F29"; break;
+            case vtbackend::Key::F30: name = "F30"; break;
+            case vtbackend::Key::F31: name = "F31"; break;
+            case vtbackend::Key::F32: name = "F32"; break;
+            case vtbackend::Key::F33: name = "F33"; break;
+            case vtbackend::Key::F34: name = "F34"; break;
+            case vtbackend::Key::F35: name = "F35"; break;
+            case vtbackend::Key::Escape: name = "Escape"; break;
+            case vtbackend::Key::Enter: name = "Enter"; break;
+            case vtbackend::Key::Tab: name = "Tab"; break;
+            case vtbackend::Key::Backspace: name = "Backspace"; break;
+            case vtbackend::Key::DownArrow: name = "DownArrow"; break;
+            case vtbackend::Key::LeftArrow: name = "LeftArrow"; break;
+            case vtbackend::Key::RightArrow: name = "RightArrow"; break;
+            case vtbackend::Key::UpArrow: name = "UpArrow"; break;
+            case vtbackend::Key::Insert: name = "Insert"; break;
+            case vtbackend::Key::Delete: name = "Delete"; break;
+            case vtbackend::Key::Home: name = "Home"; break;
+            case vtbackend::Key::End: name = "End"; break;
+            case vtbackend::Key::PageUp: name = "PageUp"; break;
+            case vtbackend::Key::PageDown: name = "PageDown"; break;
+            case vtbackend::Key::MediaPlay: name = "MediaPlay"; break;
+            case vtbackend::Key::MediaStop: name = "MediaStop"; break;
+            case vtbackend::Key::MediaPrevious: name = "MediaPrevious"; break;
+            case vtbackend::Key::MediaNext: name = "MediaNext"; break;
+            case vtbackend::Key::MediaPause: name = "MediaPause"; break;
+            case vtbackend::Key::MediaTogglePlayPause: name = "MediaTogglePlayPause"; break;
+            case vtbackend::Key::VolumeDown: name = "VolumeDown"; break;
+            case vtbackend::Key::VolumeUp: name = "VolumeUp"; break;
+            case vtbackend::Key::VolumeMute: name = "VolumeMute"; break;
+            case vtbackend::Key::LeftShift: name = "LeftShift"; break;
+            case vtbackend::Key::RightShift: name = "RightShift"; break;
+            case vtbackend::Key::LeftControl: name = "LeftControl"; break;
+            case vtbackend::Key::RightControl: name = "RightControl"; break;
+            case vtbackend::Key::LeftAlt: name = "LeftAlt"; break;
+            case vtbackend::Key::RightAlt: name = "RightAlt"; break;
+            case vtbackend::Key::LeftSuper: name = "LeftSuper"; break;
+            case vtbackend::Key::RightSuper: name = "RightSuper"; break;
+            case vtbackend::Key::LeftHyper: name = "LeftHyper"; break;
+            case vtbackend::Key::RightHyper: name = "RightHyper"; break;
+            case vtbackend::Key::LeftMeta: name = "LeftMeta"; break;
+            case vtbackend::Key::RightMeta: name = "RightMeta"; break;
+            case vtbackend::Key::IsoLevel3Shift: name = "IsoLevel3Shift"; break;
+            case vtbackend::Key::IsoLevel5Shift: name = "IsoLevel5Shift"; break;
+            case vtbackend::Key::CapsLock: name = "CapsLock"; break;
+            case vtbackend::Key::ScrollLock: name = "ScrollLock"; break;
+            case vtbackend::Key::NumLock: name = "NumLock"; break;
+            case vtbackend::Key::PrintScreen: name = "PrintScreen"; break;
+            case vtbackend::Key::Pause: name = "Pause"; break;
+            case vtbackend::Key::Menu: name = "Menu"; break;
+            case vtbackend::Key::Numpad_Divide: name = "Numpad_Divide"; break;
+            case vtbackend::Key::Numpad_Multiply: name = "Numpad_Multiply"; break;
+            case vtbackend::Key::Numpad_Subtract: name = "Numpad_Subtract"; break;
+            case vtbackend::Key::Numpad_Add: name = "Numpad_Add"; break;
+            case vtbackend::Key::Numpad_Decimal: name = "Numpad_Decimal"; break;
+            case vtbackend::Key::Numpad_Enter: name = "Numpad_Enter"; break;
+            case vtbackend::Key::Numpad_Equal: name = "Numpad_Equal"; break;
+            case vtbackend::Key::Numpad_0: name = "Numpad_0"; break;
+            case vtbackend::Key::Numpad_1: name = "Numpad_1"; break;
+            case vtbackend::Key::Numpad_2: name = "Numpad_2"; break;
+            case vtbackend::Key::Numpad_3: name = "Numpad_3"; break;
+            case vtbackend::Key::Numpad_4: name = "Numpad_4"; break;
+            case vtbackend::Key::Numpad_5: name = "Numpad_5"; break;
+            case vtbackend::Key::Numpad_6: name = "Numpad_6"; break;
+            case vtbackend::Key::Numpad_7: name = "Numpad_7"; break;
+            case vtbackend::Key::Numpad_8: name = "Numpad_8"; break;
+            case vtbackend::Key::Numpad_9: name = "Numpad_9"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+// }}}
