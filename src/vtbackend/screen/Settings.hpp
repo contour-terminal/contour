@@ -2,8 +2,10 @@
 
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/input/InputGenerator.hpp> // Modifier
 #include <vtbackend/shell/Folding.hpp>        // FoldJumpBehavior
+#include <vtbackend/shell/MarkArbiter.hpp>
 #include <vtbackend/vt/Charset.hpp>
 #include <vtbackend/vt/RectangularAreaChecksum.hpp>
 #include <vtbackend/vt/VTType.hpp>
@@ -123,6 +125,16 @@ struct Settings
     /// space available to cells, so a page fitted with one and a renderer drawing without it (or vice
     /// versa) put the grid in two different places.
     bool foldMarkers = false;
+
+    /// OSC 3008 hierarchical context signalling.
+    ///
+    /// Whether the sequence is read at all is ONE flag, honoured at the point the sequence enters the
+    /// emulation; the two below then describe only what to do with an ancestry that exists. @see
+    /// ContextSignalling for why the gate is here rather than folded into each of them.
+    ContextSignalling contextSignalling = ContextSignalling::Enabled;
+    ContextStackLimits contextLimits {};
+    ContextMarkPolicy contextMarkPolicy = ContextMarkPolicy::WhenAlone;
+    ContextTintScope contextTintScope = ContextTintScope::Boundaries;
 
     /// Whether a finished command's output is folded away as soon as the next prompt starts, so
     /// that only the command running now is shown in full. Off by default: folding output the user

@@ -2745,12 +2745,12 @@ class Terminal
     /// session, so there is no setter.
     ///
     /// Deliberately NOT reset by RIS or DECSTR. @see hardReset().
-    ContextStack _contexts;
+    ContextStack _contexts { _settings.contextLimits };
 
     /// Which of OSC 133 and OSC 3008 owns this session's semantic marks. Like the ancestry itself,
     /// deliberately NOT reset by RIS or DECSTR: it describes the shells attached to the pty, not the
     /// screen, and a program that emits RIS must not be able to flip it.
-    MarkArbiter _markArbiter;
+    MarkArbiter _markArbiter { _settings.contextMarkPolicy };
 
     // {{{ Output folding
     mutable FoldState _foldState;

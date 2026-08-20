@@ -6092,6 +6092,12 @@ void Screen::setMark()
 
 ApplyResult Screen::processHierarchicalContext(std::string_view payload)
 {
+    // The single gate. Unsupported rather than Invalid: the payload may well be perfectly formed, the
+    // terminal has simply been told not to read it. Refusing HERE is what makes the feature genuinely
+    // off -- the ancestry stays empty, and every consumer of it is empty in consequence.
+    if (_settings->contextSignalling == ContextSignalling::Disabled)
+        return ApplyResult::Unsupported;
+
     auto const command = parseContextSequence(payload, _contextScratch);
     if (!command)
     {

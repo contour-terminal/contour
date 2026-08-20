@@ -989,6 +989,129 @@ profiles:
     CHECK(settings.foldJumpBehavior == vtbackend::FoldJumpBehavior::Skip);
 }
 
+TEST_CASE("Config: osc_context loads from YAML and reaches the emulation settings", "[config]")
+{
+    QTemporaryDir dir;
+    // A GLOBAL section, not per-profile: this says how the terminal READS a protocol the shell speaks,
+    // not how a pane looks. The two knobs that are presentation live in the colour scheme and the
+    // indicator template instead.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+osc_context:
+    enabled: true
+    max_depth: 8
+    max_retained_contexts: 64
+    derive_markers: never
+    tinting: all
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    CHECK(config.oscContext.value().enabled == true);
+    CHECK(config.oscContext.value().maxDepth == 8);
+    CHECK(config.oscContext.value().maxRetained == 64);
+    CHECK(config.oscContext.value().deriveMarkers == vtbackend::ContextMarkPolicy::Never);
+    CHECK(config.oscContext.value().tinting == vtbackend::ContextTintScope::All);
+
+    auto const settings = contour::config::emulationSettings(config, *profile);
+    CHECK(settings.contextLimits.maxDepth == 8);
+    CHECK(settings.contextLimits.maxRetained == 64);
+    CHECK(settings.contextMarkPolicy == vtbackend::ContextMarkPolicy::Never);
+    CHECK(settings.contextTintScope == vtbackend::ContextTintScope::All);
+}
+
+TEST_CASE("Config: osc_context defaults, and disabling it silences marks and tints", "[config]")
+{
+    QTemporaryDir dir;
+    auto const defaults = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(defaults.oscContext.value().enabled == true);
+    CHECK(defaults.oscContext.value().maxDepth == 16);
+    CHECK(defaults.oscContext.value().maxRetained == 256);
+    CHECK(defaults.oscContext.value().deriveMarkers == vtbackend::ContextMarkPolicy::WhenAlone);
+    CHECK(defaults.oscContext.value().tinting == vtbackend::ContextTintScope::Boundaries);
+
+    QTemporaryDir off;
+    // The single kill switch. It travels as itself rather than being folded into the two policies
+    // below, because it has to gate the ANCESTRY: a `false` that only forced Never/Off would still
+    // leave the stack tracking, the breadcrumb drawing and the daemon replicating -- which is what the
+    // documented "nothing is tracked, nothing is derived and nothing is tinted" promises it does not.
+    auto const disabled = loadFromYaml(off, R"(
+default_profile: main
+osc_context:
+    enabled: false
+    derive_markers: when_alone
+    tinting: all
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    auto const* profile = disabled.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const settings = contour::config::emulationSettings(disabled, *profile);
+    CHECK(settings.contextSignalling == vtbackend::ContextSignalling::Disabled);
+    // The two policies pass through untouched: with the sequence refused outright there is no ancestry
+    // for either to describe, so silencing them a second time would say nothing extra.
+    CHECK(settings.contextMarkPolicy == vtbackend::ContextMarkPolicy::WhenAlone);
+    CHECK(settings.contextTintScope == vtbackend::ContextTintScope::All);
+
+    // That the engine then HONOURS this is asserted where the engine lives:
+    // Screen_context_test.cpp, "osc3008 is not read at all when signalling is disabled".
+}
+
+TEST_CASE("Config: osc_context limits are clamped to a usable range", "[config]")
+{
+    QTemporaryDir dir;
+    // A retained bound below the depth bound would let a context that is still an ancestor be evicted,
+    // leaving the chain holding a record nothing can resolve.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+osc_context:
+    max_depth: 0
+    max_retained_contexts: 1
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(config.oscContext.value().maxDepth >= 1);
+    CHECK(config.oscContext.value().maxRetained >= config.oscContext.value().maxDepth);
+
+    QTemporaryDir huge;
+    auto const big = loadFromYaml(huge, R"(
+default_profile: main
+osc_context:
+    max_depth: 60000
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(big.oscContext.value().maxDepth <= 256);
+}
+
+TEST_CASE("Config: an unknown osc_context enum value keeps the default", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+osc_context:
+    derive_markers: nonsense
+    tinting: alsononsense
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(config.oscContext.value().deriveMarkers == vtbackend::ContextMarkPolicy::WhenAlone);
+    CHECK(config.oscContext.value().tinting == vtbackend::ContextTintScope::Boundaries);
+}
+
 TEST_CASE("Config: folding defaults, and disabling it never auto-collapses", "[config]")
 {
     QTemporaryDir dir;

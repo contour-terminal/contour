@@ -468,6 +468,17 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
     settings.foldMarkers = folding.markersVisible();
     settings.autoCollapseFoldOnNewCommand = folding.enabled && folding.autoCollapseOnNewCommand;
     settings.foldJumpBehavior = folding.onJumpIntoFold;
+
+    // `enabled` travels as itself rather than being conjoined into the two policies below: the engine
+    // honours it where the sequence arrives, which is what makes it gate the ancestry -- and with it
+    // the breadcrumb and the daemon's replication -- and not merely the two knobs somebody remembered.
+    auto const& oscContext = config.oscContext.value();
+    settings.contextSignalling =
+        oscContext.enabled ? vtbackend::ContextSignalling::Enabled : vtbackend::ContextSignalling::Disabled;
+    settings.contextLimits = vtbackend::ContextStackLimits { .maxDepth = oscContext.maxDepth,
+                                                             .maxRetained = oscContext.maxRetained };
+    settings.contextMarkPolicy = oscContext.deriveMarkers;
+    settings.contextTintScope = oscContext.tinting;
     settings.terminalId = profile.terminalId.value();
     settings.frozenModes = profile.frozenModes.value();
     settings.maxImageRegisterCount = config.images.value().maxImageColorRegisters;
@@ -850,6 +861,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("pty_buffer_size", c.ptyBufferObjectSize);
         loadFromEntry("images", c.images);
         loadFromEntry("folding", c.folding);
+        loadFromEntry("osc_context", c.oscContext);
         loadFromEntry("live_config", c.live);
         loadFromEntry("early_exit_threshold", c.earlyExitThreshold);
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
@@ -1964,6 +1976,41 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "auto_collapse_on_new_command", where.autoCollapseOnNewCommand);
         loadFromEntry(child, "on_jump_into_fold", where.onJumpIntoFold);
     }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     OscContextConfig& where)
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+
+    loadFromEntry(child, "enabled", where.enabled);
+    loadFromEntry(child, "max_depth", where.maxDepth);
+    loadFromEntry(child, "max_retained_contexts", where.maxRetained);
+    loadFromEntry(child, "derive_markers", where.deriveMarkers);
+    loadFromEntry(child, "tinting", where.tinting);
+
+    // Clamped rather than rejected, and the ORDER matters: a retained bound below the depth bound
+    // would let a context that is still an ancestor be evicted, leaving the chain holding a record
+    // nothing can resolve -- which ContextStack's constructor treats as a programmer error.
+    where.maxDepth = std::clamp(where.maxDepth, uint16_t { 1 }, uint16_t { 256 });
+    where.maxRetained = std::max(where.maxRetained, where.maxDepth);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::ContextMarkPolicy& where)
+{
+    (void) loadConfigEnum(node, entry, where, logger);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::ContextTintScope& where)
+{
+    (void) loadConfigEnum(node, entry, where, logger);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,

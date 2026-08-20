@@ -136,6 +136,32 @@ inline constexpr size_t ContextTypeCount = ContextTypeList.size() + 1;
     }
 }
 
+/// Which context types a color scheme's tint map is allowed to paint.
+///
+/// Two independent gates guard the tint, and this is the first: the scheme decides WHICH colour, the
+/// configuration decides WHETHER that colour applies at all. Both are closed by default -- no shipped
+/// scheme sets a tint -- because a background that changes on upgrade reads as a rendering fault, and
+/// because a tint is a security-adjacent signal any program on the tty can trigger.
+enum class ContextTintScope : uint8_t
+{
+    Off = 0,    ///< Ignore every tint slot.
+    Boundaries, ///< Honour only the types isBoundaryContext() names. The default.
+    All,        ///< Honour every slot the scheme sets, including shell and command.
+};
+
+/// Whether the terminal reads OSC 3008 at all.
+///
+/// ONE gate, checked where the sequence enters (@see Screen::processHierarchicalContext), rather than
+/// a flag conjoined into each consumer at the configuration boundary. With the ancestry never
+/// populated, the breadcrumb, the page tint, the derived semantic marks and the daemon's replication
+/// are all empty BY CONSTRUCTION -- so a consumer added tomorrow cannot forget to consult it, which is
+/// exactly how two of the first four came to be ungated.
+enum class ContextSignalling : uint8_t
+{
+    Disabled = 0,
+    Enabled = 1,
+};
+
 /// How a context ended, as `end=`'s `exit=` reports it.
 enum class ContextExit : uint8_t
 {
@@ -721,3 +747,20 @@ class ContextStack
 // }}}
 
 } // namespace vtbackend
+
+/// Spelled as the configuration spells it, which is what `contour generate config` writes back.
+template <>
+struct std::formatter<vtbackend::ContextTintScope>: formatter<std::string_view>
+{
+    auto format(vtbackend::ContextTintScope value, auto& ctx) const
+    {
+        string_view name;
+        switch (value)
+        {
+            case vtbackend::ContextTintScope::Off: name = "off"; break;
+            case vtbackend::ContextTintScope::Boundaries: name = "boundaries"; break;
+            case vtbackend::ContextTintScope::All: name = "all"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};

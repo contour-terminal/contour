@@ -11,10 +11,12 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Primitives.hpp> // CursorDisplay
+#include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/input/InputBinding.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/MatchModes.hpp>
 #include <vtbackend/screen/Settings.hpp>
+#include <vtbackend/shell/MarkArbiter.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/VTType.hpp>
 
@@ -324,6 +326,52 @@ struct FoldingConfig
     ///
     /// @return Whether markers are shown.
     [[nodiscard]] constexpr bool markersVisible() const noexcept { return enabled && showMarkers; }
+};
+
+/// OSC 3008 (UAPI.15) hierarchical context signalling: the nested stack of contexts a shell, `run0`,
+/// `ssh` or a container runtime opens around whatever runs inside it.
+///
+/// GLOBAL rather than per-profile, for the reason FoldingConfig is: this describes how the terminal
+/// READS a protocol the shell speaks, not how a pane looks. The two knobs that ARE presentation live
+/// where presentation already lives -- the color scheme's `tint:` map, and the profile's indicator
+/// template. There is deliberately no third place, and in particular no `status_line_breadcrumb` flag:
+/// the status line has exactly one placeholder vocabulary, and a boolean elsewhere that force-injected
+/// a segment would be invisible to its parser, its serializer and its settings editor.
+///
+/// The two limits are global on a safety argument as well: a depth cap a profile could lower is a cap
+/// an attacker picks by getting the user to open a profile.
+///
+/// SECURITY: every field OSC 3008 carries is a DISPLAY HINT. Any program holding the tty can write
+/// `type=elevate` or `user=root`, so nothing here gates behaviour -- and the ABSENCE of an elevate
+/// context is not a statement that nothing is elevated.
+///
+/// Plain bool for `enabled` because it is a YAML schema field, converted at the boundary -- the
+/// documented carve-out in AGENT.md. The two enums below are not bools in disguise: each selects
+/// between three NAMED outcomes.
+struct OscContextConfig
+{
+    bool enabled { true }; ///< Whether OSC 3008 is decoded at all.
+
+    /// How deep the ancestry may grow before further pushes are refused.
+    ///
+    /// Real nesting is ssh -> container -> elevate -> shell -> command, i.e. five. Sixteen leaves room
+    /// for the pathological-but-honest case without letting a hostile program cost unbounded memory.
+    /// Per the specification the NEWER contexts are dropped on overflow, so a program deep in the
+    /// ancestry cannot evict the elevate context above it.
+    uint16_t maxDepth { 16 };
+
+    /// How many context records are kept for scrolled-back lines that still point at them.
+    /// Must be at least maxDepth, which the reader enforces.
+    uint16_t maxRetained { 256 };
+
+    /// Whether OSC 3008 may stand in for a shell integration that is not installed.
+    vtbackend::ContextMarkPolicy deriveMarkers { vtbackend::ContextMarkPolicy::WhenAlone };
+
+    /// Which context types may tint the page background.
+    ///
+    /// The COLORS come from the color scheme's `tint:` map, which is empty in every shipped scheme;
+    /// this decides which of its entries are honoured at all.
+    vtbackend::ContextTintScope tinting { vtbackend::ContextTintScope::Boundaries };
 };
 
 struct ScrollBarConfig
@@ -1223,6 +1271,7 @@ struct Config
     ConfigEntry<std::set<std::string>, documentation::ExperimentalFeatures> experimentalFeatures {};
     ConfigEntry<ImagesConfig, documentation::Images> images {};
     ConfigEntry<FoldingConfig, documentation::Folding> folding {};
+    ConfigEntry<OscContextConfig, documentation::OscContext> oscContext {};
 
     ConfigEntry<std::unordered_map<std::string, TerminalProfile>, documentation::Profiles> profiles {
         { { "main", TerminalProfile {} } }
@@ -1537,6 +1586,9 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, FoldingConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, OscContextConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ContextMarkPolicy& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ContextTintScope& where);
     void loadFromEntry(YAML::Node const& node,
                        std::string const& entry,
                        vtbackend::FoldJumpBehavior& where);
@@ -1840,6 +1892,11 @@ struct Writer
     [[nodiscard]] std::string format(std::string_view doc, FoldingConfig const& v)
     {
         return format(doc, v.enabled, v.showMarkers, v.autoCollapseOnNewCommand, v.onJumpIntoFold);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, OscContextConfig const& v)
+    {
+        return format(doc, v.enabled, v.maxDepth, v.maxRetained, v.deriveMarkers, v.tinting);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, HistoryConfig const& v)

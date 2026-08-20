@@ -611,3 +611,26 @@ TEST_CASE("Screen.osc3008 fires no callbacks during its first, undecided cycle",
 }
 
 // }}}
+
+// {{{ the enabled gate
+
+TEST_CASE("Screen.osc3008 is not read at all when signalling is disabled", "[context]")
+{
+    // The single gate, and what it is worth: it is checked where the sequence ENTERS, so the ancestry
+    // stays empty -- and with it the breadcrumb, the page tint, the derived marks and what a daemon
+    // replicates, none of which needs a flag of its own. The configuration's `enabled: false`
+    // promises exactly this ("nothing is tracked, nothing is derived and nothing is tinted").
+    auto mock = makeTerm();
+    mock.terminal.settings().contextSignalling = ContextSignalling::Disabled;
+
+    mock.writeToScreen("\033]3008;start=abc;type=container;container=foobar\033\\");
+
+    CHECK(mock.terminal.contexts().depth() == 0);
+    CHECK(!mock.terminal.contexts().activeId());
+    CHECK(mock.terminal.contexts().active() == nullptr);
+
+    // And with nothing on the ancestry the breadcrumb collapses, rather than being separately silenced.
+    CHECK(mock.terminal.contexts().chain().empty());
+}
+
+// }}}

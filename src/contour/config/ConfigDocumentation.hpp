@@ -382,6 +382,38 @@ constexpr StringLiteral FoldingConfig {
 
 };
 
+constexpr StringLiteral OscContextConfig {
+
+    "osc_context:\n"
+    "    {comment} Whether to read OSC 3008, systemd's hierarchical context signalling (UAPI.15).\n"
+    "    {comment} systemd 258 and later emit these around every interactive command with no\n"
+    "    {comment} configuration at all, so on those systems the terminal learns command\n"
+    "    {comment} boundaries, exit statuses and working directories for free.\n"
+    "    {comment} Set to false to restore the behaviour from before this was consumed.\n"
+    "    enabled: {}\n"
+    "    {comment} How deep the context stack may grow before further contexts are ignored.\n"
+    "    {comment} Per the specification the NEWER contexts are dropped, so a program cannot\n"
+    "    {comment} push the elevate context above it out of the stack.\n"
+    "    max_depth: {}\n"
+    "    {comment} How many contexts are remembered for scrolled-back output that refers to them.\n"
+    "    max_retained_contexts: {}\n"
+    "    {comment} Whether OSC 3008 may stand in for a shell integration that is not installed:\n"
+    "    {comment}   when_alone - derive marks from OSC 3008 only while OSC 133 has said nothing\n"
+    "    {comment}   never      - only OSC 133 ever leaves marks\n"
+    "    {comment} Once a shell integration speaks, it owns the marks for the rest of the session.\n"
+    "    derive_markers: {}\n"
+    "    {comment} Which contexts may tint the page background. The COLOURS come from the colour\n"
+    "    {comment} scheme's tint: map, which no shipped scheme sets -- so nothing is tinted until\n"
+    "    {comment} you choose a colour there. A context is something the session ANNOUNCED, and\n"
+    "    {comment} anything that can write to your terminal can announce one, or fail to.\n"
+    "    {comment}   boundaries - only elevate, chpriv, container, vm and remote\n"
+    "    {comment}   all        - every type the colour scheme sets a tint for\n"
+    "    {comment}   off        - ignore the tint map entirely\n"
+    "    tinting: {}\n"
+    "\n"
+
+};
+
 constexpr StringLiteral ScrollbarConfig {
 
     "scrollbar:\n"
@@ -1989,6 +2021,41 @@ constexpr StringLiteral HistoryWeb {
     "\n"
 };
 
+constexpr StringLiteral OscContextWeb {
+    "configuration controls whether Contour reads OSC 3008, systemd's hierarchical context signalling "
+    "(UAPI.15): the nested stack of contexts a shell, `run0`, `ssh` or a container runtime opens around "
+    "whatever runs inside it.\n"
+    "``` yaml\n"
+    "osc_context:\n"
+    "  enabled: true\n"
+    "  max_depth: 16\n"
+    "  max_retained_contexts: 256\n"
+    "  derive_markers: when_alone\n"
+    "  tinting: boundaries\n"
+    "```\n"
+    "systemd 258 and later ship a shell snippet that emits these sequences around every interactive "
+    "command with no configuration at all, so on such a system Contour learns command boundaries, exit "
+    "statuses (including whether a command crashed or was interrupted, which OSC 133 cannot express) "
+    "and working directories without any shell integration being installed.\n"
+    ":octicons-horizontal-rule-16: ==enabled== Whether the sequences are read at all. When false "
+    "nothing is tracked, nothing is derived and nothing is tinted. <br/>\n"
+    ":octicons-horizontal-rule-16: ==max_depth== How deep the context stack may grow. Beyond it, "
+    "further contexts are ignored -- the NEWER ones, so that a program cannot push the context "
+    "established above it out of the stack. <br/>\n"
+    ":octicons-horizontal-rule-16: ==max_retained_contexts== How many contexts are remembered for "
+    "scrolled-back output that still refers to them. Older ones are forgotten, and output belonging to "
+    "them simply stops being attributed. <br/>\n"
+    ":octicons-horizontal-rule-16: ==derive_markers== Whether OSC 3008 may stand in for a shell "
+    "integration that is not installed. `when_alone` derives prompt and command marks from it only "
+    "while OSC 133 has said nothing; once a shell integration speaks, it owns the marks for the rest of "
+    "the session. `never` leaves marks entirely to OSC 133. <br/>\n"
+    ":octicons-horizontal-rule-16: ==tinting== Which contexts may tint the page background. The "
+    "colours themselves come from the colour scheme's `tint:` map, which no shipped scheme sets, so "
+    "nothing is tinted until you choose a colour there. Note that a context is something the session "
+    "**announced**: anything that can write to your terminal can announce one, or fail to announce one, "
+    "so the absence of a tint is not a statement that nothing is elevated. <br/>\n"
+};
+
 constexpr StringLiteral FoldingWeb {
     "configuration controls output folding: collapsing a finished command's output down to the prompt "
     "line it was entered at, and expanding it again.\n"
@@ -2534,6 +2601,7 @@ using TerminalSize = DocumentationEntry<TerminalSizeConfig, TerminalSizeWeb>;
 using TerminalId = DocumentationEntry<TerminalIdConfig, TerminalIdWeb>;
 using History = DocumentationEntry<HistoryConfig, HistoryWeb>;
 using Folding = DocumentationEntry<FoldingConfig, FoldingWeb>;
+using OscContext = DocumentationEntry<OscContextConfig, OscContextWeb>;
 using Scrollbar = DocumentationEntry<ScrollbarConfig, ScrollbarWeb>;
 using StatusLine = DocumentationEntry<StatusLineConfig, StatusLineWeb>;
 using OptionKeyAsAlt = DocumentationEntry<OptionKeyAsAltConfig, OptionKeyAsAltWeb>;
