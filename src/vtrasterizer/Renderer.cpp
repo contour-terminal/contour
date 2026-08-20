@@ -756,6 +756,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             cursorOpt = renderBuffer.get().cursor;
             renderCells(std::span(renderBuffer.get().cells));
             renderLines(std::span(renderBuffer.get().lines));
+            renderGutter(std::span(renderBuffer.get().gutter));
         });
     }
     else
@@ -785,6 +786,8 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         renderPass(primaryPressure, [&] {
             renderCells(mainCells, smoothPixelOffset);
             renderLines(mainLines);
+            // The gutter belongs to the main display, and scrolls with it.
+            renderGutter(std::span(renderBuffer.get().gutter));
         });
 
         // Scissor clips the main display area so the offset content doesn't bleed into the status line.
@@ -908,6 +911,37 @@ void Renderer::renderLines(std::span<vtbackend::RenderLine const> lines)
         _backgroundRenderer.renderLine(line);
         _decorationRenderer.renderLine(line);
         _textRenderer.renderLine(line);
+    }
+}
+
+void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter)
+{
+    for (auto const& marker: gutter)
+    {
+        // groupStart and groupEnd together make each marker its own shaping group, so it is placed at
+        // its own pen position rather than run together with whatever the text renderer saw last.
+        auto const cell = vtbackend::RenderCell {
+            .codepoints = std::u32string(1, marker.codepoint),
+            .image = {},
+            .position =
+                vtbackend::CellLocation { .line = marker.lineOffset, .column = vtbackend::ColumnOffset(-1) },
+            .attributes = marker.attributes,
+            .width = 1,
+            .sizing = {},
+            .groupStart = true,
+            .groupEnd = true,
+        };
+
+        try
+        {
+            _backgroundRenderer.renderCell(cell);
+            _textRenderer.renderCell(cell);
+        }
+        catch (std::exception const& e)
+        {
+            errorLog()(
+                "renderGutter: skipping marker on line {} due to exception: {}", marker.lineOffset, e.what());
+        }
     }
 }
 

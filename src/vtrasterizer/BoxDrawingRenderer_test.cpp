@@ -1,4 +1,5 @@
 #include <vtbackend/Color.hpp>
+#include <vtbackend/Folding.hpp>
 
 #include <vtrasterizer/BoxDrawingRenderer.hpp>
 #include <vtrasterizer/GridMetrics.hpp>
@@ -8,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <format>
 
 using namespace vtrasterizer;
 using namespace vtbackend;
@@ -606,6 +608,20 @@ TEST_CASE("BoxDrawingRenderer.solidTriangles", "[boxdrawing]")
     auto constexpr Size = ImageSize { Width(8), Height(8) };
     auto constexpr LineThickness = 1;
 
+    SECTION("every fold-column glyph is drawn here, not by the font")
+    {
+        // The fold column's docstring promises its glyphs come from this renderer. Nothing else
+        // enforces that: a sixth FoldMarker whose glyph fell outside renderable() would silently
+        // drop back to the font and look wrong at runtime, with no build or test failure.
+        using vtbackend::FoldMarker;
+        for (auto const marker:
+             { FoldMarker::Expanded, FoldMarker::Collapsed, FoldMarker::Body, FoldMarker::BodyEnd })
+        {
+            INFO("marker " << std::format("{}", marker));
+            CHECK(BoxDrawingRenderer::renderable(vtbackend::foldMarkerGlyph(marker)));
+        }
+    }
+
     SECTION("renderable() claims them, so the font is never consulted")
     {
         CHECK(BoxDrawingRenderer::renderable(char32_t { 0x25B6 }));
@@ -660,5 +676,100 @@ TEST_CASE("BoxDrawingRenderer.solidTriangles", "[boxdrawing]")
                                        "##......",
                                        "#.......",
                                    });
+    }
+}
+
+TEST_CASE("BoxDrawingRenderer.foldHeadGlyphsInTinyCells", "[boxdrawing]")
+{
+    // A small font at a low DPI can hand the builder a cell only a few device pixels wide. The box has
+    // to come out of that as SOMETHING drawable rather than as undefined behaviour: sizing it once
+    // clamped the desired side between a floor of 5 and a ceiling of w-2, which are in the wrong order
+    // the moment the cell is narrower than seven pixels.
+    for (auto const width: std::views::iota(1, 12))
+    {
+        for (auto const height: std::views::iota(1, 12))
+        {
+            CAPTURE(width, height);
+            auto const cell =
+                ImageSize { Width(static_cast<unsigned>(width)), Height(static_cast<unsigned>(height)) };
+            for (auto const codepoint: { char32_t { 0x10F000 }, char32_t { 0x10F001 } })
+            {
+                CAPTURE(static_cast<uint32_t>(codepoint));
+                auto const buffer = BoxDrawingRendererTest::buildElements(codepoint, cell, 1);
+                REQUIRE(buffer.has_value());
+                CHECK(buffer->size() == static_cast<size_t>(width * height));
+            }
+        }
+    }
+}
+
+TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
+{
+    // Contour's own private-use glyphs: the fold column's head, a box carrying a minus while the
+    // block is open and a plus once it is closed. No Unicode codepoint carries the stem that ties an
+    // open head to the body column below it, which is why these are drawn here rather than typed.
+    //
+    // A realistic cell (9x20). The art is in BUFFER order -- row 0 is the BOTTOM of the glyph -- so
+    // it reads upside down; the stem is therefore at the TOP of the open head's art.
+    auto constexpr Cell = ImageSize { Width(9), Height(20) };
+
+    SECTION("renderable() claims the block, and nothing beyond it")
+    {
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F000 }));
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F001 }));
+
+        // The reserved block is documented as F0000..F00FF, but only what is drawn may be claimed:
+        // claiming the rest would swallow codepoints that must still fall through to the font.
+        CHECK(!BoxDrawingRenderer::renderable(char32_t { 0xF0002 }));
+        CHECK(!BoxDrawingRenderer::renderable(char32_t { 0xEFFFF }));
+    }
+
+    SECTION("U+10F000 fold head, open: a boxed minus with a stem into the body below")
+    {
+        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x10F000 }, Cell, 1);
+        REQUIRE(buffer.has_value());
+
+        vtrasterizer::verifyBitmap(
+            TestTileData {
+                .bitmapSize = Cell, .bitmapFormat = vtrasterizer::atlas::Format::Red, .bitmap = *buffer },
+            {
+                "....#....", "....#....", "....#....", "....#....", "....#....", "....#....", "....#....",
+                ".#######.", ".#.....#.", ".#.....#.", ".#.###.#.", ".#.....#.", ".#.....#.", ".#######.",
+                ".........", ".........", ".........", ".........", ".........", ".........",
+            });
+    }
+
+    SECTION("U+10F001 fold head, closed: a boxed plus, and no stem")
+    {
+        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x10F001 }, Cell, 1);
+        REQUIRE(buffer.has_value());
+
+        // No stem: a collapsed block has nothing below it for the column to continue into.
+        vtrasterizer::verifyBitmap(
+            TestTileData {
+                .bitmapSize = Cell, .bitmapFormat = vtrasterizer::atlas::Format::Red, .bitmap = *buffer },
+            {
+                ".........", ".........", ".........", ".........", ".........", ".........", ".........",
+                ".#######.", ".#.....#.", ".#..#..#.", ".#.###.#.", ".#..#..#.", ".#.....#.", ".#######.",
+                ".........", ".........", ".........", ".........", ".........", ".........",
+            });
+    }
+
+    SECTION("the open head's stem meets the body column exactly")
+    {
+        // The stem and U+2502 must share a column, or the fold column breaks at every head.
+        auto const head = BoxDrawingRendererTest::buildElements(char32_t { 0x10F000 }, Cell, 1);
+        auto const body = BoxDrawingRendererTest::buildBoxElements(char32_t { 0x2502 }, Cell, 1, 1);
+        REQUIRE(head.has_value());
+        REQUIRE(body.has_value());
+
+        auto const litColumnOfBottomRow = [&](atlas::Buffer const& b) {
+            for (auto x = 0; x < 9; ++x)
+                if (b[static_cast<size_t>(x)] > 0)
+                    return x;
+            return -1;
+        };
+
+        CHECK(litColumnOfBottomRow(*head) == litColumnOfBottomRow(*body));
     }
 }

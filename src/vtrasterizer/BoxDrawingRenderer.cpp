@@ -247,6 +247,104 @@ namespace detail
                 return b;
             }
         };
+        /// Whether the head draws the open block's sign or the closed one's.
+        enum class FoldHeadState : uint8_t
+        {
+            Open = 0, ///< A minus, with a stem descending into the body column.
+            Closed,   ///< A plus, and no stem: a collapsed block has nothing below it.
+        };
+
+        /// The fold column's head marker: a box carrying a minus while the block is open and a plus
+        /// once it is closed, with a stem descending from the open one into the column below it.
+        ///
+        /// No Unicode codepoint describes this. U+229F SQUARED MINUS and U+229E SQUARED PLUS are the
+        /// box and its sign, but neither carries the stem that ties a fold's head to its body, and a
+        /// head that did not connect would read as two unrelated marks rather than one bracket down
+        /// the side of a block. Contour therefore draws it from two codepoints of its own
+        /// (@see docs/vt-extensions/private-use-glyphs.md).
+        ///
+        /// A box+sign rather than a triangle, because that is what a fold control looks like
+        /// everywhere else a reader has met one -- editors, tree views, file managers.
+        struct FoldHead
+        {
+            ImageSize size {};
+            FoldHeadState state = FoldHeadState::Open;
+
+            /// The top of a @p stroke-thick horizontal bar centred between @p top and @p bottom.
+            [[nodiscard]] static constexpr int centerY(int top, int bottom, int stroke) noexcept
+            {
+                return top + ((bottom - top - stroke) / 2);
+            }
+
+            operator atlas::Buffer() const
+            {
+                /*
+                    .___________. <- cell top
+                    |           |
+                    |  XXXXXXX  |
+                    |  X     X  |
+                    |  X XXX X  |  <- minus (open) ...
+                    |  X     X  |
+                    |  XXXXXXX  |
+                    |     X     |  <- ... and the stem into the body column below
+                    `-----X-----` <- cell bottom
+                */
+                auto b = blockElement<1>(size);
+
+                auto const w = unbox<int>(size.width);
+                auto const h = unbox<int>(size.height);
+
+                // Square whatever the cell's aspect ratio is: a box that stretched with the font would
+                // stop reading as a button the moment the user picked a narrow one. Odd, so the sign
+                // inside it has a centre pixel to sit on rather than straddling two.
+                //
+                // The two bounds are ordered explicitly rather than handed to std::clamp as they come:
+                // a cell narrower than seven device pixels -- a small font at a low DPI -- puts the
+                // upper bound below the lower one, which violates clamp's precondition.
+                auto const widest = std::max(3, w - 2);
+                auto side = std::clamp(
+                    static_cast<int>(std::lround(std::min(w, h) * 0.78)), std::min(5, widest), widest);
+                if (side % 2 == 0)
+                    --side;
+                side = std::max(3, side);
+                auto const stroke = std::max(1, side / 7);
+
+                // Where U+2502 puts its vertical, so the stem below meets the body column exactly.
+                auto const centerX = (w - stroke) / 2;
+
+                auto const left = centerX + (stroke / 2) - (side / 2);
+                auto const right = left + side;
+                auto const top = (h - side) / 2;
+                auto const bottom = top + side;
+
+                // The sign spans the box's interior, which makes it symmetric by construction.
+                auto const inner = stroke + std::max(1, side / 8);
+
+                auto const px = [&](int x0, int y0, int x1, int y1) {
+                    b.rect({ .x = double(x0) / w, .y = double(y0) / h },
+                           { .x = double(x1) / w, .y = double(y1) / h });
+                };
+
+                // The box outline.
+                px(left, top, right, top + stroke);       // top
+                px(left, bottom - stroke, right, bottom); // bottom
+                px(left, top, left + stroke, bottom);     // left
+                px(right - stroke, top, right, bottom);   // right
+
+                // The sign: a minus always, crossed into a plus once the block is closed.
+                auto const signTop = centerY(top, bottom, stroke);
+                px(left + inner, signTop, right - inner, signTop + stroke);
+                if (state == FoldHeadState::Closed)
+                    px(centerX, top + inner, centerX + stroke, bottom - inner);
+                else
+                    // Only the OPEN head carries a stem: a collapsed block has nothing below it for
+                    // the column to continue into.
+                    px(centerX, bottom, centerX + stroke, h);
+
+                return b;
+            }
+        };
+
         struct Box
         {
             Line upval = NoLine;
@@ -1990,6 +2088,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
            || ascending(0x2500, 0x259F)             // box drawing, block elements, shades
            || codepoint == 0x25B6                   // ▶ BLACK RIGHT-POINTING TRIANGLE
            || codepoint == 0x25BC                   // ▼ BLACK DOWN-POINTING TRIANGLE
+           || ascending(0x10F000, 0x10F001)         // Contour's fold-head glyphs
            || ascending(0x1FB00, 0x1FBAF)           // more block sextants
            || ascending(0x1FBF0, 0x1FBF9)           // digits
            || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
@@ -2514,6 +2613,15 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         case 0xE0BA: return /*  */ ld({ .x=0, .y=1 }, { .x=1, .y=0 });
         case 0xE0BC: return /*  */ ud({ .x=0, .y=1 }, { .x=1, .y=0 });
         case 0xE0BE: return /*  */ ud({ .x=0, .y=0 }, { .x=1, .y=1 });
+
+        // Contour's own private-use glyphs (@see docs/vt-extensions/private-use-glyphs.md).
+        // Supplementary PUA-B rather than the BMP: E000..F8FF is comprehensively squatted by Nerd
+        // Fonts and friends. Not at a plane's start either, where what leaves the BMP tends to land
+        // first -- 10F000 sits near the far end of plane 16, which nothing well-known reaches.
+        case 0x10F000:
+            return /* fold head, open   */ FoldHead { .size = size, .state = FoldHeadState::Open };
+        case 0x10F001:
+            return /* fold head, closed */ FoldHead { .size = size, .state = FoldHeadState::Closed };
 
         // PUA defines as introduced by FiraCode: https://github.com/tonsky/FiraCode/issues/1324
         case 0xEE00: return progressBar().left();
