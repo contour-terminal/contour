@@ -597,3 +597,68 @@ TEST_CASE("BoxDrawingRenderer.shade_characters", "[renderer]")
                                    });
     }
 }
+
+TEST_CASE("BoxDrawingRenderer.solidTriangles", "[boxdrawing]")
+{
+    // Contour draws these itself rather than leaving them to the font: a font's ▼/▶ are small, thin
+    // and inconsistent between families, which is what made the fold-column marker hard to see and
+    // hard to recognise as a control. Drawn here they are cell-proportionate in every font.
+    auto constexpr Size = ImageSize { Width(8), Height(8) };
+    auto constexpr LineThickness = 1;
+
+    SECTION("renderable() claims them, so the font is never consulted")
+    {
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x25B6 }));
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x25BC }));
+
+        // Their neighbours in the U+25A0..25FF block are still on the TODO list and must keep
+        // falling through to the font rather than rendering as nothing.
+        CHECK(!BoxDrawingRenderer::renderable(char32_t { 0x25B2 }));
+        CHECK(!BoxDrawingRenderer::renderable(char32_t { 0x25C0 }));
+    }
+
+    SECTION("0x25BC BLACK DOWN-POINTING TRIANGLE has its base on top")
+    {
+        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x25BC }, Size, LineThickness);
+        REQUIRE(buffer.has_value());
+
+        // The atlas buffer is bottom-up -- row 0 is the BOTTOM of the glyph, as U+2580 UPPER HALF
+        // BLOCK lighting rows 4..7 shows -- so the art below is upside down: its LAST line is the
+        // triangle's base along the top of the cell, and its apex is four rows below that.
+        vtrasterizer::verifyBitmap(TestTileData { .bitmapSize = Size,
+                                                  .bitmapFormat = vtrasterizer::atlas::Format::Red,
+                                                  .bitmap = *buffer },
+                                   {
+                                       "........",
+                                       "........",
+                                       "........",
+                                       "....#...",
+                                       "...##...",
+                                       "..####..",
+                                       ".######.",
+                                       "########",
+                                   });
+    }
+
+    SECTION("0x25B6 BLACK RIGHT-POINTING TRIANGLE has its base on the left")
+    {
+        auto const buffer = BoxDrawingRendererTest::buildElements(char32_t { 0x25B6 }, Size, LineThickness);
+        REQUIRE(buffer.has_value());
+
+        // Full height down the left edge, tapering to an apex at mid-width: pointing right.
+        // Near-symmetric top to bottom, so the bottom-up buffer order barely shows here.
+        vtrasterizer::verifyBitmap(TestTileData { .bitmapSize = Size,
+                                                  .bitmapFormat = vtrasterizer::atlas::Format::Red,
+                                                  .bitmap = *buffer },
+                                   {
+                                       "#.......",
+                                       "##......",
+                                       "###.....",
+                                       "#####...",
+                                       "####....",
+                                       "###.....",
+                                       "##......",
+                                       "#.......",
+                                   });
+    }
+}

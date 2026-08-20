@@ -1988,6 +1988,8 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
 
     return ascending(0x239B, 0x23B3)                // mathematical brackets and symbols
            || ascending(0x2500, 0x259F)             // box drawing, block elements, shades
+           || codepoint == 0x25B6                   // ▶ BLACK RIGHT-POINTING TRIANGLE
+           || codepoint == 0x25BC                   // ▼ BLACK DOWN-POINTING TRIANGLE
            || ascending(0x1FB00, 0x1FBAF)           // more block sextants
            || ascending(0x1FBF0, 0x1FBF9)           // digits
            || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
@@ -2145,6 +2147,15 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
                    | (upper(1 / 2_th) * right(1 / 2_th) + lower(1 / 2_th) * left(1 / 2_th));
         case 0x259F: // ▟  QUADRANT UPPER RIGHT AND LOWER LEFT AND LOWER RIGHT
             return blockElement(size) | (upper(1 / 2_th) * right(1 / 2_th) + lower(1 / 2_th));
+
+        // Drawn here rather than left to the font: a font's ▼/▶ are small, thin and inconsistent
+        // between families, where drawn from the cell they are cell-proportionate and identical in
+        // every font -- the same reason every other glyph in this table is here.
+        //
+        // Dir names which edge the triangle's BASE sits on, so it points away from that edge -- the
+        // same convention U+E0B0's right-pointing Powerline separator uses with Dir::Left.
+        case 0x25B6: return /* ▶ */ triangle<Dir::Left, Inverted::No>(size);
+        case 0x25BC: return /* ▼ */ triangle<Dir::Top, Inverted::No>(size);
         // TODO: ■  U+25A0  BLACK SQUARE
         // TODO: □  U+25A1  WHITE SQUARE
         // TODO: ▢  U+25A2  WHITE SQUARE WITH ROUNDED CORNERS
@@ -2167,13 +2178,11 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         // TODO: △  U+25B3  WHITE UP-POINTING TRIANGLE
         // TODO: ▴  U+25B4  BLACK UP-POINTING SMALL TRIANGLE
         // TODO: ▵  U+25B5  WHITE UP-POINTING SMALL TRIANGLE
-        // TODO: ▶  U+25B6  BLACK RIGHT-POINTING TRIANGLE
         // TODO: ▷  U+25B7  WHITE RIGHT-POINTING TRIANGLE
         // TODO: ▸  U+25B8  BLACK RIGHT-POINTING SMALL TRIANGLE
         // TODO: ▹  U+25B9  WHITE RIGHT-POINTING SMALL TRIANGLE
         // TODO: ►  U+25BA  BLACK RIGHT-POINTING POINTER
         // TODO: ▻  U+25BB  WHITE RIGHT-POINTING POINTER
-        // TODO: ▼  U+25BC  BLACK DOWN-POINTING TRIANGLE
         // TODO: ▽  U+25BD  WHITE DOWN-POINTING TRIANGLE
         // TODO: ▾  U+25BE  BLACK DOWN-POINTING SMALL TRIANGLE
         // TODO: ▿  U+25BF  WHITE DOWN-POINTING SMALL TRIANGLE
