@@ -7,6 +7,7 @@
 #include <vtbackend/Color.hpp>
 #include <vtbackend/CommandBlocks.hpp>
 #include <vtbackend/Cursor.hpp>
+#include <vtbackend/Folding.hpp>
 #include <vtbackend/Grid.hpp>
 #include <vtbackend/Hyperlink.hpp>
 #include <vtbackend/Image.hpp>
@@ -36,6 +37,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -293,13 +295,17 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Renders the full screen by passing every grid cell to the callback.
     ///
     /// @param extraLines  Additional lines to render beyond the page size (e.g. for smooth scrolling).
+    /// @param rows        The exact rows to draw, top first, when they are not the contiguous page --
+    ///                    @see Grid::render, which documents the folding case this exists for.
     template <typename Renderer>
     RenderPassHints render(Renderer&& render,
                            ScrollOffset scrollOffset = {},
                            HighlightSearchMatches highlightSearchMatches = HighlightSearchMatches::Yes,
-                           LineCount extraLines = LineCount(0)) const
+                           LineCount extraLines = LineCount(0),
+                           std::span<LineOffset const> rows = {}) const
     {
-        return _grid.render(std::forward<Renderer>(render), scrollOffset, highlightSearchMatches, extraLines);
+        return _grid.render(
+            std::forward<Renderer>(render), scrollOffset, highlightSearchMatches, extraLines, rows);
     }
 
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
@@ -728,6 +734,17 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///         the prompt scrolled out of reach).
     [[nodiscard]] std::expected<LivePromptSpan, PromptRegionError> livePromptSpan() const;
 
+    /// The foldable output regions of the finished commands in the scrollback, most recent first.
+    ///
+    /// Reads the OSC 133 marks alone, like its two siblings above, so folding works for any shell that
+    /// speaks plain OSC 133 -- DEC mode 2034 is a separate, opt-in reader channel and is not required.
+    ///
+    /// Does NOT take the terminal lock; the caller holds it, the same contract lastCommandBlock() has.
+    ///
+    /// @param maxScanLines How far up the scrollback to walk (@see MaxFoldScanLines).
+    /// @return The ranges, most recent first; empty when nothing in reach is foldable.
+    [[nodiscard]] std::vector<FoldRange> foldRanges(size_t maxScanLines) const;
+
     void scrollUp(LineCount n) { scrollUp(n, margin()); }
     void scrollDown(LineCount n) { scrollDown(n, margin()); }
     void scrollLeft(ColumnCount n);
@@ -796,10 +813,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// line the user put a Vi mark on — and never the physical piece a wrap happened to chop it into.
     /// Stamping a continuation is exactly where they cannot survive: see HeadOnlyLineFlags, and the
     /// widening resize that rebuilds a joined logical line from its head alone.
-    void setLogicalLineFlags(LineOffset line, LineFlags flags, bool enable) noexcept
-    {
-        enableLineFlags(_grid.logicalLineHead(line), flags, enable);
-    }
+    /// Stamps @p flags onto the head of the LOGICAL line @p line belongs to.
+    ///
+    /// Out of line because it reaches into Terminal, which is incomplete here: every semantic mark in
+    /// the tree passes through this one funnel -- OSC 133's four, and vi's `mm` -- and the fold ranges
+    /// derived from them have to be invalidated when one lands.
+    void setLogicalLineFlags(LineOffset line, LineFlags flags, bool enable) noexcept;
 
     /// Whether the LOGICAL line that @p line belongs to carries all of @p flags.
     [[nodiscard]] bool isLogicalLineFlagEnabled(LineOffset line, LineFlags flags) const noexcept

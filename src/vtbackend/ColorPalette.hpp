@@ -298,6 +298,55 @@ struct ColorPalette
     RGBColorPair indicatorStatusLineInsertMode = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
     RGBColorPair indicatorStatusLineNormalMode = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
     RGBColorPair indicatorStatusLineVisualMode = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
+
+    /// The fold column drawn in the gutter left of the grid, and its hover state.
+    ///
+    /// Optional rather than defaulted, because there is no constant that would be right: the column has
+    /// to sit on the palette's own background, which every scheme picks differently. Unset means "derive
+    /// from the palette's own foreground and background", so a scheme that has never heard of folding
+    /// still renders a legible, obviously-clickable column.
+    ///
+    /// Those two and nothing else, deliberately. defaultForegroundDimmed and defaultForegroundBright
+    /// would be the obvious sources for the two states, but only monokai and one-dark set them: every
+    /// light preset keeps the struct's dark-theme defaults, so a bright-sourced hover would be white on
+    /// near-white there, and on one-dark the dimmed and normal foregrounds are close enough that the two
+    /// states would be indistinguishable.
+    std::optional<RGBColorPair> foldMarker;
+    std::optional<RGBColorPair> foldMarkerHover;
+
+    /// How far the fold column's resting glyph is faded toward the background.
+    ///
+    /// A fraction rather than a colour, for the reason above: fading the scheme's own text colour keeps
+    /// the marker quieter than the text beside it in every theme, which a constant grey manages in none.
+    static constexpr float FoldMarkerRestFade = 0.45f;
+
+    /// The fold column's colors at rest, with the unset case resolved.
+    ///
+    /// The background is the page's own, exactly -- as it is when hovered, so the gutter never draws a
+    /// rectangle at all (see BackgroundRenderer::renderCell) and a transparent window stays transparent
+    /// behind the column in both states.
+    [[nodiscard]] RGBColorPair foldMarkerColors() const noexcept
+    {
+        return foldMarker.value_or(
+            RGBColorPair { .foreground = mixColor(defaultForeground, defaultBackground, FoldMarkerRestFade),
+                           .background = defaultBackground });
+    }
+
+    /// The fold column's colors while the pointer is over it, with the unset case resolved.
+    ///
+    /// The GLYPH comes up to full strength and nothing else moves. Neither swapping the pair nor
+    /// tinting the run's background behind it: both paint a band down the side of the block, which
+    /// reads as a selection of those rows rather than as a control they belong to -- and a band is
+    /// what a terminal gutter, unlike an editor's, sits directly against text with no margin to
+    /// separate it.
+    ///
+    /// Legible in any scheme by construction: the hovered foreground is the very colour the scheme
+    /// already draws its text in, on the background it already draws it against.
+    [[nodiscard]] RGBColorPair foldMarkerHoverColors() const noexcept
+    {
+        return foldMarkerHover.value_or(
+            RGBColorPair { .foreground = defaultForeground, .background = defaultBackground });
+    }
 };
 
 /// Applies the built-in color scheme @p colorPaletteName to @p palette, if there is one by that name.

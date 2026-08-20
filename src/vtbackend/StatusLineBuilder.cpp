@@ -335,17 +335,21 @@ namespace
             if (!vt.isPrimaryScreen())
                 return {};
 
-            if (vt.viewport().scrollOffset().value)
+            // The SCROLLABLE count, not the raw history depth: the scroll offset is bounded by that
+            // count, so dividing by the depth yields an indicator that can never reach 100% and quotes
+            // a distance the user cannot travel. @see Viewport::scrollableLineCount, which every other
+            // consumer of the bound already reads.
+            auto const scrollable = vt.viewport().scrollableLineCount();
+
+            // Zero is the whole reason for the guard as well as an uninteresting answer: with the
+            // history entirely inside collapsed folds there is nothing to be a percentage of.
+            if (vt.viewport().scrollOffset().value && unbox(scrollable) > 0)
             {
-                auto const pct =
-                    double(vt.viewport().scrollOffset()) / double(vt.primaryScreen().historyLineCount());
-                return std::format("{}/{} {:3}%",
-                                   vt.viewport().scrollOffset(),
-                                   vt.primaryScreen().historyLineCount(),
-                                   int(pct * 100));
+                auto const pct = double(vt.viewport().scrollOffset()) / scrollable.as<double>();
+                return std::format("{}/{} {:3}%", vt.viewport().scrollOffset(), scrollable, int(pct * 100));
             }
             else
-                return std::format("{}", vt.primaryScreen().historyLineCount());
+                return std::format("{}", scrollable);
         }
 
         std::string visit(StatusLineDefinitions::Hyperlink const&)

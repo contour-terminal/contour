@@ -5,6 +5,7 @@
 #include <vtbackend/ColorPalette.hpp>
 #include <vtbackend/Cursor.hpp>
 #include <vtbackend/DesktopNotification.hpp>
+#include <vtbackend/Folding.hpp>
 #include <vtbackend/Grid.hpp>
 #include <vtbackend/HintModeHandler.hpp>
 #include <vtbackend/Hyperlink.hpp>
@@ -741,7 +742,8 @@ class Terminal
                && coord.column < boxed_cast<ColumnOffset>(_settings.pageSize.columns);
     }
 
-    [[nodiscard]] bool isCursorInViewport() const noexcept
+    /// Not noexcept: the fold projection this goes through is built lazily, and building it allocates.
+    [[nodiscard]] bool isCursorInViewport() const
     {
         return viewport().isLineVisible(currentScreen().cursor().position.line);
     }
@@ -810,6 +812,22 @@ class Terminal
             case StatusDisplayType::HostWritable: return _hostWritableStatusLineScreen.pageSize().lines;
         }
         crispy::unreachable();
+    }
+
+    /// The screen row the MAIN page starts on.
+    ///
+    /// Screen rows count from the top of everything drawn, so a status line positioned at the top
+    /// occupies the first rows and the grid begins below them. Every coordinate that crosses the
+    /// boundary between "a row on the display" and "a row of the grid" has to apply this shift --
+    /// the render buffer when it places cells, and the GUI's hit-tests when they map a pixel back --
+    /// which is why it is stated once here rather than re-derived at each of them.
+    ///
+    /// @return The first screen row of the main page; zero unless a status line sits above it.
+    [[nodiscard]] LineOffset mainPageTopRow() const noexcept
+    {
+        return _settings.statusDisplayPosition == StatusDisplayPosition::Top
+                   ? statusLineHeight().as<LineOffset>()
+                   : LineOffset(0);
     }
 
     /// Clamps a requested total page size to the minimum the backend can accept for the currently
@@ -926,6 +944,204 @@ class Terminal
     // viewport management
     [[nodiscard]] Viewport& viewport() noexcept { return _viewport; }
     [[nodiscard]] Viewport const& viewport() const noexcept { return _viewport; }
+
+    // {{{ Output folding (OSC 133 semantic blocks)
+    //
+    // Folding is a PROJECTION applied between the grid and the render pass, and nothing else: the grid,
+    // the page size and every VT semantic are untouched, so a collapsed block changes what the user sees
+    // and never what the shell is told. The two places that must agree about it are the row list handed
+    // to Grid::render and Viewport's coordinate translation -- disagreement there misplaces a selection.
+
+    /// Which folds the user has collapsed. Mutable, because collapsing one is a user action.
+    [[nodiscard]] FoldState& foldState() noexcept { return _foldState; }
+    [[nodiscard]] FoldState const& foldState() const noexcept { return _foldState; }
+
+    /// The foldable regions currently within reach, most recent first.
+    ///
+    /// Re-derived from the marks rather than stored, and cached until the grid moves underneath it:
+    /// a fold's EXISTENCE follows from the shell's marks, and only whether the user collapsed it is
+    /// worth keeping (@see FoldState).
+    [[nodiscard]] std::span<FoldRange const> foldRanges() const;
+
+    /// The grid rows the viewport shows, top first -- or EMPTY when that is simply the contiguous page.
+    ///
+    /// Empty is the fast path and the common one: with nothing collapsed the linear walk is already
+    /// right, so no projection is built and no ranges are scanned for. Every caller must treat empty as
+    /// "unfolded" rather than as "no rows".
+    ///
+    /// @note The span is valid until the grid, the viewport or the fold state changes -- it views a
+    ///       cache, and a change rebuilds it. Within one render frame none of the three moves, so a
+    ///       caller may hold it across the coordinate translations that read it in turn.
+    [[nodiscard]] std::span<LineOffset const> foldProjection() const;
+
+    /// The screen row @ref foldProjection's FIRST row is drawn on.
+    ///
+    /// NEGATIVE while smooth scrolling supplies rows beyond the page: those belong above it, so the last
+    /// row still lands on the bottom. Zero otherwise -- including when collapsed folds hide more rows
+    /// than the history can backfill, where the walk ran out of grid at the top, there is nothing above
+    /// what it found, and the page is short at the BOTTOM instead, exactly as a terminal that has not
+    /// filled its page already looks.
+    ///
+    /// Grid::render places the row list by exactly this rule, and Viewport's coordinate translation
+    /// reads it from here rather than assuming row 0 -- those two disagreeing is precisely what
+    /// misplaces a selection.
+    ///
+    /// @return The screen row of the projection's first row; 0 when nothing is folded.
+    [[nodiscard]] LineOffset foldProjectionTopRow() const;
+
+    /// How many rows collapsed folds currently hide, over the whole addressable grid.
+    ///
+    /// What the viewport's scroll bounds are short by: scrolling counts VISIBLE rows, and a collapsed
+    /// block removes its output from that count.
+    [[nodiscard]] LineCount hiddenLineCount() const;
+
+    /// Whether folding applies to the page currently on display.
+    ///
+    /// The DISPLAYED page, which is what fillRenderBufferInternal() keys on when it hands Grid::render
+    /// a folded row list -- every other page, the alternate screen among them, is drawn contiguously.
+    /// The projection, the gutter and the render pass all read this one predicate so they cannot
+    /// disagree; a viewport translating coordinates through rows the render pass never drew would
+    /// misplace the cursor and every selection on that page.
+    ///
+    /// Deliberately NOT isAlternateScreen(), which follows the CURSOR page: with DECPCCM reset the two
+    /// diverge, and a terminal showing page 0 while the cursor sits on another would fold what it drew
+    /// and then deny having done so.
+    [[nodiscard]] bool foldingAppliesToDisplayedPage() const noexcept
+    {
+        return _displayedPage == PageIndex(0);
+    }
+
+    /// Drops fold state the grid can no longer account for: heads evicted from the scrollback, and
+    /// everything at all when a reflow destroyed row identity wholesale.
+    ///
+    /// Reached from foldRanges() and ensureFoldProjection(), which between them front EVERY read of the
+    /// fold state and every mutation of it -- rather than from each caller that might have a stale one.
+    /// It was called from the render pass alone, which left a resize snapping the Vi cursor, and a
+    /// viewport change between two frames, reading ids minted by the previous grid generation.
+    ///
+    /// const, and the state it reconciles is mutable, for the reason the projection beside it is: this
+    /// is cache coherency, not a change of what the user asked to collapse. Self-guarding, because the
+    /// per-cell coordinate translation reaches it -- the guard is what runs, not the work.
+    void refreshFoldState() const;
+
+    /// Discards the cached fold ranges, a semantic mark having been stamped or cleared.
+    ///
+    /// The grid's own identity cannot stand in for this: a mark arriving on a page that has not
+    /// scrolled moves neither the generation nor the stable base, so a cache keyed on those alone would
+    /// go on reporting the ranges from before the command that has just finished.
+    /// The bump is the whole invalidation: the revision is a field of both cache keys, so neither can
+    /// hit again until the caches are rebuilt against the new one.
+    void invalidateFoldRanges() noexcept { ++_semanticMarkRevision; }
+
+    /// What the gutter shows on @p gridLine: which part of a fold's column, if any, that row carries.
+    ///
+    /// Every row a fold TOUCHES gets a marker, not only its head: the gutter draws a column spanning the
+    /// whole block, which is what makes a fold visible as an extent rather than as a lone triangle, and
+    /// what gives the mouse a target bigger than a single cell.
+    ///
+    /// @param gridLine A grid line (0 = page top, negative = into the scrollback).
+    /// @return The marker, or FoldMarker::None when no fold reaches that line.
+    [[nodiscard]] FoldMarker foldMarkerAt(LineOffset gridLine) const;
+
+    /// The fold whose range covers @p gridLine -- its head row included.
+    ///
+    /// The lookup every mouse and menu affordance goes through, because a user points at the OUTPUT they
+    /// want folded away, not at the prompt line it hangs off.
+    ///
+    /// @param gridLine A grid line (0 = page top, negative = into the scrollback).
+    /// @return The covering fold, or nullopt when none reaches that line.
+    [[nodiscard]] std::optional<FoldRange> foldContaining(LineOffset gridLine) const;
+
+    /// Collapses or expands the fold covering @p gridLine, wherever in the block that line sits.
+    /// @param gridLine A grid line (0 = page top, negative = into the scrollback).
+    /// @return Whether a fold was found and toggled.
+    bool toggleFoldContaining(LineOffset gridLine);
+
+    /// Expands the fold covering @p gridLine, if a collapsed one does.
+    ///
+    /// What FoldJumpBehavior::Expand reaches for: a jump that names a hidden target opens the block
+    /// rather than refusing to go there.
+    ///
+    /// @param gridLine A grid line (0 = page top, negative = into the scrollback).
+    /// @return Whether anything changed.
+    bool expandFoldContaining(LineOffset gridLine);
+
+    /// Collapses or expands the most recently FINISHED command's fold.
+    /// @return Whether there was one to toggle.
+    bool toggleLastFold();
+
+    /// Collapses the most recently FINISHED command's fold, leaving an already-collapsed one alone.
+    /// @return Whether there was one to collapse.
+    bool collapseLastFold();
+
+    /// Collapses every foldable command within reach.
+    /// @return Whether anything changed.
+    bool collapseAllFolds();
+
+    /// Expands everything that is collapsed.
+    /// @return Whether anything changed.
+    bool expandAllFolds();
+
+    /// Collapses the command that just finished, when configured to (@see
+    /// Settings::autoCollapseFoldOnNewCommand). Called as a new prompt starts.
+    void autoCollapseOnNewPrompt();
+
+    /// The id runs collapsed folds currently hide, ascending and disjoint.
+    ///
+    /// Cached beside the projection rather than recomputed, because the fold-aware Vi motions below ask
+    /// for it on every keystroke and it is a function of exactly the same inputs.
+    [[nodiscard]] std::span<HiddenInterval const> hiddenIntervals() const;
+
+    /// Whether a collapsed fold hides @p gridLine, so that the row is drawn nowhere.
+    ///
+    /// Deliberately NOT Viewport::isLineVisible(), which asks whether the row is on screen RIGHT NOW.
+    /// A line merely scrolled out of the viewport needs no fold opened, and opening one for it would be
+    /// a plain motion changing fold state behind the user's back.
+    ///
+    /// @param gridLine The grid line to test.
+    /// @return true when a collapsed fold hides it.
+    [[nodiscard]] bool isLineHiddenByFold(LineOffset gridLine) const;
+
+    /// How many VISIBLE grid lines lie in the half-open range [@p from, @p to).
+    ///
+    /// The distance a scroll would have to travel to bring @p to where @p from is -- which is measured
+    /// in rows the user can see, not in grid lines, and the two differ by whatever collapsed folds hide
+    /// in between. Negative when @p to precedes @p from.
+    ///
+    /// @param from The first grid line of the range, counted.
+    /// @param to The grid line one past its end, not counted.
+    /// @return The number of visible lines between them, signed.
+    [[nodiscard]] int visibleDistance(LineOffset from, LineOffset to) const;
+
+    /// The grid line @p count VISIBLE lines from @p line in @p direction.
+    ///
+    /// What makes `3j` mean three lines the user can SEE. Clamped to the addressable grid, so a motion
+    /// that runs off either end stops there -- on the last line before the edge that is DRAWN, since
+    /// the oldest addressable line may itself sit inside a collapsed block.
+    ///
+    /// @param line The grid line to start from; snapped out of a collapsed fold first, if it is in one.
+    /// @param count How many visible lines to travel; zero snaps without moving.
+    /// @param direction Which way to travel.
+    /// @return The grid line arrived at.
+    [[nodiscard]] LineOffset advanceVisibleLines(LineOffset line,
+                                                 int count,
+                                                 VerticalDirection direction) const;
+
+    /// The nearest grid line at or beyond @p line, in @p direction, that no collapsed fold hides.
+    /// @param line The grid line to snap.
+    /// @param direction Which way to leave a collapsed block.
+    /// @return @p line itself when it is already visible, the nearest visible line otherwise.
+    [[nodiscard]] LineOffset snapToVisibleLine(LineOffset line, VerticalDirection direction) const;
+
+    /// Points the fold column's hover highlight at @p gridLine, or clears it with nullopt.
+    ///
+    /// The whole run of a fold lights up rather than one row, because the whole run is the click target
+    /// -- the highlight has to say how far the thing you are about to click reaches.
+    ///
+    /// @param gridLine The grid line the pointer is over in the gutter, or nullopt when it left.
+    void setGutterHoverLine(std::optional<LineOffset> gridLine);
+
+    // }}}
 
     /// Scrolls the viewport and extends the active selection to the boundary cell.
     ///
@@ -1251,7 +1467,8 @@ class Terminal
 
     [[nodiscard]] CellLocation currentMousePosition() const noexcept { return _currentMousePosition; }
 
-    [[nodiscard]] std::optional<CellLocation> currentMouseGridPosition() const noexcept
+    /// Not noexcept: the coordinate translation goes through the fold projection, which allocates.
+    [[nodiscard]] std::optional<CellLocation> currentMouseGridPosition() const
     {
         if (_currentScreen->contains(_currentMousePosition))
             return _viewport.translateScreenToGridCoordinate(_currentMousePosition);
@@ -2486,6 +2703,139 @@ class Terminal
 
     std::unique_ptr<ShellIntegration> _shellIntegration;
     SemanticBlockTracker _semanticBlockTracker;
+
+    // {{{ Output folding
+    mutable FoldState _foldState;
+
+    /// The Grid::stableIdGeneration() _foldState was last reconciled against (@see refreshFoldState).
+    ///
+    /// Its OWN counter, and deliberately not _foldRangesGeneration: that one is a cache stamp written
+    /// by foldRanges() on every miss, so anything that merely reads the ranges after a reflow -- a
+    /// resize snapping the Vi cursor, a mouse move over the gutter mid-drag -- would bring it up to
+    /// date and the reconciliation below would conclude nothing had happened. The ids in _foldState
+    /// would then survive a reflow that gave them to different rows, and the wrong block would show as
+    /// collapsed.
+    mutable uint64_t _foldStateGeneration = 0;
+
+    /// The scrollback floor _foldState was last pruned against, or nullopt before the first
+    /// reconciliation. What makes refreshFoldState() cheap enough to front every read: the floor moves
+    /// only when history is evicted, so between two evictions the reconciliation is two comparisons.
+    mutable std::optional<int64_t> _foldStateFloor;
+
+    /// Everything the fold ranges are a function of.
+    ///
+    /// The grid's own identity: a generation bump means row identity was destroyed wholesale, and
+    /// stableBase advances on every scroll, which is exactly when a mark may have moved into or out of
+    /// reach. A struct with a defaulted operator== rather than a hand-written conjunction, for the
+    /// reason FoldProjectionKey gives: a fourth input is then a field rather than a term someone has to
+    /// remember to add to the comparison.
+    struct FoldRangesKey
+    {
+        uint64_t generation = 0;
+        int64_t stableBase = 0;
+        uint64_t markRevision = 0;
+
+        [[nodiscard]] bool operator==(FoldRangesKey const&) const noexcept = default;
+    };
+
+    // Cached, because computeFoldRanges walks the scrollback: valid until the grid moves underneath it.
+    // Empty key means never computed -- an all-zero key would compare equal to a fresh grid's.
+    mutable std::vector<FoldRange> _foldRanges;
+    mutable std::optional<FoldRangesKey> _foldRangesKey;
+
+    /// Bumped whenever a semantic mark is stamped or cleared (@see invalidateFoldRanges).
+    uint64_t _semanticMarkRevision = 0;
+
+    /// Everything the projection is a function of. Cached as one key rather than rebuilt per call,
+    /// because foldProjection() hands out a SPAN over the buffer below: recomputing on each call would
+    /// reallocate it and dangle the span a caller is still holding.
+    ///
+    /// Held as an optional for the reason FoldRangesKey is: nullopt says never computed, where an
+    /// all-zero key would compare equal to the one a fresh grid produces.
+    struct FoldProjectionKey
+    {
+        uint64_t generation = 0;
+        int64_t stableBase = 0;
+        int scrollOffset = 0;
+        int pageLines = 0;
+        uint64_t foldRevision = 0;
+        uint64_t markRevision = 0;
+        int extraLines = 0;
+        bool foldingApplies = false;
+
+        [[nodiscard]] bool operator==(FoldProjectionKey const&) const noexcept = default;
+    };
+
+    void ensureFoldProjection() const;
+
+    /// The stable id of grid line 0 on the grid the CALLER's cursor is on.
+    ///
+    /// The caller's own grid, not the primary one: Vi normal mode runs on the alternate screen too,
+    /// where the primary's addressableTop() is negative by its whole scrollback while the alternate has
+    /// none -- clamping a `k` against that bound walks the cursor off the top of a grid with no rows
+    /// there. hiddenIntervals() is empty on the alternate screen (nothing there folds), so every walk
+    /// written against this base correctly degenerates to the plain arithmetic.
+    ///
+    /// @return The base to add a LineOffset to when working in id space.
+    [[nodiscard]] int64_t currentStableBase() const noexcept
+    {
+        return currentScreen().grid().stableLineIdOf(LineOffset(0));
+    }
+
+    /// Which part of @p range's column the row @p id carries.
+    ///
+    /// Split out of foldMarkerAt() because the gutter has the range in hand already: looking it up a
+    /// second time per row to ask what to draw there would be one binary search too many. Takes the
+    /// stable id rather than the grid line for the same reason -- whoever found the range derived it on
+    /// the way there.
+    ///
+    /// @param range The fold covering @p id.
+    /// @param id The stable id of the row to describe.
+    /// @return The marker, or FoldMarker::None for a row a COLLAPSED fold hides.
+    [[nodiscard]] FoldMarker markerIn(FoldRange const& range, int64_t id) const noexcept;
+
+    /// The fold in @p ranges covering @p id, if one does.
+    ///
+    /// The lookup foldContaining() is written in terms of, exposed separately for the gutter: it walks a
+    /// page of rows against the same range list, and re-validating the range cache per row would be a
+    /// frame-constant check repeated fifty times.
+    ///
+    /// @param ranges The fold ranges, most recent first (@see foldRanges).
+    /// @param id The stable id to look up.
+    /// @return The covering fold, or nullopt when none reaches that id.
+    [[nodiscard]] static std::optional<FoldRange> foldCovering(std::span<FoldRange const> ranges,
+                                                               int64_t id) noexcept;
+
+    /// Moves the Vi cursor out of a block that is no longer drawn underneath it.
+    void snapViCursorOutOfFolds();
+
+    /// Restores the invariants a change to the fold set breaks, and the single funnel every mutator of
+    /// _foldState ends in.
+    ///
+    /// Hiding rows does two things at once that nothing else repairs: it can leave the Vi cursor on a
+    /// line that is no longer drawn, and it shrinks the scrollable range out from under a viewport
+    /// already scrolled past the new top. Both are corrected here so that a sixth mutator has one call
+    /// to make rather than a checklist to remember.
+    void onFoldStateChanged();
+
+    /// Fills @p output's gutter with one marker per visible row that a fold hangs off.
+    /// @param output The buffer being built.
+    /// @param baseLine The screen row the main page starts at -- non-zero with a top status line, and
+    ///                 the same shift RenderBufferBuilder applies to every cell it emits.
+    void fillGutter(RenderBuffer& output, LineOffset baseLine) const;
+
+    mutable std::vector<LineOffset> _foldProjection;
+
+    /// The hidden runs the projection was built from, kept rather than discarded: the fold-aware Vi
+    /// motions ask for them on every keystroke, and they are a function of the very same cache key.
+    mutable std::vector<HiddenInterval> _hiddenIntervals;
+
+    mutable LineCount _hiddenLineCount = LineCount(0);
+    mutable std::optional<FoldProjectionKey> _foldProjectionKey;
+
+    /// The grid line the pointer hovers in the gutter, if any (@see setGutterHoverLine).
+    std::optional<LineOffset> _gutterHoverLine;
+    // }}}
 
     DesktopNotificationManager _desktopNotificationManager;
 };

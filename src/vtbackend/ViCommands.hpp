@@ -71,6 +71,31 @@ class ViCommands: public ViInputHandler::Executor
                                                        char right) const noexcept;
     [[nodiscard]] CellLocation findBeginOfWordAt(CellLocation location, JumpOver jumpOver) const noexcept;
     [[nodiscard]] CellLocation findEndOfWordAt(CellLocation location, JumpOver jumpOver) const noexcept;
+    /// One VISIBLE line from @p line in @p direction, or @p line itself at the edge of the grid.
+    ///
+    /// The step every line-walking motion takes, so none of them can walk into a collapsed block.
+    /// Returning @p line unchanged at the edge is what lets those loops end on "stopped moving"
+    /// rather than each restating a bound the fold projection has already accounted for.
+    [[nodiscard]] LineOffset stepVisible(LineOffset line, VerticalDirection direction) const noexcept;
+
+    /// Moves @p line one VISIBLE line in @p direction, reporting whether it moved at all.
+    ///
+    /// The termination condition every line-scanning motion below shares: the walk ends when the step
+    /// stalls, which is the grid's edge. One helper rather than the same three lines at each of them.
+    ///
+    /// @param line The line to advance, updated in place when it moves.
+    /// @param direction Which way to step.
+    /// @return Whether @p line changed.
+    [[nodiscard]] bool tryStepVisible(LineOffset& line, VerticalDirection direction) const noexcept;
+
+    /// Resolves a jump target that lands inside a collapsed fold, per Settings::foldJumpBehavior.
+    ///
+    /// Not const: FoldJumpBehavior::Expand opens the block, which is the point of it.
+    ///
+    /// @param position The target a jump named.
+    /// @return @p position when it is visible or was revealed, the nearest visible line otherwise.
+    [[nodiscard]] CellLocation revealOrSnap(CellLocation position);
+
     [[nodiscard]] CellLocation globalCharUp(CellLocation location, char ch, unsigned count) const noexcept;
     [[nodiscard]] CellLocation globalCharDown(CellLocation location, char ch, unsigned count) const noexcept;
     [[nodiscard]] std::optional<CellLocation> toCharRight(CellLocation startPosition) const noexcept;

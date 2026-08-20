@@ -170,6 +170,7 @@ if(LIBTERMINAL_TESTING)
         DesktopNotification_test.cpp
         ProgressState_test.cpp
         Color_test.cpp
+        ColorPalette_test.cpp
         CommandBlocks_test.cpp
         Folding_test.cpp
         PromptRegion_test.cpp

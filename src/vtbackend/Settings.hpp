@@ -2,6 +2,7 @@
 
 #include <vtbackend/Charset.hpp>
 #include <vtbackend/ColorPalette.hpp>
+#include <vtbackend/Folding.hpp>        // FoldJumpBehavior
 #include <vtbackend/InputGenerator.hpp> // Modifier
 #include <vtbackend/Primitives.hpp>
 #include <vtbackend/RectangularAreaChecksum.hpp>
@@ -116,6 +117,22 @@ struct Settings
     /// bottom. When false, the viewport stays wherever the user parked it.
     /// User-initiated transitions (e.g. leaving Vi mode) are not affected.
     bool autoScrollOnUpdate = true;
+
+    /// Whether a gutter column is reserved left of the grid and a fold marker drawn in it on every
+    /// foldable prompt line. The window geometry must agree: the gutter's width is taken out of the
+    /// space available to cells, so a page fitted with one and a renderer drawing without it (or vice
+    /// versa) put the grid in two different places.
+    bool foldMarkers = false;
+
+    /// Whether a finished command's output is folded away as soon as the next prompt starts, so
+    /// that only the command running now is shown in full. Off by default: folding output the user
+    /// did not ask to fold is a strong preference, not a sensible default.
+    bool autoCollapseFoldOnNewCommand = false;
+
+    /// What a targeted Vi-mode jump -- a search hit, a mark, jump history -- does when its target sits
+    /// inside a collapsed fold. Expanding by default, because silently skipping a match the user just
+    /// searched for is worse than revealing the block it was found in.
+    FoldJumpBehavior foldJumpBehavior = FoldJumpBehavior::Expand;
 
     /// Whether the terminal considers itself focused at birth. Birth state, not a runtime knob: it is
     /// read once by the constructor and thereafter only sendFocus{In,Out}Event writes the flag.
