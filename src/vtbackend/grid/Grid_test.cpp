@@ -980,7 +980,7 @@ struct MockGridRenderer
     size_t trivialCount = 0;
     size_t perCellCount = 0;
 
-    void startLine(LineOffset y, [[maybe_unused]] LineFlags flags)
+    void startLine(LineOffset y, [[maybe_unused]] LineFlags flags, [[maybe_unused]] ContextId contextId)
     {
         renderedLines.push_back(y);
         ++perCellCount;
@@ -997,6 +997,7 @@ struct MockGridRenderer
     void renderTrivialLine([[maybe_unused]] TrivialLineBuffer const& lineBuffer,
                            LineOffset y,
                            [[maybe_unused]] LineFlags flags,
+                           [[maybe_unused]] ContextId contextId,
                            std::u32string_view textOverride = {})
     {
         renderedLines.push_back(y);

@@ -62,7 +62,8 @@ namespace
                             bool isCursorLine,
                             bool isHighlighted,
                             float blink,
-                            float rapidBlink) noexcept
+                            float rapidBlink,
+                            std::optional<RGBColor> contextTint) noexcept
     {
         auto sgrColors = CellUtil::makeColors(colorPalette,
                                               colorLookupTable,
@@ -72,6 +73,22 @@ namespace
                                               backgroundColor,
                                               blink,
                                               rapidBlink);
+
+        // The OSC 3008 context tint stands in for the PAGE background and for nothing else.
+        //
+        // Compared against the RESOLVED background rather than against the SGR parameter, which gets
+        // reverse video (DECSCNM) and the Inverse attribute right for free: in both, the resolved
+        // background comes from the FOREGROUND colour, does not equal the page background, and is
+        // therefore left alone. A cell the application coloured itself keeps that colour -- otherwise
+        // `ls --color` inside a container comes out repainted, and a hint about who is running would
+        // cost the user the output they ran it for.
+        //
+        // Lowest of all the layers below, deliberately. Every one of them is a TRANSIENT answer to
+        // something the user is doing right now -- moving the cursor, dragging a selection, searching
+        // -- and a persistent, ambient property of the line must never win over one of those, or the
+        // user loses the ability to see what they just selected.
+        if (contextTint && sgrColors.background == colorPalette.defaultBackground)
+            sgrColors.background = *contextTint;
 
         if (isCursorLine)
             sgrColors = makeRGBColorPair(sgrColors, colorPalette.normalModeCursorline);
@@ -130,12 +147,30 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
     _colorLookupTable { colorLookupTable },
     _highlightSearchMatches { highlightSearchMatches },
     _inputMethodData { std::move(inputMethodData) },
-    _includeSelection { includeSelection }
+    _includeSelection { includeSelection },
+    // Once per pass, not once per line: three facts that cannot change while a buffer is being built.
+    _contextTintingPossible { terminal.settings().contextTintScope != ContextTintScope::Off
+                              && terminal.colorPalette().hasContextTints()
+                              && &screen == &terminal.primaryScreen() }
 {
     output.frameID = terminal.lastFrameID();
 
     if (_cursorPosition)
         output.cursor = renderCursor();
+}
+
+std::optional<RGBColor> RenderBufferBuilder::tintFor(ContextId id) const noexcept
+{
+    if (!_contextTintingPossible)
+        return std::nullopt;
+
+    auto const* const record = _terminal->contexts().find(id);
+    // A line whose context has aged out of the retained pool renders untinted, which is the same
+    // degradation a cell whose hyperlink was evicted already has. A missing context tints nothing;
+    // it never tints wrongly.
+    return record
+               ? _terminal->colorPalette().contextTint(record->type, _terminal->settings().contextTintScope)
+               : std::nullopt;
 }
 
 optional<RenderCursor> RenderBufferBuilder::renderCursor() const
@@ -328,7 +363,8 @@ RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
                       _useCursorlineColoring,
                       highlighted,
                       blink,
-                      rapidBlink);
+                      rapidBlink,
+                      _currentContextTint);
 }
 
 RenderAttributes RenderBufferBuilder::createRenderAttributes(
@@ -397,6 +433,7 @@ bool RenderBufferBuilder::gridLineContainsCursor(LineOffset screenRow) const
 void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
                                             LineOffset lineOffset,
                                             LineFlags flags,
+                                            ContextId contextId,
                                             std::u32string_view textOverride)
 {
     // if (lineBuffer.text.size())
@@ -414,6 +451,7 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     // hard-coding it to false (the old invariant "cursor lines are always inflated") dropped the
     // current-line highlight on plain-text lines.
     _useCursorlineColoring = isCursorLine(lineOffset);
+    _currentContextTint = tintFor(contextId);
     _currentLineFlags = flags;
 
     // Same reason, and the same job startLine() does for a per-cell line: makeColorsForCell reads
@@ -577,7 +615,7 @@ void RenderBufferBuilder::matchSearchPattern(T const& cellText)
     _searchPatternOffset = 0;
 }
 
-void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags)
+void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags, ContextId contextId)
 {
     _lineNr = line;
     _currentLineFlags = flags;
@@ -585,6 +623,7 @@ void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags)
     _prevHasCursor = false;
 
     _useCursorlineColoring = isCursorLine(line);
+    _currentContextTint = tintFor(contextId);
 }
 
 bool RenderBufferBuilder::isCursorLine(LineOffset line) const

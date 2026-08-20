@@ -23,7 +23,7 @@ Image::Data const& white10x10()
     return data;
 }
 
-void TextRenderBuilder::startLine(LineOffset lineOffset, LineFlags /*flags*/)
+void TextRenderBuilder::startLine(LineOffset lineOffset, LineFlags /*flags*/, ContextId /*contextId*/)
 {
     if (!*lineOffset)
         text.clear();
@@ -42,6 +42,7 @@ void TextRenderBuilder::endLine()
 void TextRenderBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
                                           LineOffset lineOffset,
                                           LineFlags /*flags*/,
+                                          ContextId /*contextId*/,
                                           std::u32string_view textOverride)
 {
     if (!*lineOffset)

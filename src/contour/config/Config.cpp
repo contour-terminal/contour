@@ -1361,6 +1361,23 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
         loadPair("hover", where.foldMarkerHover);
     }
 
+    if (auto const tints = child["tint"])
+    {
+        logger()("*** loading tint");
+        // Driven by ContextTypeList, so a thirteenth context type is one row in vtbackend and nothing
+        // here. Lenient in the same way the sequence parser is: an unknown key is skipped and every
+        // other entry still loads.
+        for (auto const type: vtbackend::ContextTypeList)
+        {
+            auto const key = std::string { vtbackend::contextTypeName(type) };
+            if (!tints[key])
+                continue;
+            auto color = vtbackend::RGBColor {};
+            loadFromEntry(tints, key, color);
+            where.contextTints[static_cast<size_t>(type)] = color;
+        }
+    }
+
     logger()("*** loading palette");
     loadFromEntry(child, "", where.palette);
 }
@@ -3700,6 +3717,17 @@ static void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::Co
     }
     else
         processWithDoc(documentation::FoldMarker {});
+
+    // Same rule, same reason: only what the scheme actually set, and the commented example otherwise.
+    if (entry.hasContextTints())
+    {
+        processWithDoc(documentation::ContextTintHeader {});
+        for (auto const type: vtbackend::ContextTypeList)
+            if (auto const& color = entry.contextTints[static_cast<size_t>(type)])
+                processWithDoc(documentation::ContextTintEntry {}, vtbackend::contextTypeName(type), *color);
+    }
+    else
+        processWithDoc(documentation::ContextTint {});
 
     processWithDoc(documentation::InputMethodEditor {},
                    entry.inputMethodEditor.foreground,

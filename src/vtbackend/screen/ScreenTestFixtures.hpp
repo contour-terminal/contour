@@ -46,12 +46,13 @@ struct TextRenderBuilder
 {
     std::string text;
 
-    void startLine(LineOffset lineOffset, LineFlags flags);
+    void startLine(LineOffset lineOffset, LineFlags flags, ContextId contextId);
     void renderCell(ConstCellProxy cell, LineOffset lineOffset, ColumnOffset columnOffset);
     void endLine();
     void renderTrivialLine(TrivialLineBuffer const& lineBuffer,
                            LineOffset lineOffset,
                            LineFlags flags,
+                           ContextId contextId,
                            std::u32string_view textOverride = {});
     void finish();
 };

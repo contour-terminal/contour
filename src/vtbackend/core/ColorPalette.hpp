@@ -3,9 +3,11 @@
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/core/TerminalContext.hpp>
 
 #include <crispy/StrongHash.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -346,6 +348,53 @@ struct ColorPalette
     {
         return foldMarkerHover.value_or(
             RGBColorPair { .foreground = defaultForeground, .background = defaultBackground });
+    }
+
+    /// The page background under each kind of OSC 3008 context, when the scheme chooses to tint one.
+    ///
+    /// An array indexed by ContextType rather than twelve named members or a map, and both
+    /// alternatives are worth naming. Twelve std::optional members would be twelve rows in the reader,
+    /// twelve in the writer, twelve in the settings page and twelve in the renderer -- forty-eight
+    /// edits for a thirteenth context type, and exactly the drift CellFlagNames and configEnumValues
+    /// were each written about. An unordered_map allocates, and this struct is copied per terminal and
+    /// per XTPUSHCOLORS push, for a feature that is EMPTY in every shipped scheme; the array is a few
+    /// dozen bytes and trivially copyable. Every consumer loops ContextTypeList, so a thirteenth type
+    /// is one row in core/TerminalContext.hpp.
+    ///
+    /// UNSET IS A COMPLETE ANSWER, and this is where it differs from foldMarker above. A fold marker
+    /// must be visible or the feature is broken, so an absent one is derived. An absent tint means the
+    /// scheme does not tint that context, which needs no derivation and must not get one: a background
+    /// that appears unbidden after an upgrade reads as a rendering fault rather than a feature, no
+    /// constant works across light and dark (see the foldMarker comment above, which records exactly
+    /// that), and a tint is a security-adjacent signal any program on the tty can trigger -- shipping
+    /// one on would teach users to read a spoofable colour as authority. So every shipped scheme
+    /// leaves this entirely empty and the generated config carries a commented example instead.
+    std::array<std::optional<RGBColor>, ContextTypeCount> contextTints {};
+
+    /// The tint for @p type, honouring @p scope.
+    ///
+    /// @param type  The context type of the line being drawn.
+    /// @param scope Which types the configuration allows to tint at all.
+    /// @return The background to stand in for the page background, or nullopt -- which is a final
+    ///         answer, not a request for a default.
+    [[nodiscard]] std::optional<RGBColor> contextTint(ContextType type, ContextTintScope scope) const noexcept
+    {
+        switch (scope)
+        {
+            case ContextTintScope::Off: return std::nullopt;
+            case ContextTintScope::Boundaries:
+                if (!isBoundaryContext(type))
+                    return std::nullopt;
+                break;
+            case ContextTintScope::All: break;
+        }
+        return contextTints[static_cast<size_t>(type)];
+    }
+
+    /// Whether any tint is set at all, so the render path can skip the per-line lookup entirely.
+    [[nodiscard]] bool hasContextTints() const noexcept
+    {
+        return std::ranges::any_of(contextTints, [](auto const& c) { return c.has_value(); });
     }
 };
 

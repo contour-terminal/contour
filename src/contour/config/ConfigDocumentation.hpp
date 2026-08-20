@@ -1424,6 +1424,36 @@ constexpr StringLiteral FoldMarkerHoverConfig { "    hover:\n"
                                                 "        foreground: {}\n"
                                                 "        background: {}\n" };
 
+constexpr StringLiteral ContextTintConfig {
+    "\n"
+    "{comment} Background tints for OSC 3008 hierarchical contexts: the page is painted in a different\n"
+    "{comment} shade while an elevated, containerised, virtualised or remote context is in force, so\n"
+    "{comment} that output produced under one is distinguishable at a glance.\n"
+    "{comment} Unset by default, and deliberately. No colour is right in both a light and a dark scheme,\n"
+    "{comment} a background that changes on upgrade reads as a rendering fault rather than a feature,\n"
+    "{comment} and this is a signal worth opting into knowingly rather than inheriting.\n"
+    "{comment} A context is something the session ANNOUNCED. Anything that can write to your terminal\n"
+    "{comment} can announce one, or fail to announce one, so the absence of a tint is NOT a statement\n"
+    "{comment} that nothing is running as root.\n"
+    "{comment} These are deliberately subtle -- a few percent off the background, not a slab. On a\n"
+    "{comment} light scheme you want the mirror image.\n"
+    "{comment} tint:\n"
+    "{comment}     elevate: '#2a1a1a'\n"
+    "{comment}     container: '#161c26'\n"
+    "{comment}     remote: '#1a2018'\n"
+};
+
+constexpr StringLiteral ContextTintHeaderConfig {
+    "\n"
+    "{comment} Background tints for OSC 3008 hierarchical contexts. Written back because this scheme\n"
+    "{comment} sets them; remove the block to stop tinting. Note that a context is something the\n"
+    "{comment} session announced, and anything that can write to your terminal can announce one -- or\n"
+    "{comment} fail to. The absence of a tint is not a statement that nothing is running as root.\n"
+    "tint:\n"
+};
+
+constexpr StringLiteral ContextTintEntryConfig { "    {}: {}\n" };
+
 constexpr StringLiteral InputMethodEditorConfig { "\n"
                                                   "{comment} Colors for the IME (Input Method Editor) area.\n"
                                                   "input_method_editor:\n"
@@ -2777,6 +2807,9 @@ using FoldMarker = DocumentationEntry<FoldMarkerConfig, Dummy>;
 using FoldMarkerHeader = DocumentationEntry<FoldMarkerHeaderConfig, Dummy>;
 using FoldMarkerDefault = DocumentationEntry<FoldMarkerDefaultConfig, Dummy>;
 using FoldMarkerHover = DocumentationEntry<FoldMarkerHoverConfig, Dummy>;
+using ContextTint = DocumentationEntry<ContextTintConfig, Dummy>;
+using ContextTintHeader = DocumentationEntry<ContextTintHeaderConfig, Dummy>;
+using ContextTintEntry = DocumentationEntry<ContextTintEntryConfig, Dummy>;
 using InputMethodEditor = DocumentationEntry<InputMethodEditorConfig, Dummy>;
 using InputMethodEditorSupport = DocumentationEntry<InputMethodEditorSupportConfig, Dummy>;
 using NormalColors = DocumentationEntry<NormalColorsConfig, Dummy>;

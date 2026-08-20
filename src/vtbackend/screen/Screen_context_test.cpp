@@ -634,3 +634,137 @@ TEST_CASE("Screen.osc3008 is not read at all when signalling is disabled", "[con
 }
 
 // }}}
+
+// {{{ background tinting
+
+namespace
+{
+
+/// Gives @p mock a scheme that tints containers and commands, with the scope the configuration would
+/// supply. Not a factory, because MockTerm holds a Terminal and is therefore not movable.
+void tintContainers(MockTerm<>& mock, ContextTintScope scope = ContextTintScope::Boundaries)
+{
+    mock.terminal.settings().contextTintScope = scope;
+    auto& palette = mock.terminal.colorPalette();
+    palette.contextTints[static_cast<size_t>(ContextType::Container)] = RGBColor { 0x16, 0x1c, 0x26 };
+    palette.contextTints[static_cast<size_t>(ContextType::Command)] = RGBColor { 0x14, 0x14, 0x14 };
+}
+
+/// The background the renderer actually paints at @p line, column 0.
+RGBColor backgroundAt(MockTerm<>& mock, int line)
+{
+    mock.terminal.refreshRenderBuffer(true);
+    auto const buffer = mock.terminal.renderBuffer();
+    for (auto const& cell: buffer.get().cells)
+        if (cell.position.line == LineOffset(line) && cell.position.column == ColumnOffset(0))
+            return cell.attributes.backgroundColor;
+    for (auto const& row: buffer.get().lines)
+        if (row.lineOffset == LineOffset(line))
+            return row.fillAttributes.backgroundColor;
+    return {};
+}
+
+} // namespace
+
+TEST_CASE("Screen.osc3008 a line under a tinted context takes the tint", "[context]")
+{
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) } };
+    tintContainers(mock);
+    auto const plain = mock.terminal.colorPalette().defaultBackground;
+
+    mock.writeToScreen(osc3008("start=box;type=container"));
+    mock.writeToScreen("inside\r\n");
+
+    CHECK(backgroundAt(mock, 0) == RGBColor { 0x16, 0x1c, 0x26 });
+    CHECK(backgroundAt(mock, 0) != plain);
+}
+
+TEST_CASE("Screen.osc3008 a cell the application coloured itself is left alone", "[context]")
+{
+    // Otherwise `ls --color` inside a container comes out repainted, and a hint about who is running
+    // costs the user the output they ran it for.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) } };
+    tintContainers(mock);
+    mock.writeToScreen(osc3008("start=box;type=container"));
+    mock.writeToScreen("\033[41mred\033[m\r\n");
+
+    // The scheme's own red, untouched: the tint stands in for the PAGE background and nothing else.
+    CHECK(backgroundAt(mock, 0) == mock.terminal.colorPalette().normalColor(1));
+}
+
+TEST_CASE("Screen.osc3008 tinting off silences a scheme that sets every slot", "[context]")
+{
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) } };
+    tintContainers(mock, ContextTintScope::Off);
+    auto const plain = mock.terminal.colorPalette().defaultBackground;
+
+    mock.writeToScreen(osc3008("start=box;type=container"));
+    mock.writeToScreen("inside\r\n");
+
+    CHECK(backgroundAt(mock, 0) == plain);
+}
+
+TEST_CASE("Screen.osc3008 the boundaries scope ignores a command tint", "[context]")
+{
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) } };
+    tintContainers(mock, ContextTintScope::Boundaries);
+    auto const plain = mock.terminal.colorPalette().defaultBackground;
+
+    mock.writeToScreen(osc3008("start=cmd;type=command"));
+    mock.writeToScreen("ordinary\r\n");
+    CHECK(backgroundAt(mock, 0) == plain);
+
+    // The same scheme, the same slot, but a scope that admits it.
+    auto all = MockTerm { PageSize { LineCount(4), ColumnCount(10) } };
+    tintContainers(all, ContextTintScope::All);
+    all.writeToScreen(osc3008("start=cmd;type=command"));
+    all.writeToScreen("ordinary\r\n");
+    CHECK(backgroundAt(all, 0) == RGBColor { 0x14, 0x14, 0x14 });
+}
+
+TEST_CASE("Screen.osc3008 the alternate screen is never tinted", "[context]")
+{
+    // The equality guard would make it PATCHY there rather than uniform: a full-screen application
+    // paints most of its canvas with its own background, so only the cells it left at default would
+    // tint, and a striped vim reads as a rendering fault.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) } };
+    tintContainers(mock);
+    mock.writeToScreen(osc3008("start=box;type=container"));
+    mock.writeToScreen("\033[?1049h");
+    mock.writeToScreen("full screen app\r\n");
+
+    CHECK(backgroundAt(mock, 0) != RGBColor { 0x16, 0x1c, 0x26 });
+}
+
+TEST_CASE("Screen.osc3008 a tinted line stays on the batched render path", "[context]")
+{
+    // The performance guard. A tint is uniform over a line, so it rides RenderLine::fillAttributes;
+    // demoting a trivial line to per-cell rendering because of one would be a serious regression.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) } };
+    tintContainers(mock);
+    mock.writeToScreen(osc3008("start=box;type=container"));
+    mock.writeToScreen("plain text\r\n");
+    mock.terminal.refreshRenderBuffer(true);
+
+    auto const buffer = mock.terminal.renderBuffer();
+    CHECK(!buffer.get().lines.empty());
+    auto const tinted = std::ranges::any_of(buffer.get().lines, [](auto const& row) {
+        return row.fillAttributes.backgroundColor == RGBColor { 0x16, 0x1c, 0x26 };
+    });
+    CHECK(tinted);
+}
+
+TEST_CASE("Screen.osc3008 a scheme with no tints costs the render path nothing", "[context]")
+{
+    // hasContextTints() is false, so the per-line lookup is skipped for the overwhelmingly common case
+    // of a scheme that never opted in.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) } };
+    CHECK(!mock.terminal.colorPalette().hasContextTints());
+
+    mock.writeToScreen(osc3008("start=box;type=container"));
+    mock.writeToScreen("inside\r\n");
+    mock.terminal.refreshRenderBuffer(true);
+    CHECK(!mock.terminal.renderBuffer().get().lines.empty());
+}
+
+// }}}
