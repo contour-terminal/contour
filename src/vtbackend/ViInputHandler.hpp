@@ -3,8 +3,6 @@
 
 #include <vtbackend/InputHandler.hpp>
 #include <vtbackend/Primitives.hpp>
-#include <vtbackend/Selector.hpp>
-#include <vtbackend/Settings.hpp>
 
 #include <crispy/Assert.hpp>
 #include <crispy/LogStore.hpp>

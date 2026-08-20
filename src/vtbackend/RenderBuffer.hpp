@@ -9,7 +9,6 @@
 #include <vtbackend/Primitives.hpp>
 #include <vtbackend/TextScale.hpp>
 
-#include <vtrasterizer/RenderTarget.hpp>
 
 #include <gsl/pointers>
 

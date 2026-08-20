@@ -14,63 +14,73 @@ option(LIBTERMINAL_BUILD_BENCH_HEADLESS "Builds bench-headless CLI tool to bench
 set(vtbackend_HEADERS
     Animation.hpp
     Capabilities.hpp
-    DesktopNotification.hpp
-    ProgressState.hpp
+    CellFlags.hpp
     CellProxy.hpp
     CellUtil.hpp
     Charset.hpp
     Color.hpp
     ColorPalette.hpp
     CommandBlocks.hpp
+    ControlCode.hpp
+    Cursor.hpp
+    DesktopNotification.hpp
+    FileUrl.hpp
     Folding.hpp
-    PromptRegion.hpp
     Functions.hpp
     GraphicsAttributes.hpp
     Grid.hpp
-    FileUrl.hpp
     HintModeHandler.hpp
     Hyperlink.hpp
-    KittyClipboard.hpp
-    PointerShape.hpp
-    KittyGraphics.hpp
-    TextSizing.hpp
     Image.hpp
     InputBinding.hpp
     InputGenerator.hpp
+    InputHandler.hpp
+    JumpHistory.hpp
+    KittyClipboard.hpp
+    KittyGraphics.hpp
     Line.hpp
     LineFlags.hpp
     LineSoA.hpp
+    Logging.hpp
     MatchModes.hpp
     MessageParser.hpp
     MockTerm.hpp
     ModifyKeys.hpp
+    PointerShape.hpp
+    Primitives.hpp
+    ProgressState.hpp
+    PromptRegion.hpp
+    RectangularAreaChecksum.hpp
     RenderBuffer.hpp
     RenderBufferBuilder.hpp
     Screen.hpp
-    SemanticBlockTracker.hpp
     Selector.hpp
+    SemanticBlockTracker.hpp
     Sequence.hpp
     SequenceBuilder.hpp
+    Settings.hpp
     SgrWriter.hpp
+    ShellIntegration.hpp
     SixelParser.hpp
-    regis/ReGISTables.hpp
-    regis/ReGISColor.hpp
-    regis/ReGISRasterizer.hpp
-    regis/ReGISContext.hpp
-    regis/ReGISFont.hpp
-    regis/ReGISTextRasterizer.hpp
-    regis/ReGISParser.hpp
     SoAClusterWriter.hpp
     StatusLineBuilder.hpp
     Terminal.hpp
+    TestHelpers.hpp
+    TextScale.hpp
+    TextSizing.hpp
     VTType.hpp
-    WindowSizeStack.hpp
     VTWriter.hpp
-    Viewport.hpp
-    ViInputHandler.hpp
     ViCommands.hpp
-    JumpHistory.hpp
-    Primitives.hpp
+    ViInputHandler.hpp
+    Viewport.hpp
+    WindowSizeStack.hpp
+    regis/ReGISColor.hpp
+    regis/ReGISContext.hpp
+    regis/ReGISFont.hpp
+    regis/ReGISParser.hpp
+    regis/ReGISRasterizer.hpp
+    regis/ReGISTables.hpp
+    regis/ReGISTextRasterizer.hpp
 )
 
 set(vtbackend_SOURCES
@@ -88,11 +98,9 @@ set(vtbackend_SOURCES
     FileUrl.cpp
     HintModeHandler.cpp
     Image.cpp
-    InputBinding.cpp
     InputGenerator.cpp
     Line.cpp
     LineSoA.cpp
-    MatchModes.cpp
     MessageParser.cpp
     MockTerm.cpp
     RenderBuffer.cpp

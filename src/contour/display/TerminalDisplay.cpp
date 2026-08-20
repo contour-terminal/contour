@@ -17,7 +17,6 @@
 #include <contour/session/SessionInput.hpp>
 
 #include <vtbackend/Color.hpp>
-#include <vtbackend/Metrics.hpp>
 
 #include <vtpty/Pty.hpp>
 

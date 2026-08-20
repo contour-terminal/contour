@@ -4,7 +4,6 @@
 #include <vtbackend/LineFlags.hpp>
 #include <vtbackend/Primitives.hpp>
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -387,24 +386,6 @@ struct HiddenInterval
 
 /// The screen row a projected row list's FIRST row is drawn on.
 ///
-/// The one statement of the rule, because two consumers must agree on it to the row: Grid::render()
-/// places the list it draws by it, and Viewport translates coordinates through it. Negative while
-/// smooth scrolling supplies rows above the page, and zero once the list is no longer than the page.
-///
-/// Rows BEYOND the page count are the smooth-scrolling ones and belong above it, so the last row of the
-/// list still lands on the bottom of the page however many extra ones precede it. FEWER rows than the
-/// page means the walk ran out of grid at the top and there is nothing above them, so they start at the
-/// top and the page is short at the BOTTOM -- exactly as a terminal that has not filled its page
-/// already looks.
-///
-/// @param pageLines How many lines the page holds.
-/// @param rowCount How many rows the list holds.
-/// @return The screen row of the list's first row; zero unless the list is longer than the page.
-[[nodiscard]] constexpr LineOffset foldedRowsTopRow(LineCount pageLines, size_t rowCount) noexcept
-{
-    return LineOffset::cast_from(std::min(0, unbox<int>(pageLines) - static_cast<int>(rowCount)));
-}
-
 } // namespace vtbackend
 
 template <>

@@ -13,7 +13,6 @@
 #include <contour/session/TerminalSession.hpp>
 
 #include <vtbackend/Color.hpp>
-#include <vtbackend/Metrics.hpp>
 #include <vtbackend/Primitives.hpp>
 
 #include <vtrasterizer/ReGISFontRasterizer.hpp>
