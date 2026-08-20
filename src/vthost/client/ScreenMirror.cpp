@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/client/ScreenMirror.hpp>
 
-#include <vtbackend/Color.hpp>
-#include <vtbackend/Hyperlink.hpp>
-#include <vtbackend/Image.hpp>
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/Hyperlink.hpp>
+#include <vtbackend/core/Image.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <crispy/Overloaded.hpp>
 

@@ -11,7 +11,7 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 
-#include <vtbackend/Color.hpp>
+#include <vtbackend/core/Color.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtGui/QColor>

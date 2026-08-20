@@ -1,5 +1,5 @@
-#include <vtbackend/Color.hpp>
 #include <vtbackend/Folding.hpp>
+#include <vtbackend/core/Color.hpp>
 
 #include <vtrasterizer/BoxDrawingRenderer.hpp>
 #include <vtrasterizer/GridMetrics.hpp>

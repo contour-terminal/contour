@@ -11,7 +11,7 @@
 /// GUI reproduces the daemon's split tree instead of flattening one tab per
 /// session. Kept a free function so it is driven directly from tests.
 
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <cstdint>
 #include <optional>

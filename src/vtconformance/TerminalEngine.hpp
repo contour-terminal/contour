@@ -3,7 +3,7 @@
 
 #include <vtbackend/Terminal.hpp>
 #include <vtbackend/VTType.hpp>
-#include <vtbackend/WindowSizeStack.hpp>
+#include <vtbackend/core/WindowSizeStack.hpp>
 
 #include <vtpty/PageSize.hpp>
 #include <vtpty/Pty.hpp>

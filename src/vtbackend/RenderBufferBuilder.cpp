@@ -3,8 +3,8 @@
 #include <vtbackend/RenderBufferBuilder.hpp>
 
 #include <vtbackend/CellUtil.hpp>
-#include <vtbackend/Color.hpp>
-#include <vtbackend/ColorPalette.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 
 #include <crispy/Utils.hpp>
 

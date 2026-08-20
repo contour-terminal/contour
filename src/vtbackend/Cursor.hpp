@@ -2,9 +2,9 @@
 #pragma once
 
 #include <vtbackend/Charset.hpp>
-#include <vtbackend/GraphicsAttributes.hpp>
-#include <vtbackend/Hyperlink.hpp>
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/GraphicsAttributes.hpp>
+#include <vtbackend/core/Hyperlink.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 namespace vtbackend
 {

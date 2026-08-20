@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Image.hpp>
+#include <vtbackend/core/Image.hpp>
 
 #include <vtrasterizer/ImageRenderer.hpp>
 #include <vtrasterizer/RendererTestHelpers.hpp>

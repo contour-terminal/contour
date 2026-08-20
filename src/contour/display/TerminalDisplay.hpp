@@ -12,8 +12,8 @@
 #include <contour/session/SessionInput.hpp>
 #include <contour/session/TerminalSession.hpp>
 
-#include <vtbackend/Color.hpp>
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <vtrasterizer/ReGISFontRasterizer.hpp>
 #include <vtrasterizer/Renderer.hpp>

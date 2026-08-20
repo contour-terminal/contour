@@ -12,7 +12,7 @@
 /// resync snapshot. Hyperlink URIs ship once per connection on first
 /// reference; image pixels only on FetchImage.
 
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <cstddef>
 #include <cstdint>

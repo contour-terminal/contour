@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/LineFlags.hpp>
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/LineFlags.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <array>
 #include <cstddef>

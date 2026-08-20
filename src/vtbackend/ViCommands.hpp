@@ -3,8 +3,8 @@
 
 #include <vtbackend/Folding.hpp>
 #include <vtbackend/JumpHistory.hpp>
-#include <vtbackend/Primitives.hpp>
 #include <vtbackend/ViInputHandler.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <gsl/pointers>
 

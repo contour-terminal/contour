@@ -3,7 +3,7 @@
 
 #include <contour/config/Config.hpp>
 
-#include <vtbackend/Color.hpp>
+#include <vtbackend/core/Color.hpp>
 
 #include <expected>
 #include <filesystem>

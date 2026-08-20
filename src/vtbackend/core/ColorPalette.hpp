@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Color.hpp>
-#include <vtbackend/Image.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/Image.hpp>
 
 #include <crispy/StrongHash.hpp>
 

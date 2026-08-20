@@ -13,8 +13,8 @@
 #include <contour/display/RhiTransform.hpp>
 #include <contour/display/ScreenshotReadback.hpp>
 
-#include <vtbackend/Color.hpp>
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <vtrasterizer/shared_defines.h>
 

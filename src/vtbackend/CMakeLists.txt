@@ -13,24 +13,24 @@ option(LIBTERMINAL_BUILD_BENCH_HEADLESS "Builds bench-headless CLI tool to bench
 
 set(vtbackend_HEADERS
     Capabilities.hpp
-    CellFlags.hpp
+    core/CellFlags.hpp
     CellProxy.hpp
     CellUtil.hpp
     Charset.hpp
-    Color.hpp
-    ColorPalette.hpp
+    core/Color.hpp
+    core/ColorPalette.hpp
     CommandBlocks.hpp
     ControlCode.hpp
     Cursor.hpp
     DesktopNotification.hpp
-    FileUrl.hpp
+    core/FileUrl.hpp
     Folding.hpp
     Functions.hpp
-    GraphicsAttributes.hpp
+    core/GraphicsAttributes.hpp
     Grid.hpp
     HintModeHandler.hpp
-    Hyperlink.hpp
-    Image.hpp
+    core/Hyperlink.hpp
+    core/Image.hpp
     InputBinding.hpp
     InputGenerator.hpp
     InputHandler.hpp
@@ -38,7 +38,7 @@ set(vtbackend_HEADERS
     KittyClipboard.hpp
     KittyGraphics.hpp
     Line.hpp
-    LineFlags.hpp
+    core/LineFlags.hpp
     LineSoA.hpp
     Logging.hpp
     MatchModes.hpp
@@ -46,7 +46,7 @@ set(vtbackend_HEADERS
     MockTerm.hpp
     ModifyKeys.hpp
     PointerShape.hpp
-    Primitives.hpp
+    core/Primitives.hpp
     ProgressState.hpp
     PromptRegion.hpp
     RectangularAreaChecksum.hpp
@@ -65,14 +65,14 @@ set(vtbackend_HEADERS
     StatusLineBuilder.hpp
     Terminal.hpp
     TestHelpers.hpp
-    TextScale.hpp
+    core/TextScale.hpp
     TextSizing.hpp
     VTType.hpp
     VTWriter.hpp
     ViCommands.hpp
     ViInputHandler.hpp
     Viewport.hpp
-    WindowSizeStack.hpp
+    core/WindowSizeStack.hpp
     regis/ReGISColor.hpp
     regis/ReGISContext.hpp
     regis/ReGISFont.hpp
@@ -87,16 +87,16 @@ set(vtbackend_SOURCES
     Charset.cpp
     DesktopNotification.cpp
     ProgressState.cpp
-    Color.cpp
-    ColorPalette.cpp
+    core/Color.cpp
+    core/ColorPalette.cpp
     CommandBlocks.cpp
     Folding.cpp
     PromptRegion.cpp
     Functions.cpp
     Grid.cpp
-    FileUrl.cpp
+    core/FileUrl.cpp
     HintModeHandler.cpp
-    Image.cpp
+    core/Image.cpp
     InputGenerator.cpp
     Line.cpp
     LineSoA.cpp
@@ -127,7 +127,7 @@ set(vtbackend_SOURCES
     ViInputHandler.cpp
     ViCommands.cpp
     JumpHistory.cpp
-    Primitives.cpp
+    core/Primitives.cpp
 )
 
 add_library(vtbackend STATIC ${vtbackend_SOURCES} ${vtbackend_HEADERS})
@@ -175,8 +175,8 @@ if(LIBTERMINAL_TESTING)
         Capabilities_test.cpp
         DesktopNotification_test.cpp
         ProgressState_test.cpp
-        Color_test.cpp
-        ColorPalette_test.cpp
+        core/Color_test.cpp
+        core/ColorPalette_test.cpp
         CommandBlocks_test.cpp
         Folding_test.cpp
         PromptRegion_test.cpp
@@ -186,7 +186,7 @@ if(LIBTERMINAL_TESTING)
         Selector_test.cpp
         Functions_test.cpp
         Grid_test.cpp
-        FileUrl_test.cpp
+        core/FileUrl_test.cpp
         HintModeHandler_test.cpp
         Line_test.cpp
         MessageParser_test.cpp
@@ -198,10 +198,10 @@ if(LIBTERMINAL_TESTING)
         KittyGraphics_test.cpp
         TextSizing_test.cpp
         Screen_test.cpp
-        Image_test.cpp
+        core/Image_test.cpp
         Sequence_test.cpp
         StatusLineBuilder_test.cpp
-        WindowSizeStack_test.cpp
+        core/WindowSizeStack_test.cpp
         Terminal_test.cpp
         ShellIntegration_test.cpp
         LineSoA_test.cpp

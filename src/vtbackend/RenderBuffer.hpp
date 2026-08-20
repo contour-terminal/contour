@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/CellFlags.hpp>
-#include <vtbackend/Color.hpp>
 #include <vtbackend/Grid.hpp>
-#include <vtbackend/Image.hpp>
 #include <vtbackend/Line.hpp>
-#include <vtbackend/Primitives.hpp>
-#include <vtbackend/TextScale.hpp>
-
+#include <vtbackend/core/CellFlags.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/Image.hpp>
+#include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/TextScale.hpp>
 
 #include <gsl/pointers>
 

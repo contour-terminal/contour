@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/Sequence.hpp>
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserEvents.hpp>

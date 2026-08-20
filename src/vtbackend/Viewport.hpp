@@ -2,8 +2,8 @@
 #pragma once
 
 #include <vtbackend/Folding.hpp>
-#include <vtbackend/Primitives.hpp>
 #include <vtbackend/Screen.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <crispy/LogStore.hpp>
 

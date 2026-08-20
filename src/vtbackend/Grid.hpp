@@ -2,9 +2,9 @@
 #pragma once
 
 #include <vtbackend/CellProxy.hpp>
-#include <vtbackend/GraphicsAttributes.hpp>
 #include <vtbackend/Line.hpp>
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/GraphicsAttributes.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <crispy/Assert.hpp>
 #include <crispy/Defines.hpp>

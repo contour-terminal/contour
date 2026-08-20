@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/HintModeHandler.hpp>
 
-#include <vtbackend/Hyperlink.hpp>
+#include <vtbackend/core/Hyperlink.hpp>
 
 #include <algorithm>
 #include <cctype>

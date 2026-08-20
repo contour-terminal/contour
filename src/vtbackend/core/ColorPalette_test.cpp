@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/ColorPalette.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -3,8 +3,8 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/ModifierNames.hpp>
 
-#include <vtbackend/Color.hpp>
-#include <vtbackend/ColorPalette.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 
 #include <vtpty/ImageSize.hpp>
 

@@ -12,9 +12,9 @@
 #include <contour/config/ModifierNames.hpp>
 #include <contour/platform/GuiTheme.hpp>
 
-#include <vtbackend/Color.hpp>
 #include <vtbackend/InputGenerator.hpp>
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <text_shaper/Font.hpp>
 

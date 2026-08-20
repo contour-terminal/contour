@@ -2,10 +2,10 @@
 #include <vtbackend/Charset.hpp>
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/MockTerm.hpp>
-#include <vtbackend/Primitives.hpp>
 #include <vtbackend/Screen.hpp>
 #include <vtbackend/TestHelpers.hpp>
 #include <vtbackend/Viewport.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <crispy/Escape.hpp>
 #include <crispy/Utils.hpp>

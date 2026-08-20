@@ -1,12 +1,12 @@
 #pragma once
 
 #include <vtbackend/Charset.hpp>
-#include <vtbackend/ColorPalette.hpp>
 #include <vtbackend/Folding.hpp>        // FoldJumpBehavior
 #include <vtbackend/InputGenerator.hpp> // Modifier
-#include <vtbackend/Primitives.hpp>
 #include <vtbackend/RectangularAreaChecksum.hpp>
 #include <vtbackend/VTType.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <chrono>
 #include <map>

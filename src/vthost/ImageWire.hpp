@@ -12,7 +12,7 @@
 /// exhaustively and end in `std::unreachable()`, which the renderer reaches once per frame, on the
 /// render thread, for every attached pane.
 
-#include <vtbackend/Image.hpp>
+#include <vtbackend/core/Image.hpp>
 
 #include <cstdint>
 #include <utility>

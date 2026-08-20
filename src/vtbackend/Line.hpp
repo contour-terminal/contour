@@ -3,12 +3,12 @@
 
 #include <vtbackend/CellProxy.hpp>
 #include <vtbackend/CellUtil.hpp>
-#include <vtbackend/GraphicsAttributes.hpp>
-#include <vtbackend/Hyperlink.hpp>
-#include <vtbackend/LineFlags.hpp>
 #include <vtbackend/LineSoA.hpp>
-#include <vtbackend/Primitives.hpp>
 #include <vtbackend/SoAClusterWriter.hpp>
+#include <vtbackend/core/GraphicsAttributes.hpp>
+#include <vtbackend/core/Hyperlink.hpp>
+#include <vtbackend/core/LineFlags.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <crispy/Assert.hpp>
 #include <crispy/BufferObject.hpp>

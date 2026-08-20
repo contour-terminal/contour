@@ -1,5 +1,5 @@
-#include <vtbackend/Color.hpp>
-#include <vtbackend/ColorPalette.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 
 #include <vtrasterizer/FontDescriptions.hpp>
 #include <vtrasterizer/GridMetrics.hpp>

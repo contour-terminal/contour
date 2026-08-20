@@ -4,7 +4,7 @@
 #include <contour/config/TabBarMode.hpp>
 #include <contour/session/DisplaySurface.hpp>
 
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <cstdint>
 

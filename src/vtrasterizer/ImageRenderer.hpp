@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Image.hpp>
+#include <vtbackend/core/Image.hpp>
 
 #include <vtrasterizer/RenderTarget.hpp>
 #include <vtrasterizer/TextRenderer.hpp>

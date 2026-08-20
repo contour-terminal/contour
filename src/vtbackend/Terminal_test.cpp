@@ -2,9 +2,9 @@
 #include <vtbackend/CellUtil.hpp>
 #include <vtbackend/HintModeHandler.hpp>
 #include <vtbackend/MockTerm.hpp>
-#include <vtbackend/Primitives.hpp>
 #include <vtbackend/Terminal.hpp>
 #include <vtbackend/TestHelpers.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <vtpty/MockPty.hpp>
 

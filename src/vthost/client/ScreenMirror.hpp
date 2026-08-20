@@ -31,9 +31,9 @@
 /// rows through the page — so a resync must not erase it unless the server actually discarded its
 /// own (@see LocalHistory).
 
-#include <vtbackend/Image.hpp>
 #include <vtbackend/Screen.hpp>
 #include <vtbackend/Terminal.hpp>
+#include <vtbackend/core/Image.hpp>
 
 #include <cstdint>
 #include <memory>

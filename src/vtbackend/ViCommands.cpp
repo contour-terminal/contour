@@ -2,10 +2,10 @@
 #include <vtbackend/ViCommands.hpp>
 
 #include <vtbackend/Logging.hpp>
-#include <vtbackend/Primitives.hpp>
 #include <vtbackend/Selector.hpp>
 #include <vtbackend/Terminal.hpp>
 #include <vtbackend/ViInputHandler.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <libunicode/ucd.h>
 

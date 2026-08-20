@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <text_shaper/Shaper.hpp>
 
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <crispy/LogStore.hpp>
 

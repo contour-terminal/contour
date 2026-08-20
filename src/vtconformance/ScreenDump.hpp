@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/CellFlags.hpp>
-#include <vtbackend/LineFlags.hpp>
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/CellFlags.hpp>
+#include <vtbackend/core/LineFlags.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <string>
 #include <variant>

@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/ColorPalette.hpp>
 #include <vtbackend/Cursor.hpp>
 #include <vtbackend/DesktopNotification.hpp>
 #include <vtbackend/Folding.hpp>
 #include <vtbackend/Grid.hpp>
 #include <vtbackend/HintModeHandler.hpp>
-#include <vtbackend/Hyperlink.hpp>
 #include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/InputHandler.hpp>
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/PointerShape.hpp>
-#include <vtbackend/Primitives.hpp>
 #include <vtbackend/ProgressState.hpp>
 #include <vtbackend/RenderBuffer.hpp>
 #include <vtbackend/Selector.hpp>
@@ -25,6 +22,9 @@
 #include <vtbackend/ViCommands.hpp>
 #include <vtbackend/ViInputHandler.hpp>
 #include <vtbackend/Viewport.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/core/Hyperlink.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <vtparser/Parser.hpp>
 

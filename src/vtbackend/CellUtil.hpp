@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/CellFlags.hpp>
-#include <vtbackend/Color.hpp>
-#include <vtbackend/ColorPalette.hpp>
+#include <vtbackend/core/CellFlags.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 
 #include <crispy/Times.hpp>
 

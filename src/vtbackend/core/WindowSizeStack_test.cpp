@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/WindowSizeStack.hpp>
+#include <vtbackend/core/WindowSizeStack.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

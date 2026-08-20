@@ -33,7 +33,7 @@
 ///    application was already tracking, and only that client, which is what made it look like an
 ///    attach-order bug. Carried as resolved `mouseProtocol`/`mouseTransport`/`mouseWheelMode`.
 
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <array>
 #include <cstdint>

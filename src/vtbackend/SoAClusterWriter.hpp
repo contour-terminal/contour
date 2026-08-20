@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/GraphicsAttributes.hpp>
-#include <vtbackend/Hyperlink.hpp>
-#include <vtbackend/Image.hpp>
 #include <vtbackend/LineSoA.hpp>
+#include <vtbackend/core/GraphicsAttributes.hpp>
+#include <vtbackend/core/Hyperlink.hpp>
+#include <vtbackend/core/Image.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/grapheme_segmenter.h>

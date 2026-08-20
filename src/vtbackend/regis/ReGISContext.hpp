@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Color.hpp>
+#include <vtbackend/core/Color.hpp>
 #include <vtbackend/regis/ReGISColor.hpp>
 #include <vtbackend/regis/ReGISRasterizer.hpp>
 #include <vtbackend/regis/ReGISTables.hpp>

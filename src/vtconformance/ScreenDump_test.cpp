@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/CellFlags.hpp>
 #include <vtbackend/MockTerm.hpp>
+#include <vtbackend/core/CellFlags.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

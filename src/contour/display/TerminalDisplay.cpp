@@ -16,7 +16,7 @@
 #include <contour/session/FontControl.hpp>
 #include <contour/session/SessionInput.hpp>
 
-#include <vtbackend/Color.hpp>
+#include <vtbackend/core/Color.hpp>
 
 #include <vtpty/Pty.hpp>
 

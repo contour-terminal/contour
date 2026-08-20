@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/testing/GridParity.hpp>
 
-#include <vtbackend/Image.hpp>
-#include <vtbackend/LineFlags.hpp>
+#include <vtbackend/core/Image.hpp>
+#include <vtbackend/core/LineFlags.hpp>
 
 #include <algorithm>
 #include <array>

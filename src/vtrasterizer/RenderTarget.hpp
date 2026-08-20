@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Color.hpp>
 #include <vtbackend/Grid.hpp> // cell attribs
-#include <vtbackend/Primitives.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/Primitives.hpp>
 
 #include <vtrasterizer/GridMetrics.hpp>
 #include <vtrasterizer/ImageTextureBackend.hpp>
