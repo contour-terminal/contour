@@ -53,6 +53,7 @@ set(vtbackend_HEADERS
     render/RenderBuffer.hpp
     screen/RenderBufferBuilder.hpp
     screen/Screen.hpp
+    screen/ScreenTestFixtures.hpp
     input/vi/Selector.hpp
     shell/SemanticBlockTracker.hpp
     vt/Sequence.hpp
@@ -64,6 +65,7 @@ set(vtbackend_HEADERS
     grid/SoAClusterWriter.hpp
     screen/StatusLineBuilder.hpp
     screen/Terminal.hpp
+    screen/TerminalTestFixtures.hpp
     testing/TestHelpers.hpp
     core/TextScale.hpp
     vt/TextSizing.hpp
@@ -197,12 +199,23 @@ if(LIBTERMINAL_TESTING)
         vt/PointerShape_test.cpp
         graphics/KittyGraphics_test.cpp
         vt/TextSizing_test.cpp
+        screen/ScreenTestFixtures.cpp
+        screen/TerminalTestFixtures.cpp
         screen/Screen_test.cpp
+        screen/Screen_charset_test.cpp
+        screen/Screen_rect_test.cpp
+        screen/Screen_modes_test.cpp
+        screen/Screen_osc_test.cpp
+        screen/Screen_macros_test.cpp
+        screen/Screen_multipage_test.cpp
         core/Image_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp
         core/WindowSizeStack_test.cpp
         screen/Terminal_test.cpp
+        screen/Terminal_scroll_test.cpp
+        screen/Terminal_selection_test.cpp
+        screen/Terminal_input_test.cpp
         shell/ShellIntegration_test.cpp
         grid/LineSoA_test.cpp
         grid/SoAClusterWriter_test.cpp
