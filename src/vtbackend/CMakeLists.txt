@@ -29,6 +29,7 @@ set(vtbackend_HEADERS
     vt/Functions.hpp
     core/GraphicsAttributes.hpp
     grid/Grid.hpp
+    vt/HierarchicalContext.hpp
     input/vi/HintModeHandler.hpp
     core/Hyperlink.hpp
     core/Image.hpp
@@ -94,6 +95,7 @@ set(vtbackend_SOURCES
     core/Color.cpp
     core/ColorPalette.cpp
     core/TerminalContext.cpp
+    vt/HierarchicalContext.cpp
     shell/CommandBlocks.cpp
     shell/Folding.cpp
     shell/PromptRegion.cpp
@@ -183,6 +185,7 @@ if(LIBTERMINAL_TESTING)
         core/Color_test.cpp
         core/ColorPalette_test.cpp
         core/TerminalContext_test.cpp
+        vt/HierarchicalContext_test.cpp
         shell/CommandBlocks_test.cpp
         shell/Folding_test.cpp
         shell/PromptRegion_test.cpp
