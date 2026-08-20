@@ -1791,6 +1791,17 @@ QVariantList SettingsController::parseIndicatorSegment(QString const& templateSt
                         QString::fromStdString(v.separator.value_or(std::string {}));
                     row[QStringLiteral("displayName")] = toQString(ItemTraits<T>::Label);
                 }
+                else if constexpr (std::same_as<T, Context>)
+                {
+                    // Carried through even though the page offers no control for them yet: an item is
+                    // round-tripped through here on EVERY edit of the segment, so a payload the reader
+                    // drops is a payload the writer silently deletes from the user's profile.
+                    row[QStringLiteral("verbosity")] = toQString(contextVerbosityName(v.verbosity));
+                    row[QStringLiteral("separator")] =
+                        QString::fromStdString(v.separator.value_or(std::string {}));
+                    row[QStringLiteral("maxWidth")] = unbox<int>(v.maxWidth);
+                    row[QStringLiteral("displayName")] = toQString(ItemTraits<T>::Label);
+                }
                 else
                     row[QStringLiteral("displayName")] = toQString(ItemTraits<T>::Label);
 
@@ -1838,6 +1849,20 @@ QString SettingsController::serializeIndicatorSegment(QVariantList const& items)
                     // rendering the tabs run together.
                     separator.isEmpty() ? std::nullopt : std::optional { separator.toStdString() },
                 });
+            }
+            else if constexpr (std::same_as<T, Context>)
+            {
+                auto item = Context { styles };
+                item.verbosity =
+                    contextVerbosityFrom(row.value(QStringLiteral("verbosity")).toString().toStdString());
+                auto const separator = row.value(QStringLiteral("separator")).toString();
+                if (!separator.isEmpty())
+                    item.separator = separator.toStdString();
+                // A missing or nonsensical width keeps the default rather than collapsing the
+                // breadcrumb to nothing.
+                if (auto const width = row.value(QStringLiteral("maxWidth")).toInt(); width > 0)
+                    item.maxWidth = vtbackend::ColumnCount(width);
+                segment.emplace_back(std::move(item));
             }
             else
                 segment.emplace_back(T { styles });

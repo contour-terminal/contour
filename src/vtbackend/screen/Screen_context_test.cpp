@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/screen/Screen.hpp>
+#include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/vt/Functions.hpp>
 
@@ -765,6 +766,181 @@ TEST_CASE("Screen.osc3008 a scheme with no tints costs the render path nothing",
     mock.writeToScreen("inside\r\n");
     mock.terminal.refreshRenderBuffer(true);
     CHECK(!mock.terminal.renderBuffer().get().lines.empty());
+}
+
+// }}}
+
+// {{{ the breadcrumb
+
+namespace
+{
+
+/// The `{Context}` segment as it would be written into the indicator status line.
+std::string breadcrumb(
+    MockTerm<>& mock,
+    StatusLineDefinitions::ContextVerbosity verbosity = StatusLineDefinitions::ContextVerbosity::Boundaries,
+    ColumnCount maxWidth = ColumnCount(32))
+{
+    auto item = StatusLineDefinitions::Context {};
+    item.verbosity = verbosity;
+    item.maxWidth = maxWidth;
+    auto const segment = StatusLineSegment { item };
+    return serializeToVT(mock.terminal, segment, StatusLineStyling::Disabled);
+}
+
+} // namespace
+
+TEST_CASE("Screen.osc3008 an empty ancestry renders no breadcrumb", "[context]")
+{
+    auto mock = makeTerm();
+    CHECK(breadcrumb(mock).empty());
+}
+
+TEST_CASE("Screen.osc3008 a shell-and-command-only session renders no breadcrumb", "[context]")
+{
+    // The property that lets this ship in the DEFAULT status line: on a stock systemd install the
+    // shim emits only session/shell/command, so an ordinary session pays nothing for the segment.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=session-1;type=session"));
+    mock.writeToScreen(osc3008("start=shell-1;type=shell;comm=bash"));
+    mock.writeToScreen(osc3008("start=cmd-1;type=command;comm=ls"));
+
+    CHECK(breadcrumb(mock).empty());
+}
+
+TEST_CASE("Screen.osc3008 a container renders with its type prefix", "[context]")
+{
+    // A bare name reads like a hostname, so the type goes in front -- while a hostname and a user are
+    // self-describing in position and take none.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=box;type=container;container=foobar"));
+
+    CHECK(breadcrumb(mock) == "container:foobar");
+}
+
+TEST_CASE("Screen.osc3008 an elevate renders its target user without a prefix", "[context]")
+{
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=root;type=elevate;targetuser=root"));
+
+    CHECK(breadcrumb(mock) == "root");
+}
+
+TEST_CASE("Screen.osc3008 an elevate to the session's own user renders nothing", "[context]")
+{
+    // run0 while already root is not news -- and suppressing it removes the commonest honest false
+    // positive, so a SPOOFED one has to actually differ before it appears at all.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=outer;type=session;user=root"));
+    mock.writeToScreen(osc3008("start=elev;type=elevate;targetuser=root"));
+
+    CHECK(breadcrumb(mock).empty());
+}
+
+TEST_CASE("Screen.osc3008 a full ancestry reads root-first", "[context]")
+{
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=s;type=session;user=lennart;hostname=zeta"));
+    mock.writeToScreen(osc3008("start=box;type=container;container=foobar"));
+    mock.writeToScreen(osc3008("start=root;type=elevate;targetuser=root"));
+    mock.writeToScreen(osc3008("start=app;type=app;comm=vim"));
+
+    CHECK(breadcrumb(mock, StatusLineDefinitions::ContextVerbosity::Full, ColumnCount(80))
+          == "zeta › container:foobar › root › vim");
+}
+
+TEST_CASE("Screen.osc3008 the Active verbosity shows the innermost context alone", "[context]")
+{
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=box;type=container;container=foobar"));
+    mock.writeToScreen(osc3008("start=app;type=app;comm=vim"));
+
+    CHECK(breadcrumb(mock, StatusLineDefinitions::ContextVerbosity::Active, ColumnCount(80)) == "vim");
+}
+
+TEST_CASE("Screen.osc3008 an over-long breadcrumb elides its middle and keeps both ends", "[context]")
+{
+    // The first segment answers *where* and the last answers *who*; the ones between are the least
+    // costly to lose.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=s;type=session;hostname=zeta"));
+    mock.writeToScreen(osc3008("start=box;type=container;container=a-rather-long-container-name"));
+    mock.writeToScreen(osc3008("start=root;type=elevate;targetuser=root"));
+
+    auto const text = breadcrumb(mock, StatusLineDefinitions::ContextVerbosity::Full, ColumnCount(20));
+    CHECK(text.starts_with("zeta"));
+    CHECK(text.ends_with("root"));
+    CHECK(text.contains("…"));
+}
+
+TEST_CASE("Screen.osc3008 a single over-long segment is cut on a codepoint boundary", "[context]")
+{
+    // The last resort of the elision: the innermost segment alone, cut at its own START. Cutting one
+    // BYTE at a time left the result beginning on a UTF-8 continuation byte -- mojibake on screen, and
+    // an invalid sequence handed to writeToScreenInternal(), which parses it.
+    auto mock = makeTerm();
+    // Eight double-width CJK codepoints: 24 bytes, 16 columns, and no byte boundary that is also a
+    // codepoint boundary except every third one.
+    mock.writeToScreen(osc3008("start=box;type=container;container=容器容器容器容器"));
+
+    auto const text = breadcrumb(mock, StatusLineDefinitions::ContextVerbosity::Full, ColumnCount(8));
+
+    // Every byte of the result decodes: a lone continuation byte would round-trip to U+FFFD.
+    auto const decoded = unicode::convert_to<char32_t>(std::string_view { text });
+    CHECK(std::ranges::none_of(decoded, [](char32_t cp) { return cp == U'�'; }));
+    CHECK(text.starts_with("…"));
+    CHECK(text.ends_with("器")); // the TAIL survives: it is the part that identifies the context
+
+    // And the ellipsis is BUDGETED for rather than added on top, so the whole thing fits.
+    auto columns = 0;
+    for (auto const codepoint: decoded)
+        columns += static_cast<int>(unicode::width(codepoint));
+    CHECK(columns <= 8);
+}
+
+TEST_CASE("Screen.osc3008 control bytes in a context field never reach the status screen", "[context]")
+{
+    // Defence in depth: this string is handed to writeToScreenInternal(), which PARSES it. The
+    // decoder already rejects control bytes, so one arriving here would mean a parser bug -- and
+    // without the strip, that bug would be an injection able to clear the status screen from a field
+    // any program on the tty can write.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=box;type=container;container=safe"));
+
+    // Reach past the sequence decoder, as a parser bug would.
+    auto record = *mock.terminal.contexts().active();
+    record.container = "ev\033[2Jil";
+    mock.terminal.adoptContext(record);
+
+    // The ESC is what makes the rest a SEQUENCE; strip it and "[2J" is inert text on the status line.
+    auto const text = breadcrumb(mock);
+    CHECK(!text.contains('\033'));
+    CHECK(text == "container:ev[2Jil");
+}
+
+TEST_CASE("Screen.osc3008 the breadcrumb round-trips through the status-line serializer", "[context]")
+{
+    auto item = StatusLineDefinitions::Context {};
+    item.verbosity = StatusLineDefinitions::ContextVerbosity::Full;
+    item.separator = " | ";
+    item.maxWidth = ColumnCount(40);
+
+    auto const written = serializeStatusLineSegment(StatusLineSegment { item });
+    auto const parsed = parseStatusLineSegment(written);
+
+    REQUIRE(parsed.size() == 1);
+    auto const* const back = std::get_if<StatusLineDefinitions::Context>(&parsed.front());
+    REQUIRE(back != nullptr);
+    CHECK(back->verbosity == StatusLineDefinitions::ContextVerbosity::Full);
+    CHECK(back->separator == " | ");
+    CHECK(back->maxWidth == ColumnCount(40));
+}
+
+TEST_CASE("Screen.osc3008 a default breadcrumb writes no redundant attributes", "[context]")
+{
+    // A config Contour wrote must not gain noise when it writes it again.
+    auto const written = serializeStatusLineSegment(StatusLineSegment { StatusLineDefinitions::Context {} });
+    CHECK(written == "{Context}");
 }
 
 // }}}

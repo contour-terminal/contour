@@ -394,6 +394,9 @@ struct IndicatorConfig
                        "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
                        "{Tabs:ActiveColor=#FFFF00,Left= │ }"
                        "{ProtectedMode:Bold,Left= │ }"
+                       // Draws NOTHING until a privilege or machine boundary is in force, so an
+                       // ordinary session is unchanged by its presence.
+                       "{Context:Left= │ }"
                        "{SearchPrompt:Left= │ }" };
     std::string middle { "« {Title} »" };
     std::string right { "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}" };

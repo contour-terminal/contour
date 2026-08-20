@@ -68,7 +68,9 @@ struct Settings
     struct
     {
         std::string left { "{VTType} │ {InputMode:Bold,Color=#C0C030}{SearchPrompt:Left= │ }"
-                           "{TraceMode:Bold,Color=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }" };
+                           "{TraceMode:Bold,Color=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }"
+                           // Collapses to nothing without a privilege or machine boundary.
+                           "{Context:Left= │ }" };
         std::string middle { "{Title:Left= « ,Right= » ,Color=#20c0c0}" };
         std::string right { "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold} " };
     } indicatorStatusLine;
