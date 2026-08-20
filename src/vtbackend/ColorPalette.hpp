@@ -12,6 +12,8 @@
 #include <filesystem>
 #include <format>
 #include <optional>
+#include <span>
+#include <string_view>
 #include <variant>
 
 namespace vtbackend
@@ -298,7 +300,21 @@ struct ColorPalette
     RGBColorPair indicatorStatusLineVisualMode = { .foreground = 0xFFFFFF_rgb, .background = 0x0270c0_rgb };
 };
 
-bool defaultColorPalettes(std::string const& colorPaletteName, ColorPalette& palette) noexcept;
+/// Applies the built-in color scheme @p colorPaletteName to @p palette, if there is one by that name.
+///
+/// @param colorPaletteName The scheme to apply; @see defaultColorPaletteNames.
+/// @param palette The palette to mutate. Left untouched when the name is not a built-in one.
+/// @return Whether a scheme by that name exists.
+bool defaultColorPalettes(std::string_view colorPaletteName, ColorPalette& palette) noexcept;
+
+/// Every color scheme name defaultColorPalettes() answers to.
+///
+/// Exposed because the set is otherwise undiscoverable -- it used to live only inside that function --
+/// and anything that has to cover or offer every built-in scheme would have to re-type the list, which
+/// then quietly stops matching when a scheme is added.
+///
+/// @return The names, in table order.
+[[nodiscard]] std::span<std::string_view const> defaultColorPaletteNames() noexcept;
 
 enum class ColorTarget : uint8_t
 {
