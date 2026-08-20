@@ -79,6 +79,7 @@ set(vtbackend_HEADERS
     input/vi/ViInputHandler.hpp
     screen/Viewport.hpp
     core/WindowSizeStack.hpp
+    core/WorkingDirectory.hpp
     graphics/regis/ReGISColor.hpp
     graphics/regis/ReGISContext.hpp
     graphics/regis/ReGISFont.hpp
@@ -97,6 +98,7 @@ set(vtbackend_SOURCES
     core/ColorPalette.cpp
     core/TerminalContext.cpp
     vt/HierarchicalContext.cpp
+    core/WorkingDirectory.cpp
     shell/CommandBlocks.cpp
     shell/Folding.cpp
     shell/PromptRegion.cpp
@@ -189,6 +191,7 @@ if(LIBTERMINAL_TESTING)
         vt/HierarchicalContext_test.cpp
         screen/Screen_context_test.cpp
         shell/MarkArbiter_test.cpp
+        core/WorkingDirectory_test.cpp
         shell/CommandBlocks_test.cpp
         shell/Folding_test.cpp
         shell/PromptRegion_test.cpp
