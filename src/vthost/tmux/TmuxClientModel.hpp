@@ -13,7 +13,7 @@
 /// ingest through parseLayout/collapseToBinary into a vtworkspace-shaped tree a
 /// frontend can realize.
 
-#include <vtbackend/Terminal.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <vtpty/MockPty.hpp>
 

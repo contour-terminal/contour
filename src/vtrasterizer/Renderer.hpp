@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Terminal.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <vtrasterizer/BackgroundRenderer.hpp>
 #include <vtrasterizer/CursorRenderer.hpp>

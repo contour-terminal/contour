@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/MockTerm.hpp>
-#include <vtbackend/Screen.hpp>
 #include <vtbackend/TestHelpers.hpp>
-#include <vtbackend/Viewport.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
+#include <vtbackend/screen/Screen.hpp>
+#include <vtbackend/screen/Viewport.hpp>
 #include <vtbackend/vt/Charset.hpp>
 
 #include <crispy/Escape.hpp>

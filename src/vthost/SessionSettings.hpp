@@ -12,7 +12,7 @@
 /// Deliberately free of I/O, sockets and event loops, so `SessionSettings_test.cpp` drives every
 /// decision directly.
 
-#include <vtbackend/Settings.hpp>
+#include <vtbackend/screen/Settings.hpp>
 
 #include <vthost/proto/Pdu.hpp>
 

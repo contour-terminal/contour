@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include <vtbackend/RenderBufferBuilder.hpp>
+#include <vtbackend/screen/RenderBufferBuilder.hpp>
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>

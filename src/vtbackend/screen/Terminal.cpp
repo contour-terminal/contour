@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Terminal.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <vtbackend/Logging.hpp>
-#include <vtbackend/RenderBuffer.hpp>
-#include <vtbackend/RenderBufferBuilder.hpp>
 #include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
+#include <vtbackend/render/RenderBuffer.hpp>
+#include <vtbackend/screen/RenderBufferBuilder.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/Functions.hpp>
 #include <vtbackend/vt/SequenceBuilder.hpp>

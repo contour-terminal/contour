@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Screen.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/shell/Folding.hpp>
 
 #include <crispy/LogStore.hpp>

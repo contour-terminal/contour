@@ -22,7 +22,7 @@
 #include <contour/remote/RemoteController.hpp>
 #include <contour/session/SessionFactory.hpp>
 
-#include <vtbackend/Settings.hpp>
+#include <vtbackend/screen/Settings.hpp>
 
 #include <vtpty/ChannelPty.hpp>
 

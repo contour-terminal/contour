@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Viewport.hpp>
+#include <vtbackend/screen/Viewport.hpp>
 
-#include <vtbackend/Terminal.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <crispy/LogStore.hpp>
 

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Cursor.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Image.hpp>
@@ -9,6 +8,7 @@
 #include <vtbackend/graphics/MessageParser.hpp>
 #include <vtbackend/grid/CellUtil.hpp>
 #include <vtbackend/grid/Grid.hpp>
+#include <vtbackend/screen/Cursor.hpp>
 #include <vtbackend/shell/CommandBlocks.hpp>
 #include <vtbackend/shell/Folding.hpp>
 #include <vtbackend/shell/PromptRegion.hpp>

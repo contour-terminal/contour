@@ -8,13 +8,13 @@
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/config/WindowShadow.hpp>
 
-#include <vtbackend/Settings.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Primitives.hpp> // CursorDisplay
 #include <vtbackend/input/InputBinding.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/MatchModes.hpp>
+#include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/VTType.hpp>
 

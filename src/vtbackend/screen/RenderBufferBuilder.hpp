@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include <vtbackend/RenderBuffer.hpp>
-#include <vtbackend/Terminal.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/render/RenderBuffer.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <gsl/pointers>
 

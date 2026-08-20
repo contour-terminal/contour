@@ -4,7 +4,7 @@
 // each state does to the percentage already in effect, and the payloads it must reject.
 
 #include <vtbackend/MockTerm.hpp>
-#include <vtbackend/StatusLineBuilder.hpp>
+#include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/vt/ProgressState.hpp>
 
 #include <catch2/catch_test_macros.hpp>

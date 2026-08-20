@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Terminal.hpp>
 #include <vtbackend/core/WindowSizeStack.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <vtpty/MockPty.hpp>
 

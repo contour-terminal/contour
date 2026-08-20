@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Terminal.hpp> // vtbackend::ScrollPhase
+#include <vtbackend/screen/Terminal.hpp> // vtbackend::ScrollPhase
 
 #include <crispy/Point.hpp>
 

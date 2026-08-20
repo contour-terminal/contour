@@ -21,7 +21,7 @@ set(vtbackend_HEADERS
     core/ColorPalette.hpp
     shell/CommandBlocks.hpp
     vt/ControlCode.hpp
-    Cursor.hpp
+    screen/Cursor.hpp
     vt/DesktopNotification.hpp
     core/FileUrl.hpp
     shell/Folding.hpp
@@ -50,20 +50,20 @@ set(vtbackend_HEADERS
     vt/ProgressState.hpp
     shell/PromptRegion.hpp
     vt/RectangularAreaChecksum.hpp
-    RenderBuffer.hpp
-    RenderBufferBuilder.hpp
-    Screen.hpp
+    render/RenderBuffer.hpp
+    screen/RenderBufferBuilder.hpp
+    screen/Screen.hpp
     input/vi/Selector.hpp
     shell/SemanticBlockTracker.hpp
     vt/Sequence.hpp
     vt/SequenceBuilder.hpp
-    Settings.hpp
+    screen/Settings.hpp
     vt/SgrWriter.hpp
     shell/ShellIntegration.hpp
     graphics/SixelParser.hpp
     grid/SoAClusterWriter.hpp
-    StatusLineBuilder.hpp
-    Terminal.hpp
+    screen/StatusLineBuilder.hpp
+    screen/Terminal.hpp
     TestHelpers.hpp
     core/TextScale.hpp
     vt/TextSizing.hpp
@@ -71,7 +71,7 @@ set(vtbackend_HEADERS
     vt/VTWriter.hpp
     input/vi/ViCommands.hpp
     input/vi/ViInputHandler.hpp
-    Viewport.hpp
+    screen/Viewport.hpp
     core/WindowSizeStack.hpp
     graphics/regis/ReGISColor.hpp
     graphics/regis/ReGISContext.hpp
@@ -102,12 +102,12 @@ set(vtbackend_SOURCES
     grid/LineSoA.cpp
     graphics/MessageParser.cpp
     MockTerm.cpp
-    RenderBuffer.cpp
-    RenderBufferBuilder.cpp
+    render/RenderBuffer.cpp
+    screen/RenderBufferBuilder.cpp
     vt/KittyClipboard.cpp
     graphics/KittyGraphics.cpp
     vt/TextSizing.cpp
-    Screen.cpp
+    screen/Screen.cpp
     shell/SemanticBlockTracker.cpp
     input/vi/Selector.cpp
     grid/SoAClusterWriter.cpp
@@ -119,11 +119,11 @@ set(vtbackend_SOURCES
     graphics/regis/ReGISFont.cpp
     graphics/regis/ReGISTextRasterizer.cpp
     graphics/regis/ReGISParser.cpp
-    StatusLineBuilder.cpp
-    Terminal.cpp
+    screen/StatusLineBuilder.cpp
+    screen/Terminal.cpp
     vt/VTType.cpp
     vt/VTWriter.cpp
-    Viewport.cpp
+    screen/Viewport.cpp
     input/vi/ViInputHandler.cpp
     input/vi/ViCommands.cpp
     input/vi/JumpHistory.cpp
@@ -197,12 +197,12 @@ if(LIBTERMINAL_TESTING)
         vt/PointerShape_test.cpp
         graphics/KittyGraphics_test.cpp
         vt/TextSizing_test.cpp
-        Screen_test.cpp
+        screen/Screen_test.cpp
         core/Image_test.cpp
         vt/Sequence_test.cpp
-        StatusLineBuilder_test.cpp
+        screen/StatusLineBuilder_test.cpp
         core/WindowSizeStack_test.cpp
-        Terminal_test.cpp
+        screen/Terminal_test.cpp
         shell/ShellIntegration_test.cpp
         grid/LineSoA_test.cpp
         grid/SoAClusterWriter_test.cpp

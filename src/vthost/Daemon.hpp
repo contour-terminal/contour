@@ -5,7 +5,7 @@
 /// The daemon entry points (`contour daemon` / `contour client`) — kept in
 /// this Qt-free module so the whole serving path never touches the GUI stack.
 
-#include <vtbackend/Settings.hpp>
+#include <vtbackend/screen/Settings.hpp>
 
 #include <vtpty/Process.hpp>
 

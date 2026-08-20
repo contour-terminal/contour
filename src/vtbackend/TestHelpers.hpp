@@ -2,8 +2,8 @@
 #pragma once
 
 #include <vtbackend/MockTerm.hpp>
-#include <vtbackend/RenderBuffer.hpp>
-#include <vtbackend/Terminal.hpp>
+#include <vtbackend/render/RenderBuffer.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <crispy/Escape.hpp>
 

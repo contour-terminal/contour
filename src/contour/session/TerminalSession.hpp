@@ -14,7 +14,7 @@
 #include <contour/session/DisplaySurface.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
 
-#include <vtbackend/Terminal.hpp>
+#include <vtbackend/screen/Terminal.hpp>
 
 #include <vtpty/Pty.hpp>
 
