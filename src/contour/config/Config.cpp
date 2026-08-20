@@ -2989,6 +2989,17 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                 return std::nullopt;
         }
 
+        // ToggleFoldAt is built by the context menu from the line that was right-clicked rather than
+        // bound by hand, but it round-trips like any other parameterized action -- a config written by
+        // Contour must be a config Contour can read back.
+        if (holds_alternative<actions::ToggleFoldAt>(action))
+        {
+            if (auto line = node["line"]; line && line.IsScalar())
+                return actions::ToggleFoldAt { line.as<int>() };
+            else
+                return std::nullopt;
+        }
+
         if (holds_alternative<actions::SwitchToTab>(action))
         {
             if (auto position = node["position"]; position && position.IsScalar())

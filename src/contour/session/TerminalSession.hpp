@@ -28,6 +28,7 @@
 #include <QtQml/QJSValue>
 
 #include <atomic>
+#include <concepts>
 #include <cstdint>
 #include <format>
 #include <initializer_list>
@@ -73,6 +74,17 @@ enum class GuardedRole : uint8_t
  * and the user decided to permanently decide for the current session.
  */
 using PermissionCache = std::map<GuardedRole, bool>;
+
+/// Whether a folding action is subject to the folding.enabled setting.
+///
+/// Named rather than left to a bool because the exception reads as a rule, not as a negation: turning
+/// the feature off must still let a user undo what they folded while it was on, rather than stranding
+/// the output behind a disabled setting.
+enum class FoldingGate : uint8_t
+{
+    Configured = 0, ///< The action runs only while folding is enabled.
+    Always,         ///< The action runs regardless -- it can only ever REVEAL output.
+};
 
 /**
  * Manages a single terminal session (Client, Terminal, Display)
@@ -282,7 +294,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     bool showResizeIndicator() const noexcept { return _config.profile().sizeIndicatorOnResize.value(); }
 
-    int historyLineCount() const noexcept { return unbox(_terminal.currentScreen().historyLineCount()); }
+    /// How far the scrollbar can scroll up, in rows the user can actually reach.
+    ///
+    /// The scrollable count rather than the raw history depth: collapsed folds take their output out
+    /// of the scrollable range, and a scrollbar sized by the raw history would offer a stretch of
+    /// travel at the top that scrolls nowhere.
+    ///
+    /// Reported from what announceScrollableLineCount() last published, and emphatically NOT computed
+    /// here -- see there for why the GUI thread may neither compute this count nor take the lock that
+    /// would make computing it safe. It is therefore also exactly what the NOTIFY signal carried.
+    int historyLineCount() const noexcept { return _lastHistoryLineCount.load(std::memory_order_relaxed); }
 
     int scrollOffset() const noexcept { return unbox(terminal().viewport().scrollOffset()); }
     void setScrollOffset(int value)
@@ -584,6 +605,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ScreenshotVT);
     bool operator()(actions::CopyScreenshot);
     bool operator()(actions::SaveScreenshot);
+    bool operator()(actions::CollapseAllFolds);
+    bool operator()(actions::CollapseLastFold);
+    bool operator()(actions::ExpandAllFolds);
     bool operator()(actions::ScrollDown);
     bool operator()(actions::ScrollMarkDown);
     bool operator()(actions::ScrollMarkUp);
@@ -593,6 +617,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ScrollPageUp);
     bool operator()(actions::ScrollToBottom);
     bool operator()(actions::ScrollToTop);
+    bool operator()(actions::ToggleFold);
+    bool operator()(actions::ToggleFoldAt);
+    bool operator()(actions::ToggleLastFold);
     bool operator()(actions::ScrollUp);
     bool operator()(actions::SearchReverse);
     bool operator()(actions::SendChars const& event);
@@ -742,6 +769,21 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
   private:
     // helpers
+
+    /// Runs @p action against the terminal under the lock, and republishes the scrollable count.
+    ///
+    /// The one gate every folding action passes, so that adding one is a handler rather than a handler
+    /// plus a remembered check -- a forgotten check leaves an action live behind a disabled setting,
+    /// and nothing diagnoses it. Republishing is here for the same reason: an action that moved rows
+    /// into or out of the scrollable range and did not say so leaves the scrollbar sized for the range
+    /// before it.
+    ///
+    /// @param action What to do with the terminal; its result is the action's result.
+    /// @param gate   Whether @p action is subject to the folding.enabled setting.
+    /// @return What @p action returned, or false when folding is disabled and @p gate honours it.
+    bool withFolding(std::invocable<vtbackend::Terminal&> auto&& action,
+                     FoldingGate gate = FoldingGate::Configured);
+
     bool reloadConfig(config::Config newConfig, std::string const& profileName);
     int executeAllActions(std::vector<actions::Action> const& actions);
     void spawnNewTerminal(std::string const& profileName);
@@ -754,6 +796,19 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// notice already defines: the reason on screen, the device closed, and the pane pruned by the
     /// next key press (see sendKeyEvent) or by closing the tab (see terminate).
     void reportDeviceStartFailure(vtpty::StartFailure const& failure);
+
+    /// Publishes @p scrollable as the scrollbar's travel, announcing it when it moved.
+    ///
+    /// The historyLineCount property reads what this stored rather than computing a count of its
+    /// own, because computing one goes through the fold projection -- a lazily built cache the
+    /// render pass clears and refills under the terminal lock, so a GUI-thread rebuild races it.
+    /// Taking that lock in the property instead is what cannot be done: a scroll performed under it
+    /// emits scrollOffsetChanged, whose QML handler reads this very property on the same thread, and
+    /// the lock is not recursive. So every caller computes the count itself and hands it here, and
+    /// this is called OUTSIDE any lock -- the binding it wakes reaches back into the session.
+    ///
+    /// @param scrollable The scrollable line count, computed by the caller.
+    void announceScrollableLineCount(vtbackend::LineCount scrollable);
 
     /// Re-announces every Q_PROPERTY whose value is derived from the profile, so the QML bindings that
     /// read them re-evaluate against the profile that was just swapped in. Call after every assignment
@@ -875,7 +930,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::unique_ptr<platform::Audio> _audio;
     std::vector<int> _musicalNotesBuffer;
 
-    vtbackend::LineCount _lastHistoryLineCount;
+    /// The scrollable line count the historyLineCount property reports and its NOTIFY signal last
+    /// carried. Atomic because the parser thread publishes it while the GUI thread reads it; see
+    /// announceScrollableLineCount() for why the GUI thread cannot simply compute it.
+    std::atomic<int> _lastHistoryLineCount = 0;
 
     struct CaptureBufferRequest
     {

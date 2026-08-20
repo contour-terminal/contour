@@ -81,6 +81,9 @@ struct ResetFontSize{};
 struct ScreenshotVT{};
 struct SaveScreenshot{};
 struct CopyScreenshot{};
+struct CollapseAllFolds{};   // OSC 133: hide every finished command's output
+struct CollapseLastFold{};   // OSC 133: hide the most recent finished command's output
+struct ExpandAllFolds{};     // OSC 133: show every collapsed command's output again
 struct ScrollDown{};
 struct ScrollMarkDown{};
 struct ScrollMarkUp{};
@@ -90,6 +93,9 @@ struct ScrollPageDown{};
 struct ScrollPageUp{};
 struct ScrollToBottom{};
 struct ScrollToTop{};
+struct ToggleFold{};       // OSC 133: toggle the fold at the cursor's block
+struct ToggleFoldAt{ int line {}; }; // OSC 133: toggle the fold covering a given grid line
+struct ToggleLastFold{};   // OSC 133: toggle the most recent finished command's fold
 struct ScrollUp{};
 struct SearchReverse{};
 struct SendChars{ std::string chars; };
@@ -182,6 +188,9 @@ using Action = std::variant<CancelSelection,
                             ScreenshotVT,
                             SaveScreenshot,
                             CopyScreenshot,
+                            CollapseAllFolds,
+                            CollapseLastFold,
+                            ExpandAllFolds,
                             ScrollDown,
                             ScrollMarkDown,
                             ScrollMarkUp,
@@ -191,6 +200,9 @@ using Action = std::variant<CancelSelection,
                             ScrollPageUp,
                             ScrollToBottom,
                             ScrollToTop,
+                            ToggleFold,
+                            ToggleFoldAt,
+                            ToggleLastFold,
                             ScrollUp,
                             SearchReverse,
                             SendChars,
@@ -342,7 +354,8 @@ concept ParameterizedActionConcept = crispy::oneOf<T,
                                                    MoveTabTo,
                                                    SwitchToTab,
                                                    ResizePane,
-                                                   LaunchLayout>;
+                                                   LaunchLayout,
+                                                   ToggleFoldAt>;
 
 /// @returns true if @p action requires an argument that a bare catalog entry cannot supply (a
 /// ParameterizedActionConcept member), false if it is runnable as-is.
@@ -438,6 +451,13 @@ namespace documentation
     constexpr inline std::string_view CopyScreenshot {
         "takes a screenshot and puts it into the system clipboard"
     };
+    constexpr inline std::string_view CollapseAllFolds {
+        "Collapses every finished command, hiding all of their output (requires shell integration)"
+    };
+    constexpr inline std::string_view CollapseLastFold {
+        "Collapses the most recently finished command, hiding its output"
+    };
+    constexpr inline std::string_view ExpandAllFolds { "Expands every collapsed command again" };
     constexpr inline std::string_view ScrollDown { "Scrolls down by the multiplier factor." };
     constexpr inline std::string_view ScrollMarkDown {
         "Scrolls one mark down (if none present, bottom of the screen)"
@@ -449,6 +469,15 @@ namespace documentation
     constexpr inline std::string_view ScrollPageUp { "Scrolls a page up." };
     constexpr inline std::string_view ScrollToBottom { "Scrolls to the bottom of the screen buffer." };
     constexpr inline std::string_view ScrollToTop { "Scrolls to the top of the screen buffer." };
+    constexpr inline std::string_view ToggleFold {
+        "Collapses or expands the command block the cursor is in"
+    };
+    constexpr inline std::string_view ToggleFoldAt {
+        "Collapses or expands the command block covering a given grid line (used by the context menu)"
+    };
+    constexpr inline std::string_view ToggleLastFold {
+        "Collapses or expands the most recently finished command"
+    };
     constexpr inline std::string_view ScrollUp { "Scrolls up by the multiplier factor." };
     constexpr inline std::string_view SearchReverse {
         "Initiates search mode (starting to search at current cursor position, moving upwards)."
@@ -667,6 +696,11 @@ struct ActionCatalogEntry
         ActionCatalogEntry { "ScreenshotVT", Action { ScreenshotVT {} }, documentation::ScreenshotVT },
         ActionCatalogEntry { "SaveScreenshot", Action { SaveScreenshot {} }, documentation::SaveScreenshot },
         ActionCatalogEntry { "CopyScreenshot", Action { CopyScreenshot {} }, documentation::CopyScreenshot },
+        ActionCatalogEntry {
+            "CollapseAllFolds", Action { CollapseAllFolds {} }, documentation::CollapseAllFolds },
+        ActionCatalogEntry {
+            "CollapseLastFold", Action { CollapseLastFold {} }, documentation::CollapseLastFold },
+        ActionCatalogEntry { "ExpandAllFolds", Action { ExpandAllFolds {} }, documentation::ExpandAllFolds },
         ActionCatalogEntry { "ScrollDown", Action { ScrollDown {} }, documentation::ScrollDown },
         ActionCatalogEntry { "ScrollMarkDown", Action { ScrollMarkDown {} }, documentation::ScrollMarkDown },
         ActionCatalogEntry { "ScrollMarkUp", Action { ScrollMarkUp {} }, documentation::ScrollMarkUp },
@@ -676,6 +710,9 @@ struct ActionCatalogEntry
         ActionCatalogEntry { "ScrollPageUp", Action { ScrollPageUp {} }, documentation::ScrollPageUp },
         ActionCatalogEntry { "ScrollToBottom", Action { ScrollToBottom {} }, documentation::ScrollToBottom },
         ActionCatalogEntry { "ScrollToTop", Action { ScrollToTop {} }, documentation::ScrollToTop },
+        ActionCatalogEntry { "ToggleFold", Action { ToggleFold {} }, documentation::ToggleFold },
+        ActionCatalogEntry { "ToggleFoldAt", Action { ToggleFoldAt {} }, documentation::ToggleFoldAt },
+        ActionCatalogEntry { "ToggleLastFold", Action { ToggleLastFold {} }, documentation::ToggleLastFold },
         ActionCatalogEntry { "ScrollUp", Action { ScrollUp {} }, documentation::ScrollUp },
         ActionCatalogEntry { "SearchReverse", Action { SearchReverse {} }, documentation::SearchReverse },
         ActionCatalogEntry { "SendChars", Action { SendChars {} }, documentation::SendChars },
@@ -844,6 +881,7 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
                 return std::format(", direction: {}, percent: {}", a.direction, a.percent);
             },
             [](MoveTabTo const& a) { return std::format(", position: {}", a.position); },
+            [](ToggleFoldAt const& a) { return std::format(", line: {}", a.line); },
             [](SwitchToTab const& a) { return std::format(", position: {}", a.position); },
             [](WriteScreen const& a) { return std::format(", chars: '{}'", a.chars); },
             [](CreateSelection const& a) { return std::format(", delimiters: '{}'", a.delimiters); },

@@ -492,6 +492,14 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
     // a freshly attached display wants.
     setDefaultCursor();
 
+    // And likewise the scrollbar's travel: screenUpdated() only publishes it while a display is
+    // attached, so a pane that accumulated scrollback in the background carries whatever count was
+    // current when its display went away -- zero, for one that never had one. Nothing else republishes
+    // until the next screen update, which for an idle shell may be never, leaving the freshly bound
+    // scrollbar sized for a history it cannot see.
+    announceScrollableLineCount(
+        crispy::locked(_terminal, [this] { return _terminal.viewport().scrollableLineCount(); }));
+
     scheduleRedraw();
 }
 
@@ -683,18 +691,25 @@ void TerminalSession::screenUpdated()
     if (!_display)
         return;
 
-    if (_profile.history.value().autoScrollOnUpdate && terminal().viewport().scrolled()
-        && terminal().inputHandler().mode() == ViMode::Insert)
-        terminal().viewport().scrollToBottom();
+    // Emphatically NOT under Terminal's state mutex, however much the fold projection below would like
+    // it: this callback is raised BOTH with that mutex held and without it. Terminal::setMode() ends a
+    // synchronized update (DECRST 2026) by calling synchronizedOutput(), which refreshes the render
+    // buffer on the already-locked path and then raises this -- mid-parse, on the parser thread, with
+    // the mutex held. The mutex is a plain non-recursive std::mutex, so taking it here self-deadlocks on
+    // the very sequence neovim, tmux and every other modern TUI ends each frame with. @see
+    // Events::progressChanged for the same contract, stated.
+    if (_profile.history.value().autoScrollOnUpdate && _terminal.viewport().scrolled()
+        && _terminal.inputHandler().mode() == ViMode::Insert)
+        _terminal.viewport().scrollToBottom();
+
+    auto const scrollable = _terminal.viewport().scrollableLineCount();
 
     if (terminal().hasInput())
         _display->post(bind(&TerminalSession::flushInput, this));
 
-    if (_lastHistoryLineCount != _terminal.currentScreen().historyLineCount())
-    {
-        _lastHistoryLineCount = _terminal.currentScreen().historyLineCount();
-        emit historyLineCountChanged(unbox(_lastHistoryLineCount));
-    }
+    // The scrollable count rather than the history depth, so that folding a block -- which moves that
+    // count without touching the depth -- resizes the scrollbar too.
+    announceScrollableLineCount(scrollable);
 
     scheduleRedraw();
 }
@@ -1771,6 +1786,17 @@ void TerminalSession::updateHyperlinkHover(std::string_view uri, vtbackend::Cell
     emit hyperlinkHoverChanged();
 }
 
+void TerminalSession::announceScrollableLineCount(vtbackend::LineCount scrollable)
+{
+    // One exchange rather than a load and a store: two threads can reach this at once (the parser
+    // thread from screenUpdated(), the GUI thread from a folding action), and only the one that
+    // actually moved the value should announce it.
+    if (_lastHistoryLineCount.exchange(unbox(scrollable), std::memory_order_relaxed) == unbox(scrollable))
+        return;
+
+    emit historyLineCountChanged(unbox(scrollable));
+}
+
 void TerminalSession::onPointerLeft()
 {
     clearHyperlinkHover();
@@ -2476,6 +2502,82 @@ bool TerminalSession::operator()(actions::ScrollDown)
 {
     smoothScrollDown(vtbackend::LineCount(*_profile.history.value().historyScrollMultiplier));
     return true;
+}
+
+namespace
+{
+    /// The grid line the folding actions act on: where the user is looking, which is the top of the
+    /// viewport, not where the shell's cursor happens to be. ToggleFold is a viewport action.
+    ///
+    /// Not noexcept: that translation goes through the fold projection, which is built lazily and
+    /// allocates.
+    [[nodiscard]] vtbackend::LineOffset foldAnchorLine(vtbackend::Terminal const& terminal)
+    {
+        return terminal.viewport().topLine();
+    }
+} // namespace
+
+bool TerminalSession::withFolding(std::invocable<vtbackend::Terminal&> auto&& action, FoldingGate gate)
+{
+    // Locked: the actions walk the grid's marks and mutate fold state the render pass reads. See
+    // ScrollMarkDown.
+    auto const [handled, scrollable] =
+        crispy::locked(_terminal, [&]() -> std::pair<bool, vtbackend::LineCount> {
+            // One gate for every folding action rather than one per handler: a seventh action then
+            // cannot be live behind a disabled setting by forgetting to check.
+            auto const ran =
+                (gate == FoldingGate::Always || _config.folding.value().enabled) && action(terminal());
+
+            // Read under the same lock that just moved it: folding a block takes its rows out of the
+            // scrollable range without touching the history depth, and this is the only moment that is
+            // visible -- the property reporting that range may neither compute it nor take this lock.
+            return { ran, _terminal.viewport().scrollableLineCount() };
+        });
+
+    // Outside the lock: the QML binding this wakes runs synchronously on this thread and reaches back
+    // into the session. Announcing a count that did not move is a no-op, so the disabled case needs no
+    // second channel to say so.
+    announceScrollableLineCount(scrollable);
+    return handled;
+}
+
+bool TerminalSession::operator()(actions::CollapseAllFolds)
+{
+    return withFolding([](auto& terminal) { return terminal.collapseAllFolds(); });
+}
+
+bool TerminalSession::operator()(actions::CollapseLastFold)
+{
+    return withFolding([](auto& terminal) { return terminal.collapseLastFold(); });
+}
+
+bool TerminalSession::operator()(actions::ExpandAllFolds)
+{
+    // Ungated, but still through withFolding(): turning the feature off must let a user undo what they
+    // folded while it was on rather than stranding the output behind a disabled setting -- and the
+    // rows this hands BACK to the scrollable range have to be announced just as the ones a collapse
+    // takes away are, or the scrollbar keeps the travel it had while they were hidden.
+    return withFolding([](auto& terminal) { return terminal.expandAllFolds(); }, FoldingGate::Always);
+}
+
+bool TerminalSession::operator()(actions::ToggleFold)
+{
+    return withFolding(
+        [](auto& terminal) { return terminal.toggleFoldContaining(foldAnchorLine(terminal)); });
+}
+
+bool TerminalSession::operator()(actions::ToggleFoldAt action)
+{
+    // The line comes from the context menu, which captured where the user right-clicked -- so this
+    // acts on the block they were pointing at, not on whatever the viewport happens to start with.
+    return withFolding([line = action.line](auto& terminal) {
+        return terminal.toggleFoldContaining(vtbackend::LineOffset(line));
+    });
+}
+
+bool TerminalSession::operator()(actions::ToggleLastFold)
+{
+    return withFolding([](auto& terminal) { return terminal.toggleLastFold(); });
 }
 
 bool TerminalSession::operator()(actions::ScrollMarkDown)

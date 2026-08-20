@@ -387,11 +387,16 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
         return unbox(terminal().pageSize().lines);
     }
 
+    /// How far the view can be scrolled up, in rows the user can actually reach.
+    ///
+    /// Forwarded rather than re-derived, so a QML caller reaching either this or the session's own
+    /// accessor is told the same thing about the same viewport -- and the reason it is the scrollable
+    /// count rather than the raw history depth is stated once, there.
     Q_INVOKABLE [[nodiscard]] int historyLineCount() const noexcept
     {
         if (!_session)
             return 0;
-        return unbox(terminal().currentScreen().historyLineCount());
+        return _session->historyLineCount();
     }
 
   private:
