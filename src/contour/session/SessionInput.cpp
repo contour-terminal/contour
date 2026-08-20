@@ -11,6 +11,8 @@
 
 #include <vtrasterizer/Renderer.hpp>
 
+#include <crispy/Utils.hpp>
+
 #include <QtGui/QGuiApplication>
 
 #include <algorithm>
@@ -168,36 +170,49 @@ namespace
                 effectivePixelDelta = static_cast<float>(pixelDelta.y);
             }
 
-            if (effectivePixelDelta != 0.0f)
-            {
-                // Mouse wheels carry no gesture phase; route their discrete notches through a
-                // momentum impulse so they glide smoothly instead of snapping whole lines. Phased
-                // touchpad input keeps the existing velocity-tracking + immediate-apply path.
-                if (scrollPhase == vtbackend::ScrollPhase::NoPhase)
+            // Locked for the reason TerminalSession::smoothScrollUp() states: these advance the
+            // viewport offset, the sub-cell remainder and the momentum state, all of which the parser
+            // thread touches too. And the clamp inside applySmoothScrollPixelDelta() now reads the
+            // scrollable count, which builds the fold projection lazily -- a cache the render pass
+            // clears and refills under this same lock.
+            //
+            // Scoped to this branch alone, and the result carried out rather than returned from
+            // inside: the lock is not recursive and the line-based path below takes it again per
+            // synthesized mouse event.
+            auto const consumed = crispy::locked(terminal, [&] {
+                if (effectivePixelDelta != 0.0f)
                 {
-                    // Only consume the notch when a glide was actually armed. If injectWheelMomentum
-                    // could not arm (cell size still unknown during startup/rebind, alt screen, or a
-                    // degenerate zero net velocity) fall through to the legacy line-based path below
-                    // instead of silently swallowing the event.
-                    if (terminal.injectWheelMomentum(effectivePixelDelta, now)
-                        == vtbackend::SmoothScrollResult::Applied)
-                        return;
-                }
-                else
-                {
+                    // Mouse wheels carry no gesture phase; route their discrete notches through a
+                    // momentum impulse so they glide smoothly instead of snapping whole lines. Phased
+                    // touchpad input keeps the existing velocity-tracking + immediate-apply path.
+                    if (scrollPhase == vtbackend::ScrollPhase::NoPhase)
+                    {
+                        // Only consume the notch when a glide was actually armed. If injectWheelMomentum
+                        // could not arm (cell size still unknown during startup/rebind, alt screen, or a
+                        // degenerate zero net velocity) fall through to the legacy line-based path below
+                        // instead of silently swallowing the event.
+                        return terminal.injectWheelMomentum(effectivePixelDelta, now)
+                               == vtbackend::SmoothScrollResult::Applied;
+                    }
+
                     terminal.handleScrollPhase(scrollPhase, effectivePixelDelta, now);
-                    if (terminal.applySmoothScrollPixelDelta(effectivePixelDelta)
-                        == vtbackend::SmoothScrollResult::Applied)
-                        return;
+                    return terminal.applySmoothScrollPixelDelta(effectivePixelDelta)
+                           == vtbackend::SmoothScrollResult::Applied;
                 }
-            }
-            else if (scrollPhase == vtbackend::ScrollPhase::End
-                     || scrollPhase == vtbackend::ScrollPhase::Begin)
-            {
-                // Handle zero-delta phase events (e.g. ScrollEnd often has zero delta).
-                terminal.handleScrollPhase(scrollPhase, 0.0f, now);
+
+                if (scrollPhase == vtbackend::ScrollPhase::End
+                    || scrollPhase == vtbackend::ScrollPhase::Begin)
+                {
+                    // Handle zero-delta phase events (e.g. ScrollEnd often has zero delta).
+                    terminal.handleScrollPhase(scrollPhase, 0.0f, now);
+                    return true;
+                }
+
+                return false;
+            });
+
+            if (consumed)
                 return;
-            }
         }
 
         // Existing line-based scrolling (unchanged)
