@@ -31,9 +31,9 @@ set(vtbackend_HEADERS
     HintModeHandler.hpp
     core/Hyperlink.hpp
     core/Image.hpp
-    InputBinding.hpp
-    InputGenerator.hpp
-    InputHandler.hpp
+    input/InputBinding.hpp
+    input/InputGenerator.hpp
+    input/InputHandler.hpp
     JumpHistory.hpp
     vt/KittyClipboard.hpp
     graphics/KittyGraphics.hpp
@@ -41,7 +41,7 @@ set(vtbackend_HEADERS
     core/LineFlags.hpp
     grid/LineSoA.hpp
     Logging.hpp
-    MatchModes.hpp
+    input/MatchModes.hpp
     graphics/MessageParser.hpp
     MockTerm.hpp
     vt/ModifyKeys.hpp
@@ -97,7 +97,7 @@ set(vtbackend_SOURCES
     core/FileUrl.cpp
     HintModeHandler.cpp
     core/Image.cpp
-    InputGenerator.cpp
+    input/InputGenerator.cpp
     grid/Line.cpp
     grid/LineSoA.cpp
     graphics/MessageParser.cpp
@@ -182,7 +182,7 @@ if(LIBTERMINAL_TESTING)
         PromptRegion_test.cpp
         graphics/GoodImageProtocol_test.cpp
         graphics/XtSmGraphics_test.cpp
-        InputGenerator_test.cpp
+        input/InputGenerator_test.cpp
         Selector_test.cpp
         vt/Functions_test.cpp
         grid/Grid_test.cpp

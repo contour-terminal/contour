@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/input/InputGenerator.hpp>
 
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/vt/ControlCode.hpp>

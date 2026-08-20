@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Screen.hpp>
 
-#include <vtbackend/InputGenerator.hpp>
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/Terminal.hpp>
 #include <vtbackend/graphics/MessageParser.hpp>
@@ -11,6 +10,7 @@
 #include <vtbackend/graphics/regis/ReGISRasterizer.hpp>
 #include <vtbackend/graphics/regis/ReGISTextRasterizer.hpp>
 #include <vtbackend/grid/SoAClusterWriter.hpp>
+#include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
 #include <vtbackend/vt/ModifyKeys.hpp>

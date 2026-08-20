@@ -14,7 +14,7 @@
 /// Decoding is total: a value a peer should not have sent degrades to the default rather than
 /// being cast into an enum that has no such enumerator.
 
-#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/input/InputGenerator.hpp>
 
 #include <algorithm>
 #include <array>

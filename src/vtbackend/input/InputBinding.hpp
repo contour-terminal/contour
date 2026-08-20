@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/InputGenerator.hpp>
-#include <vtbackend/MatchModes.hpp>
+#include <vtbackend/input/InputGenerator.hpp>
+#include <vtbackend/input/MatchModes.hpp>
 
 #include <format>
 

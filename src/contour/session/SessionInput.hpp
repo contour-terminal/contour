@@ -3,7 +3,7 @@
 
 #include <contour/input/KeyboardLayout.hpp>
 
-#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/input/InputGenerator.hpp>
 
 #include <QtGui/QKeyEvent>
 

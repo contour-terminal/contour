@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/InputHandler.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/input/InputHandler.hpp>
 
 #include <crispy/Assert.hpp>
 #include <crispy/LogStore.hpp>

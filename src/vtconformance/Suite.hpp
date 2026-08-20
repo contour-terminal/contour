@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/InputGenerator.hpp>
+#include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/vt/RectangularAreaChecksum.hpp>
 #include <vtbackend/vt/VTType.hpp>
 
