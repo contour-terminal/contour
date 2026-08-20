@@ -4,13 +4,18 @@
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/grid/Line.hpp>
 
+#include <crispy/Utils.hpp>
+
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <cstddef>
+#include <expected>
 #include <mutex>
 #include <optional>
 #include <ranges>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -125,6 +130,7 @@ namespace
             });
         }
     }
+
 } // namespace
 
 NativeSession::NativeSession(net::EventLoop& loop,
@@ -137,6 +143,23 @@ NativeSession::NativeSession(net::EventLoop& loop,
     _host(host),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), maxWriteQueueBytes),
+    // A LOW-water mark — one piece's worth — not "the bound minus a piece".
+    //
+    // Both make the enqueue that follows succeed, but the high one does it by riding the backlog
+    // just under the bound for the whole run, leaving a single piece of headroom for every OTHER
+    // producer on this queue: a LayoutState, another session's page delta, a FetchImage answer.
+    // None of those can pace itself, and any of them arriving then is refused — the connection
+    // dropped by the very mechanism added to stop dropping it. Pacing to one piece instead keeps
+    // the backlog near one piece and leaves the bound's headroom for traffic that has no choice.
+    // It also stops the size ESTIMATE being load-bearing: overshooting the budget several times
+    // over still lands far below the bound.
+    //
+    // A bound too small to hold two pieces leaves 1 — "wait until fully drained" — handing that
+    // regime to the queue's never-refuse-a-lone-frame rule. That arm is NOT a test accommodation
+    // and does not collapse into the other: a proportional watermark (bound/2, say) would park at
+    // 32 KiB under a 64 KiB bound and then have the very next piece refused for the backlog it
+    // had just permitted.
+    _snapshotWatermark(maxWriteQueueBytes >= 2 * SnapshotChunkBytes ? SnapshotChunkBytes : std::size_t { 1 }),
     _id(std::move(id)),
     _expectedToken(std::move(expectedToken))
 {
@@ -164,9 +187,15 @@ void NativeSession::send(uint64_t serial, proto::DecodedPdu const& pdu, uint64_t
         // advanced past this frame, so dropping it would leave the mirror holey
         // with no resync trigger. Closing the connection unparks the PDU pump.
         //
-        // This is now reached only by a client that genuinely stopped reading: the queue
-        // never refuses a frame for its own size, and a snapshot discards the frames it
-        // supersedes rather than stacking on top of them.
+        // Reaching this now really does mean a client that stopped reading. It did not always:
+        // the queue never refuses a frame for its own size, but that rule only ever protected
+        // the FIRST frame of a burst, because a producer that enqueues without suspending never
+        // lets the drain — which is spawned onto the loop, not resumed inline — empty the queue
+        // between frames. An attach that walked every pane pushing whole grids therefore had to
+        // fit its entire payload under the bound at once, and two scrollback-heavy panes did not.
+        // Snapshots now go through @ref streamSnapshots, which waits for room before every piece,
+        // so the only producer left on this path is the incremental one, whose frames are small
+        // by construction.
         errorLog()("{}: {}; disconnecting", _id, _writer.describeRefusal());
         _closed = true;
         _writer.close();
@@ -179,7 +208,12 @@ void NativeSession::sessionScreenUpdated(SessionId session)
     if (!_handshaken || _closed)
         return;
     _pendingSessions.insert(session.value);
-    if (_flushScheduled)
+    scheduleFlush();
+}
+
+void NativeSession::scheduleFlush()
+{
+    if (_flushScheduled || _closed)
         return;
     _flushScheduled = true;
     _loop.spawn(flushSoon());
@@ -189,16 +223,22 @@ void NativeSession::sessionClosed(SessionId session)
 {
     _followed.erase(session.value);
     _pendingSessions.erase(session.value);
+    // The snapshot bookkeeping forgets it too. The streamer would survive without this (buildPush
+    // answers NoSuchSession and it moves on), but every per-session set this connection keeps must
+    // be dropped in ONE place, or the next one added is dropped in none.
+    std::erase(_snapshotQueue, session.value);
 }
 
 void NativeSession::sessionResized(SessionId session)
 {
     // A resize destroys the grid's row identity (a rebuild bumps the generation), so the mirror
-    // cannot be brought forward by a delta — it needs the whole grid. Immediately rather than
-    // through the debounce: nothing is coalescing with, since a resize raises no screen update.
+    // cannot be brought forward by a delta — it needs the whole grid. Queued rather than pushed
+    // inline, and not through the 20ms debounce either: one client's resize re-projects every
+    // pane of every window, so this arrives once PER PANE within a single callback. Pushing each
+    // one inline is the same burst the attach walk used to be, with the same outcome.
     if (!_handshaken || _closed || !_followed.contains(session.value))
         return;
-    pushDelta(session, /*forceSnapshot=*/true);
+    requestSnapshot(session);
 }
 
 void NativeSession::sessionBell(SessionId session)
@@ -245,9 +285,21 @@ coro::Task<void> NativeSession::flushSoon()
     _flushScheduled = false;
     if (_closed)
         co_return;
-    auto pending = std::exchange(_pendingSessions, {});
-    for (auto const session: pending)
-        pushDelta(SessionId { session }, /*forceSnapshot=*/false);
+    // A session whose whole grid is about to be (or is being) re-described gets no increment: the
+    // snapshot says everything this would, and one landing BETWEEN a snapshot's pieces would have
+    // the mirror apply and repaint a grid it has only half received. Put it back rather than drop
+    // it — rows changed after the snapshot was captured are still news. The reinsert targets the
+    // member, which `exchange` just emptied, not the range being walked.
+    for (auto const session: std::exchange(_pendingSessions, {}))
+        if (snapshotPending(SessionId { session }))
+            _pendingSessions.insert(session);
+        else
+            pushDelta(SessionId { session });
+    // Something was held back and nothing else will re-arm the debounce: a session whose output
+    // has stopped raises no further screen update, so without this its last increment would wait
+    // for one that never comes.
+    if (!_pendingSessions.empty())
+        scheduleFlush();
 }
 
 void NativeSession::collectContextState(vtbackend::Terminal& terminal,
@@ -306,8 +358,9 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
                                      std::optional<proto::SessionState>& state,
                                      SessionId session,
                                      uint8_t screenTypeValue,
-                                     bool snapshot)
+                                     SnapshotMode mode)
 {
+    auto const snapshot = mode == SnapshotMode::Forced;
     // Live window title (OSC 0/2): the snapshot carries it in SessionState
     // below; an incremental delta carries it only when it changed since last
     // sent, so a title-only batch still re-titles the mirror. Compare the
@@ -501,11 +554,12 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
     }
 }
 
-void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
+std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSession::buildPush(
+    SessionId session, SnapshotMode mode)
 {
     auto* terminal = _host.terminal(session);
     if (terminal == nullptr)
-        return;
+        return std::unexpected(BuildFailure::NoSuchSession);
     auto& follow = _followed[session.value];
 
     auto delta = proto::Delta {};
@@ -539,8 +593,16 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
         // screenTypeFromPage then maps the displayed page to the wire's primary(0)/
         // alt-like(1) discriminator the mirror uses to toggle ?1049 and scrollback.
         auto const screenType = vtbackend::screenTypeFromPage(displayedPage);
-        auto snapshot = forceSnapshot || follow.lastDisplayedPage != displayedPage;
+        auto const pageFlipped = follow.lastDisplayedPage != displayedPage;
         follow.lastDisplayedPage = displayedPage;
+        // A page flip needs the whole grid, and the whole grid belongs on the paced path. Bail
+        // before collecting anything: only lastDisplayedPage has moved, and the Forced rebuild
+        // that follows re-derives it, so nothing this connection believes about the peer is wrong.
+        if (mode == SnapshotMode::Delta && pageFlipped)
+            return std::unexpected(BuildFailure::ResyncRequired);
+        // Past the two bails, this is exactly the mode asked for: Delta mode reached here only by
+        // not needing a snapshot, and Forced never needs anything else.
+        auto const snapshot = mode == SnapshotMode::Forced;
 
         auto const collect = [&](vtbackend::LineOffset offset, vtbackend::Line const& line) {
             delta.lines.push_back(toWireLine(grid, offset, line));
@@ -565,13 +627,15 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             && (cursorBelowFloor
                 || grid.forEachLineChangedSince(follow.cursor, collect)
                        == vtbackend::GridDeltaResult::ResyncRequired))
-            snapshot = true;
+            // Same as the page flip above, and bailing here is equally clean: `collect` has only
+            // filled locals, and the follow state's cursor, hyperlinks and last-sent values are
+            // all still untouched. A caller told this asks for a snapshot instead.
+            return std::unexpected(BuildFailure::ResyncRequired);
         if (snapshot)
         {
-            delta.lines.clear();
-            delta.imageCells.clear();
-            hyperlinkIds.clear();
-            referencedLinks.clear();
+            // Nothing to discard first: `collect` runs only on the incremental scan above, which
+            // Forced mode short-circuits past and which Delta mode returns from rather than
+            // upgrading. Clearing here would imply otherwise.
             grid.forEachValidLine(collect);
             // The snapshot delivered the whole grid, so re-anchor the cursor to the
             // stream head directly -- forEachValidLine leaves it untouched, and a
@@ -647,11 +711,9 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             delta.hyperlinks.push_back(proto::HyperlinkEntry { .id = id, .uri = info->uri });
         }
 
-        collectLiveState(*terminal, follow, delta, state, session, std::to_underlying(screenType), snapshot);
+        collectLiveState(*terminal, follow, delta, state, session, std::to_underlying(screenType), mode);
     }
 
-    if (state)
-        send(0, proto::DecodedPdu { *state }, session.value);
     // A pure mode flip (an app enabling mouse tracking, say) changes no cell,
     // yet clients must hear about it to encode input correctly. A pure cursor move
     // (a full-screen app repositioning with no visible cell change) likewise
@@ -670,14 +732,160 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
     // history the terminal had thrown away, with `floorOutranScroll` — its detector for exactly this
     // case — waiting on a delta that never arrived.
     auto const floorMoved = delta.stableFloor != follow.lastStableFloor;
-    if (modesChanged || cursorMoved || floorMoved || delta.hasChanges())
+    if (!(modesChanged || cursorMoved || floorMoved || delta.hasChanges()))
+        return std::unexpected(BuildFailure::NothingToSay);
+
+    follow.lastModes = delta.setModes;
+    follow.lastAnsiModes = delta.setAnsiModes;
+    follow.lastCursorLine = delta.cursorLine;
+    follow.lastCursorColumn = delta.cursorColumn;
+    follow.lastStableFloor = delta.stableFloor;
+    return BuiltPush { .delta = std::move(delta), .state = std::move(state) };
+}
+
+void NativeSession::pushDelta(SessionId session)
+{
+    auto built = buildPush(session, SnapshotMode::Delta);
+    if (!built)
     {
-        follow.lastModes = delta.setModes;
-        follow.lastAnsiModes = delta.setAnsiModes;
-        follow.lastCursorLine = delta.cursorLine;
-        follow.lastCursorColumn = delta.cursorColumn;
-        follow.lastStableFloor = delta.stableFloor;
-        send(0, proto::DecodedPdu { delta }, session.value);
+        // The increment could not describe the batch. The whole grid can, and the whole grid is
+        // exactly what must not go out inline.
+        if (built.error() == BuildFailure::ResyncRequired)
+            requestSnapshot(session);
+        return;
+    }
+    // No SessionState arm: it accompanies a snapshot only, and an increment that wanted to become
+    // one reported ResyncRequired rather than building it.
+    send(0, proto::DecodedPdu { std::move(built->delta) }, session.value);
+}
+
+bool NativeSession::snapshotPending(SessionId session) const noexcept
+{
+    return _streamingSession == session.value || std::ranges::contains(_snapshotQueue, session.value);
+}
+
+void NativeSession::requestSnapshot(SessionId session)
+{
+    if (!_handshaken || _closed)
+        return;
+    // Coalesced against the QUEUE only, not against the session being streamed: a request that
+    // arrives mid-run describes state the run in flight was captured before, so it earns a fresh
+    // snapshot once that one finishes.
+    if (std::ranges::contains(_snapshotQueue, session.value))
+        return;
+    // Claimed BEFORE the spawn, not by the coroutine once it runs: `spawn` only queues the handle,
+    // so between here and its first resumption run()'s teardown poll could observe no streamer and
+    // let `this` be destroyed under a coroutine that still holds it.
+    // The queue test is belt-and-braces: past the _closed check above, a non-empty queue always
+    // has a live streamer, so !_streamingSession alone would do.
+    auto const idle = _snapshotQueue.empty() && !_streamingSession;
+    _snapshotQueue.push_back(session.value);
+    if (!idle)
+        return;
+    _streamingSession = session.value;
+    _loop.spawn(streamSnapshots());
+}
+
+coro::Task<bool> NativeSession::awaitSendRoom()
+{
+    co_await _writer.waitUntilBacklogBelow(_snapshotWatermark, [this] { return _closed; });
+    co_return !_closed;
+}
+
+coro::Task<void> NativeSession::streamSnapshots()
+{
+    // A scope guard, not an assignment at the end: run()'s teardown polls this for the streamer
+    // having let go of `this`, and a cancellation unwinding past a trailing assignment would
+    // leave it set — deadlocking the very poll that keeps `this` alive.
+    auto const finished = crispy::Finally { [this] { _streamingSession.reset(); } };
+
+    while (!_snapshotQueue.empty() && !_closed)
+    {
+        auto const session = SessionId { _snapshotQueue.front() };
+        _snapshotQueue.pop_front();
+        _streamingSession = session.value;
+
+        // Wait BEFORE building, not after: a snapshot captured and then parked behind a backlog
+        // is a snapshot of the past, and this is where a peer that fell behind gets to catch up.
+        if (!co_await awaitSendRoom())
+            co_return;
+
+        auto built = buildPush(session, SnapshotMode::Forced);
+        if (!built)
+            continue; // the host stopped hosting it while this waited its turn
+        // Always engaged on this path — a snapshot carries its session's whole state — but read as
+        // the optional it is, so the invariant lives in ONE place rather than in every consumer.
+        if (built->state)
+            send(0, proto::DecodedPdu { *std::move(built->state) }, session.value);
+        co_await sendSnapshotPieces(std::move(built->delta), session);
+    }
+}
+
+coro::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, SessionId session)
+{
+    // The rows are the only part of a snapshot that grows without bound; everything else is one
+    // session's state. So the rows are what gets split, and the rest rides along.
+    //
+    // Non-const: the pieces move their rows out of it. Safe because each row is visited exactly
+    // once, and because the partition below is computed before anything is moved.
+    auto lines = std::exchange(delta.lines, {});
+
+    // The two side tables that are neither per-row nor scalar, held aside for the ONE piece that
+    // carries each. Copying them onto every piece and clearing them again is what it would cost
+    // to leave them in `delta`: `hyperlinks` is every URI referenced anywhere in the grid, so a
+    // 25-piece run would allocate all of them 25 times and throw 24 copies away.
+    //
+    // Hyperlinks go with the first piece: the mirror merges them into a map that outlives the
+    // run, and a row cannot resolve a link id it has not seen. Status lines go with the last,
+    // alongside the rest of the state the run must land on.
+    auto hyperlinks = std::exchange(delta.hyperlinks, {});
+    auto statusLines = std::exchange(delta.statusLines, {});
+    auto const statusLinesChanged = std::exchange(delta.statusLinesChanged, uint8_t { 0 });
+
+    // Index the image cells by the row they sit on. The mirror clears a row's image cells when it
+    // takes the row and refills them from the same PDU's side table, so an entry that travelled in
+    // a different piece than its row would be dropped on arrival.
+    // ImageCellEntry is trivially copyable, so these are copies however they are spelled; only the
+    // grouping matters.
+    auto imagesByRow = std::unordered_map<int64_t, std::vector<proto::ImageCellEntry>> {};
+    for (auto const& entry: std::exchange(delta.imageCells, {}))
+        imagesByRow[entry.stableId].push_back(entry);
+
+    for (auto const& part: proto::partitionSnapshotRows(lines, SnapshotChunkBytes))
+    {
+        // The scalar state rides on every piece. Repeating it costs a few dozen bytes and buys
+        // the receiver statelessness: each piece stands on its own, and applying the same title
+        // or cursor position twice is applying it once.
+        auto piece = delta;
+        piece.snapshotPart = std::to_underlying(part.part);
+
+        // Moved, not copied: a WireLine owns a heap-allocated cell vector, so copying a 4000-row
+        // grid is 4000 allocations and megabytes of element-wise copy construction.
+        auto const rows = std::span { lines }.subspan(part.begin, part.count);
+        piece.lines.assign(std::make_move_iterator(rows.begin()), std::make_move_iterator(rows.end()));
+        for (auto const& line: piece.lines)
+            if (auto const images = imagesByRow.find(line.stableId); images != imagesByRow.end())
+                piece.imageCells.insert(piece.imageCells.end(), images->second.begin(), images->second.end());
+
+        // Handed over with `exchange` rather than `move`: the piece that takes each is decided by
+        // the SAME predicates the receiver uses, and leaving an emptied source behind means a
+        // later piece can only ever get an empty table — the correctness does not rest on the
+        // condition firing exactly once.
+        if (piece.startsSnapshot())
+            piece.hyperlinks = std::exchange(hyperlinks, {});
+        if (piece.completesSnapshot())
+        {
+            piece.statusLines = std::exchange(statusLines, {});
+            piece.statusLinesChanged = statusLinesChanged;
+        }
+
+        // Before EVERY piece, the first included: the SessionState that precedes a snapshot is
+        // already in the backlog by now, so "the streamer waited before building" does not leave
+        // the first piece the empty backlog it needs. Waiting here is what makes the enqueue
+        // below unrefusable, which is the whole point of pacing.
+        if (!co_await awaitSendRoom())
+            co_return;
+        send(0, proto::DecodedPdu { std::move(piece) }, session.value);
     }
 }
 
@@ -883,11 +1091,13 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     // trees before the per-session content streams into them.
     pushLayout();
 
-    // The attach snapshot: every hosted session of every window, full state.
+    // The attach snapshot: every hosted session of every window, full state. QUEUED, not pushed:
+    // this runs inside the PDU pump's handler, which cannot suspend, so pushing here would put
+    // every pane's whole grid into the send queue before the drain coroutine had run once.
     _host.model().forEachTab([this](vtworkspace::Window&, vtworkspace::Tab& tab) {
         tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
             if (pane.isLeaf())
-                pushDelta(pane.session(), /*forceSnapshot=*/true);
+                requestSnapshot(pane.session());
         });
     });
     return true;
@@ -933,7 +1143,12 @@ coro::Task<void> NativeSession::run()
     // entire poll, so this poll MUST remain the last thing run() does before
     // returning. Any refactoring that moves logic after this point opens a
     // use-after-free window on _flushScheduled.
-    co_await net::pollUntil(&_loop, [this] { return !_flushScheduled; });
+    //
+    // The snapshot streamer joins the same barrier for the same reason, and needs it more: it
+    // parks on the write queue's watermark, which is a far longer park than the flush debounce.
+    // `_closed` was set just above, which is what unparks it — waitUntilBacklogBelow returns on
+    // a closed queue, and the streamer's loops all test _closed — so this poll is bounded.
+    co_await net::pollUntil(&_loop, [this] { return !_flushScheduled && !_streamingSession; });
     co_await _writer.flushThenClose();
     _connection->close();
 }

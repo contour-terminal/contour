@@ -124,6 +124,7 @@
           <li>A contour attach pane gets the same context tracking, tinting and breadcrumb a local one does</li>
           <li>Fixes stale fold ranges after a command finished: OSC 133's ;B and ;D wrote their line flag without invalidating the ranges derived from it, so anything reading them between the end of a command and the next prompt saw the state from before</li>
           <li>Draws U+25BC and U+25B6 with the built-in box-drawing renderer, so they no longer depend on the font</li>
+          <li>Fixes a daemon with more than one scrollback-heavy pane becoming permanently unattachable — `contour client` was refused before any screen content arrived, and every reconnect failed the same way. Attach snapshots are now paced against the connection's send queue and split across frames, so attaching succeeds whatever the scrollback depth; a window resize could drop an already-attached client for the same reason and no longer does</li>
         </ul>
       </description>
     </release>

@@ -57,6 +57,15 @@ namespace
 
 /// The full server<->client pair over one in-memory socket: the REAL
 /// NativeSession serves what the REAL NativeClient mirrors.
+/// @return An empty snapshot PDU marked as @p part — the scaffolding every run test needs.
+proto::Delta snapshotPiece(proto::SnapshotPart part)
+{
+    auto delta = proto::Delta {};
+    delta.snapshot = 1;
+    delta.snapshotPart = std::to_underlying(part);
+    return delta;
+}
+
 struct EndToEndHarness
 {
     net::PollEventSource source;
@@ -174,6 +183,77 @@ TEST_CASE("RemoteScreen renders blank rows and trims trailing space", "[vthost][
     CHECK(screen.viewportText() == "hi\n\n"); // row 11 is unknown -> blank
     CHECK(screen.rowAt(0) != nullptr);
     CHECK(screen.rowAt(1) == nullptr);
+}
+
+TEST_CASE("RemoteScreen accumulates a chunked snapshot and clears only on its first piece",
+          "[vthost][attach]")
+{
+    // A snapshot too large for one frame arrives as a run. Only its FIRST piece may clear what
+    // the mirror holds -- a Middle or Last piece that cleared would throw away the rows its own
+    // run just delivered, leaving the mirror showing the tail of its own snapshot.
+    auto const rowAt = [](int64_t stableId, char32_t ch) {
+        auto line = proto::WireLine {};
+        line.stableId = stableId;
+        line.columns = 1;
+        auto cell = proto::WireCell {};
+        cell.codepoint = ch;
+        line.cells.push_back(cell);
+        return line;
+    };
+    auto const piece = [&](proto::SnapshotPart part, int64_t stableId, char32_t ch) {
+        auto delta = snapshotPiece(part);
+        delta.stableViewportBase = 0;
+        delta.lines.push_back(rowAt(stableId, ch));
+        return delta;
+    };
+
+    auto screen = RemoteScreen {};
+    screen.columns = 1;
+    screen.lines = 3;
+
+    // Something to be superseded, so "the first piece clears" is actually observable.
+    screen.apply(piece(proto::SnapshotPart::Whole, 0, U'o'));
+    REQUIRE(screen.rows.size() == 1);
+
+    screen.apply(piece(proto::SnapshotPart::First, 0, U'a'));
+    screen.apply(piece(proto::SnapshotPart::Middle, 1, U'b'));
+    screen.apply(piece(proto::SnapshotPart::Last, 2, U'c'));
+
+    // All three rows survived the run, and the row the superseded snapshot left is gone.
+    REQUIRE(screen.rows.size() == 3);
+    CHECK(screen.viewportText() == "a\nb\nc\n");
+
+    // A run whose tail was dropped in favour of a newer snapshot is what makes the marker
+    // necessary rather than merely convenient: the new run's First must still clear, even though
+    // the piece before it said more was coming.
+    screen.apply(piece(proto::SnapshotPart::First, 0, U'z'));
+    REQUIRE(screen.rows.size() == 1);
+    CHECK(screen.viewportText() == "z\n\n\n");
+}
+
+TEST_CASE("a screen knows a chunked snapshot is still arriving", "[vthost][attach]")
+{
+    // What gates the reply PDUs that carry no marker of their own. An ImageData answer lands in
+    // the same stream the run is still using — the client asked for it on seeing a new image id in
+    // an earlier piece — so without this the frontend would be handed, and would paint, a grid it
+    // has only half received.
+    auto screen = RemoteScreen {};
+    CHECK_FALSE(screen.snapshotInProgress); // nothing received yet
+
+    screen.apply(snapshotPiece(proto::SnapshotPart::First));
+    CHECK(screen.snapshotInProgress);
+    screen.apply(snapshotPiece(proto::SnapshotPart::Middle));
+    CHECK(screen.snapshotInProgress);
+    screen.apply(snapshotPiece(proto::SnapshotPart::Last));
+    CHECK_FALSE(screen.snapshotInProgress);
+
+    // An unsplit snapshot is never "in progress", and neither is an increment.
+    screen.apply(snapshotPiece(proto::SnapshotPart::Whole));
+    CHECK_FALSE(screen.snapshotInProgress);
+    screen.apply(snapshotPiece(proto::SnapshotPart::First));
+    REQUIRE(screen.snapshotInProgress);
+    screen.apply(proto::Delta {}); // a plain delta ends a run the server abandoned
+    CHECK_FALSE(screen.snapshotInProgress);
 }
 
 TEST_CASE("RemoteScreen drops history the server discarded via the floor", "[vthost][attach]")

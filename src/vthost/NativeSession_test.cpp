@@ -11,9 +11,13 @@
 #include <chrono>
 #include <cstddef>
 #include <format>
+#include <functional>
+#include <map>
 #include <memory>
 #include <ranges>
+#include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -45,13 +49,21 @@ Task<void> feedBytes(net::ISocket* client, std::vector<std::byte> const* bytes)
     std::ignore = co_await client->write(std::span<std::byte const> { bytes->data(), bytes->size() });
 }
 
-/// Decodes server PDUs until @p expected arrived (or the stream ended), then
-/// closes the client end — the session's read loop sees EOF and finishes.
-Task<void> collectPdus(net::ISocket* client, std::size_t expected, std::vector<proto::DecodedFrame>* out)
+/// Decodes server PDUs until @p done says to stop (or the stream ends), then closes the client
+/// end — the session's read loop sees EOF and finishes.
+///
+/// The bound is a predicate rather than a count because the two things tests wait for are shaped
+/// differently: a fixed number of PDUs, or a marker one of them carries. How many pieces a
+/// snapshot run takes depends on how its rows happen to partition, which is exactly what a test
+/// of the partitioning must not hardcode.
+/// @param done Consulted after each decoded frame; the collector stops when it returns true.
+Task<void> collectUntil(net::ISocket* client,
+                        std::function<bool(std::vector<proto::DecodedFrame> const&)> done,
+                        std::vector<proto::DecodedFrame>* out)
 {
     auto buffer = std::vector<std::byte> {};
     auto scratch = std::array<std::byte, 4096> {};
-    while (out->size() < expected)
+    while (!done(*out))
     {
         auto decoded = proto::decodePdu(buffer);
         if (decoded)
@@ -68,6 +80,44 @@ Task<void> collectPdus(net::ISocket* client, std::size_t expected, std::vector<p
         buffer.insert(buffer.end(), scratch.begin(), scratch.begin() + static_cast<long>(*n));
     }
     client->close();
+}
+
+/// Collects exactly @p expected PDUs.
+Task<void> collectPdus(net::ISocket* client, std::size_t expected, std::vector<proto::DecodedFrame>* out)
+{
+    co_await collectUntil(client, [expected](auto const& got) { return got.size() >= expected; }, out);
+}
+
+/// @return Whether @p frame terminates a snapshot run.
+bool endsSnapshotRun(proto::DecodedFrame const& frame)
+{
+    auto const* delta = std::get_if<proto::Delta>(&frame.pdu);
+    return delta != nullptr && delta->snapshot != 0 && delta->completesSnapshot();
+}
+
+/// Collects a whole snapshot run, plus @p extra PDUs after it.
+Task<void> collectSnapshotRun(net::ISocket* client,
+                              std::vector<proto::DecodedFrame>* out,
+                              std::size_t extra = 0)
+{
+    co_await collectUntil(
+        client,
+        [extra](std::vector<proto::DecodedFrame> const& got) {
+            auto const end = std::ranges::find_if(got, endsSnapshotRun);
+            return end != got.end() && std::cmp_greater(std::distance(end, got.end()), extra);
+        },
+        out);
+}
+
+/// driveExchange, but bounded by a snapshot run's completion instead of a PDU count.
+Task<void> driveSnapshotRun(NativeSession* session,
+                            net::ISocket* client,
+                            std::vector<std::byte> const* request,
+                            std::vector<proto::DecodedFrame>* out,
+                            std::size_t extra = 0)
+{
+    co_await coro::whenAll(
+        session->run(), feedBytes(client, request), collectSnapshotRun(client, out, extra));
 }
 
 Task<void> driveExchange(NativeSession* session,
@@ -172,6 +222,17 @@ Task<void> appendThenUpdate(NativeHarness* h, vtworkspace::SessionId id)
     co_await h->loop.delay(5ms);
     h->host.terminal(id)->writeToScreen("more");
     h->session->sessionScreenUpdated(id);
+}
+
+/// Writes @p rows lines of wide, tagged text into @p session, so its snapshot is a real multiple
+/// of a send-queue bound rather than a handful of trimmed lines.
+/// @param tag Prefixes each row, so a test can tell one pane's rows from another's.
+void fillRows(NativeHarness& h, vtworkspace::SessionId session, int rows, std::string_view tag)
+{
+    auto lines = std::string {};
+    for (auto const row: std::views::iota(0, rows))
+        lines += std::format("{}-{}{}\r\n", tag, row, std::string(60, 'x'));
+    h.host.terminal(session)->writeToScreen(lines);
 }
 
 /// Once the attach snapshot has landed: repositions ONLY the cursor (writing no
@@ -476,14 +537,21 @@ TEST_CASE("FetchImage for an unknown id answers ImageGone", "[vthost][native]")
     auto h = NativeHarness {};
     h.host.createTab();
 
-    // ServerHello, LayoutState, SessionState, Delta (snapshot), then ImageGone.
+    // ServerHello, LayoutState, then ImageGone, and only then the attach snapshot
+    // (SessionState + Delta). The snapshot is QUEUED by the handshake and emitted by the streamer
+    // on a later loop turn, so a request the client pipelined behind its hello is answered first.
+    // Nothing depends on the old order: replies are correlated by serial, not by position — and
+    // the client asserting its client area right after the hello now RESIZES before the snapshot
+    // is captured, so the one grid it receives is already the right shape.
     auto const received =
         h.exchange({ proto::ClientHello {}, proto::DecodedPdu { proto::FetchImage { .imageId = 4242 } } }, 5);
     REQUIRE(received.size() == 5);
-    auto const* gone = std::get_if<proto::ImageGone>(&received[4].pdu);
+    auto const* gone = std::get_if<proto::ImageGone>(&received[2].pdu);
     REQUIRE(gone != nullptr);
     CHECK(gone->imageId == 4242);
-    CHECK(received[4].serial == 2); // correlated to the request's serial
+    CHECK(received[2].serial == 2); // correlated to the request's serial
+    CHECK(std::get_if<proto::SessionState>(&received[3].pdu) != nullptr);
+    CHECK(std::get_if<proto::Delta>(&received[4].pdu) != nullptr);
 }
 
 TEST_CASE("a version-mismatched hello is answered and the session ends", "[vthost][native]")
@@ -797,6 +865,154 @@ TEST_CASE("a client that overflows the write queue is disconnected", "[vthost][n
 
     CHECK(!watchdogFired); // the SESSION closed the connection, not the watchdog
     CHECK(received.empty());
+}
+
+TEST_CASE("attaching to several scrollback-heavy panes is not refused", "[vthost][native]")
+{
+    // THE regression this whole pacing mechanism exists for. A daemon holding a couple of panes
+    // with real scrollback became permanently unattachable: completeHandshake pushed one full-grid
+    // snapshot per leaf pane synchronously, inside the PDU pump's handler, so the drain coroutine
+    // -- which EventLoop::spawn only queues -- could not run until the burst finished. The whole
+    // attach payload therefore had to fit under the send-queue bound at once, the second pane's
+    // snapshot did not fit, and the connection was dropped before a single byte reached the client.
+    // Nothing on the daemon changed between attempts, so every reconnect reproduced it exactly.
+    auto capture = logstore::ScopedCapture {};
+
+    // A bound far smaller than the snapshots it must carry, which is the shape of the report:
+    // 4 MiB against two panes of ~1.8 MB each. The point is that the SUM exceeding the bound must
+    // no longer matter, because no two pieces are ever in the queue at the same time.
+    auto h = NativeHarness { { .writeQueueBytes = std::size_t { 64 } * 1024,
+                               .history = vtbackend::LineCount(30) } };
+
+    auto sessions = std::vector<vtworkspace::SessionId> {};
+    for (auto const tab: std::views::iota(0, 3))
+    {
+        h.host.createTab();
+        auto const id = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+        sessions.push_back(id);
+        fillRows(h, id, 50, std::format("tab{}-row", tab));
+    }
+
+    // ServerHello, LayoutState, then SessionState + one snapshot Delta per pane.
+    auto const received = h.exchange({ proto::ClientHello {} }, 8);
+    REQUIRE(received.size() == 8);
+    CHECK_FALSE(capture.contains("send queue overflow"));
+
+    // Every pane arrived, and arrived whole: a snapshot that is not superseded and not truncated.
+    auto snapshots = std::map<uint64_t, proto::Delta> {};
+    for (auto const& frame: received)
+        if (auto const* delta = std::get_if<proto::Delta>(&frame.pdu))
+        {
+            CHECK(delta->snapshot == 1);
+            snapshots.emplace(delta->session, *delta);
+        }
+    REQUIRE(snapshots.size() == sessions.size());
+    for (auto const tab: std::views::iota(0, 3))
+    {
+        auto const found = snapshots.find(sessions[static_cast<std::size_t>(tab)].value);
+        REQUIRE(found != snapshots.end());
+        auto const carries = [&](std::string_view row) {
+            return std::ranges::any_of(found->second.lines,
+                                       [row](auto const& line) { return textOf(line).starts_with(row); });
+        };
+        // The oldest row is scrollback that predates the attach; the newest is on the page.
+        CHECK(carries(std::format("tab{}-row-0x", tab)));
+        CHECK(carries(std::format("tab{}-row-49x", tab)));
+    }
+}
+
+TEST_CASE("a snapshot larger than one frame travels as a marked run", "[vthost][native]")
+{
+    // The other cliff: one pane's snapshot is the whole grid INCLUDING all scrollback, built into
+    // a single PDU. Past proto::MaxFrameSize the peer's own decoder rejects it, so no amount of
+    // pacing would deliver it. It is split instead, and each piece names its place so the mirror
+    // knows which one may clear what it holds and which one completes the run.
+    auto h = NativeHarness { { .history = vtbackend::LineCount(4000) } };
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+
+    fillRows(h, sessionId, 4000, "row");
+
+    // ServerHello, LayoutState, SessionState, then however many pieces the rows partition into.
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(driveSnapshotRun(h.session.get(), h.pair.second.get(), &bytes, &received));
+
+    auto pieces = std::vector<proto::Delta> {};
+    for (auto const& frame: received)
+        if (auto const* delta = std::get_if<proto::Delta>(&frame.pdu))
+            pieces.push_back(*delta);
+    REQUIRE(pieces.size() >= 2);
+
+    // Every piece says it is a snapshot -- a piece must never be mistaken for an increment -- and
+    // the run is marked First, then Middle, then Last.
+    for (auto const& piece: pieces)
+        CHECK(piece.snapshot == 1);
+    CHECK(pieces.front().part() == proto::SnapshotPart::First);
+    CHECK(pieces.back().part() == proto::SnapshotPart::Last);
+    for (auto const& middle: pieces | std::views::drop(1) | std::views::take(pieces.size() - 2))
+        CHECK(middle.part() == proto::SnapshotPart::Middle);
+
+    // No piece is anywhere near the frame cap, and the rows are partitioned across them rather
+    // than repeated: the run delivers each row exactly once.
+    auto seen = std::set<int64_t> {};
+    auto total = std::size_t { 0 };
+    for (auto const& piece: pieces)
+    {
+        for (auto const& line: piece.lines)
+            seen.insert(line.stableId);
+        total += piece.lines.size();
+    }
+    CHECK(seen.size() == total);
+    // Every addressable row travelled exactly once: the 4000 rows written, plus the empty row the
+    // cursor sits on after the last CRLF. None is dropped at a piece boundary and none is repeated.
+    CHECK(total == 4001);
+}
+
+TEST_CASE("an increment is held back until the snapshot it would interleave with finishes",
+          "[vthost][native]")
+{
+    // A snapshot travels as a run of PDUs, and the mirror only repaints when the run completes.
+    // An incremental delta slipped BETWEEN two pieces would be published immediately, having the
+    // client repaint a grid it has only half received -- every row the run has not delivered yet
+    // rendering as absent. So a session with a snapshot queued or in flight gets no increment; it
+    // stays pending and goes out once the run is done.
+    auto h = NativeHarness { { .writeQueueBytes = std::size_t { 64 } * 1024,
+                               .history = vtbackend::LineCount(4000) } };
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+
+    fillRows(h, sessionId, 4000, "row");
+
+    // Output arriving while the attach run is still streaming: the debounce fires 20ms later,
+    // well inside a run that pauses for the write queue to drain between each of its ~25 pieces.
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(
+        net::testing::allOf(driveSnapshotRun(h.session.get(), h.pair.second.get(), &bytes, &received, 1),
+                            appendThenUpdate(&h, sessionId)));
+
+    // The run is intact: every Delta up to and including the terminating piece is a snapshot
+    // piece, with no increment wedged among them.
+    auto sawRunEnd = false;
+    auto increments = 0;
+    for (auto const& frame: received)
+    {
+        auto const* delta = std::get_if<proto::Delta>(&frame.pdu);
+        if (delta == nullptr)
+            continue;
+        if (delta->snapshot == 0)
+        {
+            CHECK(sawRunEnd); // the whole point: never before the run ended
+            ++increments;
+            continue;
+        }
+        CHECK_FALSE(sawRunEnd);
+        sawRunEnd = delta->completesSnapshot();
+    }
+    CHECK(sawRunEnd);
+    // And the increment was held, not dropped: the rows written mid-run still arrive.
+    CHECK(increments == 1);
 }
 
 // ---------------------------------------------------------------------------

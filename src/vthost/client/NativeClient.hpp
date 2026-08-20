@@ -87,6 +87,18 @@ struct RemoteScreen
     /// The ancestry, outermost first, in the sender's id space. Empty when there is none -- and that
     /// emptiness is itself asserted, so a stack that emptied is not mistaken for one never sent.
     std::vector<uint16_t> contextChain;
+
+    /// Whether a chunked snapshot is still arriving: set by a piece that opens or continues a
+    /// run, cleared by the one that completes it.
+    ///
+    /// A frontend must never be handed a screen mid-run — it holds part of a grid, and painting
+    /// it would render the rows not yet delivered as absent. This is what every publish gate in
+    /// NativeClient asks, including the Delta one that could equally have asked the PDU: an
+    /// ImageData/ImageGone reply carries no marker and CAN land between two pieces:
+    /// the client sends a FetchImage on seeing a new image id in an early piece, and the server
+    /// answers it into the same stream the rest of the run is still using. So the screen has to
+    /// remember what its last piece said.
+    bool snapshotInProgress = false;
     /// The mirrored DEC private modes currently SET remotely (by number).
     std::vector<uint32_t> setModes;
     /// The mirrored ANSI modes currently SET remotely (by number) — a separate
