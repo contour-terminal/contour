@@ -823,6 +823,26 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// derived from them have to be invalidated when one lands.
     void setLogicalLineFlags(LineOffset line, LineFlags flags, bool enable) noexcept;
 
+    /// Which of the two column-carrying semantic marks a @ref markLogicalLineAtCursorWithColumn call
+    /// is recording.
+    ///
+    /// OSC 133's ;B and ;D each remember a COLUMN as well as a flag -- where the prompt handed the
+    /// line over, and where the command's output stopped -- and both are meaningless without it. An
+    /// enum rather than two functions because the two differ only in which pair they write, and
+    /// because a third such mark would be an enumerator rather than a third near-copy.
+    enum class ColumnMark : uint8_t
+    {
+        PromptEnd = 0, ///< OSC 133;B: the border between what the shell wrote and what the user types.
+        CommandEnd,    ///< OSC 133;D: where the command's output actually stopped.
+    };
+
+    /// Stamps @p mark onto the head of the logical line the cursor is on, together with the cursor's
+    /// LOGICAL column.
+    ///
+    /// Goes through the same funnel setLogicalLineFlags() does, and for the same reason: both marks
+    /// are in HeadOnlyLineFlags, so both have to invalidate the fold ranges derived from them.
+    void markLogicalLineAtCursorWithColumn(ColumnMark mark) noexcept;
+
     /// Whether the LOGICAL line that @p line belongs to carries all of @p flags.
     [[nodiscard]] bool isLogicalLineFlagEnabled(LineOffset line, LineFlags flags) const noexcept
     {

@@ -904,3 +904,32 @@ TEST_CASE("ShellIntegration.livePromptSpan is silent on the alternate screen")
 }
 
 // }}}
+
+TEST_CASE("ShellIntegration.OSC 133;D invalidates the fold ranges it changes")
+{
+    // A regression guard for a real defect: the ;B and ;D handlers used to stamp their flag directly on
+    // the line head, bypassing Screen::setLogicalLineFlags() and therefore never calling
+    // Terminal::invalidateFoldRanges(). Both flags are in HeadOnlyLineFlags, and Terminal::foldRanges()
+    // caches on {generation, stableBase, markRevision} -- so a ;D landing on a page that has not
+    // scrolled left the cached ranges reporting the state from before the command finished.
+    //
+    // It was masked only by the ;A of the NEXT prompt invalidating one sequence later, i.e. by an
+    // accident of shell-script ordering rather than by design. This case closes the window: it reads
+    // the ranges between the ;D and that ;A, which is exactly where the stale answer lived.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(20) } };
+
+    mock.writeToScreen("\033]133;A\033\\");
+    mock.writeToScreen("$ ");
+    mock.writeToScreen("\033]133;B\033\\");
+    mock.writeToScreen("ls\r\n");
+    mock.writeToScreen("\033]133;C\033\\");
+    mock.writeToScreen("one\r\ntwo\r\n");
+
+    // Warm the cache while the command is still open: no block has finished, so there is no range yet.
+    REQUIRE(mock.terminal.foldRanges().empty());
+
+    mock.writeToScreen("\033]133;D;0\033\\");
+
+    // Without the invalidation this still reports the warmed, empty answer.
+    CHECK(!mock.terminal.foldRanges().empty());
+}

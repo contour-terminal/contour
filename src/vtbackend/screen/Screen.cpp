@@ -6070,6 +6070,21 @@ void Screen::setLogicalLineFlags(LineOffset line, LineFlags flags, bool enable) 
         _terminal->invalidateFoldRanges();
 }
 
+void Screen::markLogicalLineAtCursorWithColumn(ColumnMark mark) noexcept
+{
+    auto const cursorPosition = cursor().position;
+    auto const flag = mark == ColumnMark::PromptEnd ? LineFlag::PromptEnd : LineFlag::CommandEnd;
+    auto const column = _grid.logicalColumnOf(cursorPosition);
+
+    setLogicalLineFlags(cursorPosition.line, flag, true);
+
+    auto& head = _grid.changingLineAt(_grid.logicalLineHead(cursorPosition.line));
+    if (mark == ColumnMark::PromptEnd)
+        head.setPromptEndOffset(column);
+    else
+        head.setCommandEndOffset(column);
+}
+
 void Screen::setMark()
 {
     markLogicalLineAtCursor(LineFlag::Marked);
@@ -6130,10 +6145,7 @@ void Screen::processShellIntegration(Sequence const& seq)
             // accessibility client — or anything else asking about the LIVE prompt — where the prompt
             // area ends, and it cannot be recovered afterwards: once the user types, the two are the same
             // run of cells.
-            auto const cursorPosition = cursor().position;
-            auto& head = _grid.changingLineAt(_grid.logicalLineHead(cursorPosition.line));
-            head.setFlag(LineFlag::PromptEnd, true);
-            head.setPromptEndOffset(_grid.logicalColumnOf(cursorPosition));
+            markLogicalLineAtCursorWithColumn(ColumnMark::PromptEnd);
 
             _terminal->shellIntegration().promptEnd();
             break;
@@ -6164,10 +6176,7 @@ void Screen::processShellIntegration(Sequence const& seq)
             // output did not end in a newline, the prompt about to be printed lands on the very same line.
             // Remembering the column is what later tells the two apart; without it a copy of the command's
             // output either swallows the next prompt or loses its own last line.
-            auto const cursorPosition = cursor().position;
-            auto& head = _grid.changingLineAt(_grid.logicalLineHead(cursorPosition.line));
-            head.setFlag(LineFlag::CommandEnd, true);
-            head.setCommandEndOffset(_grid.logicalColumnOf(cursorPosition));
+            markLogicalLineAtCursorWithColumn(ColumnMark::CommandEnd);
 
             auto const exitCode =
                 (cmd.size() > 2 && cmd[1] == ';') ? crispy::toInteger<10, int>(cmd.substr(2)).value_or(0) : 0;
