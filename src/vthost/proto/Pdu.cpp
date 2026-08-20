@@ -289,6 +289,64 @@ namespace
         out.u32(pdu.imageId);
     }
 
+    /// The optional string fields of a context, in WIRE ORDER, with the presence bit each is gated on.
+    ///
+    /// ONE table, walked by both @ref encodeContext and @ref decodeContext, so the two cannot disagree
+    /// about the order. Spelled out as two hand-written sequences they agreed only by coincidence, and
+    /// a disagreement does not fail: it desynchronizes the stream mid-record and surfaces as garbage in
+    /// some later, unrelated field.
+    ///
+    /// The bit numbers are the PROTOCOL's and are pinned HERE rather than read from vtbackend, for the
+    /// reason GridWire.cpp pins LineFlag and CellFlag: they travel on the wire verbatim inside
+    /// `present`, so renumbering vtbackend's own field table -- which that table's comment actively
+    /// invites -- must not silently change what an older peer decodes. vthost/ContextWire.hpp
+    /// static_asserts that the two still agree.
+    constexpr auto ContextStringFields = std::array {
+        std::pair { uint16_t { 1 << 1 }, &WireContext::user },
+        std::pair { uint16_t { 1 << 2 }, &WireContext::hostname },
+        std::pair { uint16_t { 1 << 3 }, &WireContext::machineId },
+        std::pair { uint16_t { 1 << 4 }, &WireContext::bootId },
+        std::pair { uint16_t { 1 << 7 }, &WireContext::comm },
+        std::pair { uint16_t { 1 << 8 }, &WireContext::workingDirectory },
+        std::pair { uint16_t { 1 << 9 }, &WireContext::commandLine },
+        std::pair { uint16_t { 1 << 10 }, &WireContext::vm },
+        std::pair { uint16_t { 1 << 11 }, &WireContext::container },
+        std::pair { uint16_t { 1 << 12 }, &WireContext::targetUser },
+        std::pair { uint16_t { 1 << 13 }, &WireContext::targetHost },
+        std::pair { uint16_t { 1 << 14 }, &WireContext::sessionId },
+    };
+
+    /// The optional varint fields, same rules. @see ContextStringFields.
+    constexpr auto ContextVarintFields = std::array {
+        std::pair { uint16_t { 1 << 5 }, &WireContext::pid },
+        std::pair { uint16_t { 1 << 6 }, &WireContext::pidFdId },
+    };
+
+    /// Encodes one context record, writing only the fields its `present` mask names.
+    ///
+    /// The mask is written FIRST so the decoder knows what follows without a per-field presence byte:
+    /// a systemd `type=command` record then costs six strings on the wire rather than fifteen empty
+    /// length prefixes.
+    void encodeContext(Writer& out, WireContext const& context)
+    {
+        out.varint(context.id);
+        out.varint(context.parent);
+        out.string(context.identifier);
+        out.u8(context.type);
+        out.u16(context.present);
+
+        for (auto const& [bit, member]: ContextStringFields)
+            if (context.present & bit)
+                out.string(context.*member);
+        for (auto const& [bit, member]: ContextVarintFields)
+            if (context.present & bit)
+                out.varint(context.*member);
+
+        out.u8(context.exitKind);
+        out.u8(context.signal);
+        out.varint(context.status);
+    }
+
     void encodeBody(Writer& out, SessionState const& pdu)
     {
         out.varint(pdu.session);
@@ -313,6 +371,12 @@ namespace
         encodeMouseState(out, pdu.mouse);
         out.u8(pdu.progressState);
         out.u8(pdu.progressPercentage);
+        out.varint(pdu.contexts.size());
+        for (auto const& context: pdu.contexts)
+            encodeContext(out, context);
+        out.varint(pdu.contextChain.size());
+        for (auto const id: pdu.contextChain)
+            out.u16(id);
     }
 
     void encodeCell(Writer& out, WireCell const& cell)
@@ -335,6 +399,7 @@ namespace
     {
         out.svarint(line.stableId);
         out.u16(line.flags);
+        out.u16(line.contextId);
         out.svarint(line.promptEndOffset);
         out.svarint(line.commandEndOffset);
         out.varint(line.columns);
@@ -415,6 +480,11 @@ namespace
         out.u8(pdu.progressChanged);
         out.u8(pdu.progressState);
         out.u8(pdu.progressPercentage);
+        out.u8(pdu.contextChanged);
+        out.u16(pdu.activeContext);
+        out.varint(pdu.contexts.size());
+        for (auto const& context: pdu.contexts)
+            encodeContext(out, context);
     }
 
     void encodeBody(Writer& out, SessionBell const& pdu)
@@ -618,6 +688,41 @@ namespace
         return pdu;
     }
 
+    /// Decodes one context record, reading only the fields its `present` mask names.
+    ///
+    /// Walks the SAME tables the encoder writes, so the read order is structurally identical rather
+    /// than maintained in parallel by hand. Enum-ish bytes are carried through RAW and validated by the
+    /// consumer (@see vthost::fromWireContext), which is what keeps this codec free of vtbackend: only
+    /// the presence mask is validated here, and it has to be, because the reads below are driven by it.
+    [[nodiscard]] std::expected<WireContext, DecodeError> decodeContext(Reader& in)
+    {
+        auto context = WireContext {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), context.id, error) || !assign(in.varint(), context.parent, error)
+            || !assign(in.string(), context.identifier, error) || !assign(in.u8(), context.type, error)
+            || !assign(in.u16(), context.present, error))
+            return std::unexpected(error);
+
+        // Any bit this build does not assign is cleared, so the reads below cannot go looking for a
+        // field there is no member for and desynchronize the stream. Masked rather than rejected: an
+        // unknown bit is an unknown FIELD, and the protocol's rule for one of those is to ignore it and
+        // keep the rest, so a peer built from a newer commit degrades to the fields this build knows.
+        context.present = static_cast<uint16_t>(context.present & ContextPresentMask);
+
+        for (auto const& [bit, member]: ContextStringFields)
+            if ((context.present & bit) && !assign(in.string(), context.*member, error))
+                return std::unexpected(error);
+        for (auto const& [bit, member]: ContextVarintFields)
+            if ((context.present & bit) && !assign(in.varint(), context.*member, error))
+                return std::unexpected(error);
+
+        if (!assign(in.u8(), context.exitKind, error) || !assign(in.u8(), context.signal, error)
+            || !assign(in.varint(), context.status, error))
+            return std::unexpected(error);
+
+        return context;
+    }
+
     DecodeResult decodeSessionState(Reader& in)
     {
         auto pdu = SessionState {};
@@ -646,6 +751,12 @@ namespace
             || !decodeMouseState(in, pdu.mouse, error) || !assign(in.u8(), pdu.progressState, error)
             || !assign(in.u8(), pdu.progressPercentage, error))
             return std::unexpected(error);
+        if (auto const decoded = decodeVector(in, pdu.contexts, decodeContext); !decoded)
+            return std::unexpected(decoded.error());
+        if (auto const decoded =
+                decodeVector(in, pdu.contextChain, [](Reader& reader) { return reader.u16(); });
+            !decoded)
+            return std::unexpected(decoded.error());
         return pdu;
     }
 
@@ -676,7 +787,7 @@ namespace
         auto line = WireLine {};
         auto error = DecodeError {};
         if (!assign(in.svarint(), line.stableId, error) || !assign(in.u16(), line.flags, error)
-            || !assign(in.svarint(), line.promptEndOffset, error)
+            || !assign(in.u16(), line.contextId, error) || !assign(in.svarint(), line.promptEndOffset, error)
             || !assign(in.svarint(), line.commandEndOffset, error)
             || !assign(in.varint(), line.columns, error))
             return std::unexpected(error);
@@ -759,8 +870,11 @@ namespace
             || !assign(in.u8(), pdu.modifyOtherKeysChanged, error)
             || !assign(in.u8(), pdu.modifyOtherKeys, error) || !assign(in.u8(), pdu.mouseChanged, error)
             || !decodeMouseState(in, pdu.mouse, error) || !assign(in.u8(), pdu.progressChanged, error)
-            || !assign(in.u8(), pdu.progressState, error) || !assign(in.u8(), pdu.progressPercentage, error))
+            || !assign(in.u8(), pdu.progressState, error) || !assign(in.u8(), pdu.progressPercentage, error)
+            || !assign(in.u8(), pdu.contextChanged, error) || !assign(in.u16(), pdu.activeContext, error))
             return std::unexpected(error);
+        if (auto const decoded = decodeVector(in, pdu.contexts, decodeContext); !decoded)
+            return std::unexpected(decoded.error());
         return pdu;
     }
 

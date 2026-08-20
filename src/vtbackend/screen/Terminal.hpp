@@ -1322,6 +1322,10 @@ class Terminal
     /// Mutated only through applyContextCommand().
     [[nodiscard]] ContextStack const& contexts() const noexcept { return _contexts; }
 
+    /// Mutable access, for a daemon mirror adopting records the host already holds.
+    /// Every other caller reads: the ancestry moves through applyContextCommand().
+    [[nodiscard]] ContextStack& contexts() noexcept { return _contexts; }
+
     /// Applies one decoded OSC 3008 command: updates the ancestry, mirrors the new active id into
     /// every screen so freshly written lines are stamped with it, and announces an observable change.
     ContextTransition applyContextCommand(ContextCommand const& command);

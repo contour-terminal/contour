@@ -621,6 +621,13 @@ class ContextStack
     /// Ids naming records this stack does not hold are skipped.
     void setChain(std::span<ContextId const> ids);
 
+    /// Mints an id no record in this stack currently holds, for a mirror adopting a record whose
+    /// sender-side id means nothing here.
+    ///
+    /// The two id spaces are separate on purpose: the sender's is a uint16_t that wraps and reuses,
+    /// and a line stamped before a reuse legitimately points at the OLD record.
+    [[nodiscard]] ContextId nextAdoptedId() noexcept;
+
     /// Drops the entire ancestry and every retained record.
     ///
     /// NOT reachable from any escape sequence, deliberately. RIS and DECSTR must not clear the stack: a

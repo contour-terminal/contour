@@ -354,6 +354,223 @@ TEST_CASE("a wire hyperlink id reused for another URI re-points the mirror", "[v
     CHECK(bare.terminal->hyperlinks().nextHyperlinkId == idBefore);
 }
 
+TEST_CASE("an OSC 3008 context reaches the mirror and stamps its lines", "[vthost][mirror]")
+{
+    // The mirror drives a real vtbackend::Terminal, so a replicated context makes tinting, the
+    // breadcrumb and the cwd resolver work on an attached pane with no client-side code of their own
+    // -- provided the record and the per-line id actually arrive.
+    auto bare = BareMirror { vtbackend::LineCount(100) };
+    auto screen = vthost::client::RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+
+    auto container = proto::WireContext {};
+    container.id = 7;
+    container.identifier = "box";
+    container.type = static_cast<uint8_t>(vtbackend::ContextType::Container);
+    container.present = static_cast<uint16_t>(vtbackend::ContextField::Container)
+                        | static_cast<uint16_t>(vtbackend::ContextField::WorkingDirectory);
+    container.container = "foobar";
+    container.workingDirectory = "/app";
+
+    auto seed = proto::Delta {};
+    seed.snapshot = 1;
+    seed.stableViewportBase = 10;
+    seed.stableFloor = 10;
+    seed.contexts.push_back(container);
+    seed.contextChanged = 1;
+    seed.activeContext = 7;
+    auto row = rowAt(10, "abcde");
+    row.contextId = 7;
+    seed.lines.push_back(row);
+    screen.apply(seed);
+    bare.mirror->apply(screen, seed);
+
+    auto const& contexts = bare.terminal->contexts();
+    REQUIRE(contexts.active() != nullptr);
+    CHECK(contexts.active()->identifier == "box");
+    CHECK(contexts.active()->type == vtbackend::ContextType::Container);
+    CHECK(contexts.active()->container == "foobar");
+    CHECK(contexts.active()->workingDirectory == "/app");
+
+    // The line resolves through the MIRROR's own id space, which need not equal the sender's.
+    auto const lineContext =
+        bare.terminal->primaryScreen().grid().lineAt(vtbackend::LineOffset(0)).contextId();
+    REQUIRE(!!lineContext);
+    REQUIRE(contexts.find(lineContext) != nullptr);
+    CHECK(contexts.find(lineContext)->identifier == "box");
+}
+
+TEST_CASE("a context re-announced with new metadata updates the mirror in place", "[vthost][mirror]")
+{
+    // systemd re-announces the shell context on every prompt, and `end=` records an outcome on a
+    // command context: both reinitialise a record IN PLACE, under the same id AND the same identifier.
+    // A gate keyed on the identifier alone therefore replicated the first announcement and nothing
+    // after it, leaving an attached pane resolving a directory the session left long ago.
+    auto bare = BareMirror { vtbackend::LineCount(100) };
+    auto screen = vthost::client::RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+
+    auto shell = proto::WireContext {};
+    shell.id = 4;
+    shell.identifier = "sh";
+    shell.type = static_cast<uint8_t>(vtbackend::ContextType::Shell);
+    shell.present = static_cast<uint16_t>(vtbackend::ContextField::WorkingDirectory);
+    shell.workingDirectory = "/home/user";
+
+    auto seed = proto::Delta {};
+    seed.snapshot = 1;
+    seed.stableViewportBase = 10;
+    seed.stableFloor = 10;
+    seed.contexts.push_back(shell);
+    seed.contextChanged = 1;
+    seed.activeContext = 4;
+    seed.lines.push_back(rowAt(10, "abcde"));
+    screen.apply(seed);
+    bare.mirror->apply(screen, seed);
+
+    auto const& contexts = bare.terminal->contexts();
+    REQUIRE(contexts.active() != nullptr);
+    auto const localId = contexts.active()->id;
+    CHECK(contexts.active()->workingDirectory == "/home/user");
+
+    // The SAME context, re-announced after a `cd`. Same id, same identifier, different cwd.
+    shell.workingDirectory = "/home/user/src";
+    auto update = proto::Delta {};
+    update.stableViewportBase = 10;
+    update.stableFloor = 10;
+    update.contexts.push_back(shell);
+    screen.apply(update);
+    bare.mirror->apply(screen, update);
+
+    REQUIRE(contexts.active() != nullptr);
+    // Updated in place, so every line already stamped with this id still resolves to it.
+    CHECK(contexts.active()->id == localId);
+    CHECK(contexts.active()->workingDirectory == "/home/user/src");
+}
+
+TEST_CASE("a context ancestry whose parent links form a cycle does not spin the mirror", "[vthost][mirror]")
+{
+    // The wire's context table ACCUMULATES and the sender's id space wraps, so two records can end up
+    // naming each other as parent. RemoteScreen rebuilds the ancestry by walking those links, and a
+    // walk that only refused a SELF-reference would append to contextChain until it ran out of memory.
+    auto screen = vthost::client::RemoteScreen {};
+
+    auto makeContext = [](uint16_t id, uint16_t parent) {
+        auto context = proto::WireContext {};
+        context.id = id;
+        context.parent = parent;
+        context.identifier = std::format("ctx-{}", id);
+        return context;
+    };
+
+    auto delta = proto::Delta {};
+    delta.contexts.push_back(makeContext(1, 2));
+    delta.contexts.push_back(makeContext(2, 1));
+    delta.contextChanged = 1;
+    delta.activeContext = 1;
+    screen.apply(delta);
+
+    // Each id visited once, innermost last after the reverse.
+    CHECK(screen.contextChain == std::vector<uint16_t> { 2, 1 });
+}
+
+TEST_CASE("a wire context id reused for another context does not re-point old lines", "[vthost][mirror]")
+{
+    // The sender's ContextId is a uint16_t that wraps, exactly as HyperlinkId does. A line written
+    // before a reuse legitimately points at the OLD context, so the mirror must mint a fresh local id
+    // rather than rewriting the record behind the one it already handed out.
+    auto bare = BareMirror { vtbackend::LineCount(100) };
+    auto screen = vthost::client::RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+
+    auto makeContext = [](uint16_t id, std::string_view identifier) {
+        auto context = proto::WireContext {};
+        context.id = id;
+        context.identifier = identifier;
+        context.type = static_cast<uint8_t>(vtbackend::ContextType::Command);
+        return context;
+    };
+
+    auto first = proto::Delta {};
+    first.snapshot = 1;
+    first.stableViewportBase = 10;
+    first.stableFloor = 10;
+    first.contexts.push_back(makeContext(1, "cmd-one"));
+    auto rowOne = rowAt(10, "aaaaa");
+    rowOne.contextId = 1;
+    first.lines.push_back(rowOne);
+    screen.apply(first);
+    bare.mirror->apply(screen, first);
+
+    auto const& grid = bare.terminal->primaryScreen().grid();
+    auto const idOne = grid.lineAt(vtbackend::LineOffset(0)).contextId();
+    REQUIRE(bare.terminal->contexts().find(idOne) != nullptr);
+    CHECK(bare.terminal->contexts().find(idOne)->identifier == "cmd-one");
+
+    // The same wire id, now naming a DIFFERENT context: the counter wrapped on the server.
+    auto second = proto::Delta {};
+    second.stableViewportBase = 10;
+    second.stableFloor = 10;
+    second.contexts.push_back(makeContext(1, "cmd-two"));
+    auto rowTwo = rowAt(10, "bbbbb");
+    rowTwo.contextId = 1;
+    second.lines.push_back(rowTwo);
+    screen.apply(second);
+    bare.mirror->apply(screen, second);
+
+    auto const idTwo = grid.lineAt(vtbackend::LineOffset(0)).contextId();
+    CHECK(idTwo != idOne);
+    REQUIRE(bare.terminal->contexts().find(idTwo) != nullptr);
+    CHECK(bare.terminal->contexts().find(idTwo)->identifier == "cmd-two");
+
+    // And the record the earlier line still points at was NOT rewritten underneath it.
+    REQUIRE(bare.terminal->contexts().find(idOne) != nullptr);
+    CHECK(bare.terminal->contexts().find(idOne)->identifier == "cmd-one");
+}
+
+TEST_CASE("a snapshot asserts an EMPTY context ancestry", "[vthost][mirror]")
+{
+    // The Kitty-keyboard bug, in this feature's shape: a snapshot routes the ancestry through
+    // SessionState rather than a changed-gate, so an ancestry that emptied since the last snapshot
+    // must arrive AS empty or the mirror keeps showing a context that has ended.
+    auto bare = BareMirror { vtbackend::LineCount(100) };
+    auto screen = vthost::client::RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+
+    auto context = proto::WireContext {};
+    context.id = 3;
+    context.identifier = "box";
+    context.type = static_cast<uint8_t>(vtbackend::ContextType::Container);
+
+    auto seed = proto::Delta {};
+    seed.snapshot = 1;
+    seed.stableViewportBase = 10;
+    seed.stableFloor = 10;
+    seed.contexts.push_back(context);
+    seed.contextChanged = 1;
+    seed.activeContext = 3;
+    seed.lines.push_back(rowAt(10, "abcde"));
+    screen.apply(seed);
+    bare.mirror->apply(screen, seed);
+    REQUIRE(bare.terminal->contexts().active() != nullptr);
+
+    // A fresh snapshot whose ancestry is empty.
+    auto state = proto::SessionState {};
+    state.columns = 5;
+    state.lines = 1;
+    state.contexts.push_back(context);
+    // contextChain deliberately left empty
+    screen.apply(state);
+    bare.mirror->fullReplay(screen, vthost::client::LocalHistory::Keep);
+
+    CHECK(bare.terminal->contexts().active() == nullptr);
+    CHECK(bare.terminal->contexts().depth() == 0);
+}
+
 TEST_CASE("a peer-announced viewport jump cannot spin the mirror", "[vthost][mirror]")
 {
     // `stableViewportBase` is a wire field, and every row of the announced advance costs a

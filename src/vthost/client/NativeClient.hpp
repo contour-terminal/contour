@@ -79,6 +79,14 @@ struct RemoteScreen
     std::map<int64_t, proto::WireLine> rows;
     /// Hyperlink id → URI, merged from the deltas' side tables.
     std::unordered_map<uint16_t, std::string> hyperlinks;
+
+    /// OSC 3008 context records, keyed by the SENDER's id, accumulated the way `hyperlinks` is: sent
+    /// once on first reference and kept here so a later fullReplay can re-assert them.
+    std::unordered_map<uint16_t, proto::WireContext> contexts;
+
+    /// The ancestry, outermost first, in the sender's id space. Empty when there is none -- and that
+    /// emptiness is itself asserted, so a stack that emptied is not mistaken for one never sent.
+    std::vector<uint16_t> contextChain;
     /// The mirrored DEC private modes currently SET remotely (by number).
     std::vector<uint32_t> setModes;
     /// The mirrored ANSI modes currently SET remotely (by number) — a separate

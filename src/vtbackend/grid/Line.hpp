@@ -400,12 +400,20 @@ class Line
 
     /// Records that this line was produced under @p id, if it was not already.
     ///
+    /// A ZERO id is ignored, and that is load-bearing in two places. A line's author is set when the
+    /// line is written and cleared when the line is REUSED (@see reset), so "no context is active
+    /// right now" is an absence of information rather than a claim that this line had no author --
+    /// the cursor merely returning to a line after its context ended must not erase what wrote it.
+    /// And on a daemon mirror, whose ancestry is replicated rather than parsed, the local active
+    /// context is routinely zero while the ids arriving on the wire are not; clearing here would wipe
+    /// every replicated stamp the moment the cursor moved.
+    ///
     /// Deliberately does NOT mark the line dirty. The id is derived state -- a frontend resolves it
     /// through the context stack -- and nothing about the line's CONTENT changed, so dirtying it would
     /// push a delta for a row that did not visually change, twice per command, forever.
     void adoptContext(ContextId id) noexcept
     {
-        if (_contextId != id)
+        if (!!id)
             _contextId = id;
     }
 

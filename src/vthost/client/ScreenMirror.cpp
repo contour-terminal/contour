@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include <vthost/ContextWire.hpp>
 #include <vthost/CursorStyle.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/ImageWire.hpp>
@@ -127,6 +128,55 @@ void ScreenMirror::syncHyperlinks(RemoteScreen const& screen)
     }
 }
 
+void ScreenMirror::syncContexts(RemoteScreen const& screen)
+{
+    auto& contexts = _terminal->contexts();
+    for (auto const& [wireId, wire]: screen.contexts)
+    {
+        if (wire.id == 0)
+            continue;
+
+        auto localParent = vtbackend::ContextId {};
+        if (auto const parent = _contextIds.find(wire.parent); parent != _contextIds.end())
+            localParent = parent->second.local;
+
+        auto const known = _contextIds.find(wire.id);
+        if (known != _contextIds.end() && known->second.identifier == wire.identifier)
+        {
+            // The SAME context, so it keeps the local id every line already stamped with it points
+            // at -- but not necessarily the same metadata: a re-`start=` reinitialises a context in
+            // place under the same identifier, and `end=` records an outcome on it. Skipping on the
+            // identifier alone left an attached pane resolving the cwd of the session's first prompt
+            // forever. Compared without building the record, because this loop runs over the whole
+            // accumulated pool on every delta. @see vthost::matchesWireContext.
+            auto const* const current = contexts.find(known->second.local);
+            if (current != nullptr && matchesWireContext(*current, wire, localParent))
+                continue;
+            _terminal->adoptContext(vthost::fromWireContext(wire, known->second.local, localParent));
+            continue;
+        }
+
+        // A FRESH local id when the sender reuses a wire id for a different context, rather than
+        // rewriting the record behind the old one: lines written before the reuse legitimately point
+        // at the OLD context, and mutating it in place would retroactively re-attribute every one of
+        // them. Exactly the rule syncHyperlinks() follows, and for exactly the same reason.
+        auto const localId = contexts.nextAdoptedId();
+        _terminal->adoptContext(vthost::fromWireContext(wire, localId, localParent));
+        _contextIds.insert_or_assign(
+            wire.id, vthost::MirroredContext { .local = localId, .identifier = wire.identifier });
+    }
+
+    // The ancestry, translated through the same map. Asserted even when EMPTY: a snapshot routes it
+    // through SessionState rather than a changed-gate, so a value that returned to its default would
+    // otherwise never be delivered -- which is how a Kitty-keyboard reset used to get lost.
+    auto chain = std::vector<vtbackend::ContextId> {};
+    chain.reserve(screen.contextChain.size());
+    for (auto const wireId: screen.contextChain)
+        if (auto const it = _contextIds.find(wireId); it != _contextIds.end())
+            chain.push_back(it->second.local);
+    _terminal->setContextChain(chain);
+}
+
 void ScreenMirror::writeRow(vtbackend::Screen& page,
                             RemoteScreen const& screen,
                             int64_t stableId,
@@ -145,14 +195,14 @@ void ScreenMirror::writeRow(vtbackend::Screen& page,
         // the server merely stopped naming would destroy history rather than refresh it.
         if (row == nullptr || offset < -vtbackend::LineOffset::cast_from(page.grid().historyLineCount()))
             return;
-        applyWireLine(page.grid().changingLineAt(offset), *row, _linkIds);
+        applyWireLine(page.grid().changingLineAt(offset), *row, _linkIds, _contextIds);
         return;
     }
     if (offset >= vtbackend::LineOffset::cast_from(page.pageSize().lines))
         return; // the server's page is taller than ours; the extra rows have nowhere to go
     auto& line = page.grid().lineAt(offset);
     if (row != nullptr)
-        applyWireLine(line, *row, _linkIds);
+        applyWireLine(line, *row, _linkIds, _contextIds);
     else
         // A row the mirror has no data for is cleared rather than left holding whatever was
         // there before: stale content is worse than a blank line, because it looks correct.
@@ -231,6 +281,7 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
     {
         auto const guard = std::lock_guard { *_terminal };
         syncHyperlinks(screen); // before any row: a cell's link id is unresolvable without it
+        syncContexts(screen);   // and before any row for the same reason: so is a line's context id
         auto& page = activePage();
         auto const lines = unbox<int64_t>(page.pageSize().lines);
 
@@ -317,6 +368,7 @@ void ScreenMirror::fullReplay(RemoteScreen const& screen, LocalHistory history)
     {
         auto const guard = std::lock_guard { *_terminal };
         syncHyperlinks(screen); // before any row: a cell's link id is unresolvable without it
+        syncContexts(screen);   // and before any row for the same reason: so is a line's context id
         // The page has to be the right one BEFORE _screenType is adopted: activePage() reads it.
         auto const wantAlternate = screen.screenType == 1;
         if (_terminal->isAlternateScreen() != wantAlternate)
@@ -515,7 +567,7 @@ void ScreenMirror::applyStatusLines(RemoteScreen const& screen)
     {
         if (static_cast<std::size_t>(row) >= lines)
             break;
-        applyWireLine(page.grid().lineAt(vtbackend::LineOffset::cast_from(row)), line, _linkIds);
+        applyWireLine(page.grid().lineAt(vtbackend::LineOffset::cast_from(row)), line, _linkIds, _contextIds);
     }
 }
 

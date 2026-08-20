@@ -60,9 +60,36 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
         .underlineColor = 0x99AABBCC,
         .flags = 0xFFFFF, // all 20 CellFlags bits
     };
+    // Every field the mask can name, so the round trip proves each is written AND read back -- a
+    // record populated only in part would let a missing decoder read pass unnoticed.
+    auto const context = WireContext {
+        .id = 3,
+        .parent = 1,
+        .identifier = "bed86fab93af4328bbed0a1224af6d40",
+        .type = 6, // Container
+        .present = ContextPresentMask,
+        .user = "lennart",
+        .hostname = "zeta",
+        .machineId = "3deb5353d3ba43d08201c136a47ead7b",
+        .bootId = "d4a3d0fdf2e24fdea6d971ce73f4fbf2",
+        .comm = "systemd-nspawn",
+        .workingDirectory = "/app",
+        .commandLine = "ls -l",
+        .vm = "myvm",
+        .container = "foobar",
+        .targetUser = "root",
+        .targetHost = "example.com",
+        .sessionId = "42",
+        .pid = 1062862,
+        .pidFdId = 1063162,
+        .exitKind = 2, // Failure
+        .signal = 11,  // SIGSEGV
+        .status = 139,
+    };
     auto const line = WireLine {
         .stableId = -3, // signed: SD/unscroll push ids below the origin
         .flags = 0x01FF,
+        .contextId = 3,
         .columns = 80,
         .cells = { cell },
         .fillForeground = 1,
@@ -115,7 +142,9 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                            .kittyKeyboardFlags = 5,
                            .modifyOtherKeys = 2,
                            .progressState = 1,
-                           .progressPercentage = 42 },
+                           .progressPercentage = 42,
+                           .contexts = { context },
+                           .contextChain = { 1, 3 } },
             Delta { .session = 9,
                     .generation = 2,
                     .seqno = 1234,
@@ -153,7 +182,10 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                     .modifyOtherKeys = 2,
                     .progressChanged = 1,
                     .progressState = 2,
-                    .progressPercentage = 80 },
+                    .progressPercentage = 80,
+                    .contextChanged = 1,
+                    .activeContext = 3,
+                    .contexts = { context } },
         SessionBell { .session = 4 },
         SessionNotify { .session = 4, .title = "Build finished", .body = "3 warnings, 0 errors" },
         SessionClipboard { .session = 4, .selection = "c", .data = "copied text" },
@@ -424,11 +456,13 @@ TEST_CASE("an announced grid beyond MaxGridExtent is malformed", "[vthost][proto
         body.u8(0);           // modifyOtherKeys
         // Hand-built, so this list must stay in step with encodeBody(Writer&, SessionState const&) —
         // a missing field makes the decode fail here rather than anywhere informative.
-        body.u16(0); // mouseProtocol
-        body.u8(0);  // mouseTransport
-        body.u8(0);  // mouseWheelMode
-        body.u8(0);  // progressState
-        body.u8(0);  // progressPercentage
+        body.u16(0);    // mouseProtocol
+        body.u8(0);     // mouseTransport
+        body.u8(0);     // mouseWheelMode
+        body.u8(0);     // progressState
+        body.u8(0);     // progressPercentage
+        body.varint(0); // contexts
+        body.varint(0); // contextChain
         auto stream = Writer {};
         writeFrame(stream, 1, std::to_underlying(PduType::SessionState), body.view());
         return stream;

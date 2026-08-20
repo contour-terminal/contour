@@ -225,6 +225,23 @@ ContextTransition ContextStack::apply(ContextCommand const& command)
              .change = ContextChange::Yes };
 }
 
+ContextId ContextStack::nextAdoptedId() noexcept
+{
+    // Skips zero, which means "no context", and skips anything already stored -- a mirror adopts in
+    // an order this stack does not control, so a bare counter could collide with a record it has
+    // already been handed.
+    for (auto attempts = size_t {}; attempts <= 0xFFFF; ++attempts)
+    {
+        auto const candidate = _nextId;
+        _nextId = ContextId { static_cast<uint16_t>(_nextId.value + 1) };
+        if (!_nextId.value)
+            _nextId = ContextId { 1 };
+        if (!!candidate && !_byId.contains(candidate))
+            return candidate;
+    }
+    return ContextId { 1 };
+}
+
 void ContextStack::adopt(TerminalContext record)
 {
     Require(!!record.id);
