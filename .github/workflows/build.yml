@@ -1207,6 +1207,14 @@ jobs:
           CC_VER=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
           test "${{ matrix.compiler }}" = "GCC 8"  && EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=ON"
           test "${CC_NAME}" = "gcc" && CC_EXE="g++"
+          # AArch64 GCC + RelWithDebInfo debug info is what fills the runner; --no-keep-memory
+          # tells ld to re-read symbol tables rather than hold them, trading time for RAM.
+          #
+          # The link cap below is spelled CONTOUR_LINK_JOBS and not CMAKE_JOB_POOL_LINK on
+          # purpose: CMakeLists.txt sets CMAKE_JOB_POOL_LINK as a NORMAL variable, which shadows
+          # a cache entry of the same name passed here -- so -DCMAKE_JOB_POOL_LINK=link defines a
+          # pool nothing binds to, and rules.ninja still reads "contour_link_pool / depth = 2".
+          test "${CC_NAME}" = "gcc" && CMAKE_EXE_LINKER_FLAGS="$CMAKE_EXE_LINKER_FLAGS -Wl,--no-keep-memory"
           if [[ "${CC_NAME}" = "clang" ]]; then
               CC_EXE="clang++"
               # CMAKE_CXX_FLAGS="-stdlib=libc++"
@@ -1222,6 +1230,7 @@ jobs:
               -DCMAKE_CXX_FLAGS="${CMAKE_CXX_FLAGS}" \
               -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS}" \
               -DCMAKE_INSTALL_PREFIX="/usr" \
+              -DCONTOUR_LINK_JOBS=1 \
               -DCONTOUR_WAYLAND=OFF \
               -DLIBUNICODE_UCD_BASE_DIR=$PWD/_ucd \
               -DPEDANTIC_COMPILER_WERROR=OFF \
