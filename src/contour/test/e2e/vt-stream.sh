@@ -36,4 +36,16 @@ done
 printf '\033[r'
 
 sleep 0.3
+# OSC 3008 hierarchical context signalling: a nested ancestry, per-line association, the tint path and
+# the {Context} breadcrumb, all through the real parser and the real renderer.
+printf '\033]3008;start=e2e-session;type=session;user=%s;hostname=%s\033\\' "$(id -un)" "$(uname -n)"
+printf '\033]3008;start=e2e-box;type=container;container=coverage-e2e;cwd=/app\033\\'
+printf 'inside a container\n'
+printf '\033]3008;start=e2e-root;type=elevate;targetuser=root\033\\'
+printf 'elevated line\n'
+sleep 0.3
+printf '\033]3008;end=e2e-root;exit=failure;status=139;signal=SIGSEGV\033\\'
+printf '\033]3008;end=e2e-box;exit=success\033\\'
+printf '\033]3008;end=e2e-session\033\\'
+
 exit 0

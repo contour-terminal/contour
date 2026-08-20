@@ -16,6 +16,15 @@ live_config: false
 tab_bar_position: Bottom
 tab_bar_visibility: Multiple
 
+# OSC 3008 hierarchical context signalling, driven with a non-default scope so the tint lookup and
+# the mark-derivation path are both exercised.
+osc_context:
+    enabled: true
+    max_depth: 8
+    max_retained_contexts: 64
+    derive_markers: when_alone
+    tinting: all
+
 profiles:
     main:
         shell: /bin/sh
@@ -69,3 +78,10 @@ color_schemes:
         cursor:
             default: '#B0B0B0'
             text: '#101010'
+        # No shipped scheme sets these; the coverage scheme does, so the tint parse and the renderer
+        # blend both run under the offscreen pass.
+        tint:
+            elevate: '#2a1a1a'
+            container: '#161c26'
+            remote: '#1a2018'
+            command: '#141414'
