@@ -1104,7 +1104,7 @@ jobs:
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: "ccache-{{ matrix.runner }}-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}-${{ matrix.qt_version  }}"
+          key: "ccache-${{ matrix.runner }}-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}-${{ matrix.qt_version  }}"
           max-size: 256M
       - name: "update APT database"
         run: sudo ./scripts/apt-update.sh
