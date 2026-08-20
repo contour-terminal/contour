@@ -1227,9 +1227,18 @@ jobs:
               -DPEDANTIC_COMPILER_WERROR=OFF \
               --preset gcc-debug
       - name: "build"
-        # -j$(nproc), not a hardcoded -j3: this entry has to fit inside the ARM runner's
-        # lease, and a quarter of the cores sitting idle is the cheapest minute to buy back.
-        run: cmake --build --preset gcc-debug -- -j$(nproc)
+        # -j$(nproc) rather than a hardcoded -j3: a quarter of a 4-vCPU runner was sitting idle.
+        #
+        # The memory sampler is temporary. ubuntu-24.04-arm (GCC 14) is killed by a runner
+        # shutdown signal at the same handful of targets every time -- the final GUI links -- and
+        # an OOM-killed runner agent leaves nothing in the build log by construction. Streaming
+        # free(1) is the only way to tell "the host ran out of memory" from "the lease expired".
+        run: |
+          echo "cores=$(nproc)"; free -h
+          ( while sleep 10; do echo "[mem] $(free -m | awk '/^Mem:/{printf "used=%sM avail=%sM", $3, $7}')"; done ) &
+          sampler=$!
+          trap 'kill $sampler 2>/dev/null || true' EXIT
+          cmake --build --preset gcc-debug -- -j$(nproc)
       - name: "tests"
         # A hung test (e.g. a dead-loop) must fail the matrix fast, not stall for hours.
         #
