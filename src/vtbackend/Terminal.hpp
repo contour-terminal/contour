@@ -2,12 +2,9 @@
 #pragma once
 
 #include <vtbackend/Cursor.hpp>
-#include <vtbackend/Folding.hpp>
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/RenderBuffer.hpp>
-#include <vtbackend/SemanticBlockTracker.hpp>
 #include <vtbackend/Settings.hpp>
-#include <vtbackend/ShellIntegration.hpp>
 #include <vtbackend/StatusLineBuilder.hpp>
 #include <vtbackend/Viewport.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
@@ -20,6 +17,9 @@
 #include <vtbackend/input/vi/Selector.hpp>
 #include <vtbackend/input/vi/ViCommands.hpp>
 #include <vtbackend/input/vi/ViInputHandler.hpp>
+#include <vtbackend/shell/Folding.hpp>
+#include <vtbackend/shell/SemanticBlockTracker.hpp>
+#include <vtbackend/shell/ShellIntegration.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
 #include <vtbackend/vt/PointerShape.hpp>
 #include <vtbackend/vt/ProgressState.hpp>

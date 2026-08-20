@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Folding.hpp> // FoldJumpBehavior
+#include <vtbackend/shell/Folding.hpp> // FoldJumpBehavior
 
 #include <array>
 #include <cstddef>

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/Folding.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/input/vi/JumpHistory.hpp>
 #include <vtbackend/input/vi/ViInputHandler.hpp>
+#include <vtbackend/shell/Folding.hpp>
 
 #include <gsl/pointers>
 

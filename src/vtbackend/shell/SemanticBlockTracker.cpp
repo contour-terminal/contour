@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/SemanticBlockTracker.hpp>
+#include <vtbackend/shell/SemanticBlockTracker.hpp>
 
 #include <random>
 

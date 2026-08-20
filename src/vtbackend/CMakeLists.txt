@@ -19,12 +19,12 @@ set(vtbackend_HEADERS
     vt/Charset.hpp
     core/Color.hpp
     core/ColorPalette.hpp
-    CommandBlocks.hpp
+    shell/CommandBlocks.hpp
     vt/ControlCode.hpp
     Cursor.hpp
     vt/DesktopNotification.hpp
     core/FileUrl.hpp
-    Folding.hpp
+    shell/Folding.hpp
     vt/Functions.hpp
     core/GraphicsAttributes.hpp
     grid/Grid.hpp
@@ -48,18 +48,18 @@ set(vtbackend_HEADERS
     vt/PointerShape.hpp
     core/Primitives.hpp
     vt/ProgressState.hpp
-    PromptRegion.hpp
+    shell/PromptRegion.hpp
     vt/RectangularAreaChecksum.hpp
     RenderBuffer.hpp
     RenderBufferBuilder.hpp
     Screen.hpp
     input/vi/Selector.hpp
-    SemanticBlockTracker.hpp
+    shell/SemanticBlockTracker.hpp
     vt/Sequence.hpp
     vt/SequenceBuilder.hpp
     Settings.hpp
     vt/SgrWriter.hpp
-    ShellIntegration.hpp
+    shell/ShellIntegration.hpp
     graphics/SixelParser.hpp
     grid/SoAClusterWriter.hpp
     StatusLineBuilder.hpp
@@ -89,9 +89,9 @@ set(vtbackend_SOURCES
     vt/ProgressState.cpp
     core/Color.cpp
     core/ColorPalette.cpp
-    CommandBlocks.cpp
-    Folding.cpp
-    PromptRegion.cpp
+    shell/CommandBlocks.cpp
+    shell/Folding.cpp
+    shell/PromptRegion.cpp
     vt/Functions.cpp
     grid/Grid.cpp
     core/FileUrl.cpp
@@ -108,7 +108,7 @@ set(vtbackend_SOURCES
     graphics/KittyGraphics.cpp
     vt/TextSizing.cpp
     Screen.cpp
-    SemanticBlockTracker.cpp
+    shell/SemanticBlockTracker.cpp
     input/vi/Selector.cpp
     grid/SoAClusterWriter.cpp
     vt/Sequence.cpp
@@ -177,9 +177,9 @@ if(LIBTERMINAL_TESTING)
         vt/ProgressState_test.cpp
         core/Color_test.cpp
         core/ColorPalette_test.cpp
-        CommandBlocks_test.cpp
-        Folding_test.cpp
-        PromptRegion_test.cpp
+        shell/CommandBlocks_test.cpp
+        shell/Folding_test.cpp
+        shell/PromptRegion_test.cpp
         graphics/GoodImageProtocol_test.cpp
         graphics/XtSmGraphics_test.cpp
         input/InputGenerator_test.cpp
@@ -203,7 +203,7 @@ if(LIBTERMINAL_TESTING)
         StatusLineBuilder_test.cpp
         core/WindowSizeStack_test.cpp
         Terminal_test.cpp
-        ShellIntegration_test.cpp
+        shell/ShellIntegration_test.cpp
         grid/LineSoA_test.cpp
         grid/SoAClusterWriter_test.cpp
         graphics/SixelParser_test.cpp

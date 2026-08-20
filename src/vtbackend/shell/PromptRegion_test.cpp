@@ -4,7 +4,7 @@
 // FINISHED blocks, this one finds the prompt the user is standing in right now — the case an
 // accessibility client asks about, and the one a CommandEnd-opened block can never see.
 
-#include <vtbackend/PromptRegion.hpp>
+#include <vtbackend/shell/PromptRegion.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <vtbackend/PromptRegion.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/shell/PromptRegion.hpp>
 
 #include <optional>
 

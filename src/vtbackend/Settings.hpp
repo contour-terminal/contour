@@ -1,9 +1,9 @@
 #pragma once
 
-#include <vtbackend/Folding.hpp> // FoldJumpBehavior
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/input/InputGenerator.hpp> // Modifier
+#include <vtbackend/shell/Folding.hpp>        // FoldJumpBehavior
 #include <vtbackend/vt/Charset.hpp>
 #include <vtbackend/vt/RectangularAreaChecksum.hpp>
 #include <vtbackend/vt/VTType.hpp>

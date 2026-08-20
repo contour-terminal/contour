@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/MockTerm.hpp>
-#include <vtbackend/SemanticBlockTracker.hpp>
-#include <vtbackend/ShellIntegration.hpp>
 #include <vtbackend/Terminal.hpp>
+#include <vtbackend/shell/SemanticBlockTracker.hpp>
+#include <vtbackend/shell/ShellIntegration.hpp>
 #include <vtbackend/vt/Functions.hpp>
 
 #include <catch2/catch_test_macros.hpp>

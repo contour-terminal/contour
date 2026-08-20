@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/Folding.hpp>
+#include <vtbackend/shell/Folding.hpp>
 
 #include <algorithm>
 #include <cstdint>

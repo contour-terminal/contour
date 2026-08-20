@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <vtbackend/CommandBlocks.hpp>
+#include <vtbackend/shell/CommandBlocks.hpp>
 
 #include <crispy/Utils.hpp>
 
