@@ -14,6 +14,7 @@
 #include <contour/session/DisplaySurface.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
 
+#include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <vtpty/Pty.hpp>
@@ -465,6 +466,32 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// split pane — using the same logic, including the Windows fallback.
     /// @return The working directory path, or "." if unavailable.
     [[nodiscard]] std::string workingDirectory() const;
+
+    /// This machine's identity, for deciding whether a context describes it.
+    [[nodiscard]] vtbackend::LocalIdentity localIdentity() const noexcept
+    {
+        return vtbackend::LocalIdentity { .machineId = _localMachineId, .hostname = _localHostName };
+    }
+
+    /// The working directory for @p purpose, resolved from the OSC 3008 ancestry and then OSC 7.
+    ///
+    /// One resolution consulted by every caller, so "where does a new tab start" and "what does the
+    /// tab tooltip say" can never disagree about the ORDER even though they deliberately disagree
+    /// about the FILTER: a path worth SHOWING need not be one a child could be spawned in.
+    ///
+    /// Takes the terminal lock. A caller that already holds it must use
+    /// @ref resolveWorkingDirectoryLocked instead.
+    [[nodiscard]] std::optional<vtbackend::ResolvedWorkingDirectory> resolveWorkingDirectory(
+        vtbackend::CwdPurpose purpose) const;
+
+    /// As @ref resolveWorkingDirectory, for a caller that ALREADY holds the terminal lock.
+    ///
+    /// Two named functions rather than a `locked` flag, per the project's own rule about boolean
+    /// parameters -- and the distinction is load-bearing rather than stylistic: the terminal's mutex is
+    /// NOT recursive, so taking it a second time deadlocks the GUI thread outright. contextMenuState()
+    /// is exactly such a caller, its whole body being one locked snapshot.
+    [[nodiscard]] std::optional<vtbackend::ResolvedWorkingDirectory> resolveWorkingDirectoryLocked(
+        vtbackend::CwdPurpose purpose) const;
 
     /// The working directory to SHOW the user, as opposed to the one to spawn a child in.
     ///
@@ -926,6 +953,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// This machine's host name, asked once because one of the file:// URLs measured against it is
     /// resolved on the GUI thread under the terminal lock. @see vtbackend::isLocalHost
     std::string _localHostName;
+
+    /// This machine's /etc/machine-id, read once, empty where there is none.
+    ///
+    /// The STRONG half of the locality test an OSC 3008 working directory needs. Nothing emits a
+    /// `remote` context for ssh today, so a remote host's own sequences look entirely local and its
+    /// paths may well exist here too; comparing machine ids is the only thing that catches it, and
+    /// systemd's shim emits one for free. @see vtbackend::LocalIdentity.
+    std::string _localMachineId;
 
     crispy::Point _accumulatedPixelScroll;
     crispy::Point _accumulatedAngleScroll;
