@@ -191,14 +191,14 @@ class SshSession final: public Pty
 
     bool authenticateWithAgent();
 
-    /// Moves to whichever authentication method follows the agent, and returns false.
+    /// Moves to whichever authentication method follows the agent.
     ///
     /// Reached both when the agent has no more identities to offer and when there was never an agent
     /// to ask -- the case inside a Flatpak, where $SSH_AUTH_SOCK names a host path the sandbox does
     /// not mount. Those failures used to return with the state still on AuthenticateAgent, so the
     /// next read re-entered the same case and libssh2_agent_get_identity() was called on an agent
     /// that had never connected.
-    [[nodiscard]] bool fallBackFromAgent();
+    void fallBackFromAgent();
     void authenticateWithPrivateKey();
     void authenticateWithPassword();
 
@@ -249,12 +249,6 @@ class SshSession final: public Pty
     /// `// TODO candidate of a future logErrorWithInject()` comments in the source named this.
     void logErrorWithInject(std::string_view message) const;
 
-    template <typename... Args>
-    void logErrorWithInject(std::format_string<Args...> fmt, Args&&... args) const
-    {
-        logErrorWithInject(std::format(fmt, std::forward<Args>(args)...));
-    }
-
     /// Ends this session with @p reason: reports it, records it, and moves to State::Failure.
     ///
     /// Recording matters because start() reads the reason back: processState() runs synchronously
@@ -265,6 +259,12 @@ class SshSession final: public Pty
     /// caller of this already holds it, processState() running under the lock in both start() and
     /// read(). @see _mutex.
     void fail(std::string reason);
+
+    template <typename... Args>
+    void fail(std::format_string<Args...> fmt, Args&&... args)
+    {
+        fail(std::format(fmt, std::forward<Args>(args)...));
+    }
 
     SshHostConfig _config;
 
