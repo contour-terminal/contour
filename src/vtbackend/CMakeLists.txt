@@ -59,6 +59,7 @@ set(vtbackend_HEADERS
     screen/ScreenTestFixtures.hpp
     input/vi/Selector.hpp
     shell/SemanticBlockTracker.hpp
+    vt/Screenshot.hpp
     vt/Sequence.hpp
     vt/SequenceBuilder.hpp
     screen/Settings.hpp
@@ -121,6 +122,7 @@ set(vtbackend_SOURCES
     shell/SemanticBlockTracker.cpp
     input/vi/Selector.cpp
     grid/SoAClusterWriter.cpp
+    vt/Screenshot.cpp
     vt/Sequence.cpp
     graphics/SixelParser.cpp
     graphics/regis/ReGISColor.cpp
@@ -222,6 +224,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_macros_test.cpp
         screen/Screen_multipage_test.cpp
         core/Image_test.cpp
+        vt/Screenshot_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp
         core/WindowSizeStack_test.cpp
