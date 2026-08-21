@@ -20,8 +20,10 @@ class QtExternalLauncher final: public ExternalLauncher
 {
   public:
     [[nodiscard]] std::expected<void, LaunchError> openUrl(QUrl const& url) override;
-    bool runDetached(QString const& program, QStringList const& arguments) override;
-    int execute(QString const& program, QStringList const& arguments) override;
+    [[nodiscard]] std::expected<void, SpawnError> runDetached(QString const& program,
+                                                              QStringList const& arguments) override;
+    [[nodiscard]] std::expected<int, SpawnError> execute(QString const& program,
+                                                         QStringList const& arguments) override;
 };
 
 } // namespace contour::platform

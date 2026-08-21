@@ -2442,7 +2442,10 @@ bool TerminalSession::operator()(actions::OpenConfiguration event)
         return true;
     }
 
-    openExternally(QUrl(QString::fromStdString(_config.configFile.string())),
+    // fromLocalFile(), not QUrl(path): a bare filesystem path is not a URL. On POSIX it parses as a
+    // scheme-less relative reference and on Windows `C:\...` parses with scheme "c", so the desktop
+    // was handed something no handler could claim. The two sibling openers here already do this.
+    openExternally(QUrl::fromLocalFile(QString::fromStdString(_config.configFile.string())),
                    "configuration file",
                    _config.configFile.generic_string());
 
@@ -3366,7 +3369,11 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
         sessionLog()("spawning new process");
         auto const command = buildSpawnTerminalCommand(
             _app.programPath(), _config.configFile.generic_string(), profileName, wd, _localHostName);
-        _app.externalLauncher().runDetached(command.program, command.arguments);
+        if (auto const spawned = _app.externalLauncher().runDetached(command.program, command.arguments);
+            !spawned)
+            errorLog()("Could not spawn \"{}\": {}.",
+                       command.program.toStdString(),
+                       platform::describe(spawned.error()));
     }
     else
     {
@@ -3730,7 +3737,12 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
             if (!fileInfo.isExecutable())
                 args << editorEnv;
             args << localPath;
-            _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
+            if (auto const ran =
+                    _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
+                !ran)
+                errorLog()("Could not open \"{}\" in an editor: {}.",
+                           localPath.toStdString(),
+                           platform::describe(ran.error()));
             return;
         }
     }

@@ -44,39 +44,61 @@ PortalExternalLauncher::PortalExternalLauncher(PortalCaller caller,
     Require(_processes != nullptr);
 }
 
+void PortalExternalLauncher::openWithFallback(QUrl const& url, std::string_view why)
+{
+    // Fully encoded, as buildOpenUriArguments() spells it: toString()'s default decodes percent
+    // escapes back, which would hand xdg-open a "file:///tmp/some dir" that is not a URI at all.
+    auto const urlText = url.toString(QUrl::FullyEncoded);
+
+    // Reported rather than returned: by now the click has visibly finished and there is nothing left
+    // for the caller to decide. @see ExternalLauncher::openUrl on what a success means.
+    launcherLog()("Opening \"{}\" with {}: {}.", urlText.toStdString(), asStringView(FallbackOpener), why);
+
+    if (auto const started = runDetached(QString(FallbackOpener), QStringList { urlText }); !started)
+        launcherLog()("Could not open \"{}\": {} either -- {}.",
+                      urlText.toStdString(),
+                      asStringView(FallbackOpener),
+                      describe(started.error()));
+}
+
 std::expected<void, LaunchError> PortalExternalLauncher::openUrl(QUrl const& url)
 {
     if (!isOpenable(url))
         return std::unexpected(LaunchError::InvalidUrl);
 
+    // OpenURI refuses a file: URI outright -- "Note that file:// URIs are explicitly not supported by
+    // this method. To request opening local files, use OpenFile." -- so asking anyway would spend a
+    // round trip to be told no and write a portal failure that is not one. OpenFile is the method
+    // that takes them, but it takes an open FILE DESCRIPTOR rather than a URI, which this caller has
+    // no way to pass; until it does, a local file goes straight to the opener the refusal path would
+    // have reached in any case. Inside a Flatpak that opener is flatpak-xdg-utils' shim, which speaks
+    // OpenFile with a descriptor of its own -- so this is the path that actually worked all along.
+    if (url.isLocalFile())
+    {
+        openWithFallback(url, "the portal's OpenURI does not take local files");
+        return {};
+    }
+
     _call(this, OpenUriMethod, buildOpenUriArguments(url), [this, url](CallOutcome outcome) {
         if (outcome == CallOutcome::Accepted)
             return;
 
-        auto const urlText = url.toString();
-
         // The portal answered, and refused -- so it is responsive, and xdg-open will not hang either.
-        // Reported rather than returned: by now the click has visibly finished and there is nothing
-        // left for the caller to decide. @see ExternalLauncher::openUrl on what a success means.
-        //
         // Why it refused is not repeated here: PortalCall has already written that to gui.portal.
-        launcherLog()("Falling back to {} for \"{}\".", asStringView(FallbackOpener), urlText.toStdString());
-
-        if (!runDetached(QString(FallbackOpener), QStringList { urlText }))
-            launcherLog()("Could not open \"{}\": neither the portal nor {} would take it.",
-                          urlText.toStdString(),
-                          asStringView(FallbackOpener));
+        openWithFallback(url, "the portal refused it");
     });
 
     return {};
 }
 
-bool PortalExternalLauncher::runDetached(QString const& program, QStringList const& arguments)
+std::expected<void, SpawnError> PortalExternalLauncher::runDetached(QString const& program,
+                                                                    QStringList const& arguments)
 {
     return _processes->runDetached(program, arguments);
 }
 
-int PortalExternalLauncher::execute(QString const& program, QStringList const& arguments)
+std::expected<int, SpawnError> PortalExternalLauncher::execute(QString const& program,
+                                                               QStringList const& arguments)
 {
     return _processes->execute(program, arguments);
 }

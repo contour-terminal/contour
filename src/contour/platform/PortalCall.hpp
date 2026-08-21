@@ -33,7 +33,7 @@ constexpr auto PortalPath = QLatin1StringView("/org/freedesktop/portal/desktop")
 /// @return The same characters, as the standard view.
 [[nodiscard]] constexpr std::string_view asStringView(QLatin1StringView text) noexcept
 {
-    return std::string_view { text.data(), static_cast<size_t>(text.size()) };
+    return std::string_view { text.data(), static_cast<std::size_t>(text.size()) };
 }
 
 /// How long any D-Bus method call we issue may stay outstanding, in milliseconds.

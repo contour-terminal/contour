@@ -49,9 +49,15 @@ class RecordingPortalCaller
     }
 
     /// Delivers the portal's reply for the call at @p index, as the bus would.
+    ///
+    /// The handler is COPIED out before it runs: a reply handler may issue another portal call --
+    /// PortalNotificationTransport's does, withdrawing a notification from inside the reply that
+    /// recorded it -- and the emplace_back that records it can reallocate `calls`, destroying the
+    /// std::function under its own running call.
     void completeCall(size_t index, contour::platform::CallOutcome outcome)
     {
-        calls.at(index).onReply(outcome);
+        auto const onReply = calls.at(index).onReply;
+        onReply(outcome);
     }
 
     std::vector<RecordedPortalCall> calls;

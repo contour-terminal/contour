@@ -41,15 +41,21 @@ class RecordingExternalLauncher final: public contour::platform::ExternalLaunche
         return {};
     }
 
-    bool runDetached(QString const& program, QStringList const& arguments) override
+    [[nodiscard]] std::expected<void, contour::platform::SpawnError> runDetached(
+        QString const& program, QStringList const& arguments) override
     {
         detached.push_back({ program, arguments });
-        return detachedSucceeds;
+        if (detachedError)
+            return std::unexpected(*detachedError);
+        return {};
     }
 
-    int execute(QString const& program, QStringList const& arguments) override
+    [[nodiscard]] std::expected<int, contour::platform::SpawnError> execute(
+        QString const& program, QStringList const& arguments) override
     {
         executed.push_back({ program, arguments });
+        if (executeError)
+            return std::unexpected(*executeError);
         return 0;
     }
 
@@ -60,8 +66,12 @@ class RecordingExternalLauncher final: public contour::platform::ExternalLaunche
     /// What openUrl() fails with; empty means it accepts (set one to exercise the error path).
     std::optional<contour::platform::LaunchError> openUrlError;
 
-    /// What runDetached() answers. Cleared to reach the "not even the fallback would take it" path.
-    bool detachedSucceeds = true;
+    /// What runDetached() fails with; empty means the child started. Set one to reach the
+    /// "not even the fallback would take it" path.
+    std::optional<contour::platform::SpawnError> detachedError;
+
+    /// What execute() fails with; empty means the child ran and exited 0.
+    std::optional<contour::platform::SpawnError> executeError;
 };
 
 } // namespace contour::test

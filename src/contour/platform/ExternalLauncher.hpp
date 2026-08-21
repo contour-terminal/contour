@@ -36,6 +36,33 @@ enum class LaunchError : std::uint8_t
     return "unknown error";
 }
 
+/// Why a child process could not be started, or did not finish.
+///
+/// Separate from LaunchError because the two ask different questions: opening a URL asks the desktop
+/// to CHOOSE a handler, while this names a program outright and can say which part of running it
+/// went wrong. Qt reports one FailedToStart for both of the first two, which are different things to
+/// tell a user, so the launcher determines the first itself rather than guessing.
+enum class SpawnError : std::uint8_t
+{
+    NotFound = 0, ///< No such program: not on the search path, or the named path is not executable.
+    StartFailed,  ///< The program is there, but the platform would not start it.
+    Crashed,      ///< It ran and died on a signal. Only execute() waits long enough to observe this.
+};
+
+/// A human-readable explanation of @p error, for logs and user-facing notices.
+/// @param error The failure to describe.
+/// @return A short sentence naming the cause.
+[[nodiscard]] constexpr std::string_view describe(SpawnError error) noexcept
+{
+    switch (error)
+    {
+        case SpawnError::NotFound: return "no such program on the search path";
+        case SpawnError::StartFailed: return "it could not be started";
+        case SpawnError::Crashed: return "it crashed";
+    }
+    return "unknown error";
+}
+
 /// Whether @p url is something an ExternalLauncher could hand to the desktop at all.
 ///
 /// The one rejection every implementation makes for itself, stated once here rather than restated
@@ -81,17 +108,27 @@ class ExternalLauncher
     [[nodiscard]] virtual std::expected<void, LaunchError> openUrl(QUrl const& url) = 0;
 
     /// Starts @p program with @p arguments as a detached background process (fire-and-forget).
+    ///
+    /// Fire-and-forget names the CHILD's lifetime, not the report: whether it started is knowable
+    /// here and now, and a caller that cannot say why nothing happened has nothing to log.
+    ///
     /// @param program The executable path.
     /// @param arguments The argument list.
-    /// @return true if the process was started.
-    virtual bool runDetached(QString const& program, QStringList const& arguments) = 0;
+    /// @return Nothing once started, or why it was not.
+    [[nodiscard]] virtual std::expected<void, SpawnError> runDetached(QString const& program,
+                                                                      QStringList const& arguments) = 0;
 
     /// Runs @p program with @p arguments and blocks until it exits (used where the caller wants the
     /// child — e.g. an `$EDITOR` — to run to completion).
+    ///
+    /// The exit code and the reasons it has none are separate channels: a program that exited 1 and
+    /// a program that is not installed used to be told apart by the SIGN of one integer.
+    ///
     /// @param program The executable path.
     /// @param arguments The argument list.
-    /// @return The process exit code, or a negative value if it could not be started.
-    virtual int execute(QString const& program, QStringList const& arguments) = 0;
+    /// @return The process exit code, or why there is none.
+    [[nodiscard]] virtual std::expected<int, SpawnError> execute(QString const& program,
+                                                                 QStringList const& arguments) = 0;
 };
 
 /// The launcher this platform can offer.

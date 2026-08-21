@@ -10,6 +10,7 @@
     #include <QtCore/QObject>
 
     #include <memory>
+    #include <string_view>
 
 namespace contour::platform
 {
@@ -59,6 +60,9 @@ constexpr auto OpenUriPortalInterface = QLatin1StringView("org.freedesktop.porta
 /// The fallback for a portal that answers with an error is xdg-open, NOT QDesktopServices::openUrl
 /// -- which on Qt 6.10+ would put the blocking call straight back. It is only ever reached after a
 /// reply has arrived, so the portal is by then known to be responsive and merely refusing.
+///
+/// A `file:` URL never reaches the portal at all: OpenURI rejects those by specification and OpenFile,
+/// the method that takes them, wants a file descriptor rather than a URI. @see openUrl().
 class PortalExternalLauncher final: public QObject, public ExternalLauncher
 {
     Q_OBJECT
@@ -74,10 +78,21 @@ class PortalExternalLauncher final: public QObject, public ExternalLauncher
                            QObject* parent = nullptr);
 
     [[nodiscard]] std::expected<void, LaunchError> openUrl(QUrl const& url) override;
-    bool runDetached(QString const& program, QStringList const& arguments) override;
-    int execute(QString const& program, QStringList const& arguments) override;
+    [[nodiscard]] std::expected<void, SpawnError> runDetached(QString const& program,
+                                                              QStringList const& arguments) override;
+    [[nodiscard]] std::expected<int, SpawnError> execute(QString const& program,
+                                                         QStringList const& arguments) override;
 
   private:
+    /// Hands @p url to the fallback opener, saying @p why in the launcher log.
+    ///
+    /// Reached from two places that must read alike: a portal that refused, and a `file:` URL the
+    /// portal's OpenURI would refuse by specification.
+    ///
+    /// @param url The resource to open.
+    /// @param why What sent it here rather than to the portal.
+    void openWithFallback(QUrl const& url, std::string_view why);
+
     /// How a portal method call is issued.
     PortalCaller _call;
 

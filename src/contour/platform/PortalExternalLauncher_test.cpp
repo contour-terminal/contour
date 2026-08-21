@@ -68,13 +68,31 @@ TEST_CASE("buildOpenUriArguments carries the OpenURI signature", "[contour][laun
     CHECK(arguments.at(2).toMap().isEmpty());
 }
 
-TEST_CASE("buildOpenUriArguments passes a local file through as a file:// URI", "[contour][launcher]")
+TEST_CASE("buildOpenUriArguments encodes a local file as a file:// URI", "[contour][launcher]")
 {
-    // OpenFileManager and the $EDITOR path both arrive as file:// URLs, and the portal resolves them
-    // host-side -- which is what lets a sandboxed Contour open a directory it cannot itself see.
+    // The builder is a pure encoder and says nothing about which method the URI is fit for; that a
+    // file: URI must not be sent to OpenURI at all is openUrl()'s decision, pinned below.
     auto const arguments = buildOpenUriArguments(QUrl::fromLocalFile(QStringLiteral("/tmp/some dir")));
 
     CHECK(uriOf(arguments) == "file:///tmp/some%20dir");
+}
+
+TEST_CASE("a local file skips the portal entirely", "[contour][launcher]")
+{
+    // OpenURI rejects file: URIs by specification ("To request opening local files, use OpenFile"),
+    // and OpenFile wants a file descriptor rather than a URI. So OpenFileManager and openDocument --
+    // both of which arrive as file:// URLs -- would spend a round trip to be refused and then reach
+    // xdg-open anyway. They go straight there instead, with no portal call recorded.
+    auto fixture = Fixture {};
+
+    auto const dispatched = fixture.launcher->openUrl(QUrl::fromLocalFile(QStringLiteral("/tmp/some dir")));
+
+    CHECK(dispatched.has_value());
+    CHECK(fixture.portal.calls.empty());
+    REQUIRE(fixture.processes->detached.size() == 1);
+    CHECK(fixture.processes->detached.front().program == QStringLiteral("xdg-open"));
+    CHECK(fixture.processes->detached.front().arguments
+          == QStringList { QStringLiteral("file:///tmp/some%20dir") });
 }
 
 TEST_CASE("openUrl dispatches without waiting for the portal", "[contour][launcher]")
@@ -148,6 +166,22 @@ TEST_CASE("a portal that refuses is answered late, not returned as an error", "[
     CHECK(fixture.processes->detached.front().program == QStringLiteral("xdg-open"));
     CHECK(fixture.processes->detached.front().arguments
           == QStringList { QStringLiteral("https://contour-terminal.org/") });
+}
+
+TEST_CASE("a fallback that will not start either is reported, not retried", "[contour][launcher]")
+{
+    // The last branch there is: the portal refused AND xdg-open could not be started. Nothing is left
+    // to try, so it must say so once and stop -- not loop back to the portal it just heard from.
+    auto fixture = Fixture {};
+    fixture.processes->detachedError = contour::platform::SpawnError::NotFound;
+
+    CHECK(fixture.launcher->openUrl(QUrl(QStringLiteral("https://contour-terminal.org/"))).has_value());
+    REQUIRE(fixture.portal.calls.size() == 1);
+
+    fixture.portal.completeCall(0, CallOutcome::Failed);
+
+    CHECK(fixture.portal.calls.size() == 1);        // no second portal call
+    CHECK(fixture.processes->detached.size() == 1); // and no second spawn
 }
 
 #endif // defined(__linux__)
