@@ -2975,8 +2975,7 @@ void Terminal::answerScreenshot(screenshot::Request const& request, screenshot::
         // Permitted, but the pixels are the renderer's to make. A frontend that declines leaves nobody
         // able to produce them, which is Unavailable rather than Denied: nothing refused the read.
         if (_eventListener.renderScreenshot(request) == screenshot::Disposition::Unhandled)
-            answerScreenshot(request,
-                             std::unexpected { screenshot::Status::Unavailable });
+            answerScreenshot(request, std::unexpected { screenshot::Status::Unavailable });
         return;
     }
 

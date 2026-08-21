@@ -274,8 +274,8 @@ TEST_CASE("Screenshot.reply.echoes_the_pixel_extent_of_a_renderer_format", "[scr
         Request { .id = 1,
                   .area = Rect { .top = Top(0), .left = Left(0), .bottom = Bottom(1), .right = Right(3) },
                   .format = Format::Sixel };
-    auto const capture = Capture { .content = "\033P7;1;0q\"1;1;8;8\033\\",
-                                   .pixelSize = ImageSize { Width(8), Height(8) } };
+    auto const capture =
+        Capture { .content = "\033P7;1;0q\"1;1;8;8\033\\", .pixelSize = ImageSize { Width(8), Height(8) } };
     auto const messages = collect([&](auto const& sink) { writeReply(request, capture, sink); });
 
     REQUIRE(messages.size() == 2);

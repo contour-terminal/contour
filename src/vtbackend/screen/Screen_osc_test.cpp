@@ -1040,12 +1040,11 @@ TEST_CASE("screenshot.OSC533.denied", "[screen][screenshot]")
     mock.writeToScreen("abcd\r\nefgh");
     mock.discardPendingReplies();
 
-    auto const request = screenshot::Request { .id = 8,
-                                               .area = Rect { .top = Top(0),
-                                                              .left = Left(0),
-                                                              .bottom = Bottom(1),
-                                                              .right = Right(3) },
-                                               .format = screenshot::Format::PlainText };
+    auto const request = screenshot::Request {
+        .id = 8,
+        .area = Rect { .top = Top(0), .left = Left(0), .bottom = Bottom(1), .right = Right(3) },
+        .format = screenshot::Format::PlainText
+    };
     mock.terminal.answerScreenshot(request, screenshot::Decision::Denied);
     CHECK(mock.terminal.peekInput() == "\033^533;8;2\033\\");
 
