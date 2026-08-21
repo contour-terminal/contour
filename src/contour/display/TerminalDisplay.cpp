@@ -5,6 +5,7 @@
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/ImeQueryRect.hpp>
 #include <contour/display/Logging.hpp>
+#include <contour/display/QImageBridge.hpp>
 #include <contour/display/RhiRenderer.hpp>
 #include <contour/display/ScreenshotAnswer.hpp>
 #include <contour/display/ScreenshotEncoder.hpp>
@@ -405,21 +406,9 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
             if (image.isNull())
                 return std::nullopt;
 
-            image = image.convertToFormat(QImage::Format_RGBA8888);
-
-            size = vtbackend::ImageSize { vtbackend::Width::cast_from(image.width()),
-                                          vtbackend::Height::cast_from(image.height()) };
-
-            auto const rowBytes = static_cast<size_t>(image.width()) * 4;
-            vtbackend::Image::Data pixels;
-            pixels.resize(static_cast<size_t>(image.height()) * rowBytes);
-            auto* p = pixels.data();
-            for (auto const row: std::views::iota(0, image.height()))
-            {
-                memcpy(p, image.constScanLine(row), rowBytes);
-                p += rowBytes;
-            }
-            return pixels;
+            image = toWireFormat(image);
+            size = extentOf(image);
+            return tightlyPackedRgba(image);
         });
 
     emit sessionChanged(newSession);

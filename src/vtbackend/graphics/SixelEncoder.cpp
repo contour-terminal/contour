@@ -50,12 +50,22 @@ namespace
 
     /// One palette entry, held as the three percentages the wire carries.
     ///
-    /// Colors are compared in this space rather than in 8-bit, so two colors the wire cannot tell
+    /// Deliberately NOT an RGBColor, whose channels are 0..255 levels: these are 0..100 percentages,
+    /// and a type that says "color" while holding a different unit is how a conversion goes missing.
+    struct PaletteColor
+    {
+        uint8_t red = 0;
+        uint8_t green = 0;
+        uint8_t blue = 0;
+    };
+
+    /// Colors are keyed in percent space rather than in 8-bit, so two colors the wire cannot tell
     /// apart occupy one register instead of two -- which is what keeps a truecolor-shaded screen
     /// inside the palette that would otherwise overflow it.
-    [[nodiscard]] constexpr uint32_t packPercent(uint8_t red, uint8_t green, uint8_t blue) noexcept
+    [[nodiscard]] constexpr uint32_t keyOf(PaletteColor color) noexcept
     {
-        return (static_cast<uint32_t>(red) << 16) | (static_cast<uint32_t>(green) << 8) | blue;
+        return (static_cast<uint32_t>(color.red) << 16) | (static_cast<uint32_t>(color.green) << 8)
+               | color.blue;
     }
 
     /// @return The bucket @p channel falls in, for a cut of @p levels even steps.
@@ -75,7 +85,7 @@ namespace
     struct IndexedImage
     {
         std::vector<uint16_t> indices;
-        std::vector<uint32_t> palette;
+        std::vector<PaletteColor> palette;
     };
 
     /// Indexes @p rgba against the fixed cut described above, which always fits.
@@ -88,9 +98,10 @@ namespace
         for (auto const red: std::views::iota(0u, RedLevels))
             for (auto const green: std::views::iota(0u, GreenLevels))
                 for (auto const blue: std::views::iota(0u, BlueLevels))
-                    result.palette.push_back(packPercent(toPercent(bucketColor(red, RedLevels)),
-                                                         toPercent(bucketColor(green, GreenLevels)),
-                                                         toPercent(bucketColor(blue, BlueLevels))));
+                    result.palette.push_back(
+                        PaletteColor { .red = toPercent(bucketColor(red, RedLevels)),
+                                       .green = toPercent(bucketColor(green, GreenLevels)),
+                                       .blue = toPercent(bucketColor(blue, BlueLevels)) });
 
         for (auto const pixel: std::views::iota(size_t { 0 }, pixelCount))
         {
@@ -123,10 +134,11 @@ namespace
             if (channels[3] < OpaqueEnough)
                 continue;
 
-            auto const color =
-                packPercent(toPercent(channels[0]), toPercent(channels[1]), toPercent(channels[2]));
+            auto const color = PaletteColor { .red = toPercent(channels[0]),
+                                              .green = toPercent(channels[1]),
+                                              .blue = toPercent(channels[2]) };
 
-            if (auto const known = registerOf.find(color); known != registerOf.end())
+            if (auto const known = registerOf.find(keyOf(color)); known != registerOf.end())
             {
                 result.indices[pixel] = known->second;
                 continue;
@@ -139,7 +151,7 @@ namespace
 
             auto const assigned = static_cast<uint16_t>(result.palette.size());
             result.palette.push_back(color);
-            registerOf.emplace(color, assigned);
+            registerOf.emplace(keyOf(color), assigned);
             result.indices[pixel] = assigned;
         }
 
@@ -195,7 +207,7 @@ string encodeSixel(std::span<uint8_t const> rgba, ImageSize size)
     for (auto const entry: std::views::iota(size_t { 0 }, image.palette.size()))
     {
         auto const color = image.palette[entry];
-        out += std::format("#{};2;{};{};{}", entry, (color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF);
+        out += std::format("#{};2;{};{};{}", entry, color.red, color.green, color.blue);
     }
 
     // One column mask per palette register, refilled per band. Filling them in a single pass over the

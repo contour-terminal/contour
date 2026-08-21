@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/display/QImageBridge.hpp>
 #include <contour/display/ScreenshotEncoder.hpp>
 
 #include <vtbackend/graphics/SixelEncoder.hpp>
@@ -7,9 +8,7 @@
 #include <QtCore/QByteArray>
 
 #include <cstddef>
-#include <cstdint>
 #include <string>
-#include <vector>
 
 using vtbackend::screenshot::Capture;
 using vtbackend::screenshot::CaptureResult;
@@ -21,37 +20,6 @@ namespace contour::display
 
 namespace
 {
-    /// The image the wire formats are defined in terms of: 8 bits per channel, straight (not
-    /// premultiplied) alpha, rows top to bottom. The readback hands over premultiplied pixels, so this
-    /// is a real conversion and not a relabelling -- a PNG written from premultiplied data has every
-    /// translucent pixel too dark.
-    constexpr auto WireFormat = QImage::Format_RGBA8888;
-
-    /// Copies @p image out row by row rather than in one block: QImage pads rows to its own alignment,
-    /// so bytesPerLine() is not width*4 in general, while encodeSixel() wants them tightly packed.
-    [[nodiscard]] std::vector<uint8_t> tightlyPackedRgba(QImage const& image)
-    {
-        auto const rowSize = static_cast<size_t>(image.width()) * 4;
-        auto out = std::vector<uint8_t> {};
-        out.reserve(rowSize * static_cast<size_t>(image.height()));
-
-        for (auto y = 0; y < image.height(); ++y)
-        {
-            auto const* const row = image.constScanLine(y);
-            out.insert(out.end(), row, row + rowSize);
-        }
-
-        return out;
-    }
-
-    /// The image's own extent, which is what the reply's Pw/Ph carry -- and not the region's extent in
-    /// cells times the cell size, because the crop may have been clipped to the frame.
-    [[nodiscard]] vtbackend::ImageSize extentOf(QImage const& image) noexcept
-    {
-        return vtbackend::ImageSize { vtbackend::Width::cast_from(image.width()),
-                                      vtbackend::Height::cast_from(image.height()) };
-    }
-
     [[nodiscard]] CaptureResult encodePng(QImage const& image)
     {
         auto bytes = QByteArray {};
@@ -70,9 +38,9 @@ QRect pixelRectOf(vtbackend::Rect area, vtrasterizer::GridMetrics const& metrics
                                             vtbackend::ColumnOffset::cast_from(area.left));
 
     // Both corners are inclusive, so the bottom-right cell is part of the region: the exclusive edge is
-    // one cell further on.
-    auto const bottomRight = metrics.mapTopLeft(vtbackend::LineOffset::cast_from(unbox(area.bottom) + 1),
-                                                vtbackend::ColumnOffset::cast_from(unbox(area.right) + 1));
+    // one cell further on, which is what mapBottomLeft() names for the line.
+    auto const bottomRight = metrics.mapBottomLeft(vtbackend::LineOffset::cast_from(area.bottom),
+                                                   vtbackend::ColumnOffset::cast_from(unbox(area.right) + 1));
 
     return QRect { QPoint { topLeft.x, topLeft.y }, QPoint { bottomRight.x - 1, bottomRight.y - 1 } };
 }
@@ -98,7 +66,7 @@ CaptureResult encodeScreenshot(QImage const& frame,
     if (cropped.isNull())
         return std::unexpected { Status::Unavailable };
 
-    auto const image = cropped.convertToFormat(WireFormat);
+    auto const image = toWireFormat(cropped);
     if (image.isNull())
         return std::unexpected { Status::Unavailable };
 
