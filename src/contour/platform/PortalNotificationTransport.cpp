@@ -7,9 +7,6 @@
 
     #include <QtCore/QTimer>
     #include <QtCore/QUuid>
-    #include <QtDBus/QDBusMessage>
-    #include <QtDBus/QDBusPendingCallWatcher>
-    #include <QtDBus/QDBusPendingReply>
 
     #include <array>
     #include <atomic>
@@ -21,12 +18,11 @@ namespace contour::platform
 
 namespace
 {
-    // The portal is always at this one name, path and interface -- it is the sandbox's single
-    // entry point, so there is nothing to discover.
+    // The service and path are the portal's own; the interface is this transport's.
     constexpr auto PortalSource = DBusSignalSource {
-        .service = QLatin1StringView("org.freedesktop.portal.Desktop"),
-        .path = QLatin1StringView("/org/freedesktop/portal/desktop"),
-        .interface = QLatin1StringView("org.freedesktop.portal.Notification"),
+        .service = PortalService,
+        .path = PortalPath,
+        .interface = NotificationPortalInterface,
     };
 
     // The freedesktop close reason reported for an assumed close. There is no "we guessed" reason
@@ -73,39 +69,6 @@ DelayScheduler qtDelayScheduler()
         // Bound to the context object, so a transport destroyed with a timer pending takes the
         // timer with it and the action -- which reaches back into that transport -- never runs.
         QTimer::singleShot(delay, context, std::move(action));
-    };
-}
-
-PortalCaller qtPortalCaller()
-{
-    return [bus = QDBusConnection::sessionBus()](QObject* context,
-                                                 QLatin1StringView method,
-                                                 QVariantList const& arguments,
-                                                 std::function<void(CallOutcome)> onReply) {
-        auto message = QDBusMessage::createMethodCall(
-            PortalSource.service, PortalSource.path, PortalSource.interface, method);
-        message.setArguments(arguments);
-
-        auto pending = bus.asyncCall(message, DBusCallTimeoutMilliseconds);
-        if (!onReply)
-            return; // Sent and forgotten: nothing in this reply is acted on.
-
-        // Parented to the context, so a transport destroyed with a call in flight takes its watcher
-        // with it and the handler -- which reaches back into that transport -- is never run.
-        auto* const watcher = new QDBusPendingCallWatcher(pending, context);
-        QObject::connect(
-            watcher, &QDBusPendingCallWatcher::finished, context, [onReply = std::move(onReply)](auto* self) {
-                // AddNotification returns nothing, so there is no value to read -- only whether it
-                // arrived at all.
-                auto const reply = QDBusPendingReply<>(*self);
-                self->deleteLater();
-
-                if (reply.isError())
-                    notifierLog()("Portal notification call failed: {}",
-                                  reply.error().message().toStdString());
-
-                onReply(reply.isError() ? CallOutcome::Failed : CallOutcome::Accepted);
-            });
     };
 }
 

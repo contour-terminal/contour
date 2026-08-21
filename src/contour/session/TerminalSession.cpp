@@ -1021,8 +1021,7 @@ void TerminalSession::openDocument(std::string_view fileOrUrl)
             url = QUrl::fromLocalFile(fileInfo.absoluteFilePath());
     }
 
-    if (!_app.externalLauncher().openUrl(url))
-        errorLog()("Could not open document \"{}\".", fileOrUrl);
+    openExternally(url, "document", fileOrUrl);
 }
 
 void TerminalSession::inspect()
@@ -2443,8 +2442,12 @@ bool TerminalSession::operator()(actions::OpenConfiguration event)
         return true;
     }
 
-    if (!_app.externalLauncher().openUrl(QUrl(QString::fromUtf8(_config.configFile.string().c_str()))))
-        errorLog()("Could not open configuration file \"{}\".", _config.configFile.generic_string());
+    // fromLocalFile(), not QUrl(path): a bare filesystem path is not a URL. On POSIX it parses as a
+    // scheme-less relative reference and on Windows `C:\...` parses with scheme "c", so the desktop
+    // was handed something no handler could claim. The two sibling openers here already do this.
+    openExternally(QUrl::fromLocalFile(QString::fromStdString(_config.configFile.string())),
+                   "configuration file",
+                   _config.configFile.generic_string());
 
     return true;
 }
@@ -2467,8 +2470,7 @@ bool TerminalSession::operator()(actions::OpenFileManager)
         return true;
     }
 
-    if (!_app.externalLauncher().openUrl(QUrl::fromLocalFile(QString::fromStdString(resolved->path))))
-        errorLog()("Could not open folder \"{}\".", resolved->path);
+    openExternally(QUrl::fromLocalFile(QString::fromStdString(resolved->path)), "folder", resolved->path);
 
     return true;
 }
@@ -2476,8 +2478,8 @@ bool TerminalSession::operator()(actions::OpenFileManager)
 bool TerminalSession::operator()(actions::OpenSelection)
 {
     crispy::locked(_terminal, [&]() {
-        (void) _app.externalLauncher().openUrl(
-            QUrl(QString::fromUtf8(terminal().extractSelectionText().c_str())));
+        auto const selection = terminal().extractSelectionText();
+        openExternally(QUrl(QString::fromStdString(selection)), "selection", selection);
     });
     return true;
 }
@@ -3367,7 +3369,11 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
         sessionLog()("spawning new process");
         auto const command = buildSpawnTerminalCommand(
             _app.programPath(), _config.configFile.generic_string(), profileName, wd, _localHostName);
-        _app.externalLauncher().runDetached(command.program, command.arguments);
+        if (auto const spawned = _app.externalLauncher().runDetached(command.program, command.arguments);
+            !spawned)
+            errorLog()("Could not spawn \"{}\": {}.",
+                       command.program.toStdString(),
+                       platform::describe(spawned.error()));
     }
     else
     {
@@ -3696,6 +3702,12 @@ bool TerminalSession::resetConfig()
     return reloadConfig(defaultConfig, defaultConfig.defaultProfileName.value());
 }
 
+void TerminalSession::openExternally(QUrl const& url, std::string_view what, std::string_view subject)
+{
+    if (auto const opened = _app.externalLauncher().openUrl(url); !opened)
+        errorLog()("Could not open {} \"{}\": {}.", what, subject, platform::describe(opened.error()));
+}
+
 void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
 {
     auto url = QUrl(QString::fromStdString(hyperlink.uri));
@@ -3725,12 +3737,17 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
             if (!fileInfo.isExecutable())
                 args << editorEnv;
             args << localPath;
-            _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
+            if (auto const ran =
+                    _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
+                !ran)
+                errorLog()("Could not open \"{}\" in an editor: {}.",
+                           localPath.toStdString(),
+                           platform::describe(ran.error()));
             return;
         }
     }
 
-    (void) _app.externalLauncher().openUrl(url);
+    openExternally(url, "hyperlink", url.toString().toStdString());
 }
 
 void TerminalSession::onConfigReload()

@@ -907,6 +907,17 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool resetConfig();
     void followHyperlink(vtbackend::HyperlinkInfo const& hyperlink);
 
+    /// Hands @p url to the desktop's handler, logging why nothing happened when it will not go.
+    ///
+    /// One place rather than one per action: five actions open something, they all report the same
+    /// way, and openUrl() only DISPATCHES -- so what is logged here is a request that was rejected
+    /// outright, never a handler that failed later. @see platform::ExternalLauncher::openUrl.
+    ///
+    /// @param url     The resource to open.
+    /// @param what    What it is, for the log line ("document", "folder", "hyperlink", ...).
+    /// @param subject How to name it -- the user's own spelling, which is not always @p url's.
+    void openExternally(QUrl const& url, std::string_view what, std::string_view subject);
+
     /// Copies @p part of the most recently finished shell command into the clipboard.
     /// @param part Which part of the command block to copy.
     /// @return false when the scrollback holds no finished command (no OSC 133 shell integration).

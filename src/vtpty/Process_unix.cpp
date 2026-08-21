@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
+#include <vtpty/SandboxInfo.hpp>
 #include <vtpty/UnixPty.hpp>
 
 #include <crispy/Environment.hpp>
@@ -225,8 +226,9 @@ Process::Process(string const& path,
 
 bool Process::isFlatpak()
 {
-    static bool const check = fs::exists("/.flatpak-info");
-    return check;
+    // The narrow half of what currentSandbox() reads, rather than a second look at the same file:
+    // one reader, one memo, one answer. @see SandboxInfo.hpp.
+    return currentSandbox().state == SandboxState::Flatpak;
 }
 
 StartResult Process::start()

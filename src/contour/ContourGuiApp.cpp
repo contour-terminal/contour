@@ -9,7 +9,6 @@
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/GuiTheme.hpp>
-#include <contour/platform/QtExternalLauncher.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
@@ -122,8 +121,7 @@ ContourGuiApp::ContourGuiApp(crispy::Environment const& env,
     _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
         sessionFactory ? std::move(sessionFactory) : std::make_unique<session::AppSessionFactory>(*this))),
     _routingFactory(static_cast<remote::RoutingSessionFactory*>(_sessionFactory.get())),
-    _externalLauncher(externalLauncher ? std::move(externalLauncher)
-                                       : std::make_unique<platform::QtExternalLauncher>()),
+    _externalLauncher(externalLauncher ? std::move(externalLauncher) : platform::makeExternalLauncher()),
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<config::FileLayoutStore>()),
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
                                              : std::make_unique<command::FileCommandHistoryStore>()),

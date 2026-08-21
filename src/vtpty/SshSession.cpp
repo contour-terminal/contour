@@ -19,6 +19,8 @@
 
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
+#include <vtpty/SandboxInfo.hpp>
+#include <vtpty/SshFailureMessage.hpp>
 
 #include <crispy/Escape.hpp>
 #include <crispy/Utils.hpp>
@@ -567,8 +569,7 @@ bool SshSession::requestPty()
     }
     if (rc != LIBSSH2_ERROR_NONE)
     {
-        logError("Failed to request PTY. {}", libssl2ErrorString(rc));
-        setState(State::Failure);
+        fail("Failed to request PTY. {}", libssl2ErrorString(rc));
         return false;
     }
     setState(State::SetEnv);
@@ -629,7 +630,12 @@ void SshSession::resizeScreen()
 
 void SshSession::processState()
 {
-    waitForSocket();
+    // No waitForSocket() here. It used to open with `if (!_p->wantsWaitForSocket) return 0;`, which
+    // made this call a no-op except right after an EAGAIN; that flag is gone and the direction query
+    // now takes _mutex -- which every caller of this function already holds, so the first statement
+    // of start() deadlocked the GUI thread against itself before a single byte was sent. The idle
+    // wait belongs to the two callers that can take it: read() and write() both park on
+    // waitForSocket() with _mutex released, which is what its own comment says it is for.
     while (true)
     {
         switch (_state.load())
@@ -654,8 +660,9 @@ void SshSession::processState()
                 }
                 if (rc != LIBSSH2_ERROR_NONE)
                 {
-                    logError("Failed to establish SSH session. {}", libssl2ErrorString(rc));
-                    close();
+                    // fail() rather than close(): close() takes _mutex, which processState()'s
+                    // callers already hold, so reaching here used to deadlock the calling thread.
+                    fail("Failed to establish SSH session. {}", libssl2ErrorString(rc));
                     return;
                 }
 
@@ -675,20 +682,13 @@ void SshSession::processState()
                         setState(State::AuthenticateAgent);
                         break;
                     case HostkeyVerificationStatus::FailedWithMismatch:
-                        // TODO candidate of a future logErrorWithInject()
-                        logInfoWithInject("Host key mismatch. Connection aborted.");
-                        setState(State::Failure);
+                        fail("Host key mismatch. Connection aborted.");
                         break;
                     case HostkeyVerificationStatus::FailedByUserTrust:
-                        // TODO candidate of a future logErrorWithInject()
-                        logInfoWithInject("Host key Host key verification failed. Connection aborted.");
-                        setState(State::Failure);
+                        fail("Host key verification failed. Connection aborted.");
                         break;
                     case HostkeyVerificationStatus::FailedToReadKnownHosts:
-                        // TODO candidate of a future logErrorWithInject()
-                        logInfoWithInject("Failed to read known_hosts file \"{}\".",
-                                          _config.knownHostsFile.string());
-                        setState(State::Failure);
+                        fail("Failed to read known_hosts file \"{}\".", _config.knownHostsFile.string());
                         break;
                     case HostkeyVerificationStatus::WaitingForUserConfirmation:
                         logInfoWithInject("Waiting for user confirmation for host key.");
@@ -745,8 +745,7 @@ void SshSession::processState()
                 }
                 if (rc != LIBSSH2_ERROR_NONE)
                 {
-                    logError("Failed to open SSH channel. {}", libssl2ErrorString(rc));
-                    setState(State::Failure);
+                    fail("Failed to open SSH channel. {}", libssl2ErrorString(rc));
                     return;
                 }
                 assert(_p->sshChannel);
@@ -791,8 +790,7 @@ void SshSession::processState()
                 auto const rc = libssh2_channel_shell(_p->sshChannel);
                 if (rc != LIBSSH2_ERROR_NONE)
                 {
-                    logError("Failed to start shell. {}", libssl2ErrorString(rc));
-                    setState(State::Failure);
+                    fail("Failed to start shell. {}", libssl2ErrorString(rc));
                     return;
                 }
                 // Handshake done, so the blocking mode that carried it is no longer wanted: from here
@@ -832,10 +830,17 @@ StartResult SshSession::start()
     // Runs on the GUI thread while the PTY reader thread may already be in read(). @see _mutex.
     auto const _ = std::lock_guard { _mutex };
     setState(State::Started);
-    // Connecting is asynchronous and its failures are reported through the state machine (State::Closed
-    // plus a logged message), so there is nothing for start() itself to fail with: reaching Started IS
-    // the success this returns.
+
+    // processState() runs synchronously as far as the connection attempt, so a host that is not
+    // there, a name that does not resolve, or a sandbox with no network is already known when this
+    // returns -- and reporting it here is what lights up TerminalSession's "The terminal could not
+    // be started." notice, which SSH could not reach while start() always claimed success.
+    //
+    // Anything the machine has NOT decided yet is a success: a handshake that returned EAGAIN, or a
+    // host key waiting on the user, both leave the session alive and continuing on the reader thread.
     processState();
+    if (_state == State::Failure)
+        return std::unexpected(StartFailure { .error = StartError::ConnectFailed, .detail = _failureReason });
 
     /*
         if (!_p->sshClient.connect(_host, _port))
@@ -1080,6 +1085,10 @@ int SshSession::write(std::string_view buf)
         // subsequent write re-entered a corrupted session, which is how a single failure turned into
         // hundreds of identical log lines. Failure makes isClosed() true, so the next write
         // short-circuits with EPIPE and the reader tears the session down.
+        //
+        // The one State::Failure that does NOT go through fail(): this is reachable only long after
+        // start() returned, so there is no _failureReason for anyone to read back, and fail() would
+        // close the socket out from under the reader thread that is blocked on it right now.
         logError("Failed to write to SSH channel. {}", libssl2ErrorString(rv));
         setState(State::Failure);
         errno = EIO;
@@ -1200,16 +1209,37 @@ void SshSession::logError(std::string_view message) const
     errorLog()("{}", message);
 }
 
+void SshSession::logErrorWithInject(std::string_view message) const
+{
+    logError(message);
+    logInject(message);
+}
+
+void SshSession::fail(std::string reason)
+{
+    logErrorWithInject(reason);
+    _failureReason = std::move(reason);
+
+    if (_p->sshSocket.isOpen())
+        _p->sshSocket.close();
+
+    setState(State::Failure);
+}
+
 bool SshSession::connect(std::string_view host, int port)
 {
 #ifdef _WIN32
     WSADATA wsaData {};
     if (auto const wsaStartupCode = WSAStartup(MAKEWORD(2, 2), &wsaData); wsaStartupCode != 0)
     {
-        logError("WSAStartup failed with error: %d", wsaStartupCode);
+        fail("WSAStartup failed with error: {}", wsaStartupCode);
         return false;
     }
 #endif
+
+    // The reason the LAST address refused, for the message written once every one of them has. It
+    // outlives the try block because that is where the message is written.
+    auto lastConnectDetail = std::string {};
 
     try
     {
@@ -1222,10 +1252,12 @@ bool SshSession::connect(std::string_view host, int port)
         addrinfo* addrList = nullptr;
         if (auto const rc = getaddrinfo(host.data(), nullptr, &hints, &addrList); rc != 0) // NOLINT
         {
-            logError("Failed to resolve host \"{}\". {}", host, gai_strerror(rc));
+            fail(describeSshConnectFailure(
+                SshConnectStage::Resolve, currentSandbox().network, host, gai_strerror(rc)));
             return false;
         }
         auto const _ = crispy::Finally([&]() { freeaddrinfo(addrList); });
+
         for (addrinfo* addrEntry = addrList; addrEntry != nullptr; addrEntry = addrEntry->ai_next)
         {
             char addrStr[100] = {};
@@ -1265,19 +1297,24 @@ bool SshSession::connect(std::string_view host, int port)
                 return true;
             }
 
-            logError(
-                "Failed to connect to {}:{} ({})", addrStr, port, std::generic_category().message(errno));
-            addrEntry = addrEntry->ai_next;
+            // Per-address, so not yet terminal: another of the resolved addresses may answer. Only
+            // the fallthrough below, once every one of them has been tried, ends the session.
+            lastConnectDetail = std::generic_category().message(errno);
+            logError("Failed to connect to {}:{} ({})", addrStr, port, lastConnectDetail);
         }
     }
     catch (std::system_error const& e)
     {
-        logError("Failed to create socket. {}", e.what());
+        fail("Failed to create socket. {}", e.what());
         return false;
     }
 
-    logError("Failed to connect to {}:{}", host, port);
-    _p->sshSocket.close(); // Explicitly close socket, to indicate that we're not connected
+    // Every resolved address refused. fail() closes the socket, which is what tells the rest of this
+    // class that we are not connected.
+    fail(describeSshConnectFailure(SshConnectStage::Connect,
+                                   currentSandbox().network,
+                                   std::format("{}:{}", host, port),
+                                   lastConnectDetail));
     return false;
 }
 
@@ -1478,7 +1515,8 @@ void SshSession::authenticateWithPassword()
             setState(State::AuthenticatePasswordStart);
             return;
         }
-        setState(State::Failure);
+        fail(std::format(
+            "Authentication failed after {} attempts. {}", MaxPasswordTries, libssl2ErrorString(rc)));
         return;
     }
 
@@ -1495,13 +1533,18 @@ bool SshSession::authenticateWithAgent()
         if (!_p->sshAgent)
         {
             logError("Failed to initialize SSH agent.");
+            fallBackFromAgent();
             return false;
         }
 
+        // libssh2 reads $SSH_AUTH_SOCK itself, so this is where an absent or unreachable agent
+        // surfaces -- and inside a Flatpak that is the normal case, the variable naming a host path
+        // under /run/user/<uid>/ that the sandbox does not mount.
         int rc = libssh2_agent_connect(_p->sshAgent);
         if (rc != LIBSSH2_ERROR_NONE)
         {
             logError("Failed to connect to SSH agent. {}", libssl2ErrorString(rc));
+            fallBackFromAgent();
             return false;
         }
 
@@ -1509,6 +1552,7 @@ bool SshSession::authenticateWithAgent()
         if (rc != LIBSSH2_ERROR_NONE)
         {
             logError("Failed to list SSH identities. {}", libssl2ErrorString(rc));
+            fallBackFromAgent();
             return false;
         }
 
@@ -1545,6 +1589,12 @@ bool SshSession::authenticateWithAgent()
     }
 
     logError("Failed to authenticate with SSH agent. No more identities available.");
+    fallBackFromAgent();
+    return false;
+}
+
+void SshSession::fallBackFromAgent()
+{
     if (!_config.privateKeyFile.empty())
         setState(State::AuthenticatePrivateKeyStart);
     else
@@ -1552,7 +1602,6 @@ bool SshSession::authenticateWithAgent()
         setState(State::AuthenticatePasswordStart);
         _walkIndex = 0;
     }
-    return false;
 }
 
 } // namespace vtpty

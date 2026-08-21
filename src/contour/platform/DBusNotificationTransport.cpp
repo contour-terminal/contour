@@ -4,6 +4,7 @@
     #include <contour/Logging.hpp>
     #include <contour/platform/DBusNotificationTransport.hpp>
     #include <contour/platform/DBusSignalSubscription.hpp>
+    #include <contour/platform/PortalCall.hpp>
 
     #include <QtCore/QStringList>
     #include <QtCore/QVariantMap>

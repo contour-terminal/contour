@@ -190,6 +190,15 @@ class SshSession final: public Pty
     void hostkeyVerificationResultCallback(bool accepted);
 
     bool authenticateWithAgent();
+
+    /// Moves to whichever authentication method follows the agent.
+    ///
+    /// Reached both when the agent has no more identities to offer and when there was never an agent
+    /// to ask -- the case inside a Flatpak, where $SSH_AUTH_SOCK names a host path the sandbox does
+    /// not mount. Those failures used to return with the state still on AuthenticateAgent, so the
+    /// next read re-entered the same case and libssh2_agent_get_identity() was called on an agent
+    /// that had never connected.
+    void fallBackFromAgent();
     void authenticateWithPrivateKey();
     void authenticateWithPassword();
 
@@ -232,7 +241,36 @@ class SshSession final: public Pty
         logError(std::format(fmt, std::forward<Args>(args)...));
     }
 
+    /// Reports @p message to the error log AND onto the screen.
+    ///
+    /// logError() alone reaches only the error log, which is off by default -- so every way an SSH
+    /// session could fail to come up used to be invisible, and the user saw the session layer's
+    /// generic "Shell terminated too quickly." with no host, port or reason in it. The three
+    /// `// TODO candidate of a future logErrorWithInject()` comments in the source named this.
+    void logErrorWithInject(std::string_view message) const;
+
+    /// Ends this session with @p reason: reports it, records it, and moves to State::Failure.
+    ///
+    /// Recording matters because start() reads the reason back: processState() runs synchronously
+    /// far enough to attempt the connection, so a host that is not there is known BEFORE start()
+    /// returns, and can be reported as the StartFailure the session layer already knows how to show.
+    ///
+    /// The socket is closed directly rather than through close(), which takes _mutex -- and every
+    /// caller of this already holds it, processState() running under the lock in both start() and
+    /// read(). @see _mutex.
+    void fail(std::string reason);
+
+    template <typename... Args>
+    void fail(std::format_string<Args...> fmt, Args&&... args)
+    {
+        fail(std::format(fmt, std::forward<Args>(args)...));
+    }
+
     SshHostConfig _config;
+
+    /// Why this session failed, for start() to hand back. Empty until something fails.
+    std::string _failureReason;
+
     std::optional<bool> _hostkeyVerified = std::nullopt;
     SshHostkeyVerificationRequestCallback _hostkeyRequestCallback;
 

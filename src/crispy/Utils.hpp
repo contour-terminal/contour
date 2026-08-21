@@ -152,15 +152,37 @@ namespace views
 
 using views::joinWith;
 
+/// The ASCII whitespace trimRight(), trimLeft() and trim() strip.
+constexpr auto Whitespace = std::string_view { " \t\r\n" };
+
+/// @return @p value without its trailing whitespace.
 constexpr std::string_view trimRight(std::string_view value) noexcept
 {
     while (!value.empty())
     {
-        if (!std::string_view(" \t\r\n").contains(value.back()))
+        if (!Whitespace.contains(value.back()))
             return value;
         value.remove_suffix(1);
     }
     return value;
+}
+
+/// @return @p value without its leading whitespace.
+constexpr std::string_view trimLeft(std::string_view value) noexcept
+{
+    while (!value.empty())
+    {
+        if (!Whitespace.contains(value.front()))
+            return value;
+        value.remove_prefix(1);
+    }
+    return value;
+}
+
+/// @return @p value without its leading or trailing whitespace.
+constexpr std::string_view trim(std::string_view value) noexcept
+{
+    return trimLeft(trimRight(value));
 }
 
 template <typename T>

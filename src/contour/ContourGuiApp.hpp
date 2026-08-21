@@ -98,7 +98,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       an in-memory factory (e.g. MockPty-backed) to run session-creation
     ///                       paths headlessly.
     /// @param externalLauncher Opens URLs / spawns child processes for a session. Null (the default)
-    ///                       wires the production QtExternalLauncher; tests pass a recording launcher
+    ///                       wires whatever makeExternalLauncher() offers; tests pass a recording launcher
     ///                       to assert open-document / follow-hyperlink / spawn routing without
     ///                       actually launching anything.
     /// @param layoutStore    Persistence for named layouts (SaveLayout). Null (the default) wires the

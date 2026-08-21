@@ -29,15 +29,6 @@ struct DBusSignalSubscription
     char const* slot = nullptr;
 };
 
-/// How long a D-Bus method call to a notification service may stay outstanding, in milliseconds.
-///
-/// Deliberately below Qt's 25-second default: losing a reply costs only the replace-in-place
-/// bookkeeping for that one notification, and several of these calls do not read their reply at
-/// all. A desktop that is not answering must not be able to hold anything of ours open. @see
-/// issue #2051, and the wedged-bus harness at test/e2e/notification-nonblocking.sh that holds
-/// both transports to it.
-constexpr auto DBusCallTimeoutMilliseconds = 5000;
-
 /// The one service, path and interface a set of subscriptions is addressed with.
 struct DBusSignalSource
 {

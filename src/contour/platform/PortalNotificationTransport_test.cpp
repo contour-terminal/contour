@@ -16,6 +16,7 @@
 
     #include <contour/platform/PortalNotificationTransport.hpp>
     #include <contour/test/NotificationFixtures.hpp>
+    #include <contour/test/PortalFixtures.hpp>
 
     #include <QtCore/QMetaObject>
 
@@ -38,14 +39,6 @@ using namespace std::chrono_literals;
 namespace
 {
 
-/// One recorded portal method call, with the reply the test has yet to deliver.
-struct PortalCall
-{
-    QString method;
-    QVariantList arguments;
-    std::function<void(CallOutcome)> onReply;
-};
-
 /// One scheduled delayed action, with the timer the test has yet to fire.
 struct ScheduledAction
 {
@@ -55,23 +48,14 @@ struct ScheduledAction
 
 /// Everything the transport reached for, and nothing it was given back unasked.
 ///
-/// Deliberately not a mock framework: the recorded vectors ARE the assertions. Nothing replies or
-/// fires on its own, which is how a test observes that the transport records a notification only
-/// once the portal ACCEPTED it, and assumes a close only once the delay actually elapsed.
-struct Recorder
+/// The portal half comes from the shared recorder every portal-speaking class's tests use; what is
+/// added here is the delay, which only this transport has. Deliberately not a mock framework: the
+/// recorded vectors ARE the assertions. Nothing replies or fires on its own, which is how a test
+/// observes that the transport records a notification only once the portal ACCEPTED it, and assumes
+/// a close only once the delay actually elapsed.
+struct Recorder: contour::test::RecordingPortalCaller
 {
-    std::vector<PortalCall> calls;
     std::vector<ScheduledAction> scheduled;
-
-    [[nodiscard]] contour::platform::PortalCaller caller()
-    {
-        return [this](QObject*,
-                      QLatin1StringView method,
-                      QVariantList arguments,
-                      std::function<void(CallOutcome)> onReply) {
-            calls.emplace_back(PortalCall { QString(method), std::move(arguments), std::move(onReply) });
-        };
-    }
 
     [[nodiscard]] contour::platform::DelayScheduler scheduler()
     {
@@ -79,9 +63,6 @@ struct Recorder
             scheduled.emplace_back(ScheduledAction { delay, std::move(action) });
         };
     }
-
-    /// Delivers the portal's reply for the call at @p index.
-    void completeCall(size_t index, CallOutcome outcome) { calls.at(index).onReply(outcome); }
 
     /// Fires the timer at @p index, as the event loop would once the delay elapsed.
     void fireScheduled(size_t index) { scheduled.at(index).action(); }
@@ -434,9 +415,11 @@ TEST_CASE("PortalNotificationTransport drives the real portal without waiting",
     // Built exactly as production does, against whatever session bus is there. @see
     // contour::test::checkReturnsWithoutWaiting for what this is guarding and why the bound is what
     // it is.
-    auto transport = PortalNotificationTransport {
-        10000ms, "contour-test", contour::platform::qtDelayScheduler(), contour::platform::qtPortalCaller()
-    };
+    auto transport = PortalNotificationTransport { 10000ms,
+                                                   "contour-test",
+                                                   contour::platform::qtDelayScheduler(),
+                                                   contour::platform::qtPortalCaller(
+                                                       contour::platform::NotificationPortalInterface) };
     transport.subscribe([](auto, auto, auto) {}, [](auto) {});
 
     contour::test::checkReturnsWithoutWaiting([&] {
@@ -445,10 +428,11 @@ TEST_CASE("PortalNotificationTransport drives the real portal without waiting",
         // close() short-circuits on an id it holds no mapping for, and on a bus that never answers
         // no mapping is ever recorded -- so the withdraw path is put on the wire through the caller
         // itself. Sending it, not skipping it, is what this case is here to time.
-        contour::platform::qtPortalCaller()(&transport,
-                                            QLatin1StringView("RemoveNotification"),
-                                            { QStringLiteral("contour-test/osc-real") },
-                                            {});
+        contour::platform::qtPortalCaller(contour::platform::NotificationPortalInterface)(
+            &transport,
+            QLatin1StringView("RemoveNotification"),
+            { QStringLiteral("contour-test/osc-real") },
+            {});
     });
 }
 
