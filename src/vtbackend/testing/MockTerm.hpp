@@ -234,7 +234,7 @@ class MockTerm: public Terminal::NullEvents
     {
         auto settings = vtbackend::Settings {};
         settings.pageSize = pageSize;
-        settings.maxHistoryLineCount = maxHistoryLineCount;
+        settings.historyLimits = maxHistoryLineCount;
         settings.ptyReadBufferSize = ptyReadBufferSize;
         settings.goodImageProtocol = true;
         settings.allowClipboardRead = true; // let tests exercise OSC 52 clipboard reads

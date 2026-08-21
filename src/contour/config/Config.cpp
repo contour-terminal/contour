@@ -463,7 +463,7 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
 {
     auto settings = vtbackend::Settings {};
     settings.pageSize = profile.terminalSize.value();
-    settings.maxHistoryLineCount = profile.history.value().maxHistoryLineCount;
+    settings.historyLimits = profile.history.value().maxHistoryLineCount;
     auto const& folding = config.folding.value();
     settings.foldMarkers = folding.markersVisible();
     settings.autoCollapseFoldOnNewCommand = folding.enabled && folding.autoCollapseOnNewCommand;

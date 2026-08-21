@@ -460,7 +460,7 @@ TEST_CASE("capture-pane -e preserves each cell's SGR rendition", "[vthost][contr
 TEST_CASE("capture-pane -S - includes scrollback beyond the visible page", "[vthost][control]")
 {
     auto settings = vtbackend::Settings {};
-    settings.maxHistoryLineCount = vtbackend::LineCount(1000);
+    settings.historyLimits = vtbackend::LineCount(1000);
     auto h = ControlHarness { {}, settings };
     h.host.createTab();
     auto* tab = h.host.model().window(h.host.windowId())->activeTab();

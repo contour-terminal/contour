@@ -129,14 +129,14 @@ namespace detail
 
 } // namespace detail
 // {{{ Grid impl
-Grid::Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount maxHistoryLineCount):
+Grid::Grid(PageSize pageSize, bool reflowOnResize, HistoryLimits historyLimits):
     _pageSize { pageSize },
     _reflowOnResize { reflowOnResize },
-    _historyLimit { maxHistoryLineCount },
+    _historyLimits { historyLimits },
     _lines { detail::createLines(
         pageSize,
-        [maxHistoryLineCount]() -> LineCount {
-            if (auto const* maxLineCount = std::get_if<LineCount>(&maxHistoryLineCount))
+        [capacity = historyLimits.capacity]() -> LineCount {
+            if (auto const* maxLineCount = std::get_if<LineCount>(&capacity))
                 return *maxLineCount;
             else
                 return LineCount::cast_from(0);
@@ -148,11 +148,11 @@ Grid::Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount maxHistor
     verifyState();
 }
 
-void Grid::setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount)
+void Grid::setHistoryLimits(HistoryLimits historyLimits)
 {
     verifyState();
     rezeroBuffers();
-    _historyLimit = maxHistoryLineCount;
+    _historyLimits = historyLimits;
 
     // Slots appear and vanish at the boundary between the page and the scrollback, NOT at the
     // ring's end.
@@ -415,7 +415,7 @@ LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defa
 {
     verifyState();
     auto const linesAvailable = LineCount::cast_from(_lines.size() - unbox<size_t>(_linesUsed));
-    if (std::holds_alternative<Infinite>(_historyLimit) && linesAvailable < linesCountToScrollUp)
+    if (std::holds_alternative<Infinite>(_historyLimits.capacity) && linesAvailable < linesCountToScrollUp)
     {
         auto const linesToAllocate = unbox(linesCountToScrollUp - linesAvailable);
 

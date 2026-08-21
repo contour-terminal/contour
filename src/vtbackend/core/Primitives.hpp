@@ -85,13 +85,70 @@ using ColumnOffset = boxed::boxed<int, detail::tags::ColumnOffset>;
 // }}}
 // {{{ Line types
 
-// clang-format off
 /// Special structure for infinite history of Grid
-struct Infinite {};
-// clang-format on
+///
+/// Comparable so MaxHistoryLineCount is: @ref HistoryLimits has to ask whether its two bounds are
+/// the same value, and a variant is only comparable if every alternative is.
+struct Infinite
+{
+    bool operator==(Infinite const&) const = default;
+};
 /// MaxHistoryLineCount represents type that are used to store number
 /// of lines that can be stored in history
 using MaxHistoryLineCount = std::variant<LineCount, Infinite>;
+
+/// The two bounds on the scrollback: what is guaranteed to survive, and what is possible at all.
+///
+/// One limit cannot express "evict whole commands". Snapping eviction to the shell's OSC 133 prompt
+/// marks means the buffer has to be allowed to overshoot the depth the user asked for, because the
+/// nearest prompt boundary is almost never exactly there -- so `guaranteed` becomes a floor rather
+/// than a ceiling, and `capacity` supplies the ceiling that keeps memory bounded when no boundary
+/// can be found at all (no shell integration, or one command whose output is larger than the whole
+/// headroom).
+///
+/// A struct rather than two parameters for the reason @ref ContextStackLimits is one: a third bound
+/// would be a field rather than a signature change, and the two must be validated against each other
+/// in one place.
+struct HistoryLimits
+{
+    /// The minimum retained. Block-atomic eviction never cuts below this.
+    MaxHistoryLineCount guaranteed { LineCount(0) };
+
+    /// The ring's size, and the depth at which eviction stops caring about command boundaries.
+    /// Never below @ref guaranteed.
+    MaxHistoryLineCount capacity { LineCount(0) };
+
+    /// One value is both bounds -- a scrollback with no headroom, which is what a single
+    /// `history.limit` has always meant and still means.
+    ///
+    /// Deliberately converting rather than explicit: this is not a bool-style anonymous enum but a
+    /// widening from "one limit" to "the same limit twice", and it is what every call site that
+    /// passes one number already says. Making it explicit would edit ~80 of them to say nothing new.
+    // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
+    constexpr HistoryLimits(MaxHistoryLineCount both) noexcept: guaranteed { both }, capacity { both } {}
+
+    /// Spelled out for both alternatives because the language will not chain two user-defined
+    /// conversions: `LineCount(1000)` reaching HistoryLimits through MaxHistoryLineCount is one step
+    /// too many, and every existing call site passes exactly that.
+    // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
+    constexpr HistoryLimits(LineCount both) noexcept: guaranteed { both }, capacity { both } {}
+
+    // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
+    constexpr HistoryLimits(Infinite both) noexcept: guaranteed { both }, capacity { both } {}
+
+    constexpr HistoryLimits(MaxHistoryLineCount guaranteed, MaxHistoryLineCount capacity) noexcept:
+        guaranteed { guaranteed }, capacity { capacity }
+    {
+    }
+
+    constexpr HistoryLimits() noexcept = default;
+
+    /// Whether eviction has room to snap to a command boundary. With no headroom there is nothing to
+    /// trade, and the scrollback evicts line-wise exactly as it always has.
+    [[nodiscard]] constexpr bool hasHeadroom() const noexcept { return guaranteed != capacity; }
+
+    bool operator==(HistoryLimits const&) const = default;
+};
 /// Represents the line offset relative to main-page top.
 ///
 /// *  0  is top-most line on main page

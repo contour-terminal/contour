@@ -175,13 +175,14 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @param pageSize            page size of this display. This is passed because it does not necessarily
     ///                            need to match the terminal's main display page size.
     /// @param reflowOnResize      whether or not to perform virtual line text reflow on resuze.
-    /// @param maxHistoryLineCount maximum number of lines that are can be scrolled back to via Viewport.
+    /// @param historyLimits       how deep this screen's scrollback is guaranteed to be, and how deep
+    ///                            it may ever get (@see HistoryLimits).
     /// @param name                name of this screen, used for logging purposes.
     Screen(Terminal& terminal,
            gsl::not_null<Margin*> margin,
            PageSize pageSize,
            bool reflowOnResize,
-           MaxHistoryLineCount maxHistoryLineCount,
+           HistoryLimits historyLimits,
            std::string_view name);
 
     Screen(Screen const&) = delete;

@@ -49,7 +49,7 @@ struct Settings
     // some other display is shown along with it (e.g. below the main display).
     PageSize pageSize = PageSize { LineCount(25), ColumnCount(80) };
 
-    MaxHistoryLineCount maxHistoryLineCount;
+    HistoryLimits historyLimits;
     ImageSize maxImageSize { Width(800), Height(600) };
     unsigned maxImageRegisterCount = 256;
     bool goodImageProtocol = false;

@@ -243,7 +243,7 @@ Terminal::Terminal(Events& eventListener,
                                               _pageMargins.data(),
                                               _settings.pageSize,
                                               _settings.primaryScreen.allowReflowOnResize,
-                                              _settings.maxHistoryLineCount,
+                                              _settings.historyLimits,
                                               "page-1"));
     for (auto const i: std::views::iota(1, MaxPageCount))
         _pages.push_back(std::make_unique<Screen>(
@@ -4647,9 +4647,10 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
 }
 // }}}
 
-void Terminal::setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount)
+void Terminal::setHistoryLimits(HistoryLimits historyLimits)
 {
-    primaryScreen().grid().setMaxHistoryLineCount(maxHistoryLineCount);
+    _settings.historyLimits = historyLimits;
+    primaryScreen().grid().setHistoryLimits(historyLimits);
 }
 
 LineCount Terminal::maxHistoryLineCount() const noexcept

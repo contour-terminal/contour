@@ -15,8 +15,8 @@ namespace
 /// The finite scrollback @p settings carries, for a test that already knows it is finite.
 [[nodiscard]] int finiteHistory(vtbackend::Settings const& settings)
 {
-    REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings.maxHistoryLineCount));
-    return unbox<int>(std::get<vtbackend::LineCount>(settings.maxHistoryLineCount));
+    REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings.historyLimits.capacity));
+    return unbox<int>(std::get<vtbackend::LineCount>(settings.historyLimits.capacity));
 }
 
 /// Settings that differ from vtbackend's defaults in every field the wire carries, so a round trip
@@ -24,7 +24,7 @@ namespace
 [[nodiscard]] vtbackend::Settings distinctiveSettings()
 {
     auto settings = vtbackend::Settings {};
-    settings.maxHistoryLineCount = vtbackend::LineCount(4242);
+    settings.historyLimits = vtbackend::LineCount(4242);
     settings.terminalId = vtbackend::VTType::VT420;
     settings.graphemeClustering = false;
     settings.primaryScreen.allowReflowOnResize = false;
@@ -50,7 +50,7 @@ TEST_CASE("hostedSessionSettings raises a zero scrollback to the default", "[vth
 TEST_CASE("hostedSessionSettings caps an absurd finite scrollback", "[vthost][settings]")
 {
     auto asked = vtbackend::Settings {};
-    asked.maxHistoryLineCount = vtbackend::LineCount(MaxSessionHistoryLineCount * 10);
+    asked.historyLimits = vtbackend::LineCount(MaxSessionHistoryLineCount * 10);
     CHECK(finiteHistory(hostedSessionSettings(asked)) == MaxSessionHistoryLineCount);
 }
 
@@ -59,7 +59,7 @@ TEST_CASE("hostedSessionSettings leaves a real scrollback alone", "[vthost][sett
     SECTION("a finite value in range")
     {
         auto asked = vtbackend::Settings {};
-        asked.maxHistoryLineCount = vtbackend::LineCount(10'000);
+        asked.historyLimits = vtbackend::LineCount(10'000);
         CHECK(finiteHistory(hostedSessionSettings(asked)) == 10'000);
     }
 
@@ -68,7 +68,7 @@ TEST_CASE("hostedSessionSettings leaves a real scrollback alone", "[vthost][sett
         // The default is a default, not a floor. A profile that deliberately keeps 200 lines is not
         // the broken zero-scrollback configuration, so nothing here may "helpfully" raise it.
         auto asked = vtbackend::Settings {};
-        asked.maxHistoryLineCount = vtbackend::LineCount(200);
+        asked.historyLimits = vtbackend::LineCount(200);
         CHECK(finiteHistory(hostedSessionSettings(asked)) == 200);
     }
 
@@ -77,9 +77,9 @@ TEST_CASE("hostedSessionSettings leaves a real scrollback alone", "[vthost][sett
         // Infinite is NOT capped: it is a choice the configuration offers outright, so clamping it
         // would silently overrule a user who asked for it in as many words.
         auto asked = vtbackend::Settings {};
-        asked.maxHistoryLineCount = vtbackend::Infinite {};
+        asked.historyLimits = vtbackend::Infinite {};
         auto const hosted = hostedSessionSettings(asked);
-        CHECK(std::holds_alternative<vtbackend::Infinite>(hosted.maxHistoryLineCount));
+        CHECK(std::holds_alternative<vtbackend::Infinite>(hosted.historyLimits.capacity));
     }
 }
 
@@ -141,11 +141,11 @@ TEST_CASE("an unlimited scrollback survives the wire as unlimited", "[vthost][se
     // -1 is the configuration's own spelling of `history.limit: unlimited`; a second encoding here
     // would be one more thing to keep in step with it.
     auto asked = vtbackend::Settings {};
-    asked.maxHistoryLineCount = vtbackend::Infinite {};
+    asked.historyLimits = vtbackend::Infinite {};
     auto const wire = toWireSessionSettings(asked);
     CHECK(wire.historyLineCount == -1);
     CHECK(std::holds_alternative<vtbackend::Infinite>(
-        fromWireSessionSettings(wire, vtbackend::Settings {}).maxHistoryLineCount));
+        fromWireSessionSettings(wire, vtbackend::Settings {}).historyLimits.capacity));
 }
 
 TEST_CASE("fromWireSessionSettings falls back to the daemon's own settings", "[vthost][settings]")

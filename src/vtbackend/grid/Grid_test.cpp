@@ -1538,7 +1538,7 @@ TEST_CASE("Grid.generation.bumpsOnlyOnWholesaleRebuilds", "[grid][stable-id]")
     std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(6) }, CellLocation {}, false);
     CHECK(grid.generation() == g0 + 1); // reflow rebuilds the whole ring
 
-    grid.setMaxHistoryLineCount(LineCount(9));
+    grid.setHistoryLimits(LineCount(9));
     CHECK(grid.generation() == g0 + 2);
 
     grid.reset();
@@ -1956,7 +1956,7 @@ TEST_CASE("Grid.render_rows.empty_list_is_the_linear_walk", "[grid]")
     CHECK(withDefault.renderedTexts == withEmptyRows.renderedTexts);
 }
 
-TEST_CASE("Grid.setMaxHistoryLineCount.growingKeepsTheScrollback", "[grid][history]")
+TEST_CASE("Grid.setHistoryLimits.growingKeepsTheScrollback", "[grid][history]")
 {
     // Ring capacity: 2 page + 2 history = 4 slots, all of them used.
     auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(2));
@@ -1972,7 +1972,7 @@ TEST_CASE("Grid.setMaxHistoryLineCount.growingKeepsTheScrollback", "[grid][histo
 
     // Growing the limit must leave every retained row exactly where it was: the fresh slots
     // belong at the OLD end of the history, not between the newest history row and the page.
-    grid.setMaxHistoryLineCount(LineCount(5));
+    grid.setHistoryLimits(LineCount(5));
 
     CHECK(grid.historyLineCount() == LineCount(2));
     CHECK(grid.lineText(LineOffset(-2)) == "AAAAA");
@@ -1981,7 +1981,7 @@ TEST_CASE("Grid.setMaxHistoryLineCount.growingKeepsTheScrollback", "[grid][histo
     CHECK(grid.lineText(LineOffset(1)) == "DDDDD");
 }
 
-TEST_CASE("Grid.setMaxHistoryLineCount.shrinkingDropsTheOldestRows", "[grid][history]")
+TEST_CASE("Grid.setHistoryLimits.shrinkingDropsTheOldestRows", "[grid][history]")
 {
     // Ring capacity: 1 page + 3 history = 4 slots.
     auto grid = Grid(PageSize { LineCount(1), ColumnCount(5) }, false, LineCount(3));
@@ -1997,7 +1997,7 @@ TEST_CASE("Grid.setMaxHistoryLineCount.shrinkingDropsTheOldestRows", "[grid][his
     REQUIRE(grid.lineText(LineOffset(-3)) == "AAAAA");
 
     // Shrinking keeps the NEWEST rows: what falls out is the oldest end of the scrollback.
-    grid.setMaxHistoryLineCount(LineCount(1));
+    grid.setHistoryLimits(LineCount(1));
 
     CHECK(grid.historyLineCount() == LineCount(1));
     CHECK(grid.lineText(LineOffset(-1)) == "CCCCC");

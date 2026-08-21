@@ -228,8 +228,8 @@ profiles:
     REQUIRE(profile != nullptr);
     auto const settings = contour::config::emulationSettings(config, *profile);
 
-    REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings.maxHistoryLineCount));
-    CHECK(std::get<vtbackend::LineCount>(settings.maxHistoryLineCount) == vtbackend::LineCount(4242));
+    REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings.historyLimits.capacity));
+    CHECK(std::get<vtbackend::LineCount>(settings.historyLimits.capacity) == vtbackend::LineCount(4242));
     CHECK(settings.pageSize.columns == vtbackend::ColumnCount(132));
     CHECK(settings.pageSize.lines == vtbackend::LineCount(40));
     CHECK(settings.terminalId == vtbackend::VTType::VT340);
@@ -254,7 +254,7 @@ profiles:
     auto const* const profile = config.findProfile("main");
     REQUIRE(profile != nullptr);
     CHECK(std::holds_alternative<vtbackend::Infinite>(
-        contour::config::emulationSettings(config, *profile).maxHistoryLineCount));
+        contour::config::emulationSettings(config, *profile).historyLimits.capacity));
 }
 
 TEST_CASE("Config: profile knobs load from YAML", "[config]")
@@ -3920,8 +3920,8 @@ profiles:
         auto const settings = contour::config::resolveEmulationSettings(path.string(), "other");
         REQUIRE(settings.has_value());
         CHECK(settings->terminalId == vtbackend::VTType::VT420);
-        REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings->maxHistoryLineCount));
-        CHECK(std::get<vtbackend::LineCount>(settings->maxHistoryLineCount) == vtbackend::LineCount(100));
+        REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings->historyLimits.capacity));
+        CHECK(std::get<vtbackend::LineCount>(settings->historyLimits.capacity) == vtbackend::LineCount(100));
     }
 
     SECTION("an empty profile name selects the configuration's default")

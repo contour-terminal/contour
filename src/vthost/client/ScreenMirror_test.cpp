@@ -59,7 +59,7 @@ vtbackend::Settings gipSettings(vtbackend::LineCount history)
 {
     auto settings = vtbackend::Settings {};
     settings.goodImageProtocol = true;
-    settings.maxHistoryLineCount = history;
+    settings.historyLimits = history;
     return settings;
 }
 
@@ -238,7 +238,7 @@ struct BareMirror
     {
         auto settings = vtbackend::Settings {};
         settings.pageSize = vtbackend::PageSize { vtbackend::LineCount(1), vtbackend::ColumnCount(5) };
-        settings.maxHistoryLineCount = history;
+        settings.historyLimits = history;
         terminal = std::make_unique<vtbackend::Terminal>(events,
                                                          crispy::defaultEnvironment(),
                                                          std::make_unique<vtpty::MockPty>(settings.pageSize),

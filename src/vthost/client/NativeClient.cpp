@@ -253,7 +253,7 @@ std::optional<int64_t> NativeClient::resolveHistoryKeep(HandshakeOptions const& 
     // drift apart on what a field means, and a second reader spelling the conventions out by hand
     // is the parallel field list its file comment warns about.
     auto const settings = fromWireSessionSettings(*handshake.sessionSettings, defaultSessionSettings());
-    if (auto const* finite = std::get_if<vtbackend::LineCount>(&settings.maxHistoryLineCount))
+    if (auto const* finite = std::get_if<vtbackend::LineCount>(&settings.historyLimits.capacity))
         return unbox<int64_t>(*finite);
     return std::nullopt; // vtbackend::Infinite -- `history.limit: infinite`
 }

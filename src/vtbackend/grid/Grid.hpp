@@ -592,22 +592,34 @@ enum class CaptureTrailingSpaces : uint8_t
 class Grid
 {
   public:
-    Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount maxHistoryLineCount);
+    Grid(PageSize pageSize, bool reflowOnResize, HistoryLimits historyLimits);
 
     Grid(): Grid(PageSize { LineCount(25), ColumnCount(80) }, false, LineCount(0)) {}
 
     void reset();
 
     // {{{ grid global properties
+    /// @return The ring's history capacity -- the depth beyond which rows are dropped no matter what.
     [[nodiscard]] LineCount maxHistoryLineCount() const noexcept
     {
-        if (auto const* maxLineCount = std::get_if<LineCount>(&_historyLimit))
+        if (auto const* maxLineCount = std::get_if<LineCount>(&_historyLimits.capacity))
             return *maxLineCount;
         else
             return LineCount::cast_from(_lines.size()) - _pageSize.lines;
     }
 
-    void setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount);
+    /// @return The depth block-atomic eviction will never cut below.
+    [[nodiscard]] LineCount guaranteedHistoryLineCount() const noexcept
+    {
+        if (auto const* lineCount = std::get_if<LineCount>(&_historyLimits.guaranteed))
+            return *lineCount;
+        else
+            return maxHistoryLineCount();
+    }
+
+    [[nodiscard]] HistoryLimits const& historyLimits() const noexcept { return _historyLimits; }
+
+    void setHistoryLimits(HistoryLimits historyLimits);
 
     [[nodiscard]] LineCount totalLineCount() const noexcept
     {
@@ -1105,7 +1117,7 @@ class Grid
     //
     PageSize _pageSize;
     bool _reflowOnResize = false;
-    MaxHistoryLineCount _historyLimit;
+    HistoryLimits _historyLimits;
     Lines _lines;
     LineCount _linesUsed;
 

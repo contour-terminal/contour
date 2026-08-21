@@ -440,7 +440,7 @@ class Terminal
     void setRefreshRate(RefreshRate refreshRate);
     void setLastMarkRangeOffset(LineOffset value) noexcept;
 
-    void setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount);
+    void setHistoryLimits(HistoryLimits historyLimits);
     LineCount maxHistoryLineCount() const noexcept;
 
     void setTerminalId(VTType id) noexcept;

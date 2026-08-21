@@ -334,12 +334,12 @@ Screen::Screen(Terminal& terminal,
                gsl::not_null<Margin*> margin,
                PageSize pageSize,
                bool reflowOnResize,
-               MaxHistoryLineCount maxHistoryLineCount,
+               HistoryLimits historyLimits,
                std::string_view name):
     _terminal { &terminal },
     _settings { &terminal.settings() },
     _margin { margin },
-    _grid { pageSize, reflowOnResize, maxHistoryLineCount },
+    _grid { pageSize, reflowOnResize, historyLimits },
     _name { name }
 {
     updateCursorIterator();
