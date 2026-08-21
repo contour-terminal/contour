@@ -10,6 +10,8 @@
 
 #include <vtparser/Parser.hpp>
 
+#include <vtpty/Process.hpp>
+
 #include <crispy/App.hpp>
 #include <crispy/Base64.hpp>
 #include <crispy/CLI.hpp>

@@ -4,6 +4,7 @@
 #include <contour/test/GuiTestFixtures.hpp>
 
 #include <vtpty/MockPty.hpp>
+#include <vtpty/Process.hpp>
 
 #include <crispy/BufferObject.hpp>
 
