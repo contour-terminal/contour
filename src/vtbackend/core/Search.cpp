@@ -8,12 +8,12 @@
 namespace vtbackend
 {
 
-bool isCaseSensitiveSearch(std::u32string_view searchText, SearchCaseSensitivity mode) noexcept
+CaseComparison caseComparisonFor(std::u32string_view searchText, SearchCaseSensitivity mode) noexcept
 {
     switch (mode)
     {
-        case SearchCaseSensitivity::Insensitive: return false;
-        case SearchCaseSensitivity::Sensitive: return true;
+        case SearchCaseSensitivity::Insensitive: return CaseComparison::Folded;
+        case SearchCaseSensitivity::Sensitive: return CaseComparison::Exact;
         case SearchCaseSensitivity::Smart: break;
     }
 
@@ -21,7 +21,9 @@ bool isCaseSensitiveSearch(std::u32string_view searchText, SearchCaseSensitivity
     // char32_t is undefined for every codepoint above 0xFF -- and it would answer for the wrong
     // alphabet anyway. The UCD lookup is the codepoint-correct test, so "Привет" and "Ünicode"
     // select a case-sensitive search just like "Hello" does.
-    return std::ranges::any_of(searchText, unicode::general_category::is_uppercase_letter);
+    return std::ranges::any_of(searchText, unicode::general_category::is_uppercase_letter)
+               ? CaseComparison::Exact
+               : CaseComparison::Folded;
 }
 
 } // namespace vtbackend

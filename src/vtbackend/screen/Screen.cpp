@@ -7588,13 +7588,16 @@ optional<CellLocation> Screen::search(std::u32string_view searchText,
                                       CellLocation startPosition,
                                       SearchCaseSensitivity mode)
 {
-    return searchFrom(searchText, startPosition, isCaseSensitiveSearch(searchText, mode));
+    return searchFrom(searchText, startPosition, caseComparisonFor(searchText, mode));
 }
 
 optional<CellLocation> Screen::searchFrom(std::u32string_view searchText,
                                           CellLocation startPosition,
-                                          bool isCaseSensitive)
+                                          CaseComparison comparison)
 {
+    // The grid's matchers still take a bool; converting here keeps the boundary in one place.
+    auto const isCaseSensitive = comparison == CaseComparison::Exact;
+
     // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
 
     if (searchText.empty())
@@ -7622,7 +7625,7 @@ optional<CellLocation> Screen::searchReverse(std::u32string_view searchText,
                                              SearchCaseSensitivity mode)
 {
     // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
-    auto const isCaseSensitive = isCaseSensitiveSearch(searchText, mode);
+    auto const isCaseSensitive = caseComparisonFor(searchText, mode) == CaseComparison::Exact;
 
     if (searchText.empty())
         return nullopt;
@@ -7678,9 +7681,9 @@ SearchMatchTally Screen::tallyMatches(std::u32string_view searchText,
         CellLocation { .line = -boxed_cast<LineOffset>(historyLineCount()), .column = ColumnOffset(0) };
 
     // Resolved once for the whole walk, not per match. @see searchFrom.
-    auto const isCaseSensitive = isCaseSensitiveSearch(searchText, mode);
+    auto const comparison = caseComparisonFor(searchText, mode);
 
-    while (auto const match = searchFrom(searchText, cursor, isCaseSensitive))
+    while (auto const match = searchFrom(searchText, cursor, comparison))
     {
         if (tally.total == limit)
         {

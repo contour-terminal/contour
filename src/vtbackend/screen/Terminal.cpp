@@ -5111,7 +5111,7 @@ bool Terminal::setNewSearchTerm(std::u32string text, SearchOrigin origin)
         return false;
 
     _search.pattern = std::move(text);
-    _search.isCaseSensitive = isCaseSensitiveSearch(_search.pattern, _search.caseSensitivity);
+    _search.comparison = caseComparisonFor(_search.pattern, _search.caseSensitivity);
     return true;
 }
 
@@ -5121,7 +5121,7 @@ bool Terminal::setSearchCaseSensitivity(SearchCaseSensitivity mode)
         return false;
 
     _search.caseSensitivity = mode;
-    _search.isCaseSensitive = isCaseSensitiveSearch(_search.pattern, mode);
+    _search.comparison = caseComparisonFor(_search.pattern, mode);
     return true;
 }
 
@@ -5183,7 +5183,13 @@ void Terminal::clearSearch()
 {
     _search.pattern.clear();
     _search.origin = SearchOrigin::Typed;
-    _search.isCaseSensitive = false;
+    _search.comparison = CaseComparison::Folded;
+
+    // The highlights of the pattern just dropped are still in the render buffer, and nothing else on
+    // this path rebuilds it -- unlike search()/searchReverse(), which raise this themselves. Without
+    // it the matches of a cleared search stay painted until some unrelated event forces a frame. The
+    // deleted ViCommands::searchCancel() ended with this call, for this reason.
+    screenUpdated();
 }
 
 bool Terminal::wordDelimited(CellLocation position) const noexcept

@@ -681,7 +681,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Finds the first match at or after @p startPosition, walking forward through logical lines.
     /// @param searchText    The needle. An empty needle matches nothing.
     /// @param startPosition Where to begin; a match starting exactly here is returned.
-    /// @param mode          The case policy. @see isCaseSensitiveSearch.
+    /// @param mode          The case policy. @see caseComparisonFor.
     [[nodiscard]] std::optional<CellLocation> search(std::u32string_view searchText,
                                                      CellLocation startPosition,
                                                      SearchCaseSensitivity mode);
@@ -715,7 +715,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// difference between one such scan and ten thousand.
     [[nodiscard]] std::optional<CellLocation> searchFrom(std::u32string_view searchText,
                                                          CellLocation startPosition,
-                                                         bool isCaseSensitive);
+                                                         CaseComparison comparison);
 
   public:
     [[nodiscard]] CellProxy usePreviousCell() noexcept

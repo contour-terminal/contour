@@ -93,15 +93,6 @@ namespace
         std::pair { "bar"sv, vtbackend::CursorShape::Bar },
     };
 
-    /// Builds an enum profile-field descriptor from a token-to-value table.
-    ///
-    /// The combo-box options, the getter's display token and the setter's parse are all derived from
-    /// @p mappings, so the set of values a user can pick and the set the setter understands cannot drift
-    /// apart. Both halves used to be written out by hand -- an option list beside a chain of string
-    /// comparisons -- while the getter derived its token from `std::format`, a third spelling again:
-    /// the formatters render values for people ("host writable", "Logical", "Bold"), not as the tokens
-    /// this option list and the config grammar use. A `Decorator` field would have shown nothing
-    /// selected, because "dotted-underline" lowercases to itself but "DottedUnderline" does not.
     /// One of the profile's `history:` depths, in the configuration's own `-1 == unlimited` spelling.
     ///
     /// A pointer-to-member rather than a getter/setter pair, because the two rows this builds differ
@@ -165,6 +156,15 @@ namespace
                  std::move(options) };
     }
 
+    /// Builds an enum profile-field descriptor from a token-to-value table.
+    ///
+    /// The combo-box options, the getter's display token and the setter's parse are all derived from
+    /// @p mappings, so the set of values a user can pick and the set the setter understands cannot drift
+    /// apart. Both halves used to be written out by hand -- an option list beside a chain of string
+    /// comparisons -- while the getter derived its token from `std::format`, a third spelling again:
+    /// the formatters render values for people ("host writable", "Logical", "Bold"), not as the tokens
+    /// this option list and the config grammar use. A `Decorator` field would have shown nothing
+    /// selected, because "dotted-underline" lowercases to itself but "DottedUnderline" does not.
     template <typename Enum, size_t N, typename Getter, typename Setter>
     ProfileFieldDescriptor enumField(QString key,
                                      QString label,

@@ -83,7 +83,19 @@ struct SearchMatchTally
     constexpr bool operator==(SearchMatchTally const&) const noexcept = default;
 };
 
-/// Decides whether a needle is matched case-sensitively under @p mode.
+/// A case policy resolved against an actual needle: how the comparison will be done.
+///
+/// Distinct from @c SearchCaseSensitivity, which is what the user asked for -- @c Smart is a rule,
+/// not an answer. This is the answer, and it is named rather than left a @c bool because it is
+/// threaded through call sites where a bare @c true says nothing (@c Screen::searchFrom) and stored
+/// on @c Search, where a @c bool member would be a finding by this project's own rule.
+enum class CaseComparison : uint8_t
+{
+    Folded = 0, //!< Letters compare equal regardless of case.
+    Exact,      //!< Letters must match case.
+};
+
+/// Resolves @p mode against @p searchText.
 ///
 /// The single answer to that question in the tree. It used to be asked twice and answered
 /// differently: @c Screen matched via the UCD, while @c RenderBufferBuilder highlighted via
@@ -92,7 +104,8 @@ struct SearchMatchTally
 ///
 /// @param searchText The needle to inspect. Only read under @c SearchCaseSensitivity::Smart.
 /// @param mode       The configured policy.
-/// @return true if the comparison must respect letter case.
-[[nodiscard]] bool isCaseSensitiveSearch(std::u32string_view searchText, SearchCaseSensitivity mode) noexcept;
+/// @return How the comparison must treat letter case.
+[[nodiscard]] CaseComparison caseComparisonFor(std::u32string_view searchText,
+                                               SearchCaseSensitivity mode) noexcept;
 
 } // namespace vtbackend

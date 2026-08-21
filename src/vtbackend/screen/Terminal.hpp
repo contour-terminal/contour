@@ -177,14 +177,14 @@ struct Search
     SearchCaseSensitivity caseSensitivity = SearchCaseSensitivity::Smart;
     SearchOrigin origin = SearchOrigin::Typed;
 
-    /// The cached answer to isCaseSensitiveSearch(pattern, caseSensitivity).
+    /// The cached result of caseComparisonFor(pattern, caseSensitivity).
     ///
-    /// Derived, and maintained by Terminal's two setters -- never assigned from anywhere else. It is
+    /// Derived, and maintained by Terminal's setters -- never assigned from anywhere else. It is
     /// cached because RenderBufferBuilder asks it once per RENDERED CELL, and under the default Smart
     /// policy the honest answer is a UCD lookup per codepoint of the needle: ~109ns against ~8ns for
     /// the (incorrect) <cctype> test it replaced, which at 240x70 is over a millisecond per frame
     /// spent re-deriving a constant.
-    bool isCaseSensitive = false;
+    CaseComparison comparison = CaseComparison::Folded;
 };
 
 /// Folds the 7-bit C1 control introducers in a terminal reply to their single-byte 8-bit forms, as

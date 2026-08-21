@@ -557,7 +557,7 @@ void RenderBufferBuilder::matchSearchPattern(T const& cellText)
     // tail matched case-insensitively. Screen::search reads the same field, so highlighting and
     // matching cannot disagree (they did, for every non-ASCII needle: std::isupper is undefined above
     // 0xFF). Read rather than recomputed because this runs once per RENDERED CELL. @see Search.
-    auto const isCaseSensitive = search.isCaseSensitive;
+    auto const isCaseSensitive = search.comparison == CaseComparison::Exact;
 
     auto const isFullMatch = [&]() -> bool {
         return !CellUtil::beginsWith(searchText, cellText, isCaseSensitive);

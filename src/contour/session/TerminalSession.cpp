@@ -1580,6 +1580,12 @@ void TerminalSession::searchBarClosed()
     // the flag exists to avoid. Told by the bar rather than inferred, because only the bar knows.
     _isSearchBarOpen.store(false, std::memory_order_relaxed);
     _searchTallyTimer.stop();
+
+    // Cleared BECAUSE the timer was just stopped: the flag is otherwise only cleared where the timer
+    // fires, so stopping it mid-window would strand the flag set for the rest of the session -- and a
+    // stranded flag means screenUpdated() never posts again, so re-opening the bar would show a count
+    // that no longer follows new output. Same hazard attachDisplay() heals for the cursor-moved flag.
+    _searchTallyPostPending.clear(std::memory_order_release);
 }
 
 QString TerminalSession::searchPattern() const
@@ -1590,25 +1596,33 @@ QString TerminalSession::searchPattern() const
 
 void TerminalSession::setSearchPattern(QString const& pattern)
 {
-    auto const l = scoped_lock { _terminal };
+    {
+        auto const l = scoped_lock { _terminal };
 
-    auto text = pattern.toStdU32String();
-    if (text.empty())
-    {
-        _terminal.clearSearch();
-    }
-    else
-    {
+        auto text = pattern.toStdU32String();
+        if (text.empty())
+        {
+            _terminal.clearSearch();
+        }
         // Backwards from the cursor, which is what the terminal's search has always done and what
-        // makes an incremental search land on the nearest match behind you rather than jumping to
-        // the top of the scrollback on every keystroke.
-        (void) _terminal.searchReverse(std::move(text), _terminal.normalModeCursorPosition());
-    }
+        // makes an incremental search land on the nearest match behind you rather than jumping to the
+        // top of the scrollback on every keystroke.
+        else if (auto const match =
+                     _terminal.searchReverse(std::move(text), _terminal.normalModeCursorPosition()))
+        {
+            // The cursor MUST follow the match, exactly as the vi `/` flow did. Three things read it:
+            // the tally's ordinal (so "3 of 27" has a 3 at all), the renderer's choice of
+            // searchHighlightFocused (so one match reads as the current one), and Enter, which steps
+            // from wherever the cursor is. Dropping the returned location broke all three at once.
+            _terminal.moveNormalModeCursorTo(*match);
+        }
 
-    // Under the SAME lock, and therefore in the same walk of the grid: taking it twice per keystroke
-    // meant two full traversals, and left a window in which the grid could change between the search
-    // and the tally that described it.
-    refreshSearchStatusLocked();
+        // Under the SAME lock, and so against the same grid the search just ran over: taking it twice
+        // per keystroke meant two full traversals and a window in which the grid could change between
+        // the search and the tally describing it.
+        refreshSearchStatusLocked();
+    }
+    emit searchStateChanged();
 }
 
 void TerminalSession::cycleSearchCaseSensitivity()
@@ -1616,13 +1630,15 @@ void TerminalSession::cycleSearchCaseSensitivity()
     {
         auto const l = scoped_lock { _terminal };
 
-        auto const next = nextSearchCase(_terminal.search().caseSensitivity);
-        if (!_terminal.setSearchCaseSensitivity(next))
-            return;
-
-        // Re-run in place: the old match may not be a match under the new policy.
-        if (!_terminal.search().pattern.empty())
-            (void) _terminal.searchReverse(_terminal.normalModeCursorPosition());
+        // The early exit skips the RE-SEARCH, never the refresh and the notify below: a policy that
+        // was already in effect still has to leave the glyph, the tooltip and the count consistent.
+        if (_terminal.setSearchCaseSensitivity(nextSearchCase(_terminal.search().caseSensitivity))
+            && !_terminal.search().pattern.empty())
+        {
+            // Re-run in place: the old match may not be a match under the new policy.
+            if (auto const match = _terminal.searchReverse(_terminal.normalModeCursorPosition()))
+                _terminal.moveNormalModeCursorTo(*match);
+        }
 
         refreshSearchStatusLocked();
     }
@@ -1631,20 +1647,40 @@ void TerminalSession::cycleSearchCaseSensitivity()
 
 void TerminalSession::searchNext()
 {
-    (void) (*this)(actions::FocusNextSearchMatch {});
+    if (!(*this)(actions::FocusNextSearchMatch {}))
+        wrapSearchTo(SearchWrapEdge::Top);
     refreshSearchStatus();
 }
 
 void TerminalSession::searchPrevious()
 {
-    (void) (*this)(actions::FocusPreviousSearchMatch {});
+    if (!(*this)(actions::FocusPreviousSearchMatch {}))
+        wrapSearchTo(SearchWrapEdge::Bottom);
     refreshSearchStatus();
 }
 
-void TerminalSession::clearSearch()
+void TerminalSession::wrapSearchTo(SearchWrapEdge edge)
 {
-    (void) (*this)(actions::NoSearchHighlight {});
-    refreshSearchStatus();
+    // The find bar wraps; Terminal::searchNextMatch does not, and must not -- vi's `n` stopping at
+    // the end of the scrollback is its documented behaviour. So the wrap lives here, where "the last
+    // match" means "start over" rather than "there is nothing more". Without it, the bar's own
+    // MatchNavigation promise would be a lie at both ends of the list.
+    auto const l = scoped_lock { _terminal };
+    if (_terminal.search().pattern.empty())
+        return;
+
+    auto const& screen = _terminal.currentScreen();
+    auto const from =
+        edge == SearchWrapEdge::Top
+            ? CellLocation { .line = -boxed_cast<vtbackend::LineOffset>(screen.historyLineCount()),
+                             .column = vtbackend::ColumnOffset(0) }
+            : CellLocation { .line = boxed_cast<vtbackend::LineOffset>(_terminal.pageSize().lines) - 1,
+                             .column =
+                                 boxed_cast<vtbackend::ColumnOffset>(_terminal.pageSize().columns) - 1 };
+
+    auto const match = edge == SearchWrapEdge::Top ? _terminal.search(from) : _terminal.searchReverse(from);
+    if (match)
+        _terminal.moveNormalModeCursorTo(*match);
 }
 
 void TerminalSession::refreshSearchStatus()
@@ -3649,9 +3685,13 @@ void TerminalSession::configureTerminal()
     _terminal.settings().autoScrollOnUpdate = _profile.history.value().autoScrollOnUpdate;
     _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
-    // The policy the find bar OPENS with; its Aa button re-points it afterwards.
+    // The profile's policy, re-imposed on every profile application -- so a config reload or a
+    // profile switch resets a policy the Aa button had pinned, the same way it resets every other
+    // profile-derived setting here. The notify is what keeps the button honest about it: without one,
+    // an open bar kept showing the lit glyph of a mode the terminal had already stopped using.
     (void) _terminal.setSearchCaseSensitivity(_profile.searchCaseSensitivity.value());
     _searchCase = describeSearchCase(_profile.searchCaseSensitivity.value());
+    emit searchStateChanged();
     _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
     _terminal.settings().blinkStyle = _profile.blinkStyle.value();
     _terminal.settings().screenTransitionStyle = _profile.screenTransitionStyle.value();

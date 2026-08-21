@@ -207,16 +207,23 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_INVOKABLE void searchNext();
     Q_INVOKABLE void searchPrevious();
 
-    /// Clears the pattern and its highlights -- what closing the find bar with Escape does.
-    Q_INVOKABLE void clearSearch();
-
     /// Re-reads the tally and re-derives the summary. Called after anything that can change either.
     void refreshSearchStatus();
 
   private:
+    /// Which end of the scrollback a wrapped search restarts from.
+    enum class SearchWrapEdge : uint8_t
+    {
+        Top,    ///< Next-match ran off the bottom; resume at the oldest line.
+        Bottom, ///< Previous-match ran off the top; resume at the newest line.
+    };
+
     /// The half of refreshSearchStatus() that reads the terminal, for callers already holding its
     /// lock -- so typing does not take the lock twice and walk the grid twice per keystroke.
     void refreshSearchStatusLocked();
+
+    /// Restarts the search from @p edge, which is how the find bar wraps. @see searchNext.
+    void wrapSearchTo(SearchWrapEdge edge);
 
   public:
     // }}}

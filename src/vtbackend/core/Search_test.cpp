@@ -3,56 +3,57 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-using vtbackend::isCaseSensitiveSearch;
+using vtbackend::CaseComparison;
+using vtbackend::caseComparisonFor;
 using vtbackend::SearchCaseSensitivity;
 using vtbackend::SearchMatchTally;
 using vtbackend::TallyExactness;
 
-TEST_CASE("isCaseSensitiveSearch.smart", "[search]")
+TEST_CASE("caseComparisonFor.smart", "[search]")
 {
     auto constexpr Smart = SearchCaseSensitivity::Smart;
 
     // A needle with no uppercase letter is matched loosely, so "error" also finds "Error".
-    CHECK(!isCaseSensitiveSearch(U"", Smart));
-    CHECK(!isCaseSensitiveSearch(U"error", Smart));
-    CHECK(!isCaseSensitiveSearch(U"error: 42", Smart));
+    CHECK(caseComparisonFor(U"", Smart) == CaseComparison::Folded);
+    CHECK(caseComparisonFor(U"error", Smart) == CaseComparison::Folded);
+    CHECK(caseComparisonFor(U"error: 42", Smart) == CaseComparison::Folded);
 
     // One uppercase letter anywhere pins it.
-    CHECK(isCaseSensitiveSearch(U"Error", Smart));
-    CHECK(isCaseSensitiveSearch(U"setNewSearchTerm", Smart));
+    CHECK(caseComparisonFor(U"Error", Smart) == CaseComparison::Exact);
+    CHECK(caseComparisonFor(U"setNewSearchTerm", Smart) == CaseComparison::Exact);
 }
 
-TEST_CASE("isCaseSensitiveSearch.smartIsCodepointAware", "[search]")
+TEST_CASE("caseComparisonFor.smartIsCodepointAware", "[search]")
 {
     auto constexpr Smart = SearchCaseSensitivity::Smart;
 
     // The regression this function exists for: std::isupper() is undefined above 0xFF and answers for
     // the wrong alphabet besides, so every one of these used to be decided incorrectly -- and, worse,
     // decided differently by the matcher and by the highlighter.
-    CHECK(isCaseSensitiveSearch(U"Привет", Smart));
-    CHECK(!isCaseSensitiveSearch(U"привет", Smart));
-    CHECK(isCaseSensitiveSearch(U"Ünicode", Smart));
-    CHECK(!isCaseSensitiveSearch(U"ünicode", Smart));
+    CHECK(caseComparisonFor(U"Привет", Smart) == CaseComparison::Exact);
+    CHECK(caseComparisonFor(U"привет", Smart) == CaseComparison::Folded);
+    CHECK(caseComparisonFor(U"Ünicode", Smart) == CaseComparison::Exact);
+    CHECK(caseComparisonFor(U"ünicode", Smart) == CaseComparison::Folded);
 
     // Deseret capital letter LONG I (U+10400) is an uppercase letter outside the BMP.
-    CHECK(isCaseSensitiveSearch(U"\U00010400", Smart));
+    CHECK(caseComparisonFor(U"\U00010400", Smart) == CaseComparison::Exact);
 
     // Codepoints with no case at all must not pin the search.
-    CHECK(!isCaseSensitiveSearch(U"\U0001F600", Smart)); // emoji
-    CHECK(!isCaseSensitiveSearch(U"12:04:11", Smart));
-    CHECK(!isCaseSensitiveSearch(U"日本語", Smart));
+    CHECK(caseComparisonFor(U"\U0001F600", Smart) == CaseComparison::Folded); // emoji
+    CHECK(caseComparisonFor(U"12:04:11", Smart) == CaseComparison::Folded);
+    CHECK(caseComparisonFor(U"日本語", Smart) == CaseComparison::Folded);
 }
 
-TEST_CASE("isCaseSensitiveSearch.pinnedModesIgnoreTheNeedle", "[search]")
+TEST_CASE("caseComparisonFor.pinnedModesIgnoreTheNeedle", "[search]")
 {
     // Both pinned modes answer without looking at the text -- that is what makes them pinned.
-    CHECK(isCaseSensitiveSearch(U"error", SearchCaseSensitivity::Sensitive));
-    CHECK(isCaseSensitiveSearch(U"Error", SearchCaseSensitivity::Sensitive));
-    CHECK(isCaseSensitiveSearch(U"", SearchCaseSensitivity::Sensitive));
+    CHECK(caseComparisonFor(U"error", SearchCaseSensitivity::Sensitive) == CaseComparison::Exact);
+    CHECK(caseComparisonFor(U"Error", SearchCaseSensitivity::Sensitive) == CaseComparison::Exact);
+    CHECK(caseComparisonFor(U"", SearchCaseSensitivity::Sensitive) == CaseComparison::Exact);
 
-    CHECK(!isCaseSensitiveSearch(U"error", SearchCaseSensitivity::Insensitive));
-    CHECK(!isCaseSensitiveSearch(U"Error", SearchCaseSensitivity::Insensitive));
-    CHECK(!isCaseSensitiveSearch(U"", SearchCaseSensitivity::Insensitive));
+    CHECK(caseComparisonFor(U"error", SearchCaseSensitivity::Insensitive) == CaseComparison::Folded);
+    CHECK(caseComparisonFor(U"Error", SearchCaseSensitivity::Insensitive) == CaseComparison::Folded);
+    CHECK(caseComparisonFor(U"", SearchCaseSensitivity::Insensitive) == CaseComparison::Folded);
 }
 
 TEST_CASE("SearchCaseSensitivity.smartIsZero", "[search]")

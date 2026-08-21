@@ -172,9 +172,6 @@ class ViInputHandler: public InputHandler
         /// The user asked for the search prompt. The frontend opens whatever it uses to type one.
         virtual void searchStart() = 0;
 
-        /// Installs @p text as the search pattern and moves the cursor onto its nearest match.
-        virtual void updateSearchTerm(std::u32string const& text) = 0;
-
         virtual void scrollViewport(ScrollOffset delta) = 0;
 
         // Starts searching for the word under the cursor position in reverse order.

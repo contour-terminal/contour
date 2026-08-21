@@ -45,7 +45,6 @@ class ViCommands: public ViInputHandler::Executor
     void paste(unsigned count, bool stripped) override;
 
     void searchStart() override;
-    void updateSearchTerm(std::u32string const& text) override;
 
     bool jumpToNextMatch(unsigned count);
     bool jumpToPreviousMatch(unsigned count);
@@ -120,6 +119,12 @@ class ViCommands: public ViInputHandler::Executor
     void addLineOffsetToJumpHistory(LineOffset offset) { _jumpHistory.addOffset(offset); }
     // Cursor offset into the grid.
     CellLocation cursorPosition {};
+
+    /// Installs @p text as the search pattern and moves the cursor onto its nearest match.
+    ///
+    /// A member rather than an Executor hook: with the in-terminal line editor gone, ViInputHandler
+    /// no longer reaches through the interface for it -- only `#` and `*` below still use it.
+    void updateSearchTerm(std::u32string const& text);
 
   private:
     gsl::not_null<Terminal*> _terminal;
