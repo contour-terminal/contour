@@ -2086,6 +2086,32 @@ TEST_CASE("Grid.historyEviction.evictsAWholeBlockRatherThanCuttingMidCommand", "
     CHECK(withHeadroom.historyLineCount() <= LineCount(12));
 }
 
+TEST_CASE("Grid.historyEviction.honoursABoundaryWrittenBeforeTheBufferFirstFilled",
+          "[grid][history-eviction]")
+{
+    // The eviction scan examines each row once, as it crosses the guarantee -- but the very first
+    // call has a whole window of already-eligible rows behind that line, and it has to sweep them.
+    // A scan cursor seeded at the bound instead of at the top declares that window examined before
+    // looking at a single row, and every boundary older than the guarantee by the time the buffer
+    // first filled stays invisible for the rest of the generation.
+    //
+    // So: one prompt, written early enough to be deep in the scrollback when the ceiling is first
+    // reached, and nothing marked after it. There is exactly one chance to see it.
+    auto grid = makeGrid(LineCount(1), LineCount(2), LineCount(8));
+
+    for (auto const i: std::views::iota(0, 4))
+        appendLine(grid, 'a', i);
+    appendLine(grid, "P0", BlockStart::Yes);
+    for (auto const i: std::views::iota(0, 4))
+        appendLine(grid, 'b', i);
+
+    // Everything above the prompt went, the prompt itself stayed, and what is left is the block --
+    // not the eight lines a line-wise cut at the ceiling would have kept.
+    CHECK(grid.historyLineCount() == LineCount(4));
+    CHECK(grid.lineAt(grid.addressableTop()).marked());
+    CHECK(historyText(grid).front() == "P0   ");
+}
+
 TEST_CASE("Grid.historyEviction.neverRetainsFewerThanTheGuaranteedLines", "[grid][history-eviction]")
 {
     auto grid = makeGrid(LineCount(1), LineCount(4), LineCount(8));

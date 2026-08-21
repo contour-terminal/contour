@@ -1116,7 +1116,14 @@ void Grid::clampHistory()
     // A row becomes eligible exactly when `bound` reaches its id, so watching the rows that cross
     // `bound` observes every one of them, once. The first call has nothing remembered and sweeps the
     // window whole; after that the work is proportional to the lines scrolled, not to the depth.
-    auto& scan = _evictionScan.has_value() ? *_evictionScan : _evictionScan.emplace(boundId, std::nullopt);
+    //
+    // Hence the seed: one id BELOW the window's top, so that first call really does sweep [top, bound].
+    // Seeding it at `boundId` instead would declare the window already examined before a single row had
+    // been looked at, and every block start that was already older than the guarantee when the buffer
+    // first filled would stay invisible for the rest of the generation -- the eviction would then cut
+    // line-wise exactly where it is supposed to snap to a prompt.
+    auto& scan = _evictionScan.has_value() ? *_evictionScan
+                                           : _evictionScan.emplace(stableLineIdOf(top) - 1, std::nullopt);
     auto const scanFrom = std::max(top, LineOffset::cast_from(scan.examinedThrough + 1 - _stableBase));
     for (auto y = scanFrom; y <= bound; ++y)
         if (lineAt(y).marked())
