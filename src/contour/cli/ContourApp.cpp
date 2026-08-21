@@ -707,8 +707,6 @@ int ContourApp::daemonAction()
     config.shell.arguments.assign(std::next(shellCommand.begin()), shellCommand.end());
     config.shell.workingDirectory = vtpty::Process::homeDirectory();
 
-    config.shell.env = vthost::hostedShellEnvironment(config.socketPath);
-
     if (auto label = parameters().get<string>("contour.daemon.tmux-compat-socket"); !label.empty())
         config.tmuxCompatLabel = std::move(label);
 

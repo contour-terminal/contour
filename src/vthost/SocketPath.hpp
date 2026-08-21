@@ -2,8 +2,9 @@
 #pragma once
 
 /// @file
-/// Derivation of the daemon's control-socket path, following tmux's shape:
-/// a per-user runtime directory holding one socket file per label.
+/// Derivation of the daemon's control-socket path, following tmux's shape: a per-user runtime
+/// directory holding one socket file per label -- and, because it is the same fact from the other
+/// side, how a hosted shell is told where that socket is.
 
 #include <vtpty/Process.hpp>
 #include <vtpty/SandboxInfo.hpp>
@@ -97,10 +98,10 @@ struct MuxSocketPathInputs
 
     if (inputs.xdgRuntimeDir && !inputs.xdgRuntimeDir->empty())
     {
+        auto base = fs::path { *inputs.xdgRuntimeDir };
         if (!inputs.sandboxAppId.empty())
-            return fs::path { *inputs.xdgRuntimeDir } / "app" / inputs.sandboxAppId / "contour"
-                   / inputs.label;
-        return fs::path { *inputs.xdgRuntimeDir } / "contour" / inputs.label;
+            base /= fs::path { "app" } / inputs.sandboxAppId;
+        return base / "contour" / inputs.label;
     }
 
     return fs::temp_directory_path() / ("contour-" + std::string { inputs.user }) / inputs.label;
@@ -146,7 +147,9 @@ struct MuxSocketPathInputs
 /// The environment a daemon-hosted shell is started with.
 ///
 /// One named, testable decision rather than an assignment buried in CLI argument parsing: what a
-/// hosted shell is told is the daemon's business, and it will grow.
+/// hosted shell is told is the daemon's business, so it is applied where the daemon spawns
+/// (makeShellPtyFactory) rather than where one of its callers happens to parse arguments. It will
+/// grow.
 ///
 /// `$CONTOUR_MUX` is here because a hosted shell cannot DERIVE where its own daemon is. It is
 /// derived everywhere else, but the derivation differs on the two sides of a sandbox boundary --
