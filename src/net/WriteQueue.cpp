@@ -62,6 +62,17 @@ coro::Task<void> WriteQueue::flushThenClose()
     close();
 }
 
+coro::Task<void> WriteQueue::waitUntilBacklogBelow(std::size_t watermark, std::function<bool()> callerDone)
+{
+    // The state is captured by value, so the poll survives this WriteQueue being destroyed
+    // mid-park exactly as the drain does.
+    co_await pollUntil(&_loop, [state = _state, watermark, done = std::move(callerDone)] {
+        if (done && done())
+            return true;
+        return state->closed || state->failure.has_value() || state->backlogBytes < watermark;
+    });
+}
+
 coro::Task<void> WriteQueue::drain(std::shared_ptr<State> state)
 {
     while (!state->queue.empty() && !state->failure.has_value() && !state->closed)

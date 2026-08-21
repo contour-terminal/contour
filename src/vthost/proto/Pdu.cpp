@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <expected>
 #include <ranges>
+#include <span>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -418,6 +419,7 @@ namespace
         out.varint(pdu.generation);
         out.varint(pdu.seqno);
         out.u8(pdu.snapshot);
+        out.u8(pdu.snapshotPart);
         out.svarint(pdu.stableViewportBase);
         out.svarint(pdu.stableFloor);
         out.svarint(pdu.cursorLine);
@@ -805,6 +807,7 @@ namespace
         auto error = DecodeError {};
         if (!assign(in.varint(), pdu.session, error) || !assign(in.varint(), pdu.generation, error)
             || !assign(in.varint(), pdu.seqno, error) || !assign(in.u8(), pdu.snapshot, error)
+            || !assign(in.u8(), pdu.snapshotPart, error)
             || !assign(in.svarint(), pdu.stableViewportBase, error)
             || !assign(in.svarint(), pdu.stableFloor, error) || !assign(in.svarint(), pdu.cursorLine, error)
             || !assign(in.svarint(), pdu.cursorColumn, error))
@@ -1058,6 +1061,53 @@ namespace
     static_assert(DecodeTable.size() + 1 == std::variant_size_v<DecodedPdu>,
                   "every DecodedPdu alternative except Invalid needs a DecodeTable row");
 } // namespace
+
+std::size_t estimatedEncodedSize(WireLine const& line) noexcept
+{
+    // encodeCell writes a varint codepoint, a varint extras count, two u8, two u16 and four u32 —
+    // 22 fixed bytes plus a 1..4 byte codepoint and whatever clusterExtras adds. encodeLine's own
+    // header is two svarints, a u16, two varints and four u32. Both are rounded up to a round
+    // number rather than computed exactly: @see the header for why an estimate is the point.
+    constexpr auto BytesPerCell = std::size_t { 24 };
+    constexpr auto BytesPerRowHeader = std::size_t { 24 };
+    return BytesPerRowHeader + (line.cells.size() * BytesPerCell);
+}
+
+std::vector<SnapshotPiece> partitionSnapshotRows(std::span<WireLine const> lines, std::size_t budget)
+{
+    auto pieces = std::vector<SnapshotPiece> {};
+    auto begin = std::size_t { 0 };
+    while (begin < lines.size())
+    {
+        // The first row of a piece is taken unconditionally, which is what keeps an oversized row
+        // from producing an empty span and looping forever.
+        auto count = std::size_t { 1 };
+        auto used = estimatedEncodedSize(lines[begin]);
+        for (auto const& line: lines.subspan(begin + 1))
+        {
+            auto const cost = estimatedEncodedSize(line);
+            if (used + cost > budget)
+                break;
+            used += cost;
+            ++count;
+        }
+        pieces.push_back(SnapshotPiece { .begin = begin, .count = count });
+        begin += count;
+    }
+    if (pieces.empty())
+        pieces.push_back(SnapshotPiece {});
+
+    // Marked in a second pass: how many pieces there are is only known once the partition is done,
+    // and a lone piece must be Whole rather than a First whose Last never comes.
+    if (pieces.size() > 1)
+    {
+        for (auto& piece: pieces)
+            piece.part = SnapshotPart::Middle;
+        pieces.front().part = SnapshotPart::First;
+        pieces.back().part = SnapshotPart::Last;
+    }
+    return pieces;
+}
 
 void encodePdu(Writer& sink, uint64_t serial, DecodedPdu const& pdu)
 {

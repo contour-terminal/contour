@@ -89,6 +89,35 @@ class ParkingSocket: public net::ISocket
     bool _isClosed = false;
 };
 
+/// Waits for room on @p queue and records that it resumed.
+///
+/// A free coroutine taking pointers, not a capturing lambda: `spawn` outlives the expression
+/// that built it, so a closure's captures would dangle (the same reason serveNativeClient is
+/// free in vthost).
+Task<void> awaitRoom(WriteQueue* queue, std::size_t watermark, bool* resumed)
+{
+    co_await queue->waitUntilBacklogBelow(watermark);
+    *resumed = true;
+}
+
+/// Parks @p queue over a watermark of 64: one frame in flight on a socket that will not take it,
+/// and a bigger one behind it. The 16/128/64 relationship is what every waiter test depends on,
+/// so it is stated once.
+void stallOverWatermark(EventLoop& loop, WriteQueue& queue)
+{
+    REQUIRE(queue.enqueue(std::string(16, 'x')));
+    loop.blockOn(net::testing::sleepFor(&loop, 20ms));
+    REQUIRE(queue.enqueue(std::string(128, 'y')));
+    REQUIRE(queue.backlogBytes() == 128);
+}
+
+/// Waits for room, or for @p callerDone — the shape a connection tearing down needs.
+Task<void> awaitRoomOrDone(WriteQueue* queue, std::size_t watermark, bool const* callerDone, bool* resumed)
+{
+    co_await queue->waitUntilBacklogBelow(watermark, [callerDone] { return *callerDone; });
+    *resumed = true;
+}
+
 } // namespace
 
 TEST_CASE("WriteQueue drains frames in FIFO order, each frame atomically", "[net][writequeue]")
@@ -283,4 +312,97 @@ TEST_CASE("close() drops queued frames and refuses new ones", "[net][writequeue]
 
     loop.blockOn(settle(&loop)); // the spawned drain sees the closed queue and exits
     REQUIRE_FALSE(queue.draining());
+}
+
+TEST_CASE("waitUntilBacklogBelow returns without parking when there is already room", "[net][writequeue]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+
+    auto pair = net::testing::makeSocketPair(loop);
+    REQUIRE(pair.has_value());
+
+    auto queue = WriteQueue { loop, pair->first.get(), 1024 };
+
+    // The pacing wait must cost nothing in the overwhelmingly common case, or a producer that
+    // consults it between every frame pays a loop tick per frame for no reason.
+    auto resumed = false;
+    loop.blockOn(awaitRoom(&queue, 64, &resumed));
+    REQUIRE(resumed);
+}
+
+TEST_CASE("waitUntilBacklogBelow parks until the drain makes room", "[net][writequeue]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+
+    // Declared before the queue so it outlives the drain that writes to it.
+    auto socket = ParkingSocket { loop };
+    auto queue = WriteQueue { loop, &socket, 1024 };
+
+    // One frame in flight (the socket parks it) and a bigger one behind it, so the backlog
+    // sits above the watermark until the peer catches up — exactly the state a producer
+    // emitting faster than one loop turn can drain puts the queue in.
+    stallOverWatermark(loop, queue);
+
+    auto resumed = false;
+    loop.spawn(awaitRoom(&queue, 64, &resumed));
+    loop.blockOn(net::testing::sleepFor(&loop, 20ms));
+    REQUIRE_FALSE(resumed); // parked: the backlog is over the mark
+
+    // The peer catches up; the backlog drains and the waiter resumes on its own.
+    socket.release();
+    REQUIRE(loop.blockOn(net::testing::waitUntil(&loop, [&] { return resumed; })));
+    REQUIRE(queue.backlogBytes() == 0);
+}
+
+TEST_CASE("waitUntilBacklogBelow stops waiting once the queue is closed", "[net][writequeue]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+
+    auto socket = ParkingSocket { loop };
+    auto queue = WriteQueue { loop, &socket, 1024 };
+
+    stallOverWatermark(loop, queue);
+
+    auto resumed = false;
+    loop.spawn(awaitRoom(&queue, 64, &resumed));
+    loop.blockOn(net::testing::sleepFor(&loop, 20ms));
+    REQUIRE_FALSE(resumed);
+
+    // A connection being torn down must not strand its pacer: an owner that closes the queue
+    // and then polls for its producers to finish would otherwise deadlock, because a closed
+    // queue never drains again and the watermark can never be met.
+    queue.close();
+    REQUIRE(loop.blockOn(net::testing::waitUntil(&loop, [&] { return resumed; })));
+}
+
+TEST_CASE("waitUntilBacklogBelow stops waiting when the caller says it is done", "[net][writequeue]")
+{
+    auto source = net::PollEventSource {};
+    auto loop = EventLoop { source };
+
+    auto socket = ParkingSocket { loop };
+    auto queue = WriteQueue { loop, &socket, 1024 };
+
+    stallOverWatermark(loop, queue);
+
+    auto callerDone = false;
+    auto resumed = false;
+    loop.spawn(awaitRoomOrDone(&queue, 64, &callerDone, &resumed));
+    loop.blockOn(net::testing::sleepFor(&loop, 20ms));
+    REQUIRE_FALSE(resumed);
+
+    // The close() the queue-state predicate watches for is not available to a connection tearing
+    // down: it closes the queue only AFTER waiting for its producers to let go, so a producer
+    // waiting on the close would be waiting for something waiting on it. The caller's own flag is
+    // what breaks that cycle, and it must work with the backlog still stuck and the queue open.
+    callerDone = true;
+    REQUIRE(loop.blockOn(net::testing::waitUntil(&loop, [&] { return resumed; })));
+    CHECK(queue.backlogBytes() == 128); // still stuck: the caller left, the peer did not catch up
+
+    // Leave no coroutine parked on the socket at teardown.
+    socket.release();
+    REQUIRE(loop.blockOn(net::testing::waitUntil(&loop, [&] { return !queue.draining(); })));
 }

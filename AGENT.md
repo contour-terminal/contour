@@ -228,6 +228,13 @@ inherited by every preset through `contour-common` (see `cmake/PedanticCompiler.
 
 First-party modules under `src/`, roughly bottom-up (later depends on earlier):
 
+- `src/coro` — the C++23 coroutine vocabulary: `Task`, `WhenAll`, `WhenAny`, `Cancellation`,
+  `UniqueCoroHandle`. **No first-party dependencies** — its headers include nothing but the
+  standard library, and that is the invariant, not an accident.
+- `src/net` — the coroutine-native reactor and transport `vthost` is built on: `EventLoop`, the
+  `EventSource` DI seam with its poll/epoll/kqueue backends, sockets, and TLS behind
+  `ITlsContext`. Built on `coro` and **deliberately not on `crispy`**, which is why it declares
+  `Threads::Threads` itself.
 - `src/crispy` — foundational utilities (`result`, ranges/format helpers, app scaffolding)
 - `src/text_shaper` — font shaping / glyph rasterization abstraction
 - `src/vtparser` — VT escape-sequence parser (state machine)
@@ -235,10 +242,21 @@ First-party modules under `src/`, roughly bottom-up (later depends on earlier):
 - `src/vtbackend` — terminal engine (grid, screen, VT semantics)
 - `src/vtrasterizer` — turns terminal cells into renderable geometry/atlases
 - `src/vtworkspace` — Qt-free tab/split-pane tree model
+- `src/vthost` — the Qt-free serving path: the daemon, session hosting, the native protocol and
+  the tmux control-mode gateway
 - `src/contour` — the application: the headless CLI, and the Qt/QML GUI frontend
 
 Respect these boundaries: lower layers must not depend on higher ones, and the GUI must not
 reach around `vtbackend`/`vtworkspace` into rendering internals.
+
+`coro` and `net` originated in [Endo](https://github.com/contour-terminal/endo) and, before that,
+fastcached — but **this copy is now the source of truth for all three**, having since gained
+`UniqueCoroHandle`, the `EventLoop`/`EventSource` split, TLS, Unix sockets and fd passing. Changes
+flow *outward*: fix here, then propagate; never re-sync *from* Endo, whose copy is a strict subset.
+Consumers pull this code in at CMake configure time rather than vendoring it. See
+[`src/coro/README.md`](src/coro/README.md) and [`src/net/README.md`](src/net/README.md), which also
+carry the invariants worth not breaking (a failed fd registration fails the awaitable rather than
+parking forever; readiness is level-triggered; I/O errors are `std::expected`, not exceptions).
 
 `src/vtbackend/` is layered too, one directory per concern, lowest first. Unlike `src/contour/`
 the namespace stays flat — everything is `vtbackend`, so the directories are about *finding* code,
@@ -265,6 +283,28 @@ not about naming it:
 The graph is acyclic — `core/ → grid/ → vt/ → render/ → screen/` — and it stays that way because
 the builders live with the engine they walk rather than with the buffer they fill. Only
 `Logging.hpp` and the two optional tools sit at the top level.
+
+`src/vthost/` is layered too, but unlike `vtbackend` **each subdirectory names a sub-namespace** —
+`vthost::proto`, `vthost::imsg`, `vthost::tmux`, `vthost::client`. The top level is the server: the
+`Daemon` entry points behind `contour daemon`/`contour client`, `ConnectionAcceptor`, `SessionHost`
+(the daemon-side owner of sessions, the second consumer `vtworkspace`'s model was designed for), and
+the `*Wire.hpp` encoders that turn `vtbackend` state into PDU payloads. Beneath it:
+
+- `proto/` — the native protocol's byte level: LEB128 varints, the PDU frame, and its trace
+  formatting. **Dependency-free** — no socket enters here, so every framing rule is table-testable.
+- `imsg/` — the rewritten-libutil imsg codec tmux ≥ 3.6 speaks between its own client and server.
+  Pure bytes-in/frames-out for the same reason.
+- `tmux/` — control mode (`tmux -CC`): the parser, the `TmuxGateway` that owns the protocol state
+  machine, and the server side that speaks it back. It deliberately knows nothing about pane
+  *contents* — consumers feed `%output` bytes into their own terminals.
+- `client/` — the native-protocol client engine, which runs **no parser**: it mirrors each remote
+  session's screen from the server's Delta stream into a `RemoteScreen` any frontend can render.
+- `testing/` — `GridParity`, which checks a mirrored screen against the grid it came from.
+
+`vthost` links no Qt, and that is the point: the whole serving path never touches the GUI stack, so
+`contour daemon` and `contour client` are thin entry points over a module that tests headlessly.
+Its suite, along with those of `coro`, `net` and `vtworkspace`, carries the `daemon` CTest label —
+`ctest -L daemon` is everything daemon mode must pass to be trusted.
 
 `src/contour/` is itself layered, one directory per concern, and **each directory names the
 namespace it holds** — `src/contour/config/` is `contour::config`, and so on for every one. Only

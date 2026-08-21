@@ -8,6 +8,15 @@
 /// version handshake the session pushes a full snapshot (SessionState + a
 /// snapshot Delta per hosted session), then per-line deltas driven by the
 /// host's screen-updated signal, debounced so bursts coalesce into one Delta.
+///
+/// Snapshots and increments travel differently, and the difference is the point. An increment is
+/// small by construction — the rows that changed in one 20ms window. A snapshot is the whole
+/// grid INCLUDING all scrollback, which is legitimately megabytes and has no smaller form. So
+/// snapshots are queued per session and emitted by a single streamer coroutine that waits for
+/// room in the send queue before each piece and splits anything over `SnapshotChunkBytes`.
+/// Emitting them inline instead is what made a daemon with a couple of scrollback-heavy panes
+/// permanently unattachable: the burst never yielded, so the drain never ran, so the whole attach
+/// payload had to fit the send-queue bound at once — and past two panes it did not.
 /// Grid rows are addressed by stable id; a generation change triggers one
 /// resync snapshot. Hyperlink URIs ship once per connection on first
 /// reference; image pixels only on FetchImage.
@@ -16,6 +25,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <expected>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -43,6 +54,15 @@ class NativeSession final: public SessionStreamEvents
   public:
     /// The default send-queue bound (see the constructor).
     static constexpr std::size_t DefaultWriteQueueBytes = std::size_t { 4 } * 1024 * 1024;
+
+    /// The largest snapshot payload one PDU carries; a grid bigger than this travels as several.
+    ///
+    /// Two cliffs make a lone unbounded frame wrong, and this clears both. It sits far below the
+    /// send-queue bound, so the streamer can always wait for room for a whole piece — and a piece
+    /// that lands on a drained backlog is never refused, whatever its size. And it sits orders of
+    /// magnitude below @ref proto::MaxFrameSize, so no scrollback depth can build a frame the
+    /// peer's own decoder rejects as FrameTooLarge.
+    static constexpr std::size_t SnapshotChunkBytes = std::size_t { 256 } * 1024;
 
     /// @param loop The event loop everything runs on.
     /// @param host The session host (not owned; outlives this).
@@ -241,18 +261,93 @@ class NativeSession final: public SessionStreamEvents
     /// (serial 0), once the handshake completed — on attach and on every change.
     void pushLayout();
 
-    /// Validates the peer's ClientHello, answers, and pushes the attach
+    /// Validates the peer's ClientHello, answers, and queues the attach
     /// snapshot (spawning the first session on an empty daemon).
     /// @return False when the hello was missing or version-mismatched.
     [[nodiscard]] bool completeHandshake(proto::DecodedFrame const& frame);
 
-    /// Sends SessionState + a snapshot/delta for @p session (under its lock).
-    void pushDelta(vtworkspace::SessionId session, bool forceSnapshot);
+    /// Whether a push re-describes the whole grid or reports only what changed since this
+    /// connection's delta cursor.
+    enum class SnapshotMode : uint8_t
+    {
+        Delta = 0,  ///< Report the rows changed since @c FollowState::cursor.
+        Forced = 1, ///< Re-describe the whole grid: attach, resize, page flip or a lost cursor.
+    };
+
+    /// One session's push, built under the terminal's lock and emitted after it is released.
+    ///
+    /// Building and emitting are separate steps because the two emission policies differ and
+    /// neither may hold the lock while it waits: an increment goes out at once, a snapshot is
+    /// paced against the send queue and split across PDUs.
+    struct BuiltPush
+    {
+        proto::Delta delta;                       ///< The rows and state to send.
+        std::optional<proto::SessionState> state; ///< Precedes the delta, on a snapshot.
+    };
+
+    /// Why @ref buildPush produced no push.
+    enum class BuildFailure : uint8_t
+    {
+        NoSuchSession = 0, ///< The host no longer hosts it.
+        /// The increment asked for cannot describe this batch — row identity moved out from under
+        /// the delta cursor. Reported rather than silently upgraded to a snapshot, because a
+        /// snapshot is the whole grid and belongs on the paced path, not inline on the caller's.
+        /// Nothing in the follow state has been advanced when this is returned, so the caller may
+        /// simply ask for a snapshot instead.
+        ResyncRequired = 1,
+        /// The delta would tell this peer nothing it has not been told: no cell, mode, cursor or
+        /// scrollback-floor movement since the last push. Unlike the two above, the follow state
+        /// HAS been advanced when this is returned — there was simply nothing to send.
+        NothingToSay = 2,
+    };
+
+    /// Collects @p session's push under the terminal's lock, advancing this connection's follow
+    /// state to match what the returned push will say.
+    /// @param session The session to describe.
+    /// @param mode Whether to re-describe the whole grid or only what changed.
+    /// @return The built push, or why none was built.
+    [[nodiscard]] std::expected<BuiltPush, BuildFailure> buildPush(vtworkspace::SessionId session,
+                                                                   SnapshotMode mode);
+
+    /// Sends SessionState + an incremental delta for @p session, deferring to @ref requestSnapshot
+    /// when an increment turns out not to be able to describe the batch.
+    void pushDelta(vtworkspace::SessionId session);
+
+    /// Queues a full-grid snapshot of @p session and starts the streamer if it is idle.
+    ///
+    /// Queued rather than sent: a snapshot is the whole grid, several of them are asked for at
+    /// once (attach walks every pane, a resize re-projects every pane), and emitting them inline
+    /// puts the entire payload in the send queue before the drain has run even once.
+    void requestSnapshot(vtworkspace::SessionId session);
+
+    /// @return Whether @p session has a snapshot queued or in flight. An increment for such a
+    ///         session must be held back: the snapshot re-describes everything the increment
+    ///         would say, and one landing BETWEEN a snapshot's pieces would have the mirror
+    ///         repaint a grid it has only half received.
+    [[nodiscard]] bool snapshotPending(vtworkspace::SessionId session) const noexcept;
+
+    /// Parks until the send queue has room for a snapshot piece.
+    /// @return False when the connection is going away and the caller should stop.
+    [[nodiscard]] coro::Task<bool> awaitSendRoom();
+
+    /// Arms the debounced delta flush unless one is already armed or the connection is closing.
+    void scheduleFlush();
+
+    /// The single snapshot streamer: drains @ref _snapshotQueue, one session at a time, waiting
+    /// for room in the send queue before each piece. One streamer rather than one coroutine per
+    /// snapshot, so two runs for the same session can never interleave on the wire.
+    [[nodiscard]] coro::Task<void> streamSnapshots();
+
+    /// Emits @p delta as one PDU, or as a run of @ref SnapshotChunkBytes-sized ones when its rows
+    /// exceed that, waiting for room before each.
+    /// @param delta The snapshot to send (consumed).
+    /// @param session The session it describes; also the supersede tag its pieces carry.
+    [[nodiscard]] coro::Task<void> sendSnapshotPieces(proto::Delta delta, vtworkspace::SessionId session);
 
     /// Pulls the session's live renditional state (title, cursor shape, cwd,
     /// colours, status display, Kitty-keyboard flags) into @p delta as diffs and —
-    /// on a snapshot — captures the full state into @p state. Called by pushDelta
-    /// with the terminal already locked; split out to keep pushDelta within the
+    /// on a snapshot — captures the full state into @p state. Called by buildPush
+    /// with the terminal already locked; split out to keep buildPush within the
     /// cognitive-complexity budget. Static: it reads only its arguments.
     /// @param screenTypeValue The wire screen-type discriminator (std::to_underlying).
     static void collectLiveState(vtbackend::Terminal& terminal,
@@ -261,7 +356,7 @@ class NativeSession final: public SessionStreamEvents
                                  std::optional<proto::SessionState>& state,
                                  vtworkspace::SessionId session,
                                  uint8_t screenTypeValue,
-                                 bool snapshot);
+                                 SnapshotMode mode);
 
     /// Captures the live OSC 3008 ancestry into @p delta, or — on a snapshot, which carries the records
     /// through SessionState instead — only brings @p follow up to date.
@@ -289,6 +384,13 @@ class NativeSession final: public SessionStreamEvents
     SessionHost& _host;
     std::unique_ptr<net::ISocket> _connection;
     net::WriteQueue _writer;
+    /// The backlog a snapshot piece waits to get under before it is enqueued.
+    ///
+    /// Derived from the connection's own bound rather than fixed: waiting for room for a WHOLE
+    /// piece is what makes the enqueue that follows unrefusable, and a bound smaller than a piece
+    /// (what a test sets) degrades this to "wait until fully drained", where the queue's
+    /// never-refuse-a-lone-frame rule takes over.
+    std::size_t _snapshotWatermark;
     ConnectionId _id;           ///< Prefixes this connection's every log line.
     std::string _expectedToken; ///< Required ClientHello token; empty accepts any.
     /// The emulation settings this client asked the sessions IT creates to have, layered onto the
@@ -301,6 +403,14 @@ class NativeSession final: public SessionStreamEvents
     LayoutObserver _layoutObserver;
     std::unordered_map<uint64_t, FollowState> _followed;
     std::unordered_set<uint64_t> _pendingSessions;
+    /// Sessions awaiting a full-grid snapshot, in the order they were asked for.
+    std::deque<uint64_t> _snapshotQueue;
+    /// The session @ref streamSnapshots is emitting right now; engaged exactly while a streamer
+    /// coroutine is live, which is also how @ref run knows it may let `this` go.
+    ///
+    /// Distinct from the queue because a session is popped before its pieces go out, and an
+    /// increment for it must stay held back for the whole run, not just while it waits its turn.
+    std::optional<uint64_t> _streamingSession;
     bool _flushScheduled = false;
     bool _handshaken = false;
     bool _closed = false;

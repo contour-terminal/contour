@@ -63,9 +63,16 @@ void RemoteScreen::apply(proto::SessionState const& state)
 void RemoteScreen::apply(proto::Delta const& delta)
 {
     session = delta.session;
-    if (delta.snapshot != 0)
+    // A snapshot replaces everything the client held — but a snapshot too large for one frame
+    // arrives as several, and only its FIRST piece may clear. The piece says which it is rather
+    // than the mirror inferring it from the piece before, so a run whose tail was dropped in
+    // favour of a newer snapshot still clears when that newer run's first piece lands.
+    // Remembered for the reply PDUs that carry no marker of their own. @see snapshotInProgress.
+    // No `snapshot != 0` conjunct: completesSnapshot() already answers true for an increment.
+    snapshotInProgress = !delta.completesSnapshot();
+    if (delta.startsSnapshot())
     {
-        rows.clear(); // a snapshot replaces everything the client held
+        rows.clear();
         imageCells.clear();
         // The pixel caches stay valid: image ids are pool-scoped, not
         // generation-scoped, so a rebuild does not invalidate a fetched image.
@@ -378,7 +385,10 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
             screen.requestedImages.insert(entry.imageId);
             fetchImage(delta->session, entry.imageId);
         }
-        if (_onUpdate)
+        // Publish only a screen that is whole. A mid-run piece leaves the mirror holding part of
+        // a grid, and handing that to a frontend would have it repaint a snapshot it has only
+        // half received — the rows not yet delivered rendering as absent until the run finishes.
+        if (_onUpdate && !screen.snapshotInProgress)
             _onUpdate(screen, *delta);
         return;
     }
@@ -395,7 +405,9 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         _pendingImages.erase(it);
         auto& screen = screenFor(session);
         screen.images.insert_or_assign(imageId, *image);
-        if (_onImage)
+        // Withheld mid-run for the same reason a snapshot piece is: the pixels are recorded either
+        // way, and the piece that completes the run places every image it holds.
+        if (_onImage && !screen.snapshotInProgress)
             _onImage(screen, imageId);
         return;
     }
@@ -411,7 +423,7 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         _pendingImages.erase(it);
         auto& screen = screenFor(session);
         screen.dropImage(imageId);
-        if (_onImage)
+        if (_onImage && !screen.snapshotInProgress)
             _onImage(screen, imageId);
         return;
     }

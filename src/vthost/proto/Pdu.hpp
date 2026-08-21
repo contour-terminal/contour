@@ -424,6 +424,23 @@ struct ImageCellEntry
     bool operator==(ImageCellEntry const&) const = default;
 };
 
+/// Where one PDU sits in a snapshot that was too large to travel as a single frame.
+///
+/// A full-grid snapshot of a deep scrollback is legitimately megabytes, and a producer that
+/// enqueues it whole either exceeds its connection's send-queue bound or hands the peer a frame
+/// its decoder must reject. Splitting it means `snapshot != 0` alone can no longer say "clear
+/// what you hold and start over" — only the FIRST piece may say that — so each piece names its
+/// place instead of the receiver inferring it from the piece before. Inferring it is what breaks
+/// when a superseding snapshot drops the remaining pieces of the one in flight: the new run's
+/// first piece must clear, and only an explicit marker still says so.
+enum class SnapshotPart : uint8_t
+{
+    Whole = 0,  ///< The entire snapshot in one PDU. Also what a non-snapshot delta carries.
+    First = 1,  ///< The first of several: clear, then accumulate.
+    Middle = 2, ///< Accumulate.
+    Last = 3,   ///< Accumulate, then apply — this piece carries the state the run must land with.
+};
+
 /// A batch of changed rows plus the side tables they reference. `snapshot`
 /// marks a full resync (attach or generation change) rather than an increment.
 struct Delta
@@ -432,6 +449,10 @@ struct Delta
     uint64_t generation = 0;
     uint64_t seqno = 0;
     uint8_t snapshot = 0;
+    /// This PDU's place in a chunked snapshot, as a @ref SnapshotPart. Zero (`Whole`) on every
+    /// unchunked delta, so a producer that never splits says nothing and a reader that ignores
+    /// it sees exactly the unchunked protocol.
+    uint8_t snapshotPart = 0;
     /// The stable id of page row 0 at delta time — what lets the client map
     /// stable-id-addressed rows onto its viewport.
     int64_t stableViewportBase = 0;
@@ -528,6 +549,40 @@ struct Delta
                || cwdChanged != 0 || colorsChanged != 0 || statusChanged != 0 || statusLinesChanged != 0
                || kittyKeyboardChanged != 0 || modifyOtherKeysChanged != 0 || mouseChanged != 0
                || progressChanged != 0 || contextChanged != 0 || !contexts.empty();
+    }
+
+    /// @return Where this PDU sits in its snapshot, or `Whole` for anything that is not part of a
+    ///         multi-PDU run — including a value no enumerator names, which a peer built from a
+    ///         later revision could send. Treating that as `Whole` is the safe reading: the piece
+    ///         is applied on its own rather than held for a run terminator that never comes.
+    [[nodiscard]] SnapshotPart part() const noexcept
+    {
+        // A switch rather than a range check, and every enumerator named: adding a fifth then
+        // fails the build here instead of being silently folded into Whole.
+        auto const value = static_cast<SnapshotPart>(snapshotPart);
+        switch (value)
+        {
+            case SnapshotPart::Whole:
+            case SnapshotPart::First:
+            case SnapshotPart::Middle:
+            case SnapshotPart::Last: return value;
+        }
+        return SnapshotPart::Whole; // a byte no enumerator names, from a revision we do not know
+    }
+
+    /// @return Whether the receiver must discard what it holds for this session before applying
+    ///         this PDU. True for a snapshot that opens a run, or is a run of one.
+    [[nodiscard]] bool startsSnapshot() const noexcept
+    {
+        return snapshot != 0 && (part() == SnapshotPart::Whole || part() == SnapshotPart::First);
+    }
+
+    /// @return Whether the receiver holds a whole screen once this PDU is applied, and may render
+    ///         it. False only mid-run: publishing then would paint a grid half of which has not
+    ///         arrived. Every non-snapshot delta completes trivially.
+    [[nodiscard]] bool completesSnapshot() const noexcept
+    {
+        return snapshot == 0 || part() == SnapshotPart::Whole || part() == SnapshotPart::Last;
     }
 
     bool operator==(Delta const&) const = default;
@@ -709,6 +764,48 @@ using DecodedPdu = std::variant<Invalid,
 /// @param serial Request correlation; 0 = unsolicited push.
 /// @param pdu Any catalog PDU.
 void encodePdu(Writer& sink, uint64_t serial, DecodedPdu const& pdu);
+
+/// @return Roughly how many bytes @p line occupies once encoded.
+///
+/// For deciding where to split a payload that is too large to send as one frame, and for nothing
+/// else. The exact size is known only after encoding, and encoding a row twice to learn a number
+/// whose only job is to pick a split point would double the work; being within a small factor is
+/// enough for a budget whose consumer pads it anyway.
+///
+/// Lives beside the encoder it approximates for the reason `Delta::hasChanges` lives beside its
+/// gates: a field added to `encodeCell` has to be remembered here too, and nothing points across
+/// a module boundary to say so. `Pdu_test` pins the two together against a real `Writer`.
+[[nodiscard]] std::size_t estimatedEncodedSize(WireLine const& line) noexcept;
+
+/// One piece of a snapshot whose rows did not fit a single frame: an index range plus its
+/// place in the run.
+struct SnapshotPiece
+{
+    std::size_t begin = 0; ///< Index of this piece's first row.
+    std::size_t count = 0; ///< How many rows it covers; zero only for an empty input.
+    /// Where this piece sits in the run.
+    ///
+    /// Carried here rather than left to the caller so the rule with the sharp edge — a lone piece
+    /// is `Whole`, never a `First` whose `Last` never comes — has one home and one test. A caller
+    /// re-deriving it from "am I the first element, am I the last" gets that case wrong by writing
+    /// the two conditions independently, and the peer then waits forever for a terminator.
+    SnapshotPart part = SnapshotPart::Whole;
+};
+
+/// Splits @p lines into consecutive pieces, each aiming to stay within @p budget bytes.
+///
+/// Two rules make the result always usable rather than sometimes impossible:
+/// - **A row is never split.** It is the smallest thing the wire can address, so a row that alone
+///   exceeds @p budget gets a span to itself and the budget is overshot. The budget is a target,
+///   not a guarantee — its consumer must not depend on the bound.
+/// - **An empty input yields one empty span.** A payload with no rows is still a payload, and its
+///   sender still has one PDU's worth of state to deliver.
+/// @param lines The rows to partition, in order.
+/// @param budget The byte target per piece, by @ref estimatedEncodedSize.
+/// @return One entry per piece, covering @p lines exactly once, in order, each marked with its
+///         place in the run — a single piece is `Whole`, never `First` followed by nothing.
+[[nodiscard]] std::vector<SnapshotPiece> partitionSnapshotRows(std::span<WireLine const> lines,
+                                                               std::size_t budget);
 
 /// The catalog tag @p pdu carries, for diagnostics and dispatch.
 ///

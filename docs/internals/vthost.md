@@ -260,9 +260,10 @@ directions, rather than argued.
 
 ### The send queue: what a bound may and may not conclude
 
-`net::WriteQueue`'s byte bound exists to detect a peer that stopped draining, and two rules
-keep it from firing on anything else. Both were learned the hard way — the daemon used to
-disconnect perfectly healthy clients on a window resize.
+`net::WriteQueue`'s byte bound exists to detect a peer that stopped draining, and three rules
+keep it from firing on anything else. All three were learned the hard way — the daemon used to
+disconnect perfectly healthy clients on a window resize, and later refused to let them attach
+at all.
 
 - **The bound governs the backlog, never a single frame.** A frame landing on an empty
   backlog is always accepted, however large. A full-grid snapshot of a deep scrollback is
@@ -276,8 +277,36 @@ disconnect perfectly healthy clients on a window resize.
   stacking on top of them. Without it a burst of resyncs — a window drag, or an attach
   immediately followed by the client asserting its area — queues whole grids until the
   bound trips, for frames the client's mirror would have discarded on arrival anyway.
+- **A producer that can pace itself must, and a snapshot is split so it can.** The first two
+  rules are about what the queue concludes; this one is about what a producer may hand it.
+  `enqueue` is non-suspending and the drain is *spawned* onto the loop — `EventLoop::spawn`
+  queues a handle, it does not resume one — so a producer that enqueues a burst without
+  suspending never lets the drain run, and the queue is never empty after its first frame. The
+  lone-frame exemption then protects nothing, and the whole burst has to fit the bound at once.
+  That is what made a daemon with two scrollback-heavy panes permanently unattachable: the attach
+  walked every pane pushing a whole grid each, and the second one did not fit. Snapshots
+  therefore go through `NativeSession`'s streamer, which `waitUntilBacklogBelow`s a piece's worth
+  before each PDU and splits anything past `SnapshotChunkBytes` into a `proto::SnapshotPart` run.
+  The watermark is deliberately a *low*-water mark. Pacing to `bound − piece` delivers the
+  snapshot just as well, but does it by riding the backlog just under the bound for the whole
+  run — leaving a single piece of headroom for every producer that *cannot* pace itself, and
+  refusing the first one that needs more.
 
-The complement to both lives upstream: a resync is only pushed when a grid actually moved.
+The same rule has a second shape in-tree, for a producer that *cannot* suspend: `ControlOutput::pump`
+reads `queuedBytes()` and spends a headroom-derived per-pane credit, re-arming a timer while work
+remains, rather than waiting. `NativeSession`'s own debounce re-arm does the same. Suspend where you
+can, budget-and-re-arm where you cannot — one rule, two shapes.
+
+What the third rule does **not** cover, and what is still open: the burst-in-a-non-suspending-callback
+shape is unprotected in `tmux::ControlSession`'s *reply* path (`emitGuarded` sinks one frame per
+captured row against a 256 KiB bound, bypassing the credit pacer its own `%output` path uses) and in
+`tmux::TmuxGateway` (`sendKeys`/`sendRawInput` chop a paste into many commands). Both can still
+refuse mid-burst and drop a healthy peer. The deeper fix for the
+whole class is to make the bound mean what its comment says — refuse only when over bound *and*
+the drain has made no progress for some interval — which would protect the producers that
+structurally cannot pace.
+
+The complement to the first two lives upstream: a resync is only pushed when a grid actually moved.
 `SessionHost` reports that (`SizeChange`) rather than letting callers assume a resize
 request changed something, because clients re-assert an unchanged client area on every
 attach, and each pane's grid is clamped before it is applied — so both "different request,
