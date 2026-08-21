@@ -756,6 +756,7 @@ void TerminalSession::executeRole(GuardedRole role, bool allow, bool remember)
             executeShowHostWritableStatusLine(allow, remember);
             break;
         case GuardedRole::BigPaste: applyPendingPaste(allow, remember); break;
+        case GuardedRole::Screenshot: executePendingScreenshot(allow, remember); break;
     }
 }
 
@@ -790,6 +791,7 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
                     case GuardedRole::CaptureBuffer: emit requestPermissionForBufferCapture(); break;
                     case GuardedRole::ShowHostWritableStatusLine: emit requestPermissionForShowHostWritableStatusLine(); break;
                     case GuardedRole::BigPaste: emit requestPermissionForPasteLargeFile(); break;
+                    case GuardedRole::Screenshot: emit requestPermissionForScreenshot(); break;
                         // clang-format on
                 }
             }
@@ -841,6 +843,47 @@ void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
     _terminal.primaryScreen().captureBuffer(capture.lines, capture.logical);
 
     sessionLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
+    flushInput();
+}
+
+vtbackend::screenshot::Disposition TerminalSession::requestScreenshot(
+    vtbackend::screenshot::Request const& request)
+{
+    if (!_display)
+        return vtbackend::screenshot::Disposition::Unhandled;
+
+    // Only one screenshot is held at the wall at a time. A second request arriving while the user is
+    // still looking at the dialog for the first would otherwise overwrite it, and the first would
+    // never be answered.
+    if (_pendingScreenshot)
+    {
+        _terminal.answerScreenshot(request, vtbackend::screenshot::Decision::Denied);
+        return vtbackend::screenshot::Disposition::Pending;
+    }
+
+    _pendingScreenshot = request;
+    _display->post([this]() {
+        requestPermission(_profile.permissions.value().screenshot, GuardedRole::Screenshot);
+    });
+    return vtbackend::screenshot::Disposition::Pending;
+}
+
+void TerminalSession::executePendingScreenshot(bool allow, bool remember)
+{
+    if (remember)
+        _rememberedPermissions[GuardedRole::Screenshot] = allow;
+
+    if (!_pendingScreenshot)
+        return;
+
+    auto const request = _pendingScreenshot.value();
+    _pendingScreenshot.reset();
+
+    _terminal.answerScreenshot(request,
+                               allow ? vtbackend::screenshot::Decision::Allowed
+                                     : vtbackend::screenshot::Decision::Denied);
+
+    sessionLog()("requestScreenshot: {}. Waking up I/O thread.", allow ? "allowed" : "denied");
     flushInput();
 }
 

@@ -205,6 +205,16 @@ Item {
     }
 
     RequestPermission {
+        id: requestScreenshotDialog
+        text: "The host application is requesting to read the screen contents."
+        onYesToAllClicked: if (chrome.session !== null) chrome.session.executePendingScreenshot(true, true);
+        onYesClicked: if (chrome.session !== null) chrome.session.executePendingScreenshot(true, false);
+        onNoToAllClicked: if (chrome.session !== null) chrome.session.executePendingScreenshot(false, true);
+        onNoClicked: if (chrome.session !== null) chrome.session.executePendingScreenshot(false, false);
+        onRejected: if (chrome.session !== null) chrome.session.executePendingScreenshot(false, false);
+    }
+
+    RequestPermission {
         id: requestShowHostWritableStatusLine
         text: "The host application is requesting to show the host-writable statusline."
         onYesToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(true, true);
@@ -277,6 +287,7 @@ Item {
         // Permission-wall hooks.
         function onRequestPermissionForFontChange() { requestFontChangeDialog.open(); }
         function onRequestPermissionForBufferCapture() { requestBufferCaptureDialog.open(); }
+        function onRequestPermissionForScreenshot() { requestScreenshotDialog.open(); }
         function onRequestPermissionForShowHostWritableStatusLine() { requestShowHostWritableStatusLine.open(); }
         function onRequestPermissionForPasteLargeFile() { requestLargeFilePaste.open(); }
     }
