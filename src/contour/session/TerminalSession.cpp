@@ -875,8 +875,17 @@ vtbackend::screenshot::Disposition TerminalSession::renderScreenshot(
     if (!_display)
         return vtbackend::screenshot::Disposition::Unhandled;
 
-    auto const scheduled =
-        _display->renderScreenshot(request, [this, request](vtbackend::screenshot::CaptureResult capture) {
+    // The capture outlives this call by a frame or two, and a session does NOT outlive every surface it
+    // was shown on -- releaseSession() exists precisely because a session can be torn down while its
+    // display carries on. A raw `this` would therefore be answering into freed memory on that path, so
+    // the answer is guarded by the session's own QObject lifetime. The check is not a race: the surface
+    // answers on the GUI thread, which is also where a session is destroyed.
+    auto const scheduled = _display->renderScreenshot(
+        request,
+        [this, guard = QPointer<TerminalSession> { this }, request](
+            vtbackend::screenshot::CaptureResult capture) {
+            if (!guard)
+                return;
             _terminal.answerScreenshot(request, capture);
             sessionLog()("renderScreenshot: {}. Waking up I/O thread.", capture ? "captured" : "unavailable");
             flushInput();

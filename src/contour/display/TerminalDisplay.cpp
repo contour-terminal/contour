@@ -6,6 +6,7 @@
 #include <contour/display/ImeQueryRect.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/display/RhiRenderer.hpp>
+#include <contour/display/ScreenshotAnswer.hpp>
 #include <contour/display/ScreenshotEncoder.hpp>
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
@@ -1802,10 +1803,25 @@ bool TerminalDisplay::renderScreenshot(vtbackend::screenshot::Request const& req
     // captured frame was not rendered with.
     auto const metrics = gridMetrics();
 
-    requestScreenshot([this, request, metrics, onReady = std::move(onReady)](QImage const& frame) mutable {
+    // The renderer numbers its rows from the top of everything DRAWN, while the request names rows of
+    // the main page: a status line positioned above the grid occupies the first rows and pushes every
+    // page row down by its height. The same shift the render buffer applies when it places cells, and
+    // the hit-tests when they map a pixel back. @see vtbackend::Terminal::mainPageTopRow.
+    auto const topRow = _session != nullptr ? unbox<int>(_session->terminal().mainPageTopRow()) : 0;
+    auto const area =
+        vtbackend::Rect { .top = vtbackend::Top::cast_from(unbox(request.area.top) + topRow),
+                          .left = request.area.left,
+                          .bottom = vtbackend::Bottom::cast_from(unbox(request.area.bottom) + topRow),
+                          .right = request.area.right };
+
+    // The display outlives every callback the render target holds, because it owns the renderer that
+    // holds them -- which is what makes capturing `this` for the hop sound here.
+    auto answer = std::make_shared<ScreenshotAnswer>(
+        [this](std::function<void()> const& work) { post(work); }, std::move(onReady));
+
+    requestScreenshot([area, format = request.format, metrics, answer](QImage const& frame) {
         // Encoded here, on the render thread, so a page-sized PNG is not deflated on the GUI thread.
-        post([capture = encodeScreenshot(frame, request.area, metrics, request.format),
-              onReady = std::move(onReady)]() mutable { onReady(std::move(capture)); });
+        answer->deliver(encodeScreenshot(frame, area, metrics, format));
     });
 
     return true;
