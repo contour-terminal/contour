@@ -243,7 +243,7 @@ Terminal::Terminal(Events& eventListener,
                                               _pageMargins.data(),
                                               _settings.pageSize,
                                               _settings.primaryScreen.allowReflowOnResize,
-                                              _settings.maxHistoryLineCount,
+                                              _settings.historyLimits,
                                               "page-1"));
     for (auto const i: std::views::iota(1, MaxPageCount))
         _pages.push_back(std::make_unique<Screen>(
@@ -2692,6 +2692,7 @@ std::span<FoldRange const> Terminal::foldRanges() const
     // position, so the previous scan still stands.
     auto const key = FoldRangesKey { .generation = grid.generation(),
                                      .stableBase = grid.stableLineIdOf(LineOffset(0)),
+                                     .stableFloor = grid.stableRangeFloor(),
                                      .markRevision = _semanticMarkRevision };
     if (_foldRangesKey == key)
         return _foldRanges;
@@ -2720,6 +2721,7 @@ void Terminal::ensureFoldProjection() const
     auto const pageLines = unbox<int>(pageSize().lines);
     auto const key = FoldProjectionKey { .generation = grid.generation(),
                                          .stableBase = grid.stableLineIdOf(LineOffset(0)),
+                                         .stableFloor = grid.stableRangeFloor(),
                                          .scrollOffset = unbox<int>(_viewport.scrollOffset()),
                                          .pageLines = pageLines,
                                          .foldRevision = _foldState.revision(),
@@ -4645,11 +4647,26 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
     else
         clearSelection();
 }
+
+void Terminal::clampToHistory() noexcept
+{
+    _viewport.clampScrollOffset();
+
+    // The Normal-mode cursor is walked one line further up on every scroll (@see onBufferScrolled)
+    // with nothing bounding it, so an eviction leaves it pointing below the oldest row there is.
+    // Bounded by addressableTop() rather than by the history depth, because that is the one place
+    // allowed to answer "where does this grid start" -- the two differ after a reverse scroll has
+    // wrapped unreset rows into the oldest slots.
+    auto const top = primaryScreen().grid().addressableTop();
+    if (_viCommands.cursorPosition.line < top)
+        _viCommands.cursorPosition.line = top;
+}
 // }}}
 
-void Terminal::setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount)
+void Terminal::setHistoryLimits(HistoryLimits historyLimits)
 {
-    primaryScreen().grid().setMaxHistoryLineCount(maxHistoryLineCount);
+    _settings.historyLimits = historyLimits;
+    primaryScreen().grid().setHistoryLimits(historyLimits);
 }
 
 LineCount Terminal::maxHistoryLineCount() const noexcept

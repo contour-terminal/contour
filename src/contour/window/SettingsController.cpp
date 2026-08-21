@@ -102,6 +102,42 @@ namespace
     /// the formatters render values for people ("host writable", "Logical", "Bold"), not as the tokens
     /// this option list and the config grammar use. A `Decorator` field would have shown nothing
     /// selected, because "dotted-underline" lowercases to itself but "DottedUnderline" does not.
+    /// One of the profile's `history:` depths, in the configuration's own `-1 == unlimited` spelling.
+    ///
+    /// A pointer-to-member rather than a getter/setter pair, because the two rows this builds differ
+    /// in nothing else: written out by hand they were character-for-character identical but for the
+    /// field name, and a third depth tomorrow would have been a third copy of the same encoding.
+    ///
+    /// -1 in both directions, matching what the HistoryConfig writer emits, so what the page shows is
+    /// what the file holds. Mapping Infinite to 0 on the way out while reading 0 back as LineCount(0)
+    /// -- as this once did -- displayed unlimited scrollback as "0" and then turned it into literally
+    /// no scrollback the first time the field was touched.
+    ProfileFieldDescriptor historyLimitField(QString key,
+                                             QString label,
+                                             QString help,
+                                             vtbackend::MaxHistoryLineCount config::HistoryConfig::* field)
+    {
+        return { std::move(key),
+                 std::move(label),
+                 std::move(help),
+                 "int",
+                 [field](TerminalProfile const& p) {
+                     auto const& limit = p.history.value().*field;
+                     if (auto const* lineCount = std::get_if<vtbackend::LineCount>(&limit))
+                         return QVariant(static_cast<int>(unbox(*lineCount)));
+                     return QVariant(-1);
+                 },
+                 [field](TerminalProfile& p, QVariant const& v) {
+                     auto history = p.history.value();
+                     auto const lines = v.toInt();
+                     if (lines < 0)
+                         history.*field = vtbackend::Infinite {};
+                     else
+                         history.*field = vtbackend::LineCount(lines);
+                     p.history = history;
+                 } };
+    }
+
     template <typename Enum, size_t N, typename Getter, typename Setter>
     ProfileFieldDescriptor enumField(QString key,
                                      QString label,
@@ -389,30 +425,17 @@ namespace
             { "History & scrollbar",
               "≡",
               {
-                  { "history_max_lines",
-                    "History max lines",
-                    "Maximum number of scrollback lines to keep (-1 = unlimited).",
-                    "int",
-                    // -1 means unlimited, in both directions. That is the config file's own spelling
-                    // (see the HistoryConfig writer in Config.h), so what the page shows matches what
-                    // the file holds. Mapping Infinite to 0 on the way out while reading 0 back as
-                    // LineCount(0) -- as this did -- displayed unlimited scrollback as "0" and then
-                    // turned it into literally no scrollback the first time the field was touched.
-                    [](TerminalProfile const& p) {
-                        auto const& maxLines = p.history.value().maxHistoryLineCount;
-                        if (auto const* lineCount = std::get_if<vtbackend::LineCount>(&maxLines))
-                            return QVariant(static_cast<int>(unbox(*lineCount)));
-                        return QVariant(-1);
-                    },
-                    [](TerminalProfile& p, QVariant const& v) {
-                        auto h = p.history.value();
-                        auto const lines = v.toInt();
-                        if (lines < 0)
-                            h.maxHistoryLineCount = vtbackend::Infinite {};
-                        else
-                            h.maxHistoryLineCount = vtbackend::LineCount(lines);
-                        p.history = h;
-                    } },
+                  historyLimitField("history_max_lines",
+                                    "History max lines",
+                                    "Maximum number of scrollback lines to keep (-1 = unlimited).",
+                                    &config::HistoryConfig::maxHistoryLineCount),
+                  historyLimitField(
+                      "history_hard_limit",
+                      "History hard limit",
+                      "Upper bound on the scrollback (-1 = unlimited). Above the max, the extra "
+                      "lines are headroom in which whole (prompt, output) blocks are evicted instead "
+                      "of cutting mid-command. Values at or below the max disable that.",
+                      &config::HistoryConfig::hardLimit),
                   { "history_scroll_multiplier",
                     "History scroll multiplier",
                     "Number of lines scrolled per scroll wheel step.",

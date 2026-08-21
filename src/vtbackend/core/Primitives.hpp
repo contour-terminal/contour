@@ -85,13 +85,57 @@ using ColumnOffset = boxed::boxed<int, detail::tags::ColumnOffset>;
 // }}}
 // {{{ Line types
 
-// clang-format off
 /// Special structure for infinite history of Grid
-struct Infinite {};
-// clang-format on
+///
+/// Ordered so MaxHistoryLineCount is. A variant compares by ALTERNATIVE INDEX first, and Infinite is
+/// the second alternative, so `std::max`/`std::min` over the variant already mean "the deeper of the
+/// two" and "the shallower" -- including against an infinity. That is what lets the two places which
+/// reconcile a guarantee against a capacity say so in one line each instead of unwrapping both
+/// variants by hand. @see HistoryLimits.
+struct Infinite
+{
+    auto operator<=>(Infinite const&) const = default;
+};
 /// MaxHistoryLineCount represents type that are used to store number
 /// of lines that can be stored in history
 using MaxHistoryLineCount = std::variant<LineCount, Infinite>;
+
+/// The two bounds on the scrollback: what is guaranteed to survive, and what is possible at all.
+///
+/// One limit cannot express "evict whole commands". Snapping eviction to the shell's OSC 133 prompt
+/// marks means the buffer has to be allowed to overshoot the depth the user asked for, because the
+/// nearest prompt boundary is almost never exactly there -- so `guaranteed` becomes a floor rather
+/// than a ceiling, and `capacity` supplies the ceiling that keeps memory bounded when no boundary
+/// can be found at all (no shell integration, or one command whose output is larger than the whole
+/// headroom).
+///
+/// A plain aggregate, like @ref ContextStackLimits: designated initialisers then name which bound is
+/// which, so the two -- adjacent, identically typed and otherwise silently exchangeable -- cannot be
+/// transposed at a call site. Use @ref plain for the one-value case rather than a converting
+/// constructor, so that a bare line count can never widen into "both bounds" by accident.
+struct HistoryLimits
+{
+    /// The minimum retained. Block-atomic eviction never cuts below this.
+    MaxHistoryLineCount guaranteed { LineCount(0) };
+
+    /// The ring's size, and the depth at which eviction stops caring about command boundaries.
+    /// Never below @ref guaranteed.
+    MaxHistoryLineCount capacity { LineCount(0) };
+
+    /// One value is both bounds -- a scrollback with no headroom, which is what a single
+    /// `history.limit` has always meant and still means.
+    [[nodiscard]] static constexpr HistoryLimits plain(MaxHistoryLineCount both) noexcept
+    {
+        return HistoryLimits { .guaranteed = both, .capacity = both };
+    }
+
+    /// Whether eviction has room to snap to a command boundary. With no headroom there is nothing to
+    /// trade, and the scrollback evicts line-wise exactly as it always has.
+    [[nodiscard]] constexpr bool hasHeadroom() const noexcept { return guaranteed != capacity; }
+
+    bool operator==(HistoryLimits const&) const = default;
+};
+
 /// Represents the line offset relative to main-page top.
 ///
 /// *  0  is top-most line on main page

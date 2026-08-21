@@ -228,8 +228,8 @@ profiles:
     REQUIRE(profile != nullptr);
     auto const settings = contour::config::emulationSettings(config, *profile);
 
-    REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings.maxHistoryLineCount));
-    CHECK(std::get<vtbackend::LineCount>(settings.maxHistoryLineCount) == vtbackend::LineCount(4242));
+    REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings.historyLimits.capacity));
+    CHECK(std::get<vtbackend::LineCount>(settings.historyLimits.capacity) == vtbackend::LineCount(4242));
     CHECK(settings.pageSize.columns == vtbackend::ColumnCount(132));
     CHECK(settings.pageSize.lines == vtbackend::LineCount(40));
     CHECK(settings.terminalId == vtbackend::VTType::VT340);
@@ -254,7 +254,7 @@ profiles:
     auto const* const profile = config.findProfile("main");
     REQUIRE(profile != nullptr);
     CHECK(std::holds_alternative<vtbackend::Infinite>(
-        contour::config::emulationSettings(config, *profile).maxHistoryLineCount));
+        contour::config::emulationSettings(config, *profile).historyLimits.capacity));
 }
 
 TEST_CASE("Config: profile knobs load from YAML", "[config]")
@@ -3920,8 +3920,8 @@ profiles:
         auto const settings = contour::config::resolveEmulationSettings(path.string(), "other");
         REQUIRE(settings.has_value());
         CHECK(settings->terminalId == vtbackend::VTType::VT420);
-        REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings->maxHistoryLineCount));
-        CHECK(std::get<vtbackend::LineCount>(settings->maxHistoryLineCount) == vtbackend::LineCount(100));
+        REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings->historyLimits.capacity));
+        CHECK(std::get<vtbackend::LineCount>(settings->historyLimits.capacity) == vtbackend::LineCount(100));
     }
 
     SECTION("an empty profile name selects the configuration's default")
@@ -3970,3 +3970,97 @@ profiles:
     REQUIRE_FALSE(settings.has_value());
     CHECK_FALSE(settings.error().empty());
 }
+
+// {{{ history.hard_limit (issue #836)
+namespace
+{
+/// A minimal profile whose `history:` block is @p historyBody.
+[[nodiscard]] std::string historyConfig(std::string_view historyBody)
+{
+    return std::format("platform_plugin: auto\n"
+                       "default_profile: main\n"
+                       "profiles:\n"
+                       "    main:\n"
+                       "        shell: \"/bin/bash\"\n"
+                       "        history:\n"
+                       "{}",
+                       historyBody);
+}
+
+/// The reconciled scrollback bounds a profile with this `history:` block ends up with.
+[[nodiscard]] vtbackend::HistoryLimits limitsFrom(QTemporaryDir& dir, std::string_view historyBody)
+{
+    auto const config = loadFromYaml(dir, historyConfig(historyBody));
+    auto const* const profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    return profile->history.value().limits();
+}
+} // namespace
+
+TEST_CASE("Config: history.hard_limit defaults to history.limit", "[config][history]")
+{
+    auto dir = QTemporaryDir {};
+
+    // A configuration naming only `limit` must keep the behaviour it always had: no headroom, so no
+    // block-atomic eviction and no ring larger than what was asked for.
+    auto const limits = limitsFrom(dir, "            limit: 4242\n");
+    CHECK(limits.guaranteed == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(4242) });
+    CHECK(limits.capacity == limits.guaranteed);
+    CHECK(!limits.hasHeadroom());
+}
+
+TEST_CASE("Config: history.hard_limit above the limit opens the headroom", "[config][history]")
+{
+    auto dir = QTemporaryDir {};
+    auto const config =
+        loadFromYaml(dir, historyConfig("            limit: 1000\n            hard_limit: 2500\n"));
+    auto const* const profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    auto const limits = profile->history.value().limits();
+    CHECK(limits.guaranteed == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(1000) });
+    CHECK(limits.capacity == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(2500) });
+    CHECK(limits.hasHeadroom());
+
+    // And it reaches the terminal the daemon builds, not just the profile.
+    CHECK(contour::config::emulationSettings(config, *profile).historyLimits == limits);
+}
+
+TEST_CASE("Config: history.hard_limit below the limit is raised to it", "[config][history]")
+{
+    auto dir = QTemporaryDir {};
+
+    // Clamped rather than rejected, landing on "no headroom" -- a working configuration.
+    auto const limits = limitsFrom(dir, "            limit: 5000\n            hard_limit: 200\n");
+    CHECK(limits.capacity == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(5000) });
+    CHECK(!limits.hasHeadroom());
+}
+
+TEST_CASE("Config: an infinite history.limit makes the hard limit infinite too", "[config][history]")
+{
+    auto dir = QTemporaryDir {};
+
+    // Nothing is ever evicted, so a ceiling under it would describe a bound that is never reached.
+    auto const limits = limitsFrom(dir, "            limit: -1\n            hard_limit: 2000\n");
+    CHECK(std::holds_alternative<vtbackend::Infinite>(limits.guaranteed));
+    CHECK(std::holds_alternative<vtbackend::Infinite>(limits.capacity));
+    CHECK(!limits.hasHeadroom());
+}
+
+TEST_CASE("Config: history.hard_limit survives a write/read round-trip", "[config][history]")
+{
+    auto dir = QTemporaryDir {};
+    auto const config =
+        loadFromYaml(dir, historyConfig("            limit: 1000\n            hard_limit: 2500\n"));
+    auto const* const profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+    auto secondDir = QTemporaryDir {};
+    auto const reloaded = loadFromYaml(secondDir, written);
+    auto const* const reloadedProfile = reloaded.profile("main");
+    REQUIRE(reloadedProfile != nullptr);
+
+    CHECK(reloadedProfile->history.value().limits() == profile->history.value().limits());
+}
+// }}}

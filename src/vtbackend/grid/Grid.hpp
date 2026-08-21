@@ -592,22 +592,33 @@ enum class CaptureTrailingSpaces : uint8_t
 class Grid
 {
   public:
-    Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount maxHistoryLineCount);
+    Grid(PageSize pageSize, bool reflowOnResize, HistoryLimits historyLimits);
+
+    /// A scrollback with no headroom, which is what a single depth has always meant. Spelled here
+    /// rather than as a converting constructor on HistoryLimits, so the widening from one number to
+    /// two bounds happens only where a caller asked for it.
+    Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount maxHistoryLineCount):
+        Grid(pageSize, reflowOnResize, HistoryLimits::plain(maxHistoryLineCount))
+    {
+    }
 
     Grid(): Grid(PageSize { LineCount(25), ColumnCount(80) }, false, LineCount(0)) {}
 
     void reset();
 
     // {{{ grid global properties
+    /// @return The ring's history capacity -- the depth beyond which rows are dropped no matter what.
     [[nodiscard]] LineCount maxHistoryLineCount() const noexcept
     {
-        if (auto const* maxLineCount = std::get_if<LineCount>(&_historyLimit))
+        if (auto const* maxLineCount = std::get_if<LineCount>(&_historyLimits.capacity))
             return *maxLineCount;
         else
             return LineCount::cast_from(_lines.size()) - _pageSize.lines;
     }
 
-    void setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount);
+    [[nodiscard]] HistoryLimits const& historyLimits() const noexcept { return _historyLimits; }
+
+    void setHistoryLimits(HistoryLimits historyLimits);
 
     [[nodiscard]] LineCount totalLineCount() const noexcept
     {
@@ -963,7 +974,42 @@ class Grid
     }
 
   private:
+    /// @return The depth block-atomic eviction will never cut below.
+    [[nodiscard]] LineCount guaranteedHistoryLineCount() const noexcept
+    {
+        if (auto const* lineCount = std::get_if<LineCount>(&_historyLimits.guaranteed))
+            return *lineCount;
+        else
+            return maxHistoryLineCount();
+    }
+
     CellLocation growLines(LineCount newHeight, CellLocation cursor);
+
+    /// Drops the oldest scrollback down to a command boundary, keeping at least the guaranteed depth.
+    ///
+    /// A *block start* is a row carrying LineFlag::Marked -- what OSC 133;A stamps at a prompt (and
+    /// what the OSC 3008 synthesis and Vi's `mm` stamp too). The rule is one sentence: drop
+    /// everything older than the NEWEST block start that still leaves @ref guaranteedHistoryLineCount
+    /// rows behind. A block straddling that depth therefore survives whole, and a block entirely
+    /// beyond it goes whole -- which is the difference between losing a command and losing the top
+    /// half of one.
+    ///
+    /// Finding no such boundary is not a failure and must not fall back to cutting line-wise HERE:
+    /// with no shell integration, or with one command whose output is larger than the whole
+    /// headroom, the right answer is to leave the scrollback alone and let it fill to capacity,
+    /// where scrollUp's at-capacity path evicts line-wise as it always has. That is the ceiling
+    /// which keeps memory bounded when no boundary can be honoured.
+    ///
+    /// Called when the history is about to cross capacity rather than the moment it passes the
+    /// guarantee. That keeps the headroom genuinely used rather than merely allocated, and lets an
+    /// attached mirror resync once per trim instead of once per command (@see ScreenMirror's
+    /// floor-outran-scroll replay).
+    ///
+    /// A row is examined once, as it crosses the guarantee, and the newest block start seen is
+    /// remembered (@see _newestEligibleBlockStart). The one thing that misses is a mark stamped on a
+    /// history row that has already been passed -- Vi's `mm` deep in the scrollback, or a mirror
+    /// replaying one. That boundary is then simply not used, which costs an eviction its snapping
+    /// and never the guarantee, and is the price of not re-walking the scrollback per line.
     void clampHistory();
 
     // {{{ buffer helpers
@@ -1084,6 +1130,11 @@ class Grid
         // Row identity is gone, so an id-keyed history watermark means nothing now. Consumers
         // resync on the generation mismatch anyway.
         _dirtyHistoryFloor = NoHistoryFloor;
+        // Same reason, and the only invalidation the eviction scan needs: its ids name rows, so a
+        // rebuild that renames every row leaves them naming nothing. Everything else -- scrolling
+        // either way, a line-count resize, an eviction -- keeps row identity and therefore keeps them
+        // meaningful, which is what lets the scan carry no other invalidation hooks.
+        _evictionScan.reset();
         _changedHistoryFloor = NoHistoryFloor;
         _changedHistorySeqno = 0;
         // Re-anchor the finalize scan: the pre-rebuild base delta is meaningless now.
@@ -1105,7 +1156,26 @@ class Grid
     //
     PageSize _pageSize;
     bool _reflowOnResize = false;
-    MaxHistoryLineCount _historyLimit;
+    HistoryLimits _historyLimits;
+
+    /// How far @ref clampHistory has examined, and the best boundary it found -- one state, so that
+    /// "a block start is remembered but nothing was ever examined" cannot be represented.
+    ///
+    /// This is what turns the eviction scan from a per-scroll walk of the whole scrollback into a
+    /// walk of the rows that just crossed the guarantee. @see clampHistory for why that matters.
+    struct EvictionScan
+    {
+        /// The highest stable id whose eligibility has been examined.
+        int64_t examinedThrough {};
+
+        /// The newest block start seen at or below the guarantee, if any. Validated against the
+        /// current bound and floor at use rather than invalidated eagerly, because a reverse scroll
+        /// can move the bound back underneath it.
+        std::optional<int64_t> newestBlockStart;
+    };
+
+    /// Nullopt until the first examination, which is the one case that has to sweep the window whole.
+    std::optional<EvictionScan> _evictionScan;
     Lines _lines;
     LineCount _linesUsed;
 

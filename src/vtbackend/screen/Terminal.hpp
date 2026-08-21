@@ -440,7 +440,7 @@ class Terminal
     void setRefreshRate(RefreshRate refreshRate);
     void setLastMarkRangeOffset(LineOffset value) noexcept;
 
-    void setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount);
+    void setHistoryLimits(HistoryLimits historyLimits);
     LineCount maxHistoryLineCount() const noexcept;
 
     void setTerminalId(VTType id) noexcept;
@@ -1981,6 +1981,19 @@ class Terminal
     void reportInBandWindowResize();
     void onBufferScrolled(LineCount n) noexcept;
 
+    /// Pulls the viewport and the Normal-mode cursor back inside the scrollback that still exists.
+    ///
+    /// Distinct from onBufferScrolled, which SHIFTS them to keep the same rows under the user as new
+    /// content arrives. This only refuses to name a row that is gone, which is why it may run on the
+    /// paths that must not shift anything: a top-anchored partial DECSTBM region feeds the scrollback
+    /// through the same scrollUp while the live area below it does not move.
+    ///
+    /// Needed at all because block-atomic eviction is the first thing that makes the scrollback
+    /// SHRINK while output is being written -- at capacity it used to stay pinned forever. A viewport
+    /// left naming an evicted row trips Grid::render's assertion, and in a release build indexes the
+    /// ring modulo its size onto unrelated rows.
+    void clampToHistory() noexcept;
+
     void onViewportChanged();
 
     /// Extends the active selection to the current mouse position after a viewport scroll.
@@ -2779,12 +2792,18 @@ class Terminal
     /// The grid's own identity: a generation bump means row identity was destroyed wholesale, and
     /// stableBase advances on every scroll, which is exactly when a mark may have moved into or out of
     /// reach. A struct with a defaulted operator== rather than a hand-written conjunction, for the
-    /// reason FoldProjectionKey gives: a fourth input is then a field rather than a term someone has to
+    /// reason FoldProjectionKey gives: a fifth input is then a field rather than a term someone has to
     /// remember to add to the comparison.
+    ///
+    /// The floor is named EXPLICITLY even though a trim currently cannot happen without stableBase
+    /// moving in the same Grid::scrollUp call. That is a coincidence of where clampHistory() is
+    /// called from, not a property of the cache, and the failure it would hide -- ranges whose head
+    /// has been evicted, handed to foldContaining() and to the gutter -- is silent.
     struct FoldRangesKey
     {
         uint64_t generation = 0;
         int64_t stableBase = 0;
+        int64_t stableFloor = 0;
         uint64_t markRevision = 0;
 
         [[nodiscard]] bool operator==(FoldRangesKey const&) const noexcept = default;
@@ -2808,6 +2827,7 @@ class Terminal
     {
         uint64_t generation = 0;
         int64_t stableBase = 0;
+        int64_t stableFloor = 0;
         int scrollOffset = 0;
         int pageLines = 0;
         uint64_t foldRevision = 0;

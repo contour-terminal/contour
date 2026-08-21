@@ -34,7 +34,7 @@ PaneView::PaneView(int columns, int lines, vtbackend::LineCount history)
         vtpty::PageSize { .lines = vtpty::LineCount(lines), .columns = vtpty::ColumnCount(columns) };
     auto settings = vtbackend::Settings {};
     settings.pageSize = pageSize;
-    settings.maxHistoryLineCount = history;
+    settings.historyLimits = vtbackend::HistoryLimits::plain(history);
     // The process's own environment: this terminal only mirrors what a remote pane already
     // rendered, so nothing it reads from there describes anything but the client it runs in.
     _terminal = std::make_unique<vtbackend::Terminal>(_events,

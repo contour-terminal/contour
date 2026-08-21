@@ -222,14 +222,14 @@ TEST_CASE("a daemon hosts sessions with scrollback by default", "[vthost][daemon
     // DaemonConfig used to inherit `vtbackend::Settings{}`'s LineCount(0) verbatim, so the daemon
     // retained no history at all — @see vthost::DefaultSessionHistoryLineCount for what that costs.
     auto const settings = vthost::defaultSessionSettings();
-    REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings.maxHistoryLineCount));
-    CHECK(unbox(std::get<vtbackend::LineCount>(settings.maxHistoryLineCount)) > 0);
+    REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings.historyLimits.capacity));
+    CHECK(unbox(std::get<vtbackend::LineCount>(settings.historyLimits.capacity)) > 0);
 
     // And DaemonConfig itself, since that is what `contour daemon` starts from.
-    auto const configured = vthost::DaemonConfig {}.settings.maxHistoryLineCount;
+    auto const configured = vthost::DaemonConfig {}.settings.historyLimits.capacity;
     REQUIRE(std::holds_alternative<vtbackend::LineCount>(configured));
     CHECK(std::get<vtbackend::LineCount>(configured)
-          == std::get<vtbackend::LineCount>(settings.maxHistoryLineCount));
+          == std::get<vtbackend::LineCount>(settings.historyLimits.capacity));
 }
 
 TEST_CASE("joinCommandLine quotes every argument, argv[0] included", "[vthost][spawn]")

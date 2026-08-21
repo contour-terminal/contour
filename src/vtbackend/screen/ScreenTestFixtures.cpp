@@ -61,24 +61,27 @@ void TextRenderBuilder::finish()
 
 MockTerm<vtpty::MockPty> screenForDECRA()
 {
-    return MockTerm<vtpty::MockPty> { PageSize { LineCount(5), ColumnCount(6) }, {}, 1024, [](auto& mock) {
-                                         mock.writeToScreen("ABCDEF\r\n"
-                                                            "abcdef\r\n"
-                                                            "123456\r\n");
-                                         mock.writeToScreen("\033[43m");
-                                         mock.writeToScreen("GHIJKL\r\n"
-                                                            "ghijkl");
-                                         mock.writeToScreen("\033[0m");
+    return MockTerm<vtpty::MockPty> { PageSize { LineCount(5), ColumnCount(6) },
+                                      HistoryLimits {},
+                                      1024,
+                                      [](auto& mock) {
+                                          mock.writeToScreen("ABCDEF\r\n"
+                                                             "abcdef\r\n"
+                                                             "123456\r\n");
+                                          mock.writeToScreen("\033[43m");
+                                          mock.writeToScreen("GHIJKL\r\n"
+                                                             "ghijkl");
+                                          mock.writeToScreen("\033[0m");
 
-                                         auto const* const initialText = "ABCDEF\n"
-                                                                         "abcdef\n"
-                                                                         "123456\n"
-                                                                         "GHIJKL\n"
-                                                                         "ghijkl\n";
+                                          auto const* const initialText = "ABCDEF\n"
+                                                                          "abcdef\n"
+                                                                          "123456\n"
+                                                                          "GHIJKL\n"
+                                                                          "ghijkl\n";
 
-                                         CHECK(mock.terminal.primaryScreen().renderMainPageText()
-                                               == initialText);
-                                     } };
+                                          CHECK(mock.terminal.primaryScreen().renderMainPageText()
+                                                == initialText);
+                                      } };
 }
 
 std::set<int> parseDA1Extensions(std::string_view reply)

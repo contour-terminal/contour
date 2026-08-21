@@ -3490,7 +3490,7 @@ void TerminalSession::configureTerminal()
 
     configureCursor(_profile.modeInsert.value().cursor);
     updateColorPreference(_app.colorPreference());
-    _terminal.setMaxHistoryLineCount(_profile.history.value().maxHistoryLineCount);
+    _terminal.setHistoryLimits(_profile.history.value().limits());
     _terminal.setMouseWheelScrollMultiplier(_profile.history.value().historyScrollMultiplier);
     _terminal.settings().autoScrollOnUpdate = _profile.history.value().autoScrollOnUpdate;
     _terminal.setHighlightTimeout(_profile.highlightTimeout.value());

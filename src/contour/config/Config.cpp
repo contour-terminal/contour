@@ -463,7 +463,7 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
 {
     auto settings = vtbackend::Settings {};
     settings.pageSize = profile.terminalSize.value();
-    settings.maxHistoryLineCount = profile.history.value().maxHistoryLineCount;
+    settings.historyLimits = profile.history.value().limits();
     auto const& folding = config.folding.value();
     settings.foldMarkers = folding.markersVisible();
     settings.autoCollapseFoldOnNewCommand = folding.enabled && folding.autoCollapseOnNewCommand;
@@ -1978,6 +1978,10 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     if (child)
     {
         loadFromEntry(child, "limit", where.maxHistoryLineCount);
+        // Read raw, reconciled against the limit by HistoryConfig::limits(). Doing it there rather
+        // than here means a profile with no `history:` node at all gets the same answer as one that
+        // spells the defaults out -- this branch only runs when the node exists.
+        loadFromEntry(child, "hard_limit", where.hardLimit);
         loadFromEntry(child, "scroll_multiplier", where.historyScrollMultiplier);
         loadFromEntry(child, "auto_scroll_on_update", where.autoScrollOnUpdate);
     }

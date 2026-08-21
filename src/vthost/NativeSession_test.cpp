@@ -156,7 +156,7 @@ std::string textOf(proto::WireLine const& line)
 vtbackend::Settings hostSettings(vtbackend::LineCount history)
 {
     auto settings = vtbackend::Settings {};
-    settings.maxHistoryLineCount = history;
+    settings.historyLimits = vtbackend::HistoryLimits::plain(history);
     return settings;
 }
 
@@ -1204,8 +1204,8 @@ TEST_CASE("a ClientHello's settings reach the sessions that client creates", "[v
 
     // The host's own settings are NOT rewritten: they remain the default for anything the daemon or
     // another client creates.
-    REQUIRE(std::holds_alternative<vtbackend::LineCount>(h.host.settings().maxHistoryLineCount));
-    CHECK(unbox<int>(std::get<vtbackend::LineCount>(h.host.settings().maxHistoryLineCount)) == 500);
+    REQUIRE(std::holds_alternative<vtbackend::LineCount>(h.host.settings().historyLimits.capacity));
+    CHECK(unbox<int>(std::get<vtbackend::LineCount>(h.host.settings().historyLimits.capacity)) == 500);
 }
 
 TEST_CASE("a ClientHello without settings leaves the host's own in force", "[vthost][native]")

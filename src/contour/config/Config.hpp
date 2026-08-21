@@ -292,11 +292,42 @@ struct CursorConfig
     std::chrono::milliseconds cursorBlinkInterval;
 };
 
+/// How deep the scrollback is, and how it gives rows back when it is full.
+///
+/// `hardLimit` above `maxHistoryLineCount` is what turns on block-atomic eviction: with headroom
+/// between the two, what falls out of the buffer is a whole (prompt, output) command rather than
+/// whatever happened to be at the limit. Defaulting it to the same value is today's behaviour, so a
+/// configuration that names only `limit` is unaffected.
 struct HistoryConfig
 {
+    /// The scrollback depth that always survives. Below the hard limit this is simply THE limit.
     vtbackend::MaxHistoryLineCount maxHistoryLineCount { vtbackend::LineCount(1000) };
+
+    /// The ceiling, and the depth at which eviction stops caring about command boundaries. Anything
+    /// at or below `maxHistoryLineCount` means "no ceiling of its own", which is why the default is
+    /// zero rather than a second copy of the limit's default -- two literals that must agree are two
+    /// chances to disagree. @see limits, which is where the two are reconciled.
+    vtbackend::MaxHistoryLineCount hardLimit { vtbackend::LineCount(0) };
+
     vtbackend::LineCount historyScrollMultiplier { vtbackend::LineCount(3) };
     bool autoScrollOnUpdate { true };
+
+    /// Both bounds, in the vocabulary vtbackend speaks, reconciled in this one place.
+    ///
+    /// A ceiling below the depth it bounds is raised rather than rejected: that lands on "no
+    /// headroom", which is a working configuration rather than an error, and it is what an unset
+    /// `hard_limit` therefore means too. A plain max because MaxHistoryLineCount is ORDERED -- the
+    /// variant compares by alternative index first, so Infinite sits above every line count and this
+    /// reads as "the deeper of the two" across all four combinations. That also carries an infinite
+    /// `limit` into the capacity, which it must: a scrollback that never evicts has no ceiling it
+    /// could reach.
+    ///
+    /// @return The reconciled bounds.
+    [[nodiscard]] vtbackend::HistoryLimits limits() const noexcept
+    {
+        return vtbackend::HistoryLimits { .guaranteed = maxHistoryLineCount,
+                                          .capacity = std::max(hardLimit, maxHistoryLineCount) };
+    }
 };
 
 /// Output folding: collapsing a finished command's output down to the prompt line it was entered at.
@@ -1904,16 +1935,18 @@ struct Writer
 
     [[nodiscard]] std::string format(std::string_view doc, HistoryConfig const& v)
     {
-        return format(
-            doc,
-            [&]() {
-                if (std::holds_alternative<vtbackend::Infinite>(v.maxHistoryLineCount))
-                    return -1;
-                auto number = unbox(std::get<vtbackend::LineCount>(v.maxHistoryLineCount));
-                return number;
-            }(),
-            v.autoScrollOnUpdate,
-            v.historyScrollMultiplier);
+        auto const spell = [](vtbackend::MaxHistoryLineCount limit) {
+            if (std::holds_alternative<vtbackend::Infinite>(limit))
+                return -1;
+            return unbox(std::get<vtbackend::LineCount>(limit));
+        };
+        return format(doc,
+                      spell(v.maxHistoryLineCount),
+                      // The resolved ceiling rather than the raw field: an unset hard_limit is zero,
+                      // and writing that back would read as a scrollback of none.
+                      spell(v.limits().capacity),
+                      v.autoScrollOnUpdate,
+                      v.historyScrollMultiplier);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, ScrollBarConfig const& v)

@@ -2874,3 +2874,27 @@ TEST_CASE("TerminalSession::attachDisplay publishes the scrollbar's travel it ac
 
     session->detachDisplay(surface);
 }
+
+TEST_CASE("TerminalSession applies the profile's history limits to the terminal",
+          "[contour][session][history]")
+{
+    // Closes the last gap between the YAML and the grid: Config_test proves the two bounds survive
+    // parsing, and vtbackend proves the grid evicts on them, but only this proves the session hands
+    // the one to the other -- and it is the path every profile apply and config reload takes.
+    TestApp testApp;
+    auto& profile = *testApp.app().config().profile(testApp.app().profileName());
+    auto history = profile.history.value();
+    history.maxHistoryLineCount = vtbackend::LineCount(1000);
+    history.hardLimit = vtbackend::LineCount(2500);
+    profile.history = history;
+
+    auto session = makeDisplaylessSession(testApp.app());
+
+    auto const& limits = session->terminal().primaryScreen().grid().historyLimits();
+    CHECK(limits.guaranteed == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(1000) });
+    CHECK(limits.capacity == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(2500) });
+    CHECK(limits.hasHeadroom());
+
+    // And the ring really was allocated to the ceiling, not to the guarantee.
+    CHECK(session->terminal().primaryScreen().grid().maxHistoryLineCount() == vtbackend::LineCount(2500));
+}

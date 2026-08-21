@@ -334,12 +334,12 @@ Screen::Screen(Terminal& terminal,
                gsl::not_null<Margin*> margin,
                PageSize pageSize,
                bool reflowOnResize,
-               MaxHistoryLineCount maxHistoryLineCount,
+               HistoryLimits historyLimits,
                std::string_view name):
     _terminal { &terminal },
     _settings { &terminal.settings() },
     _margin { margin },
-    _grid { pageSize, reflowOnResize, maxHistoryLineCount },
+    _grid { pageSize, reflowOnResize, historyLimits },
     _name { name }
 {
     updateCursorIterator();
@@ -1132,6 +1132,18 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
         && margin.vertical.from.value == 0 && margin.vertical.to.value + 1 == pageSize().lines.value;
     if (isFullPageMargin)
         _terminal->onBufferScrolled(scrollCount);
+
+    // After either branch, because the scrollback may have just LOST rows rather than gained them.
+    // Block-atomic eviction drops a whole command at once, and it reaches this path even for a
+    // partial region, where the branch above deliberately shifts nothing. Clamping is not shifting --
+    // it only refuses to name a row that is gone.
+    //
+    // Gated on the headroom for cost, not for correctness: without it the history cannot shrink here
+    // at all (@see Grid::clampHistory, which returns on the same test), and this is the linefeed
+    // path. Reaching Viewport::clampScrollOffset per line would drag Terminal::hiddenLineCount with
+    // it, which with one collapsed fold rebuilds the whole fold projection on every scrolled line.
+    if (_grid.historyLimits().hasHeadroom())
+        _terminal->clampToHistory();
 }
 
 void Screen::scrollDown(LineCount n, Margin margin)
