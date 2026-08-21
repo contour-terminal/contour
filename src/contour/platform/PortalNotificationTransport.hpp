@@ -6,6 +6,7 @@
     #include <contour/platform/DBusSignalSubscription.hpp>
     #include <contour/platform/NotificationIdMap.hpp>
     #include <contour/platform/NotificationTransport.hpp>
+    #include <contour/platform/PortalCall.hpp>
 
     #include <QtCore/QLatin1StringView>
     #include <QtCore/QObject>
@@ -22,6 +23,10 @@
 
 namespace contour::platform
 {
+
+/// The portal interface this transport speaks. Named here rather than in the source file because
+/// the factory that builds the transport's PortalCaller lives in Notifier.cpp.
+constexpr auto NotificationPortalInterface = QLatin1StringView("org.freedesktop.portal.Notification");
 
 /// A fresh portal-notification id namespace, unique within this process and across calls.
 ///
@@ -82,38 +87,6 @@ using DelayScheduler =
 /// The production DelayScheduler: a single-shot QTimer owned by the context object, so a transport
 /// destroyed with a timer pending takes the timer with it.
 [[nodiscard]] DelayScheduler qtDelayScheduler();
-
-/// Whether a portal method call was accepted.
-///
-/// An enum rather than a bool because at the call site `true` says nothing about which way round the
-/// question was asked, and the two states have real names. The reason for a failure is not carried:
-/// nothing acts on it beyond the log line the caller already writes.
-enum class CallOutcome : uint8_t
-{
-    Failed = 0,
-    Accepted = 1,
-};
-
-/// Issues one org.freedesktop.portal.Notification method call, returning WITHOUT waiting for it.
-///
-/// Injected because the D-Bus call is the one ambient resource this class is built out of. Behind a
-/// seam, a headless test drives the whole transport -- the id bookkeeping, replace-in-place, the
-/// assumed close -- with no portal to send to; without one, the only way to reach the code that
-/// runs when a call is ACCEPTED would be to send real notifications at whoever runs the suite.
-///
-/// @param context Whose lifetime the pending call is bound to.
-/// @param method The interface method to call.
-/// @param arguments Its arguments, in wire order.
-/// @param onReply Called if and when a reply arrives, with whether the call was accepted. Empty
-///                where the caller does not read the reply at all.
-using PortalCaller = std::function<void(QObject* context,
-                                        QLatin1StringView method,
-                                        QVariantList arguments,
-                                        std::function<void(CallOutcome)> onReply)>;
-
-/// The production PortalCaller: an asynchronous session-bus call to the portal, whose reply watcher
-/// is owned by the context object.
-[[nodiscard]] PortalCaller qtPortalCaller();
 
 /// Speaks org.freedesktop.portal.Notification, asynchronously.
 ///

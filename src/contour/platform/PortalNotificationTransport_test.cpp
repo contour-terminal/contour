@@ -434,9 +434,11 @@ TEST_CASE("PortalNotificationTransport drives the real portal without waiting",
     // Built exactly as production does, against whatever session bus is there. @see
     // contour::test::checkReturnsWithoutWaiting for what this is guarding and why the bound is what
     // it is.
-    auto transport = PortalNotificationTransport {
-        10000ms, "contour-test", contour::platform::qtDelayScheduler(), contour::platform::qtPortalCaller()
-    };
+    auto transport = PortalNotificationTransport { 10000ms,
+                                                   "contour-test",
+                                                   contour::platform::qtDelayScheduler(),
+                                                   contour::platform::qtPortalCaller(
+                                                       contour::platform::NotificationPortalInterface) };
     transport.subscribe([](auto, auto, auto) {}, [](auto) {});
 
     contour::test::checkReturnsWithoutWaiting([&] {
@@ -445,10 +447,11 @@ TEST_CASE("PortalNotificationTransport drives the real portal without waiting",
         // close() short-circuits on an id it holds no mapping for, and on a bus that never answers
         // no mapping is ever recorded -- so the withdraw path is put on the wire through the caller
         // itself. Sending it, not skipping it, is what this case is here to time.
-        contour::platform::qtPortalCaller()(&transport,
-                                            QLatin1StringView("RemoveNotification"),
-                                            { QStringLiteral("contour-test/osc-real") },
-                                            {});
+        contour::platform::qtPortalCaller(contour::platform::NotificationPortalInterface)(
+            &transport,
+            QLatin1StringView("RemoveNotification"),
+            { QStringLiteral("contour-test/osc-real") },
+            {});
     });
 }
 

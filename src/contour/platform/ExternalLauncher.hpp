@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <string_view>
 
 namespace contour::platform
@@ -82,5 +83,17 @@ class ExternalLauncher
     /// @return The process exit code, or a negative value if it could not be started.
     virtual int execute(QString const& program, QStringList const& arguments) = 0;
 };
+
+/// The launcher this platform can offer.
+///
+/// A PortalExternalLauncher on Linux and a QtExternalLauncher everywhere else. Mirrors
+/// makeDesktopNotifier() and makeSpeechSynthesizer(): the platform split lives here, so nothing
+/// above this layer needs an #ifdef to hold a launcher.
+///
+/// Note that this does NOT branch on SandboxState the way selectNotificationBackend() does. The
+/// reason is worth reading before "fixing" the asymmetry: @see PortalExternalLauncher.
+///
+/// @return The launcher; never null.
+[[nodiscard]] std::unique_ptr<ExternalLauncher> makeExternalLauncher();
 
 } // namespace contour::platform

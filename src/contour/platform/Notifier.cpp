@@ -39,8 +39,10 @@ std::unique_ptr<NotificationTransport> makeNotificationTransport(
     {
         case NotificationBackend::FreeDesktop: return std::make_unique<DBusNotificationTransport>();
         case NotificationBackend::Portal:
-            return std::make_unique<PortalNotificationTransport>(
-                closeDelay, makePortalIdPrefix(), qtDelayScheduler(), qtPortalCaller());
+            return std::make_unique<PortalNotificationTransport>(closeDelay,
+                                                                 makePortalIdPrefix(),
+                                                                 qtDelayScheduler(),
+                                                                 qtPortalCaller(NotificationPortalInterface));
     }
 #endif
     return std::make_unique<NullNotificationTransport>();

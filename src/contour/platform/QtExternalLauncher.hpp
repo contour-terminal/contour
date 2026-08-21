@@ -9,9 +9,13 @@ namespace contour::platform
 /// The production ExternalLauncher: forwards to Qt's desktop-integration statics
 /// (QDesktopServices::openUrl, QProcess::startDetached/execute).
 ///
-/// Used where no portal is reachable — every platform but Linux, and a Linux build without QtDBus.
-/// On Linux with D-Bus, PortalExternalLauncher is used instead, because Qt's openUrl() reaches the
-/// portal with a BLOCKING call. @see makeExternalLauncher().
+/// Used where there is no xdg-desktop-portal to speak to -- every platform but Linux. On Linux,
+/// PortalExternalLauncher is used instead, because Qt's openUrl() reaches the portal with a BLOCKING
+/// call. @see makeExternalLauncher(), and PortalExternalLauncher for why that is not a sandbox-only
+/// concern.
+///
+/// Its runDetached()/execute() are also what PortalExternalLauncher delegates to: starting a child
+/// process has nothing to do with the portal, and is identical on both paths.
 class QtExternalLauncher final: public ExternalLauncher
 {
   public:
