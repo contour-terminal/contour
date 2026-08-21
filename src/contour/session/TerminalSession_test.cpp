@@ -26,6 +26,7 @@
 
 #include <vtpty/MockPty.hpp>
 
+#include <crispy/Base64.hpp>
 #include <crispy/Utils.hpp>
 
 #include <QtCore/QCoreApplication>
@@ -2709,6 +2710,70 @@ TEST_CASE("TerminalSession arms the surface's screenshot capture", "[contour][se
     REQUIRE(surface.screenshotOutputs.size() == 2);
     REQUIRE(surface.screenshotOutputs.back().has_value());
     CHECK(std::holds_alternative<std::monostate>(*surface.screenshotOutputs.back()));
+}
+
+TEST_CASE("TerminalSession serves an OSC 533 pixel format from the surface", "[contour][session][screenshot]")
+{
+    // The renderer half of OSC 533, end to end: an application asks for PNG, the permission wall holds
+    // the request, allowing it routes to the surface (because the format table says a renderer must
+    // produce it), and the capture the surface hands back comes out on the PTY as a base64 PM reply.
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+
+    surface.screenshotCapture = vtbackend::screenshot::Capture {
+        .content = "\x89PNG\r\n\x1a\n-pretend-",
+        .pixelSize = vtbackend::ImageSize { vtbackend::Width(24), vtbackend::Height(32) },
+    };
+
+    // Rows 1..2, columns 1..3, format 3 (PNG), tagged 77.
+    held->terminal().writeToScreen("\033]533;77;1;1;2;3;3\033\\");
+
+    // Nothing is served until the wall answers -- not even a format the terminal could not produce
+    // itself.
+    CHECK(surface.screenshotRenderRequests.empty());
+    CHECK(mockPtyOf(*held.session).stdinBuffer().empty());
+
+    held->executePendingScreenshot(true, false);
+
+    // The surface was asked for exactly the region the application named, in the format it asked for.
+    REQUIRE(surface.screenshotRenderRequests.size() == 1);
+    auto const& asked = surface.screenshotRenderRequests.front();
+    CHECK(asked.id == 77);
+    CHECK(*asked.area.top == 0);
+    CHECK(*asked.area.left == 0);
+    CHECK(*asked.area.bottom == 1);
+    CHECK(*asked.area.right == 2);
+    CHECK(asked.format == vtbackend::screenshot::Format::Png);
+
+    // Pid=77, Ps=1 (Data), the region one-based, Pf=3, then the PIXEL extent -- which raw pixels and
+    // a cropped PNG alike cannot be measured from the cell region alone.
+    auto const reply = mockPtyOf(*held.session).stdinBuffer();
+    CHECK(reply.starts_with("\033^533;77;1;1;1;2;3;3;24;32;"));
+    CHECK(reply.ends_with("\033^533;77;0\033\\"));
+
+    // The PNG's own ESC-free-ness is not assumed: it travels base64-encoded like every other payload.
+    auto const payload = std::string_view { reply }.substr(
+        reply.find(";24;32;") + 7, reply.find("\033\\") - (reply.find(";24;32;") + 7));
+    CHECK(crispy::base64::decode(payload) == surface.screenshotCapture->value().content);
+}
+
+TEST_CASE("TerminalSession refuses an OSC 533 pixel format when the surface cannot capture",
+          "[contour][session][screenshot]")
+{
+    // A pane that has never been composited has no render target, so there is nothing to photograph.
+    // That is Unavailable (Ps=6) and not Denied (Ps=2): nothing refused the read, and an application
+    // told so may usefully ask again once the window is up.
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+    REQUIRE_FALSE(surface.screenshotCapture.has_value());
+
+    held->terminal().writeToScreen("\033]533;8;1;1;2;3;4\033\\");
+    held->executePendingScreenshot(true, false);
+
+    CHECK(surface.screenshotRenderRequests.size() == 1);
+    CHECK(mockPtyOf(*held.session).stdinBuffer() == "\033^533;8;6\033\\");
 }
 
 TEST_CASE("TerminalSession relays the window-scoped view actions", "[contour][session][view]")

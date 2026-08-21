@@ -862,10 +862,28 @@ vtbackend::screenshot::Disposition TerminalSession::requestScreenshot(
     }
 
     _pendingScreenshot = request;
-    _display->post([this]() {
-        requestPermission(_profile.permissions.value().screenshot, GuardedRole::Screenshot);
-    });
+    _display->post(
+        [this]() { requestPermission(_profile.permissions.value().screenshot, GuardedRole::Screenshot); });
     return vtbackend::screenshot::Disposition::Pending;
+}
+
+vtbackend::screenshot::Disposition TerminalSession::renderScreenshot(
+    vtbackend::screenshot::Request const& request)
+{
+    // Reached from executePendingScreenshot() on the GUI thread, so the display may be touched
+    // directly. The capture itself completes frames later, and the surface answers on this thread.
+    if (!_display)
+        return vtbackend::screenshot::Disposition::Unhandled;
+
+    auto const scheduled =
+        _display->renderScreenshot(request, [this, request](vtbackend::screenshot::CaptureResult capture) {
+            _terminal.answerScreenshot(request, capture);
+            sessionLog()("renderScreenshot: {}. Waking up I/O thread.", capture ? "captured" : "unavailable");
+            flushInput();
+        });
+
+    return scheduled ? vtbackend::screenshot::Disposition::Pending
+                     : vtbackend::screenshot::Disposition::Unhandled;
 }
 
 void TerminalSession::executePendingScreenshot(bool allow, bool remember)
@@ -879,9 +897,8 @@ void TerminalSession::executePendingScreenshot(bool allow, bool remember)
     auto const request = _pendingScreenshot.value();
     _pendingScreenshot.reset();
 
-    _terminal.answerScreenshot(request,
-                               allow ? vtbackend::screenshot::Decision::Allowed
-                                     : vtbackend::screenshot::Decision::Denied);
+    _terminal.answerScreenshot(
+        request, allow ? vtbackend::screenshot::Decision::Allowed : vtbackend::screenshot::Decision::Denied);
 
     sessionLog()("requestScreenshot: {}. Waking up I/O thread.", allow ? "allowed" : "denied");
     flushInput();

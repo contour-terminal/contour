@@ -13,6 +13,7 @@
 #include <QtQuick/QQuickWindow>
 
 #include <functional>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -41,6 +42,9 @@ class FakeDisplaySurface final: public session::DisplaySurface
     bool fontSizeApplies = true;
     /// True once a test decides the surface is composited; @c configureDisplay() gates on it.
     bool renderTargetPresent = false;
+    /// What @ref renderScreenshot hands back. @c std::nullopt models a surface with no render target,
+    /// where it declines outright and never calls back.
+    std::optional<vtbackend::screenshot::CaptureResult> screenshotCapture;
     // }}}
 
     // {{{ What the session asked for
@@ -52,6 +56,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     std::vector<std::pair<vtrasterizer::Decorator, vtrasterizer::Decorator>> hyperlinkDecorations;
     std::vector<vtbackend::ScreenType> bufferChanges;
     std::vector<ScreenshotOutput> screenshotOutputs;
+    std::vector<vtbackend::screenshot::Request> screenshotRenderRequests;
     std::vector<config::TabBarVisibility> tabBarVisibilities;
     std::vector<config::TabBarPosition> tabBarPositions;
     std::vector<bool> blurBehindRequests;
@@ -153,6 +158,19 @@ class FakeDisplaySurface final: public session::DisplaySurface
     void setScreenshotOutput(ScreenshotOutput where) override
     {
         screenshotOutputs.push_back(std::move(where));
+    }
+
+    /// Answers synchronously with @ref screenshotCapture, so a test drives the whole `OSC 533` pixel
+    /// path — permission wall included — without a renderer behind it.
+    [[nodiscard]] bool renderScreenshot(vtbackend::screenshot::Request const& request,
+                                        ScreenshotCaptureCallback onReady) override
+    {
+        screenshotRenderRequests.push_back(request);
+        if (!screenshotCapture)
+            return false;
+
+        onReady(*screenshotCapture);
+        return true;
     }
     void inspect() override { ++inspectCount; }
     void reportCursorMoved() override { ++cursorMovedReports; }

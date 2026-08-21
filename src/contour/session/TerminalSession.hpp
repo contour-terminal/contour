@@ -557,6 +557,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void requestCaptureBuffer(vtbackend::LineCount lines, bool logical) override;
     [[nodiscard]] vtbackend::screenshot::Disposition requestScreenshot(
         vtbackend::screenshot::Request const& request) override;
+
+    [[nodiscard]] vtbackend::screenshot::Disposition renderScreenshot(
+        vtbackend::screenshot::Request const& request) override;
     void bell() override;
     void bufferChanged(vtbackend::ScreenType) override;
     void renderBufferUpdated() override;

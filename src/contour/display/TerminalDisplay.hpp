@@ -294,6 +294,15 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     void bufferChanged(vtbackend::ScreenType) final;
     void discardImage(vtbackend::Image const&) final;
     void setScreenshotOutput(ScreenshotOutput where) final { _saveScreenshot = std::move(where); }
+
+    /// @copydoc session::DisplaySurface::renderScreenshot
+    ///
+    /// @p onReady is invoked on the GUI thread, not on the render thread the readback completes on: the
+    /// answer runs into the terminal's reply queue, which every other screenshot answer reaches from
+    /// the GUI thread. The hop goes through post(), so a surface that dies with a capture in flight
+    /// drops the answer rather than delivering it into a destroyed session.
+    [[nodiscard]] bool renderScreenshot(vtbackend::screenshot::Request const& request,
+                                        ScreenshotCaptureCallback onReady) final;
     // }}}
 
     /// How large glyphs are rasterized, in device pixels per logical pixel.

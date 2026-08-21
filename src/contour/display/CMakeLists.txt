@@ -9,6 +9,7 @@ set(QT_RESOURCES DisplayResources.qrc)
 add_library(ContourTerminalDisplay STATIC
     ContentScale.cpp ContentScale.hpp
     RhiRenderer.cpp RhiRenderer.hpp
+    ScreenshotEncoder.cpp ScreenshotEncoder.hpp
     ShaderConfig.cpp ShaderConfig.hpp
     TerminalDisplay.cpp TerminalDisplay.hpp
     TerminalRenderNode.cpp TerminalRenderNode.hpp

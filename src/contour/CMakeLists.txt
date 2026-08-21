@@ -627,6 +627,7 @@ if(CONTOUR_FRONTEND_GUI)
             display/RenderingBackendSelection_test.cpp
             display/ScissorRect_test.cpp
             display/RhiVertexLayout_test.cpp
+            display/ScreenshotEncoder_test.cpp
             display/ScreenshotReadback_test.cpp
             display/ScreenshotRhiReadback_test.cpp
             session/TabSizeInheritance_test.cpp

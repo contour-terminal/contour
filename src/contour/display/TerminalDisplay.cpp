@@ -6,6 +6,7 @@
 #include <contour/display/ImeQueryRect.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/display/RhiRenderer.hpp>
+#include <contour/display/ScreenshotEncoder.hpp>
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/TerminalRenderNode.hpp>
@@ -1781,6 +1782,33 @@ void TerminalDisplay::requestScreenshot(std::function<void(QImage)> onReady)
         if (window())
             update();
     });
+}
+
+bool TerminalDisplay::renderScreenshot(vtbackend::screenshot::Request const& request,
+                                       ScreenshotCaptureCallback onReady)
+{
+    if (!_renderTarget)
+        return false;
+
+    // A capture is already in flight, and the render target holds exactly one callback: taking this
+    // request would silently drop the pending one -- a screenshot key binding that never writes its
+    // file, or the at-exit state dump whose callback owns terminating the session. Declining costs the
+    // application an Unavailable it may retry, which is the cheaper of the two losses.
+    if (_renderTarget->screenshotRequested())
+        return vtbackend::screenshot::Disposition::Unhandled;
+
+    // Read the grid the frame will be cropped against HERE, on the GUI thread, rather than from the
+    // readback callback: a resize between the two would otherwise have the crop use metrics the
+    // captured frame was not rendered with.
+    auto const metrics = gridMetrics();
+
+    requestScreenshot([this, request, metrics, onReady = std::move(onReady)](QImage const& frame) mutable {
+        // Encoded here, on the render thread, so a page-sized PNG is not deflated on the GUI thread.
+        post([capture = encodeScreenshot(frame, request.area, metrics, request.format),
+              onReady = std::move(onReady)]() mutable { onReady(std::move(capture)); });
+    });
+
+    return true;
 }
 
 void TerminalDisplay::doDumpStateInternal()
