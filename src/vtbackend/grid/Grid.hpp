@@ -976,6 +976,28 @@ class Grid
 
   private:
     CellLocation growLines(LineCount newHeight, CellLocation cursor);
+
+    /// Drops the oldest scrollback down to a command boundary, keeping at least the guaranteed depth.
+    ///
+    /// A *block start* is a row carrying LineFlag::Marked -- what OSC 133;A stamps at a prompt (and
+    /// what the OSC 3008 synthesis and Vi's `mm` stamp too). The rule is one sentence: drop
+    /// everything older than the NEWEST block start that still leaves @ref guaranteedHistoryLineCount
+    /// rows behind. A block straddling that depth therefore survives whole, and a block entirely
+    /// beyond it goes whole -- which is the difference between losing a command and losing the top
+    /// half of one.
+    ///
+    /// Finding no such boundary is not a failure and must not fall back to cutting line-wise HERE:
+    /// with no shell integration, or with one command whose output is larger than the whole
+    /// headroom, the right answer is to leave the scrollback alone and let it fill to capacity,
+    /// where scrollUp's at-capacity path evicts line-wise as it always has. That is the ceiling
+    /// which keeps memory bounded when no boundary can be honoured.
+    ///
+    /// Called when the history is about to cross capacity rather than the moment it passes the
+    /// guarantee: one backward scan per (capacity - guaranteed) scrolled lines is amortised free,
+    /// whereas scanning at the guarantee would rescan the same rows on every single line of a large
+    /// command's output -- the exact case this exists for. It also means the headroom is genuinely
+    /// used rather than merely allocated, and that an attached mirror resyncs once per trim instead
+    /// of once per command (@see ScreenMirror's floor-outran-scroll replay).
     void clampHistory();
 
     // {{{ buffer helpers

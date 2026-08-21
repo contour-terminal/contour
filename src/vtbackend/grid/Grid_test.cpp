@@ -2003,3 +2003,178 @@ TEST_CASE("Grid.setHistoryLimits.shrinkingDropsTheOldestRows", "[grid][history]"
     CHECK(grid.lineText(LineOffset(-1)) == "CCCCC");
     CHECK(grid.lineText(LineOffset(0)) == "DDDDD");
 }
+
+// {{{ block-atomic history eviction (issue #836)
+namespace
+{
+/// Appends one line of text to the bottom of the page, scrolling the previous one into history.
+void appendLine(Grid& grid, std::string_view text, bool blockStart = false)
+{
+    grid.scrollUp(LineCount(1));
+    auto const bottom = LineOffset::cast_from(unbox<int>(grid.pageSize().lines) - 1);
+    grid.setLineText(bottom, text);
+    grid.lineAt(bottom).setMarked(blockStart);
+}
+
+/// The scrollback, oldest first, as one string per line.
+[[nodiscard]] std::vector<std::string> historyText(Grid const& grid)
+{
+    auto result = std::vector<std::string> {};
+    for (auto y = -unbox<int>(grid.historyLineCount()); y < 0; ++y)
+        result.emplace_back(grid.lineText(LineOffset::cast_from(y)));
+    return result;
+}
+} // namespace
+
+TEST_CASE("Grid.historyEviction.evictsAWholeBlockRatherThanCuttingMidCommand", "[grid][history-eviction]")
+{
+    // Deliberately uneven block lengths, so that where a line-wise cut lands is not a coincidence of
+    // the block size dividing the capacity.
+    auto const blocks = std::array { 2, 5, 3, 4, 2, 6 };
+    auto const writeBlocks = [&](Grid& grid) {
+        for (auto const [block, length]: std::views::enumerate(blocks))
+        {
+            appendLine(grid, std::format("P{}   ", block), true);
+            for (auto const i: std::views::iota(0, length))
+                appendLine(grid, std::format("o{}{}  ", block, i));
+        }
+    };
+
+    auto withHeadroom =
+        Grid(PageSize { LineCount(1), ColumnCount(5) }, false, HistoryLimits { LineCount(6), LineCount(12) });
+    auto plain = Grid(PageSize { LineCount(1), ColumnCount(5) }, false, LineCount(12));
+    writeBlocks(withHeadroom);
+    writeBlocks(plain);
+
+    // THE invariant the issue asks for: the oldest line still in the scrollback is a prompt, with
+    // its command's output whole beneath it.
+    CHECK(withHeadroom.lineAt(withHeadroom.addressableTop()).marked());
+
+    // And the same buffer without headroom is what that is worth: it cut wherever the limit fell,
+    // leaving an orphaned tail of output whose prompt is gone.
+    CHECK(!plain.lineAt(plain.addressableTop()).marked());
+    CHECK(historyText(plain).front().starts_with("o"));
+
+    CHECK(withHeadroom.historyLineCount() >= LineCount(6));
+    CHECK(withHeadroom.historyLineCount() <= LineCount(12));
+}
+
+TEST_CASE("Grid.historyEviction.neverRetainsFewerThanTheGuaranteedLines", "[grid][history-eviction]")
+{
+    auto grid =
+        Grid(PageSize { LineCount(1), ColumnCount(5) }, false, HistoryLimits { LineCount(4), LineCount(8) });
+
+    // Every line is a block start, so the trim could snap anywhere it liked -- including all the way
+    // down to the newest, which is exactly what the guarantee forbids.
+    for (auto const i: std::views::iota(0, 40))
+    {
+        appendLine(grid, std::format("L{:<4}", i).substr(0, 5), true);
+        CHECK(grid.historyLineCount() <= LineCount(8));
+        // Only once the buffer has accumulated that much: a guarantee is a floor on what eviction
+        // may take, not on what has been written yet.
+        if (i >= 8)
+            CHECK(grid.historyLineCount() >= LineCount(4));
+    }
+}
+
+TEST_CASE("Grid.historyEviction.withoutSemanticMarksBehavesExactlyAsBefore", "[grid][history-eviction]")
+{
+    // Same capacity, one with headroom and one without. With no block start anywhere, the trim can
+    // honour no boundary and must leave the scrollback to the at-capacity path -- so both grids end
+    // up holding the very same rows.
+    auto withHeadroom =
+        Grid(PageSize { LineCount(1), ColumnCount(5) }, false, HistoryLimits { LineCount(4), LineCount(8) });
+    auto plain = Grid(PageSize { LineCount(1), ColumnCount(5) }, false, LineCount(8));
+
+    for (auto const i: std::views::iota(0, 30))
+    {
+        appendLine(withHeadroom, std::format("L{:<4}", i).substr(0, 5));
+        appendLine(plain, std::format("L{:<4}", i).substr(0, 5));
+    }
+
+    CHECK(withHeadroom.historyLineCount() == plain.historyLineCount());
+    CHECK(historyText(withHeadroom) == historyText(plain));
+}
+
+TEST_CASE("Grid.historyEviction.aBlockLargerThanTheHeadroomFallsBackToLineWiseEviction",
+          "[grid][history-eviction]")
+{
+    auto grid =
+        Grid(PageSize { LineCount(1), ColumnCount(5) }, false, HistoryLimits { LineCount(4), LineCount(8) });
+
+    // One prompt, then far more output than the whole buffer can hold -- `cat` on a large file.
+    appendLine(grid, "P0   ", true);
+    for (auto const i: std::views::iota(0, 40))
+        appendLine(grid, std::format("o{:<4}", i).substr(0, 5));
+
+    // The prompt is long gone and the ceiling is what bounds the buffer: truncating this one
+    // command's history is the only alternative to unbounded memory.
+    CHECK(grid.historyLineCount() == LineCount(8));
+}
+
+TEST_CASE("Grid.historyEviction.raisesTheFloorAndKeepsRowIdentity", "[grid][history-eviction]")
+{
+    auto grid =
+        Grid(PageSize { LineCount(1), ColumnCount(5) }, false, HistoryLimits { LineCount(2), LineCount(6) });
+
+    appendLine(grid, "P0   ", true);
+    auto const evictedId = grid.stableLineIdOf(LineOffset(0));
+    auto const generationBefore = grid.stableIdGeneration();
+    for (auto const i: std::views::iota(0, 3))
+        appendLine(grid, std::format("o{:<4}", i).substr(0, 5));
+    appendLine(grid, "P1   ", true);
+    auto const survivorId = grid.stableLineIdOf(LineOffset(0));
+    for (auto const i: std::views::iota(0, 4))
+        appendLine(grid, std::format("q{:<4}", i).substr(0, 5));
+
+    // The first block is gone, the second is not, and no id was renamed on the way.
+    CHECK(grid.lineOffsetOf(evictedId) == std::nullopt);
+    CHECK(grid.lineOffsetOf(survivorId).has_value());
+    CHECK(grid.stableIdGeneration() == generationBefore);
+    CHECK(grid.stableRangeFloor() > evictedId);
+}
+
+TEST_CASE("Grid.historyEviction.aWrappedGarbageSlotIsNeverMistakenForABlockStart", "[grid][history-eviction]")
+{
+    auto grid =
+        Grid(PageSize { LineCount(2), ColumnCount(5) }, false, HistoryLimits { LineCount(2), LineCount(4) });
+
+    // Fill to capacity with marked rows, then reverse-scroll so destroyed page rows wrap into the
+    // oldest history slots, still carrying their Marked flag but no longer addressable.
+    for (auto const i: std::views::iota(0, 8))
+        appendLine(grid, std::format("L{:<4}", i).substr(0, 5), true);
+    grid.scrollDown(LineCount(2),
+                    GraphicsAttributes {},
+                    Margin { .vertical = { .from = LineOffset(0), .to = LineOffset(1) },
+                             .horizontal = { .from = ColumnOffset(0), .to = ColumnOffset(4) } });
+
+    for (auto const i: std::views::iota(0, 6))
+        appendLine(grid, std::format("M{:<4}", i).substr(0, 5), true);
+
+    // Whatever it snapped to, it stayed inside the rows the grid actually has.
+    CHECK(grid.historyLineCount() <= LineCount(4));
+    CHECK(grid.stableRangeFloor() >= grid.stableLineIdOf(grid.addressableTop()));
+}
+
+TEST_CASE("Grid.historyEviction.theGuaranteeSurvivesAReverseScroll", "[grid][history-eviction]")
+{
+    auto grid =
+        Grid(PageSize { LineCount(2), ColumnCount(5) }, false, HistoryLimits { LineCount(4), LineCount(10) });
+
+    for (auto const i: std::views::iota(0, 12))
+        appendLine(grid, std::format("L{:<4}", i).substr(0, 5), true);
+
+    // A full-page reverse scroll (RI past the top / CSI T) walks the stable base BACKWARDS, which is
+    // what a cached scan bound anchored on it would not survive.
+    grid.scrollDown(LineCount(2),
+                    GraphicsAttributes {},
+                    Margin { .vertical = { .from = LineOffset(0), .to = LineOffset(1) },
+                             .horizontal = { .from = ColumnOffset(0), .to = ColumnOffset(4) } });
+
+    for (auto const i: std::views::iota(0, 12))
+    {
+        appendLine(grid, std::format("M{:<4}", i).substr(0, 5), true);
+        CHECK(grid.historyLineCount() >= LineCount(4));
+    }
+}
+// }}}

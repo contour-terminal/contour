@@ -414,6 +414,14 @@ int Grid::computeLogicalLineNumberFromBottom(LineCount n) const noexcept
 LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defaultAttributes) noexcept
 {
     verifyState();
+
+    // Before the branching, not after: the branch below that grows the history also contains the
+    // at-capacity path in its tail, so one call can both fill the last free slot and start
+    // recycling. Trimming first is also what hands that path a correctly positioned free region --
+    // at capacity the free slots begin at exactly _pageSize.lines, which is where it appends.
+    if (historyLineCount() + linesCountToScrollUp > maxHistoryLineCount())
+        clampHistory();
+
     auto const linesAvailable = LineCount::cast_from(_lines.size() - unbox<size_t>(_linesUsed));
     if (std::holds_alternative<Infinite>(_historyLimits.capacity) && linesAvailable < linesCountToScrollUp)
     {
@@ -1066,7 +1074,67 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
 
 void Grid::clampHistory()
 {
-    // TODO: needed?
+    // No headroom means no trade to make: the scrollback evicts line-wise, exactly as it always has.
+    if (!_historyLimits.hasHeadroom())
+        return;
+
+    // A zero-history grid is every page but the primary one. Returning here also makes the
+    // monotone-floor reasoning below unconditional rather than true-by-audit: rotateBuffersRight has
+    // a zero-history branch that LOWERS _stableFloor, and it is the only path that ever does.
+    auto const historyLineCount = this->historyLineCount();
+    if (historyLineCount <= LineCount(0))
+        return;
+
+    auto const guaranteed = guaranteedHistoryLineCount();
+    if (historyLineCount <= guaranteed)
+        return;
+
+    // Rows at offsets below `bound` may go; a block start AT bound leaves exactly the guarantee.
+    // Clamped to -1 because offset 0 is the page, not the scrollback.
+    auto const bound = std::min(LineOffset::cast_from(-unbox<int>(guaranteed)), LineOffset(-1));
+
+    // The scan stops at addressableTop() rather than at -historyLineCount(): at capacity, scrollDown
+    // wraps destroyed page rows into the oldest history slots WITHOUT resetting them, so those slots
+    // keep whatever LineFlag::Marked they last held. Reading one as a block start would evict to a
+    // prompt that is not there. @see addressableTop.
+    auto const top = addressableTop();
+    if (bound < top)
+        return;
+
+    auto blockStart = std::optional<LineOffset> {};
+    for (auto y = bound; y >= top; --y)
+    {
+        if (lineAt(y).marked())
+        {
+            blockStart = y;
+            break;
+        }
+    }
+
+    if (!blockStart)
+        return;
+
+    // Measured from the real bottom of the ring's history rather than from addressableTop(), so any
+    // unaddressable garbage below the floor is dropped along with the rest instead of being left to
+    // occupy slots nothing can read.
+    auto const dropCount = LineCount::cast_from(unbox<int>(*blockStart) + unbox<int>(historyLineCount));
+    if (dropCount <= LineCount(0))
+        return;
+
+    // Reset before forgetting them: an inflated LineSoA would otherwise sit on its heap buffers until
+    // the slot happened to be reused, and a stale Marked flag would be a phantom block start for the
+    // next scan. rowAt rather than changingLineAt -- these rows are leaving, so announcing them to
+    // the delta stream would arm a history watermark for content no client will ever ask for.
+    for (auto y = LineOffset::cast_from(-unbox<int>(historyLineCount)); y < *blockStart; ++y)
+        rowAt(y).reset(defaultLineFlags(), GraphicsAttributes {});
+
+    // The whole eviction, in two lines: the ring keeps its slots and its rotation, the rows simply
+    // stop being counted, and the freed slots rejoin the free region scrollUp appends into. No
+    // generation bump -- every surviving row keeps the id it had, and the rising floor is the
+    // signal consumers already watch for an eviction (@see FoldState::prune).
+    _linesUsed -= dropCount;
+    syncStableFloor();
+    verifyState();
 }
 // }}}
 // {{{ dumpGrid impl
