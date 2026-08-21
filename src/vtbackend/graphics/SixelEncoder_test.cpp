@@ -14,7 +14,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstdint>
+#include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>

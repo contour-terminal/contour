@@ -13,6 +13,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace std::string_view_literals;
@@ -200,7 +201,7 @@ TEST_CASE("Screenshot.parse.renderer_formats_are_accepted_here", "[screenshot]")
 {
     // Whether pixels can actually be produced is a question about the SESSION, answered later by the
     // frontend; the grammar accepts the request either way. @see Status::Unavailable.
-    for (auto const [text, format]: { std::pair { "2"sv, Format::Sixel }, std::pair { "3"sv, Format::Png } })
+    for (auto const& [text, format]: { std::pair { "2"sv, Format::Sixel }, std::pair { "3"sv, Format::Png } })
     {
         auto const request = parseRequest(std::string("11;1;1;5;20;") + std::string(text), TestPage);
         REQUIRE(request.has_value());

@@ -16,7 +16,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <memory>
 #include <ranges>
+#include <string_view>
 
 using contour::display::encodeScreenshot;
 using contour::display::pixelRectOf;
