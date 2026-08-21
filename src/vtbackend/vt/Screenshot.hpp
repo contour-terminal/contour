@@ -37,9 +37,16 @@ enum class Format : uint8_t
 {
     PlainText = 0,   ///< UTF-8 text, one LF-terminated line per row of the region.
     VTSequences = 1, ///< The text plus the SGR sequences needed to reproduce its colors.
-    Sixel = 2,       ///< Reserved -- the tree parses sixel but does not encode it.
+    Sixel = 2,       ///< The region as rendered, as sixel that can be written back to a terminal.
     Png = 3,         ///< A whole PNG file of the region as rendered.
-    Rgba = 4,        ///< Tightly-packed top-left-origin RGBA8 pixels of the region as rendered.
+
+    /// Reserved: raw pixels, which this extension deliberately does not carry.
+    ///
+    /// A page-sized region is very nearly a megabyte raw against tens of kilobytes as PNG, and
+    /// base64 adds a third to that -- twenty-five to eighty times the wire, through a PTY the
+    /// application is also trying to use, to save the receiver a decode it can already do. The
+    /// number stays spoken for so it cannot later mean something else.
+    Rgba = 4,
 };
 
 /// Whether this terminal can actually produce a @ref Format.
@@ -107,7 +114,7 @@ inline constexpr auto Formats = std::array {
                  .producer = Producer::Grid },
     FormatInfo { .format = Format::Sixel,
                  .name = "sixel",
-                 .availability = Availability::Reserved,
+                 .availability = Availability::Implemented,
                  .producer = Producer::Renderer },
     FormatInfo { .format = Format::Png,
                  .name = "PNG",
@@ -115,7 +122,7 @@ inline constexpr auto Formats = std::array {
                  .producer = Producer::Renderer },
     FormatInfo { .format = Format::Rgba,
                  .name = "RGBA",
-                 .availability = Availability::Implemented,
+                 .availability = Availability::Reserved,
                  .producer = Producer::Renderer },
 };
 
@@ -213,15 +220,17 @@ struct Rejection
 struct Capture
 {
     /// The screenshot itself, unencoded: UTF-8 for a @ref Producer::Grid format, a whole PNG file or
-    /// raw RGBA8 pixels for a @ref Producer::Renderer one.
+    /// a complete sixel sequence for a @ref Producer::Renderer one.
     std::string content;
 
     /// What the pixels measure, echoed to the application as `Pw`/`Ph`.
     ///
-    /// Zero for a grid format, which has no pixel extent. It is *not* redundant for a renderer format:
-    /// PNG carries its own dimensions but RGBA does not, and even for PNG the region's extent in pixels
-    /// is not derivable from its extent in cells without knowing the cell size and how the crop
-    /// rounded. Kitty's graphics protocol makes the same call, requiring `s=`/`v=` alongside raw pixels.
+    /// Zero for a grid format, which has no pixel extent.
+    ///
+    /// Both renderer formats state their own extent -- PNG in its IHDR, sixel in its raster attribute
+    /// -- so this is a convenience rather than the only source of the truth. It earns its place by
+    /// arriving FIRST: a reader reassembling a few hundred base64 chunks can size its buffer, show
+    /// progress, or reject an oversized image before it has decoded anything at all.
     ImageSize pixelSize {};
 };
 

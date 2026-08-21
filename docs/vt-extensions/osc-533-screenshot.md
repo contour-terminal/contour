@@ -1,7 +1,7 @@
 # OSC 533 — Screenshot
 
 Reads a rectangular region of the page back to the application: as text, as the VT sequences that
-would reproduce it, or as the pixels it is actually rendered with.
+would reproduce it, or as a picture of the pixels it is actually rendered with.
 
 This is the region-addressable counterpart to [buffer capture](buffer-capture.md). Buffer capture
 answers "what scrolled past", counted in lines from the bottom of the page and reaching back into
@@ -46,13 +46,13 @@ Only the current buffer's main page is readable. Scrollback is not addressable h
 
 ### Formats
 
-| `Pf` | Format        | Status      | Produced by |
-|------|---------------|-------------|-------------|
-| `0`  | Plain text    | Implemented | the grid    |
-| `1`  | VT sequences  | Implemented | the grid    |
-| `2`  | Sixel         | Reserved    | the renderer |
+| `Pf` | Format        | Status      | Produced by  |
+|------|---------------|-------------|--------------|
+| `0`  | Plain text    | Implemented | the grid     |
+| `1`  | VT sequences  | Implemented | the grid     |
+| `2`  | Sixel         | Implemented | the renderer |
 | `3`  | PNG           | Implemented | the renderer |
-| `4`  | RGBA          | Implemented | the renderer |
+| `4`  | RGBA          | Reserved    | the renderer |
 
 **Plain text** is UTF-8, one LF-terminated line per row of the region, blank cells rendered as
 spaces and a wide character contributing a single codepoint.
@@ -61,17 +61,25 @@ spaces and a wide character contributing a single codepoint.
 terminated by CRLF — this format exists to be written back to a terminal, where a bare LF would
 leave every row starting where the one above it ended.
 
-**PNG** is a whole PNG file — signature, `IHDR` and all — of the region as rendered.
+**Sixel** is the region as rendered, encoded as a complete sixel sequence — `DCS` introducer and
+`ST` included — so it can be written straight back to a terminal, exactly as VT sequences can. It is
+the pixel counterpart to format `1`.
 
-**RGBA** is tightly-packed 8-bit-per-channel pixels with straight (not premultiplied) alpha, rows
-top to bottom, exactly `Pw * Ph * 4` bytes. It exists so an application that is going to blit the
-pixels anyway does not have to carry a PNG decoder; the reply's `Pw`/`Ph` are what give the flat run
-its shape.
+Two properties are worth knowing before relying on it. Sixel states a color as three *percentages*,
+so an 8-bit channel passes through 101 levels and may come back off by one; channels that are
+already whole percentages (0, 51, 102, 153, 204, 255) survive exactly. And sixel has no alpha
+channel, so a pixel less than half opaque is left *unpainted* rather than blended down — which is
+what the envelope's `P2 = 1` announces. A screen carrying more distinct colors than there are color
+registers (a background image, or inline graphics) is reduced to a fixed 6×7×6 cut of RGB.
 
-**Sixel** is **reserved, not absent**: the number is spoken for, but nothing here encodes one yet.
-It has a number so that an application asking for it is told `UnsupportedFormat` rather than met
-with silence, and so that implementing it later adds a row to a table rather than changing this
-grammar.
+**PNG** is a whole PNG file — signature, `IHDR` and all — of the region as rendered. Use it when
+fidelity matters; use sixel when the point is to display the result somewhere.
+
+**RGBA** is **reserved, and deliberately not served.** Raw pixels would be very nearly a megabyte
+for a page-sized region against tens of kilobytes as PNG, and base64 adds a third to that — twenty-
+five to eighty times the wire, through a PTY the application is also trying to use, to save the
+receiver a decode it can already do. The number stays spoken for so it cannot later come to mean
+something else; a request for it is answered `UnsupportedFormat`.
 
 ### What the pixel formats need
 
@@ -89,8 +97,8 @@ consequences an application should expect:
 - **The reply is not prompt.** The frame must be submitted before its texture can be read back, so
   the capture completes a frame or two after the request. `Pid` is what matches the answer to the
   question.
-- **They are large.** A 640×384 region is under 30 KB as PNG but very nearly a megabyte as RGBA,
-  which base64 inflates by a further third. It arrives as several hundred chunks; see below.
+- **They are still not small.** A 640×384 region is tens of kilobytes as PNG and rather more as
+  sixel, which is uncompressed. Expect several chunks, not one; see below.
 
 ## Response Syntax
 
@@ -110,11 +118,11 @@ The geometry echoed back is the region **as resolved**, in the same one-based un
 used, so a reply can be read without knowing what the terminal defaulted the request to.
 
 `Pw` and `Ph` are the payload's extent **in pixels**, and are `0` for a format that has no pixel
-extent — which keeps the payload at one fixed position whatever the format was. They are not
-redundant for a pixel format: RGBA is a flat run of bytes and says nothing about its own shape, and
-even PNG's region cannot be measured from its extent in cells without knowing the cell size and how
-the crop was clipped to the rendered frame. Kitty's graphics protocol makes the same call, requiring
-`s=`/`v=` alongside raw pixels.
+extent — which keeps the payload at one fixed position whatever the format was. Both pixel formats
+do state their own extent (PNG in its `IHDR`, sixel in its raster attribute), so this is a
+convenience rather than the only source of the truth. It earns its place by arriving *first*: a
+reader reassembling a few hundred base64 chunks can size its buffer, drive a progress indicator, or
+reject an oversized image before it has decoded anything at all.
 
 ### Status codes
 
@@ -183,17 +191,27 @@ printf '\033]533;7;1;;10;;3\033\\'
 # PM 533 ; 7 ; 0 ST
 ```
 
-Ask a headless session for the same thing, and be told it cannot:
+Ask a headless session for pixels, and be told it cannot produce them:
 
 ```sh
 printf '\033]533;7;;;;;3\033\\'
 # PM 533 ; 7 ; 6 ST
 ```
 
-Ask for sixel, which has a number but no encoder behind it:
+Capture the whole page as sixel, and display it again. The payload is a complete sixel sequence, so
+it needs no wrapping — decoding the chunks and writing them out is all it takes:
 
 ```sh
-printf '\033]533;9;;;;;2\033\\'
+printf '\033]533;8;;;;;2\033\\'
+# PM 533 ; 8 ; 1 ; 1 ; 1 ; 24 ; 80 ; 2 ; 640 ; 384 ; <base64> ST
+# ... more chunks ...
+# PM 533 ; 8 ; 0 ST
+```
+
+Ask for raw RGBA, which this extension reserves but does not serve:
+
+```sh
+printf '\033]533;9;;;;;4\033\\'
 # PM 533 ; 9 ; 4 ST
 ```
 

@@ -2769,7 +2769,7 @@ TEST_CASE("TerminalSession refuses an OSC 533 pixel format when the surface cann
     auto& surface = *held.surface;
     REQUIRE_FALSE(surface.screenshotCapture.has_value());
 
-    held->terminal().writeToScreen("\033]533;8;1;1;2;3;4\033\\");
+    held->terminal().writeToScreen("\033]533;8;1;1;2;3;2\033\\");
     held->executePendingScreenshot(true, false);
 
     CHECK(surface.screenshotRenderRequests.size() == 1);

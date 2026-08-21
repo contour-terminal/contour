@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Unit tests for the pixel half of the OSC 533 screenshot extension: mapping a cell region onto the
-// pixels it occupies in a rendered frame, and encoding those pixels as PNG or raw RGBA.
+// pixels it occupies in a rendered frame, and encoding those pixels as PNG or as sixel.
 //
 // No renderer, no window and no GPU are involved -- the frame is a QImage a test paints itself, which
 // is exactly what makes the crop arithmetic checkable at all. Getting it wrong shifts every pixel
 // screenshot by a margin without failing anything visible.
 
 #include <contour/display/ScreenshotEncoder.hpp>
+
+#include <vtbackend/graphics/SixelParser.hpp>
 
 #include <QtGui/QColor>
 #include <QtGui/QImage>
@@ -47,7 +49,10 @@ namespace
 }
 
 /// A frame large enough to hold @ref testMetrics' whole page, painted so every cell is a different
-/// color: cell (line, column) is rgb(line * 40, column * 40, 0).
+/// color: cell (line, column) is rgb(line * 51, column * 51, 0).
+///
+/// The step is 51 because those are whole percentages, and sixel states a color in percent -- so a
+/// round trip through it compares exactly instead of within a tolerance that would hide a real shift.
 [[nodiscard]] QImage testFrame()
 {
     auto const metrics = testMetrics();
@@ -60,21 +65,10 @@ namespace
             auto const at = metrics.mapTopLeft(vtbackend::LineOffset(line), vtbackend::ColumnOffset(column));
             for (auto const y: std::views::iota(0, 16))
                 for (auto const x: std::views::iota(0, 8))
-                    frame.setPixelColor(at.x + x, at.y + y, QColor(line * 40, column * 40, 0));
+                    frame.setPixelColor(at.x + x, at.y + y, QColor(line * 51, column * 51, 0));
         }
 
     return frame;
-}
-
-/// @return The four bytes of the pixel at (@p x, @p y) in a tightly-packed RGBA8 run @p rowWidth wide.
-[[nodiscard]] QColor pixelAt(std::string const& rgba, int rowWidth, int x, int y)
-{
-    auto const at = ((static_cast<size_t>(y) * static_cast<size_t>(rowWidth)) + static_cast<size_t>(x)) * 4;
-    REQUIRE(at + 4 <= rgba.size());
-    return { static_cast<uint8_t>(rgba[at]),
-             static_cast<uint8_t>(rgba[at + 1]),
-             static_cast<uint8_t>(rgba[at + 2]),
-             static_cast<uint8_t>(rgba[at + 3]) };
 }
 
 } // namespace
@@ -105,22 +99,36 @@ TEST_CASE("ScreenshotEncoder.pixelRectOf maps a cell region through the page mar
     }
 }
 
-TEST_CASE("ScreenshotEncoder.rgba is tightly packed and carries its own extent", "[screenshot]")
+TEST_CASE("ScreenshotEncoder.sixel round-trips back through our own parser", "[screenshot]")
 {
-    // Lines 1..2, columns 2..3: a 16x32 rectangle out of the middle of the page.
+    // Lines 1..2, columns 2..3: a 16x32 rectangle out of the middle of the page. Decoding the result
+    // with SixelParser is what proves the crop landed on the cells the request named -- an off-by-one
+    // margin would return a picture of the wrong cells while still being perfectly valid sixel.
     auto const area = Rect { .top = Top(1), .left = Left(2), .bottom = Bottom(2), .right = Right(3) };
-    auto const capture = encodeScreenshot(testFrame(), area, testMetrics(), Format::Rgba);
+    auto const capture = encodeScreenshot(testFrame(), area, testMetrics(), Format::Sixel);
 
     REQUIRE(capture.has_value());
     CHECK(unbox(capture->pixelSize.width) == 16);
     CHECK(unbox(capture->pixelSize.height) == 32);
-    // Raw pixels say nothing about their own shape, so the reply's Pw/Ph must -- and the run must be
-    // exactly width*height*4 bytes for those to describe it.
-    CHECK(capture->content.size() == size_t { 16 } * 32 * 4);
+    // Written back to a terminal verbatim, envelope included -- that is what this format is for.
+    CHECK(capture->content.starts_with("\033P"));
+    CHECK(capture->content.ends_with("\033\\"));
 
-    // The top-left pixel is cell (1,2)'s color, and the bottom-right one is cell (2,3)'s.
-    CHECK(pixelAt(capture->content, 16, 0, 0) == QColor(40, 80, 0));
-    CHECK(pixelAt(capture->content, 16, 15, 31) == QColor(80, 120, 0));
+    auto builder = vtbackend::SixelImageBuilder {
+        vtbackend::ImageSize { Width(64), Height(64) },
+        vtbackend::SixelAspectRatio {},
+        vtbackend::RGBAColor { 0, 0, 0, 0 },
+        std::make_shared<vtbackend::SixelColorPalette>(16, 256),
+    };
+    auto const data = std::string_view { capture->content };
+    vtbackend::SixelParser::parse(data.substr(8, data.size() - 10), builder);
+
+    CHECK(builder.size() == vtbackend::ImageSize { Width(16), Height(32) });
+    // The top-left pixel is cell (1,2)'s color, the bottom-right one cell (2,3)'s.
+    CHECK(builder.at(vtbackend::CellLocation { vtbackend::LineOffset(0), vtbackend::ColumnOffset(0) })
+          == vtbackend::RGBAColor { 51, 102, 0, 255 });
+    CHECK(builder.at(vtbackend::CellLocation { vtbackend::LineOffset(31), vtbackend::ColumnOffset(15) })
+          == vtbackend::RGBAColor { 102, 153, 0, 255 });
 }
 
 TEST_CASE("ScreenshotEncoder.png round-trips through Qt's decoder", "[screenshot]")
@@ -140,7 +148,7 @@ TEST_CASE("ScreenshotEncoder.png round-trips through Qt's decoder", "[screenshot
     CHECK(decoded.width() == 24);
     CHECK(decoded.height() == 32);
     CHECK(decoded.pixelColor(0, 0) == QColor(0, 0, 0));
-    CHECK(decoded.pixelColor(23, 31) == QColor(40, 80, 0));
+    CHECK(decoded.pixelColor(23, 31) == QColor(51, 102, 0));
 }
 
 TEST_CASE("ScreenshotEncoder.a region reaching past the frame is clipped to it", "[screenshot]")
@@ -150,20 +158,19 @@ TEST_CASE("ScreenshotEncoder.a region reaching past the frame is clipped to it",
     // the pixels that exist rather than read past them.
     auto const frame = testFrame().copy(QRect { 0, 0, 5 + (6 * 8), 3 + (3 * 16) + 4 });
     auto const area = Rect { .top = Top(3), .left = Left(0), .bottom = Bottom(3), .right = Right(5) };
-    auto const capture = encodeScreenshot(frame, area, testMetrics(), Format::Rgba);
+    auto const capture = encodeScreenshot(frame, area, testMetrics(), Format::Png);
 
     REQUIRE(capture.has_value());
     CHECK(unbox(capture->pixelSize.width) == 6 * 8);
     // Only the four rows of pixels that were actually rendered, not the sixteen the cell asks for.
     CHECK(unbox(capture->pixelSize.height) == 4);
-    CHECK(capture->content.size() == size_t { 48 } * 4 * 4);
 }
 
 TEST_CASE("ScreenshotEncoder.a region wholly outside the frame is unavailable", "[screenshot]")
 {
     auto const frame = QImage { 8, 16, QImage::Format_RGBA8888 };
     auto const area = Rect { .top = Top(3), .left = Left(4), .bottom = Bottom(3), .right = Right(5) };
-    auto const capture = encodeScreenshot(frame, area, testMetrics(), Format::Rgba);
+    auto const capture = encodeScreenshot(frame, area, testMetrics(), Format::Png);
 
     REQUIRE(!capture.has_value());
     CHECK(capture.error() == Status::Unavailable);
@@ -172,9 +179,10 @@ TEST_CASE("ScreenshotEncoder.a region wholly outside the frame is unavailable", 
 TEST_CASE("ScreenshotEncoder.a grid format never reaches the renderer", "[screenshot]")
 {
     // Terminal::answerScreenshot() serves the grid formats off the cells and hands only the renderer
-    // formats here. Asking anyway is refused rather than answered with something plausible.
+    // formats here, and RGBA is reserved rather than served. Asking anyway is refused rather than
+    // answered with something plausible.
     auto const area = Rect { .top = Top(0), .left = Left(0), .bottom = Bottom(0), .right = Right(0) };
-    for (auto const format: { Format::PlainText, Format::VTSequences, Format::Sixel })
+    for (auto const format: { Format::PlainText, Format::VTSequences, Format::Rgba })
     {
         auto const capture = encodeScreenshot(testFrame(), area, testMetrics(), format);
         REQUIRE(!capture.has_value());

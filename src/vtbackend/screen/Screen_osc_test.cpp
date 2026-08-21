@@ -969,8 +969,9 @@ TEST_CASE("screenshot.OSC533", "[screen][screenshot]")
 
     SECTION("a reserved format is refused")
     {
-        // Sixel: the number is spoken for, but nothing in the tree encodes one.
-        mock.writeToScreen("\033]533;6;1;1;3;5;2\033\\");
+        // Raw RGBA: the number is spoken for so nothing else can take it, but the extension
+        // deliberately does not carry pixels that way. @see screenshot::Format::Rgba.
+        mock.writeToScreen("\033]533;6;1;1;3;5;4\033\\");
         CHECK(mock.terminal.peekInput() == "\033^533;6;4\033\\");
     }
 

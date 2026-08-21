@@ -185,9 +185,9 @@ TEST_CASE("Screenshot.parse.malformed_parameter_is_rejected", "[screenshot]")
 
 TEST_CASE("Screenshot.parse.reserved_and_unknown_formats_are_refused", "[screenshot]")
 {
-    // Sixel has a number but no encoder behind it, and 5 upwards name nothing at all. An application
-    // asking for one is told so rather than met with silence.
-    for (auto const format: { "2"sv, "5"sv, "255"sv })
+    // RGBA has a number this extension deliberately does not serve, and 5 upwards name nothing at
+    // all. An application asking for one is told so rather than met with silence.
+    for (auto const format: { "4"sv, "5"sv, "255"sv })
     {
         auto const request = parseRequest(std::string("11;1;1;5;20;") + std::string(format), TestPage);
         REQUIRE(!request.has_value());
@@ -200,7 +200,7 @@ TEST_CASE("Screenshot.parse.renderer_formats_are_accepted_here", "[screenshot]")
 {
     // Whether pixels can actually be produced is a question about the SESSION, answered later by the
     // frontend; the grammar accepts the request either way. @see Status::Unavailable.
-    for (auto const [text, format]: { std::pair { "3"sv, Format::Png }, std::pair { "4"sv, Format::Rgba } })
+    for (auto const [text, format]: { std::pair { "2"sv, Format::Sixel }, std::pair { "3"sv, Format::Png } })
     {
         auto const request = parseRequest(std::string("11;1;1;5;20;") + std::string(text), TestPage);
         REQUIRE(request.has_value());
@@ -215,9 +215,9 @@ TEST_CASE("Screenshot.formats.table_names_every_enumerator", "[screenshot]")
 {
     CHECK(isSupported(Format::PlainText));
     CHECK(isSupported(Format::VTSequences));
-    CHECK(!isSupported(Format::Sixel));
+    CHECK(isSupported(Format::Sixel));
     CHECK(isSupported(Format::Png));
-    CHECK(isSupported(Format::Rgba));
+    CHECK(!isSupported(Format::Rgba));
     CHECK(formatInfo(static_cast<Format>(200)) == nullptr);
 }
 
@@ -268,18 +268,18 @@ TEST_CASE("Screenshot.reply.echoes_the_resolved_region_one_based", "[screenshot]
 
 TEST_CASE("Screenshot.reply.echoes_the_pixel_extent_of_a_renderer_format", "[screenshot]")
 {
-    // Raw RGBA is a flat run of bytes and says nothing about its own shape, so the reply must. Kitty's
-    // graphics protocol requires the same of raw pixels, for the same reason.
+    // Both pixel formats state their own extent too, but only once they have been reassembled and
+    // decoded. Arriving in the header lets a reader size its buffer before any of that.
     auto const request =
         Request { .id = 1,
                   .area = Rect { .top = Top(0), .left = Left(0), .bottom = Bottom(1), .right = Right(3) },
-                  .format = Format::Rgba };
-    auto const capture =
-        Capture { .content = std::string(4 * 8 * 8, '\0'), .pixelSize = ImageSize { Width(8), Height(8) } };
+                  .format = Format::Sixel };
+    auto const capture = Capture { .content = "\033P7;1;0q\"1;1;8;8\033\\",
+                                   .pixelSize = ImageSize { Width(8), Height(8) } };
     auto const messages = collect([&](auto const& sink) { writeReply(request, capture, sink); });
 
     REQUIRE(messages.size() == 2);
-    CHECK(messages[0].starts_with("\033^533;1;1;1;1;2;4;4;8;8;"));
+    CHECK(messages[0].starts_with("\033^533;1;1;1;1;2;4;2;8;8;"));
 }
 
 TEST_CASE("Screenshot.reply.payload_is_base64_and_round_trips", "[screenshot]")
