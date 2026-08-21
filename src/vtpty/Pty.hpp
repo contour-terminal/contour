@@ -58,6 +58,7 @@ enum class StartError : std::uint8_t
 {
     PtyAllocationFailed, ///< The pseudo terminal itself could not be created.
     SpawnFailed,         ///< The child process could not be created.
+    ConnectFailed,       ///< A remote session (SSH) could not be established.
 };
 
 /// A start() failure: the machine-readable reason plus the platform's own diagnostic text.
@@ -171,6 +172,7 @@ struct std::formatter<vtpty::StartError>: std::formatter<std::string_view>
             {
                 case vtpty::StartError::PtyAllocationFailed: return "PTY allocation failed";
                 case vtpty::StartError::SpawnFailed: return "process creation failed";
+                case vtpty::StartError::ConnectFailed: return "connection failed";
             }
             return "unknown error";
         }();

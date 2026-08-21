@@ -13,8 +13,8 @@
 
 using contour::platform::makeNotificationTransport;
 using contour::platform::NotificationBackend;
-using contour::platform::SandboxState;
 using contour::platform::selectNotificationBackend;
+using vtpty::SandboxState;
 
 TEST_CASE("selectNotificationBackend prefers the session bus off the sandbox", "[contour][notification]")
 {

@@ -3,6 +3,8 @@
 
 #include <vtbackend/vt/DesktopNotification.hpp>
 
+#include <vtpty/SandboxInfo.hpp>
+
 #include <QtCore/QObject>
 #include <QtCore/QString>
 
@@ -71,11 +73,12 @@ class NullNotifier final: public Notifier
 };
 
 /// Whether this process runs inside an application sandbox, and which.
-enum class SandboxState : uint8_t
-{
-    Host = 0,    ///< No sandbox: the session bus is reachable by name.
-    Flatpak = 1, ///< A Flatpak sandbox: only the portals are reachable without a static permission.
-};
+///
+/// An alias rather than an enum of its own: vtpty owns the fact, because vtpty is what reads
+/// /.flatpak-info -- and it reads more than this out of it (@see vtpty::SandboxInfo), which two
+/// separately-declared enums would leave nothing to tie together. Host means the session bus is
+/// reachable by name; Flatpak means only the portals are, without a static permission.
+using SandboxState = vtpty::SandboxState;
 
 /// Which service a notifier should talk to.
 enum class NotificationBackend : uint8_t

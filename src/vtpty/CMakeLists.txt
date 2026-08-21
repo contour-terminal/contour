@@ -21,7 +21,9 @@ set(vtpty_SOURCES
     MockViewPty.cpp
     Process${PLATFORM_SUFFIX}.cpp
     Pty.cpp
+    SandboxInfo.cpp
     SpawnLadder.cpp
+    SshFailureMessage.cpp
 )
 
 set(vtpty_HEADERS
@@ -32,7 +34,9 @@ set(vtpty_HEADERS
     PageSize.hpp
     Process.hpp
     Pty.hpp
+    SandboxInfo.hpp
     SpawnLadder.hpp
+    SshFailureMessage.hpp
 )
 
 set(_include_SshSession_module FALSE)
@@ -104,6 +108,7 @@ if(VTPTY_TESTING)
         test_main.cpp
         ChannelPty_test.cpp
         ImageSize_test.cpp
+        SandboxInfo_test.cpp
         SpawnLadder_test.cpp
     )
     if(WIN32)
