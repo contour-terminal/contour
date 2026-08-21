@@ -887,15 +887,15 @@ namespace
             break;
         auto const end = rest.find("\033\\", start);
         REQUIRE(end != std::string_view::npos);
-        // Skip the whole "ESC ^ 533 ;" introducer, leaving Pid;Ps;Pt;Pl;Pb;Pr;Pf;<base64>.
+        // Skip the whole "ESC ^ 533 ;" introducer, leaving Pid;Ps;Pt;Pl;Pb;Pr;Pf;Pw;Ph;<base64>.
         auto const message = rest.substr(start + 6, end - start - 6);
         rest = rest.substr(end + 2);
 
-        // Pid;Ps;... -- a data message is the only one with a payload after the format.
+        // Pid;Ps;... -- a data message is the only one with a payload after the pixel extent.
         auto const fields = crispy::split(message, ';');
-        if (fields.size() < 8)
+        if (fields.size() < 10)
             continue;
-        content += crispy::base64::decode(fields[7]);
+        content += crispy::base64::decode(fields[9]);
     }
     return content;
 }
@@ -912,7 +912,7 @@ TEST_CASE("screenshot.OSC533", "[screen][screenshot]")
         mock.writeToScreen("\033]533\033\\");
         auto const reply = mock.terminal.peekInput();
         // A PM reply, never an OSC -- replaying it into a terminal must not start a new screenshot.
-        CHECK(reply.starts_with("\033^533;0;1;1;1;3;5;0;"));
+        CHECK(reply.starts_with("\033^533;0;1;1;1;3;5;0;0;0;"));
         CHECK(reply.find("\033]533") == std::string::npos);
         CHECK(decodeScreenshot(reply) == "ABCDE\nfghij\n12345\n");
         // ... and it ends with the end-of-data message.
@@ -938,7 +938,7 @@ TEST_CASE("screenshot.OSC533", "[screen][screenshot]")
     {
         mock.writeToScreen("\033]533;0;1;1;999;999\033\\");
         auto const reply = mock.terminal.peekInput();
-        CHECK(reply.starts_with("\033^533;0;1;1;1;3;5;0;"));
+        CHECK(reply.starts_with("\033^533;0;1;1;1;3;5;0;0;0;"));
         CHECK(decodeScreenshot(reply) == "ABCDE\nfghij\n12345\n");
     }
 
@@ -951,7 +951,7 @@ TEST_CASE("screenshot.OSC533", "[screen][screenshot]")
 
         mock.writeToScreen("\033]533;0;1;1;1;5;1\033\\");
         auto const reply = mock.terminal.peekInput();
-        CHECK(reply.starts_with("\033^533;0;1;1;1;1;5;1;"));
+        CHECK(reply.starts_with("\033^533;0;1;1;1;1;5;1;0;0;"));
         auto const content = decodeScreenshot(reply);
         CHECK(content.ends_with("\r\n"));
         CHECK(content.find("ABCDE") != std::string::npos);
@@ -967,10 +967,19 @@ TEST_CASE("screenshot.OSC533", "[screen][screenshot]")
         CHECK(mock.terminal.peekInput() == "\033^533;5;5\033\\");
     }
 
-    SECTION("a reserved pixel format is refused")
+    SECTION("a reserved format is refused")
     {
-        mock.writeToScreen("\033]533;6;1;1;3;5;3\033\\");
+        // Sixel: the number is spoken for, but nothing in the tree encodes one.
+        mock.writeToScreen("\033]533;6;1;1;3;5;2\033\\");
         CHECK(mock.terminal.peekInput() == "\033^533;6;4\033\\");
+    }
+
+    SECTION("a renderer format with no renderer behind it is unavailable, not denied")
+    {
+        // PNG is implemented, but only where there is something rasterizing glyphs. A MockTerm is a
+        // headless session: nothing refused the read, there is simply no picture to take.
+        mock.writeToScreen("\033]533;8;1;1;3;5;3\033\\");
+        CHECK(mock.terminal.peekInput() == "\033^533;8;6\033\\");
     }
 
     SECTION("a malformed request is still answered")

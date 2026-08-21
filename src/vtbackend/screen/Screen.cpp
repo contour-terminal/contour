@@ -6123,6 +6123,11 @@ ApplyResult Screen::processScreenshot(std::string_view payload)
 
 void Screen::emitScreenshot(screenshot::Request const& request)
 {
+    // Terminal::answerScreenshot() routes a renderer format to the frontend instead, so only the grid
+    // formats reach here. Reaching it with another one means the format table and this switch have
+    // drifted apart.
+    Require(screenshot::producerOf(request.format) == screenshot::Producer::Grid);
+
     auto const top = LineOffset::cast_from(request.area.top);
     auto const bottom = LineOffset::cast_from(request.area.bottom);
     auto const left = ColumnOffset::cast_from(request.area.left);
@@ -6156,14 +6161,15 @@ void Screen::emitScreenshot(screenshot::Request const& request)
             case screenshot::Format::Sixel:
             case screenshot::Format::Png:
             case screenshot::Format::Rgba:
-                // parseRequest() refuses these, so reaching here would mean the format table and the
-                // formats this switch produces have drifted apart.
+                // Excluded by the Require() above: these are pixels, and there are none here.
                 Guarantee(false);
                 break;
         }
     }
 
-    screenshot::writeReply(request, content, [this](std::string_view message) { reply(message); });
+    screenshot::writeReply(request,
+                           screenshot::Capture { .content = std::move(content), .pixelSize = {} },
+                           [this](std::string_view message) { reply(message); });
 }
 
 ApplyResult Screen::processHierarchicalContext(std::string_view payload)

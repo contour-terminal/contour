@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <string>
 #include <string_view>
 
 namespace vtbackend::screenshot
@@ -29,16 +30,16 @@ inline constexpr size_t MaxChunkSize = 4095;
 
 /// The representation a screenshot is delivered in, as named by `Pf`.
 ///
-/// The pixel formats are deliberately *reserved rather than absent*: an application that asks for one
-/// is told so (@ref Status::UnsupportedFormat) instead of being met with silence, and implementing one
-/// later adds a row to @ref Formats rather than changing the grammar.
+/// A format that is not implemented yet is deliberately *reserved rather than absent*: an application
+/// that asks for one is told so (@ref Status::UnsupportedFormat) instead of being met with silence, and
+/// implementing it later adds a row to @ref Formats rather than changing the grammar.
 enum class Format : uint8_t
 {
     PlainText = 0,   ///< UTF-8 text, one LF-terminated line per row of the region.
     VTSequences = 1, ///< The text plus the SGR sequences needed to reproduce its colors.
-    Sixel = 2,       ///< Reserved.
-    Png = 3,         ///< Reserved.
-    Rgba = 4,        ///< Reserved.
+    Sixel = 2,       ///< Reserved -- the tree parses sixel but does not encode it.
+    Png = 3,         ///< A whole PNG file of the region as rendered.
+    Rgba = 4,        ///< Tightly-packed top-left-origin RGBA8 pixels of the region as rendered.
 };
 
 /// Whether this terminal can actually produce a @ref Format.
@@ -46,6 +47,23 @@ enum class Availability : uint8_t
 {
     Reserved = 0,    ///< The number is spoken for, but nothing produces it yet.
     Implemented = 1, ///< The terminal produces it.
+};
+
+/// What has to run to produce a @ref Format.
+///
+/// This is the axis that decides where a request is served from, and it is a property of the format
+/// rather than of the call site -- which is why it is a column of @ref Formats and not a branch
+/// somewhere. @see Terminal::answerScreenshot.
+enum class Producer : uint8_t
+{
+    /// The terminal engine reads the cells and produces the bytes itself. Always available, including
+    /// in a headless session.
+    Grid = 0,
+
+    /// Only a renderer can produce these bytes: they are pixels, and pixels come from rasterized
+    /// glyphs, a font and a GPU. The frontend supplies them, and a session with no renderer attached
+    /// cannot serve them at all (@ref Status::Unavailable).
+    Renderer = 1,
 };
 
 /// What `Ps` says about a reply message.
@@ -60,25 +78,45 @@ enum class Status : uint8_t
     Malformed = 3,         ///< The request could not be read.
     UnsupportedFormat = 4, ///< The format named is reserved, or is not a format at all.
     EmptyRegion = 5,       ///< The region names no cell -- its corners are inverted.
+
+    /// The format exists and is implemented, but this session cannot produce it now: a
+    /// @ref Producer::Renderer format asked of a session with no renderer attached, or a capture that
+    /// failed. Distinct from @ref UnsupportedFormat, which is a statement about the protocol rather
+    /// than about this session -- an application told @c Unavailable may usefully try again.
+    Unavailable = 6,
 };
 
-/// One row of the format table: what a `Pf` value means and whether it can be served.
+/// One row of the format table: what a `Pf` value means, whether it can be served, and by what.
 struct FormatInfo
 {
     Format format;
     std::string_view name;
     Availability availability;
+    Producer producer;
 };
 
 /// Every format the protocol assigns a number to. Adding a format is adding a row here.
 inline constexpr auto Formats = std::array {
-    FormatInfo {
-        .format = Format::PlainText, .name = "plain text", .availability = Availability::Implemented },
-    FormatInfo {
-        .format = Format::VTSequences, .name = "VT sequences", .availability = Availability::Implemented },
-    FormatInfo { .format = Format::Sixel, .name = "sixel", .availability = Availability::Reserved },
-    FormatInfo { .format = Format::Png, .name = "PNG", .availability = Availability::Reserved },
-    FormatInfo { .format = Format::Rgba, .name = "RGBA", .availability = Availability::Reserved },
+    FormatInfo { .format = Format::PlainText,
+                 .name = "plain text",
+                 .availability = Availability::Implemented,
+                 .producer = Producer::Grid },
+    FormatInfo { .format = Format::VTSequences,
+                 .name = "VT sequences",
+                 .availability = Availability::Implemented,
+                 .producer = Producer::Grid },
+    FormatInfo { .format = Format::Sixel,
+                 .name = "sixel",
+                 .availability = Availability::Reserved,
+                 .producer = Producer::Renderer },
+    FormatInfo { .format = Format::Png,
+                 .name = "PNG",
+                 .availability = Availability::Implemented,
+                 .producer = Producer::Renderer },
+    FormatInfo { .format = Format::Rgba,
+                 .name = "RGBA",
+                 .availability = Availability::Implemented,
+                 .producer = Producer::Renderer },
 };
 
 /// @param format The format to look up.
@@ -97,6 +135,14 @@ inline constexpr auto Formats = std::array {
 {
     auto const* const info = formatInfo(format);
     return info != nullptr && info->availability == Availability::Implemented;
+}
+
+/// @param format The format to look up; must be one @ref isSupported names.
+/// @return What has to run to produce @p format.
+[[nodiscard]] constexpr Producer producerOf(Format format) noexcept
+{
+    auto const* const info = formatInfo(format);
+    return info != nullptr ? info->producer : Producer::Grid;
 }
 
 /// One decoded `OSC 533` request.
@@ -163,19 +209,38 @@ struct Rejection
 /// @return The decoded request, or the rejection to reply with instead.
 [[nodiscard]] std::expected<Request, Rejection> parseRequest(std::string_view payload, PageSize page);
 
+/// One finished screenshot, ready to be replied with.
+struct Capture
+{
+    /// The screenshot itself, unencoded: UTF-8 for a @ref Producer::Grid format, a whole PNG file or
+    /// raw RGBA8 pixels for a @ref Producer::Renderer one.
+    std::string content;
+
+    /// What the pixels measure, echoed to the application as `Pw`/`Ph`.
+    ///
+    /// Zero for a grid format, which has no pixel extent. It is *not* redundant for a renderer format:
+    /// PNG carries its own dimensions but RGBA does not, and even for PNG the region's extent in pixels
+    /// is not derivable from its extent in cells without knowing the cell size and how the crop
+    /// rounded. Kitty's graphics protocol makes the same call, requiring `s=`/`v=` alongside raw pixels.
+    ImageSize pixelSize {};
+};
+
+/// Whether a capture could be made, or why not.
+using CaptureResult = std::expected<Capture, Status>;
+
 /// Receives one complete reply message, terminator included, ready to be written to the host.
 using Sink = std::function<void(std::string_view)>;
 
-/// Writes the reply carrying @p content, split into as many messages as it takes.
+/// Writes the reply carrying @p capture, split into as many messages as it takes.
 ///
 /// The content is base64-encoded. That is not decoration: a screenshot is screen content, the
 /// VT-sequence format carries ESC by construction, and a raw ST anywhere in the payload would end the
 /// reply early and leave the remainder to be read as input by whatever asked for it.
 ///
 /// @param request The request being answered; its id, region and format are echoed back.
-/// @param content The screenshot itself, unencoded.
+/// @param capture The screenshot to reply with.
 /// @param sink    Invoked once per reply message.
-void writeReply(Request const& request, std::string_view content, Sink const& sink);
+void writeReply(Request const& request, Capture const& capture, Sink const& sink);
 
 /// Writes the single message that refuses a request.
 ///

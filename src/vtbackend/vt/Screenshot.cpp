@@ -140,11 +140,12 @@ std::expected<Request, Rejection> parseRequest(string_view payload, PageSize pag
     };
 }
 
-void writeReply(Request const& request, string_view content, Sink const& sink)
+void writeReply(Request const& request, Capture const& capture, Sink const& sink)
 {
     // One-based on the wire, in the units the request used, so a reply can be read without knowing
-    // what the terminal defaulted the request to.
-    auto const header = std::format("\033^{};{};{};{};{};{};{};{};",
+    // what the terminal defaulted the request to. Pw/Ph follow in pixels, and are zero for a format
+    // that has no pixel extent -- the payload therefore keeps one fixed position whatever the format.
+    auto const header = std::format("\033^{};{};{};{};{};{};{};{};{};{};",
                                     Code,
                                     request.id,
                                     static_cast<unsigned>(Status::Data),
@@ -152,9 +153,11 @@ void writeReply(Request const& request, string_view content, Sink const& sink)
                                     unbox(request.area.left) + 1,
                                     unbox(request.area.bottom) + 1,
                                     unbox(request.area.right) + 1,
-                                    static_cast<unsigned>(request.format));
+                                    static_cast<unsigned>(request.format),
+                                    unbox(capture.pixelSize.width),
+                                    unbox(capture.pixelSize.height));
 
-    auto remaining = content;
+    auto remaining = string_view { capture.content };
     while (!remaining.empty())
     {
         auto const chunk = remaining.substr(0, std::min(MaxChunkSize, remaining.size()));
