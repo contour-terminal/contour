@@ -6,6 +6,8 @@
 #include <crispy/Assert.hpp>
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <format>
 #include <ranges>
 #include <unordered_map>
@@ -158,6 +160,20 @@ namespace
         return result;
     }
 
+    /// Appends @p value in decimal.
+    ///
+    /// Not std::format: this is reached once per run and once per register per band, which is close to
+    /// a million calls for a page-sized frame, and each std::format pays a type-erased argument pack
+    /// and a temporary string to emit at most a handful of characters. Measured at a third of the
+    /// encoder's whole cost -- which lands on the RENDER thread, so it is dropped frames, not just
+    /// microseconds.
+    void appendDecimal(string& out, size_t value)
+    {
+        auto digits = std::array<char, 20> {};
+        auto const written = std::to_chars(digits.data(), digits.data() + digits.size(), value);
+        out.append(digits.data(), written.ptr);
+    }
+
     /// Appends one color's row of sixel characters, run-length encoded.
     ///
     /// @param out   Receives the characters.
@@ -181,7 +197,11 @@ namespace
 
             auto const character = static_cast<char>(63 + pattern);
             if (run >= ShortestWorthwhileRun)
-                out += std::format("!{}{}", run, character);
+            {
+                out += '!';
+                appendDecimal(out, run);
+                out += character;
+            }
             else
                 out.append(run, character);
         }
@@ -244,7 +264,8 @@ string encodeSixel(std::span<uint8_t const> rgba, ImageSize size)
             if (!std::exchange(first, false))
                 out += '$';
 
-            out += std::format("#{}", entry);
+            out += '#';
+            appendDecimal(out, entry);
             auto const lane = std::span { masks }.subspan(entry * width, width);
             appendRow(out, lane);
 

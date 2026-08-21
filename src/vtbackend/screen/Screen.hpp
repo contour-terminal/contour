@@ -348,13 +348,16 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///          including initial clear screen, and initial cursor hide.
     [[nodiscard]] std::string screenshot(std::function<std::string(LineOffset)> const& postLine = {}) const;
 
-    /// Writes the reply to an `OSC 533` screenshot request the frontend has allowed.
+    /// Reads the region an `OSC 533` request names off the cells.
     ///
-    /// Public because the permission wall lives in the frontend: the request is decoded when it
-    /// arrives, but served only once the frontend, or the user it asked, has said yes.
+    /// Returns the bytes rather than replying with them, so that Terminal::answerScreenshot() stays
+    /// the single writer of a screenshot reply whichever half produced it — the grid here, or a
+    /// renderer through the frontend. That also makes this a pure function of the grid, checkable
+    /// without a Terminal or a PTY in the way.
     ///
-    /// @param request The request to serve, as decoded by processScreenshot().
-    void emitScreenshot(screenshot::Request const& request);
+    /// @param request The request to serve; its format must be a screenshot::Producer::Grid one.
+    /// @return The region's content, with no pixel extent.
+    [[nodiscard]] screenshot::Capture captureScreenshot(screenshot::Request const& request) const;
 
     void crlf() { linefeed(margin().horizontal.from); }
     void crlfIfWrapPending();

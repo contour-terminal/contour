@@ -2979,7 +2979,7 @@ void Terminal::answerScreenshot(screenshot::Request const& request, screenshot::
         return;
     }
 
-    currentScreen().emitScreenshot(request);
+    answerScreenshot(request, currentScreen().captureScreenshot(request));
 }
 
 void Terminal::answerScreenshot(screenshot::Request const& request, screenshot::CaptureResult const& capture)

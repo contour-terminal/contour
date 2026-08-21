@@ -8,6 +8,7 @@
 #include <QtCore/QByteArray>
 
 #include <cstddef>
+#include <span>
 #include <string>
 
 using vtbackend::screenshot::Capture;
@@ -20,7 +21,7 @@ namespace contour::display
 
 namespace
 {
-    [[nodiscard]] CaptureResult encodePng(QImage const& image)
+    [[nodiscard]] CaptureResult encodePng(QImage const& image, vtbackend::ImageSize extent)
     {
         auto bytes = QByteArray {};
         auto buffer = QBuffer { &bytes };
@@ -28,7 +29,7 @@ namespace
             return std::unexpected { Status::Unavailable };
 
         return Capture { .content = std::string { bytes.constData(), static_cast<size_t>(bytes.size()) },
-                         .pixelSize = extentOf(image) };
+                         .pixelSize = extent };
     }
 } // namespace
 
@@ -62,11 +63,9 @@ CaptureResult encodeScreenshot(QImage const& frame,
     if (crop.isEmpty())
         return std::unexpected { Status::Unavailable };
 
-    auto const cropped = frame.copy(crop);
-    if (cropped.isNull())
-        return std::unexpected { Status::Unavailable };
-
-    auto const image = toWireFormat(cropped);
+    // One check for both steps: toWireFormat() propagates a null copy, so a failure in either lands
+    // here. A null result at this point is an allocation failure.
+    auto const image = toWireFormat(frame.copy(crop));
     if (image.isNull())
         return std::unexpected { Status::Unavailable };
 
@@ -74,10 +73,20 @@ CaptureResult encodeScreenshot(QImage const& frame,
 
     switch (format)
     {
-        case Format::Png: return encodePng(image);
+        case Format::Png: return encodePng(image, extent);
         case Format::Sixel:
-            return Capture { .content = vtbackend::encodeSixel(tightlyPackedRgba(image), extent),
-                             .pixelSize = extent };
+            // encodeSixel only READS the pixels, so a frame Qt already laid out tightly is handed over
+            // as-is rather than copied -- a page-sized screenshot is 8 MB of pointless memcpy otherwise.
+            // `image` is a named local, so its buffer outlives the call.
+            return Capture {
+                .content =
+                    isTightlyPacked(image)
+                        ? vtbackend::encodeSixel(
+                              std::span { image.constBits(), static_cast<size_t>(image.sizeInBytes()) },
+                              extent)
+                        : vtbackend::encodeSixel(tightlyPackedRgba(image), extent),
+                .pixelSize = extent,
+            };
         case Format::PlainText:
         case Format::VTSequences:
             // Grid formats never reach a renderer: Terminal::answerScreenshot() serves those off the

@@ -212,8 +212,11 @@ TEST_CASE("Screenshot.parse.renderer_formats_are_accepted_here", "[screenshot]")
 // }}}
 // {{{ format table
 
-TEST_CASE("Screenshot.formats.table_names_every_enumerator", "[screenshot]")
+TEST_CASE("Screenshot.formats.each_enumerator_is_served_or_reserved", "[screenshot]")
 {
+    // The hand-written list is the point: it is what a new enumerator has to be added to, and so what
+    // notices a format that was declared and then never given a row. That the rows themselves are
+    // well-formed is asserted at build time. @see Formats.
     CHECK(isSupported(Format::PlainText));
     CHECK(isSupported(Format::VTSequences));
     CHECK(isSupported(Format::Sixel));

@@ -192,11 +192,14 @@ class DisplaySurface
     /// runs on a later frame rather than before this returns, and may run on the render thread.
     ///
     /// @param request What to capture; already permitted, and its format is a renderer format.
-    /// @param onReady Invoked exactly once with the result, unless this returns false.
-    /// @return False when this surface cannot capture at all (no render target), in which case
-    ///         @p onReady never runs and the caller must answer the request itself.
-    [[nodiscard]] virtual bool renderScreenshot(vtbackend::screenshot::Request const& request,
-                                                ScreenshotCaptureCallback onReady) = 0;
+    /// @param onReady Invoked exactly once with the result, unless this returns @c Unhandled.
+    /// @return Whether this surface has taken the request on. @c Unhandled when it cannot capture it
+    ///         now -- no render target, or another capture already in flight -- in which case
+    ///         @p onReady never runs and the caller must answer the request itself. The same
+    ///         vocabulary Events::renderScreenshot answers in, so the two seams do not have to be
+    ///         translated between.
+    [[nodiscard]] virtual vtbackend::screenshot::Disposition renderScreenshot(
+        vtbackend::screenshot::Request const& request, ScreenshotCaptureCallback onReady) = 0;
 
     /// Opens the terminal state inspector, dumping the current state to it.
     virtual void inspect() = 0;

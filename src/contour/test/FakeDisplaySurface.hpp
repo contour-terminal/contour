@@ -162,15 +162,15 @@ class FakeDisplaySurface final: public session::DisplaySurface
 
     /// Answers synchronously with @ref screenshotCapture, so a test drives the whole `OSC 533` pixel
     /// path — permission wall included — without a renderer behind it.
-    [[nodiscard]] bool renderScreenshot(vtbackend::screenshot::Request const& request,
-                                        ScreenshotCaptureCallback onReady) override
+    [[nodiscard]] vtbackend::screenshot::Disposition renderScreenshot(
+        vtbackend::screenshot::Request const& request, ScreenshotCaptureCallback onReady) override
     {
         screenshotRenderRequests.push_back(request);
         if (!screenshotCapture)
-            return false;
+            return vtbackend::screenshot::Disposition::Unhandled;
 
         onReady(*screenshotCapture);
-        return true;
+        return vtbackend::screenshot::Disposition::Pending;
     }
     void inspect() override { ++inspectCount; }
     void reportCursorMoved() override { ++cursorMovedReports; }

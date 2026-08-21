@@ -6121,15 +6121,32 @@ ApplyResult Screen::processScreenshot(std::string_view payload)
     return ApplyResult::Ok;
 }
 
-void Screen::emitScreenshot(screenshot::Request const& request)
+screenshot::Capture Screen::captureScreenshot(screenshot::Request const& request) const
 {
-    // Terminal::answerScreenshot() routes a renderer format to the frontend instead, so only the grid
-    // formats reach here. Reaching it with another one means the format table and this switch have
-    // drifted apart.
-    Require(screenshot::producerOf(request.format) == screenshot::Producer::Grid);
+    // The two facts that vary by format, read once rather than per row. Switched rather than
+    // conditioned so that a format added to the table is named here by exhaustiveness.
+    auto rendition = CaptureRendition::PlainText;
+    auto terminator = "\n"sv;
 
-    auto const top = LineOffset::cast_from(request.area.top);
-    auto const bottom = LineOffset::cast_from(request.area.bottom);
+    switch (request.format)
+    {
+        case screenshot::Format::PlainText: break;
+        case screenshot::Format::VTSequences:
+            rendition = CaptureRendition::WithSgr;
+            // CR as well as LF: this format exists to be written back to a terminal, where a bare LF
+            // would leave every row starting where the one above it ended.
+            terminator = "\r\n"sv;
+            break;
+        case screenshot::Format::Sixel:
+        case screenshot::Format::Png:
+        case screenshot::Format::Rgba:
+            // Pixels, and there are none here. Terminal::answerScreenshot() routes a renderer format
+            // to the frontend instead, so reaching this means the format table and this switch have
+            // drifted apart.
+            Guarantee(false);
+            break;
+    }
+
     auto const left = ColumnOffset::cast_from(request.area.left);
     // Line::toUtf8() and Line::toUtf8WithSgr() take a half-open column range, while a Rect names both
     // its corners. Both clamp to the line, so the columns need no bound of their own here.
@@ -6143,33 +6160,16 @@ void Screen::emitScreenshot(screenshot::Request const& request)
     auto const bottom = std::min(unbox(request.area.bottom), lastRow);
 
     auto content = std::string {};
-    for (auto const row: std::views::iota(*top, *bottom + 1))
+    for (auto const row: std::views::iota(std::min(unbox(request.area.top), bottom), bottom + 1))
     {
-        auto const& line = _grid.lineAt(LineOffset(row));
-        switch (request.format)
-        {
-            case screenshot::Format::PlainText:
-                content += line.toUtf8(left, end);
-                content += '\n';
-                break;
-            case screenshot::Format::VTSequences:
-                // CR as well as LF: this format exists to be written back to a terminal, where a bare
-                // LF would leave every row starting where the one above it ended.
-                content += line.toUtf8WithSgr(left, end);
-                content += "\r\n";
-                break;
-            case screenshot::Format::Sixel:
-            case screenshot::Format::Png:
-            case screenshot::Format::Rgba:
-                // Excluded by the Require() above: these are pixels, and there are none here.
-                Guarantee(false);
-                break;
-        }
+        auto const& line = _grid.lineAt(LineOffset::cast_from(row));
+        content +=
+            rendition == CaptureRendition::WithSgr ? line.toUtf8WithSgr(left, end) : line.toUtf8(left, end);
+        content += terminator;
     }
 
-    screenshot::writeReply(request,
-                           screenshot::Capture { .content = std::move(content), .pixelSize = {} },
-                           [this](std::string_view message) { reply(message); });
+    // No pixel extent: cells have none. @see screenshot::Capture::pixelSize.
+    return screenshot::Capture { .content = std::move(content), .pixelSize = {} };
 }
 
 ApplyResult Screen::processHierarchicalContext(std::string_view payload)

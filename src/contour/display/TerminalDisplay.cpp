@@ -1774,11 +1774,11 @@ void TerminalDisplay::requestScreenshot(std::function<void(QImage)> onReady)
     });
 }
 
-bool TerminalDisplay::renderScreenshot(vtbackend::screenshot::Request const& request,
-                                       ScreenshotCaptureCallback onReady)
+vtbackend::screenshot::Disposition TerminalDisplay::renderScreenshot(
+    vtbackend::screenshot::Request const& request, ScreenshotCaptureCallback onReady)
 {
     if (!_renderTarget)
-        return false;
+        return vtbackend::screenshot::Disposition::Unhandled;
 
     // A capture is already in flight, and the render target holds exactly one callback: taking this
     // request would silently drop the pending one -- a screenshot key binding that never writes its
@@ -1813,7 +1813,7 @@ bool TerminalDisplay::renderScreenshot(vtbackend::screenshot::Request const& req
         answer->deliver(encodeScreenshot(frame, area, metrics, format));
     });
 
-    return true;
+    return vtbackend::screenshot::Disposition::Pending;
 }
 
 void TerminalDisplay::doDumpStateInternal()

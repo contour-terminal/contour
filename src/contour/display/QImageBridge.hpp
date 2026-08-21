@@ -32,10 +32,20 @@ namespace contour::display
 /// @return @p image's extent, as vtbackend names it.
 [[nodiscard]] vtbackend::ImageSize extentOf(QImage const& image) noexcept;
 
+/// @param image The image to inspect; must already be in @ref toWireFormat's format.
+/// @return Whether @p image's rows are already width * 4 bytes apart, so its own buffer can be read
+///         directly instead of being copied. @see tightlyPackedRgba.
+[[nodiscard]] bool isTightlyPacked(QImage const& image) noexcept;
+
 /// Copies @p image out row by row rather than in one block.
 ///
 /// QImage pads rows to its own alignment, so bytesPerLine() is not width * 4 in general, while every
 /// consumer on the vtbackend side wants exactly width * height * 4 bytes.
+///
+/// At 32 bits per pixel Qt's stride formula happens to come out to exactly width * 4, so in practice
+/// this copies a buffer that was already in the right shape — which is why @ref isTightlyPacked
+/// exists for callers that only need to READ the pixels. The copy stays for callers that need to own
+/// them, and because "happens to" is not a guarantee to build on.
 ///
 /// @param image The image to copy; must already be in @ref toWireFormat's format.
 /// @return Its pixels, tightly packed.

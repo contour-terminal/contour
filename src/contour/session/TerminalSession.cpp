@@ -849,17 +849,13 @@ void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
 vtbackend::screenshot::Disposition TerminalSession::requestScreenshot(
     vtbackend::screenshot::Request const& request)
 {
-    if (!_display)
+    // No display to ask, or a screenshot already at the wall -- only one is held there at a time, since
+    // a second arriving while the user is still looking at the dialog would overwrite the first and
+    // leave it unanswered. Either way nobody here will answer this one, and Terminal::requestScreenshot
+    // refuses it on our behalf. Declining beats replying from in here: this runs inside the very
+    // requestScreenshot() call the terminal has not returned from yet.
+    if (!_display || _pendingScreenshot)
         return vtbackend::screenshot::Disposition::Unhandled;
-
-    // Only one screenshot is held at the wall at a time. A second request arriving while the user is
-    // still looking at the dialog for the first would otherwise overwrite it, and the first would
-    // never be answered.
-    if (_pendingScreenshot)
-    {
-        _terminal.answerScreenshot(request, vtbackend::screenshot::Decision::Denied);
-        return vtbackend::screenshot::Disposition::Pending;
-    }
 
     _pendingScreenshot = request;
     _display->post(
@@ -880,19 +876,17 @@ vtbackend::screenshot::Disposition TerminalSession::renderScreenshot(
     // display carries on. A raw `this` would therefore be answering into freed memory on that path, so
     // the answer is guarded by the session's own QObject lifetime. The check is not a race: the surface
     // answers on the GUI thread, which is also where a session is destroyed.
-    auto const scheduled = _display->renderScreenshot(
-        request,
-        [this, guard = QPointer<TerminalSession> { this }, request](
-            vtbackend::screenshot::CaptureResult capture) {
-            if (!guard)
-                return;
-            _terminal.answerScreenshot(request, capture);
-            sessionLog()("renderScreenshot: {}. Waking up I/O thread.", capture ? "captured" : "unavailable");
-            flushInput();
-        });
-
-    return scheduled ? vtbackend::screenshot::Disposition::Pending
-                     : vtbackend::screenshot::Disposition::Unhandled;
+    return _display->renderScreenshot(request,
+                                      [this, guard = QPointer<TerminalSession> { this }, request](
+                                          vtbackend::screenshot::CaptureResult capture) {
+                                          if (!guard)
+                                              return;
+                                          _terminal.answerScreenshot(request, capture);
+                                          sessionLog()("renderScreenshot: {} as {}. Waking up I/O thread.",
+                                                       capture ? "captured" : "unavailable",
+                                                       request.format);
+                                          flushInput();
+                                      });
 }
 
 void TerminalSession::executePendingScreenshot(bool allow, bool remember)

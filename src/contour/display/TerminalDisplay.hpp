@@ -301,8 +301,12 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// answer runs into the terminal's reply queue, which every other screenshot answer reaches from
     /// the GUI thread. The hop goes through post(), so a surface that dies with a capture in flight
     /// drops the answer rather than delivering it into a destroyed session.
-    [[nodiscard]] bool renderScreenshot(vtbackend::screenshot::Request const& request,
-                                        ScreenshotCaptureCallback onReady) final;
+    ///
+    /// Declines while another capture is in flight, on top of the no-render-target case: the render
+    /// target holds a single pending callback, so taking the request would drop whatever was already
+    /// waiting on it -- including the at-exit state dump, whose callback owns terminating the session.
+    [[nodiscard]] vtbackend::screenshot::Disposition renderScreenshot(
+        vtbackend::screenshot::Request const& request, ScreenshotCaptureCallback onReady) final;
     // }}}
 
     /// How large glyphs are rasterized, in device pixels per logical pixel.

@@ -990,6 +990,46 @@ TEST_CASE("screenshot.OSC533", "[screen][screenshot]")
     }
 }
 
+TEST_CASE("screenshot.captureScreenshot reads the grid directly", "[screen][screenshot]")
+{
+    // The grid half of OSC 533 returns its bytes rather than replying with them, so it is checkable
+    // as a function of the grid -- no sequence to write, no reply queue to decode, no PTY. The tests
+    // above still drive the whole sequence; this one pins what the region actually reads.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    mock.writeToScreen("ABCDE\r\nfghij\r\n12345");
+
+    auto const wholePage = screenshot::Request {
+        .id = 0,
+        .area = Rect { .top = Top(0), .left = Left(0), .bottom = Bottom(2), .right = Right(4) },
+        .format = screenshot::Format::PlainText,
+    };
+
+    SECTION("plain text is LF-terminated, one line per row, and carries no pixel extent")
+    {
+        auto const capture = mock.terminal.primaryScreen().captureScreenshot(wholePage);
+        CHECK(capture.content == "ABCDE\nfghij\n12345\n");
+        CHECK(capture.pixelSize == ImageSize {});
+    }
+
+    SECTION("a sub-rectangle reads exactly those cells")
+    {
+        auto request = wholePage;
+        request.area = Rect { .top = Top(0), .left = Left(1), .bottom = Bottom(1), .right = Right(3) };
+        CHECK(mock.terminal.primaryScreen().captureScreenshot(request).content == "BCD\nghi\n");
+    }
+
+    SECTION("the VT-sequence format ends each row with CRLF")
+    {
+        // A bare LF would leave every row starting where the one above it ended, once written back.
+        auto request = wholePage;
+        request.format = screenshot::Format::VTSequences;
+        auto const capture = mock.terminal.primaryScreen().captureScreenshot(request);
+        CHECK(capture.content.ends_with("\r\n"));
+        CHECK(capture.content.contains("ABCDE"));
+        CHECK(capture.pixelSize == ImageSize {});
+    }
+}
+
 TEST_CASE("screenshot.OSC533.chunking", "[screen][screenshot]")
 {
     // A page whose screenshot comfortably exceeds one chunk: 60 rows of 80 columns plus a newline

@@ -23,6 +23,11 @@ vtbackend::ImageSize extentOf(QImage const& image) noexcept
                                   vtbackend::Height::cast_from(image.height()) };
 }
 
+bool isTightlyPacked(QImage const& image) noexcept
+{
+    return image.bytesPerLine() == static_cast<qsizetype>(image.width()) * 4;
+}
+
 std::vector<uint8_t> tightlyPackedRgba(QImage const& image)
 {
     auto const rowSize = static_cast<size_t>(image.width()) * 4;

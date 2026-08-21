@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -128,6 +129,8 @@ inline constexpr auto Formats = std::array {
 
 /// @param format The format to look up.
 /// @return The table row describing @p format, or nullptr if no row names it.
+///
+/// @note Declared before @ref Formats is asserted complete, which is what lets that assertion call it.
 [[nodiscard]] constexpr FormatInfo const* formatInfo(Format format) noexcept
 {
     for (auto const& info: Formats)
@@ -135,6 +138,21 @@ inline constexpr auto Formats = std::array {
             return &info;
     return nullptr;
 }
+
+/// The table covers every value from zero up, with no gaps and no duplicates.
+///
+/// @ref isSupported and @ref producerOf both answer from the table, so a row that is duplicated, out
+/// of order, or left behind by a deleted enumerator makes them answer about the wrong format. This is
+/// deliberately NOT a check that every enumerator has a row: a new one is already caught, harder and
+/// closer to the work, by the exhaustive switches over @ref Format that must then be extended.
+static_assert(
+    [] {
+        for (auto value = size_t {}; value < Formats.size(); ++value)
+            if (formatInfo(static_cast<Format>(value)) == nullptr)
+                return false;
+        return true;
+    }(),
+    "the Formats rows must cover every value from 0 to Formats.size() - 1");
 
 /// @param format The format to test.
 /// @return Whether this terminal can produce @p format.
@@ -259,3 +277,18 @@ void writeReply(Request const& request, Capture const& capture, Sink const& sink
 void writeError(uint32_t requestId, Status status, Sink const& sink);
 
 } // namespace vtbackend::screenshot
+
+/// Names a screenshot format in a log line or a diagnostic, from the same table that routes it.
+///
+/// This is what @ref vtbackend::screenshot::FormatInfo::name is for: without it the table would carry
+/// a column nothing reads, and every message about a screenshot would have to say "3" where it could
+/// say "PNG".
+template <>
+struct std::formatter<vtbackend::screenshot::Format>: std::formatter<std::string_view>
+{
+    auto format(vtbackend::screenshot::Format value, auto& ctx) const
+    {
+        auto const* const info = vtbackend::screenshot::formatInfo(value);
+        return std::formatter<std::string_view>::format(info != nullptr ? info->name : "unknown", ctx);
+    }
+};
