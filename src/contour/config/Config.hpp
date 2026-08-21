@@ -719,10 +719,6 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::ShowIndicatorOnResize> sizeIndicatorOnResize { true };
     ConfigEntry<bool, documentation::Fullscreen> fullscreen { false };
     ConfigEntry<bool, documentation::Maximized> maximized { false };
-    /// DEPRECATED and unread. Kept only so that a configuration carrying `search_mode_switch`
-    /// still loads, and so the key round-trips through a GUI-driven save instead of vanishing from
-    /// the user's file. @see documentation::SearchModeSwitch for why it no longer means anything.
-    ConfigEntry<bool, documentation::SearchModeSwitch> searchModeSwitch { true };
     ConfigEntry<bool, documentation::InsertAfterYank> insertAfterYank { false };
     ConfigEntry<Bell, documentation::Bell> bell { { .sound = "default", .alert = true, .volume = 1.0f } };
     ConfigEntry<vtbackend::VTType, documentation::TerminalId> terminalId { vtbackend::VTType::VT525 };
@@ -2476,6 +2472,18 @@ template <>
 struct std::formatter<contour::config::TabBarPosition>: formatter<std::string_view>
 {
     auto format(contour::config::TabBarPosition value, auto& ctx) const
+    {
+        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
+    }
+};
+
+// vtbackend owns the enum, but the TOKEN is a configuration fact, so the formatter lives here with
+// the others and delegates to the same table the reader uses. Spelling it in vtbackend instead would
+// put the written spelling out of reach of the table that defines the accepted one.
+template <>
+struct std::formatter<vtbackend::SearchCaseSensitivity>: formatter<std::string_view>
+{
+    auto format(vtbackend::SearchCaseSensitivity value, auto& ctx) const
     {
         return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
     }

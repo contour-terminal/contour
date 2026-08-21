@@ -551,13 +551,13 @@ void RenderBufferBuilder::matchSearchPattern(T const& cellText)
     auto const searchText = u32string_view(search.pattern.data() + _searchPatternOffset,
                                            search.pattern.size() - _searchPatternOffset);
 
-    // Asked of the WHOLE pattern, not of `searchText` -- which is only the part still unmatched. The
-    // policy is a property of the search, so deriving it from a suffix made it drift mid-match: with
-    // "Foo", the suffix left after 'F' carries no uppercase, and the tail matched case-insensitively.
-    // Screen::search asks the same question of the same function, so highlighting and matching can no
-    // longer disagree (they did, for every non-ASCII needle: std::isupper is undefined above 0xFF).
-    auto const isCaseSensitive =
-        isCaseSensitiveSearch(u32string_view(search.pattern), search.caseSensitivity);
+    // The cached answer for the WHOLE pattern, not one re-derived from `searchText` -- which is only
+    // the part still unmatched. The policy is a property of the search, so deriving it from a suffix
+    // made it drift mid-match: with "Foo", the suffix left after 'F' carries no uppercase, and the
+    // tail matched case-insensitively. Screen::search reads the same field, so highlighting and
+    // matching cannot disagree (they did, for every non-ASCII needle: std::isupper is undefined above
+    // 0xFF). Read rather than recomputed because this runs once per RENDERED CELL. @see Search.
+    auto const isCaseSensitive = search.isCaseSensitive;
 
     auto const isFullMatch = [&]() -> bool {
         return !CellUtil::beginsWith(searchText, cellText, isCaseSensitive);

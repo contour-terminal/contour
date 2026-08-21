@@ -31,7 +31,6 @@
 #include <libunicode/convert.h>
 #include <libunicode/emoji_segmenter.h>
 #include <libunicode/grapheme_segmenter.h>
-#include <libunicode/ucd.h>
 #include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/word_segmenter.h>
 
@@ -7589,9 +7588,14 @@ optional<CellLocation> Screen::search(std::u32string_view searchText,
                                       CellLocation startPosition,
                                       SearchCaseSensitivity mode)
 {
-    // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
+    return searchFrom(searchText, startPosition, isCaseSensitiveSearch(searchText, mode));
+}
 
-    auto const isCaseSensitive = isCaseSensitiveSearch(searchText, mode);
+optional<CellLocation> Screen::searchFrom(std::u32string_view searchText,
+                                          CellLocation startPosition,
+                                          bool isCaseSensitive)
+{
+    // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
 
     if (searchText.empty())
         return nullopt;
@@ -7673,7 +7677,10 @@ SearchMatchTally Screen::tallyMatches(std::u32string_view searchText,
     auto cursor =
         CellLocation { .line = -boxed_cast<LineOffset>(historyLineCount()), .column = ColumnOffset(0) };
 
-    while (auto const match = search(searchText, cursor, mode))
+    // Resolved once for the whole walk, not per match. @see searchFrom.
+    auto const isCaseSensitive = isCaseSensitiveSearch(searchText, mode);
+
+    while (auto const match = searchFrom(searchText, cursor, isCaseSensitive))
     {
         if (tally.total == limit)
         {

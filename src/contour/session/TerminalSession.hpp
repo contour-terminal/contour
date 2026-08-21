@@ -141,7 +141,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(QString searchSummary READ searchSummary NOTIFY searchStateChanged)
     Q_PROPERTY(bool searchHasMatches READ searchHasMatches NOTIFY searchStateChanged)
     Q_PROPERTY(bool searchNavigable READ searchNavigable NOTIFY searchStateChanged)
-    Q_PROPERTY(SearchCase searchCaseSensitivity READ searchCaseSensitivity NOTIFY searchStateChanged)
+    // The case affordance as what it SHOWS, not as an enumerator QML would have to interpret. The
+    // bar spoke raw ints before and inverted every one of them; a glyph and a lit flag cannot be
+    // read backwards. @see contour::session::describeSearchCase.
+    Q_PROPERTY(QString searchCaseGlyph READ searchCaseGlyph NOTIFY searchStateChanged)
+    Q_PROPERTY(QString searchCaseTooltip READ searchCaseTooltip NOTIFY searchStateChanged)
+    Q_PROPERTY(bool searchCasePinned READ searchCasePinned NOTIFY searchStateChanged)
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
@@ -153,44 +158,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         auto const now = std::chrono::steady_clock::now();
         auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
         return static_cast<int>(diff.count());
-    }
-
-    /// The case policy, mirrored for QML.
-    ///
-    /// vtbackend::SearchCaseSensitivity cannot be handed to QML directly -- an enum reaches it only
-    /// through the meta-object system, and Q_ENUM must be applied to a type this QObject declares.
-    /// The enumerators match one-for-one and searchCaseSensitivityOf() is the single conversion.
-    enum class SearchCase : uint8_t
-    {
-        Smart = 0,
-        Insensitive,
-        Sensitive,
-    };
-    Q_ENUM(SearchCase)
-
-    /// The QML-facing spelling of @p mode. The inverse of searchCaseSensitivityOf.
-    [[nodiscard]] static constexpr SearchCase searchCaseOf(vtbackend::SearchCaseSensitivity mode) noexcept
-    {
-        switch (mode)
-        {
-            case vtbackend::SearchCaseSensitivity::Smart: return SearchCase::Smart;
-            case vtbackend::SearchCaseSensitivity::Insensitive: return SearchCase::Insensitive;
-            case vtbackend::SearchCaseSensitivity::Sensitive: return SearchCase::Sensitive;
-        }
-        return SearchCase::Smart;
-    }
-
-    /// The backend policy @p mode names. The one place the two enums are tied together.
-    [[nodiscard]] static constexpr vtbackend::SearchCaseSensitivity searchCaseSensitivityOf(
-        SearchCase mode) noexcept
-    {
-        switch (mode)
-        {
-            case SearchCase::Smart: return vtbackend::SearchCaseSensitivity::Smart;
-            case SearchCase::Insensitive: return vtbackend::SearchCaseSensitivity::Insensitive;
-            case SearchCase::Sensitive: return vtbackend::SearchCaseSensitivity::Sensitive;
-        }
-        return vtbackend::SearchCaseSensitivity::Smart;
     }
 
     /// What the hyperlink tooltip should say, or empty for "show nothing".
@@ -215,13 +182,26 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return _searchStatus.navigation == MatchNavigation::Available;
     }
 
-    [[nodiscard]] SearchCase searchCaseSensitivity() const noexcept { return _searchCase; }
+    [[nodiscard]] QString searchCaseGlyph() const
+    {
+        return QString::fromUtf8(_searchCase.glyph.data(), qsizetype(_searchCase.glyph.size()));
+    }
+    [[nodiscard]] QString searchCaseTooltip() const
+    {
+        return QString::fromUtf8(_searchCase.tooltip.data(), qsizetype(_searchCase.tooltip.size()));
+    }
+    [[nodiscard]] bool searchCasePinned() const noexcept { return _searchCase.pinned == CasePinned::Yes; }
 
     /// Installs @p pattern as the search term and moves to its nearest match, live as the user types.
     Q_INVOKABLE void setSearchPattern(QString const& pattern);
 
-    /// Switches the case policy and re-runs the search in place.
-    Q_INVOKABLE void setSearchCaseSensitivity(SearchCase mode);
+    /// Moves to the next case policy and re-runs the search in place. @see nextSearchCase.
+    Q_INVOKABLE void cycleSearchCaseSensitivity();
+
+    /// The find bar opened, or closed. Told rather than inferred: only the bar knows, and a tally is
+    /// worth computing only while something displays it.
+    Q_INVOKABLE void searchBarOpened();
+    Q_INVOKABLE void searchBarClosed();
 
     /// Steps to the next/previous match, updating the summary's ordinal.
     Q_INVOKABLE void searchNext();
@@ -232,6 +212,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Re-reads the tally and re-derives the summary. Called after anything that can change either.
     void refreshSearchStatus();
+
+  private:
+    /// The half of refreshSearchStatus() that reads the terminal, for callers already holding its
+    /// lock -- so typing does not take the lock twice and walk the grid twice per keystroke.
+    void refreshSearchStatusLocked();
+
+  public:
     // }}}
 
     /// The cell the pointer entered the hyperlink at, in the display's item-local logical coordinates.
@@ -1078,7 +1065,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// What the find bar currently shows, re-derived by refreshSearchStatus().
     SearchStatus _searchStatus;
-    SearchCase _searchCase = SearchCase::Smart;
+    SearchCaseAffordance _searchCase = describeSearchCase(vtbackend::SearchCaseSensitivity::Smart);
     /// Coalesces re-tallying while output keeps arriving: a tally walks the whole scrollback, so it
     /// must never run once per frame. Armed by screenUpdated(), and only while the bar is open.
     QTimer _searchTallyTimer;

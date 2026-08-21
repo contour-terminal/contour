@@ -214,11 +214,6 @@ class ViInputHandler: public InputHandler
         crispy::unreachable();
     }
 
-    /// Asks the frontend to open the search prompt, as `/` does. @see Executor::searchStart.
-    void startSearch();
-
-    void clearSearch();
-
   private:
     enum class ModeSelect : uint8_t
     {
@@ -242,6 +237,9 @@ class ViInputHandler: public InputHandler
     bool parseCount(char32_t ch, Modifiers modifiers);
     bool parseTextObject(char32_t ch, Modifiers modifiers);
     Handled handleModeSwitches(char32_t ch, Modifiers modifiers);
+
+    /// Asks the frontend to open the search prompt, which is all `/` does now.
+    void startSearch();
 
     ViMode _viMode = ViMode::Normal;
 

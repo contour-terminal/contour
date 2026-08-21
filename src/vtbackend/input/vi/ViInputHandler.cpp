@@ -300,11 +300,10 @@ void ViInputHandler::setMode(ViMode theMode)
     _viMode = theMode;
     clearPendingInput();
 
+    // No search-clearing here: ViCommands::modeChanged() has already called Terminal::clearSearch()
+    // for Insert by the time this returns, and re-running an empty search on top of that only moved
+    // the viewport for no reason.
     _executor->modeChanged(theMode);
-
-    // clear search term when switching to insert mode
-    if (_viMode == ViMode::Insert)
-        clearSearch();
 }
 
 // Precondition: `modifiers` arrives as a pure chord, with the lock modifiers (CapsLock/NumLock)
@@ -490,11 +489,6 @@ void ViInputHandler::startSearch()
 void ViInputHandler::toggleMode(ViMode newMode)
 {
     setMode(newMode != _viMode ? newMode : ViMode::Normal);
-}
-
-void ViInputHandler::clearSearch()
-{
-    _executor->updateSearchTerm({});
 }
 
 } // namespace vtbackend

@@ -138,6 +138,33 @@ namespace
                  } };
     }
 
+    /// enumField() for an enum that already has a ConfigEnum table.
+    ///
+    /// The overload below takes the token/value pairs by hand, which for a table-backed enum means
+    /// spelling every value a second time, in a file that no test compares against the table. This
+    /// one reads the table, so adding a value stays what ConfigEnum.hpp promises it is: adding a row.
+    template <typename Enum, typename Getter, typename Setter>
+    ProfileFieldDescriptor enumFieldFromTable(
+        QString key, QString label, QString help, Getter getter, Setter setter)
+    {
+        auto options = QStringList {};
+        for (auto const& info: config::configEnumValues<Enum>())
+            options.push_back(toQString(info.token));
+
+        return { std::move(key),
+                 std::move(label),
+                 std::move(help),
+                 "enum",
+                 [getter](TerminalProfile const& p) -> QVariant {
+                     return QVariant(toQString(config::configEnumToken(getter(p))));
+                 },
+                 [setter](TerminalProfile& p, QVariant const& v) {
+                     if (auto const value = config::configEnumFromToken<Enum>(v.toString().toStdString()))
+                         setter(p, *value);
+                 },
+                 std::move(options) };
+    }
+
     template <typename Enum, size_t N, typename Getter, typename Setter>
     ProfileFieldDescriptor enumField(QString key,
                                      QString label,
@@ -369,16 +396,11 @@ namespace
                         m.vertical = config::VerticalMargin(static_cast<unsigned>(v.toInt()));
                         p.margins = m;
                     } },
-                  enumField(
+                  enumFieldFromTable<vtbackend::SearchCaseSensitivity>(
                       "search_case_sensitivity",
                       "Search case sensitivity",
                       "How the find bar compares letters when it opens. Its Aa button cycles the same "
                       "three at any time.",
-                      std::array {
-                          std::pair { "smart"sv, vtbackend::SearchCaseSensitivity::Smart },
-                          std::pair { "insensitive"sv, vtbackend::SearchCaseSensitivity::Insensitive },
-                          std::pair { "sensitive"sv, vtbackend::SearchCaseSensitivity::Sensitive },
-                      },
                       [](TerminalProfile const& p) { return p.searchCaseSensitivity.value(); },
                       [](TerminalProfile& p, auto v) { p.searchCaseSensitivity = v; }),
                   enumField(

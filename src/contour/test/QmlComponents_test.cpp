@@ -14,6 +14,7 @@
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/session/SearchStatus.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
@@ -4559,14 +4560,29 @@ class MockSearchSession: public QObject
     Q_PROPERTY(QString searchSummary READ searchSummary NOTIFY searchStateChanged)
     Q_PROPERTY(bool searchHasMatches READ searchHasMatches NOTIFY searchStateChanged)
     Q_PROPERTY(bool searchNavigable READ searchNavigable NOTIFY searchStateChanged)
-    Q_PROPERTY(int searchCaseSensitivity READ searchCaseSensitivity NOTIFY searchStateChanged)
+    // The affordance as the bar consumes it -- a glyph and a lit flag, not an enumerator. Mirrors
+    // TerminalSession, which resolves it through describeSearchCase.
+    Q_PROPERTY(QString searchCaseGlyph READ searchCaseGlyph NOTIFY searchStateChanged)
+    Q_PROPERTY(QString searchCaseTooltip READ searchCaseTooltip NOTIFY searchStateChanged)
+    Q_PROPERTY(bool searchCasePinned READ searchCasePinned NOTIFY searchStateChanged)
 
   public:
     [[nodiscard]] QString searchPattern() const { return _pattern; }
     [[nodiscard]] QString searchSummary() const { return _summary; }
     [[nodiscard]] bool searchHasMatches() const { return _hasMatches; }
     [[nodiscard]] bool searchNavigable() const { return _navigable; }
-    [[nodiscard]] int searchCaseSensitivity() const { return _caseMode; }
+    [[nodiscard]] QString searchCaseGlyph() const
+    {
+        return QString::fromUtf8(contour::session::describeSearchCase(_caseMode).glyph.data());
+    }
+    [[nodiscard]] QString searchCaseTooltip() const
+    {
+        return QString::fromUtf8(contour::session::describeSearchCase(_caseMode).tooltip.data());
+    }
+    [[nodiscard]] bool searchCasePinned() const
+    {
+        return contour::session::describeSearchCase(_caseMode).pinned == contour::session::CasePinned::Yes;
+    }
 
     Q_INVOKABLE void setSearchPattern(QString const& pattern)
     {
@@ -4593,11 +4609,18 @@ class MockSearchSession: public QObject
         emit searchStateChanged();
     }
 
-    Q_INVOKABLE void setSearchCaseSensitivity(int mode)
+    Q_INVOKABLE void cycleSearchCaseSensitivity()
     {
-        _caseMode = mode;
+        _caseMode = contour::session::nextSearchCase(_caseMode);
         emit searchStateChanged();
     }
+
+    Q_INVOKABLE void searchBarOpened() { ++openNotifications; }
+    Q_INVOKABLE void searchBarClosed() { ++closeNotifications; }
+
+    int openNotifications = 0;
+    int closeNotifications = 0;
+    [[nodiscard]] vtbackend::SearchCaseSensitivity caseMode() const { return _caseMode; }
 
     Q_INVOKABLE void searchNext() { ++nextCalls; }
     Q_INVOKABLE void searchPrevious() { ++previousCalls; }
@@ -4614,7 +4637,7 @@ class MockSearchSession: public QObject
     QString _summary;
     bool _hasMatches = true;
     bool _navigable = false;
-    int _caseMode = 0;
+    vtbackend::SearchCaseSensitivity _caseMode = vtbackend::SearchCaseSensitivity::Smart;
 };
 
 struct SearchBarHost
@@ -4731,26 +4754,46 @@ TEST_CASE("The find bar drives the session's search and restores focus (offscree
         CHECK_FALSE(previous->property("enabled").toBool());
     }
 
-    SECTION("the case toggle cycles all three policies")
+    SECTION("the case toggle cycles all three policies, and shows which one is active")
     {
         auto* toggle = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarCaseToggle"));
         REQUIRE(toggle != nullptr);
 
-        // Smart -> Sensitive -> Insensitive -> Smart. Two states could not express the third, which
-        // is why this is not the binary Aa every other find bar has.
-        CHECK(session.searchCaseSensitivity() == 0);
-        QMetaObject::invokeMethod(host.bar, "cycleCase");
-        CHECK(session.searchCaseSensitivity() == 1);
-        QMetaObject::invokeMethod(host.bar, "cycleCase");
-        CHECK(session.searchCaseSensitivity() == 2);
-        QMetaObject::invokeMethod(host.bar, "cycleCase");
-        CHECK(session.searchCaseSensitivity() == 0);
+        // Asserted through what the BUTTON shows, not through enumerator values: an earlier version
+        // compared raw integers here and happily pinned an inverted mapping in place.
+        CHECK(toggle->property("text").toString() == QStringLiteral("Aa"));
+        CHECK_FALSE(toggle->property("checked").toBool()); // smart is not "pinned"
 
-        // The glyph reports which way it is pinned, and lit-vs-unlit whether it is pinned at all.
-        session.setSearchCaseSensitivity(2);
+        // Smart -> Sensitive: still the capitalised glyph, now lit.
+        QMetaObject::invokeMethod(host.bar, "cycleCase");
+        QCoreApplication::processEvents();
+        CHECK(toggle->property("text").toString() == QStringLiteral("Aa"));
+        CHECK(toggle->property("checked").toBool());
+
+        // Sensitive -> Insensitive: the lowercase glyph is the one that means "ignoring case".
+        QMetaObject::invokeMethod(host.bar, "cycleCase");
         QCoreApplication::processEvents();
         CHECK(toggle->property("text").toString() == QStringLiteral("aa"));
         CHECK(toggle->property("checked").toBool());
+
+        // Insensitive -> Smart closes the cycle. Two states could not express the third, which is
+        // why this is not the binary Aa every other find bar has.
+        QMetaObject::invokeMethod(host.bar, "cycleCase");
+        QCoreApplication::processEvents();
+        CHECK(toggle->property("text").toString() == QStringLiteral("Aa"));
+        CHECK_FALSE(toggle->property("checked").toBool());
+    }
+
+    SECTION("the bar tells the session when it opens and closes")
+    {
+        // The session cannot infer this, and tallying while nothing displays the answer is a walk of
+        // the whole scrollback for nobody.
+        CHECK(session.openNotifications == 1); // openSearchBar() opened it
+        CHECK(session.closeNotifications == 0);
+
+        QMetaObject::invokeMethod(host.bar, "close");
+        QCoreApplication::processEvents();
+        CHECK(session.closeNotifications == 1);
     }
 
     SECTION("closing hands the keyboard back to the terminal")

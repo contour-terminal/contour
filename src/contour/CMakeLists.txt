@@ -302,7 +302,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/BellSound.qml
         qml/RequestPermission.qml
         qml/SearchBar.qml
-    qml/SessionChrome.qml
+        qml/SessionChrome.qml
         qml/TitleBar.qml
         qml/TabStrip.qml
         qml/NewTabMenu.qml

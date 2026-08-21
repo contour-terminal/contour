@@ -48,6 +48,9 @@ Popup {
     parent: root.displayItem
     x: root.displayItem ? root.displayItem.width - width - chromeStyle.shadowMargin : 0
     y: chromeStyle.shadowMargin
+    // The backstop for a pane narrower than the bar, where the x above goes negative and would clip
+    // the field off the left edge. TabColorFlyout documents the same rule.
+    margins: chromeStyle.shadowMargin
 
     SystemPalette {
         id: systemPalette
@@ -59,18 +62,22 @@ Popup {
     // differently shaped from every other popup here. See PopupSurface.qml.
     background: PopupSurface {}
 
-    readonly property bool _hasMatches: (root.session && root.session.searchHasMatches !== undefined)
-                                        ? root.session.searchHasMatches : true
-    readonly property bool _navigable: (root.session && root.session.searchNavigable !== undefined)
-                                       ? root.session.searchNavigable : false
+    // One guarded alias rather than the same test repeated at every use: null while a split pane is
+    // being torn down, and null for the lightweight MOCK sessions several offscreen tests bind, which
+    // carry none of these properties. Assigning undefined to a TYPED property is a QML warning, and
+    // the run-wide diagnostic gate in test_main.cpp fails the entire suite on one.
+    readonly property var _search: (root.session && root.session.searchSummary !== undefined)
+                                   ? root.session : null
 
-    // The glyph tells you which way it is pinned; lit-vs-unlit tells you whether it is pinned at all.
-    readonly property int _caseMode: (root.session && root.session.searchCaseSensitivity !== undefined)
-                                     ? root.session.searchCaseSensitivity : 0
-    readonly property string _caseGlyph: root._caseMode === 2 ? "aa" : "Aa"
-    readonly property string _caseTooltip: root._caseMode === 0
-        ? qsTr("Match case: smart — case-sensitive only when the term has a capital")
-        : root._caseMode === 1 ? qsTr("Match case: on") : qsTr("Match case: off")
+    readonly property bool _hasMatches: root._search ? root._search.searchHasMatches : true
+    readonly property bool _navigable: root._search ? root._search.searchNavigable : false
+
+    // The glyph and the lit state come from the session already resolved, rather than as an
+    // enumerator this file would have to interpret. It spoke raw integers once and inverted every one
+    // of them -- the glyph, both tooltips and the cycle order. @see describeSearchCase.
+    readonly property string _caseGlyph: root._search ? root._search.searchCaseGlyph : "Aa"
+    readonly property bool _casePinned: root._search ? root._search.searchCasePinned : false
+    readonly property string _caseTooltip: root._search ? root._search.searchCaseTooltip : ""
 
     // The tint a fruitless search takes. From the style's own token row rather than a literal here,
     // so the two chrome styles can disagree about it like they do about every other colour value.
@@ -80,15 +87,19 @@ Popup {
     // behaviour every find bar has, and what makes a second Ctrl+Shift+F a "search for something else"
     // rather than a "keep typing".
     onOpened: {
-        field.text = (root.session && root.session.searchPattern !== undefined)
-                     ? root.session.searchPattern : "";
-        field.forceActiveFocus();
-        field.selectAll();
+        field.text = root._search ? root._search.searchPattern : "";
+        root.focusField();
+        // Tallying costs a walk of the whole scrollback, so the session only does it while something
+        // is displaying the result. It cannot infer that; only this bar knows.
+        if (root._search)
+            root._search.searchBarOpened();
     }
 
     // Whatever closed the bar, the terminal must get the keyboard back, or the user is left typing
     // into nothing. Same law, and the same reason, as CommandPalette.qml states at length.
     onClosed: {
+        if (root._search)
+            root._search.searchBarClosed();
         if (root.displayItem)
             root.displayItem.forceActiveFocus();
     }
@@ -99,23 +110,22 @@ Popup {
         field.selectAll();
     }
 
+    // Three states rather than VS Code's two, because issue #1410 asks for smart case AND a way to
+    // override it, and two cannot express three. WHICH three, and in what order, is decided in C++
+    // where the enum is -- `(mode + 1) % 3` here hard-coded a count this file cannot see.
     function cycleCase() {
-        if (!root.session)
-            return;
-        // Smart -> Sensitive -> Insensitive -> Smart. Three states rather than VS Code's two, because
-        // issue #1410 asks for smart case AND a way to override it, and two cannot express three.
-        const next = (root._caseMode + 1) % 3;
-        root.session.setSearchCaseSensitivity(next);
+        if (root._search)
+            root._search.cycleSearchCaseSensitivity();
     }
 
     // Enter / Shift+Enter. Split out so both Return and Enter (the keypad one) reach the same rule.
     function step(event) {
-        if (!root.session)
+        if (!root._search)
             return;
         if (event.modifiers & Qt.ShiftModifier)
-            root.session.searchPrevious();
+            root._search.searchPrevious();
         else
-            root.session.searchNext();
+            root._search.searchNext();
         event.accepted = true;
     }
 
@@ -140,7 +150,7 @@ Popup {
 
             // Live as the user types: this is an incremental search, so each keystroke re-runs it and
             // moves the viewport onto the nearest match behind the cursor.
-            onTextChanged: if (root.session) root.session.setSearchPattern(text);
+            onTextChanged: if (root._search) root._search.setSearchPattern(text);
 
             Keys.onEscapePressed: root.close();
 
@@ -155,8 +165,7 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: chromeStyle.labelPadding
                 anchors.verticalCenter: parent.verticalCenter
-                text: (root.session && root.session.searchSummary !== undefined)
-                      ? root.session.searchSummary : ""
+                text: root._search ? root._search.searchSummary : ""
                 // Dimmed against the term: it reports on the search rather than being part of it.
                 // Turns to the error color when the term matches nothing, which is the same signal the
                 // field's own edge carries -- stated twice on purpose, since the edge is a hairline.
@@ -175,7 +184,7 @@ Popup {
             checkable: true
             // Lit means "you pinned this"; unlit is smart case, which is what the terminal has always
             // done and what an untouched bar opens with.
-            checked: root._caseMode !== 0
+            checked: root._casePinned
             onClicked: root.cycleCase()
             ToolTip.visible: hovered
             ToolTip.text: root._caseTooltip
@@ -195,7 +204,7 @@ Popup {
             anchors.verticalCenter: parent.verticalCenter
             text: "▴"
             enabled: root._navigable
-            onClicked: if (root.session) root.session.searchPrevious();
+            onClicked: if (root._search) root._search.searchPrevious();
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Previous match — Shift+Enter")
         }
@@ -205,7 +214,7 @@ Popup {
             anchors.verticalCenter: parent.verticalCenter
             text: "▾"
             enabled: root._navigable
-            onClicked: if (root.session) root.session.searchNext();
+            onClicked: if (root._search) root._search.searchNext();
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Next match — Enter")
         }

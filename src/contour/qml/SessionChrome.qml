@@ -283,13 +283,12 @@ Item {
         // Viewport -> scrollbar thumb (the drag direction lives on the ScrollBar's own handlers).
         function onScrollOffsetChanged() { chrome.updateScrollBarPosition(); }
 
-        // The find bar. Already open? Re-focus and select instead of re-opening, so a second
-        // Ctrl+Shift+F means "search for something else" rather than doing nothing.
+        // open() is a no-op on an already-open Popup (and onOpened does not re-fire), so focusing
+        // afterwards covers both cases: a second Ctrl+Shift+F means "search for something else"
+        // rather than doing nothing.
         function onSearchBarRequested() {
-            if (searchBar.opened)
-                searchBar.focusField();
-            else
-                searchBar.open();
+            searchBar.open();
+            searchBar.focusField();
         }
 
         // Permission-wall hooks.

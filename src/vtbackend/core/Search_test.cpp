@@ -3,8 +3,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <format>
-
 using vtbackend::isCaseSensitiveSearch;
 using vtbackend::SearchCaseSensitivity;
 using vtbackend::SearchMatchTally;
@@ -73,14 +71,4 @@ TEST_CASE("SearchMatchTally.empty", "[search]")
     // A tally can be non-empty while the caller stands on no match at all -- the pattern matches
     // somewhere, just not where they are.
     CHECK(!SearchMatchTally { .total = 27, .ordinal = 0, .exactness = TallyExactness::Exact }.empty());
-}
-
-TEST_CASE("SearchMatchTally.formatting", "[search]")
-{
-    CHECK(std::format("{}", SearchMatchTally { .total = 27, .ordinal = 3 }) == "3 of 27");
-
-    // The "+" is the whole reason TallyExactness exists: "9999" and "9999+" must not read alike.
-    CHECK(std::format("{}",
-                      SearchMatchTally { .total = 9999, .ordinal = 3, .exactness = TallyExactness::Capped })
-          == "3 of 9999+");
 }

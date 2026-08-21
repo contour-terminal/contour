@@ -379,7 +379,11 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     // actions (typing, stepping, switching case) re-tally immediately instead of waiting for it.
     _searchTallyTimer.setSingleShot(true);
     _searchTallyTimer.setInterval(std::chrono::milliseconds { 250 });
-    connect(&_searchTallyTimer, &QTimer::timeout, this, &TerminalSession::refreshSearchStatus);
+    connect(&_searchTallyTimer, &QTimer::timeout, this, [this]() {
+        // Cleared before the tally, so output arriving DURING it still schedules the next one.
+        _searchTallyPostPending.clear(std::memory_order_release);
+        refreshSearchStatus();
+    });
 
     _profile = *_config.profile(_profileName); // XXX do it again. but we've to be more efficient here
     configureTerminal();
@@ -738,13 +742,11 @@ void TerminalSession::screenUpdated()
     {
         QMetaObject::invokeMethod(
             this,
-            [this]() {
-                _searchTallyPostPending.clear(std::memory_order_release);
-                // Not restarted while already pending: restarting on every frame would mean the count
-                // never refreshed at all until the output stopped.
-                if (!_searchTallyTimer.isActive())
-                    _searchTallyTimer.start();
-            },
+            // The flag is cleared where the timer FIRES, not here, so exactly one post is made per
+            // 250 ms window. Clearing it here instead let every following screen update post again
+            // while the timer was still running -- one queued call per PTY read chunk, which under
+            // heavy output is thousands a second.
+            [this]() { _searchTallyTimer.start(); },
             Qt::QueuedConnection);
     }
 
@@ -1560,17 +1562,26 @@ void TerminalSession::searchPromptRequested()
     // Reached with the terminal's state mutex HELD (SearchReverse takes it, and `/` arrives inside
     // sendCharEvent). A queued connection is therefore mandatory: the find bar reads terminal state as
     // it opens, and a direct call would re-enter that non-recursive mutex on this very thread.
-    _isSearchBarOpen.store(true, std::memory_order_relaxed);
-    QMetaObject::invokeMethod(
-        this,
-        [this]() {
-            refreshSearchStatus();
-            emit searchBarRequested();
-        },
-        Qt::QueuedConnection);
+    QMetaObject::invokeMethod(this, [this]() { emit searchBarRequested(); }, Qt::QueuedConnection);
 }
 
 // {{{ Find bar
+void TerminalSession::searchBarOpened()
+{
+    _isSearchBarOpen.store(true, std::memory_order_relaxed);
+    refreshSearchStatus();
+}
+
+void TerminalSession::searchBarClosed()
+{
+    // Only the bar's own visibility is dropped here -- NOT the pattern, which deliberately outlives
+    // it so F3 keeps stepping and the matches stay lit. What this ends is the tallying: nothing
+    // displays a count now, and walking the scrollback every 250 ms to compute one is the exact cost
+    // the flag exists to avoid. Told by the bar rather than inferred, because only the bar knows.
+    _isSearchBarOpen.store(false, std::memory_order_relaxed);
+    _searchTallyTimer.stop();
+}
+
 QString TerminalSession::searchPattern() const
 {
     auto const l = scoped_lock { _terminal };
@@ -1579,40 +1590,43 @@ QString TerminalSession::searchPattern() const
 
 void TerminalSession::setSearchPattern(QString const& pattern)
 {
-    {
-        auto const l = scoped_lock { _terminal };
+    auto const l = scoped_lock { _terminal };
 
-        auto text = pattern.toStdU32String();
-        if (text.empty())
-        {
-            _terminal.clearSearch();
-        }
-        else
-        {
-            // Backwards from the cursor, which is what the terminal's search has always done and what
-            // makes an incremental search land on the nearest match behind you rather than jumping to
-            // the top of the scrollback on every keystroke.
-            (void) _terminal.searchReverse(std::move(text), _terminal.normalModeCursorPosition());
-        }
+    auto text = pattern.toStdU32String();
+    if (text.empty())
+    {
+        _terminal.clearSearch();
     }
-    refreshSearchStatus();
+    else
+    {
+        // Backwards from the cursor, which is what the terminal's search has always done and what
+        // makes an incremental search land on the nearest match behind you rather than jumping to
+        // the top of the scrollback on every keystroke.
+        (void) _terminal.searchReverse(std::move(text), _terminal.normalModeCursorPosition());
+    }
+
+    // Under the SAME lock, and therefore in the same walk of the grid: taking it twice per keystroke
+    // meant two full traversals, and left a window in which the grid could change between the search
+    // and the tally that described it.
+    refreshSearchStatusLocked();
 }
 
-void TerminalSession::setSearchCaseSensitivity(SearchCase mode)
+void TerminalSession::cycleSearchCaseSensitivity()
 {
     {
         auto const l = scoped_lock { _terminal };
 
-        if (!_terminal.setSearchCaseSensitivity(searchCaseSensitivityOf(mode)))
+        auto const next = nextSearchCase(_terminal.search().caseSensitivity);
+        if (!_terminal.setSearchCaseSensitivity(next))
             return;
-
-        _searchCase = mode;
 
         // Re-run in place: the old match may not be a match under the new policy.
         if (!_terminal.search().pattern.empty())
             (void) _terminal.searchReverse(_terminal.normalModeCursorPosition());
+
+        refreshSearchStatusLocked();
     }
-    refreshSearchStatus();
+    emit searchStateChanged();
 }
 
 void TerminalSession::searchNext()
@@ -1629,28 +1643,34 @@ void TerminalSession::searchPrevious()
 
 void TerminalSession::clearSearch()
 {
-    _isSearchBarOpen.store(false, std::memory_order_relaxed);
-    _searchTallyTimer.stop();
     (void) (*this)(actions::NoSearchHighlight {});
     refreshSearchStatus();
 }
 
 void TerminalSession::refreshSearchStatus()
 {
-    auto status = SearchStatus {};
     {
         auto const l = scoped_lock { _terminal };
-        auto const& pattern = _terminal.search().pattern;
-        // Skipped entirely while the bar is closed: nothing displays the answer, and walking the
-        // scrollback to compute one nobody reads is the cost this guard exists to avoid.
-        auto const tally = (_isSearchBarOpen.load(std::memory_order_relaxed) && !pattern.empty())
-                               ? _terminal.tallySearchMatches(_terminal.normalModeCursorPosition())
-                               : vtbackend::SearchMatchTally {};
-        status = describeSearch(pattern, tally);
+        refreshSearchStatusLocked();
     }
-
-    _searchStatus = std::move(status);
     emit searchStateChanged();
+}
+
+void TerminalSession::refreshSearchStatusLocked()
+{
+    auto const& search = _terminal.search();
+    _searchCase = describeSearchCase(search.caseSensitivity);
+
+    // Skipped entirely while the bar is closed: nothing displays the answer, and walking the
+    // scrollback to compute one nobody reads is the cost this guard exists to avoid. The LAST status
+    // is left standing rather than replaced by an idle one, so nothing can publish a wrong label.
+    if (!_isSearchBarOpen.load(std::memory_order_relaxed))
+        return;
+
+    _searchStatus = describeSearch(search.pattern,
+                                   search.pattern.empty()
+                                       ? vtbackend::SearchMatchTally {}
+                                       : _terminal.tallySearchMatches(_terminal.normalModeCursorPosition()));
 }
 // }}}
 
@@ -3631,7 +3651,7 @@ void TerminalSession::configureTerminal()
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
     // The policy the find bar OPENS with; its Aa button re-points it afterwards.
     (void) _terminal.setSearchCaseSensitivity(_profile.searchCaseSensitivity.value());
-    _searchCase = searchCaseOf(_profile.searchCaseSensitivity.value());
+    _searchCase = describeSearchCase(_profile.searchCaseSensitivity.value());
     _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
     _terminal.settings().blinkStyle = _profile.blinkStyle.value();
     _terminal.settings().screenTransitionStyle = _profile.screenTransitionStyle.value();

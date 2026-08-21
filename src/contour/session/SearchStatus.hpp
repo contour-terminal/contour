@@ -3,6 +3,8 @@
 
 #include <vtbackend/core/Search.hpp>
 
+#include <crispy/Assert.hpp>
+
 #include <cstdint>
 #include <format>
 #include <string>
@@ -41,6 +43,65 @@ struct SearchStatus
     SearchOutcome outcome = SearchOutcome::Idle;
     MatchNavigation navigation = MatchNavigation::Unavailable;
 };
+
+/// Whether the user has pinned the case policy, or left it to decide for itself.
+///
+/// Drives the toggle's lit state: lit says "you chose this", unlit says "smart case is deciding".
+enum class CasePinned : uint8_t
+{
+    No = 0,
+    Yes,
+};
+
+/// What the find bar's case affordance shows for one policy.
+struct SearchCaseAffordance
+{
+    /// The glyph on the button. Its own case IS the state it names -- "Aa" for a comparison that
+    /// respects case, "aa" for one that ignores it -- so the button reads without its tooltip.
+    std::string_view glyph;
+    std::string_view tooltip;
+    CasePinned pinned = CasePinned::No;
+};
+
+/// How @p mode presents itself on the toggle.
+///
+/// A switch rather than arithmetic on the enumerator values, and here rather than in QML, because
+/// this is exactly the mapping that went wrong when the bar spoke raw integers: Insensitive is 1 and
+/// Sensitive is 2, so "the higher one is the strict one" is false, and every comparison built on that
+/// assumption inverted the meaning without any test being able to notice.
+[[nodiscard]] inline SearchCaseAffordance describeSearchCase(vtbackend::SearchCaseSensitivity mode)
+{
+    switch (mode)
+    {
+        case vtbackend::SearchCaseSensitivity::Smart:
+            return { .glyph = "Aa",
+                     .tooltip = "Match case: smart — exact only when the term has a capital",
+                     .pinned = CasePinned::No };
+        case vtbackend::SearchCaseSensitivity::Sensitive:
+            return { .glyph = "Aa", .tooltip = "Match case: on", .pinned = CasePinned::Yes };
+        case vtbackend::SearchCaseSensitivity::Insensitive:
+            return { .glyph = "aa", .tooltip = "Match case: off", .pinned = CasePinned::Yes };
+    }
+    crispy::unreachable();
+}
+
+/// The policy the toggle moves to from @p mode.
+///
+/// Smart -> Sensitive -> Insensitive -> Smart. The two pinned modes come first because someone
+/// reaching for this button has just decided smart case guessed wrong, and "on" is the commoner of
+/// the two corrections. A switch, so a fourth policy is a compile error here rather than a silent
+/// wrap -- which is what `(mode + 1) % 3` in QML would have been.
+[[nodiscard]] inline vtbackend::SearchCaseSensitivity nextSearchCase(vtbackend::SearchCaseSensitivity mode)
+{
+    switch (mode)
+    {
+        case vtbackend::SearchCaseSensitivity::Smart: return vtbackend::SearchCaseSensitivity::Sensitive;
+        case vtbackend::SearchCaseSensitivity::Sensitive:
+            return vtbackend::SearchCaseSensitivity::Insensitive;
+        case vtbackend::SearchCaseSensitivity::Insensitive: return vtbackend::SearchCaseSensitivity::Smart;
+    }
+    crispy::unreachable();
+}
 
 /// Derives what the find bar shows from the active pattern and its tally.
 ///

@@ -78,16 +78,10 @@ struct SearchMatchTally
     TallyExactness exactness = TallyExactness::Exact;
 
     /// Whether there is anything to step between.
-    [[nodiscard]] constexpr bool empty() const noexcept
-    {
-        return total == 0;
-    } // NOLINT(readability-identifier-naming)
-};
+    [[nodiscard]] constexpr bool empty() const noexcept { return total == 0; }
 
-constexpr bool operator==(SearchMatchTally a, SearchMatchTally b) noexcept
-{
-    return a.total == b.total && a.ordinal == b.ordinal && a.exactness == b.exactness;
-}
+    constexpr bool operator==(SearchMatchTally const&) const noexcept = default;
+};
 
 /// Decides whether a needle is matched case-sensitively under @p mode.
 ///
@@ -102,66 +96,3 @@ constexpr bool operator==(SearchMatchTally a, SearchMatchTally b) noexcept
 [[nodiscard]] bool isCaseSensitiveSearch(std::u32string_view searchText, SearchCaseSensitivity mode) noexcept;
 
 } // namespace vtbackend
-
-// Lower-case, because these ARE the configuration tokens: the config writer round-trips a value
-// through std::format, so a formatter spelling them any other way would write a file that no longer
-// re-parses. @see contour::config::detail::SearchCaseSensitivityTable.
-template <>
-struct std::formatter<vtbackend::SearchCaseSensitivity>: formatter<std::string_view>
-{
-    auto format(vtbackend::SearchCaseSensitivity value, auto& ctx) const
-    {
-        string_view name;
-        switch (value)
-        {
-            case vtbackend::SearchCaseSensitivity::Smart: name = "smart"; break;
-            case vtbackend::SearchCaseSensitivity::Insensitive: name = "insensitive"; break;
-            case vtbackend::SearchCaseSensitivity::Sensitive: name = "sensitive"; break;
-        }
-        return formatter<string_view>::format(name, ctx);
-    }
-};
-
-template <>
-struct std::formatter<vtbackend::SearchOrigin>: formatter<std::string_view>
-{
-    auto format(vtbackend::SearchOrigin value, auto& ctx) const
-    {
-        string_view name;
-        switch (value)
-        {
-            case vtbackend::SearchOrigin::Typed: name = "Typed"; break;
-            case vtbackend::SearchOrigin::DoubleClick: name = "DoubleClick"; break;
-        }
-        return formatter<string_view>::format(name, ctx);
-    }
-};
-
-template <>
-struct std::formatter<vtbackend::TallyExactness>: formatter<std::string_view>
-{
-    auto format(vtbackend::TallyExactness value, auto& ctx) const
-    {
-        string_view name;
-        switch (value)
-        {
-            case vtbackend::TallyExactness::Exact: name = "Exact"; break;
-            case vtbackend::TallyExactness::Capped: name = "Capped"; break;
-        }
-        return formatter<string_view>::format(name, ctx);
-    }
-};
-
-template <>
-struct std::formatter<vtbackend::SearchMatchTally>: formatter<std::string>
-{
-    auto format(vtbackend::SearchMatchTally value, auto& ctx) const
-    {
-        return formatter<std::string>::format(
-            std::format("{} of {}{}",
-                        value.ordinal,
-                        value.total,
-                        value.exactness == vtbackend::TallyExactness::Capped ? "+" : ""),
-            ctx);
-    }
-};

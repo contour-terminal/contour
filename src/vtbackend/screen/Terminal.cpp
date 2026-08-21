@@ -5111,6 +5111,7 @@ bool Terminal::setNewSearchTerm(std::u32string text, SearchOrigin origin)
         return false;
 
     _search.pattern = std::move(text);
+    _search.isCaseSensitive = isCaseSensitiveSearch(_search.pattern, _search.caseSensitivity);
     return true;
 }
 
@@ -5120,6 +5121,7 @@ bool Terminal::setSearchCaseSensitivity(SearchCaseSensitivity mode)
         return false;
 
     _search.caseSensitivity = mode;
+    _search.isCaseSensitive = isCaseSensitiveSearch(_search.pattern, mode);
     return true;
 }
 
@@ -5181,6 +5183,7 @@ void Terminal::clearSearch()
 {
     _search.pattern.clear();
     _search.origin = SearchOrigin::Typed;
+    _search.isCaseSensitive = false;
 }
 
 bool Terminal::wordDelimited(CellLocation position) const noexcept

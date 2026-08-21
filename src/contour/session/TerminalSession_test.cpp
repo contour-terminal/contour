@@ -1906,9 +1906,9 @@ TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given
         session->terminal().writeToScreen(std::format("needle row {}\r\n", i));
 
     // The bar has to be open for a tally to be computed at all: walking the scrollback for a label
-    // nobody is displaying is exactly the cost that guard exists to avoid.
-    (*session)(actions::SearchReverse {});
-    QCoreApplication::processEvents(); // the request reaches the GUI thread queued
+    // nobody is displaying is exactly the cost that guard exists to avoid. In production the bar
+    // itself says so from its onOpened handler.
+    session->searchBarOpened();
 
     SECTION("an empty pattern reports nothing at all")
     {
@@ -1935,21 +1935,49 @@ TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given
         CHECK_FALSE(session->searchNavigable());
     }
 
-    SECTION("the case policy is honoured and re-runs the search in place")
+    SECTION("cycling the case policy re-runs the search, and says which way it is pinned")
     {
         session->terminal().writeToScreen("NEEDLE upper\r\n");
-
         session->setSearchPattern(QStringLiteral("needle"));
+
+        // Smart, and unpinned: the glyph is the capitalised one and the button is not lit.
+        CHECK(session->searchCaseGlyph() == QStringLiteral("Aa"));
+        CHECK_FALSE(session->searchCasePinned());
         auto const smart = session->searchSummary();
 
-        // Pinned sensitive: the uppercase line stops counting.
-        session->setSearchCaseSensitivity(contour::session::TerminalSession::SearchCase::Sensitive);
-        CHECK(session->searchCaseSensitivity() == contour::session::TerminalSession::SearchCase::Sensitive);
+        // Smart -> Sensitive. Still "Aa", now lit, and the uppercase line stops counting.
+        session->cycleSearchCaseSensitivity();
+        CHECK(session->searchCaseGlyph() == QStringLiteral("Aa"));
+        CHECK(session->searchCasePinned());
         CHECK(session->searchSummary() != smart);
 
-        // Pinned insensitive brings it back.
-        session->setSearchCaseSensitivity(contour::session::TerminalSession::SearchCase::Insensitive);
+        // Sensitive -> Insensitive. THIS is the one that shows the lowercase glyph. An earlier
+        // version had it the other way round, and a test asserting enumerator integers could not
+        // tell -- which is why this asserts what the user actually sees.
+        session->cycleSearchCaseSensitivity();
+        CHECK(session->searchCaseGlyph() == QStringLiteral("aa"));
+        CHECK(session->searchCasePinned());
         CHECK(session->searchHasMatches());
+
+        // Insensitive -> Smart, closing the cycle.
+        session->cycleSearchCaseSensitivity();
+        CHECK(session->searchCaseGlyph() == QStringLiteral("Aa"));
+        CHECK_FALSE(session->searchCasePinned());
+    }
+
+    SECTION("closing the bar stops the tallying but keeps the pattern lit for F3")
+    {
+        session->setSearchPattern(QStringLiteral("needle"));
+        REQUIRE(session->searchHasMatches());
+
+        session->searchBarClosed();
+
+        // The pattern deliberately outlives the bar -- that is what F3 keeps stepping through.
+        CHECK(session->searchPattern() == QStringLiteral("needle"));
+        // And re-opening picks the count back up rather than showing a stale or empty one.
+        session->searchBarOpened();
+        CHECK(session->searchHasMatches());
+        CHECK_FALSE(session->searchSummary().isEmpty());
     }
 
     SECTION("clearing drops the pattern and the summary together")

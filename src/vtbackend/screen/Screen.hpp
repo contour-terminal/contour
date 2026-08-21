@@ -707,6 +707,17 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
                                                 SearchCaseSensitivity mode,
                                                 size_t limit);
 
+  private:
+    /// search()'s body, for callers that have already resolved the case policy.
+    ///
+    /// tallyMatches() calls search() once per match, and resolving Smart case means a UCD lookup per
+    /// codepoint of the needle -- so resolving it once per TALLY rather than once per match is the
+    /// difference between one such scan and ten thousand.
+    [[nodiscard]] std::optional<CellLocation> searchFrom(std::u32string_view searchText,
+                                                         CellLocation startPosition,
+                                                         bool isCaseSensitive);
+
+  public:
     [[nodiscard]] CellProxy usePreviousCell() noexcept
     {
         return useCellAt(_lastCursorPosition.line, _lastCursorPosition.column);

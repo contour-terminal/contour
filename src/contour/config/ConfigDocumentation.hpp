@@ -161,15 +161,6 @@ constexpr StringLiteral SearchCaseSensitivityConfig {
     "\n"
 };
 
-constexpr StringLiteral SearchModeSwitchConfig {
-    "{comment} DEPRECATED, and has no effect. Search is typed into the find bar now, which floats over\n"
-    "{comment} the terminal rather than living in the status line, so entering it no longer changes the\n"
-    "{comment} Vi mode and there is no mode left for exiting a search to restore. The key is still\n"
-    "{comment} accepted so that existing configurations keep loading unchanged.\n"
-    "search_mode_switch: {}\n"
-    "\n"
-};
-
 constexpr StringLiteral InsertAfterYankConfig {
     "{comment} Whether or not to switch from normal mode into insert after yank command. If this value is "
     "set to true,\n"
@@ -2565,20 +2556,6 @@ constexpr StringLiteral SearchCaseSensitivityWeb {
     "\n"
 };
 
-constexpr StringLiteral SearchModeSwitchWeb {
-    "**Deprecated, and has no effect.** Search used to be typed into the indicator status line, which "
-    "meant entering it had to switch the terminal into Vi normal mode just to make that line visible; "
-    "this option chose which mode exiting the search returned to. Search is now typed into the find bar, "
-    "which floats over the terminal and changes no mode at all, so there is nothing left for this to "
-    "select. The key is still accepted, so an existing configuration keeps loading unchanged.\n"
-    "``` yaml\n"
-    "profiles:\n"
-    "  profile_name:\n"
-    "```\n"
-    "\n"
-
-};
-
 constexpr StringLiteral InsertAfterYankWeb {
     "This configuration option determines whether the terminal should automatically switch from normal mode "
     "to insert mode after executing a yank command. When enabled, the terminal will enter insert mode, "
@@ -2655,7 +2632,6 @@ using DimUnfocused = DocumentationEntry<DimUnfocusedConfig, DimUnfocusedWeb>;
 using ShowIndicatorOnResize = DocumentationEntry<ShowIndicatorOnResizeConfig, ShowIndicatorOnResizeWeb>;
 using Mouse = DocumentationEntry<MouseConfig, MouseWeb>;
 using SearchCaseSensitivity = DocumentationEntry<SearchCaseSensitivityConfig, SearchCaseSensitivityWeb>;
-using SearchModeSwitch = DocumentationEntry<SearchModeSwitchConfig, SearchModeSwitchWeb>;
 using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYankWeb>;
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
