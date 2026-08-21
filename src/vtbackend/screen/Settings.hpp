@@ -67,7 +67,7 @@ struct Settings
     StatusDisplayPosition statusDisplayPosition = StatusDisplayPosition::Bottom;
     struct
     {
-        std::string left { "{VTType} │ {InputMode:Bold,Color=#C0C030}{SearchPrompt:Left= │ }"
+        std::string left { "{VTType} │ {InputMode:Bold,Color=#C0C030}"
                            "{TraceMode:Bold,Color=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }"
                            // Collapses to nothing without a privilege or machine boundary.
                            "{Context:Left= │ }" };
@@ -183,7 +183,6 @@ struct Settings
     };
     PrimaryScreen primaryScreen;
 
-    bool fromSearchIntoInsertMode = true;
     bool isInsertAfterYank = false;
 
     TabsNamingMode tabNamingMode = TabsNamingMode::Indexing;

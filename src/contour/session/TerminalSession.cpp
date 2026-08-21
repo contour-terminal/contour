@@ -1662,7 +1662,7 @@ void TerminalSession::sendCharEvent(char32_t value,
             if (auto const base = input::unshiftedCodepoint(folded); base != folded)
                 actions = config::apply(charMappings, base, modifiers.chord, flags);
 
-        if (actions != nullptr && !_terminal.inputHandler().isEditingSearch())
+        if (actions != nullptr)
         {
             auto executionCount = 0;
             handleAction(actions, eventType, [&](auto const& actions) {
@@ -2771,11 +2771,13 @@ bool TerminalSession::operator()(actions::ScrollUp)
 
 bool TerminalSession::operator()(actions::SearchReverse)
 {
-    // Locked: starting a search switches Vi mode, which pushes the indicator status line and so
-    // resizes the page -- the same hazard ViNormalMode documents.
+    // Locked: the request reaches the frontend synchronously, and what it opens reads terminal state
+    // (the active pattern and its match tally) to populate itself.
     auto const l = scoped_lock { _terminal };
 
-    terminal().inputHandler().startSearchExternally();
+    // No vi-mode switch. The old prompt forced Normal mode only so the status line carrying it became
+    // visible; the find bar floats over the terminal, so the user keeps whatever mode they were in.
+    _terminal.requestSearchPrompt();
 
     return true;
 }
@@ -3501,7 +3503,6 @@ void TerminalSession::configureTerminal()
     _terminal.settings().autoScrollOnUpdate = _profile.history.value().autoScrollOnUpdate;
     _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
-    _terminal.inputHandler().setSearchModeSwitch(_profile.searchModeSwitch.value());
     _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
     _terminal.settings().blinkStyle = _profile.blinkStyle.value();
     _terminal.settings().screenTransitionStyle = _profile.screenTransitionStyle.value();

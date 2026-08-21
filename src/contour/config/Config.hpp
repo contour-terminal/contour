@@ -427,8 +427,7 @@ struct IndicatorConfig
                        "{ProtectedMode:Bold,Left= │ }"
                        // Draws NOTHING until a privilege or machine boundary is in force, so an
                        // ordinary session is unchanged by its presence.
-                       "{Context:Left= │ }"
-                       "{SearchPrompt:Left= │ }" };
+                       "{Context:Left= │ }" };
     std::string middle { "« {Title} »" };
     std::string right { "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}" };
 };
@@ -720,6 +719,9 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::ShowIndicatorOnResize> sizeIndicatorOnResize { true };
     ConfigEntry<bool, documentation::Fullscreen> fullscreen { false };
     ConfigEntry<bool, documentation::Maximized> maximized { false };
+    /// DEPRECATED and unread. Kept only so that a configuration carrying `search_mode_switch`
+    /// still loads, and so the key round-trips through a GUI-driven save instead of vanishing from
+    /// the user's file. @see documentation::SearchModeSwitch for why it no longer means anything.
     ConfigEntry<bool, documentation::SearchModeSwitch> searchModeSwitch { true };
     ConfigEntry<bool, documentation::InsertAfterYank> insertAfterYank { false };
     ConfigEntry<Bell, documentation::Bell> bell { { .sound = "default", .alert = true, .volume = 1.0f } };

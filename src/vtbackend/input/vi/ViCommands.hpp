@@ -45,8 +45,6 @@ class ViCommands: public ViInputHandler::Executor
     void paste(unsigned count, bool stripped) override;
 
     void searchStart() override;
-    void searchDone() override;
-    void searchCancel() override;
     void updateSearchTerm(std::u32string const& text) override;
 
     bool jumpToNextMatch(unsigned count);

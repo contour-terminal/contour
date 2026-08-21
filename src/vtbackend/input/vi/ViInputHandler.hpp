@@ -148,13 +148,6 @@ struct RectangularHighlight { CellLocation from; CellLocation to; };
 
 using HighlightRange = std::variant<LinearHighlight, RectangularHighlight>;
 
-enum class PromptMode : uint8_t
-{
-    Disabled,
-    Enabled,
-    ExternallyEnabled,
-};
-
 /**
  * ViInputHandler provides Vi-input handling.
  */
@@ -176,9 +169,10 @@ class ViInputHandler: public InputHandler
 
         virtual void modeChanged(ViMode mode) = 0;
 
+        /// The user asked for the search prompt. The frontend opens whatever it uses to type one.
         virtual void searchStart() = 0;
-        virtual void searchDone() = 0;
-        virtual void searchCancel() = 0;
+
+        /// Installs @p text as the search pattern and moves the cursor onto its nearest match.
         virtual void updateSearchTerm(std::u32string const& text) = 0;
 
         virtual void scrollViewport(ScrollOffset delta) = 0;
@@ -220,11 +214,9 @@ class ViInputHandler: public InputHandler
         crispy::unreachable();
     }
 
-    [[nodiscard]] bool isEditingSearch() const noexcept { return _searchEditMode != PromptMode::Disabled; }
+    /// Asks the frontend to open the search prompt, as `/` does. @see Executor::searchStart.
+    void startSearch();
 
-    void startSearchExternally();
-
-    void setSearchModeSwitch(bool enabled);
     void clearSearch();
 
   private:
@@ -233,11 +225,6 @@ class ViInputHandler: public InputHandler
         Normal,
         Visual
     };
-
-    struct
-    {
-        bool fromSearchIntoInsertMode { true };
-    } _settings;
 
     using CommandHandler = std::function<void()>;
     using CommandHandlerMap = crispy::TrieMap<std::string, CommandHandler>;
@@ -254,15 +241,9 @@ class ViInputHandler: public InputHandler
 
     bool parseCount(char32_t ch, Modifiers modifiers);
     bool parseTextObject(char32_t ch, Modifiers modifiers);
-    Handled handleSearchEditor(char32_t ch, Modifiers modifiers);
     Handled handleModeSwitches(char32_t ch, Modifiers modifiers);
-    void startSearch();
 
     ViMode _viMode = ViMode::Normal;
-
-    PromptMode _searchEditMode = PromptMode::Disabled;
-    bool _searchExternallyActivated = false;
-    std::u32string _searchTerm;
 
     std::string _pendingInput;
     CommandHandlerMap _normalMode;

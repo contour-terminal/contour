@@ -1501,13 +1501,9 @@ void Terminal::sendPaste(string_view text)
     if (!allowInput())
         return;
 
-    if (_inputHandler.isEditingSearch())
-    {
-        _search.pattern += unicode::convert_to<char32_t>(text);
-        screenUpdated();
-        return;
-    }
-
+    // No branch for "is the user typing a search term": the find bar owns a real text field, which
+    // handles its own clipboard. Appending here is what used to corrupt the pattern, since it wrote
+    // past the edit buffer the prompt was actually rendering from.
     _inputGenerator.generatePaste(text);
     flushInput();
 }
@@ -1516,14 +1512,6 @@ void Terminal::sendRawInput(string_view text)
 {
     if (!allowInput())
         return;
-
-    if (_inputHandler.isEditingSearch())
-    {
-        inputLog()("Sending raw input to search input: {}", crispy::escape(text));
-        _search.pattern += unicode::convert_to<char32_t>(text);
-        screenUpdated();
-        return;
-    }
 
     inputLog()("Sending raw input to stdin: {}", crispy::escape(text));
     _inputGenerator.generateRaw(text);

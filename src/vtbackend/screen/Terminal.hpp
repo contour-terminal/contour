@@ -375,6 +375,14 @@ class Terminal
         virtual void setTerminalProfile(std::string const& /*configProfileName*/) {}
         virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
+
+        /// The user asked for the search prompt -- by the SearchReverse action, or by `/` in vi mode.
+        ///
+        /// The terminal states the request and never learns what draws it. A frontend opens its find
+        /// bar here; a headless build inherits the empty default, which is correct, since there is no
+        /// interactive search without something to type into.
+        virtual void searchPromptRequested() {}
+
         virtual void updateHighlights() {}
         virtual void playSound(Sequence::Parameters const&) {}
         /// The render buffer's cursor moved (or appeared/disappeared, including the blink phase).
@@ -915,6 +923,9 @@ class Terminal
     void sendRawInput(std::string_view text);
 
     void inputModeChanged(ViMode mode) { _eventListener.inputModeChanged(mode); }
+
+    /// Asks the frontend to open its search prompt. @see Events::searchPromptRequested.
+    void requestSearchPrompt() { _eventListener.searchPromptRequested(); }
     void updateHighlights() { _eventListener.updateHighlights(); }
     void playSound(vtbackend::Sequence::Parameters const& params) { _eventListener.playSound(params); }
 
