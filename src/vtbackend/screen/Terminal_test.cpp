@@ -3124,3 +3124,45 @@ TEST_CASE("Terminal.historyEviction.keepsTheViCursorInsideTheAddressableGrid", "
     CHECK(unbox<int>(mock.terminal.normalModeCursorPosition().line) >= top);
 }
 // }}}
+
+TEST_CASE("Terminal.historyEviction.theOldestScrollbackLineIsAlwaysAPrompt", "[terminal][history-eviction]")
+{
+    // What the issue actually asks for, driven end to end through real OSC 133 sequences.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) },
+                                           vtbackend::HistoryLimits { LineCount(10), LineCount(24) } };
+
+    auto const outputLengths = std::array { 4, 9, 2, 7, 3, 11, 5, 6 };
+    for (auto const [block, length]: std::views::enumerate(outputLengths))
+    {
+        writeCommandBlock(mock, static_cast<int>(block), length);
+
+        auto const& grid = mock.terminal.primaryScreen().grid();
+        if (grid.historyLineCount() < LineCount(10))
+            continue; // not deep enough yet for anything to have been evicted
+
+        // The oldest line still addressable is a prompt, with its command's output whole beneath it.
+        auto const top = grid.addressableTop();
+        UNSCOPED_INFO(std::format("block {}: top={} text=\"{}\" history={}",
+                                  block,
+                                  top,
+                                  grid.lineText(top),
+                                  grid.historyLineCount()));
+        CHECK(grid.lineAt(top).marked());
+        CHECK(grid.lineText(top).starts_with("P"));
+    }
+}
+
+TEST_CASE("Terminal.historyEviction.aShellWithoutOsc133SimplyBoundsAtTheHardLimit",
+          "[terminal][history-eviction]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) },
+                                           vtbackend::HistoryLimits { LineCount(10), LineCount(24) } };
+
+    for (auto const i: std::views::iota(0, 200))
+        mock.writeToScreen(std::format("line{}\r\n", i));
+
+    // No mark anywhere, so no boundary can be honoured: the ceiling is what bounds the buffer, and
+    // eviction is line-wise exactly as it was before this existed.
+    CHECK(mock.terminal.primaryScreen().historyLineCount() == LineCount(24));
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(-24)) == "line174   ");
+}
