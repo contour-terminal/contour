@@ -3,6 +3,7 @@
 #include <vtbackend/grid/Grid.hpp>
 
 #include <crispy/BufferObject.hpp>
+#include <crispy/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -2059,7 +2060,7 @@ TEST_CASE("Grid.historyEviction.evictsAWholeBlockRatherThanCuttingMidCommand", "
     // the block size dividing the capacity.
     auto const blocks = std::array { 2, 5, 3, 4, 2, 6 };
     auto const writeBlocks = [&](Grid& grid) {
-        for (auto const [block, length]: std::views::enumerate(blocks))
+        for (auto const [block, length]: crispy::views::enumerate(blocks))
         {
             appendLine(grid, std::format("P{}", block), BlockStart::Yes);
             for (auto const i: std::views::iota(0, length))

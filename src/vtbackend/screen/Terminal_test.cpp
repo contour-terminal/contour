@@ -3133,7 +3133,7 @@ TEST_CASE("Terminal.historyEviction.theOldestScrollbackLineIsAlwaysAPrompt", "[t
                                            vtbackend::HistoryLimits { LineCount(10), LineCount(24) } };
 
     auto const outputLengths = std::array { 4, 9, 2, 7, 3, 11, 5, 6 };
-    for (auto const [block, length]: std::views::enumerate(outputLengths))
+    for (auto const [block, length]: crispy::views::enumerate(outputLengths))
     {
         writeCommandBlock(mock, static_cast<int>(block), length);
 
