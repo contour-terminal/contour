@@ -1955,3 +1955,51 @@ TEST_CASE("Grid.render_rows.empty_list_is_the_linear_walk", "[grid]")
     CHECK(withDefault.renderedLines == withEmptyRows.renderedLines);
     CHECK(withDefault.renderedTexts == withEmptyRows.renderedTexts);
 }
+
+TEST_CASE("Grid.setMaxHistoryLineCount.growingKeepsTheScrollback", "[grid][history]")
+{
+    // Ring capacity: 2 page + 2 history = 4 slots, all of them used.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(2));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.setLineText(LineOffset(1), "BBBBB");
+    grid.scrollUp(LineCount(2));
+    grid.setLineText(LineOffset(0), "CCCCC");
+    grid.setLineText(LineOffset(1), "DDDDD");
+
+    REQUIRE(grid.historyLineCount() == LineCount(2));
+    REQUIRE(grid.lineText(LineOffset(-2)) == "AAAAA");
+    REQUIRE(grid.lineText(LineOffset(-1)) == "BBBBB");
+
+    // Growing the limit must leave every retained row exactly where it was: the fresh slots
+    // belong at the OLD end of the history, not between the newest history row and the page.
+    grid.setMaxHistoryLineCount(LineCount(5));
+
+    CHECK(grid.historyLineCount() == LineCount(2));
+    CHECK(grid.lineText(LineOffset(-2)) == "AAAAA");
+    CHECK(grid.lineText(LineOffset(-1)) == "BBBBB");
+    CHECK(grid.lineText(LineOffset(0)) == "CCCCC");
+    CHECK(grid.lineText(LineOffset(1)) == "DDDDD");
+}
+
+TEST_CASE("Grid.setMaxHistoryLineCount.shrinkingDropsTheOldestRows", "[grid][history]")
+{
+    // Ring capacity: 1 page + 3 history = 4 slots.
+    auto grid = Grid(PageSize { LineCount(1), ColumnCount(5) }, false, LineCount(3));
+    grid.setLineText(LineOffset(0), "AAAAA");
+    grid.scrollUp(LineCount(1));
+    grid.setLineText(LineOffset(0), "BBBBB");
+    grid.scrollUp(LineCount(1));
+    grid.setLineText(LineOffset(0), "CCCCC");
+    grid.scrollUp(LineCount(1));
+    grid.setLineText(LineOffset(0), "DDDDD");
+
+    REQUIRE(grid.historyLineCount() == LineCount(3));
+    REQUIRE(grid.lineText(LineOffset(-3)) == "AAAAA");
+
+    // Shrinking keeps the NEWEST rows: what falls out is the oldest end of the scrollback.
+    grid.setMaxHistoryLineCount(LineCount(1));
+
+    CHECK(grid.historyLineCount() == LineCount(1));
+    CHECK(grid.lineText(LineOffset(-1)) == "CCCCC");
+    CHECK(grid.lineText(LineOffset(0)) == "DDDDD");
+}

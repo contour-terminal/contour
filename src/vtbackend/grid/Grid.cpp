@@ -153,12 +153,33 @@ void Grid::setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount)
     verifyState();
     rezeroBuffers();
     _historyLimit = maxHistoryLineCount;
-    // Use the prototype overload so newly grown ring slots are blank Lines with the
-    // correct logical column count (not default-constructed cols=0 lines that would
-    // violate the "size() >= pageSize.columns" invariant elsewhere).
-    _lines.resize(unbox<size_t>(_pageSize.lines + this->maxHistoryLineCount()),
-                  Line(_pageSize.columns, defaultLineFlags(), GraphicsAttributes {}));
-    _linesUsed = min(_linesUsed, _pageSize.lines + this->maxHistoryLineCount());
+
+    // Slots appear and vanish at the boundary between the page and the scrollback, NOT at the
+    // ring's end.
+    //
+    // After rezeroBuffers() the ring reads [page][free][history] with the history newest-last, so
+    // the ring's end is where the NEWEST history row lives. Resizing there gets both directions
+    // exactly backwards: growing splices blanks between that row and the page, blanking the top of
+    // the scrollback and sliding the real rows out of the addressable range, and shrinking drops
+    // the newest rows while keeping the oldest. The free region at `_pageSize.lines` is the one
+    // place where slots may come and go without moving a row relative to offset 0, and erasing
+    // past it consumes the OLDEST history rows first -- precisely the end a shrunken scrollback
+    // has to forget.
+    auto const newTotalLineCount = _pageSize.lines + this->maxHistoryLineCount();
+    auto const oldSlotCount = _lines.size();
+    auto const newSlotCount = unbox<size_t>(newTotalLineCount);
+    auto& slots = _lines.storage();
+    auto const freeRegion = std::next(slots.begin(), static_cast<ptrdiff_t>(unbox(_pageSize.lines)));
+    if (newSlotCount > oldSlotCount)
+        // The prototype rather than a default-constructed Line: a cols=0 line would violate the
+        // "every slot is at least pageSize.columns wide" invariant the other paths rely on.
+        slots.insert(freeRegion,
+                     newSlotCount - oldSlotCount,
+                     Line(_pageSize.columns, defaultLineFlags(), GraphicsAttributes {}));
+    else if (newSlotCount < oldSlotCount)
+        slots.erase(freeRegion, std::next(freeRegion, static_cast<ptrdiff_t>(oldSlotCount - newSlotCount)));
+
+    _linesUsed = min(_linesUsed, newTotalLineCount);
     bumpGeneration(RowIdentity::Destroyed);
     verifyState();
 }
