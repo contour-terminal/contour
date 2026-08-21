@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/ContextId.hpp>
 #include <vtbackend/core/GraphicsAttributes.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/LineFlags.hpp>
@@ -119,6 +120,7 @@ class Line
         _storage = other._storage;
         _columns = other._columns;
         _flags = other._flags;
+        _contextId = other._contextId;
         _commandEndOffset = other._commandEndOffset;
         _promptEndOffset = other._promptEndOffset;
         _revision = other._revision;
@@ -133,6 +135,7 @@ class Line
         _storage = std::move(other._storage);
         _columns = other._columns;
         _flags = other._flags;
+        _contextId = other._contextId;
         _commandEndOffset = other._commandEndOffset;
         _promptEndOffset = other._promptEndOffset;
         _revision = other._revision;
@@ -176,6 +179,7 @@ class Line
     {
         _dirty = true;
         _flags = flags;
+        _contextId = {};
         _commandEndOffset = {};
         _promptEndOffset = {};
         if (isBlankWithFillAttrs(attributes))
@@ -187,6 +191,7 @@ class Line
     {
         _dirty = true;
         _flags = flags;
+        _contextId = {};
         _commandEndOffset = {};
         _promptEndOffset = {};
         _columns = count;
@@ -203,6 +208,7 @@ class Line
     {
         _dirty = true;
         _flags = flags;
+        _contextId = {};
         _commandEndOffset = {};
         _promptEndOffset = {};
         if (codepoint == 0)
@@ -388,6 +394,29 @@ class Line
     /// re-chops a logical line into different physical pieces but never changes its content, so a
     /// logical column does not move when the window is resized.
     [[nodiscard]] ColumnOffset promptEndOffset() const noexcept { return _promptEndOffset; }
+
+    /// The context that wrote this line, or zero when none was in effect.
+    [[nodiscard]] ContextId contextId() const noexcept { return _contextId; }
+
+    /// Records that this line was produced under @p id, if it was not already.
+    ///
+    /// A ZERO id is ignored, and that is load-bearing in two places. A line's author is set when the
+    /// line is written and cleared when the line is REUSED (@see reset), so "no context is active
+    /// right now" is an absence of information rather than a claim that this line had no author --
+    /// the cursor merely returning to a line after its context ended must not erase what wrote it.
+    /// And on a daemon mirror, whose ancestry is replicated rather than parsed, the local active
+    /// context is routinely zero while the ids arriving on the wire are not; clearing here would wipe
+    /// every replicated stamp the moment the cursor moved.
+    ///
+    /// Deliberately does NOT mark the line dirty. The id is derived state -- a frontend resolves it
+    /// through the context stack -- and nothing about the line's CONTENT changed, so dirtying it would
+    /// push a delta for a row that did not visually change, twice per command, forever.
+    void adoptContext(ContextId id) noexcept
+    {
+        if (!!id)
+            _contextId = id;
+    }
+
     void setPromptEndOffset(ColumnOffset offset) noexcept
     {
         _dirty = true;
@@ -607,6 +636,20 @@ class Line
     LineSoA _storage;
     ColumnCount _columns {};
     LineFlags _flags {};
+
+    /// The OSC 3008 context that wrote this line, or zero for none.
+    ///
+    /// Placed HERE on purpose: _columns is 4-aligned and _commandEndOffset must be too, so there was a
+    /// two-byte padding hole right at this offset. Associating every line with the context that
+    /// produced it therefore costs nothing per line -- which is what makes it affordable across a
+    /// whole scrollback. The static_assert below is what turns a future field reordering that breaks
+    /// that into a build error rather than a silent +8 bytes on every line in the grid.
+    ///
+    /// Unlike _commandEndOffset and _promptEndOffset, this is NOT head-only: those name a border
+    /// WITHIN a logical line, so only its head can carry them, while this names who WROTE the line --
+    /// and a wrap does not change the author of the continuation. @see detail::addNewWrappedLines.
+    ContextId _contextId {};
+
     ColumnOffset _commandEndOffset {};
     ColumnOffset _promptEndOffset {};
     uint64_t _revision = 0; ///< Batch seqno of the last change (see revision()).
@@ -616,6 +659,22 @@ class Line
                             ///< years, so wrap is not handled in the comparison.
     bool _dirty = true;     ///< Fresh lines are pending: bootstrap self-heals.
 };
+
+/// Line's size is a fact about the whole scrollback, so it is pinned rather than left to drift.
+///
+/// _contextId was placed in the padding hole between _flags and _commandEndOffset precisely so that
+/// associating every line with the context that wrote it costs nothing. A reordering that pushes it
+/// out of that hole costs eight bytes on every line the grid holds -- tens of thousands of them -- and
+/// would otherwise do so silently. If this fires, do not simply update the number: put the field back
+/// where it fits, or accept the cost deliberately.
+///
+/// Expressed RELATIVE to LineSoA rather than as an absolute byte count, because an absolute count is
+/// not portable: LineSoA holds a std::vector and a std::optional<std::unordered_map>, whose sizes
+/// differ between libstdc++, libc++ and the MSVC STL, so a pinned literal would be a build break on
+/// macOS and Windows rather than a statement about Line's own tail. What matters here is exactly that
+/// tail -- the scalars after the storage -- and it is the same 32 bytes everywhere.
+static_assert(sizeof(Line) == sizeof(LineSoA) + 32,
+              "Line's scalar tail grew. See the comment on Line::_contextId before changing this.");
 
 } // namespace vtbackend
 

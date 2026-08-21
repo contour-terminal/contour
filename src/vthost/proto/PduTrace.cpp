@@ -92,22 +92,31 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<SessionState>(pdu);
                        // title/cwd are screen-derived content; their LENGTHS are the diagnostic.
-                       return std::format("session={} {}x{} screen={} title={}ch cwd={}ch progress={}/{}",
-                                          value.session,
-                                          value.columns,
-                                          value.lines,
-                                          value.screenType,
-                                          value.title.size(),
-                                          value.cwd.size(),
-                                          value.progressState,
-                                          value.progressPercentage);
+                       // Context records carry user, hostname, cwd and cmdline: a COUNT is the
+                       // diagnostic, and the fields themselves must never reach a trace log.
+                       return std::format(
+                           "session={} {}x{} screen={} title={}ch cwd={}ch progress={}/{} contexts={} "
+                           "chain={}",
+                           value.session,
+                           value.columns,
+                           value.lines,
+                           value.screenType,
+                           value.title.size(),
+                           value.cwd.size(),
+                           value.progressState,
+                           value.progressPercentage,
+                           value.contexts.size(),
+                           value.contextChain.size());
                    } },
         TraceRow { PduType::Delta,
                    "Delta",
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<Delta>(pdu);
+                       // Counts and the ACTIVE ID only -- never a record's fields. @see the
+                       // SessionState row above.
                        return std::format("session={} gen={} seq={} snapshot={} lines={} links={} "
-                                          "imagecells={} statuslines={} progress={}/{}",
+                                          "imagecells={} statuslines={} progress={}/{} contexts={} "
+                                          "activecontext={}",
                                           value.session,
                                           value.generation,
                                           value.seqno,
@@ -117,7 +126,9 @@ namespace
                                           value.imageCells.size(),
                                           value.statusLines.size(),
                                           value.progressChanged != 0 ? value.progressState : 0,
-                                          value.progressChanged != 0 ? value.progressPercentage : 0);
+                                          value.progressChanged != 0 ? value.progressPercentage : 0,
+                                          value.contexts.size(),
+                                          value.contextChanged != 0 ? value.activeContext : 0);
                    } },
         TraceRow { PduType::SessionBell,
                    "SessionBell",

@@ -171,7 +171,8 @@ void applyWireCell(vtbackend::LineSoA& soa,
 
 void applyWireLine(vtbackend::Line& line,
                    proto::WireLine const& wire,
-                   std::unordered_map<uint16_t, vtbackend::HyperlinkId> const& hyperlinks)
+                   std::unordered_map<uint16_t, vtbackend::HyperlinkId> const& hyperlinks,
+                   ContextIdMap const& contexts)
 {
     auto const flags = vtbackend::LineFlags::fromValue(wire.flags);
     // The clear does three jobs at once: it drops stale content, it gives the omitted trailing
@@ -181,6 +182,13 @@ void applyWireLine(vtbackend::Line& line,
     // After the reset, never before: Line::reset() clears both offsets.
     line.setPromptEndOffset(vtbackend::ColumnOffset(wire.promptEndOffset));
     line.setCommandEndOffset(vtbackend::ColumnOffset(wire.commandEndOffset));
+    // Translated, never copied: the id is the SENDER's, and this terminal mints its own. An id with
+    // no mapping resolves to none, exactly as an unmapped hyperlink id does. The zero test first,
+    // because a session that never sees OSC 3008 stamps every line with it and would otherwise pay a
+    // hash lookup per line per delta to learn nothing.
+    if (wire.contextId != 0)
+        if (auto const it = contexts.find(wire.contextId); it != contexts.end())
+            line.adoptContext(it->second.local);
     if (wire.cells.empty())
         return;
 
@@ -213,6 +221,7 @@ proto::WireLine toWireLine(vtbackend::Grid const& grid,
     auto wire = proto::WireLine {};
     wire.stableId = grid.stableLineIdOf(offset);
     wire.flags = static_cast<uint16_t>(line.flags().value());
+    wire.contextId = unbox<uint16_t>(line.contextId());
     wire.promptEndOffset = unbox<int32_t>(line.promptEndOffset());
     wire.commandEndOffset = unbox<int32_t>(line.commandEndOffset());
     wire.columns = unbox<uint32_t>(line.size());

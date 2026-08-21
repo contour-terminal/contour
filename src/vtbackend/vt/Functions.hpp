@@ -239,6 +239,7 @@ constexpr inline auto ITERM2 = FunctionDocumentation { .mnemonic = "ITERM2", .co
 constexpr inline auto TEXTSIZING = FunctionDocumentation { .mnemonic = "TEXTSIZING", .comment = "Kitty text sizing protocol: sized/scaled text.", .parameters = "metadata ; text" };
 constexpr inline auto KITTYCLIPBOARD = FunctionDocumentation { .mnemonic = "KITTYCLIPBOARD", .comment = "Kitty clipboard protocol: chunked, MIME-typed clipboard read/write.", .parameters = "metadata ; base64" };
 constexpr inline auto POINTERSHAPE = FunctionDocumentation { .mnemonic = "POINTERSHAPE", .comment = "Kitty pointer shape protocol: set, push, pop or query the mouse pointer shape.", .parameters = "=|>|<|? name[,name...]" };
+constexpr inline auto HIERCONTEXT = FunctionDocumentation { .mnemonic = "HIERCONTEXT", .comment = "Hierarchical context signalling (UAPI.15): the nesting a shell, run0, ssh or a container runtime opens around what runs inside it.", .parameters = "start=CTXID|end=CTXID [; field=value ...]", .description = "Maintains a stack of contexts, each carrying metadata about the component in control of the terminal. `start=` initiates, updates or returns to a context; `end=` terminates one. Ordinary reset sequences deliberately do NOT clear the stack.", .examples = "OSC 3008 ; start=bed86fab ; type=container ; container=foobar ST\nOSC 3008 ; end=bed86fab ; exit=success ST" };
 
 // DEC Multi-Page Navigation (VT420)
 constexpr inline auto NP = FunctionDocumentation { .mnemonic = "NP", .comment = "Next Page", .parameters = "Pn", .description = "Moves the cursor to the home position on one of the following pages in page memory." };
@@ -886,6 +887,7 @@ constexpr inline auto ITERM2           = detail::OSC(1337, VTExtension::Unknown,
 constexpr inline auto TEXTSIZING       = detail::OSC(66, VTExtension::Unknown, documentation::TEXTSIZING);
 constexpr inline auto KITTYCLIPBOARD   = detail::OSC(5522, VTExtension::Unknown, documentation::KITTYCLIPBOARD);
 constexpr inline auto POINTERSHAPE     = detail::OSC(22, VTExtension::Unknown, documentation::POINTERSHAPE);
+constexpr inline auto HIERCONTEXT      = detail::OSC(3008, VTExtension::Unknown, documentation::HIERCONTEXT);
 
 // NOLINTEND(readability-identifier-naming)
 // clang-format on
@@ -1151,6 +1153,7 @@ constexpr static auto allFunctionsArray() noexcept
         TEXTSIZING,
         KITTYCLIPBOARD,
         POINTERSHAPE,
+        HIERCONTEXT,
         DUMPSTATE,
     };
     return funcs;

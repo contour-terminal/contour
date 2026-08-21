@@ -47,7 +47,7 @@ class RenderBufferBuilder
     void renderCell(ConstCellProxy cell, LineOffset line, ColumnOffset column);
     /// Not noexcept: the cursor-line decision it makes goes through the viewport's coordinate
     /// translation, which builds the fold projection lazily and therefore allocates.
-    void startLine(LineOffset line, LineFlags flags);
+    void startLine(LineOffset line, LineFlags flags, ContextId contextId);
     void endLine() noexcept;
 
     /// Renders a trivial line.
@@ -61,6 +61,7 @@ class RenderBufferBuilder
     void renderTrivialLine(TrivialLineBuffer const& lineBuffer,
                            LineOffset lineOffset,
                            LineFlags flags,
+                           ContextId contextId,
                            std::u32string_view textOverride = {});
 
     /// This call is guaranteed to be invoked when the the full page has been rendered.
@@ -71,6 +72,11 @@ class RenderBufferBuilder
     [[nodiscard]] bool isCursorLine(LineOffset line) const;
 
     [[nodiscard]] std::optional<RenderCursor> renderCursor() const;
+
+    /// The tint for @p id, resolved once per LINE -- not per cell, and only when @ref
+    /// _contextTintingPossible said a tint could apply at all, which is what keeps the ordinary
+    /// session (no scheme sets a tint) at one bool test per line.
+    [[nodiscard]] std::optional<RGBColor> tintFor(ContextId id) const noexcept;
 
     [[nodiscard]] static RenderCell makeRenderCellExplicit(ColorPalette const& colorPalette,
                                                            std::u32string graphemeCluster,
@@ -182,6 +188,20 @@ class RenderBufferBuilder
     bool _prevHasCursor = false;
     LineOffset _lineNr = LineOffset(0);
     bool _useCursorlineColoring = false;
+
+    /// The OSC 3008 tint in force on the line currently being rendered, resolved once per line.
+    std::optional<RGBColor> _currentContextTint {};
+
+    /// Whether any tint could apply at all -- the scheme sets one, the configuration allows it, and
+    /// this is the primary screen. Decided once per pass so the per-line path is a single branch.
+    ///
+    /// The alternate screen is excluded on purpose. The equality guard in makeColors() would make the
+    /// tint PATCHY there rather than uniform -- a full-screen application paints most of its canvas
+    /// with its own background, so only the cells it left at default would tint, and a striped vim
+    /// reads as a rendering fault. The application's background IS the application; the information is
+    /// constant for the whole buffer anyway, so there is nothing per-line to convey; and the status
+    /// line is the better channel for it, being already immune to an application's own colours.
+    bool _contextTintingPossible = false;
 
     // Offset into the search pattern that has been already matched.
     size_t _searchPatternOffset = 0;

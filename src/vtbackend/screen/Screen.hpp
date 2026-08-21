@@ -4,6 +4,7 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/graphics/KittyGraphics.hpp>
 #include <vtbackend/graphics/MessageParser.hpp>
 #include <vtbackend/grid/CellUtil.hpp>
@@ -245,6 +246,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Lays out one `OSC 66` (kitty text sizing) request.
     [[nodiscard]] ApplyResult processTextSizing(std::string_view payload);
+
+    /// Applies one `OSC 3008` (hierarchical context signalling) sequence.
+    [[nodiscard]] ApplyResult processHierarchicalContext(std::string_view payload);
+
+    /// Stamps the OSC-133-equivalent marks an OSC 3008 transition stands in for, when the arbiter says
+    /// this session's marks are OSC 3008's to stamp. @see MarkArbiter.
+    void synthesizeSemanticMarks(ContextTransition const& transition, ContextCommand const& command);
 
     /// Erases the whole multi-cell block that @p position belongs to, however many rows and columns
     /// it covers, and wherever within it @p position happens to be.
@@ -666,7 +674,65 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         return useCellAt(_lastCursorPosition.line, _lastCursorPosition.column);
     }
 
-    void updateCursorIterator() noexcept { _currentLine = &_grid.lineAt(_cursor.position.line); }
+    /// Re-points _currentLine at the row the cursor is on, and stamps that row with the context in
+    /// effect.
+    ///
+    /// The stamp lives HERE because this is the tree's single "the cursor is now on this line" funnel
+    /// -- fifteen call sites, and provably exhaustive, because _currentLine would already be stale if
+    /// any path skipped it. Stamping per CODEPOINT instead would be the obvious design and the wrong
+    /// one: this runs once per cursor line change, so the per-character write path is untouched.
+    void updateCursorIterator() noexcept
+    {
+        _currentLine = &_grid.lineAt(_cursor.position.line);
+        _currentLine->adoptContext(_activeContextId);
+    }
+
+    /// The OSC 3008 context freshly written lines are stamped with.
+    ///
+    /// A mirror of Terminal's ancestry rather than a read through it: Terminal fans the active id out
+    /// to all 18 screens whenever it moves (@see Terminal::applyContextCommand), which costs two stores
+    /// per command and keeps this funnel free of the two pointer chases a lookup would add. It also
+    /// keeps Screen drivable in a test without a populated stack behind it.
+    void setActiveContextId(ContextId id) noexcept
+    {
+        _activeContextId = id;
+        // The line the cursor is ALREADY on, not just the ones it moves to next. A context is
+        // announced before the output it describes is written, and typically at column 0 of a line the
+        // cursor is already sitting on -- so waiting for the next cursor-line change would attribute
+        // that whole first line to the previous context. Re-stamping a line that already holds output
+        // is last-writer-wins, which is the only defensible answer when one line spans two contexts.
+        if (_currentLine && !!id && _currentLine->contextId() != id)
+        {
+            _currentLine->adoptContext(id);
+            // Dirtied HERE, unlike the updateCursorIterator() funnel, which deliberately is not.
+            // There the stamp always precedes the write that dirties the row anyway; here the row may
+            // already be clean and already replicated, and a daemon mirror's delta scan only revisits
+            // dirty rows -- so without this the mirror keeps a row's old context id forever, which
+            // GridParity reports as a real difference. At most one row per context transition.
+            _currentLine->markDirty();
+        }
+    }
+
+    /// The context that wrote the line at @p line, walking UP through blank lines.
+    ///
+    /// A line the cursor never moved onto -- one cleared by ED while the cursor stayed put -- carries
+    /// no stamp of its own, and a run of blank lines below some output reads to a user as belonging to
+    /// that output. Bounded by the page height so the walk cannot run away into a scrollback of blank
+    /// lines; this is a query-time cost only, paid at most once per visible row.
+    [[nodiscard]] ContextId contextIdAt(LineOffset line) const noexcept
+    {
+        auto const limit = unbox<int>(pageSize().lines);
+        auto const topMost = boxed_cast<LineOffset>(-_grid.historyLineCount());
+        for (auto steps = 0; steps < limit; ++steps)
+        {
+            auto const probe = line - steps;
+            if (probe < topMost)
+                break;
+            if (auto const id = _grid.lineAt(probe).contextId(); !!id)
+                return id;
+        }
+        return {};
+    }
 
     [[nodiscard]] Line& currentLine() noexcept { return *_currentLine; }
 
@@ -819,6 +885,26 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// the tree passes through this one funnel -- OSC 133's four, and vi's `mm` -- and the fold ranges
     /// derived from them have to be invalidated when one lands.
     void setLogicalLineFlags(LineOffset line, LineFlags flags, bool enable) noexcept;
+
+    /// Which of the two column-carrying semantic marks a @ref markLogicalLineAtCursorWithColumn call
+    /// is recording.
+    ///
+    /// OSC 133's ;B and ;D each remember a COLUMN as well as a flag -- where the prompt handed the
+    /// line over, and where the command's output stopped -- and both are meaningless without it. An
+    /// enum rather than two functions because the two differ only in which pair they write, and
+    /// because a third such mark would be an enumerator rather than a third near-copy.
+    enum class ColumnMark : uint8_t
+    {
+        PromptEnd = 0, ///< OSC 133;B: the border between what the shell wrote and what the user types.
+        CommandEnd,    ///< OSC 133;D: where the command's output actually stopped.
+    };
+
+    /// Stamps @p mark onto the head of the logical line the cursor is on, together with the cursor's
+    /// LOGICAL column.
+    ///
+    /// Goes through the same funnel setLogicalLineFlags() does, and for the same reason: both marks
+    /// are in HeadOnlyLineFlags, so both have to invalidate the fold ranges derived from them.
+    void markLogicalLineAtCursorWithColumn(ColumnMark mark) noexcept;
 
     /// Whether the LOGICAL line that @p line belongs to carries all of @p flags.
     [[nodiscard]] bool isLogicalLineFlagEnabled(LineOffset line, LineFlags flags) const noexcept
@@ -998,6 +1084,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     Cursor _cursor {};
     Cursor _savedCursor {};
+
+    /// The OSC 3008 context freshly written lines are stamped with. @see setActiveContextId.
+    ContextId _activeContextId {};
+
+    /// Scratch for the OSC 3008 decoder, owned here so the per-prompt hot path allocates once per
+    /// session rather than once per sequence. @see parseContextSequence.
+    std::string _contextScratch {};
 
     /// Payload accumulated across a chunked kitty graphics transmission (`m=1`), plus the command
     /// that opened it -- the continuation chunks carry no control data of their own.

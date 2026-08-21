@@ -163,6 +163,22 @@ class NativeSession final: public SessionStreamEvents
         /// "never sent" from "sent empty".
         std::string lastCwd;
         bool cwdKnown = false;
+        /// The OSC 3008 context records this peer has been told about, keyed by id and remembering
+        /// the WHOLE record. A map for the reason `sentHyperlinks` is: the id space is a uint16_t
+        /// that wraps, so a REUSED id has to be recognised as a new context rather than silently
+        /// re-pointing every line already stamped with it. The whole record rather than its
+        /// identifier alone because a context is also reinitialised IN PLACE -- a re-`start=` on
+        /// every prompt, an `end=` recording an outcome -- and those carry news too.
+        std::unordered_map<uint16_t, proto::WireContext> sentContexts;
+        /// The ContextStack revision `sentContexts` was last brought in line with, so the per-flush
+        /// walk over the retained pool is skipped entirely while the ancestry has not moved. Reset to
+        /// its sentinel wherever `sentContexts` is cleared, or the re-send that clearing exists to
+        /// force would be gated away.
+        uint64_t lastContextRevision = 0;
+        bool contextRevisionKnown = false;
+        /// The active context last sent (-1 until the first snapshot), so a change carries -- and
+        /// forces -- a delta only when the ancestry actually moved.
+        int lastActiveContext = -1;
         /// The default fg/bg (0xRRGGBB) last sent (-1 until the first snapshot),
         /// so an OSC 10/11 change carries (and forces) a delta only on change.
         int lastDefaultForeground = -1;
@@ -246,6 +262,17 @@ class NativeSession final: public SessionStreamEvents
                                  vtworkspace::SessionId session,
                                  uint8_t screenTypeValue,
                                  bool snapshot);
+
+    /// Captures the live OSC 3008 ancestry into @p delta, or — on a snapshot, which carries the records
+    /// through SessionState instead — only brings @p follow up to date.
+    ///
+    /// Split out of collectLiveState for the same reason that one is split out of pushDelta: it is a
+    /// self-contained pull+diff over its own state, and inline it pushed collectLiveState past the
+    /// cognitive-complexity budget. Static: it reads only its arguments.
+    static void collectContextState(vtbackend::Terminal& terminal,
+                                    FollowState& follow,
+                                    proto::Delta& delta,
+                                    bool snapshot);
 
     /// What every session THIS connection creates is spawned with.
     ///

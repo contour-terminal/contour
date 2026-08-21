@@ -17,6 +17,7 @@
 
 #include <net/Sockets.hpp>
 #include <net/Tls.hpp>
+#include <vthost/ContextWire.hpp>
 #include <vthost/CursorStyle.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/Logging.hpp>
@@ -249,6 +250,56 @@ coro::Task<void> NativeSession::flushSoon()
         pushDelta(SessionId { session }, /*forceSnapshot=*/false);
 }
 
+void NativeSession::collectContextState(vtbackend::Terminal& terminal,
+                                        FollowState& follow,
+                                        proto::Delta& delta,
+                                        bool snapshot)
+{
+    // The ACTIVE id is pull+diff like the cwd is, and the records it and its ancestors need travel as
+    // a side table in the same "sent once per connection on first reference" shape the hyperlink pool
+    // uses -- so a client already told about a context is not told again on every command.
+    auto const& contexts = terminal.contexts();
+    auto const active = static_cast<int>(contexts.activeId().value);
+    if (active != follow.lastActiveContext)
+    {
+        if (!snapshot)
+        {
+            delta.contextChanged = 1;
+            delta.activeContext = contexts.activeId().value;
+        }
+        follow.lastActiveContext = active;
+    }
+
+    // Every record the ancestry needs, plus any whose metadata moved. Compared as the WHOLE wire
+    // record, not by identifier alone: a re-`start=` reinitialises a context IN PLACE under the same
+    // id and the same identifier, and `end=` records an outcome on one, so an identifier-keyed gate
+    // would replicate a shell context's first `cwd=` and then never again -- leaving an attached pane
+    // resolving a directory the session left long ago, and never learning how a command ended.
+    //
+    // Gated on the stack's revision, which is what that counter is for: this runs per flush (20ms, per
+    // session) and the pool holds up to maxRetained records, so walking it unconditionally spent the
+    // common case -- a session where nothing about the ancestry moved -- on a scan that can have
+    // nothing to say. @see ContextStack::revision.
+    if (follow.contextRevisionKnown && contexts.revision() == follow.lastContextRevision)
+        return;
+
+    follow.lastContextRevision = contexts.revision();
+    follow.contextRevisionKnown = true;
+    // Rebuilt rather than merged into, so the table tracks the sender's own retention bound instead of
+    // accumulating one entry per context the session ever created.
+    auto refreshed = decltype(follow.sentContexts) {};
+    contexts.forEachRecord([&](vtbackend::TerminalContext const& record) {
+        auto wire = toWireContext(record);
+        auto const id = record.id.value;
+        auto const known = follow.sentContexts.find(id);
+        auto const unchanged = known != follow.sentContexts.end() && known->second == wire;
+        if (!unchanged && !snapshot)
+            delta.contexts.push_back(wire);
+        refreshed.insert_or_assign(id, std::move(wire));
+    });
+    follow.sentContexts = std::move(refreshed);
+}
+
 void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
                                      FollowState& follow,
                                      proto::Delta& delta,
@@ -301,6 +352,8 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
         follow.lastCwd = cwd;
         follow.cwdKnown = true;
     }
+
+    collectContextState(terminal, follow, delta, snapshot);
 
     // Live default fg/bg (OSC 10/11): pull+diff; the snapshot carries them in
     // SessionState below.
@@ -428,6 +481,14 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
         snap.title = terminal.windowTitle();
         snap.cursorShape = cursorPs;
         snap.cwd = terminal.currentWorkingDirectory();
+        // Stated outright, including when EMPTY: a snapshot routes this through SessionState rather
+        // than through a delta's changed-gate, so an ancestry that emptied would otherwise never be
+        // delivered -- and the server, having recorded it as sent, would never re-send it.
+        terminal.contexts().forEachRecord([&](vtbackend::TerminalContext const& record) {
+            snap.contexts.push_back(toWireContext(record));
+        });
+        for (auto const& entry: terminal.contexts().chain())
+            snap.contextChain.push_back(entry.record->id.value);
         snap.defaultForeground = colors.defaultForeground.value();
         snap.defaultBackground = colors.defaultBackground.value();
         snap.statusDisplayType = static_cast<uint8_t>(statusType);
@@ -528,7 +589,15 @@ void NativeSession::pushDelta(SessionId session, bool forceSnapshot)
             // Conditional because clearing costs a full URI re-send, and with an empty backlog
             // — the overwhelmingly common case — nothing was dropped and nothing is stale.
             if (_writer.dropTagged(session.value) != 0)
+            {
                 follow.sentHyperlinks.clear();
+                // Same reasoning, same fix: a context record whose only mention was in a dropped
+                // delta would leave the client with lines pointing at a record it never received.
+                follow.sentContexts.clear();
+                // And the revision gate with it: the pool has not moved, so without this the re-send
+                // the clear exists to force would be skipped and the records never sent again.
+                follow.contextRevisionKnown = false;
+            }
         }
         delta.snapshot = snapshot ? 1 : 0;
         delta.generation = grid.generation();

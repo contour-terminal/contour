@@ -117,6 +117,25 @@ void applyWireCell(vtbackend::LineSoA& soa,
                    proto::WireCell const& cell,
                    vtbackend::HyperlinkId hyperlink);
 
+/// What a mirror made of one wire context id.
+///
+/// The local id and the identifier it was adopted under travel together because they are always
+/// written together and always read together: keeping them in two maps keyed alike was two lookups,
+/// two insertions, and an invariant nothing enforced.
+struct MirroredContext
+{
+    /// The id THIS terminal holds the record under. Wire ids are the sender's counter, which wraps and
+    /// reuses, so a line stamped before a reuse legitimately points at the OLD record.
+    vtbackend::ContextId local;
+
+    /// The identifier last adopted under @ref local. It distinguishes a REUSED wire id — which must
+    /// get a fresh local id — from the same context being re-announced, which keeps its own.
+    std::string identifier;
+};
+
+/// Wire context id → what the mirror adopted for it.
+using ContextIdMap = std::unordered_map<uint16_t, MirroredContext>;
+
 /// Brings @p line to exactly what @p wire describes — the inverse of @ref toWireLine.
 ///
 /// Clears the row to its fill first, which is both how stale content goes and how the omitted
@@ -127,9 +146,11 @@ void applyWireCell(vtbackend::LineSoA& soa,
 /// @param wire What it should hold.
 /// @param hyperlinks Wire hyperlink id → this terminal's own id. Ids are per-terminal counters, so
 ///        a cell's id is meaningless until translated; an unmapped id becomes "no hyperlink".
+/// @param contexts Wire context id → what the mirror adopted for it. @see MirroredContext.
 void applyWireLine(vtbackend::Line& line,
                    proto::WireLine const& wire,
-                   std::unordered_map<uint16_t, vtbackend::HyperlinkId> const& hyperlinks);
+                   std::unordered_map<uint16_t, vtbackend::HyperlinkId> const& hyperlinks,
+                   ContextIdMap const& contexts);
 
 /// Restores every column of @p line, undoing the trailing-fill omission.
 ///

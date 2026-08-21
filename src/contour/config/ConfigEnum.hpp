@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/shell/Folding.hpp> // FoldJumpBehavior
+#include <vtbackend/shell/MarkArbiter.hpp>
 
 #include <array>
 #include <cstddef>
@@ -106,12 +108,40 @@ namespace detail
         ConfigEnumInfo<vtbackend::FoldJumpBehavior> {
             vtbackend::FoldJumpBehavior::Skip, "skip", "Stop at the prompt line" },
     };
+    /// Whether OSC 3008 may stand in for a shell integration that is not installed.
+    inline constexpr auto ContextMarkPolicyTable = std::array {
+        ConfigEnumInfo<vtbackend::ContextMarkPolicy> {
+            vtbackend::ContextMarkPolicy::Never, "never", "Only OSC 133 leaves marks" },
+        ConfigEnumInfo<vtbackend::ContextMarkPolicy> {
+            vtbackend::ContextMarkPolicy::WhenAlone, "when_alone", "Only while OSC 133 has said nothing" },
+    };
+
+    /// Which context types a color scheme's tint map may paint.
+    inline constexpr auto ContextTintScopeTable = std::array {
+        ConfigEnumInfo<vtbackend::ContextTintScope> { vtbackend::ContextTintScope::Off, "off", "Never tint" },
+        ConfigEnumInfo<vtbackend::ContextTintScope> {
+            vtbackend::ContextTintScope::Boundaries, "boundaries", "Only privilege and machine boundaries" },
+        ConfigEnumInfo<vtbackend::ContextTintScope> {
+            vtbackend::ContextTintScope::All, "all", "Every type the scheme sets" },
+    };
 } // namespace detail
 
 template <>
 constexpr std::span<ConfigEnumInfo<vtbackend::FoldJumpBehavior> const> configEnumValues() noexcept
 {
     return detail::FoldJumpBehaviorTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<vtbackend::ContextMarkPolicy> const> configEnumValues() noexcept
+{
+    return detail::ContextMarkPolicyTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<vtbackend::ContextTintScope> const> configEnumValues() noexcept
+{
+    return detail::ContextTintScopeTable;
 }
 
 } // namespace contour::config

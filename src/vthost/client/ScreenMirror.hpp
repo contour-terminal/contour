@@ -39,6 +39,7 @@
 #include <memory>
 #include <unordered_map>
 
+#include <vthost/GridWire.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/proto/Pdu.hpp>
 
@@ -185,6 +186,13 @@ class ScreenMirror
     /// pointing at the URI they were drawn with.
     void syncHyperlinks(RemoteScreen const& screen);
 
+    /// Brings the mirror's OSC 3008 context pool and ancestry in line with the server's.
+    ///
+    /// Ahead of the rows, and for the same reason syncHyperlinks() is: a row carries only an id while
+    /// resolving it needs the record, and the record may arrive in the SAME delta as the first row
+    /// referencing it.
+    void syncContexts(RemoteScreen const& screen);
+
     /// A pointer, not a reference: a reference member would delete copy- and move-assignment, and
     /// the binding registry holds mirrors in a map. Never null.
     vtbackend::Terminal* _terminal;
@@ -213,6 +221,13 @@ class ScreenMirror
     /// cell referencing it resolves without a lookup by string. Re-pointed, never merely inserted:
     /// the sender's id space wraps, and @see syncHyperlinks for what a reused id must do.
     std::unordered_map<uint16_t, vtbackend::HyperlinkId> _linkIds;
+
+    /// Wire context id -> what this mirror adopted for it. Separate id spaces for the same reason the
+    /// hyperlink map is separate: the sender's ContextId is a uint16_t that wraps and reuses, and a
+    /// line written before a reuse legitimately points at the OLD record. The identifier rides along
+    /// so a reused wire id is recognised as new rather than silently re-pointing every line already
+    /// stamped with it. @see vthost::MirroredContext.
+    vthost::ContextIdMap _contextIds;
     /// Server image id → the local `vtbackend::Image` built from its pixels, so a placement decodes
     /// them once. Holding the reference is also what keeps the pool entry alive: `ImagePool`'s id
     /// index is weak, so an image nothing holds is collected.

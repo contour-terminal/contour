@@ -83,6 +83,22 @@ namespace contour::session
 
 namespace
 {
+
+    /// This machine's /etc/machine-id, or empty where there is none.
+    ///
+    /// Read once at session construction rather than on every question: it cannot change while the
+    /// process runs, and the callers that need it are on the GUI path. Absent on Windows and on a system
+    /// without systemd, where the host-name comparison carries the locality test alone.
+    [[nodiscard]] std::string readLocalMachineId()
+    {
+        auto file = std::ifstream { "/etc/machine-id" };
+        if (!file)
+            return {};
+        auto value = std::string {};
+        std::getline(file, value);
+        // Trimmed, because trailing whitespace would make every comparison against a wire value fail.
+        return std::string { crispy::trimRight(value) };
+    }
     string unhandledExceptionMessage(string_view const& where, exception const& e)
     {
         return std::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
@@ -330,6 +346,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _app { app },
     _currentColorPreference { app.colorPreference() },
     _localHostName { QHostInfo::localHostName().toStdString() },
+    _localMachineId { readLocalMachineId() },
     _accumulatedPixelScroll {},
     _accumulatedAngleScroll {},
     _hyperlinkHover { _localHostName },
@@ -2091,11 +2108,15 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // cannot guard against that in an alias) reports a command that never ran, with no text to
             // copy — offering the user three rows that would all yield nothing.
             .hasLastCommand = block.has_value() && !(block->prompt.empty() && block->output.empty()),
-            // Only a working directory on this host can be opened by the local file manager. OSC 7 gives a
-            // file://HOST/PATH; a remote (SSH) cwd resolves to nullopt and grays the "Open Current Folder".
+            // Only a working directory on this host can be opened by the local file manager, and the row
+            // and the action behind it go through ONE resolver so they cannot disagree. A remote OSC 7
+            // cwd grays it out, and so does an OSC 3008 cwd behind a container boundary or from another
+            // machine -- which would otherwise open the HOST's directory of the same name, a false
+            // positive OSC 7 never had, because a context cwd carries no host authority to test.
+            // The LOCKED resolver: this whole lambda runs inside crispy::locked() above, and the
+            // terminal's mutex is not recursive.
             .hasLocalWorkingDirectory =
-                vtbackend::localWorkingDirectory(terminal().currentWorkingDirectory(), _localHostName)
-                    .has_value(),
+                resolveWorkingDirectoryLocked(vtbackend::CwdPurpose::OpenLocally).has_value(),
             // Left for the window to fill in: whether this tab holds more than one pane is not something
             // a session knows about itself.
             .hasSplits = false,
@@ -2434,25 +2455,20 @@ bool TerminalSession::operator()(actions::OpenFileManager)
     // host authority is read as a network share ("//fedora/home/..."), which does not exist locally.
     // Resolve it to a plain local path first, and only when it is on THIS host — a remote (SSH) cwd is
     // not openable here (its menu row is grayed out, but a keybinding could still reach this handler).
-    auto localPath = std::optional<std::string> {};
-    auto cwd = std::string {};
+    // The same resolver the menu row's enablement uses, so the two can never disagree about whether a
+    // directory is openable.
+    auto const resolved = resolveWorkingDirectory(vtbackend::CwdPurpose::OpenLocally);
+    if (!resolved)
     {
-        auto const l = scoped_lock { terminal() };
-        cwd = terminal().currentWorkingDirectory();
-        localPath = vtbackend::localWorkingDirectory(cwd, _localHostName);
-    }
-
-    if (!localPath)
-    {
-        // A remote (SSH) or otherwise non-local cwd cannot be opened in this host's file manager. The
-        // context-menu row for this is grayed out, but a keybinding can still reach this handler — so
-        // report why nothing happened rather than silently swallowing the request.
-        errorLog()("Cannot open file manager: working directory \"{}\" is not on the local host.", cwd);
+        // A remote (SSH) cwd, or one behind a container/VM boundary, cannot be opened in this host's
+        // file manager. The context-menu row is grayed out, but a keybinding can still reach this
+        // handler — so report why nothing happened rather than silently swallowing the request.
+        errorLog()("Cannot open file manager: the working directory is not on the local host.");
         return true;
     }
 
-    if (!_app.externalLauncher().openUrl(QUrl::fromLocalFile(QString::fromStdString(*localPath))))
-        errorLog()("Could not open folder \"{}\".", *localPath);
+    if (!_app.externalLauncher().openUrl(QUrl::fromLocalFile(QString::fromStdString(resolved->path))))
+        errorLog()("Could not open folder \"{}\".", resolved->path);
 
     return true;
 }
@@ -3275,49 +3291,61 @@ bool TerminalSession::executeAction(actions::Action const& action)
     return visit(*this, action);
 }
 
+std::optional<vtbackend::ResolvedWorkingDirectory> TerminalSession::resolveWorkingDirectory(
+    vtbackend::CwdPurpose purpose) const
+{
+    // Resolved AND returned under the lock: the resolver's intermediate views point into the ancestry,
+    // while ResolvedWorkingDirectory owns its path, so nothing escaping here outlives the guard.
+    auto const lock = scoped_lock { _terminal };
+    return resolveWorkingDirectoryLocked(purpose);
+}
+
+std::optional<vtbackend::ResolvedWorkingDirectory> TerminalSession::resolveWorkingDirectoryLocked(
+    vtbackend::CwdPurpose purpose) const
+{
+    auto const osc7 = _terminal.currentWorkingDirectory();
+    return vtbackend::resolveWorkingDirectory(_terminal.contexts(), osc7, localIdentity(), purpose);
+}
+
 std::string TerminalSession::workingDirectory() const
 {
 #ifndef _WIN32
+    // /proc FIRST on POSIX, and deliberately: it reads the pty child's own cwd, so it is always a real
+    // path on THIS machine and can never hand fork+exec a path from another filesystem namespace. It
+    // is a genuine trade rather than a free win -- it names the LOGIN shell, so it does not follow a
+    // subshell the way an OSC 3008 cwd would -- and this side of it is the conservative one.
+    //
+    // An OSC 3008 cwd is consulted only where /proc has nothing to say (see the Windows branch
+    // below), which is why the display path resolves separately.
     if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
         return ptyProcess->workingDirectory();
 #else
-    // On Windows the CWD is only known via OSC 7, which reports it as a file:// URL. Passing that raw
-    // URL to CreateProcess() as a new tab/split's working directory fails with ERROR_DIRECTORY and
-    // crashes the app, so extract the filesystem path first (fix from master's OSC-7 crash fix).
-    std::string cwdUrl;
+    // On Windows there is no /proc, so the advertised cwd is all there is: the OSC 3008 ancestry
+    // first, then OSC 7. Both are filtered for locality by the resolver -- an OSC 3008 cwd behind a
+    // container or from another machine, and an OSC 7 cwd naming a remote host, are both refused.
+    if (auto const resolved = resolveWorkingDirectory(vtbackend::CwdPurpose::Spawn))
     {
-        auto const _l = scoped_lock { _terminal };
-        cwdUrl = _terminal.currentWorkingDirectory();
+        // Existence is checked on top of that, and the reason is a crash rather than a nicety: an SSH
+        // session advertises its REMOTE cwd, and handing a path that does not exist here to a new
+        // tab's CreateProcess() fails, makes Process::start() throw, and -- being reached from a QML
+        // `session:` binding write inside a Qt event handler -- aborts the whole process.
+        std::error_code ec;
+        if (std::filesystem::is_directory(fs::path(resolved->path), ec))
+            return resolved->path;
     }
-    if (!cwdUrl.empty())
-        if (auto path = vtbackend::extractPathFromFileUrl(cwdUrl); !path.empty())
-        {
-            // The path is only usable to CreateProcess() if it exists on THIS machine. An SSH session
-            // advertises its *remote* cwd over OSC 7 (e.g. "file://remotehost/home/user" -> "/home/user"),
-            // which does not exist locally; handing it to a new local tab/split's CreateProcess() fails
-            // and Process::start() throws, and — being reached from a QML `session:` binding write inside
-            // a Qt event handler — that exception aborts the whole process. Only inherit a directory that
-            // actually exists locally; otherwise fall through to the "." sentinel (inherit our own cwd).
-            std::error_code ec;
-            if (std::filesystem::is_directory(fs::path(path), ec))
-                return path;
-        }
 #endif
     return "."s;
 }
 
 std::string TerminalSession::displayWorkingDirectory() const
 {
-    // OSC 7 first: it is the shell speaking, so it tracks a `cd` made inside a full-screen application
-    // and it is the only source that can be right for a remote session. Reported as a file:// URL.
-    auto cwdUrl = std::string {};
-    {
-        auto const lock = scoped_lock { _terminal };
-        cwdUrl = _terminal.currentWorkingDirectory();
-    }
-    if (!cwdUrl.empty())
-        if (auto path = vtbackend::extractPathFromFileUrl(cwdUrl); !path.empty())
-            return path;
+    // The OSC 3008 ancestry first, then OSC 7: both are the shell speaking, so both track a `cd` made
+    // inside a full-screen application, and both can be right for a session that is not on this
+    // machine. NOT filtered for locality, unlike workingDirectory() above -- a container's /app is
+    // exactly what the user is looking at, and a path worth SHOWING need not be one a child could be
+    // spawned in.
+    if (auto const resolved = resolveWorkingDirectory(vtbackend::CwdPurpose::Display))
+        return resolved->path;
 
     // Nothing reported (no shell integration, or not yet): fall back to where the session was started.
     // Unlike workingDirectory() this is NOT filtered for local existence — a path worth SHOWING need not

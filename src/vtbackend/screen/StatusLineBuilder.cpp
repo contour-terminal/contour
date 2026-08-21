@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <ctime>
 #include <format>
+#include <iterator>
 #include <optional>
 #include <ranges>
 #include <system_error>
@@ -89,6 +90,18 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
         return StatusLineDefinitions::Text {
             styles, tryParseStringAttribute(interpolation, "text").value_or(std::string {})
         };
+    }
+    else if constexpr (std::same_as<T, StatusLineDefinitions::Context>)
+    {
+        auto item = StatusLineDefinitions::Context {};
+        static_cast<StatusLineDefinitions::Styles&>(item) = styles;
+        if (auto const verbosity = tryParseStringAttribute(interpolation, "Verbosity"))
+            item.verbosity = StatusLineDefinitions::contextVerbosityFrom(*verbosity);
+        item.separator = tryParseStringAttribute(interpolation, "Separator");
+        if (auto const width = tryParseStringAttribute(interpolation, "MaxWidth"))
+            if (auto const columns = crispy::toInteger<10, int>(*width); columns && *columns > 0)
+                item.maxWidth = ColumnCount(*columns);
+        return item;
     }
     else if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
     {
@@ -462,6 +475,229 @@ namespace
             return std::format("{}", vt.operatingLevel());
         }
 
+        /// How one context type reads in a breadcrumb.
+        ///
+        /// A TABLE rather than a switch chain, and the prefix column is why: `container:foobar` needs
+        /// its type in front because a bare name reads like a hostname, while `zeta` and `root` are
+        /// self-describing in position. That rule lives here, one row per type, rather than being
+        /// re-decided at each call site.
+        struct SegmentRule
+        {
+            ContextType type;
+            std::string_view prefix; ///< "" for none.
+            /// Fields tried in order; the first non-empty one is shown.
+            std::array<ContextField, 2> fields;
+        };
+
+        /// Which field to show for each type. WHETHER a type is shown at the default verbosity is not
+        /// a column here: that is isBoundaryContext(), and stating it twice is how the tint and the
+        /// breadcrumb would come to disagree about what a boundary is.
+        static constexpr auto SegmentRules = std::array {
+            SegmentRule { ContextType::Remote, "", { ContextField::TargetHost, ContextField::Hostname } },
+            SegmentRule {
+                ContextType::Container, "container:", { ContextField::Container, ContextField::Comm } },
+            SegmentRule { ContextType::Vm, "vm:", { ContextField::Vm, ContextField::Comm } },
+            SegmentRule { ContextType::Elevate, "", { ContextField::TargetUser, ContextField::User } },
+            SegmentRule {
+                ContextType::ChangePrivileges, "", { ContextField::TargetUser, ContextField::User } },
+            // A session names WHERE, which is why the issue's example reads "zeta > container:foobar
+            // > root > vim": the hostname comes from the outermost context.
+            SegmentRule { ContextType::Session, "", { ContextField::Hostname, ContextField::User } },
+            SegmentRule { ContextType::Boot, "", { ContextField::Hostname, ContextField::Comm } },
+            SegmentRule { ContextType::Service, "", { ContextField::Comm, ContextField::User } },
+            SegmentRule { ContextType::Shell, "", { ContextField::Comm, ContextField::User } },
+            SegmentRule { ContextType::Command, "", { ContextField::Comm, ContextField::CommandLine } },
+            SegmentRule { ContextType::App, "", { ContextField::Comm, ContextField::User } },
+            SegmentRule { ContextType::Subcontext, "", { ContextField::TargetUser, ContextField::User } },
+        };
+
+        static_assert(SegmentRules.size() == ContextTypeList.size(),
+                      "A ContextType was added or removed. Give it a SegmentRule row, or the breadcrumb "
+                      "falls back to comm= for it without anything saying so.");
+
+        /// The value @p field names on @p record, or empty when it was not supplied.
+        ///
+        /// Generated from VTBACKEND_CONTEXT_FIELDS, so a sixteenth textual field is reachable from a
+        /// SegmentRule the moment it exists. Written out by hand, a row naming a field the switch had
+        /// forgotten yielded a silently empty segment.
+        [[nodiscard]] static std::string_view fieldOf(TerminalContext const& record, ContextField field)
+        {
+            if (!(record.present & field).any())
+                return {};
+            switch (field)
+            {
+// Only the textual kinds have a std::string to view; Enum and Uint64 fall to the default below.
+#define VTBACKEND_CONTEXT_FIELD_OF_Text(Name, Member) \
+    case ContextField::Name: return record.Member;
+#define VTBACKEND_CONTEXT_FIELD_OF_OptionalText(Name, Member) \
+    case ContextField::Name: return record.Member;
+#define VTBACKEND_CONTEXT_FIELD_OF_Id128(Name, Member) \
+    case ContextField::Name: return record.Member;
+#define VTBACKEND_CONTEXT_FIELD_OF_Uint64(Name, Member)
+#define VTBACKEND_CONTEXT_FIELD_OF_Enum(Name, Member)
+#define VTBACKEND_CONTEXT_FIELD_OF(Name, Bit, Spelling, Member, Kind, Max) \
+    VTBACKEND_CONTEXT_FIELD_OF_##Kind(Name, Member)
+                VTBACKEND_CONTEXT_FIELDS(VTBACKEND_CONTEXT_FIELD_OF)
+#undef VTBACKEND_CONTEXT_FIELD_OF
+#undef VTBACKEND_CONTEXT_FIELD_OF_Enum
+#undef VTBACKEND_CONTEXT_FIELD_OF_Uint64
+#undef VTBACKEND_CONTEXT_FIELD_OF_Id128
+#undef VTBACKEND_CONTEXT_FIELD_OF_OptionalText
+#undef VTBACKEND_CONTEXT_FIELD_OF_Text
+                default: return {};
+            }
+        }
+
+        /// Strips anything a terminal would INTERPRET.
+        ///
+        /// Defence in depth, and not theoretical: this string is handed to writeToScreenInternal(),
+        /// which parses it. The sequence decoder already rejects control bytes, so one arriving here
+        /// means a parser bug -- and without this, that bug would be an injection able to clear the
+        /// status screen from a field any program on the tty can write.
+        [[nodiscard]] static std::string sanitized(std::string_view text)
+        {
+            auto out = std::string {};
+            out.reserve(text.size());
+            for (auto const ch: text)
+                if (static_cast<unsigned char>(ch) >= 0x20 && static_cast<unsigned char>(ch) != 0x7f)
+                    out.push_back(ch);
+            return out;
+        }
+
+        /// How @p record reads in a breadcrumb at @p verbosity, or empty when it says nothing worth
+        /// showing.
+        [[nodiscard]] static std::string segmentFor(TerminalContext const& record,
+                                                    TerminalContext const* outermost,
+                                                    StatusLineDefinitions::ContextVerbosity verbosity)
+        {
+            // Plain `auto`, never `auto const*`: std::array's const_iterator is a raw pointer only in
+            // libstdc++. The MSVC STL wraps it in a class, so the pointer form fails to deduce there --
+            // which is exactly why .clang-tidy disables readability-qualified-auto.
+            auto const rule = std::ranges::find_if(
+                SegmentRules, [&](SegmentRule const& r) { return r.type == record.type; });
+            auto const known = rule != SegmentRules.end();
+
+            // The same predicate the background tint consults, so the two can never disagree about what
+            // a boundary is. An untyped context is not one, which is what the old `known &&` said.
+            if (verbosity == StatusLineDefinitions::ContextVerbosity::Boundaries
+                && !isBoundaryContext(record.type))
+                return {};
+
+            // run0 while already root, or an elevate to yourself, is not news -- and suppressing it
+            // removes the commonest honest false positive, so a SPOOFED one has to actually differ
+            // before it appears at all.
+            if (known && (record.type == ContextType::Elevate || record.type == ContextType::ChangePrivileges)
+                && outermost != nullptr && !record.targetUser.empty() && record.targetUser == outermost->user)
+                return {};
+
+            auto value = std::string_view {};
+            if (known)
+            {
+                for (auto const field: rule->fields)
+                    if (value = fieldOf(record, field); !value.empty())
+                        break;
+            }
+            else
+                value = fieldOf(record, ContextField::Comm);
+
+            if (value.empty())
+                return {};
+            return (known ? std::string { rule->prefix } : std::string {}) + sanitized(value);
+        }
+
+        /// Joins @p segments, eliding the MIDDLE when the result would exceed @p maxWidth columns.
+        [[nodiscard]] static std::string elide(std::vector<std::string> const& segments,
+                                               std::string const& separator,
+                                               ColumnCount maxWidth)
+        {
+            auto const widthOf = [](std::string_view text) {
+                // Counted in COLUMNS, not bytes: a CJK container name is two columns per codepoint and
+                // three bytes, and measuring bytes would elide text that fits.
+                auto columns = 0;
+                for (auto const codepoint: unicode::convert_to<char32_t>(text))
+                    columns += static_cast<int>(unicode::width(codepoint));
+                return columns;
+            };
+
+            auto const join = [&](std::vector<std::string> const& parts) {
+                return crispy::joinWith(parts, separator);
+            };
+
+            auto candidate = join(segments);
+            if (widthOf(candidate) <= unbox<int>(maxWidth))
+                return candidate;
+
+            // Keep both ends: the first answers *where*, the last answers *who*.
+            if (segments.size() > 2)
+            {
+                auto elided = std::vector<std::string> { segments.front(), "…", segments.back() };
+                candidate = join(elided);
+                if (widthOf(candidate) <= unbox<int>(maxWidth))
+                    return candidate;
+            }
+
+            // Still too wide: the innermost alone, cut at its own START so its tail -- the part that
+            // identifies it -- survives.
+            //
+            // Cut by CODEPOINT, never by byte: a container name is UTF-8, and erasing one byte at a
+            // time leaves the string starting on a continuation byte, which is mojibake on screen and
+            // an invalid sequence handed to writeToScreenInternal(). The ellipsis is budgeted for
+            // rather than added afterwards, because prepending it to a string already at maxWidth
+            // overflows the width by exactly the column the caller allotted.
+            auto const codepoints = unicode::convert_to<char32_t>(std::string_view { segments.back() });
+            auto const budget = unbox<int>(maxWidth) - 1; // one column for the leading '…'
+            if (budget <= 0)
+                return {};
+
+            auto kept = size_t {};
+            auto columns = 0;
+            for (auto index = codepoints.size(); index-- > 0;)
+            {
+                columns += static_cast<int>(unicode::width(codepoints[index]));
+                if (columns > budget)
+                    break;
+                kept = codepoints.size() - index;
+            }
+            if (kept == 0)
+                return {};
+
+            auto tail = std::string { "…" };
+            unicode::convert_to<char>(std::u32string_view { codepoints }.substr(codepoints.size() - kept),
+                                      std::back_inserter(tail));
+            return tail;
+        }
+
+        std::string visit(StatusLineDefinitions::Context const& item)
+        {
+            auto const& stack = vt.contexts();
+            auto const chain = stack.chain();
+            if (chain.empty())
+                return {};
+
+            auto const* const outermost = chain.front().record.get();
+            auto segments = std::vector<std::string> {};
+
+            if (item.verbosity == StatusLineDefinitions::ContextVerbosity::Active)
+            {
+                if (auto text = segmentFor(
+                        *chain.back().record, outermost, StatusLineDefinitions::ContextVerbosity::Full);
+                    !text.empty())
+                    segments.push_back(std::move(text));
+            }
+            else
+                for (auto const& entry: chain)
+                    if (auto text = segmentFor(*entry.record, outermost, item.verbosity); !text.empty())
+                        segments.push_back(std::move(text));
+
+            // Nothing to say, so the segment COLLAPSES -- and operator() drops textLeft/textRight with
+            // it, so no orphan divider is left behind. That is what keeps this affordable in the
+            // default status line: an ordinary session pays nothing for it.
+            if (segments.empty())
+                return {};
+
+            return elide(segments, item.separator.value_or(" › "), item.maxWidth);
+        }
+
         std::string visit(StatusLineDefinitions::Tabs const& tabs)
         {
             auto const tabsInfo = vt.guiTabsInfoForStatusLine();
@@ -614,6 +850,20 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
                     attributes.add("Program", v.command);
 
                 appendStyles(attributes, v);
+
+                if constexpr (std::same_as<T, StatusLineDefinitions::Context>)
+                {
+                    // Only what is NOT the default: a config Contour writes must be one Contour reads
+                    // back, and one it wrote must not gain noise. The default is read off a
+                    // default-constructed item rather than restated, so it cannot drift from the header.
+                    if (auto const name = StatusLineDefinitions::contextVerbosityName(v.verbosity);
+                        !name.empty())
+                        attributes.add("Verbosity", std::string { name });
+                    if (v.separator)
+                        attributes.add("Separator", *v.separator);
+                    if (v.maxWidth != StatusLineDefinitions::Context {}.maxWidth)
+                        attributes.add("MaxWidth", std::to_string(unbox(v.maxWidth)));
+                }
 
                 if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
                 {

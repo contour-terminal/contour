@@ -43,20 +43,44 @@ namespace detail
         return lines;
     }
 
+    /// Internal linkage, matching the `static` helpers around it: this is reflow's own vocabulary and
+    /// nothing outside this translation unit names it.
+    namespace
+    {
+        /// Everything a logical line carries that survives being re-chopped into physical rows.
+        ///
+        /// One parameter rather than four, and one local rather than four kept in step by hand: reflow
+        /// assigns these together, captures them together and passes them together, so a fifth attribute is
+        /// a member here instead of an edit at six sites. It also un-swaps the two ColumnOffsets, which as
+        /// adjacent parameters of one type could be exchanged at any call site without a diagnostic.
+        struct LogicalLineAttributes
+        {
+            LineFlags flags = LineFlag::None;
+
+            /// An offset into the LOGICAL line, carried by its head alone: re-chopping the line into
+            /// different physical pieces leaves it untouched.
+            ColumnOffset commandEndOffset {};
+
+            /// Likewise head-only. @see commandEndOffset.
+            ColumnOffset promptEndOffset {};
+
+            /// NOT head-only, unlike the two above: those name a border WITHIN the logical line, while this
+            /// names who WROTE it, and a wrap does not change the author of a continuation.
+            ContextId contextId {};
+        };
+    } // namespace
+
     /// Splits a logical line (stored as a LineSoA) into fixed-width Line objects.
-    /// @param baseFlags The logical line's flags; only its head keeps the semantic marks among them.
-    /// @param commandEndOffset The logical line's command-end offset, likewise carried by the head alone.
-    /// @param promptEndOffset The logical line's prompt-end offset, likewise carried by the head alone.
+    /// @param attributes What the logical line carries; only its head keeps the head-only members.
     /// @returns number of inserted lines.
     static LineCount addNewWrappedLines(Lines& targetLines,
                                         ColumnCount newColumnCount,
                                         LineSoA const& logicalLineBuffer,
                                         size_t usedColumns,
-                                        LineFlags baseFlags,
-                                        ColumnOffset commandEndOffset,
-                                        ColumnOffset promptEndOffset,
+                                        LogicalLineAttributes const& attributes,
                                         bool initialNoWrap)
     {
+        auto const& baseFlags = attributes.flags;
         auto const newCols = unbox<size_t>(newColumnCount);
         int i = 0;
         size_t offset = 0;
@@ -75,9 +99,11 @@ namespace detail
                                      newColumnCount);
             if (isHead)
             {
-                targetLines.back().setCommandEndOffset(commandEndOffset);
-                targetLines.back().setPromptEndOffset(promptEndOffset);
+                targetLines.back().setCommandEndOffset(attributes.commandEndOffset);
+                targetLines.back().setPromptEndOffset(attributes.promptEndOffset);
             }
+            // EVERY chunk, head or not. @see LogicalLineAttributes::contextId.
+            targetLines.back().adoptContext(attributes.contextId);
             ++i;
         };
 
@@ -766,9 +792,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
             LineSoA logicalLineBuffer;
             initializeLineSoA(logicalLineBuffer, ColumnCount(0));
             size_t logicalLineUsed = 0;
-            LineFlags logicalLineFlags = LineFlag::None;
-            ColumnOffset logicalLineCommandEndOffset {};
-            ColumnOffset logicalLinePromptEndOffset {};
+            auto logicalLineAttributes = detail::LogicalLineAttributes {};
 
             auto const appendToLogicalLine = [&logicalLineBuffer, &logicalLineUsed](Line const& line) {
                 auto const cols = unbox<size_t>(line.size());
@@ -786,18 +810,14 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                                            &grownLines,
                                            &logicalLineBuffer,
                                            &logicalLineUsed,
-                                           &logicalLineFlags,
-                                           &logicalLineCommandEndOffset,
-                                           &logicalLinePromptEndOffset]() {
+                                           &logicalLineAttributes]() {
                 if (logicalLineUsed > 0)
                 {
                     detail::addNewWrappedLines(grownLines,
                                                newColumnCount,
                                                logicalLineBuffer,
                                                logicalLineUsed,
-                                               logicalLineFlags,
-                                               logicalLineCommandEndOffset,
-                                               logicalLinePromptEndOffset,
+                                               logicalLineAttributes,
                                                true);
                     initializeLineSoA(logicalLineBuffer, ColumnCount(0));
                     logicalLineUsed = 0;
@@ -824,9 +844,12 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                     else
                     {
                         appendToLogicalLine(line);
-                        logicalLineFlags = line.flags().without(LineFlag::Wrapped);
-                        logicalLineCommandEndOffset = line.commandEndOffset();
-                        logicalLinePromptEndOffset = line.promptEndOffset();
+                        logicalLineAttributes = {
+                            .flags = line.flags().without(LineFlag::Wrapped),
+                            .commandEndOffset = line.commandEndOffset(),
+                            .promptEndOffset = line.promptEndOffset(),
+                            .contextId = line.contextId(),
+                        };
                     }
                 }
             }
@@ -878,7 +901,13 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
             LineSoA wrappedColumns;
             initializeLineSoA(wrappedColumns, ColumnCount(0));
             size_t wrappedUsed = 0;
-            LineFlags previousFlags = _lines.front().inheritableFlags();
+            // A run of physical rows being rejoined into one logical line was all written by one
+            // context, so the chunks that run is re-split into all belong to it -- which is why the
+            // context travels beside the flags rather than being defaulted per chunk. The two offsets
+            // stay at zero here: a shrink emits only continuations, which carry neither.
+            auto previousAttributes =
+                detail::LogicalLineAttributes { .flags = _lines.front().inheritableFlags(),
+                                                .contextId = _lines.front().contextId() };
 
             auto const totalLineCount = unbox<size_t>(_pageSize.lines + maxHistoryLineCount());
             shrunkLines.reserve(totalLineCount);
@@ -891,7 +920,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
 
                 if (wrappedUsed > 0)
                 {
-                    if (line.wrapped() && line.inheritableFlags() == previousFlags)
+                    if (line.wrapped() && line.inheritableFlags() == previousAttributes.flags)
                     {
                         // Prepend wrapped columns to this line using SoA copyColumns
                         auto const cols = unbox<size_t>(line.size());
@@ -907,7 +936,13 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                         // is guarded on it), so it carries no command-end offset to lose — but say so out
                         // loud rather than let the constructor's default quietly stand in for the reason.
                         Require(line.commandEndOffset() == ColumnOffset(0));
+                        // Carried across the rebuild explicitly. Unlike the offsets above, the context
+                        // is NOT default-correct here: this line and the columns being prepended to it
+                        // are two physical pieces of ONE logical line, so they share an author, and a
+                        // fresh Line would silently report none.
+                        auto const carriedContext = line.contextId();
                         line = Line(line.flags(), std::move(merged), ColumnCount::cast_from(totalCols));
+                        line.adoptContext(carriedContext);
                     }
                     else
                     {
@@ -917,12 +952,11 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                                                                                  newColumnCount,
                                                                                  wrappedColumns,
                                                                                  wrappedUsed,
-                                                                                 previousFlags,
-                                                                                 ColumnOffset(0),
-                                                                                 ColumnOffset(0),
+                                                                                 previousAttributes,
                                                                                  false);
                         numLinesWritten += numLinesInserted;
-                        previousFlags = line.inheritableFlags();
+                        previousAttributes = { .flags = line.inheritableFlags(),
+                                               .contextId = line.contextId() };
                     }
                     wrappedUsed = 0;
                     initializeLineSoA(wrappedColumns, ColumnCount(0));
@@ -930,7 +964,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                 else
                 {
                     line.setWrappable(true);
-                    previousFlags = line.inheritableFlags();
+                    previousAttributes = { .flags = line.inheritableFlags(), .contextId = line.contextId() };
                 }
 
                 auto overflow = line.reflow(newColumnCount);
@@ -947,14 +981,8 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
             }
             if (wrappedUsed > 0)
             {
-                numLinesWritten += detail::addNewWrappedLines(shrunkLines,
-                                                              newColumnCount,
-                                                              wrappedColumns,
-                                                              wrappedUsed,
-                                                              previousFlags,
-                                                              ColumnOffset(0),
-                                                              ColumnOffset(0),
-                                                              false);
+                numLinesWritten += detail::addNewWrappedLines(
+                    shrunkLines, newColumnCount, wrappedColumns, wrappedUsed, previousAttributes, false);
             }
             Require(unbox<size_t>(numLinesWritten) == shrunkLines.size());
             Require(numLinesWritten >= _pageSize.lines);

@@ -232,6 +232,55 @@ struct MouseState
     bool operator==(MouseState const&) const = default;
 };
 
+/// The presence bits a context record's `present` field may carry, as the WIRE numbers them.
+///
+/// Proto-owned rather than taken from vtbackend, because it travels verbatim: a bit this build does
+/// not know is cleared on decode so the field reads that follow stay in step with the sender. The
+/// vtbackend side is pinned against this in vthost/ContextWire.hpp, which is where a renumbering
+/// becomes a build error instead of a silent protocol change.
+constexpr inline uint16_t ContextPresentMask = 0x7FFF; // bits 0..14: fifteen fields
+
+/// One OSC 3008 hierarchical context, as the host holds it.
+///
+/// The same id-plus-pool shape @ref HyperlinkEntry has, one level up: a grid LINE carries the 16-bit
+/// id and the record travels in a side table, sent once per connection on first reference so it is
+/// immune to the sender's own retention bound dropping it later.
+///
+/// `present` is what keeps the common record small AND what keeps it honest. Only the fields it names
+/// are encoded, so a systemd `type=command` context sends six of fifteen -- and a receiver can still
+/// tell "sent empty" from "never mentioned", which is what lets the nearest-cwd walk skip a context
+/// rather than stop at it with an empty answer.
+struct WireContext
+{
+    uint16_t id = 0;
+    uint16_t parent = 0;
+    std::string identifier; ///< The application's own CTXID, unescaped.
+    uint8_t type = 0;       ///< vtbackend::ContextType.
+    uint16_t present = 0;   ///< vtbackend::ContextFields bits; validated, never cast blindly.
+
+    /// Only the fields `present` names carry meaning; the rest are left empty by the encoder.
+    std::string user;
+    std::string hostname;
+    std::string machineId;
+    std::string bootId;
+    std::string comm;
+    std::string workingDirectory;
+    std::string commandLine;
+    std::string vm;
+    std::string container;
+    std::string targetUser;
+    std::string targetHost;
+    std::string sessionId;
+    uint64_t pid = 0;
+    uint64_t pidFdId = 0;
+
+    uint8_t exitKind = 0; ///< vtbackend::ContextExit.
+    uint8_t signal = 0;   ///< vtbackend::ContextSignal, as a Linux signal number.
+    uint64_t status = 0;
+
+    bool operator==(WireContext const&) const = default;
+};
+
 /// Everything renditional a session carries OUTSIDE its grid cells — replayed
 /// on attach and after every ResyncRequired.
 struct SessionState
@@ -265,6 +314,14 @@ struct SessionState
     /// bar an operation still in flight had drawn. @see vtbackend::ProgressState.
     uint8_t progressState = 0;      ///< vtbackend::ProgressState: 0 inactive … 4 paused.
     uint8_t progressPercentage = 0; ///< 0..100.
+    /// The OSC 3008 context pool and the ancestry, stated OUTRIGHT rather than behind a changed-gate.
+    ///
+    /// A snapshot has to assert every field including one sitting at its default, because it routes
+    /// state through here rather than through a delta's gate -- and the server, having recorded the
+    /// value as sent, never re-sends it. An EMPTY ancestry is exactly such a value, and is how a
+    /// Kitty-keyboard reset used to get lost.
+    std::vector<WireContext> contexts;
+    std::vector<uint16_t> contextChain; ///< The ancestry, outermost first; empty when there is none.
     bool operator==(SessionState const&) const = default;
 };
 
@@ -294,6 +351,10 @@ struct WireLine
     /// The bit values are frozen because they travel verbatim; `vthost/GridWire.cpp` pins them, so
     /// renumbering one is a build break rather than a silent mis-decode against an older peer.
     uint16_t flags = 0;
+    /// The OSC 3008 context that wrote this row, or 0 for none. Resolved against the context pool the
+    /// snapshot and deltas carry; an id with no record simply resolves to nothing, exactly as an
+    /// unmapped hyperlink id does.
+    uint16_t contextId = 0;
     /// Where the prompt stopped and where the previous command's output stopped, as LOGICAL columns
     /// (they may exceed @ref columns on a row whose logical line wrapped). Both are meaningful only
     /// with the matching flag — `PromptEnd`, `CommandEnd` — set in @ref flags, and both belong to
@@ -439,6 +500,15 @@ struct Delta
     uint8_t progressChanged = 0;
     uint8_t progressState = 0;      ///< vtbackend::ProgressState: 0 inactive … 4 paused.
     uint8_t progressPercentage = 0; ///< 0..100.
+    /// Set (1) when the OSC 3008 ancestry moved in this batch; `activeContext` then holds the id now
+    /// in effect, and 0 means the ancestry is empty.
+    uint8_t contextChanged = 0;
+    uint16_t activeContext = 0;
+    /// Context records first referenced in this batch, in the same "sent once per connection" shape
+    /// as @ref hyperlinks. Not gated: like the hyperlink table it is simply empty when there is
+    /// nothing new to say, so a bare `!contexts.empty()` would be a second way to spell the same
+    /// thing and hasChanges() below does not need one.
+    std::vector<WireContext> contexts;
 
     /// Whether this delta says anything about the SESSION at all — a snapshot, changed rows, or any
     /// of the gated fields above.
@@ -457,7 +527,7 @@ struct Delta
         return snapshot != 0 || !lines.empty() || titleChanged != 0 || cursorShapeChanged != 0
                || cwdChanged != 0 || colorsChanged != 0 || statusChanged != 0 || statusLinesChanged != 0
                || kittyKeyboardChanged != 0 || modifyOtherKeysChanged != 0 || mouseChanged != 0
-               || progressChanged != 0;
+               || progressChanged != 0 || contextChanged != 0 || !contexts.empty();
     }
 
     bool operator==(Delta const&) const = default;

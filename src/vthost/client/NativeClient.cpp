@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <iterator>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -51,6 +52,12 @@ void RemoteScreen::apply(proto::SessionState const& state)
     mouse = state.mouse;
     progressState = state.progressState;
     progressPercentage = state.progressPercentage;
+
+    // Stated outright, and the ancestry REPLACED rather than merged: a snapshot is the whole truth
+    // about the session, so an ancestry that emptied since the last one has to arrive as empty.
+    for (auto const& context: state.contexts)
+        contexts.insert_or_assign(context.id, context);
+    contextChain = state.contextChain;
 }
 
 void RemoteScreen::apply(proto::Delta const& delta)
@@ -115,6 +122,31 @@ void RemoteScreen::apply(proto::Delta const& delta)
         imageCells[entry.stableId][entry.column] = entry;
     for (auto const& entry: delta.hyperlinks)
         hyperlinks.insert_or_assign(entry.id, entry.uri);
+
+    for (auto const& context: delta.contexts)
+        contexts.insert_or_assign(context.id, context);
+    if (delta.contextChanged != 0)
+    {
+        // The delta carries only the ACTIVE id; the ancestry above it is rebuilt from the records'
+        // parent links, which every record carries. Cheaper than resending the whole chain on every
+        // command, and it cannot disagree with the records, being derived from them.
+        contextChain.clear();
+        // Every id is visited at most once, which is what makes the walk TOTAL. A self-reference is
+        // not the only cycle a peer can present: the sender's id space is a uint16_t that wraps and
+        // reuses, so a long-lived session can legitimately end up with A.parent == B and B.parent == A
+        // in this accumulated table, and a bare "stop when parent == id" would then spin forever
+        // appending to contextChain until the process ran out of memory.
+        auto visited = std::unordered_set<uint16_t> {};
+        for (auto id = delta.activeContext; id != 0 && visited.insert(id).second;)
+        {
+            contextChain.push_back(id);
+            auto const it = contexts.find(id);
+            if (it == contexts.end())
+                break; // unknown parent: the chain is as much of the ancestry as this mirror has
+            id = it->second.parent;
+        }
+        std::ranges::reverse(contextChain); // outermost first, as SessionState spells it
+    }
 
     // Trim client-side scrollback. The server's floor is authoritative — a
     // `clear`/CSI 3 J jumps it up with no line changes, so honoring it is what

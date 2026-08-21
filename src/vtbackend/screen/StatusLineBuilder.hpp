@@ -3,9 +3,12 @@
 
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/TerminalContext.hpp>
 
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -45,6 +48,65 @@ namespace StatusLineDefinitions
     struct TraceMode: Styles {};
     struct VTType: Styles {};
 
+    /// What a `{Context}` breadcrumb shows of the OSC 3008 ancestry.
+    enum class ContextVerbosity : uint8_t
+    {
+        /// Only the contexts that name a privilege or machine boundary, and NOTHING at all when there
+        /// is none -- the same collapse ProtectedMode and TraceMode use. That is what lets this ship
+        /// in the default indicator line: on a stock systemd install the shim emits only
+        /// session/shell/command, so the segment costs an ordinary session nothing until the user
+        /// runs run0, ssh, or enters a container.
+        Boundaries = 0,
+        Full,   ///< The whole ancestry, root-first: "zeta > container:foobar > root > vim".
+        Active, ///< The innermost context alone.
+    };
+
+    /// The attribute spelling of @p verbosity, or an empty view for the default.
+    ///
+    /// Paired with @ref contextVerbosityFrom rather than left as two if-chains in the parser and the
+    /// serializer: those face in opposite directions, and a spelling that disagreed between them was a
+    /// silent round-trip failure that lost the whole placeholder. Same shape as contextTypeName /
+    /// contextTypeFrom.
+    [[nodiscard]] constexpr std::string_view contextVerbosityName(ContextVerbosity verbosity) noexcept
+    {
+        switch (verbosity)
+        {
+            case ContextVerbosity::Full: return "Full";
+            case ContextVerbosity::Active: return "Active";
+            case ContextVerbosity::Boundaries: break;
+        }
+        return {};
+    }
+
+    /// The verbosity @p name spells, or @ref ContextVerbosity::Boundaries when it spells none.
+    ///
+    /// An unrecognised spelling keeps the DEFAULT rather than making the whole placeholder unknown: a
+    /// typo in one attribute must not silently delete the segment.
+    [[nodiscard]] constexpr ContextVerbosity contextVerbosityFrom(std::string_view name) noexcept
+    {
+        if (name == contextVerbosityName(ContextVerbosity::Full))
+            return ContextVerbosity::Full;
+        if (name == contextVerbosityName(ContextVerbosity::Active))
+            return ContextVerbosity::Active;
+        return ContextVerbosity::Boundaries;
+    }
+
+    struct Context: Styles
+    {
+        ContextVerbosity verbosity = ContextVerbosity::Boundaries;
+
+        /// Defaulted explicitly, unlike Tabs::separator: the settings editor builds every item it does
+        /// not special-case as `T { styles }`, and a member without an initializer makes that a
+        /// -Wmissing-field-initializers error under -Werror.
+        std::optional<std::string> separator {};
+
+        /// Widest the breadcrumb may draw, in COLUMNS -- not bytes, because a container name is UTF-8
+        /// and may be double-width. Beyond it the MIDDLE is elided and both ends kept: the first
+        /// segment answers *where* and the last answers *who*, and the ones between are the least
+        /// costly to lose.
+        ColumnCount maxWidth { 32 };
+    };
+
     struct Tabs: Styles
     {
         std::optional<RGBColor> activeColor;
@@ -69,7 +131,8 @@ namespace StatusLineDefinitions
         Title,
         TraceMode,
         VTType,
-        Tabs
+        Tabs,
+        Context
     >;
     // clang-format on
 
@@ -157,6 +220,9 @@ namespace StatusLineDefinitions
 
     template <> struct ItemTraits<Tabs>
     { static constexpr std::string_view Name = "Tabs", Label = "Tab strip", Sample = "1 2 3"; };
+
+    template <> struct ItemTraits<Context>
+    { static constexpr std::string_view Name = "Context", Label = "Context breadcrumb", Sample = "container:build \u203a root"; };
 
     template <> struct ItemTraits<Text>
     { static constexpr std::string_view Name = "Text", Label = "Static text", Sample = "text"; };

@@ -28,6 +28,20 @@ namespace
         return info ? info->uri : std::string { "<unresolved>" };
     }
 
+    /// @return The context identifier @p id names on @p terminal, or empty for "no context".
+    ///
+    /// Compared by IDENTIFIER rather than by id, for the same reason a hyperlink is compared by URI:
+    /// the two sides mint their own ids, so equal ids would be meaningless and unequal ones a false
+    /// positive. An id whose record has aged out of the retained pool reads as "<unresolved>", which
+    /// is a real difference worth reporting if only one side lost it.
+    [[nodiscard]] std::string contextOf(vtbackend::Terminal const& terminal, uint16_t id)
+    {
+        if (id == 0)
+            return {};
+        auto const* const record = terminal.contexts().find(vtbackend::ContextId { id });
+        return record ? record->identifier : std::string { "<unresolved>" };
+    }
+
     /// Names the line flags set in @p raw, so a report says `Wrapped` rather than `0x2`.
     ///
     /// Through vtbackend's own formatter, which is generated from the same table as the
@@ -277,6 +291,13 @@ std::vector<ParityGap> compareGrids(vtbackend::Terminal const& server,
         for (auto const& field: LineFields)
             if (auto const want = field.render(expected), got = field.render(actual); want != got)
                 note(gaps, maxGaps, row, -1, std::string { field.name }, want, got);
+
+        // Outside the table, for the reason the hyperlink check below is: resolving a context id
+        // needs the TERMINAL, and the two sides mint their own ids.
+        if (auto const want = contextOf(server, expected.contextId),
+            got = contextOf(mirror, actual.contextId);
+            want != got)
+            note(gaps, maxGaps, row, -1, "context", want, got);
 
         // Expanded first: how a row is STORED (blank vs materialized) decides how much of it
         // travels, and that is not a parity difference.

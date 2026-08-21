@@ -18,6 +18,7 @@ set(vtbackend_HEADERS
     grid/CellUtil.hpp
     vt/Charset.hpp
     core/Color.hpp
+    core/ContextId.hpp
     core/ColorPalette.hpp
     shell/CommandBlocks.hpp
     vt/ControlCode.hpp
@@ -28,6 +29,7 @@ set(vtbackend_HEADERS
     vt/Functions.hpp
     core/GraphicsAttributes.hpp
     grid/Grid.hpp
+    vt/HierarchicalContext.hpp
     input/vi/HintModeHandler.hpp
     core/Hyperlink.hpp
     core/Image.hpp
@@ -41,6 +43,7 @@ set(vtbackend_HEADERS
     core/LineFlags.hpp
     grid/LineSoA.hpp
     Logging.hpp
+    shell/MarkArbiter.hpp
     input/MatchModes.hpp
     graphics/MessageParser.hpp
     testing/MockTerm.hpp
@@ -67,6 +70,7 @@ set(vtbackend_HEADERS
     screen/Terminal.hpp
     screen/TerminalTestFixtures.hpp
     testing/TestHelpers.hpp
+    core/TerminalContext.hpp
     core/TextScale.hpp
     vt/TextSizing.hpp
     vt/VTType.hpp
@@ -75,6 +79,7 @@ set(vtbackend_HEADERS
     input/vi/ViInputHandler.hpp
     screen/Viewport.hpp
     core/WindowSizeStack.hpp
+    core/WorkingDirectory.hpp
     graphics/regis/ReGISColor.hpp
     graphics/regis/ReGISContext.hpp
     graphics/regis/ReGISFont.hpp
@@ -91,6 +96,9 @@ set(vtbackend_SOURCES
     vt/ProgressState.cpp
     core/Color.cpp
     core/ColorPalette.cpp
+    core/TerminalContext.cpp
+    vt/HierarchicalContext.cpp
+    core/WorkingDirectory.cpp
     shell/CommandBlocks.cpp
     shell/Folding.cpp
     shell/PromptRegion.cpp
@@ -179,6 +187,11 @@ if(LIBTERMINAL_TESTING)
         vt/ProgressState_test.cpp
         core/Color_test.cpp
         core/ColorPalette_test.cpp
+        core/TerminalContext_test.cpp
+        vt/HierarchicalContext_test.cpp
+        screen/Screen_context_test.cpp
+        shell/MarkArbiter_test.cpp
+        core/WorkingDirectory_test.cpp
         shell/CommandBlocks_test.cpp
         shell/Folding_test.cpp
         shell/PromptRegion_test.cpp

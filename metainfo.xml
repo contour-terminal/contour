@@ -115,6 +115,14 @@
           <li>Adds the global folding config section and the actions CollapseAllFolds, CollapseLastFold, ExpandAllFolds, ToggleFold and ToggleLastFold</li>
           <li>Vi normal mode moves in visible lines, stepping over collapsed blocks; folding.on_jump_into_fold picks whether a search hit inside one expands it or is skipped</li>
           <li>Removes the deprecated SETMARK sequence (CSI &gt; M); use OSC 133 ; A instead</li>
+          <li>Adds support for OSC 3008, systemd's hierarchical context signalling (UAPI.15): the nested stack of contexts a shell, run0, ssh or a container runtime opens around whatever runs inside it. systemd 258 and later emit these around every interactive command with no configuration at all, so on such a system Contour learns command boundaries, exit statuses and working directories for free (#2078)</li>
+          <li>On a system where OSC 3008 arrives and no shell integration is installed, prompts now get fold controls, mark-jump stops and "copy last command output" without any setup. A shell integration, if one is installed, keeps full ownership of the markers and nothing changes</li>
+          <li>Reports how a command really ended: OSC 3008 distinguishes a crash from an interruption from a plain non-zero exit, and names the signal — which OSC 133's numeric exit code cannot express</li>
+          <li>Adds the {Context} indicator status-line placeholder: a breadcrumb of the contexts above the one you are typing in. It shows only privilege and machine boundaries by default and draws nothing at all when there are none, so an ordinary shell session is unchanged</li>
+          <li>Adds an optional tint map to color schemes, giving the page background a different shade under an elevated, containerised, virtualised or remote context. No shipped scheme sets one, deliberately: every field OSC 3008 carries is a display hint any program on the terminal can write, so the colour is something you opt into rather than something that appears</li>
+          <li>The tab tooltip and "Open Current Folder" now follow the working directory OSC 3008 reports. A directory belonging to a container, a VM or another machine is never opened locally — the menu entry greys out rather than opening the host's directory of the same name. Set osc_context.enabled to false to opt out of all of it</li>
+          <li>A contour attach pane gets the same context tracking, tinting and breadcrumb a local one does</li>
+          <li>Fixes stale fold ranges after a command finished: OSC 133's ;B and ;D wrote their line flag without invalidating the ranges derived from it, so anything reading them between the end of a command and the next prompt saw the state from before</li>
           <li>Draws U+25BC and U+25B6 with the built-in box-drawing renderer, so they no longer depend on the font</li>
         </ul>
       </description>
