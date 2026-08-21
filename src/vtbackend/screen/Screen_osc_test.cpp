@@ -913,7 +913,7 @@ TEST_CASE("screenshot.OSC533", "[screen][screenshot]")
         auto const reply = mock.terminal.peekInput();
         // A PM reply, never an OSC -- replaying it into a terminal must not start a new screenshot.
         CHECK(reply.starts_with("\033^533;0;1;1;1;3;5;0;0;0;"));
-        CHECK(reply.find("\033]533") == std::string::npos);
+        CHECK(!reply.contains("\033]533"));
         CHECK(decodeScreenshot(reply) == "ABCDE\nfghij\n12345\n");
         // ... and it ends with the end-of-data message.
         CHECK(reply.ends_with("\033^533;0;0\033\\"));
@@ -954,11 +954,11 @@ TEST_CASE("screenshot.OSC533", "[screen][screenshot]")
         CHECK(reply.starts_with("\033^533;0;1;1;1;1;5;1;0;0;"));
         auto const content = decodeScreenshot(reply);
         CHECK(content.ends_with("\r\n"));
-        CHECK(content.find("ABCDE") != std::string::npos);
+        CHECK(content.contains("ABCDE"));
         // The ESC bytes live inside the base64 payload, never raw on the wire -- which is the whole
         // reason the payload is encoded.
-        CHECK(content.find('\033') != std::string::npos);
-        CHECK(reply.find("\033[31m") == std::string::npos);
+        CHECK(content.contains('\033'));
+        CHECK(!reply.contains("\033[31m"));
     }
 
     SECTION("an inverted region is refused rather than answered with nothing")

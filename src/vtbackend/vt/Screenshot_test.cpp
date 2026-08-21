@@ -316,7 +316,7 @@ TEST_CASE("Screenshot.reply.control_characters_never_reach_the_wire", "[screensh
     auto const body = std::string_view { messages[0] };
     auto const payload = body.substr(0, body.size() - 2);
     CHECK(payload.find('\033', 1) == std::string_view::npos);
-    CHECK(payload.find('\007') == std::string_view::npos);
+    CHECK(!payload.contains('\007'));
 }
 
 TEST_CASE("Screenshot.reply.ends_with_an_end_of_data_message", "[screenshot]")
@@ -342,7 +342,7 @@ TEST_CASE("Screenshot.reply.ends_with_an_end_of_data_message", "[screenshot]")
 
 TEST_CASE("Screenshot.reply.splits_content_into_chunks", "[screenshot]")
 {
-    auto const content = std::string(MaxChunkSize * 2 + 10, 'x');
+    auto const content = std::string((MaxChunkSize * 2) + 10, 'x');
     auto const request =
         Request { .id = 0,
                   .area = Rect { .top = Top(0), .left = Left(0), .bottom = Bottom(0), .right = Right(0) },
@@ -368,7 +368,7 @@ TEST_CASE("Screenshot.reply.chunks_reassemble_either_way", "[screenshot]")
     CHECK(MaxChunkSize % 3 == 0);
 
     auto content = std::string {};
-    for (auto const i: std::views::iota(0u, MaxChunkSize * 2 + 7))
+    for (auto const i: std::views::iota(0u, (MaxChunkSize * 2) + 7))
         content += static_cast<char>('a' + (i % 26));
 
     auto const request =

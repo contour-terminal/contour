@@ -163,7 +163,7 @@ TEST_CASE("SixelEncoder falls back to a fixed cut when the palette overflows", "
 
     auto const sequence = image.encode();
     CHECK(colorDefinitionsIn(sequence) <= MaxSixelPaletteSize);
-    CHECK(colorDefinitionsIn(sequence) == 6u * 7u * 6u); // the fixed cut, and nothing else
+    CHECK(colorDefinitionsIn(sequence) == size_t { 6 } * 7 * 6); // the fixed cut, and nothing else
 
     auto const decoded = decode(sequence, ImageSize { Width(256), Height(256) });
     CHECK(decoded.size() == image.size);
