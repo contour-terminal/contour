@@ -1021,8 +1021,8 @@ void TerminalSession::openDocument(std::string_view fileOrUrl)
             url = QUrl::fromLocalFile(fileInfo.absoluteFilePath());
     }
 
-    if (!_app.externalLauncher().openUrl(url))
-        errorLog()("Could not open document \"{}\".", fileOrUrl);
+    if (auto const opened = _app.externalLauncher().openUrl(url); !opened)
+        errorLog()("Could not open document \"{}\": {}.", fileOrUrl, platform::describe(opened.error()));
 }
 
 void TerminalSession::inspect()
@@ -2443,8 +2443,12 @@ bool TerminalSession::operator()(actions::OpenConfiguration event)
         return true;
     }
 
-    if (!_app.externalLauncher().openUrl(QUrl(QString::fromUtf8(_config.configFile.string().c_str()))))
-        errorLog()("Could not open configuration file \"{}\".", _config.configFile.generic_string());
+    if (auto const opened =
+            _app.externalLauncher().openUrl(QUrl(QString::fromUtf8(_config.configFile.string().c_str())));
+        !opened)
+        errorLog()("Could not open configuration file \"{}\": {}.",
+                   _config.configFile.generic_string(),
+                   platform::describe(opened.error()));
 
     return true;
 }
@@ -2467,8 +2471,10 @@ bool TerminalSession::operator()(actions::OpenFileManager)
         return true;
     }
 
-    if (!_app.externalLauncher().openUrl(QUrl::fromLocalFile(QString::fromStdString(resolved->path))))
-        errorLog()("Could not open folder \"{}\".", resolved->path);
+    if (auto const opened =
+            _app.externalLauncher().openUrl(QUrl::fromLocalFile(QString::fromStdString(resolved->path)));
+        !opened)
+        errorLog()("Could not open folder \"{}\": {}.", resolved->path, platform::describe(opened.error()));
 
     return true;
 }
@@ -2476,8 +2482,10 @@ bool TerminalSession::operator()(actions::OpenFileManager)
 bool TerminalSession::operator()(actions::OpenSelection)
 {
     crispy::locked(_terminal, [&]() {
-        (void) _app.externalLauncher().openUrl(
-            QUrl(QString::fromUtf8(terminal().extractSelectionText().c_str())));
+        auto const selection = terminal().extractSelectionText();
+        if (auto const opened = _app.externalLauncher().openUrl(QUrl(QString::fromUtf8(selection.c_str())));
+            !opened)
+            errorLog()("Could not open selection \"{}\": {}.", selection, platform::describe(opened.error()));
     });
     return true;
 }
@@ -3730,7 +3738,10 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
         }
     }
 
-    (void) _app.externalLauncher().openUrl(url);
+    if (auto const opened = _app.externalLauncher().openUrl(url); !opened)
+        errorLog()("Could not follow hyperlink \"{}\": {}.",
+                   url.toString().toStdString(),
+                   platform::describe(opened.error()));
 }
 
 void TerminalSession::onConfigReload()

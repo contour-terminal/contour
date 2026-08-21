@@ -2211,12 +2211,12 @@ TEST_CASE("TerminalSession: NewTerminal with spawn_new_process launches a detach
 TEST_CASE("TerminalSession: the opener actions log (do not crash) when the launcher fails",
           "[contour][session][actions]")
 {
-    // openUrl returning false drives the "could not open" error-log branch of OpenConfiguration /
+    // openUrl failing drives the "could not open" error-log branch of OpenConfiguration /
     // OpenFileManager / OpenSelection — a diagnostic, not a crash.
     contour::test::TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     namespace actions = contour::actions;
-    testApp.launcher().openUrlResult = false;
+    testApp.launcher().openUrlError = contour::platform::LaunchError::NoHandler;
 
     // A local cwd, so OpenFileManager reaches its openUrl() (and thus the failure branch) rather than
     // short-circuiting on an absent/remote directory.

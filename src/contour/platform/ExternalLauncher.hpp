@@ -4,8 +4,38 @@
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
 
+#include <cstdint>
+#include <expected>
+#include <string_view>
+
 namespace contour::platform
 {
+
+/// Why a resource could not be opened. Each value names a distinct, user-actionable cause, so the
+/// caller can report WHY nothing happened rather than just that nothing did.
+///
+/// Every cause here is knowable without a round trip to the desktop — @see ExternalLauncher::openUrl
+/// for why that matters and what is deliberately NOT in this enumeration.
+enum class LaunchError : std::uint8_t
+{
+    InvalidUrl = 0, ///< The URL is empty, or not something a handler could be found for.
+    NoHandler,      ///< Nothing on this desktop is registered to open it.
+    DispatchFailed, ///< The request could not be handed to the platform at all.
+};
+
+/// A human-readable explanation of @p error, for logs and user-facing notices.
+/// @param error The failure to describe.
+/// @return A short sentence naming the cause.
+[[nodiscard]] constexpr std::string_view describe(LaunchError error) noexcept
+{
+    switch (error)
+    {
+        case LaunchError::InvalidUrl: return "the address is not a valid URL";
+        case LaunchError::NoHandler: return "no application is registered to open it";
+        case LaunchError::DispatchFailed: return "the desktop could not be asked to open it";
+    }
+    return "unknown error";
+}
 
 /// Launches external resources on behalf of a terminal session: opening URLs/documents in the
 /// desktop's default handler and running detached or blocking child processes.
@@ -22,10 +52,22 @@ class ExternalLauncher
   public:
     virtual ~ExternalLauncher() = default;
 
-    /// Opens @p url in the desktop's default handler (browser, file manager, editor, ...).
+    /// DISPATCHES a request to open @p url in the desktop's default handler (browser, file manager,
+    /// editor, ...).
+    ///
+    /// It dispatches rather than completes, and the distinction is the whole contract: on Linux the
+    /// desktop is reached over D-Bus, and waiting for that reply would block whichever thread called
+    /// — the GUI thread, on every hyperlink click. @see PortalExternalLauncher and
+    /// https://github.com/contour-terminal/contour/issues/2075
+    ///
+    /// So a success here means the request was accepted for delivery, NOT that anything opened; an
+    /// error means it could be rejected without asking the desktop at all. A failure the desktop
+    /// itself reports arrives later and is logged, because by then the action has visibly finished
+    /// and there is nothing left for the caller to do about it.
+    ///
     /// @param url The resource to open.
-    /// @return true if the platform accepted the request.
-    [[nodiscard]] virtual bool openUrl(QUrl const& url) = 0;
+    /// @return Nothing on acceptance, or why the request was rejected outright.
+    [[nodiscard]] virtual std::expected<void, LaunchError> openUrl(QUrl const& url) = 0;
 
     /// Starts @p program with @p arguments as a detached background process (fire-and-forget).
     /// @param program The executable path.

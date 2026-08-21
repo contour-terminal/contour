@@ -140,10 +140,12 @@ class RecordingExternalLauncher final: public contour::platform::ExternalLaunche
         QStringList arguments;
     };
 
-    [[nodiscard]] bool openUrl(QUrl const& url) override
+    [[nodiscard]] std::expected<void, contour::platform::LaunchError> openUrl(QUrl const& url) override
     {
         openedUrls.push_back(url);
-        return openUrlResult;
+        if (openUrlError)
+            return std::unexpected(*openUrlError);
+        return {};
     }
 
     bool runDetached(QString const& program, QStringList const& arguments) override
@@ -161,8 +163,8 @@ class RecordingExternalLauncher final: public contour::platform::ExternalLaunche
     std::vector<QUrl> openedUrls;
     std::vector<Execution> detached;
     std::vector<Execution> executed;
-    /// The value openUrl() returns (flip to false to exercise the "could not open" error path).
-    bool openUrlResult = true;
+    /// What openUrl() fails with; empty means it accepts (set one to exercise the error path).
+    std::optional<contour::platform::LaunchError> openUrlError;
 };
 
 /// A SpeechSynthesizer that records what it was asked to say instead of saying it.

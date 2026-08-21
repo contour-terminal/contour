@@ -7,9 +7,17 @@
 namespace contour::platform
 {
 
-bool QtExternalLauncher::openUrl(QUrl const& url)
+std::expected<void, LaunchError> QtExternalLauncher::openUrl(QUrl const& url)
 {
-    return QDesktopServices::openUrl(url);
+    if (url.isEmpty() || !url.isValid())
+        return std::unexpected(LaunchError::InvalidUrl);
+
+    // Qt reports one bool for two different failures -- no handler found, and a handler that could
+    // not be started -- so the more specific of the two is not available to report here.
+    if (!QDesktopServices::openUrl(url))
+        return std::unexpected(LaunchError::NoHandler);
+
+    return {};
 }
 
 bool QtExternalLauncher::runDetached(QString const& program, QStringList const& arguments)
