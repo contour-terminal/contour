@@ -1132,6 +1132,12 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
         && margin.vertical.from.value == 0 && margin.vertical.to.value + 1 == pageSize().lines.value;
     if (isFullPageMargin)
         _terminal->onBufferScrolled(scrollCount);
+
+    // Unconditionally, and after either branch: the scrollback may have just LOST rows rather than
+    // gained them. Block-atomic eviction drops a whole command at once, and it reaches this path
+    // even for a partial region, where the branch above deliberately shifts nothing. Clamping is not
+    // shifting -- it only refuses to name a row that is gone.
+    _terminal->clampToHistory();
 }
 
 void Screen::scrollDown(LineCount n, Margin margin)

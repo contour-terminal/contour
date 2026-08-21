@@ -3016,3 +3016,111 @@ TEST_CASE("a terminal constructed below VT525 narrows its sequence table too", "
 }
 
 // NOLINTEND(misc-const-correctness)
+
+// {{{ block-atomic history eviction: the consumers a shrinking history reaches (issue #836)
+namespace
+{
+/// Writes one OSC 133 prompt-marked command whose output is @p outputLines lines long.
+void writeCommandBlock(MockTerm<vtpty::MockPty>& mock, int index, int outputLines)
+{
+    mock.writeToScreen(std::format("\033]133;A\033\\P{}\r\n", index));
+    mock.writeToScreen("\033]133;C\033\\");
+    for (auto const i: std::views::iota(0, outputLines))
+        mock.writeToScreen(std::format("o{}{}\r\n", index, i));
+    mock.writeToScreen("\033]133;D;0\033\\");
+}
+} // namespace
+
+TEST_CASE("Terminal.historyEviction.clampsAViewportScrolledIntoTheEvictedBlock",
+          "[terminal][history-eviction]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(8) },
+                                           vtbackend::HistoryLimits { LineCount(4), LineCount(12) } };
+    for (auto const block: std::views::iota(0, 3))
+        writeCommandBlock(mock, block, 3);
+
+    // Scroll all the way up, so the viewport sits on rows the next trim is about to take.
+    mock.terminal.viewport().scrollToTop();
+    REQUIRE(mock.terminal.viewport().scrolled());
+
+    // The offset must never name more history than there is: Grid::render asserts exactly this, and
+    // in a release build the ring would wrap modulo its size onto unrelated rows instead. Checked
+    // after every block, because a dangling offset is transient -- the buffer grows back past it.
+    for (auto const block: std::views::iota(3, 8))
+    {
+        writeCommandBlock(mock, block, 3);
+        CHECK(unbox<int>(mock.terminal.viewport().scrollOffset())
+              <= unbox<int>(mock.terminal.primaryScreen().historyLineCount()));
+    }
+}
+
+TEST_CASE("Terminal.historyEviction.clampsAViewportWhenAPartialRegionFeedsTheScrollback",
+          "[terminal][history-eviction]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) },
+                                           vtbackend::HistoryLimits { LineCount(4), LineCount(12) } };
+    for (auto const block: std::views::iota(0, 3))
+        writeCommandBlock(mock, block, 3);
+
+    mock.terminal.viewport().scrollToTop();
+    REQUIRE(mock.terminal.viewport().scrolled());
+
+    // A TOP-ANCHORED partial DECSTBM region still feeds rows into the scrollback -- Grid routes it
+    // through the very same scrollUp -- but Screen deliberately withholds onBufferScrolled, because
+    // the live area below the region did not move. So the one path that clamps the viewport on an
+    // ordinary scroll is not reached here, and the trim's floor jump goes unnoticed.
+    mock.writeToScreen("\033[1;3r");
+
+    // Checked after every write, not just at the end: the buffer oscillates between the guarantee
+    // and the capacity, so an offset left dangling by a trim is back in range by the time the next
+    // few lines have been written. It is the moment right after a trim that renders wrongly.
+    for (auto const i: std::views::iota(0, 40))
+    {
+        mock.writeToScreen(std::format("x{}\r\n", i % 10));
+        CHECK(unbox<int>(mock.terminal.viewport().scrollOffset())
+              <= unbox<int>(mock.terminal.primaryScreen().historyLineCount()));
+    }
+}
+
+TEST_CASE("Terminal.historyEviction.foldRangesForgetAnEvictedBlock", "[terminal][history-eviction]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(8) },
+                                           vtbackend::HistoryLimits { LineCount(4), LineCount(12) } };
+    for (auto const block: std::views::iota(0, 3))
+        writeCommandBlock(mock, block, 3);
+
+    // Populate the fold cache while the first block is still there.
+    auto const floorBefore = mock.terminal.primaryScreen().grid().stableRangeFloor();
+    REQUIRE(!mock.terminal.foldRanges().empty());
+
+    for (auto const block: std::views::iota(3, 8))
+        writeCommandBlock(mock, block, 3);
+
+    REQUIRE(mock.terminal.primaryScreen().grid().stableRangeFloor() > floorBefore);
+
+    // A trim moves neither the generation nor the stable base nor the mark revision, so a fold cache
+    // keyed on those alone would go on serving ranges whose head has been evicted.
+    auto const floor = mock.terminal.primaryScreen().grid().stableRangeFloor();
+    for (auto const& range: mock.terminal.foldRanges())
+        CHECK(range.firstStableId >= floor);
+}
+
+TEST_CASE("Terminal.historyEviction.keepsTheViCursorInsideTheAddressableGrid", "[terminal][history-eviction]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(8) },
+                                           vtbackend::HistoryLimits { LineCount(4), LineCount(12) } };
+    for (auto const block: std::views::iota(0, 3))
+        writeCommandBlock(mock, block, 3);
+
+    mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    mock.terminal.moveNormalModeCursorTo(CellLocation {
+        .line = LineOffset::cast_from(-unbox<int>(mock.terminal.primaryScreen().historyLineCount())),
+        .column = ColumnOffset(0) });
+
+    for (auto const block: std::views::iota(3, 8))
+        writeCommandBlock(mock, block, 3);
+
+    auto const top = -unbox<int>(mock.terminal.primaryScreen().historyLineCount());
+    CHECK(unbox<int>(mock.terminal.normalModeCursorPosition().line) >= top);
+}
+// }}}

@@ -2692,6 +2692,7 @@ std::span<FoldRange const> Terminal::foldRanges() const
     // position, so the previous scan still stands.
     auto const key = FoldRangesKey { .generation = grid.generation(),
                                      .stableBase = grid.stableLineIdOf(LineOffset(0)),
+                                     .stableFloor = grid.stableRangeFloor(),
                                      .markRevision = _semanticMarkRevision };
     if (_foldRangesKey == key)
         return _foldRanges;
@@ -2720,6 +2721,7 @@ void Terminal::ensureFoldProjection() const
     auto const pageLines = unbox<int>(pageSize().lines);
     auto const key = FoldProjectionKey { .generation = grid.generation(),
                                          .stableBase = grid.stableLineIdOf(LineOffset(0)),
+                                         .stableFloor = grid.stableRangeFloor(),
                                          .scrollOffset = unbox<int>(_viewport.scrollOffset()),
                                          .pageLines = pageLines,
                                          .foldRevision = _foldState.revision(),
@@ -4644,6 +4646,17 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
         _selection->applyScroll(boxed_cast<LineOffset>(n), primaryScreen().historyLineCount());
     else
         clearSelection();
+}
+
+void Terminal::clampToHistory() noexcept
+{
+    _viewport.clampScrollOffset();
+
+    // The Normal-mode cursor is walked one line further up on every scroll (@see onBufferScrolled)
+    // with nothing bounding it, so an eviction leaves it pointing below the oldest row there is.
+    auto const top = -boxed_cast<LineOffset>(primaryScreen().historyLineCount());
+    if (_viCommands.cursorPosition.line < top)
+        _viCommands.cursorPosition.line = top;
 }
 // }}}
 

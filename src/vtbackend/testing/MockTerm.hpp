@@ -20,11 +20,11 @@ class MockTerm: public Terminal::NullEvents
   public:
     MockTerm(ColumnCount columns, LineCount lines): MockTerm { PageSize { lines, columns } } {}
 
-    explicit MockTerm(PageSize size, LineCount maxHistoryLineCount = {}, size_t ptyReadBufferSize = 1024);
+    explicit MockTerm(PageSize size, HistoryLimits historyLimits = {}, size_t ptyReadBufferSize = 1024);
 
     template <typename Init>
     MockTerm(
-        PageSize size, LineCount hist, size_t ptyReadBufferSize, Init init = [](MockTerm&) {}):
+        PageSize size, HistoryLimits hist, size_t ptyReadBufferSize, Init init = [](MockTerm&) {}):
         MockTerm { size, hist, ptyReadBufferSize }
     {
         init(*this);
@@ -229,12 +229,12 @@ class MockTerm: public Terminal::NullEvents
     void progressChanged(Progress progress) override { progressNotifications.push_back(progress); }
 
     static vtbackend::Settings createSettings(PageSize pageSize,
-                                              LineCount maxHistoryLineCount,
+                                              HistoryLimits historyLimits,
                                               size_t ptyReadBufferSize)
     {
         auto settings = vtbackend::Settings {};
         settings.pageSize = pageSize;
-        settings.historyLimits = maxHistoryLineCount;
+        settings.historyLimits = historyLimits;
         settings.ptyReadBufferSize = ptyReadBufferSize;
         settings.goodImageProtocol = true;
         settings.allowClipboardRead = true; // let tests exercise OSC 52 clipboard reads
@@ -263,12 +263,12 @@ class MockTerm: public Terminal::NullEvents
 
 template <typename PtyDevice>
 inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
-                                     LineCount maxHistoryLineCount,
+                                     HistoryLimits historyLimits,
                                      size_t ptyReadBufferSize):
     terminal { *this,
                crispy::defaultEnvironment(),
                std::make_unique<PtyDevice>(pageSize),
-               createSettings(pageSize, maxHistoryLineCount, ptyReadBufferSize),
+               createSettings(pageSize, historyLimits, ptyReadBufferSize),
                std::chrono::steady_clock::time_point() } // explicitly start with empty timepoint
 {
     if (auto const logFilterString = crispy::defaultEnvironment().get("LOG"))
