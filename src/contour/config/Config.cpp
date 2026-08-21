@@ -936,6 +936,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "fullscreen", where.fullscreen);
         loadFromEntry(child, "maximized", where.maximized);
         loadFromEntry(child, "search_mode_switch", where.searchModeSwitch);
+        loadFromEntry(child, "search_case_sensitivity", where.searchCaseSensitivity);
         loadFromEntry(child, "insert_after_yank", where.insertAfterYank);
         loadFromEntry(child, "bell", where.bell);
         loadFromEntry(child, "wm_class", where.wmClass);
@@ -2414,6 +2415,13 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, ShadowSize& where)
+{
+    loadConfigEnum(node, entry, where, logger);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::SearchCaseSensitivity& where)
 {
     loadConfigEnum(node, entry, where, logger);
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/Search.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/shell/Folding.hpp> // FoldJumpBehavior
 #include <vtbackend/shell/MarkArbiter.hpp>
@@ -124,6 +125,20 @@ namespace detail
         ConfigEnumInfo<vtbackend::ContextTintScope> {
             vtbackend::ContextTintScope::All, "all", "Every type the scheme sets" },
     };
+
+    /// How a search compares letters by case.
+    ///
+    /// Owned by vtbackend, so the table hangs off the type from here, exactly as FoldJumpBehavior's
+    /// does -- the reader, the settings-page combo box and the written-back spelling all come from
+    /// this one row set.
+    inline constexpr auto SearchCaseSensitivityTable = std::array {
+        ConfigEnumInfo<vtbackend::SearchCaseSensitivity> {
+            vtbackend::SearchCaseSensitivity::Smart, "smart", "Smart (capital makes it exact)" },
+        ConfigEnumInfo<vtbackend::SearchCaseSensitivity> {
+            vtbackend::SearchCaseSensitivity::Insensitive, "insensitive", "Ignore case" },
+        ConfigEnumInfo<vtbackend::SearchCaseSensitivity> {
+            vtbackend::SearchCaseSensitivity::Sensitive, "sensitive", "Match case" },
+    };
 } // namespace detail
 
 template <>
@@ -142,6 +157,12 @@ template <>
 constexpr std::span<ConfigEnumInfo<vtbackend::ContextTintScope> const> configEnumValues() noexcept
 {
     return detail::ContextTintScopeTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<vtbackend::SearchCaseSensitivity> const> configEnumValues() noexcept
+{
+    return detail::SearchCaseSensitivityTable;
 }
 
 } // namespace contour::config

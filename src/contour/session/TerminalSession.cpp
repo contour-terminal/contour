@@ -3629,6 +3629,9 @@ void TerminalSession::configureTerminal()
     _terminal.settings().autoScrollOnUpdate = _profile.history.value().autoScrollOnUpdate;
     _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
+    // The policy the find bar OPENS with; its Aa button re-points it afterwards.
+    (void) _terminal.setSearchCaseSensitivity(_profile.searchCaseSensitivity.value());
+    _searchCase = searchCaseOf(_profile.searchCaseSensitivity.value());
     _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
     _terminal.settings().blinkStyle = _profile.blinkStyle.value();
     _terminal.settings().screenTransitionStyle = _profile.screenTransitionStyle.value();

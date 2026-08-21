@@ -480,7 +480,7 @@ namespace documentation
     };
     constexpr inline std::string_view ScrollUp { "Scrolls up by the multiplier factor." };
     constexpr inline std::string_view SearchReverse {
-        "Initiates search mode (starting to search at current cursor position, moving upwards)."
+        "Opens the find bar, searching upwards from the current cursor position."
     };
     constexpr inline std::string_view SendChars {
         "Writes given characters in `chars` member to the applications input."

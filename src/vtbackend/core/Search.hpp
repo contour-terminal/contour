@@ -103,6 +103,9 @@ constexpr bool operator==(SearchMatchTally a, SearchMatchTally b) noexcept
 
 } // namespace vtbackend
 
+// Lower-case, because these ARE the configuration tokens: the config writer round-trips a value
+// through std::format, so a formatter spelling them any other way would write a file that no longer
+// re-parses. @see contour::config::detail::SearchCaseSensitivityTable.
 template <>
 struct std::formatter<vtbackend::SearchCaseSensitivity>: formatter<std::string_view>
 {
@@ -111,9 +114,9 @@ struct std::formatter<vtbackend::SearchCaseSensitivity>: formatter<std::string_v
         string_view name;
         switch (value)
         {
-            case vtbackend::SearchCaseSensitivity::Smart: name = "Smart"; break;
-            case vtbackend::SearchCaseSensitivity::Insensitive: name = "Insensitive"; break;
-            case vtbackend::SearchCaseSensitivity::Sensitive: name = "Sensitive"; break;
+            case vtbackend::SearchCaseSensitivity::Smart: name = "smart"; break;
+            case vtbackend::SearchCaseSensitivity::Insensitive: name = "insensitive"; break;
+            case vtbackend::SearchCaseSensitivity::Sensitive: name = "sensitive"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

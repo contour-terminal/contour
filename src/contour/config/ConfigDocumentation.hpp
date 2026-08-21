@@ -151,6 +151,16 @@ constexpr StringLiteral MouseConfig { "mouse:\n"
                                       "    hide_while_typing: {}\n"
                                       "\n" };
 
+constexpr StringLiteral SearchCaseSensitivityConfig {
+    "{comment} How the find bar compares letters when it opens. One of:\n"
+    "{comment}   smart       -- case-insensitive until the search term contains a capital (default)\n"
+    "{comment}   insensitive -- never case-sensitive\n"
+    "{comment}   sensitive   -- always case-sensitive\n"
+    "{comment} The bar's \"Aa\" button cycles the three at any time; this is only what it starts as.\n"
+    "search_case_sensitivity: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral SearchModeSwitchConfig {
     "{comment} DEPRECATED, and has no effect. Search is typed into the find bar now, which floats over\n"
     "{comment} the terminal rather than living in the status line, so entering it no longer changes the\n"
@@ -1130,9 +1140,8 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - ScrollToBottom    Scrolls to the bottom of the screen buffer.\n"
     "{comment} - ScrollToTop       Scrolls to the top of the screen buffer.\n"
     "{comment} - ScrollUp          Scrolls up by the multiplier factor.\n"
-    "{comment} - SearchReverse     Initiates search mode (starting to search at current cursor position, "
-    "moving "
-    "upwards).\n"
+    "{comment} - SearchReverse     Opens the find bar, searching upwards from the current cursor "
+    "position.\n"
     "{comment} - SendChars         Writes given characters in `chars` member to the applications input.\n"
     "{comment} - SwitchToTab       Switches to the tab position, given by extra parameter \"position\".\n"
     "{comment}                     The positions start at number 1.\n"
@@ -2537,6 +2546,25 @@ constexpr StringLiteral ShowIndicatorOnResizeWeb {
     "\n"
 };
 
+constexpr StringLiteral SearchCaseSensitivityWeb {
+    "Which case policy the find bar opens with.\n"
+    "\n"
+    "- `smart` (default): the search is case-insensitive until the term contains an uppercase "
+    "letter, at which point it becomes exact. So `error` also finds `Error`, while `Error` finds only "
+    "itself. The test is Unicode-aware, so it works for non-Latin scripts too.\n"
+    "- `insensitive`: never case-sensitive.\n"
+    "- `sensitive`: always case-sensitive.\n"
+    "\n"
+    "The find bar's `Aa` button cycles the same three at any time; this only selects the one it "
+    "starts from.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    search_case_sensitivity: smart\n"
+    "```\n"
+    "\n"
+};
+
 constexpr StringLiteral SearchModeSwitchWeb {
     "**Deprecated, and has no effect.** Search used to be typed into the indicator status line, which "
     "meant entering it had to switch the terminal into Vi normal mode just to make that line visible; "
@@ -2626,6 +2654,7 @@ using WindowShadow = DocumentationEntry<WindowShadowConfig, WindowShadowWeb>;
 using DimUnfocused = DocumentationEntry<DimUnfocusedConfig, DimUnfocusedWeb>;
 using ShowIndicatorOnResize = DocumentationEntry<ShowIndicatorOnResizeConfig, ShowIndicatorOnResizeWeb>;
 using Mouse = DocumentationEntry<MouseConfig, MouseWeb>;
+using SearchCaseSensitivity = DocumentationEntry<SearchCaseSensitivityConfig, SearchCaseSensitivityWeb>;
 using SearchModeSwitch = DocumentationEntry<SearchModeSwitchConfig, SearchModeSwitchWeb>;
 using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYankWeb>;
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;

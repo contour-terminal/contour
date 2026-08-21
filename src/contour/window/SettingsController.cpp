@@ -370,6 +370,18 @@ namespace
                         p.margins = m;
                     } },
                   enumField(
+                      "search_case_sensitivity",
+                      "Search case sensitivity",
+                      "How the find bar compares letters when it opens. Its Aa button cycles the same "
+                      "three at any time.",
+                      std::array {
+                          std::pair { "smart"sv, vtbackend::SearchCaseSensitivity::Smart },
+                          std::pair { "insensitive"sv, vtbackend::SearchCaseSensitivity::Insensitive },
+                          std::pair { "sensitive"sv, vtbackend::SearchCaseSensitivity::Sensitive },
+                      },
+                      [](TerminalProfile const& p) { return p.searchCaseSensitivity.value(); },
+                      [](TerminalProfile& p, auto v) { p.searchCaseSensitivity = v; }),
+                  enumField(
                       "pixel_reporting",
                       "Pixel reporting",
                       "How image dimensions are reported: logical pixels or device pixels.",

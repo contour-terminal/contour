@@ -168,6 +168,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     };
     Q_ENUM(SearchCase)
 
+    /// The QML-facing spelling of @p mode. The inverse of searchCaseSensitivityOf.
+    [[nodiscard]] static constexpr SearchCase searchCaseOf(vtbackend::SearchCaseSensitivity mode) noexcept
+    {
+        switch (mode)
+        {
+            case vtbackend::SearchCaseSensitivity::Smart: return SearchCase::Smart;
+            case vtbackend::SearchCaseSensitivity::Insensitive: return SearchCase::Insensitive;
+            case vtbackend::SearchCaseSensitivity::Sensitive: return SearchCase::Sensitive;
+        }
+        return SearchCase::Smart;
+    }
+
     /// The backend policy @p mode names. The one place the two enums are tied together.
     [[nodiscard]] static constexpr vtbackend::SearchCaseSensitivity searchCaseSensitivityOf(
         SearchCase mode) noexcept

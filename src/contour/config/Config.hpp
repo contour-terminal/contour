@@ -745,6 +745,8 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::HighlightDoubleClickerWord> highlightDoubleClickedWord { true };
     ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont() };
     ConfigEntry<bool, documentation::DrawBoldTextWithBrightColors> drawBoldTextWithBrightColors { false };
+    ConfigEntry<vtbackend::SearchCaseSensitivity, documentation::SearchCaseSensitivity>
+        searchCaseSensitivity { vtbackend::SearchCaseSensitivity::Smart };
     ConfigEntry<vtbackend::BlinkStyle, documentation::BlinkStyle> blinkStyle {
         vtbackend::BlinkStyle::Smooth
     };
@@ -1555,6 +1557,9 @@ struct YAMLConfigReader
                        std::string const& entry,
                        vtrasterizer::GlyphScalingMethod& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorDisplay& where);
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       vtbackend::SearchCaseSensitivity& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::BlinkStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ScreenTransitionStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::Modifiers& where);

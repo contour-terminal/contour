@@ -2322,6 +2322,10 @@ TEST_CASE("Config: every tab bar mode is described by its table", "[config]")
                             WindowControlStyle::Windows,
                             WindowControlStyle::MacOS,
                             WindowControlStyle::Plasma });
+    checkModes(configEnumValues<vtbackend::SearchCaseSensitivity>(),
+               std::array { vtbackend::SearchCaseSensitivity::Smart,
+                            vtbackend::SearchCaseSensitivity::Insensitive,
+                            vtbackend::SearchCaseSensitivity::Sensitive });
 
     // The reader is case-insensitive, and refuses what no row carries.
     CHECK(configEnumFromToken<TabBarVisibility>("MULTIPLE") == TabBarVisibility::Multiple);
@@ -2933,6 +2937,54 @@ TEST_CASE("config.tab_switch_on_horizontal_wheel", "[config]")
 
         auto const reloaded = loadFromYaml(dir, written);
         CHECK_FALSE(reloaded.tabSwitchOnHorizontalWheel.value());
+    }
+}
+
+TEST_CASE("config.search_case_sensitivity", "[config]")
+{
+    using vtbackend::SearchCaseSensitivity;
+
+    QTemporaryDir dir;
+    auto const profileWith = [](std::string_view entry) {
+        return std::string("profiles:\n  main:\n    shell: \"/bin/bash\"\n    ") + std::string(entry) + "\n";
+    };
+    auto const modeOf = [&](std::string_view entry) {
+        auto const config = loadFromYaml(dir, profileWith(entry));
+        return config.profile("main")->searchCaseSensitivity.value();
+    };
+
+    SECTION("defaults to smart, which is what the terminal has always done")
+    {
+        // The regression gate: an existing configuration must keep the behaviour it had.
+        CHECK(contour::config::TerminalProfile {}.searchCaseSensitivity.value()
+              == SearchCaseSensitivity::Smart);
+    }
+
+    SECTION("loads every value, ignoring case")
+    {
+        CHECK(modeOf("search_case_sensitivity: sensitive") == SearchCaseSensitivity::Sensitive);
+        CHECK(modeOf("search_case_sensitivity: INSENSITIVE") == SearchCaseSensitivity::Insensitive);
+        CHECK(modeOf("search_case_sensitivity: SmArT") == SearchCaseSensitivity::Smart);
+    }
+
+    SECTION("keeps the default when the value is not a known token")
+    {
+        CHECK(modeOf("search_case_sensitivity: whatever") == SearchCaseSensitivity::Smart);
+    }
+
+    SECTION("round-trips through the generated config")
+    {
+        // Pins the reflection walk AND the formatter: a field the writer skipped would silently reset
+        // on every GUI-driven save, and a formatter emitting the enumerator rather than the token
+        // would write a file that no longer re-parses.
+        auto config = contour::config::Config {};
+        config.profile("main")->searchCaseSensitivity = SearchCaseSensitivity::Sensitive;
+
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        REQUIRE(written.contains("search_case_sensitivity: sensitive"));
+
+        auto const reloaded = loadFromYaml(dir, written);
+        CHECK(reloaded.profile("main")->searchCaseSensitivity.value() == SearchCaseSensitivity::Sensitive);
     }
 }
 
