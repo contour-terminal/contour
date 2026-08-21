@@ -553,6 +553,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ResizeBorder.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/TitleBar.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/SessionChrome.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/SearchBar.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/CommandPalette.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/SaveLayoutDialog.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ActionContextMenu.qml"),
@@ -3508,8 +3509,6 @@ TEST_CASE("The palette bolds matched characters and tints only unselected rows (
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
 
-#include <QmlComponents_test.moc>
-
 TEST_CASE("SessionChrome shows the hyperlink tooltip only while there is a link under the pointer",
           "[contour][gui][qml][hyperlink]")
 {
@@ -4541,3 +4540,246 @@ TEST_CASE("Traffic lights are drawn as cells in the terminal chrome and as shape
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
+
+// {{{ The find bar (issue #2081)
+namespace
+{
+
+/// A stand-in for TerminalSession carrying exactly the search surface SearchBar.qml binds to.
+///
+/// The real session needs a PTY, a render thread and a display; the bar needs four properties, five
+/// invokables and one signal. Mocking that surface is what makes the bar's BEHAVIOUR -- what it shows,
+/// what it enables, what it does to focus -- testable offscreen, and it doubles as a check that the
+/// bar reads nothing else.
+class MockSearchSession: public QObject
+{
+    Q_OBJECT
+
+    Q_PROPERTY(QString searchPattern READ searchPattern NOTIFY searchStateChanged)
+    Q_PROPERTY(QString searchSummary READ searchSummary NOTIFY searchStateChanged)
+    Q_PROPERTY(bool searchHasMatches READ searchHasMatches NOTIFY searchStateChanged)
+    Q_PROPERTY(bool searchNavigable READ searchNavigable NOTIFY searchStateChanged)
+    Q_PROPERTY(int searchCaseSensitivity READ searchCaseSensitivity NOTIFY searchStateChanged)
+
+  public:
+    [[nodiscard]] QString searchPattern() const { return _pattern; }
+    [[nodiscard]] QString searchSummary() const { return _summary; }
+    [[nodiscard]] bool searchHasMatches() const { return _hasMatches; }
+    [[nodiscard]] bool searchNavigable() const { return _navigable; }
+    [[nodiscard]] int searchCaseSensitivity() const { return _caseMode; }
+
+    Q_INVOKABLE void setSearchPattern(QString const& pattern)
+    {
+        _pattern = pattern;
+        // A crude stand-in for the real tally, enough to drive every state the bar can render.
+        if (pattern.isEmpty())
+        {
+            _summary.clear();
+            _hasMatches = true;
+            _navigable = false;
+        }
+        else if (pattern == QStringLiteral("zzz"))
+        {
+            _summary = QStringLiteral("No results");
+            _hasMatches = false;
+            _navigable = false;
+        }
+        else
+        {
+            _summary = QStringLiteral("1 of 3");
+            _hasMatches = true;
+            _navigable = true;
+        }
+        emit searchStateChanged();
+    }
+
+    Q_INVOKABLE void setSearchCaseSensitivity(int mode)
+    {
+        _caseMode = mode;
+        emit searchStateChanged();
+    }
+
+    Q_INVOKABLE void searchNext() { ++nextCalls; }
+    Q_INVOKABLE void searchPrevious() { ++previousCalls; }
+    Q_INVOKABLE void clearSearch() { setSearchPattern(QString {}); }
+
+    int nextCalls = 0;
+    int previousCalls = 0;
+
+  signals:
+    void searchStateChanged();
+
+  private:
+    QString _pattern;
+    QString _summary;
+    bool _hasMatches = true;
+    bool _navigable = false;
+    int _caseMode = 0;
+};
+
+struct SearchBarHost
+{
+    std::unique_ptr<QObject> window;
+    QObject* bar = nullptr;
+
+    /// How often the bar handed the keyboard back to the "terminal" it floats over.
+    [[nodiscard]] int focusRestores() const { return window->property("focusRestores").toInt(); }
+};
+
+[[nodiscard]] SearchBarHost openSearchBar(QQmlEngine& engine, MockSearchSession& session)
+{
+    contour::test::installChromeStyle(engine);
+    engine.rootContext()->setContextProperty("mockSession", &session);
+
+    QQmlComponent component(&engine);
+    component.setData(
+        QByteArrayLiteral("import QtQuick\n"
+                          "import QtQuick.Window\n"
+                          "import Contour.Ui\n"
+                          "Window {\n"
+                          "  id: host\n"
+                          "  width: 800; height: 600; visible: true\n"
+                          "  property int focusRestores: 0\n"
+                          "  property alias searchBarItem: barItem\n"
+                          // Stands in for the ContourTerminal the bar docks against: the bar reads its
+                          // width to place itself and calls forceActiveFocus() on it when it closes.
+                          "  Item {\n"
+                          "    id: fakeDisplay\n"
+                          "    anchors.fill: parent\n"
+                          "    function forceActiveFocus() { host.focusRestores++; }\n"
+                          "  }\n"
+                          "  SearchBar {\n"
+                          "    id: barItem\n"
+                          "    session: mockSession\n"
+                          "    displayItem: fakeDisplay\n"
+                          "  }\n"
+                          "}\n"),
+        QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SearchBarTestHost.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+
+    auto host = SearchBarHost {};
+    {
+        INFO("SearchBarTestHost errors: " << component.errorString().toStdString());
+        if (!component.isReady())
+            return host;
+    }
+
+    host.window.reset(component.create());
+    if (host.window == nullptr)
+        return host;
+
+    host.bar = host.window->property("searchBarItem").value<QObject*>();
+    if (host.bar == nullptr)
+        return host;
+
+    // A Popup builds its contentItem lazily; opening it materializes the field and the buttons.
+    QMetaObject::invokeMethod(host.bar, "open");
+    QCoreApplication::processEvents();
+    return host;
+}
+
+} // namespace
+
+TEST_CASE("The find bar drives the session's search and restores focus (offscreen)",
+          "[contour][gui][qml][search]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockSearchSession session;
+
+    auto const host = openSearchBar(engine, session);
+    REQUIRE(host.bar != nullptr);
+
+    auto* field = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarField"));
+    REQUIRE(field != nullptr);
+    auto* count = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarCount"));
+    REQUIRE(count != nullptr);
+    auto* previous = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarPrevious"));
+    REQUIRE(previous != nullptr);
+    auto* next = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarNext"));
+    REQUIRE(next != nullptr);
+
+    SECTION("typing runs the search and shows its count")
+    {
+        field->setProperty("text", QStringLiteral("needle"));
+        QCoreApplication::processEvents();
+
+        CHECK(session.searchPattern() == QStringLiteral("needle"));
+        CHECK(count->property("text").toString() == QStringLiteral("1 of 3"));
+    }
+
+    SECTION("stepping is inert until there is somewhere to step")
+    {
+        // Nothing typed yet: the buttons are visible but dead, rather than absent -- a bar whose
+        // controls come and go as you type is the thing this deliberately does not do.
+        CHECK_FALSE(previous->property("enabled").toBool());
+        CHECK_FALSE(next->property("enabled").toBool());
+
+        field->setProperty("text", QStringLiteral("needle"));
+        QCoreApplication::processEvents();
+        CHECK(previous->property("enabled").toBool());
+        CHECK(next->property("enabled").toBool());
+    }
+
+    SECTION("a fruitless search says so")
+    {
+        field->setProperty("text", QStringLiteral("zzz"));
+        QCoreApplication::processEvents();
+
+        CHECK(count->property("text").toString() == QStringLiteral("No results"));
+        CHECK_FALSE(previous->property("enabled").toBool());
+    }
+
+    SECTION("the case toggle cycles all three policies")
+    {
+        auto* toggle = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarCaseToggle"));
+        REQUIRE(toggle != nullptr);
+
+        // Smart -> Sensitive -> Insensitive -> Smart. Two states could not express the third, which
+        // is why this is not the binary Aa every other find bar has.
+        CHECK(session.searchCaseSensitivity() == 0);
+        QMetaObject::invokeMethod(host.bar, "cycleCase");
+        CHECK(session.searchCaseSensitivity() == 1);
+        QMetaObject::invokeMethod(host.bar, "cycleCase");
+        CHECK(session.searchCaseSensitivity() == 2);
+        QMetaObject::invokeMethod(host.bar, "cycleCase");
+        CHECK(session.searchCaseSensitivity() == 0);
+
+        // The glyph reports which way it is pinned, and lit-vs-unlit whether it is pinned at all.
+        session.setSearchCaseSensitivity(2);
+        QCoreApplication::processEvents();
+        CHECK(toggle->property("text").toString() == QStringLiteral("aa"));
+        CHECK(toggle->property("checked").toBool());
+    }
+
+    SECTION("closing hands the keyboard back to the terminal")
+    {
+        auto const before = host.focusRestores();
+        QMetaObject::invokeMethod(host.bar, "close");
+        QCoreApplication::processEvents();
+
+        // Whatever closed the bar, the terminal gets the keyboard back, or the user is left typing
+        // into nothing.
+        CHECK(host.focusRestores() == before + 1);
+    }
+
+    SECTION("re-opening onto an existing term selects it, so typing replaces rather than appends")
+    {
+        field->setProperty("text", QStringLiteral("needle"));
+        QCoreApplication::processEvents();
+
+        QMetaObject::invokeMethod(host.bar, "close");
+        QCoreApplication::processEvents();
+        QMetaObject::invokeMethod(host.bar, "open");
+        QCoreApplication::processEvents();
+
+        CHECK(field->property("text").toString() == QStringLiteral("needle"));
+        CHECK(field->property("selectedText").toString() == QStringLiteral("needle"));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}
+
+#include <QmlComponents_test.moc>

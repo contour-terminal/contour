@@ -214,6 +214,15 @@ Item {
         onRejected: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, false);
     }
 
+    // The find bar (Ctrl+Shift+F, or `/` in Vi normal mode). Per pane, not per window: each session
+    // keeps its own pattern, count and highlights, so a split shows the bar over the pane being
+    // searched. Opened by the session's searchBarRequested signal, wired in Connections below.
+    SearchBar {
+        id: searchBar
+        session: chrome.session
+        displayItem: chrome.displayItem
+    }
+
     // Play a bell, deferring the volume if the sound Loader is not ready yet.
     function playBell(volume) {
         if (bellLoader.status === Loader.Ready)
@@ -273,6 +282,15 @@ Item {
 
         // Viewport -> scrollbar thumb (the drag direction lives on the ScrollBar's own handlers).
         function onScrollOffsetChanged() { chrome.updateScrollBarPosition(); }
+
+        // The find bar. Already open? Re-focus and select instead of re-opening, so a second
+        // Ctrl+Shift+F means "search for something else" rather than doing nothing.
+        function onSearchBarRequested() {
+            if (searchBar.opened)
+                searchBar.focusField();
+            else
+                searchBar.open();
+        }
 
         // Permission-wall hooks.
         function onRequestPermissionForFontChange() { requestFontChangeDialog.open(); }

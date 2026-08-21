@@ -301,7 +301,8 @@ if(CONTOUR_FRONTEND_GUI)
         qml/Main.qml
         qml/BellSound.qml
         qml/RequestPermission.qml
-        qml/SessionChrome.qml
+        qml/SearchBar.qml
+    qml/SessionChrome.qml
         qml/TitleBar.qml
         qml/TabStrip.qml
         qml/NewTabMenu.qml
