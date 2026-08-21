@@ -9,6 +9,7 @@
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/CoreFixtures.hpp>
+#include <contour/test/LauncherFixtures.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtpty/ChannelPty.hpp>
@@ -126,45 +127,6 @@ class InMemoryLayoutStore final: public contour::config::LayoutStore
     /// The path each load()/save() was asked for, so a test can assert WHERE layouts persist.
     mutable std::vector<std::filesystem::path> loadedPaths;
     std::vector<std::filesystem::path> savedPaths;
-};
-
-/// Records every URL-open / process-spawn request instead of launching it, so tests can assert the
-/// routing and validation of the open-document, follow-hyperlink, open-configuration/-file-manager
-/// /-selection, and spawn-new-terminal actions without touching the desktop.
-class RecordingExternalLauncher final: public contour::platform::ExternalLauncher
-{
-  public:
-    struct Execution
-    {
-        QString program;
-        QStringList arguments;
-    };
-
-    [[nodiscard]] std::expected<void, contour::platform::LaunchError> openUrl(QUrl const& url) override
-    {
-        openedUrls.push_back(url);
-        if (openUrlError)
-            return std::unexpected(*openUrlError);
-        return {};
-    }
-
-    bool runDetached(QString const& program, QStringList const& arguments) override
-    {
-        detached.push_back({ program, arguments });
-        return true;
-    }
-
-    int execute(QString const& program, QStringList const& arguments) override
-    {
-        executed.push_back({ program, arguments });
-        return 0;
-    }
-
-    std::vector<QUrl> openedUrls;
-    std::vector<Execution> detached;
-    std::vector<Execution> executed;
-    /// What openUrl() fails with; empty means it accepts (set one to exercise the error path).
-    std::optional<contour::platform::LaunchError> openUrlError;
 };
 
 /// A SpeechSynthesizer that records what it was asked to say instead of saying it.

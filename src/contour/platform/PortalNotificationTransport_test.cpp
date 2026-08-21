@@ -16,6 +16,7 @@
 
     #include <contour/platform/PortalNotificationTransport.hpp>
     #include <contour/test/NotificationFixtures.hpp>
+    #include <contour/test/PortalFixtures.hpp>
 
     #include <QtCore/QMetaObject>
 
@@ -38,14 +39,6 @@ using namespace std::chrono_literals;
 namespace
 {
 
-/// One recorded portal method call, with the reply the test has yet to deliver.
-struct PortalCall
-{
-    QString method;
-    QVariantList arguments;
-    std::function<void(CallOutcome)> onReply;
-};
-
 /// One scheduled delayed action, with the timer the test has yet to fire.
 struct ScheduledAction
 {
@@ -55,23 +48,14 @@ struct ScheduledAction
 
 /// Everything the transport reached for, and nothing it was given back unasked.
 ///
-/// Deliberately not a mock framework: the recorded vectors ARE the assertions. Nothing replies or
-/// fires on its own, which is how a test observes that the transport records a notification only
-/// once the portal ACCEPTED it, and assumes a close only once the delay actually elapsed.
-struct Recorder
+/// The portal half comes from the shared recorder every portal-speaking class's tests use; what is
+/// added here is the delay, which only this transport has. Deliberately not a mock framework: the
+/// recorded vectors ARE the assertions. Nothing replies or fires on its own, which is how a test
+/// observes that the transport records a notification only once the portal ACCEPTED it, and assumes
+/// a close only once the delay actually elapsed.
+struct Recorder: contour::test::RecordingPortalCaller
 {
-    std::vector<PortalCall> calls;
     std::vector<ScheduledAction> scheduled;
-
-    [[nodiscard]] contour::platform::PortalCaller caller()
-    {
-        return [this](QObject*,
-                      QLatin1StringView method,
-                      QVariantList arguments,
-                      std::function<void(CallOutcome)> onReply) {
-            calls.emplace_back(PortalCall { QString(method), std::move(arguments), std::move(onReply) });
-        };
-    }
 
     [[nodiscard]] contour::platform::DelayScheduler scheduler()
     {
@@ -79,9 +63,6 @@ struct Recorder
             scheduled.emplace_back(ScheduledAction { delay, std::move(action) });
         };
     }
-
-    /// Delivers the portal's reply for the call at @p index.
-    void completeCall(size_t index, CallOutcome outcome) { calls.at(index).onReply(outcome); }
 
     /// Fires the timer at @p index, as the event loop would once the delay elapsed.
     void fireScheduled(size_t index) { scheduled.at(index).action(); }

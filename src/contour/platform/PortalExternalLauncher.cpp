@@ -4,6 +4,8 @@
     #include <contour/Logging.hpp>
     #include <contour/platform/PortalExternalLauncher.hpp>
 
+    #include <crispy/Assert.hpp>
+
     #include <QtCore/QVariantMap>
 
     #include <utility>
@@ -31,18 +33,21 @@ QVariantList buildOpenUriArguments(QUrl const& url)
     };
 }
 
-PortalExternalLauncher::PortalExternalLauncher(PortalCaller caller, QObject* parent):
-    QObject(parent), _call { std::move(caller) }
+PortalExternalLauncher::PortalExternalLauncher(PortalCaller caller,
+                                               std::unique_ptr<ExternalLauncher> processes,
+                                               QObject* parent):
+    QObject(parent), _call { std::move(caller) }, _processes { std::move(processes) }
 {
+    // Both collaborators are a construction-time requirement rather than a runtime error: a launcher
+    // built without one is a wiring mistake, and there is no answer to give a user about it.
+    Require(static_cast<bool>(_call));
+    Require(_processes != nullptr);
 }
 
 std::expected<void, LaunchError> PortalExternalLauncher::openUrl(QUrl const& url)
 {
-    if (url.isEmpty() || !url.isValid())
+    if (!isOpenable(url))
         return std::unexpected(LaunchError::InvalidUrl);
-
-    if (!_call)
-        return std::unexpected(LaunchError::DispatchFailed);
 
     _call(this, OpenUriMethod, buildOpenUriArguments(url), [this, url](CallOutcome outcome) {
         if (outcome == CallOutcome::Accepted)
@@ -53,9 +58,9 @@ std::expected<void, LaunchError> PortalExternalLauncher::openUrl(QUrl const& url
         // The portal answered, and refused -- so it is responsive, and xdg-open will not hang either.
         // Reported rather than returned: by now the click has visibly finished and there is nothing
         // left for the caller to decide. @see ExternalLauncher::openUrl on what a success means.
-        launcherLog()("Portal declined to open \"{}\"; falling back to {}.",
-                      urlText.toStdString(),
-                      asStringView(FallbackOpener));
+        //
+        // Why it refused is not repeated here: PortalCall has already written that to gui.portal.
+        launcherLog()("Falling back to {} for \"{}\".", asStringView(FallbackOpener), urlText.toStdString());
 
         if (!runDetached(QString(FallbackOpener), QStringList { urlText }))
             launcherLog()("Could not open \"{}\": neither the portal nor {} would take it.",
@@ -68,12 +73,12 @@ std::expected<void, LaunchError> PortalExternalLauncher::openUrl(QUrl const& url
 
 bool PortalExternalLauncher::runDetached(QString const& program, QStringList const& arguments)
 {
-    return _processes.runDetached(program, arguments);
+    return _processes->runDetached(program, arguments);
 }
 
 int PortalExternalLauncher::execute(QString const& program, QStringList const& arguments)
 {
-    return _processes.execute(program, arguments);
+    return _processes->execute(program, arguments);
 }
 
 } // namespace contour::platform

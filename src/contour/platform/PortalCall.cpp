@@ -2,7 +2,6 @@
 #ifdef __linux__
 
     #include <contour/Logging.hpp>
-    #include <contour/platform/DBusSignalSubscription.hpp>
     #include <contour/platform/PortalCall.hpp>
 
     #include <QtDBus/QDBusConnection>

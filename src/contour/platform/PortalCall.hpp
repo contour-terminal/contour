@@ -36,6 +36,16 @@ constexpr auto PortalPath = QLatin1StringView("/org/freedesktop/portal/desktop")
     return std::string_view { text.data(), static_cast<size_t>(text.size()) };
 }
 
+/// How long any D-Bus method call we issue may stay outstanding, in milliseconds.
+///
+/// Deliberately below Qt's 25-second default: losing a reply costs only the bookkeeping for that
+/// one call, and several of them do not read their reply at all. A desktop that is not answering
+/// must not be able to hold anything of ours open -- which is the whole reason the calling side is
+/// asynchronous. It lives with the caller rather than with any one caller's subject, because the
+/// notification transports and the URL launcher all inherit it. @see issue #2051, and the
+/// wedged-bus harness at test/e2e/notification-nonblocking.sh that holds the transports to it.
+constexpr auto DBusCallTimeoutMilliseconds = 5000;
+
 /// Whether a portal method call was accepted.
 ///
 /// An enum rather than a bool because at the call site `true` says nothing about which way round the

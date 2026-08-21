@@ -12,7 +12,8 @@ namespace contour::platform
 std::unique_ptr<ExternalLauncher> makeExternalLauncher()
 {
 #ifdef __linux__
-    return std::make_unique<PortalExternalLauncher>(qtPortalCaller(OpenUriPortalInterface));
+    return std::make_unique<PortalExternalLauncher>(qtPortalCaller(OpenUriPortalInterface),
+                                                    std::make_unique<QtExternalLauncher>());
 #else
     return std::make_unique<QtExternalLauncher>();
 #endif

@@ -21,7 +21,6 @@ enum class LaunchError : std::uint8_t
 {
     InvalidUrl = 0, ///< The URL is empty, or not something a handler could be found for.
     NoHandler,      ///< Nothing on this desktop is registered to open it.
-    DispatchFailed, ///< The request could not be handed to the platform at all.
 };
 
 /// A human-readable explanation of @p error, for logs and user-facing notices.
@@ -33,9 +32,20 @@ enum class LaunchError : std::uint8_t
     {
         case LaunchError::InvalidUrl: return "the address is not a valid URL";
         case LaunchError::NoHandler: return "no application is registered to open it";
-        case LaunchError::DispatchFailed: return "the desktop could not be asked to open it";
     }
     return "unknown error";
+}
+
+/// Whether @p url is something an ExternalLauncher could hand to the desktop at all.
+///
+/// The one rejection every implementation makes for itself, stated once here rather than restated
+/// per implementation: it is a property of the URL, not of how the desktop is reached.
+///
+/// @param url The resource to open.
+/// @return true when the desktop can be asked about it.
+[[nodiscard]] inline bool isOpenable(QUrl const& url)
+{
+    return !url.isEmpty() && url.isValid();
 }
 
 /// Launches external resources on behalf of a terminal session: opening URLs/documents in the

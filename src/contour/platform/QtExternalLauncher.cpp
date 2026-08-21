@@ -9,7 +9,7 @@ namespace contour::platform
 
 std::expected<void, LaunchError> QtExternalLauncher::openUrl(QUrl const& url)
 {
-    if (url.isEmpty() || !url.isValid())
+    if (!isOpenable(url))
         return std::unexpected(LaunchError::InvalidUrl);
 
     // Qt reports one bool for two different failures -- no handler found, and a handler that could

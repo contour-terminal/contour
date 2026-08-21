@@ -5,10 +5,11 @@
 
     #include <contour/platform/ExternalLauncher.hpp>
     #include <contour/platform/PortalCall.hpp>
-    #include <contour/platform/QtExternalLauncher.hpp>
 
     #include <QtCore/QLatin1StringView>
     #include <QtCore/QObject>
+
+    #include <memory>
 
 namespace contour::platform
 {
@@ -63,9 +64,14 @@ class PortalExternalLauncher final: public QObject, public ExternalLauncher
     Q_OBJECT
 
   public:
-    /// @param caller How a portal method call is issued; required, so a test can drive it by hand.
-    /// @param parent Qt ownership, or nullptr.
-    explicit PortalExternalLauncher(PortalCaller caller, QObject* parent = nullptr);
+    /// @param caller    How a portal method call is issued; required, so a test can drive it by hand.
+    /// @param processes What starts a child process, including the xdg-open fallback. Injected for
+    ///                  the same reason @p caller is: without it, the fallback case could only be
+    ///                  tested by really spawning xdg-open at whoever runs the suite.
+    /// @param parent    Qt ownership, or nullptr.
+    PortalExternalLauncher(PortalCaller caller,
+                           std::unique_ptr<ExternalLauncher> processes,
+                           QObject* parent = nullptr);
 
     [[nodiscard]] std::expected<void, LaunchError> openUrl(QUrl const& url) override;
     bool runDetached(QString const& program, QStringList const& arguments) override;
@@ -77,8 +83,8 @@ class PortalExternalLauncher final: public QObject, public ExternalLauncher
 
     /// The process-spawning half, which the portal has nothing to do with: runDetached() and
     /// execute() start a child directly on both paths, so they are delegated rather than repeated.
-    /// It is also what the xdg-open fallback goes through.
-    QtExternalLauncher _processes;
+    /// It is also what the xdg-open fallback goes through. Never null.
+    std::unique_ptr<ExternalLauncher> _processes;
 };
 
 } // namespace contour::platform

@@ -72,14 +72,6 @@ class NullNotifier final: public Notifier
     void close(std::string const& /*identifier*/) override {}
 };
 
-/// Whether this process runs inside an application sandbox, and which.
-///
-/// An alias rather than an enum of its own: vtpty owns the fact, because vtpty is what reads
-/// /.flatpak-info -- and it reads more than this out of it (@see vtpty::SandboxInfo), which two
-/// separately-declared enums would leave nothing to tie together. Host means the session bus is
-/// reachable by name; Flatpak means only the portals are, without a static permission.
-using SandboxState = vtpty::SandboxState;
-
 /// Which service a notifier should talk to.
 enum class NotificationBackend : uint8_t
 {
@@ -94,14 +86,18 @@ enum class NotificationBackend : uint8_t
 /// notification was dismissed, which the portal cannot, so preferring the portal everywhere would
 /// trade away a working OSC 99 `c=1` close report for uniformity.
 ///
+/// vtpty owns the sandbox vocabulary, because vtpty is what reads /.flatpak-info -- and reads more
+/// than this out of it. @see vtpty::SandboxInfo. Host means the session bus is reachable by name;
+/// Flatpak means only the portals are, without a static permission.
+///
 /// @param sandbox Where this process is running.
 /// @return The backend to construct.
-[[nodiscard]] constexpr NotificationBackend selectNotificationBackend(SandboxState sandbox) noexcept
+[[nodiscard]] constexpr NotificationBackend selectNotificationBackend(vtpty::SandboxState sandbox) noexcept
 {
     switch (sandbox)
     {
-        case SandboxState::Host: return NotificationBackend::FreeDesktop;
-        case SandboxState::Flatpak: return NotificationBackend::Portal;
+        case vtpty::SandboxState::Host: return NotificationBackend::FreeDesktop;
+        case vtpty::SandboxState::Flatpak: return NotificationBackend::Portal;
     }
     return NotificationBackend::FreeDesktop;
 }

@@ -12,47 +12,40 @@
 #ifdef __linux__
 
     #include <contour/platform/PortalExternalLauncher.hpp>
+    #include <contour/test/LauncherFixtures.hpp>
+    #include <contour/test/PortalFixtures.hpp>
 
     #include <catch2/catch_test_macros.hpp>
 
-    #include <functional>
+    #include <memory>
     #include <string>
-    #include <utility>
-    #include <vector>
 
 using contour::platform::buildOpenUriArguments;
 using contour::platform::CallOutcome;
 using contour::platform::LaunchError;
 using contour::platform::PortalExternalLauncher;
+using contour::test::RecordingExternalLauncher;
+using contour::test::RecordingPortalCaller;
 
 namespace
 {
 
-/// One recorded portal method call, with the reply the test has yet to deliver.
-struct RecordedCall
-{
-    QString method;
-    QVariantList arguments;
-    std::function<void(CallOutcome)> onReply;
-};
-
-/// Everything the launcher reached for, and nothing it was given back unasked.
+/// A launcher over a recorded portal and a recorded process spawner, with both kept reachable.
 ///
-/// Deliberately not a mock framework: the recorded vector IS the assertion. Nothing replies on its
-/// own, which is how a test observes that openUrl() returns before any reply exists -- the whole
-/// property this class was written for.
-struct RecordingPortal
+/// The process half is injected for the same reason the portal call is: PortalExternalLauncher's
+/// refusal path really runs xdg-open, so a test that did not replace it would open a browser at
+/// whoever is running the suite -- and could not observe that the fallback was taken either.
+struct Fixture
 {
-    std::vector<RecordedCall> calls;
+    RecordingPortalCaller portal;
+    RecordingExternalLauncher* processes = nullptr;
+    std::unique_ptr<PortalExternalLauncher> launcher;
 
-    [[nodiscard]] contour::platform::PortalCaller caller()
+    Fixture()
     {
-        return [this](QObject* /*context*/,
-                      QLatin1StringView method,
-                      QVariantList const& arguments,
-                      std::function<void(CallOutcome)> onReply) {
-            calls.push_back({ QString(method), arguments, std::move(onReply) });
-        };
+        auto owned = std::make_unique<RecordingExternalLauncher>();
+        processes = owned.get();
+        launcher = std::make_unique<PortalExternalLauncher>(portal.caller(), std::move(owned));
     }
 };
 
@@ -88,67 +81,53 @@ TEST_CASE("openUrl dispatches without waiting for the portal", "[contour][launch
 {
     // The reason this class exists. openUrl() must return having issued the call and NOT having
     // waited for it: the reply handler is still unrun, and nothing about the outcome is known yet.
-    auto portal = RecordingPortal {};
-    auto launcher = PortalExternalLauncher { portal.caller() };
+    auto fixture = Fixture {};
 
-    auto const dispatched = launcher.openUrl(QUrl(QStringLiteral("https://contour-terminal.org/")));
+    auto const dispatched = fixture.launcher->openUrl(QUrl(QStringLiteral("https://contour-terminal.org/")));
 
     CHECK(dispatched.has_value());
-    REQUIRE(portal.calls.size() == 1);
-    CHECK(portal.calls.front().method == QStringLiteral("OpenURI"));
-    CHECK(uriOf(portal.calls.front().arguments) == "https://contour-terminal.org/");
-    CHECK(portal.calls.front().onReply); // a reply is awaited, not awaited ON
+    REQUIRE(fixture.portal.calls.size() == 1);
+    CHECK(fixture.portal.calls.front().method == QStringLiteral("OpenURI"));
+    CHECK(uriOf(fixture.portal.calls.front().arguments) == "https://contour-terminal.org/");
+    CHECK(fixture.portal.calls.front().onReply); // a reply is awaited, not awaited ON
 }
 
 TEST_CASE("openUrl rejects a URL the portal could not take, without calling it", "[contour][launcher]")
 {
-    auto portal = RecordingPortal {};
-    auto launcher = PortalExternalLauncher { portal.caller() };
+    auto fixture = Fixture {};
 
     SECTION("an empty URL")
     {
-        auto const dispatched = launcher.openUrl(QUrl {});
+        auto const dispatched = fixture.launcher->openUrl(QUrl {});
 
         REQUIRE_FALSE(dispatched.has_value());
         CHECK(dispatched.error() == LaunchError::InvalidUrl);
-        CHECK(portal.calls.empty()); // rejected here, not by the desktop
+        CHECK(fixture.portal.calls.empty()); // rejected here, not by the desktop
     }
 
     SECTION("a malformed URL")
     {
-        auto const dispatched = launcher.openUrl(QUrl(QStringLiteral("http://[::malformed")));
+        auto const dispatched = fixture.launcher->openUrl(QUrl(QStringLiteral("http://[::malformed")));
 
         REQUIRE_FALSE(dispatched.has_value());
         CHECK(dispatched.error() == LaunchError::InvalidUrl);
-        CHECK(portal.calls.empty());
+        CHECK(fixture.portal.calls.empty());
     }
-}
-
-TEST_CASE("openUrl reports DispatchFailed when there is no caller at all", "[contour][launcher]")
-{
-    // A launcher built with an empty PortalCaller has nothing to send through. It answers rather
-    // than calling an empty std::function, which would be undefined behaviour.
-    auto launcher = PortalExternalLauncher { contour::platform::PortalCaller {} };
-
-    auto const dispatched = launcher.openUrl(QUrl(QStringLiteral("https://contour-terminal.org/")));
-
-    REQUIRE_FALSE(dispatched.has_value());
-    CHECK(dispatched.error() == LaunchError::DispatchFailed);
 }
 
 TEST_CASE("a portal that accepts is the end of it", "[contour][launcher]")
 {
     // Nothing further must happen on the happy path -- in particular the xdg-open fallback must not
     // run, or every opened URL would open twice.
-    auto portal = RecordingPortal {};
-    auto launcher = PortalExternalLauncher { portal.caller() };
+    auto fixture = Fixture {};
 
-    CHECK(launcher.openUrl(QUrl(QStringLiteral("https://contour-terminal.org/"))).has_value());
-    REQUIRE(portal.calls.size() == 1);
+    CHECK(fixture.launcher->openUrl(QUrl(QStringLiteral("https://contour-terminal.org/"))).has_value());
+    REQUIRE(fixture.portal.calls.size() == 1);
 
-    portal.calls.front().onReply(CallOutcome::Accepted);
+    fixture.portal.completeCall(0, CallOutcome::Accepted);
 
-    CHECK(portal.calls.size() == 1); // no second attempt
+    CHECK(fixture.portal.calls.size() == 1); // no second attempt
+    CHECK(fixture.processes->detached.empty());
 }
 
 TEST_CASE("a portal that refuses is answered late, not returned as an error", "[contour][launcher]")
@@ -156,16 +135,19 @@ TEST_CASE("a portal that refuses is answered late, not returned as an error", "[
     // The failure arrives after openUrl() already returned success, which is exactly what the
     // "dispatches, does not complete" contract on ExternalLauncher::openUrl means. There is no way
     // to hand it back to the caller, so it must not crash and must not be mistaken for acceptance.
-    auto portal = RecordingPortal {};
-    auto launcher = PortalExternalLauncher { portal.caller() };
+    auto fixture = Fixture {};
 
-    auto const dispatched = launcher.openUrl(QUrl(QStringLiteral("https://contour-terminal.org/")));
+    auto const dispatched = fixture.launcher->openUrl(QUrl(QStringLiteral("https://contour-terminal.org/")));
     REQUIRE(dispatched.has_value()); // already reported as accepted for delivery
 
-    REQUIRE(portal.calls.size() == 1);
-    portal.calls.front().onReply(CallOutcome::Failed); // reaches the xdg-open fallback
+    REQUIRE(fixture.portal.calls.size() == 1);
+    fixture.portal.completeCall(0, CallOutcome::Failed);
 
-    CHECK(portal.calls.size() == 1); // the fallback is a process, not another portal call
+    CHECK(fixture.portal.calls.size() == 1); // the fallback is a process, not another portal call
+    REQUIRE(fixture.processes->detached.size() == 1);
+    CHECK(fixture.processes->detached.front().program == QStringLiteral("xdg-open"));
+    CHECK(fixture.processes->detached.front().arguments
+          == QStringList { QStringLiteral("https://contour-terminal.org/") });
 }
 
 #endif // defined(__linux__)
