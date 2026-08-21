@@ -3,6 +3,7 @@
 
 #include <vtbackend/core/GraphicsAttributes.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/Search.hpp>
 #include <vtbackend/grid/CellProxy.hpp>
 #include <vtbackend/grid/Line.hpp>
 

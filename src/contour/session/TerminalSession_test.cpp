@@ -1887,7 +1887,7 @@ TEST_CASE("TerminalSession: search-match focus actions move the vi cursor onto a
     // Set a search pattern through the terminal, then the match-focus actions have somewhere to go.
     {
         auto const l = std::scoped_lock { session->terminal() };
-        session->terminal().setNewSearchTerm(U"needle", /*initiatedByDoubleClick*/ false);
+        session->terminal().setNewSearchTerm(U"needle", vtbackend::SearchOrigin::Typed);
     }
     // At least one of next/prev must find a match now (position-dependent), and neither throws.
     auto const nextFound = (*session)(actions::FocusNextSearchMatch {});

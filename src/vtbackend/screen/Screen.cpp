@@ -7585,28 +7585,13 @@ unique_ptr<ParserExtension> Screen::hookDECUDK(Sequence const& seq)
         [this, clearAll, locked](string_view data) { _terminal->programUDK(clearAll, locked, data); });
 }
 
-namespace
-{
-    /// Decides whether a search is case-sensitive ("smart case"): it is, as soon as the needle
-    /// contains an uppercase character.
-    ///
-    /// @param searchText The needle to inspect.
-    /// @return true if @p searchText contains at least one uppercase letter.
-    [[nodiscard]] bool isCaseSensitiveSearch(std::u32string_view searchText) noexcept
-    {
-        // NB: std::isupper() takes an *int holding an unsigned char value* (or EOF), so feeding it a
-        // char32_t is undefined for every codepoint above 0xFF -- and it would answer for the wrong
-        // alphabet anyway. The UCD lookup is the codepoint-correct test, so "Привет" and "Ünicode"
-        // now select a case-sensitive search just like "Hello" does.
-        return std::ranges::any_of(searchText, unicode::general_category::is_uppercase_letter);
-    }
-} // namespace
-
-optional<CellLocation> Screen::search(std::u32string_view searchText, CellLocation startPosition)
+optional<CellLocation> Screen::search(std::u32string_view searchText,
+                                      CellLocation startPosition,
+                                      SearchCaseSensitivity mode)
 {
     // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
 
-    auto const isCaseSensitive = isCaseSensitiveSearch(searchText);
+    auto const isCaseSensitive = isCaseSensitiveSearch(searchText, mode);
 
     if (searchText.empty())
         return nullopt;
@@ -7628,10 +7613,12 @@ optional<CellLocation> Screen::search(std::u32string_view searchText, CellLocati
     return nullopt;
 }
 
-optional<CellLocation> Screen::searchReverse(std::u32string_view searchText, CellLocation startPosition)
+optional<CellLocation> Screen::searchReverse(std::u32string_view searchText,
+                                             CellLocation startPosition,
+                                             SearchCaseSensitivity mode)
 {
     // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
-    auto const isCaseSensitive = isCaseSensitiveSearch(searchText);
+    auto const isCaseSensitive = isCaseSensitiveSearch(searchText, mode);
 
     if (searchText.empty())
         return nullopt;
@@ -7651,6 +7638,62 @@ optional<CellLocation> Screen::searchReverse(std::u32string_view searchText, Cel
         startPosition.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
     }
     return nullopt;
+}
+
+SearchMatchTally Screen::tallyMatches(std::u32string_view searchText,
+                                      CellLocation position,
+                                      SearchCaseSensitivity mode,
+                                      size_t limit)
+{
+    auto tally = SearchMatchTally {};
+    if (searchText.empty() || limit == 0)
+        return tally;
+
+    auto const lastLine = boxed_cast<LineOffset>(pageSize().lines) - 1;
+    auto const lastColumn = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+
+    // The cell after @p location, or nullopt at the very end of the grid. Advancing by ONE cell (and
+    // not by the needle's length) is what keeps this count in step with searchNextMatch(), which does
+    // the same -- so overlapping matches, which navigation does visit, are counted rather than hidden.
+    auto const advance = [&](CellLocation location) -> optional<CellLocation> {
+        if (location.column < lastColumn)
+        {
+            ++location.column;
+            return location;
+        }
+        if (location.line < lastLine)
+        {
+            ++location.line;
+            location.column = ColumnOffset(0);
+            return location;
+        }
+        return nullopt;
+    };
+
+    auto cursor =
+        CellLocation { .line = -boxed_cast<LineOffset>(historyLineCount()), .column = ColumnOffset(0) };
+
+    while (auto const match = search(searchText, cursor, mode))
+    {
+        if (tally.total == limit)
+        {
+            // A match exists beyond the limit, so the count the caller gets is a floor rather than a
+            // total. Saying so is the whole point of the flag: "9999" and "9999+" mean different things.
+            tally.exactness = TallyExactness::Capped;
+            break;
+        }
+
+        ++tally.total;
+        if (*match == position)
+            tally.ordinal = tally.total;
+
+        auto const next = advance(*match);
+        if (!next)
+            break;
+        cursor = *next;
+    }
+
+    return tally;
 }
 
 bool Screen::isCursorInsideHorizontalMargins() const noexcept

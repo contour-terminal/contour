@@ -1157,7 +1157,7 @@ void Terminal::updateSelectionMatches()
 
     auto const text = extractSelectionText();
     auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
-    setNewSearchTerm(text32, true);
+    setNewSearchTerm(text32, SearchOrigin::DoubleClick);
 }
 
 void Terminal::setStatusLineDefinition(StatusLineDefinition&& definition)
@@ -1217,7 +1217,7 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
     switch (_speedClicks)
     {
         case 1:
-            if (_search.initiatedByDoubleClick)
+            if (_search.origin == SearchOrigin::DoubleClick)
                 clearSearch();
             clearSelection();
             if (modifiers == _settings.mouseBlockSelectionModifiers)
@@ -5115,9 +5115,9 @@ void Terminal::setAllowInput(bool enabled)
     setMode(AnsiMode::KeyboardAction, !enabled);
 }
 
-bool Terminal::setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick)
+bool Terminal::setNewSearchTerm(std::u32string text, SearchOrigin origin)
 {
-    _search.initiatedByDoubleClick = initiatedByDoubleClick;
+    _search.origin = origin;
 
     if (_search.pattern == text)
         return false;
@@ -5126,9 +5126,24 @@ bool Terminal::setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick
     return true;
 }
 
+bool Terminal::setSearchCaseSensitivity(SearchCaseSensitivity mode)
+{
+    if (_search.caseSensitivity == mode)
+        return false;
+
+    _search.caseSensitivity = mode;
+    return true;
+}
+
+SearchMatchTally Terminal::tallySearchMatches(CellLocation position, size_t limit)
+{
+    return currentScreen().tallyMatches(
+        u32string_view(_search.pattern), position, _search.caseSensitivity, limit);
+}
+
 optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)
 {
-    if (!setNewSearchTerm(std::move(text), false))
+    if (!setNewSearchTerm(std::move(text), SearchOrigin::Typed))
         return searchPosition;
 
     return searchReverse(searchPosition);
@@ -5137,7 +5152,7 @@ optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation sear
 optional<CellLocation> Terminal::search(CellLocation searchPosition)
 {
     auto const searchText = u32string_view(_search.pattern);
-    auto const matchLocation = currentScreen().search(searchText, searchPosition);
+    auto const matchLocation = currentScreen().search(searchText, searchPosition, _search.caseSensitivity);
 
     if (matchLocation)
         viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
@@ -5177,7 +5192,7 @@ std::optional<CellLocation> Terminal::searchPrevMatch(CellLocation cursorPositio
 void Terminal::clearSearch()
 {
     _search.pattern.clear();
-    _search.initiatedByDoubleClick = false;
+    _search.origin = SearchOrigin::Typed;
 }
 
 bool Terminal::wordDelimited(CellLocation position) const noexcept
@@ -5204,7 +5219,8 @@ std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
 optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 {
     auto const searchText = u32string_view(_search.pattern);
-    auto const matchLocation = currentScreen().searchReverse(searchText, searchPosition);
+    auto const matchLocation =
+        currentScreen().searchReverse(searchText, searchPosition, _search.caseSensitivity);
 
     if (matchLocation)
         viewport().makeVisibleWithinSafeArea(matchLocation.value().line);

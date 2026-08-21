@@ -4,6 +4,7 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/core/Search.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/graphics/KittyGraphics.hpp>
 #include <vtbackend/graphics/MessageParser.hpp>
@@ -677,10 +678,34 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
                && coord.column < boxed_cast<ColumnOffset>(pageSize().columns);
     }
 
+    /// Finds the first match at or after @p startPosition, walking forward through logical lines.
+    /// @param searchText    The needle. An empty needle matches nothing.
+    /// @param startPosition Where to begin; a match starting exactly here is returned.
+    /// @param mode          The case policy. @see isCaseSensitiveSearch.
     [[nodiscard]] std::optional<CellLocation> search(std::u32string_view searchText,
-                                                     CellLocation startPosition);
+                                                     CellLocation startPosition,
+                                                     SearchCaseSensitivity mode);
+
+    /// Finds the first match at or before @p startPosition, walking backward through logical lines.
     [[nodiscard]] std::optional<CellLocation> searchReverse(std::u32string_view searchText,
-                                                            CellLocation startPosition);
+                                                            CellLocation startPosition,
+                                                            SearchCaseSensitivity mode);
+
+    /// Counts @p searchText's matches over the whole grid, scrollback included, and locates
+    /// @p position among them.
+    ///
+    /// Implemented as a forward walk that reuses search() rather than a matcher of its own, so the
+    /// count can never disagree with what stepping through the matches actually visits -- including
+    /// the overlapping ones, which navigation reaches and a non-overlapping count would hide.
+    ///
+    /// @param searchText The needle.
+    /// @param position   Reported back as @c ordinal when a match starts exactly there.
+    /// @param mode       The case policy.
+    /// @param limit      Stop after this many and report @c TallyExactness::Capped.
+    [[nodiscard]] SearchMatchTally tallyMatches(std::u32string_view searchText,
+                                                CellLocation position,
+                                                SearchCaseSensitivity mode,
+                                                size_t limit);
 
     [[nodiscard]] CellProxy usePreviousCell() noexcept
     {

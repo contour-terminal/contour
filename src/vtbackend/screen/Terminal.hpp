@@ -5,6 +5,7 @@
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/Search.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
@@ -165,11 +166,16 @@ class Modes
 };
 // }}}
 
+/// The terminal's one active search: what is being looked for, and how.
+///
+/// There is exactly one per terminal, and it outlives whatever surface put it there -- closing the
+/// find bar leaves the pattern (and therefore the highlights) standing, which is what lets F3 keep
+/// stepping afterwards. Terminal::clearSearch() is what ends it.
 struct Search
 {
     std::u32string pattern;
-    ScrollOffset initialScrollOffset {};
-    bool initiatedByDoubleClick = false;
+    SearchCaseSensitivity caseSensitivity = SearchCaseSensitivity::Smart;
+    SearchOrigin origin = SearchOrigin::Typed;
 };
 
 /// Folds the 7-bit C1 control introducers in a terminal reply to their single-byte 8-bit forms, as
@@ -2073,7 +2079,32 @@ class Terminal
     [[nodiscard]] std::optional<CellLocation> searchNextMatch(CellLocation cursorPosition);
     [[nodiscard]] std::optional<CellLocation> searchPrevMatch(CellLocation cursorPosition);
 
-    bool setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick);
+    /// Installs @p text as the active search pattern.
+    /// @param text   The needle. Replaces whatever was being searched for.
+    /// @param origin Where it came from; selects which highlight colors its matches take.
+    /// @return false if @p text was already the pattern, so callers can skip a redundant search.
+    bool setNewSearchTerm(std::u32string text, SearchOrigin origin);
+
+    /// Re-points the active search at @p mode. Does not itself move the viewport or the cursor --
+    /// the caller re-runs the search, because only it knows where from.
+    /// @return false if @p mode was already in effect.
+    bool setSearchCaseSensitivity(SearchCaseSensitivity mode);
+
+    /// Counts the active pattern's matches across the whole grid, scrollback included, and locates
+    /// @p position among them.
+    ///
+    /// One traversal answers both halves of a "3 of 27" label. It is O(grid), so it is meant to be
+    /// called when the pattern or the grid changes -- not per rendered frame.
+    ///
+    /// @param position Where the caller is standing; reported back as @c SearchMatchTally::ordinal.
+    /// @param limit    Stop after this many matches and report @c TallyExactness::Capped.
+    /// @return The tally. All-zero and @c Exact when the pattern is empty.
+    ///
+    /// @note Not const, only because Grid's logical-line iteration is not: search() walks it, and
+    ///       const-correcting that family is a refactor of its own rather than part of this one.
+    [[nodiscard]] SearchMatchTally tallySearchMatches(CellLocation position,
+                                                      size_t limit = DefaultSearchMatchLimit);
+
     void clearSearch();
 
     // Tests if the grid cell at the given location does contain a word delimiter.

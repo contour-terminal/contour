@@ -3183,30 +3183,35 @@ TEST_CASE("searchReverse", "[screen]")
         [[maybe_unused]] auto const inflate = true;
 
         // Find "qr" right at in front of the cursor.
-        optional<CellLocation> const qr = screen.searchReverse(U"qr", cursorPosition);
+        optional<CellLocation> const qr =
+            screen.searchReverse(U"qr", cursorPosition, vtbackend::SearchCaseSensitivity::Smart);
         REQUIRE(qr.value() == CellLocation { LineOffset(2), ColumnOffset(2) });
 
         // Find something in main page area.
-        optional<CellLocation> const mn = screen.searchReverse(U"mn", cursorPosition);
+        optional<CellLocation> const mn =
+            screen.searchReverse(U"mn", cursorPosition, vtbackend::SearchCaseSensitivity::Smart);
         REQUIRE(mn.value() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
         // Search for something that doesn't exist.
-        optional<CellLocation> const nnOut = screen.searchReverse(U"XY", *mn);
+        optional<CellLocation> const nnOut =
+            screen.searchReverse(U"XY", *mn, vtbackend::SearchCaseSensitivity::Smart);
         REQUIRE(!nnOut.has_value());
 
         // Check that we can find a term in the top-most scrollback line.
-        optional<CellLocation> const oneAB = screen.searchReverse(U"1ab", *mn);
+        optional<CellLocation> const oneAB =
+            screen.searchReverse(U"1ab", *mn, vtbackend::SearchCaseSensitivity::Smart);
         REQUIRE(oneAB.value() == CellLocation { LineOffset(-3), ColumnOffset(0) });
 
         mock.writeToScreen("7abcd");
 
         // Find text that got wrapped
-        optional<CellLocation> const cd = screen.searchReverse(U"cd", screen.cursor().position);
+        optional<CellLocation> const cd =
+            screen.searchReverse(U"cd", screen.cursor().position, vtbackend::SearchCaseSensitivity::Smart);
         REQUIRE(cd.value() == CellLocation { LineOffset(1), ColumnOffset(3) });
 
         // Find text larger than the line length
-        optional<CellLocation> const longSearch =
-            screen.searchReverse(U"6pqr7abcd", screen.cursor().position);
+        optional<CellLocation> const longSearch = screen.searchReverse(
+            U"6pqr7abcd", screen.cursor().position, vtbackend::SearchCaseSensitivity::Smart);
         REQUIRE(longSearch.value() == CellLocation { LineOffset(0), ColumnOffset(0) });
     }
 }
@@ -3229,20 +3234,131 @@ TEST_CASE("search.smartCaseIsCodepointAware", "[screen]")
 
     SECTION("an uppercase non-ASCII needle selects a case-sensitive search")
     {
-        CHECK(screen.search(U"Привет", start).has_value());  // matches exactly
-        CHECK(!screen.search(U"ПРИВЕТ", start).has_value()); // case-sensitive, so this must not match
+        CHECK(screen.search(U"Привет", start, vtbackend::SearchCaseSensitivity::Smart)
+                  .has_value()); // matches exactly
+        CHECK(!screen.search(U"ПРИВЕТ", start, vtbackend::SearchCaseSensitivity::Smart)
+                   .has_value()); // case-sensitive, so this must not match
     }
 
     SECTION("an all-lowercase non-ASCII needle stays case-insensitive")
     {
-        CHECK(screen.search(U"привет", start).has_value());
+        CHECK(screen.search(U"привет", start, vtbackend::SearchCaseSensitivity::Smart).has_value());
     }
 
     SECTION("codepoints far above the ctype table are safe to scan")
     {
         // Reaching these at all used to be the crash; not matching is the only expected outcome.
-        CHECK(!screen.search(U"\U0001F600", start).has_value()); // emoji, U+1F600
-        CHECK(!screen.search(U"\U00010400", start).has_value()); // Deseret capital, U+10400
+        CHECK(!screen.search(U"\U0001F600", start, vtbackend::SearchCaseSensitivity::Smart)
+                   .has_value()); // emoji, U+1F600
+        CHECK(!screen.search(U"\U00010400", start, vtbackend::SearchCaseSensitivity::Smart)
+                   .has_value()); // Deseret capital, U+10400
+    }
+}
+
+TEST_CASE("tallyMatches", "[screen]")
+{
+    using vtbackend::SearchCaseSensitivity;
+    using vtbackend::SearchMatchTally;
+    using vtbackend::TallyExactness;
+
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
+    mock.writeToScreen("ab1a"); // -3: +
+    mock.writeToScreen("2abc"); // -2: | history
+    mock.writeToScreen("3ghi"); // -1: +
+    mock.writeToScreen("4jAb"); //  0: +
+    mock.writeToScreen("5mno"); //  1: | main screen
+    mock.writeToScreen("6pab"); //  2: +
+
+    auto& screen = mock.terminal.primaryScreen();
+    auto constexpr NoLimit = size_t { 1000 };
+
+    SECTION("an empty needle tallies nothing")
+    {
+        auto const tally = screen.tallyMatches(U"", CellLocation {}, SearchCaseSensitivity::Smart, NoLimit);
+        CHECK(tally == SearchMatchTally {});
+        CHECK(tally.empty());
+    }
+
+    SECTION("a needle that matches nothing tallies nothing, but is not an error")
+    {
+        auto const tally =
+            screen.tallyMatches(U"zzz", CellLocation {}, SearchCaseSensitivity::Smart, NoLimit);
+        CHECK(tally.total == 0);
+        CHECK(tally.exactness == TallyExactness::Exact);
+    }
+
+    SECTION("counts every match across scrollback and main screen")
+    {
+        // "ab" appears at -3:0, -2:1, 0:2 (as "Ab") and 2:2. Lowercase needle, so smart case folds and
+        // the capitalised one counts too.
+        auto const tally = screen.tallyMatches(U"ab", CellLocation {}, SearchCaseSensitivity::Smart, NoLimit);
+        CHECK(tally.total == 4);
+        CHECK(tally.exactness == TallyExactness::Exact);
+    }
+
+    SECTION("the ordinal reports where the caller stands among the matches")
+    {
+        auto const at = [&](LineOffset line, ColumnOffset column) {
+            return screen
+                .tallyMatches(U"ab",
+                              CellLocation { .line = line, .column = column },
+                              SearchCaseSensitivity::Smart,
+                              NoLimit)
+                .ordinal;
+        };
+
+        // Ordinals run top-down through the grid, scrollback first.
+        CHECK(at(LineOffset(-3), ColumnOffset(0)) == 1);
+        CHECK(at(LineOffset(-2), ColumnOffset(1)) == 2);
+        CHECK(at(LineOffset(0), ColumnOffset(2)) == 3);
+        CHECK(at(LineOffset(2), ColumnOffset(2)) == 4);
+
+        // Standing anywhere that is not the START of a match reports 0 rather than the nearest one:
+        // "3 of 27" is a claim about being ON a match, and guessing would make it a lie.
+        CHECK(at(LineOffset(-3), ColumnOffset(1)) == 0); // inside the first match, not at its start
+        CHECK(at(LineOffset(1), ColumnOffset(0)) == 0);  // a line with no match at all
+    }
+
+    SECTION("case sensitivity decides whether the capitalised match counts")
+    {
+        auto const total = [&](SearchCaseSensitivity mode) {
+            return screen.tallyMatches(U"ab", CellLocation {}, mode, NoLimit).total;
+        };
+
+        CHECK(total(SearchCaseSensitivity::Insensitive) == 4);
+        CHECK(total(SearchCaseSensitivity::Sensitive) == 3); // "Ab" on line 0 drops out
+        CHECK(total(SearchCaseSensitivity::Smart) == 4);     // needle is lowercase, so it folds
+
+        // An uppercase needle pins smart case, which is what makes it "smart".
+        CHECK(screen.tallyMatches(U"Ab", CellLocation {}, SearchCaseSensitivity::Smart, NoLimit).total == 1);
+    }
+
+    SECTION("counting stops at the limit and says so")
+    {
+        auto const capped = screen.tallyMatches(U"ab", CellLocation {}, SearchCaseSensitivity::Smart, 2);
+        CHECK(capped.total == 2);
+        CHECK(capped.exactness == TallyExactness::Capped);
+
+        // A limit exactly equal to the match count is NOT capped: nothing was left uncounted.
+        auto const exact = screen.tallyMatches(U"ab", CellLocation {}, SearchCaseSensitivity::Smart, 4);
+        CHECK(exact.total == 4);
+        CHECK(exact.exactness == TallyExactness::Exact);
+
+        // A zero limit is a degenerate but legal request, not a crash.
+        auto const none = screen.tallyMatches(U"ab", CellLocation {}, SearchCaseSensitivity::Smart, 0);
+        CHECK(none.total == 0);
+    }
+
+    SECTION("overlapping matches are counted, because navigation visits them")
+    {
+        // "aa" over "ab1a" + "2abc": the wrapped logical line contains "aa" only once, but the point
+        // here is that the tally advances by one cell like searchNextMatch does, so a needle that can
+        // overlap itself is not silently collapsed.
+        auto overlapping = MockTerm { PageSize { LineCount(2), ColumnCount(4) }, LineCount(4) };
+        overlapping.writeToScreen("aaaa");
+        auto const tally = overlapping.terminal.primaryScreen().tallyMatches(
+            U"aa", CellLocation {}, SearchCaseSensitivity::Smart, NoLimit);
+        CHECK(tally.total == 3); // at columns 0, 1 and 2
     }
 }
 
