@@ -1,7 +1,7 @@
 # OSC 533 — Screenshot
 
-Reads a rectangular region of the page back to the application, as text or as the VT sequences that
-would reproduce it.
+Reads a rectangular region of the page back to the application: as text, as the VT sequences that
+would reproduce it, or as the pixels it is actually rendered with.
 
 This is the region-addressable counterpart to [buffer capture](buffer-capture.md). Buffer capture
 answers "what scrolled past", counted in lines from the bottom of the page and reaching back into
@@ -46,13 +46,13 @@ Only the current buffer's main page is readable. Scrollback is not addressable h
 
 ### Formats
 
-| `Pf` | Format        | Status      |
-|------|---------------|-------------|
-| `0`  | Plain text    | Implemented |
-| `1`  | VT sequences  | Implemented |
-| `2`  | Sixel         | Reserved    |
-| `3`  | PNG           | Reserved    |
-| `4`  | RGBA          | Reserved    |
+| `Pf` | Format        | Status      | Produced by |
+|------|---------------|-------------|-------------|
+| `0`  | Plain text    | Implemented | the grid    |
+| `1`  | VT sequences  | Implemented | the grid    |
+| `2`  | Sixel         | Reserved    | the renderer |
+| `3`  | PNG           | Implemented | the renderer |
+| `4`  | RGBA          | Implemented | the renderer |
 
 **Plain text** is UTF-8, one LF-terminated line per row of the region, blank cells rendered as
 spaces and a wide character contributing a single codepoint.
@@ -61,17 +61,42 @@ spaces and a wide character contributing a single codepoint.
 terminated by CRLF — this format exists to be written back to a terminal, where a bare LF would
 leave every row starting where the one above it ended.
 
-The pixel formats are **reserved, not absent**. Producing one requires rasterizing glyphs, which is
-a renderer's job and not the terminal engine's, and is impossible at all in a headless session where
-there is no renderer. They have numbers so that an application asking for one is told
-`UnsupportedFormat` rather than met with silence, and so that implementing one later adds a row to a
-table rather than changing this grammar.
+**PNG** is a whole PNG file — signature, `IHDR` and all — of the region as rendered.
+
+**RGBA** is tightly-packed 8-bit-per-channel pixels with straight (not premultiplied) alpha, rows
+top to bottom, exactly `Pw * Ph * 4` bytes. It exists so an application that is going to blit the
+pixels anyway does not have to carry a PNG decoder; the reply's `Pw`/`Ph` are what give the flat run
+its shape.
+
+**Sixel** is **reserved, not absent**: the number is spoken for, but nothing here encodes one yet.
+It has a number so that an application asking for it is told `UnsupportedFormat` rather than met
+with silence, and so that implementing it later adds a row to a table rather than changing this
+grammar.
+
+### What the pixel formats need
+
+The two pixel formats are produced by the **renderer**, not by the terminal engine, and that has
+consequences an application should expect:
+
+- **A session without a renderer cannot serve them.** A headless session has no font loaded and no
+  GPU attached, so there are no rasterized glyphs to photograph. Such a request is answered
+  `Unavailable` (`Ps = 6`) — which is a statement about the *session*, not about the protocol, so an
+  application that gets it may usefully ask again once a window exists.
+- **They photograph what is on screen, not what is in the grid.** The capture is a crop out of a
+  real rendered frame, so it carries the cursor, any selection highlight, the background image and
+  the current viewport — including a scrollback position, if the user has scrolled away from the
+  bottom.
+- **The reply is not prompt.** The frame must be submitted before its texture can be read back, so
+  the capture completes a frame or two after the request. `Pid` is what matches the answer to the
+  question.
+- **They are large.** A 640×384 region is under 30 KB as PNG but very nearly a megabyte as RGBA,
+  which base64 inflates by a further third. It arrives as several hundred chunks; see below.
 
 ## Response Syntax
 
 ```
-PM 533 ; Pid ; Ps ; Pt ; Pl ; Pb ; Pr ; Pf ; <base64> ST     (Ps = 1)
-PM 533 ; Pid ; Ps ST                                          (Ps ≠ 1)
+PM 533 ; Pid ; Ps ; Pt ; Pl ; Pb ; Pr ; Pf ; Pw ; Ph ; <base64> ST   (Ps = 1)
+PM 533 ; Pid ; Ps ST                                                  (Ps ≠ 1)
 ```
 
 That is: `ESC ^ 533 ; … ESC \`.
@@ -84,6 +109,13 @@ read as a fresh request, so there is no way to build a request/response loop out
 The geometry echoed back is the region **as resolved**, in the same one-based units the request
 used, so a reply can be read without knowing what the terminal defaulted the request to.
 
+`Pw` and `Ph` are the payload's extent **in pixels**, and are `0` for a format that has no pixel
+extent — which keeps the payload at one fixed position whatever the format was. They are not
+redundant for a pixel format: RGBA is a flat run of bytes and says nothing about its own shape, and
+even PNG's region cannot be measured from its extent in cells without knowing the cell size and how
+the crop was clipped to the rendered frame. Kitty's graphics protocol makes the same call, requiring
+`s=`/`v=` alongside raw pixels.
+
 ### Status codes
 
 | `Ps` | Meaning                                                    |
@@ -94,6 +126,11 @@ used, so a reply can be read without knowing what the terminal defaulted the req
 | `3`  | The request could not be read                              |
 | `4`  | The format named is reserved, or is not a format           |
 | `5`  | The region names no cell (its corners are inverted)        |
+| `6`  | The format is implemented, but this session cannot produce it right now |
+
+`4` and `6` are deliberately different answers. `UnsupportedFormat` says the *protocol* does not
+offer what was asked for and never will in this version; `Unavailable` says this *session* cannot —
+no renderer is attached, or the capture failed — and is worth retrying.
 
 **Every request is answered**, including one that is refused. An application that writes a request
 and then blocks on a read is never left waiting for a reply that is not coming — which matters
@@ -125,7 +162,7 @@ Capture the whole page as plain text:
 
 ```sh
 printf '\033]533\033\\'
-# PM 533 ; 0 ; 1 ; 1 ; 1 ; 24 ; 80 ; 0 ; <base64> ST
+# PM 533 ; 0 ; 1 ; 1 ; 1 ; 24 ; 80 ; 0 ; 0 ; 0 ; <base64> ST
 # PM 533 ; 0 ; 0 ST
 ```
 
@@ -133,15 +170,31 @@ Capture rows 1–5, columns 1–20, as VT sequences, tagging the request `42`:
 
 ```sh
 printf '\033]533;42;1;1;5;20;1\033\\'
-# PM 533 ; 42 ; 1 ; 1 ; 1 ; 5 ; 20 ; 1 ; <base64> ST
+# PM 533 ; 42 ; 1 ; 1 ; 1 ; 5 ; 20 ; 1 ; 0 ; 0 ; <base64> ST
 # PM 533 ; 42 ; 0 ST
 ```
 
-Ask for PNG, and be told it is not available:
+Capture rows 1–10 as PNG, tagging the request `7`:
+
+```sh
+printf '\033]533;7;1;;10;;3\033\\'
+# PM 533 ; 7 ; 1 ; 1 ; 1 ; 10 ; 80 ; 3 ; 640 ; 160 ; <base64> ST
+# ... more chunks ...
+# PM 533 ; 7 ; 0 ST
+```
+
+Ask a headless session for the same thing, and be told it cannot:
 
 ```sh
 printf '\033]533;7;;;;;3\033\\'
-# PM 533 ; 7 ; 4 ST
+# PM 533 ; 7 ; 6 ST
+```
+
+Ask for sixel, which has a number but no encoder behind it:
+
+```sh
+printf '\033]533;9;;;;;2\033\\'
+# PM 533 ; 9 ; 4 ST
 ```
 
 ## Notes on interoperability
