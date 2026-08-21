@@ -463,7 +463,7 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
 {
     auto settings = vtbackend::Settings {};
     settings.pageSize = profile.terminalSize.value();
-    settings.historyLimits = profile.history.value().maxHistoryLineCount;
+    settings.historyLimits = profile.history.value().limits();
     auto const& folding = config.folding.value();
     settings.foldMarkers = folding.markersVisible();
     settings.autoCollapseFoldOnNewCommand = folding.enabled && folding.autoCollapseOnNewCommand;
@@ -1978,6 +1978,24 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     if (child)
     {
         loadFromEntry(child, "limit", where.maxHistoryLineCount);
+        // Defaults to `limit` rather than to its own literal, so a configuration naming only `limit`
+        // keeps the behaviour it always had -- no headroom, and therefore line-wise eviction.
+        where.hardLimit = where.maxHistoryLineCount;
+        loadFromEntry(child, "hard_limit", where.hardLimit);
+
+        // Validated here, after both keys are read, following OscContextConfig: a ceiling below the
+        // depth it bounds is clamped rather than rejected, and lands on "no headroom", which is a
+        // working configuration rather than an error. An unbounded scrollback evicts nothing, so a
+        // hard limit under it would describe a ceiling that is never reached.
+        if (std::holds_alternative<vtbackend::Infinite>(where.maxHistoryLineCount))
+            where.hardLimit = vtbackend::Infinite {};
+        else if (auto const* const ceiling = std::get_if<vtbackend::LineCount>(&where.hardLimit))
+        {
+            auto const guaranteed = std::get<vtbackend::LineCount>(where.maxHistoryLineCount);
+            if (*ceiling < guaranteed)
+                where.hardLimit = guaranteed;
+        }
+
         loadFromEntry(child, "scroll_multiplier", where.historyScrollMultiplier);
         loadFromEntry(child, "auto_scroll_on_update", where.autoScrollOnUpdate);
     }

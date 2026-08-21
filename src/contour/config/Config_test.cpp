@@ -3970,3 +3970,99 @@ profiles:
     REQUIRE_FALSE(settings.has_value());
     CHECK_FALSE(settings.error().empty());
 }
+
+// {{{ history.hard_limit (issue #836)
+namespace
+{
+/// A minimal profile whose `history:` block is @p historyBody.
+[[nodiscard]] std::string historyConfig(std::string_view historyBody)
+{
+    return std::format("platform_plugin: auto\n"
+                       "default_profile: main\n"
+                       "profiles:\n"
+                       "    main:\n"
+                       "        shell: \"/bin/bash\"\n"
+                       "        history:\n"
+                       "{}",
+                       historyBody);
+}
+} // namespace
+
+TEST_CASE("Config: history.hard_limit defaults to history.limit", "[config][history]")
+{
+    auto dir = QTemporaryDir {};
+    auto const config = loadFromYaml(dir, historyConfig("            limit: 4242\n"));
+    auto const* const profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    // A configuration naming only `limit` must keep the behaviour it always had: no headroom, so no
+    // block-atomic eviction and no ring larger than what was asked for.
+    auto const limits = profile->history.value().limits();
+    CHECK(limits.guaranteed == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(4242) });
+    CHECK(limits.capacity == limits.guaranteed);
+    CHECK(!limits.hasHeadroom());
+}
+
+TEST_CASE("Config: history.hard_limit above the limit opens the headroom", "[config][history]")
+{
+    auto dir = QTemporaryDir {};
+    auto const config =
+        loadFromYaml(dir, historyConfig("            limit: 1000\n            hard_limit: 2500\n"));
+    auto const* const profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    auto const limits = profile->history.value().limits();
+    CHECK(limits.guaranteed == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(1000) });
+    CHECK(limits.capacity == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(2500) });
+    CHECK(limits.hasHeadroom());
+
+    // And it reaches the terminal the daemon builds, not just the profile.
+    CHECK(contour::config::emulationSettings(config, *profile).historyLimits == limits);
+}
+
+TEST_CASE("Config: history.hard_limit below the limit is raised to it", "[config][history]")
+{
+    auto dir = QTemporaryDir {};
+    auto const config =
+        loadFromYaml(dir, historyConfig("            limit: 5000\n            hard_limit: 200\n"));
+    auto const* const profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    // Clamped rather than rejected, landing on "no headroom" -- a working configuration.
+    auto const limits = profile->history.value().limits();
+    CHECK(limits.capacity == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(5000) });
+    CHECK(!limits.hasHeadroom());
+}
+
+TEST_CASE("Config: an infinite history.limit makes the hard limit infinite too", "[config][history]")
+{
+    auto dir = QTemporaryDir {};
+    auto const config =
+        loadFromYaml(dir, historyConfig("            limit: -1\n            hard_limit: 2000\n"));
+    auto const* const profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    // Nothing is ever evicted, so a ceiling under it would describe a bound that is never reached.
+    auto const limits = profile->history.value().limits();
+    CHECK(std::holds_alternative<vtbackend::Infinite>(limits.guaranteed));
+    CHECK(std::holds_alternative<vtbackend::Infinite>(limits.capacity));
+    CHECK(!limits.hasHeadroom());
+}
+
+TEST_CASE("Config: history.hard_limit survives a write/read round-trip", "[config][history]")
+{
+    auto dir = QTemporaryDir {};
+    auto const config =
+        loadFromYaml(dir, historyConfig("            limit: 1000\n            hard_limit: 2500\n"));
+    auto const* const profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+    auto secondDir = QTemporaryDir {};
+    auto const reloaded = loadFromYaml(secondDir, written);
+    auto const* const reloadedProfile = reloaded.profile("main");
+    REQUIRE(reloadedProfile != nullptr);
+
+    CHECK(reloadedProfile->history.value().limits() == profile->history.value().limits());
+}
+// }}}

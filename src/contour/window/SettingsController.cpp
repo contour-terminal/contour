@@ -413,6 +413,27 @@ namespace
                             h.maxHistoryLineCount = vtbackend::LineCount(lines);
                         p.history = h;
                     } },
+                  { "history_hard_limit",
+                    "History hard limit",
+                    "Upper bound on the scrollback (-1 = unlimited). Above the max, the extra lines "
+                    "are headroom in which whole (prompt, output) blocks are evicted instead of "
+                    "cutting mid-command. Values below the max disable that and are raised to it.",
+                    "int",
+                    [](TerminalProfile const& p) {
+                        auto const& hardLimit = p.history.value().hardLimit;
+                        if (auto const* lineCount = std::get_if<vtbackend::LineCount>(&hardLimit))
+                            return QVariant(static_cast<int>(unbox(*lineCount)));
+                        return QVariant(-1);
+                    },
+                    [](TerminalProfile& p, QVariant const& v) {
+                        auto h = p.history.value();
+                        auto const lines = v.toInt();
+                        if (lines < 0)
+                            h.hardLimit = vtbackend::Infinite {};
+                        else
+                            h.hardLimit = vtbackend::LineCount(lines);
+                        p.history = h;
+                    } },
                   { "history_scroll_multiplier",
                     "History scroll multiplier",
                     "Number of lines scrolled per scroll wheel step.",

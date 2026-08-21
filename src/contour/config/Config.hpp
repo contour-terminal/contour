@@ -292,11 +292,29 @@ struct CursorConfig
     std::chrono::milliseconds cursorBlinkInterval;
 };
 
+/// How deep the scrollback is, and how it gives rows back when it is full.
+///
+/// `hardLimit` above `maxHistoryLineCount` is what turns on block-atomic eviction: with headroom
+/// between the two, what falls out of the buffer is a whole (prompt, output) command rather than
+/// whatever happened to be at the limit. Defaulting it to the same value is today's behaviour, so a
+/// configuration that names only `limit` is unaffected.
 struct HistoryConfig
 {
+    /// The scrollback depth that always survives. Below the hard limit this is simply THE limit.
     vtbackend::MaxHistoryLineCount maxHistoryLineCount { vtbackend::LineCount(1000) };
+
+    /// The ceiling, and the depth at which eviction stops caring about command boundaries. Raised to
+    /// `maxHistoryLineCount` when configured below it -- @see YAMLConfigReader::loadFromEntry.
+    vtbackend::MaxHistoryLineCount hardLimit { vtbackend::LineCount(1000) };
+
     vtbackend::LineCount historyScrollMultiplier { vtbackend::LineCount(3) };
     bool autoScrollOnUpdate { true };
+
+    /// @return Both bounds, in the vocabulary vtbackend speaks.
+    [[nodiscard]] vtbackend::HistoryLimits limits() const noexcept
+    {
+        return vtbackend::HistoryLimits { maxHistoryLineCount, hardLimit };
+    }
 };
 
 /// Output folding: collapsing a finished command's output down to the prompt line it was entered at.
@@ -1904,16 +1922,16 @@ struct Writer
 
     [[nodiscard]] std::string format(std::string_view doc, HistoryConfig const& v)
     {
-        return format(
-            doc,
-            [&]() {
-                if (std::holds_alternative<vtbackend::Infinite>(v.maxHistoryLineCount))
-                    return -1;
-                auto number = unbox(std::get<vtbackend::LineCount>(v.maxHistoryLineCount));
-                return number;
-            }(),
-            v.autoScrollOnUpdate,
-            v.historyScrollMultiplier);
+        auto const spell = [](vtbackend::MaxHistoryLineCount limit) {
+            if (std::holds_alternative<vtbackend::Infinite>(limit))
+                return -1;
+            return unbox(std::get<vtbackend::LineCount>(limit));
+        };
+        return format(doc,
+                      spell(v.maxHistoryLineCount),
+                      spell(v.hardLimit),
+                      v.autoScrollOnUpdate,
+                      v.historyScrollMultiplier);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, ScrollBarConfig const& v)

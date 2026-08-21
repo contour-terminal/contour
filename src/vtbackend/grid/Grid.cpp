@@ -1078,6 +1078,12 @@ void Grid::clampHistory()
     if (!_historyLimits.hasHeadroom())
         return;
 
+    // An unbounded scrollback evicts nothing, so there is no eviction to snap to a boundary. Without
+    // this the ring's current allocation would read as the capacity and the trim would start cutting
+    // the very history `infinite` promises to keep.
+    if (std::holds_alternative<Infinite>(_historyLimits.capacity))
+        return;
+
     // A zero-history grid is every page but the primary one. Returning here also makes the
     // monotone-floor reasoning below unconditional rather than true-by-audit: rotateBuffersRight has
     // a zero-history branch that LOWERS _stableFloor, and it is the only path that ever does.
