@@ -630,7 +630,12 @@ void SshSession::resizeScreen()
 
 void SshSession::processState()
 {
-    waitForSocket();
+    // No waitForSocket() here. It used to open with `if (!_p->wantsWaitForSocket) return 0;`, which
+    // made this call a no-op except right after an EAGAIN; that flag is gone and the direction query
+    // now takes _mutex -- which every caller of this function already holds, so the first statement
+    // of start() deadlocked the GUI thread against itself before a single byte was sent. The idle
+    // wait belongs to the two callers that can take it: read() and write() both park on
+    // waitForSocket() with _mutex released, which is what its own comment says it is for.
     while (true)
     {
         switch (_state.load())
