@@ -2953,6 +2953,24 @@ void Terminal::requestCaptureBuffer(LineCount lines, bool logical)
     _eventListener.requestCaptureBuffer(lines, logical);
 }
 
+void Terminal::requestScreenshot(screenshot::Request const& request)
+{
+    if (_eventListener.requestScreenshot(request) == screenshot::Disposition::Unhandled)
+        answerScreenshot(request, screenshot::Decision::Denied);
+}
+
+void Terminal::answerScreenshot(screenshot::Request const& request, screenshot::Decision decision)
+{
+    if (decision == screenshot::Decision::Denied)
+    {
+        screenshot::writeError(
+            request.id, screenshot::Status::Denied, [this](std::string_view message) { reply(message); });
+        return;
+    }
+
+    currentScreen().emitScreenshot(request);
+}
+
 void Terminal::requestShowHostWritableStatusLine()
 {
     _eventListener.requestShowHostWritableStatusLine();

@@ -25,6 +25,7 @@
 #include <vtbackend/vt/DesktopNotification.hpp>
 #include <vtbackend/vt/PointerShape.hpp>
 #include <vtbackend/vt/ProgressState.hpp>
+#include <vtbackend/vt/Screenshot.hpp>
 #include <vtbackend/vt/Sequence.hpp>
 #include <vtbackend/vt/SequenceBuilder.hpp>
 
@@ -284,6 +285,21 @@ class Terminal
         virtual ~Events() = default;
 
         virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
+
+        /// Asks the frontend whether the application may read the screen back, and to serve the
+        /// request if so.
+        ///
+        /// The default refuses, and deliberately so: a frontend that does not implement this has no
+        /// way to ask the user, and silently handing over the screen is not the safe reading of that.
+        /// The refusal is still a reply, so the application is never left waiting.
+        ///
+        /// @param request What was asked for.
+        /// @return Whether the frontend has taken ownership of @p request and will answer it.
+        [[nodiscard]] virtual screenshot::Disposition requestScreenshot(screenshot::Request const& /*request*/)
+        {
+            return screenshot::Disposition::Unhandled;
+        }
+
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void renderBufferUpdated() {}
@@ -386,6 +402,11 @@ class Terminal
     {
       public:
         void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) override {}
+        [[nodiscard]] screenshot::Disposition requestScreenshot(
+            screenshot::Request const& /*request*/) override
+        {
+            return screenshot::Disposition::Unhandled;
+        }
         void bell() override {}
         void bufferChanged(ScreenType) override {}
         void renderBufferUpdated() override {}
@@ -1723,6 +1744,15 @@ class Terminal
     // Screen's EventListener implementation
     //
     void requestCaptureBuffer(LineCount lines, bool logical);
+
+    /// Routes a decoded screenshot request to the frontend, and refuses it here if none will answer.
+    /// @param request What the application asked for.
+    void requestScreenshot(screenshot::Request const& request);
+
+    /// Answers a screenshot request the frontend was asked to decide on.
+    /// @param request  The request being answered.
+    /// @param decision What the frontend, or the user, decided.
+    void answerScreenshot(screenshot::Request const& request, screenshot::Decision decision);
     void requestShowHostWritableStatusLine();
     void bell();
     void bufferChanged(ScreenType);

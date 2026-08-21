@@ -6102,6 +6102,70 @@ void Screen::setMark()
     markLogicalLineAtCursor(LineFlag::Marked);
 }
 
+ApplyResult Screen::processScreenshot(std::string_view payload)
+{
+    auto const request = screenshot::parseRequest(payload, pageSize());
+    if (!request)
+    {
+        // A request that cannot be read is refused here rather than passed on: there is nothing for
+        // the user to be asked about, and an application that wrote a request and is now waiting on
+        // the answer must get one either way.
+        auto const& rejection = request.error();
+        screenshot::writeError(
+            rejection.id, rejection.status, [this](std::string_view message) { reply(message); });
+        return rejection.status == screenshot::Status::Malformed ? ApplyResult::Invalid
+                                                                 : ApplyResult::Unsupported;
+    }
+
+    _terminal->requestScreenshot(*request);
+    return ApplyResult::Ok;
+}
+
+void Screen::emitScreenshot(screenshot::Request const& request)
+{
+    auto const top = LineOffset::cast_from(request.area.top);
+    auto const bottom = LineOffset::cast_from(request.area.bottom);
+    auto const left = ColumnOffset::cast_from(request.area.left);
+    // Line::toUtf8() and Line::toUtf8WithSgr() take a half-open column range, while a Rect names both
+    // its corners. Both clamp to the line, so the columns need no bound of their own here.
+    auto const end = ColumnOffset::cast_from(unbox(request.area.right) + 1);
+
+    // The ROWS do need one. parseRequest() resolved the region against the page as it was when the
+    // request arrived, and the permission wall can hold that request for as long as the user takes to
+    // answer a dialog -- during which the window may well have been made smaller. lineAt() indexes the
+    // ring, so a row past the page would come back as an unrelated scrollback row rather than fail.
+    auto const lastRow = unbox(pageSize().lines) - 1;
+    auto const bottom = std::min(unbox(request.area.bottom), lastRow);
+
+    auto content = std::string {};
+    for (auto const row: std::views::iota(*top, *bottom + 1))
+    {
+        auto const& line = _grid.lineAt(LineOffset(row));
+        switch (request.format)
+        {
+            case screenshot::Format::PlainText:
+                content += line.toUtf8(left, end);
+                content += '\n';
+                break;
+            case screenshot::Format::VTSequences:
+                // CR as well as LF: this format exists to be written back to a terminal, where a bare
+                // LF would leave every row starting where the one above it ended.
+                content += line.toUtf8WithSgr(left, end);
+                content += "\r\n";
+                break;
+            case screenshot::Format::Sixel:
+            case screenshot::Format::Png:
+            case screenshot::Format::Rgba:
+                // parseRequest() refuses these, so reaching here would mean the format table and the
+                // formats this switch produces have drifted apart.
+                Guarantee(false);
+                break;
+        }
+    }
+
+    screenshot::writeReply(request, content, [this](std::string_view message) { reply(message); });
+}
+
 ApplyResult Screen::processHierarchicalContext(std::string_view payload)
 {
     // The single gate. Unsupported rather than Invalid: the payload may well be perfectly formed, the
@@ -7199,6 +7263,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case KITTYCLIPBOARD: return processKittyClipboard(seq.intermediateCharacters());
         case POINTERSHAPE: return processPointerShape(seq.intermediateCharacters());
         case HIERCONTEXT: return processHierarchicalContext(seq.intermediateCharacters());
+        case SCREENSHOT: return processScreenshot(seq.intermediateCharacters());
         case DESKTOPNOTIFY: return impl::DESKTOPNOTIFY(seq, *_terminal);
         case DUMPSTATE: inspect(); break;
         case SEMA: processShellIntegration(seq); break;
