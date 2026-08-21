@@ -91,8 +91,6 @@ CaptureResult encodeScreenshot(QImage const& frame,
         case Format::VTSequences:
             // Grid formats never reach a renderer: Terminal::answerScreenshot() serves those off the
             // cells and only hands the renderer formats on.
-        case Format::Rgba:
-            // Reserved, and refused by screenshot::parseRequest() long before this.
             break;
     }
 

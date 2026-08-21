@@ -46,13 +46,16 @@ Only the current buffer's main page is readable. Scrollback is not addressable h
 
 ### Formats
 
-| `Pf` | Format        | Status      | Produced by  |
-|------|---------------|-------------|--------------|
-| `0`  | Plain text    | Implemented | the grid     |
-| `1`  | VT sequences  | Implemented | the grid     |
-| `2`  | Sixel         | Implemented | the renderer |
-| `3`  | PNG           | Implemented | the renderer |
-| `4`  | RGBA          | Reserved    | the renderer |
+| `Pf` | Format        | Produced by  |
+|------|---------------|--------------|
+| `0`  | Plain text    | the grid     |
+| `1`  | VT sequences  | the grid     |
+| `2`  | Sixel         | the renderer |
+| `3`  | PNG           | the renderer |
+
+Every number this table assigns is one the terminal produces; a format is named here when it is
+implemented, and not before. `4` and up name nothing, and a request for one is answered
+`UnsupportedFormat`.
 
 **Plain text** is UTF-8, one LF-terminated line per row of the region, blank cells rendered as
 spaces and a wide character contributing a single codepoint.
@@ -74,12 +77,6 @@ registers (a background image, or inline graphics) is reduced to a fixed 6×7×6
 
 **PNG** is a whole PNG file — signature, `IHDR` and all — of the region as rendered. Use it when
 fidelity matters; use sixel when the point is to display the result somewhere.
-
-**RGBA** is **reserved, and deliberately not served.** Raw pixels would be very nearly a megabyte
-for a page-sized region against tens of kilobytes as PNG, and base64 adds a third to that — twenty-
-five to eighty times the wire, through a PTY the application is also trying to use, to save the
-receiver a decode it can already do. The number stays spoken for so it cannot later come to mean
-something else; a request for it is answered `UnsupportedFormat`.
 
 ### What the pixel formats need
 
@@ -132,9 +129,9 @@ reject an oversized image before it has decoded anything at all.
 | `1`  | Data chunk                                                 |
 | `2`  | Denied by the user or by configuration                     |
 | `3`  | The request could not be read                              |
-| `4`  | The format named is reserved, or is not a format           |
+| `4`  | The number named is not a format                           |
 | `5`  | The region names no cell (its corners are inverted)        |
-| `6`  | The format is implemented, but this session cannot produce it right now |
+| `6`  | The format exists, but this session cannot produce it right now |
 
 `4` and `6` are deliberately different answers. `UnsupportedFormat` says the *protocol* does not
 offer what was asked for and never will in this version; `Unavailable` says this *session* cannot —
@@ -208,7 +205,7 @@ printf '\033]533;8;;;;;2\033\\'
 # PM 533 ; 8 ; 0 ST
 ```
 
-Ask for raw RGBA, which this extension reserves but does not serve:
+Ask for a format number the protocol does not name:
 
 ```sh
 printf '\033]533;9;;;;;4\033\\'

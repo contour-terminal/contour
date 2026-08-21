@@ -31,30 +31,16 @@ inline constexpr size_t MaxChunkSize = 4095;
 
 /// The representation a screenshot is delivered in, as named by `Pf`.
 ///
-/// A format that is not implemented yet is deliberately *reserved rather than absent*: an application
-/// that asks for one is told so (@ref Status::UnsupportedFormat) instead of being met with silence, and
-/// implementing it later adds a row to @ref Formats rather than changing the grammar.
+/// Every number the protocol assigns is one this terminal produces: a format is specified when it is
+/// implemented, never before. Adding one later adds a row to @ref Formats rather than changing the
+/// grammar, and until then an application asking for its number is told so
+/// (@ref Status::UnsupportedFormat) instead of being met with silence.
 enum class Format : uint8_t
 {
     PlainText = 0,   ///< UTF-8 text, one LF-terminated line per row of the region.
     VTSequences = 1, ///< The text plus the SGR sequences needed to reproduce its colors.
     Sixel = 2,       ///< The region as rendered, as sixel that can be written back to a terminal.
     Png = 3,         ///< A whole PNG file of the region as rendered.
-
-    /// Reserved: raw pixels, which this extension deliberately does not carry.
-    ///
-    /// A page-sized region is very nearly a megabyte raw against tens of kilobytes as PNG, and
-    /// base64 adds a third to that -- twenty-five to eighty times the wire, through a PTY the
-    /// application is also trying to use, to save the receiver a decode it can already do. The
-    /// number stays spoken for so it cannot later mean something else.
-    Rgba = 4,
-};
-
-/// Whether this terminal can actually produce a @ref Format.
-enum class Availability : uint8_t
-{
-    Reserved = 0,    ///< The number is spoken for, but nothing produces it yet.
-    Implemented = 1, ///< The terminal produces it.
 };
 
 /// What has to run to produce a @ref Format.
@@ -84,47 +70,30 @@ enum class Status : uint8_t
     Data = 1,              ///< This message carries a chunk of the screenshot.
     Denied = 2,            ///< The user, or the configuration, refused the request.
     Malformed = 3,         ///< The request could not be read.
-    UnsupportedFormat = 4, ///< The format named is reserved, or is not a format at all.
+    UnsupportedFormat = 4, ///< The number named is not a format at all.
     EmptyRegion = 5,       ///< The region names no cell -- its corners are inverted.
 
-    /// The format exists and is implemented, but this session cannot produce it now: a
+    /// The format is one the protocol names, but this session cannot produce it now: a
     /// @ref Producer::Renderer format asked of a session with no renderer attached, or a capture that
     /// failed. Distinct from @ref UnsupportedFormat, which is a statement about the protocol rather
     /// than about this session -- an application told @c Unavailable may usefully try again.
     Unavailable = 6,
 };
 
-/// One row of the format table: what a `Pf` value means, whether it can be served, and by what.
+/// One row of the format table: what a `Pf` value means, and what has to run to serve it.
 struct FormatInfo
 {
     Format format;
     std::string_view name;
-    Availability availability;
     Producer producer;
 };
 
 /// Every format the protocol assigns a number to. Adding a format is adding a row here.
 inline constexpr auto Formats = std::array {
-    FormatInfo { .format = Format::PlainText,
-                 .name = "plain text",
-                 .availability = Availability::Implemented,
-                 .producer = Producer::Grid },
-    FormatInfo { .format = Format::VTSequences,
-                 .name = "VT sequences",
-                 .availability = Availability::Implemented,
-                 .producer = Producer::Grid },
-    FormatInfo { .format = Format::Sixel,
-                 .name = "sixel",
-                 .availability = Availability::Implemented,
-                 .producer = Producer::Renderer },
-    FormatInfo { .format = Format::Png,
-                 .name = "PNG",
-                 .availability = Availability::Implemented,
-                 .producer = Producer::Renderer },
-    FormatInfo { .format = Format::Rgba,
-                 .name = "RGBA",
-                 .availability = Availability::Reserved,
-                 .producer = Producer::Renderer },
+    FormatInfo { .format = Format::PlainText, .name = "plain text", .producer = Producer::Grid },
+    FormatInfo { .format = Format::VTSequences, .name = "VT sequences", .producer = Producer::Grid },
+    FormatInfo { .format = Format::Sixel, .name = "sixel", .producer = Producer::Renderer },
+    FormatInfo { .format = Format::Png, .name = "PNG", .producer = Producer::Renderer },
 };
 
 /// @param format The format to look up.
@@ -158,8 +127,7 @@ static_assert(
 /// @return Whether this terminal can produce @p format.
 [[nodiscard]] constexpr bool isSupported(Format format) noexcept
 {
-    auto const* const info = formatInfo(format);
-    return info != nullptr && info->availability == Availability::Implemented;
+    return formatInfo(format) != nullptr;
 }
 
 /// @param format The format to look up; must be one @ref isSupported names.

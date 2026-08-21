@@ -181,10 +181,9 @@ TEST_CASE("ScreenshotEncoder.a region wholly outside the frame is unavailable", 
 TEST_CASE("ScreenshotEncoder.a grid format never reaches the renderer", "[screenshot]")
 {
     // Terminal::answerScreenshot() serves the grid formats off the cells and hands only the renderer
-    // formats here, and RGBA is reserved rather than served. Asking anyway is refused rather than
-    // answered with something plausible.
+    // formats here. Asking anyway is refused rather than answered with something plausible.
     auto const area = Rect { .top = Top(0), .left = Left(0), .bottom = Bottom(0), .right = Right(0) };
-    for (auto const format: { Format::PlainText, Format::VTSequences, Format::Rgba })
+    for (auto const format: { Format::PlainText, Format::VTSequences })
     {
         auto const capture = encodeScreenshot(testFrame(), area, testMetrics(), format);
         REQUIRE(!capture.has_value());

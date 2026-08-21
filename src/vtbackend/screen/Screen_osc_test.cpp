@@ -967,10 +967,10 @@ TEST_CASE("screenshot.OSC533", "[screen][screenshot]")
         CHECK(mock.terminal.peekInput() == "\033^533;5;5\033\\");
     }
 
-    SECTION("a reserved format is refused")
+    SECTION("a format the protocol does not name is refused")
     {
-        // Raw RGBA: the number is spoken for so nothing else can take it, but the extension
-        // deliberately does not carry pixels that way. @see screenshot::Format::Rgba.
+        // Pf = 4 is past the last format this extension assigns. Asking for it is answered, rather
+        // than met with silence. @see screenshot::Format.
         mock.writeToScreen("\033]533;6;1;1;3;5;4\033\\");
         CHECK(mock.terminal.peekInput() == "\033^533;6;4\033\\");
     }

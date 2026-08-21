@@ -6139,7 +6139,6 @@ screenshot::Capture Screen::captureScreenshot(screenshot::Request const& request
             break;
         case screenshot::Format::Sixel:
         case screenshot::Format::Png:
-        case screenshot::Format::Rgba:
             // Pixels, and there are none here. Terminal::answerScreenshot() routes a renderer format
             // to the frontend instead, so reaching this means the format table and this switch have
             // drifted apart.

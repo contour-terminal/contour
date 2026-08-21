@@ -184,10 +184,10 @@ TEST_CASE("Screenshot.parse.malformed_parameter_is_rejected", "[screenshot]")
     }
 }
 
-TEST_CASE("Screenshot.parse.reserved_and_unknown_formats_are_refused", "[screenshot]")
+TEST_CASE("Screenshot.parse.unknown_formats_are_refused", "[screenshot]")
 {
-    // RGBA has a number this extension deliberately does not serve, and 5 upwards name nothing at
-    // all. An application asking for one is told so rather than met with silence.
+    // Every number the protocol assigns is served; 4 upwards name nothing at all. An application
+    // asking for one is told so rather than met with silence.
     for (auto const format: { "4"sv, "5"sv, "255"sv })
     {
         auto const request = parseRequest(std::string("11;1;1;5;20;") + std::string(format), TestPage);
@@ -212,7 +212,7 @@ TEST_CASE("Screenshot.parse.renderer_formats_are_accepted_here", "[screenshot]")
 // }}}
 // {{{ format table
 
-TEST_CASE("Screenshot.formats.each_enumerator_is_served_or_reserved", "[screenshot]")
+TEST_CASE("Screenshot.formats.each_enumerator_is_served", "[screenshot]")
 {
     // The hand-written list is the point: it is what a new enumerator has to be added to, and so what
     // notices a format that was declared and then never given a row. That the rows themselves are
@@ -221,7 +221,8 @@ TEST_CASE("Screenshot.formats.each_enumerator_is_served_or_reserved", "[screensh
     CHECK(isSupported(Format::VTSequences));
     CHECK(isSupported(Format::Sixel));
     CHECK(isSupported(Format::Png));
-    CHECK(!isSupported(Format::Rgba));
+    // And nothing past the last enumerator: the table ends exactly where Format does.
+    CHECK(!isSupported(static_cast<Format>(4)));
     CHECK(formatInfo(static_cast<Format>(200)) == nullptr);
 }
 
@@ -233,7 +234,6 @@ TEST_CASE("Screenshot.formats.the_table_says_who_produces_each", "[screenshot]")
     CHECK(producerOf(Format::VTSequences) == Producer::Grid);
     CHECK(producerOf(Format::Sixel) == Producer::Renderer);
     CHECK(producerOf(Format::Png) == Producer::Renderer);
-    CHECK(producerOf(Format::Rgba) == Producer::Renderer);
 }
 
 // }}}
