@@ -373,6 +373,14 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 SLOT(onConfigReload()));
     }
     _musicalNotesBuffer.reserve(16);
+
+    // A tally walks the whole scrollback, so it must never run on the render path. Output that keeps
+    // arriving only re-arms this; the tally runs once the terminal goes quiet for a beat. Explicit
+    // actions (typing, stepping, switching case) re-tally immediately instead of waiting for it.
+    _searchTallyTimer.setSingleShot(true);
+    _searchTallyTimer.setInterval(std::chrono::milliseconds { 250 });
+    connect(&_searchTallyTimer, &QTimer::timeout, this, &TerminalSession::refreshSearchStatus);
+
     _profile = *_config.profile(_profileName); // XXX do it again. but we've to be more efficient here
     configureTerminal();
 }
@@ -720,6 +728,25 @@ void TerminalSession::screenUpdated()
         _terminal.viewport().scrollToBottom();
 
     auto const scrollable = _terminal.viewport().scrollableLineCount();
+
+    // New output can add or remove matches, so the find bar's count goes stale. Re-tallying walks the
+    // whole scrollback, so it is neither done here nor once per frame: this only re-arms a timer on
+    // the GUI thread, and only while the bar is open. Posted rather than called, for the reason
+    // stated above -- this runs on the parser thread, sometimes with the state mutex held.
+    if (_isSearchBarOpen.load(std::memory_order_relaxed)
+        && !_searchTallyPostPending.test_and_set(std::memory_order_acq_rel))
+    {
+        QMetaObject::invokeMethod(
+            this,
+            [this]() {
+                _searchTallyPostPending.clear(std::memory_order_release);
+                // Not restarted while already pending: restarting on every frame would mean the count
+                // never refreshed at all until the output stopped.
+                if (!_searchTallyTimer.isActive())
+                    _searchTallyTimer.start();
+            },
+            Qt::QueuedConnection);
+    }
 
     if (terminal().hasInput())
         _display->post(bind(&TerminalSession::flushInput, this));
@@ -1527,6 +1554,105 @@ void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
         case ViMode::Hint: configureCursor(_profile.modeNormal.value().cursor); break;
     }
 }
+
+void TerminalSession::searchPromptRequested()
+{
+    // Reached with the terminal's state mutex HELD (SearchReverse takes it, and `/` arrives inside
+    // sendCharEvent). A queued connection is therefore mandatory: the find bar reads terminal state as
+    // it opens, and a direct call would re-enter that non-recursive mutex on this very thread.
+    _isSearchBarOpen.store(true, std::memory_order_relaxed);
+    QMetaObject::invokeMethod(
+        this,
+        [this]() {
+            refreshSearchStatus();
+            emit searchBarRequested();
+        },
+        Qt::QueuedConnection);
+}
+
+// {{{ Find bar
+QString TerminalSession::searchPattern() const
+{
+    auto const l = scoped_lock { _terminal };
+    return QString::fromStdU32String(_terminal.search().pattern);
+}
+
+void TerminalSession::setSearchPattern(QString const& pattern)
+{
+    {
+        auto const l = scoped_lock { _terminal };
+
+        auto text = pattern.toStdU32String();
+        if (text.empty())
+        {
+            _terminal.clearSearch();
+        }
+        else
+        {
+            // Backwards from the cursor, which is what the terminal's search has always done and what
+            // makes an incremental search land on the nearest match behind you rather than jumping to
+            // the top of the scrollback on every keystroke.
+            (void) _terminal.searchReverse(std::move(text), _terminal.normalModeCursorPosition());
+        }
+    }
+    refreshSearchStatus();
+}
+
+void TerminalSession::setSearchCaseSensitivity(SearchCase mode)
+{
+    {
+        auto const l = scoped_lock { _terminal };
+
+        if (!_terminal.setSearchCaseSensitivity(searchCaseSensitivityOf(mode)))
+            return;
+
+        _searchCase = mode;
+
+        // Re-run in place: the old match may not be a match under the new policy.
+        if (!_terminal.search().pattern.empty())
+            (void) _terminal.searchReverse(_terminal.normalModeCursorPosition());
+    }
+    refreshSearchStatus();
+}
+
+void TerminalSession::searchNext()
+{
+    (void) (*this)(actions::FocusNextSearchMatch {});
+    refreshSearchStatus();
+}
+
+void TerminalSession::searchPrevious()
+{
+    (void) (*this)(actions::FocusPreviousSearchMatch {});
+    refreshSearchStatus();
+}
+
+void TerminalSession::clearSearch()
+{
+    _isSearchBarOpen.store(false, std::memory_order_relaxed);
+    _searchTallyTimer.stop();
+    (void) (*this)(actions::NoSearchHighlight {});
+    refreshSearchStatus();
+}
+
+void TerminalSession::refreshSearchStatus()
+{
+    auto status = SearchStatus {};
+    {
+        auto const l = scoped_lock { _terminal };
+        auto const& pattern = _terminal.search().pattern;
+        // Skipped entirely while the bar is closed: nothing displays the answer, and walking the
+        // scrollback to compute one nobody reads is the cost this guard exists to avoid.
+        auto const tally = (_isSearchBarOpen.load(std::memory_order_relaxed) && !pattern.empty())
+                               ? _terminal.tallySearchMatches(_terminal.normalModeCursorPosition())
+                               : vtbackend::SearchMatchTally {};
+        status = describeSearch(pattern, tally);
+    }
+
+    _searchStatus = std::move(status);
+    emit searchStateChanged();
+}
+// }}}
 
 void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
 {

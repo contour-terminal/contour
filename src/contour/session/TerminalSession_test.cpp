@@ -1895,6 +1895,96 @@ TEST_CASE("TerminalSession: search-match focus actions move the vi cursor onto a
     CHECK((nextFound || prevFound));
 }
 
+TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given",
+          "[contour][session][search]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    namespace actions = contour::actions;
+
+    for (int i = 0; i < 5; ++i)
+        session->terminal().writeToScreen(std::format("needle row {}\r\n", i));
+
+    // The bar has to be open for a tally to be computed at all: walking the scrollback for a label
+    // nobody is displaying is exactly the cost that guard exists to avoid.
+    (*session)(actions::SearchReverse {});
+    QCoreApplication::processEvents(); // the request reaches the GUI thread queued
+
+    SECTION("an empty pattern reports nothing at all")
+    {
+        session->setSearchPattern(QString {});
+        CHECK(session->searchPattern().isEmpty());
+        CHECK(session->searchSummary().isEmpty());
+        CHECK_FALSE(session->searchNavigable());
+    }
+
+    SECTION("a matching pattern reports its count")
+    {
+        session->setSearchPattern(QStringLiteral("needle"));
+        CHECK(session->searchPattern() == QStringLiteral("needle"));
+        CHECK(session->searchHasMatches());
+        CHECK(session->searchSummary().contains(QStringLiteral("5")));
+        CHECK(session->searchNavigable());
+    }
+
+    SECTION("a pattern that matches nothing says so, and offers nowhere to step")
+    {
+        session->setSearchPattern(QStringLiteral("haystack"));
+        CHECK_FALSE(session->searchHasMatches());
+        CHECK(session->searchSummary() == QStringLiteral("No results"));
+        CHECK_FALSE(session->searchNavigable());
+    }
+
+    SECTION("the case policy is honoured and re-runs the search in place")
+    {
+        session->terminal().writeToScreen("NEEDLE upper\r\n");
+
+        session->setSearchPattern(QStringLiteral("needle"));
+        auto const smart = session->searchSummary();
+
+        // Pinned sensitive: the uppercase line stops counting.
+        session->setSearchCaseSensitivity(contour::session::TerminalSession::SearchCase::Sensitive);
+        CHECK(session->searchCaseSensitivity() == contour::session::TerminalSession::SearchCase::Sensitive);
+        CHECK(session->searchSummary() != smart);
+
+        // Pinned insensitive brings it back.
+        session->setSearchCaseSensitivity(contour::session::TerminalSession::SearchCase::Insensitive);
+        CHECK(session->searchHasMatches());
+    }
+
+    SECTION("clearing drops the pattern and the summary together")
+    {
+        session->setSearchPattern(QStringLiteral("needle"));
+        REQUIRE(session->searchHasMatches());
+
+        session->clearSearch();
+        CHECK(session->searchPattern().isEmpty());
+        CHECK(session->searchSummary().isEmpty());
+        CHECK_FALSE(session->searchNavigable());
+    }
+}
+
+TEST_CASE("TerminalSession: SearchReverse asks for the find bar without switching Vi mode",
+          "[contour][session][search]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    namespace actions = contour::actions;
+
+    auto requests = 0;
+    QObject::connect(
+        session.get(), &contour::session::TerminalSession::searchBarRequested, [&]() { ++requests; });
+
+    auto const modeBefore = session->terminal().inputHandler().mode();
+    CHECK((*session)(actions::SearchReverse {}));
+    QCoreApplication::processEvents();
+
+    CHECK(requests == 1);
+    // The old prompt forced Normal mode purely to reveal the status line carrying it. Nothing is
+    // revealed any more, so nothing may be switched.
+    CHECK(session->terminal().inputHandler().mode() == modeBefore);
+}
+
 TEST_CASE("TerminalSession: open and paste-shell actions run headlessly without a display",
           "[contour][session][actions]")
 {
