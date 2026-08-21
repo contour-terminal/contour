@@ -129,6 +129,7 @@ nav:
     - vt-extensions/save-and-restore-sgr-attributes.md
     - vt-extensions/osc-133-shell-integration.md
     - vt-extensions/osc-3008-context.md
+    - vt-extensions/osc-533-screenshot.md
     - vt-extensions/osc-9-4-progress.md
     - vt-extensions/semantic-block-query.md
     - vt-extensions/private-use-glyphs.md
