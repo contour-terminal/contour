@@ -696,7 +696,7 @@ TEST_CASE("a spawn request's settings reach only the session it creates", "[vtho
     // ... while a request overrides them for its session alone.
     auto requested = h.host.settings();
     requested.terminalId = vtbackend::VTType::VT340;
-    requested.historyLimits = vtbackend::LineCount(4242);
+    requested.historyLimits = vtbackend::HistoryLimits::plain(vtbackend::LineCount(4242));
     auto* custom = h.host.createTab(vthost::SessionSpawnRequest { .settings = requested });
     REQUIRE(custom != nullptr);
     auto* customTerminal = h.host.terminal(custom->rootPane()->session());
@@ -716,7 +716,7 @@ TEST_CASE("a spawn request cannot talk a session out of the host invariants", "[
     // The request can have travelled in from a client, so seedSession re-normalizes rather than
     // trusting it: zero scrollback is not something a peer gets to ask for.
     auto requested = vtbackend::Settings {};
-    requested.historyLimits = vtbackend::LineCount(0);
+    requested.historyLimits = vtbackend::HistoryLimits::plain(vtbackend::LineCount(0));
     auto* tab = h.host.createTab(vthost::SessionSpawnRequest { .settings = requested });
     REQUIRE(tab != nullptr);
     auto* terminal = h.host.terminal(tab->rootPane()->session());

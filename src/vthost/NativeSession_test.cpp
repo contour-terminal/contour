@@ -156,7 +156,7 @@ std::string textOf(proto::WireLine const& line)
 vtbackend::Settings hostSettings(vtbackend::LineCount history)
 {
     auto settings = vtbackend::Settings {};
-    settings.historyLimits = history;
+    settings.historyLimits = vtbackend::HistoryLimits::plain(history);
     return settings;
 }
 

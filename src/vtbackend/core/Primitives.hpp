@@ -87,11 +87,14 @@ using ColumnOffset = boxed::boxed<int, detail::tags::ColumnOffset>;
 
 /// Special structure for infinite history of Grid
 ///
-/// Comparable so MaxHistoryLineCount is: @ref HistoryLimits has to ask whether its two bounds are
-/// the same value, and a variant is only comparable if every alternative is.
+/// Ordered so MaxHistoryLineCount is. A variant compares by ALTERNATIVE INDEX first, and Infinite is
+/// the second alternative, so `std::max`/`std::min` over the variant already mean "the deeper of the
+/// two" and "the shallower" -- including against an infinity. That is what lets the two places which
+/// reconcile a guarantee against a capacity say so in one line each instead of unwrapping both
+/// variants by hand. @see HistoryLimits.
 struct Infinite
 {
-    bool operator==(Infinite const&) const = default;
+    auto operator<=>(Infinite const&) const = default;
 };
 /// MaxHistoryLineCount represents type that are used to store number
 /// of lines that can be stored in history
@@ -106,9 +109,10 @@ using MaxHistoryLineCount = std::variant<LineCount, Infinite>;
 /// can be found at all (no shell integration, or one command whose output is larger than the whole
 /// headroom).
 ///
-/// A struct rather than two parameters for the reason @ref ContextStackLimits is one: a third bound
-/// would be a field rather than a signature change, and the two must be validated against each other
-/// in one place.
+/// A plain aggregate, like @ref ContextStackLimits: designated initialisers then name which bound is
+/// which, so the two -- adjacent, identically typed and otherwise silently exchangeable -- cannot be
+/// transposed at a call site. Use @ref plain for the one-value case rather than a converting
+/// constructor, so that a bare line count can never widen into "both bounds" by accident.
 struct HistoryLimits
 {
     /// The minimum retained. Block-atomic eviction never cuts below this.
@@ -120,28 +124,10 @@ struct HistoryLimits
 
     /// One value is both bounds -- a scrollback with no headroom, which is what a single
     /// `history.limit` has always meant and still means.
-    ///
-    /// Deliberately converting rather than explicit: this is not a bool-style anonymous enum but a
-    /// widening from "one limit" to "the same limit twice", and it is what every call site that
-    /// passes one number already says. Making it explicit would edit ~80 of them to say nothing new.
-    // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
-    constexpr HistoryLimits(MaxHistoryLineCount both) noexcept: guaranteed { both }, capacity { both } {}
-
-    /// Spelled out for both alternatives because the language will not chain two user-defined
-    /// conversions: `LineCount(1000)` reaching HistoryLimits through MaxHistoryLineCount is one step
-    /// too many, and every existing call site passes exactly that.
-    // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
-    constexpr HistoryLimits(LineCount both) noexcept: guaranteed { both }, capacity { both } {}
-
-    // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
-    constexpr HistoryLimits(Infinite both) noexcept: guaranteed { both }, capacity { both } {}
-
-    constexpr HistoryLimits(MaxHistoryLineCount guaranteed, MaxHistoryLineCount capacity) noexcept:
-        guaranteed { guaranteed }, capacity { capacity }
+    [[nodiscard]] static constexpr HistoryLimits plain(MaxHistoryLineCount both) noexcept
     {
+        return HistoryLimits { .guaranteed = both, .capacity = both };
     }
-
-    constexpr HistoryLimits() noexcept = default;
 
     /// Whether eviction has room to snap to a command boundary. With no headroom there is nothing to
     /// trade, and the scrollback evicts line-wise exactly as it always has.
@@ -149,6 +135,7 @@ struct HistoryLimits
 
     bool operator==(HistoryLimits const&) const = default;
 };
+
 /// Represents the line offset relative to main-page top.
 ///
 /// *  0  is top-most line on main page

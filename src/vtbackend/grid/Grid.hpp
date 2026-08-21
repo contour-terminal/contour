@@ -594,6 +594,14 @@ class Grid
   public:
     Grid(PageSize pageSize, bool reflowOnResize, HistoryLimits historyLimits);
 
+    /// A scrollback with no headroom, which is what a single depth has always meant. Spelled here
+    /// rather than as a converting constructor on HistoryLimits, so the widening from one number to
+    /// two bounds happens only where a caller asked for it.
+    Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount maxHistoryLineCount):
+        Grid(pageSize, reflowOnResize, HistoryLimits::plain(maxHistoryLineCount))
+    {
+    }
+
     Grid(): Grid(PageSize { LineCount(25), ColumnCount(80) }, false, LineCount(0)) {}
 
     void reset();
@@ -606,15 +614,6 @@ class Grid
             return *maxLineCount;
         else
             return LineCount::cast_from(_lines.size()) - _pageSize.lines;
-    }
-
-    /// @return The depth block-atomic eviction will never cut below.
-    [[nodiscard]] LineCount guaranteedHistoryLineCount() const noexcept
-    {
-        if (auto const* lineCount = std::get_if<LineCount>(&_historyLimits.guaranteed))
-            return *lineCount;
-        else
-            return maxHistoryLineCount();
     }
 
     [[nodiscard]] HistoryLimits const& historyLimits() const noexcept { return _historyLimits; }
@@ -975,6 +974,15 @@ class Grid
     }
 
   private:
+    /// @return The depth block-atomic eviction will never cut below.
+    [[nodiscard]] LineCount guaranteedHistoryLineCount() const noexcept
+    {
+        if (auto const* lineCount = std::get_if<LineCount>(&_historyLimits.guaranteed))
+            return *lineCount;
+        else
+            return maxHistoryLineCount();
+    }
+
     CellLocation growLines(LineCount newHeight, CellLocation cursor);
 
     /// Drops the oldest scrollback down to a command boundary, keeping at least the guaranteed depth.
@@ -1122,12 +1130,11 @@ class Grid
         // Row identity is gone, so an id-keyed history watermark means nothing now. Consumers
         // resync on the generation mismatch anyway.
         _dirtyHistoryFloor = NoHistoryFloor;
-        // Same reason, and the only invalidation the eviction scan needs: its two ids name rows, so
-        // a rebuild that renames every row leaves them naming nothing. Everything else -- scrolling
-        // either way, a line-count resize, an eviction -- keeps row identity and therefore keeps
-        // them meaningful, which is what lets the scan carry no other invalidation hooks.
-        _eligibleScanId.reset();
-        _newestEligibleBlockStart.reset();
+        // Same reason, and the only invalidation the eviction scan needs: its ids name rows, so a
+        // rebuild that renames every row leaves them naming nothing. Everything else -- scrolling
+        // either way, a line-count resize, an eviction -- keeps row identity and therefore keeps them
+        // meaningful, which is what lets the scan carry no other invalidation hooks.
+        _evictionScan.reset();
         _changedHistoryFloor = NoHistoryFloor;
         _changedHistorySeqno = 0;
         // Re-anchor the finalize scan: the pre-rebuild base delta is meaningless now.
@@ -1151,16 +1158,24 @@ class Grid
     bool _reflowOnResize = false;
     HistoryLimits _historyLimits;
 
-    /// The highest stable id whose eligibility for @ref clampHistory has been examined, or nullopt
-    /// before the first examination. Together with @ref _newestEligibleBlockStart this turns the
-    /// eviction scan from a per-scroll walk of the whole scrollback into a walk of the rows that
-    /// just crossed the guarantee. @see clampHistory for why that matters.
-    std::optional<int64_t> _eligibleScanId;
+    /// How far @ref clampHistory has examined, and the best boundary it found -- one state, so that
+    /// "a block start is remembered but nothing was ever examined" cannot be represented.
+    ///
+    /// This is what turns the eviction scan from a per-scroll walk of the whole scrollback into a
+    /// walk of the rows that just crossed the guarantee. @see clampHistory for why that matters.
+    struct EvictionScan
+    {
+        /// The highest stable id whose eligibility has been examined.
+        int64_t examinedThrough {};
 
-    /// The newest block start seen at or below the guarantee, or nullopt if none has been. Validated
-    /// against the current bound and floor at use rather than invalidated eagerly, because a reverse
-    /// scroll can move the bound back underneath it.
-    std::optional<int64_t> _newestEligibleBlockStart;
+        /// The newest block start seen at or below the guarantee, if any. Validated against the
+        /// current bound and floor at use rather than invalidated eagerly, because a reverse scroll
+        /// can move the bound back underneath it.
+        std::optional<int64_t> newestBlockStart;
+    };
+
+    /// Nullopt until the first examination, which is the one case that has to sweep the window whole.
+    std::optional<EvictionScan> _evictionScan;
     Lines _lines;
     LineCount _linesUsed;
 

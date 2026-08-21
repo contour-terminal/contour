@@ -57,6 +57,12 @@ bool Viewport::forceScrollToBottom()
 
 bool Viewport::clampScrollOffset()
 {
+    // scrollableLineCount() is never negative, so an unscrolled viewport is in range by definition --
+    // and it reaches Terminal::hiddenLineCount(), which rebuilds the fold projection when anything is
+    // collapsed. Sitting at the bottom is the state during any output the user is actually watching.
+    if (!_scrollOffset)
+        return false;
+
     auto const maxOffset = boxed_cast<ScrollOffset>(scrollableLineCount());
     if (_scrollOffset <= maxOffset)
         return false;

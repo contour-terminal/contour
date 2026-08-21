@@ -29,19 +29,19 @@ vtbackend::Settings hostedSessionSettings(vtbackend::Settings settings)
     };
 
     settings.historyLimits.capacity = bounded(settings.historyLimits.capacity);
-    settings.historyLimits.guaranteed = bounded(settings.historyLimits.guaranteed);
 
     // The guarantee can never outrun the ceiling it is measured against, and equalling it is the
     // right answer rather than an error: with no headroom the scrollback simply evicts line-wise, as
     // it always has. That is also what a daemon whose capacity was just raised off zero must get --
     // inheriting the raise as HEADROOM would hand a session block eviction nobody configured.
-    if (auto const* const capacity = std::get_if<vtbackend::LineCount>(&settings.historyLimits.capacity);
-        capacity != nullptr)
-    {
-        auto const* const guaranteed = std::get_if<vtbackend::LineCount>(&settings.historyLimits.guaranteed);
-        if (guaranteed == nullptr || *guaranteed > *capacity)
-            settings.historyLimits.guaranteed = *capacity;
-    }
+    //
+    // A plain min because MaxHistoryLineCount is ORDERED: the variant compares by alternative index
+    // first, so Infinite sits above every line count and this reads as "the shallower of the two"
+    // across all four combinations, infinities included. It LOWERS the guarantee rather than raising
+    // the capacity, because unlike the configuration's own reconciliation the ceiling here is
+    // externally imposed -- MaxSessionHistoryLineCount is not ours to exceed.
+    settings.historyLimits.guaranteed =
+        std::min(bounded(settings.historyLimits.guaranteed), settings.historyLimits.capacity);
 
     settings.maxImageRegisterCount =
         std::clamp(settings.maxImageRegisterCount, 1U, MaxSessionImageRegisterCount);
@@ -94,11 +94,11 @@ vtbackend::Settings fromWireSessionSettings(proto::WireSessionSettings const& wi
     // Both bounds take the one number the wire carries. A mirror evicts on its own budget and never
     // runs the block-atomic rule -- that is a server-side policy, and the client learns its outcome
     // from the stable floor the delta stream already moves.
-    settings.historyLimits =
+    settings.historyLimits = vtbackend::HistoryLimits::plain(
         wire.historyLineCount < 0
             ? vtbackend::MaxHistoryLineCount { vtbackend::Infinite {} }
             : vtbackend::MaxHistoryLineCount { vtbackend::LineCount(
-                  static_cast<int>(std::min<int64_t>(wire.historyLineCount, MaxSessionHistoryLineCount))) };
+                  static_cast<int>(std::min<int64_t>(wire.historyLineCount, MaxSessionHistoryLineCount))) });
 
     // The numbering is sparse and not ordered by capability, so an unknown number cannot be clamped
     // into something sensible -- keeping the daemon's own is the only honest answer.

@@ -22,6 +22,20 @@ class MockTerm: public Terminal::NullEvents
 
     explicit MockTerm(PageSize size, HistoryLimits historyLimits = {}, size_t ptyReadBufferSize = 1024);
 
+    /// A scrollback with no headroom, which is what a bare line count has always meant here.
+    MockTerm(PageSize size, MaxHistoryLineCount maxHistoryLineCount, size_t ptyReadBufferSize = 1024):
+        MockTerm { size, HistoryLimits::plain(maxHistoryLineCount), ptyReadBufferSize }
+    {
+    }
+
+    template <typename Init>
+    MockTerm(
+        PageSize size, MaxHistoryLineCount hist, size_t ptyReadBufferSize, Init init = [](MockTerm&) {}):
+        MockTerm { size, HistoryLimits::plain(hist), ptyReadBufferSize }
+    {
+        init(*this);
+    }
+
     template <typename Init>
     MockTerm(
         PageSize size, HistoryLimits hist, size_t ptyReadBufferSize, Init init = [](MockTerm&) {}):

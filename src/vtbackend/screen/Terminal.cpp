@@ -4654,7 +4654,10 @@ void Terminal::clampToHistory() noexcept
 
     // The Normal-mode cursor is walked one line further up on every scroll (@see onBufferScrolled)
     // with nothing bounding it, so an eviction leaves it pointing below the oldest row there is.
-    auto const top = -boxed_cast<LineOffset>(primaryScreen().historyLineCount());
+    // Bounded by addressableTop() rather than by the history depth, because that is the one place
+    // allowed to answer "where does this grid start" -- the two differ after a reverse scroll has
+    // wrapped unreset rows into the oldest slots.
+    auto const top = primaryScreen().grid().addressableTop();
     if (_viCommands.cursorPosition.line < top)
         _viCommands.cursorPosition.line = top;
 }

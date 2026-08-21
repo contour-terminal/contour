@@ -3029,15 +3029,24 @@ void writeCommandBlock(MockTerm<vtpty::MockPty>& mock, int index, int outputLine
         mock.writeToScreen(std::format("o{}{}\r\n", index, i));
     mock.writeToScreen("\033]133;D;0\033\\");
 }
+
+/// Writes the command blocks numbered [@p first, @p last), each with @p outputLines of output.
+void writeCommandBlocks(MockTerm<vtpty::MockPty>& mock, int first, int last, int outputLines)
+{
+    for (auto const block: std::views::iota(first, last))
+        writeCommandBlock(mock, block, outputLines);
+}
+
+/// The headroom the eviction tests share: four guaranteed rows, twelve at most.
+constexpr auto TestHistoryLimits =
+    vtbackend::HistoryLimits { .guaranteed = LineCount(4), .capacity = LineCount(12) };
 } // namespace
 
 TEST_CASE("Terminal.historyEviction.clampsAViewportScrolledIntoTheEvictedBlock",
           "[terminal][history-eviction]")
 {
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(8) },
-                                           vtbackend::HistoryLimits { LineCount(4), LineCount(12) } };
-    for (auto const block: std::views::iota(0, 3))
-        writeCommandBlock(mock, block, 3);
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(8) }, TestHistoryLimits };
+    writeCommandBlocks(mock, 0, 3, 3);
 
     // Scroll all the way up, so the viewport sits on rows the next trim is about to take.
     mock.terminal.viewport().scrollToTop();
@@ -3057,10 +3066,8 @@ TEST_CASE("Terminal.historyEviction.clampsAViewportScrolledIntoTheEvictedBlock",
 TEST_CASE("Terminal.historyEviction.clampsAViewportWhenAPartialRegionFeedsTheScrollback",
           "[terminal][history-eviction]")
 {
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) },
-                                           vtbackend::HistoryLimits { LineCount(4), LineCount(12) } };
-    for (auto const block: std::views::iota(0, 3))
-        writeCommandBlock(mock, block, 3);
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) }, TestHistoryLimits };
+    writeCommandBlocks(mock, 0, 3, 3);
 
     mock.terminal.viewport().scrollToTop();
     REQUIRE(mock.terminal.viewport().scrolled());
@@ -3084,17 +3091,14 @@ TEST_CASE("Terminal.historyEviction.clampsAViewportWhenAPartialRegionFeedsTheScr
 
 TEST_CASE("Terminal.historyEviction.foldRangesForgetAnEvictedBlock", "[terminal][history-eviction]")
 {
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(8) },
-                                           vtbackend::HistoryLimits { LineCount(4), LineCount(12) } };
-    for (auto const block: std::views::iota(0, 3))
-        writeCommandBlock(mock, block, 3);
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(8) }, TestHistoryLimits };
+    writeCommandBlocks(mock, 0, 3, 3);
 
     // Populate the fold cache while the first block is still there.
     auto const floorBefore = mock.terminal.primaryScreen().grid().stableRangeFloor();
     REQUIRE(!mock.terminal.foldRanges().empty());
 
-    for (auto const block: std::views::iota(3, 8))
-        writeCommandBlock(mock, block, 3);
+    writeCommandBlocks(mock, 3, 8, 3);
 
     REQUIRE(mock.terminal.primaryScreen().grid().stableRangeFloor() > floorBefore);
 
@@ -3107,18 +3111,15 @@ TEST_CASE("Terminal.historyEviction.foldRangesForgetAnEvictedBlock", "[terminal]
 
 TEST_CASE("Terminal.historyEviction.keepsTheViCursorInsideTheAddressableGrid", "[terminal][history-eviction]")
 {
-    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(8) },
-                                           vtbackend::HistoryLimits { LineCount(4), LineCount(12) } };
-    for (auto const block: std::views::iota(0, 3))
-        writeCommandBlock(mock, block, 3);
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(8) }, TestHistoryLimits };
+    writeCommandBlocks(mock, 0, 3, 3);
 
     mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
     mock.terminal.moveNormalModeCursorTo(CellLocation {
         .line = LineOffset::cast_from(-unbox<int>(mock.terminal.primaryScreen().historyLineCount())),
         .column = ColumnOffset(0) });
 
-    for (auto const block: std::views::iota(3, 8))
-        writeCommandBlock(mock, block, 3);
+    writeCommandBlocks(mock, 3, 8, 3);
 
     auto const top = -unbox<int>(mock.terminal.primaryScreen().historyLineCount());
     CHECK(unbox<int>(mock.terminal.normalModeCursorPosition().line) >= top);

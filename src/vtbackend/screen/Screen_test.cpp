@@ -3444,7 +3444,7 @@ TEST_CASE("setMaxHistoryLineCount", "[screen]")
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
-    mock.terminal.setHistoryLimits(LineCount(1));
+    mock.terminal.setHistoryLimits(HistoryLimits::plain(LineCount(1)));
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
 }
 
@@ -3457,7 +3457,7 @@ TEST_CASE("resize", "[screen]")
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
-    mock.terminal.setHistoryLimits(LineCount(10));
+    mock.terminal.setHistoryLimits(HistoryLimits::plain(LineCount(10)));
 
     SECTION("no-op")
     {

@@ -1133,11 +1133,17 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
     if (isFullPageMargin)
         _terminal->onBufferScrolled(scrollCount);
 
-    // Unconditionally, and after either branch: the scrollback may have just LOST rows rather than
-    // gained them. Block-atomic eviction drops a whole command at once, and it reaches this path
-    // even for a partial region, where the branch above deliberately shifts nothing. Clamping is not
-    // shifting -- it only refuses to name a row that is gone.
-    _terminal->clampToHistory();
+    // After either branch, because the scrollback may have just LOST rows rather than gained them.
+    // Block-atomic eviction drops a whole command at once, and it reaches this path even for a
+    // partial region, where the branch above deliberately shifts nothing. Clamping is not shifting --
+    // it only refuses to name a row that is gone.
+    //
+    // Gated on the headroom for cost, not for correctness: without it the history cannot shrink here
+    // at all (@see Grid::clampHistory, which returns on the same test), and this is the linefeed
+    // path. Reaching Viewport::clampScrollOffset per line would drag Terminal::hiddenLineCount with
+    // it, which with one collapsed fold rebuilds the whole fold projection on every scrolled line.
+    if (_grid.historyLimits().hasHeadroom())
+        _terminal->clampToHistory();
 }
 
 void Screen::scrollDown(LineCount n, Margin margin)

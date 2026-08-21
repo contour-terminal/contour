@@ -185,6 +185,18 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
            HistoryLimits historyLimits,
            std::string_view name);
 
+    /// A screen with no headroom in its scrollback -- the status lines and the non-primary pages,
+    /// which pass a bare depth (usually none at all).
+    Screen(Terminal& terminal,
+           gsl::not_null<Margin*> margin,
+           PageSize pageSize,
+           bool reflowOnResize,
+           MaxHistoryLineCount maxHistoryLineCount,
+           std::string_view name):
+        Screen(terminal, margin, pageSize, reflowOnResize, HistoryLimits::plain(maxHistoryLineCount), name)
+    {
+    }
+
     Screen(Screen const&) = delete;
     Screen& operator=(Screen const&) = delete;
     Screen(Screen&&) noexcept = delete;

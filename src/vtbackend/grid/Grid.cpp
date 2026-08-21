@@ -176,7 +176,7 @@ void Grid::setHistoryLimits(HistoryLimits historyLimits)
         slots.insert(freeRegion,
                      newSlotCount - oldSlotCount,
                      Line(_pageSize.columns, defaultLineFlags(), GraphicsAttributes {}));
-    else if (newSlotCount < oldSlotCount)
+    else
         slots.erase(freeRegion, std::next(freeRegion, static_cast<ptrdiff_t>(oldSlotCount - newSlotCount)));
 
     _linesUsed = min(_linesUsed, newTotalLineCount);
@@ -1075,22 +1075,17 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
 void Grid::clampHistory()
 {
     // No headroom means no trade to make: the scrollback evicts line-wise, exactly as it always has.
-    if (!_historyLimits.hasHeadroom())
+    // An unbounded scrollback evicts nothing at all, and without that second test the ring's current
+    // allocation would read as the capacity and the trim would start cutting the very history
+    // `infinite` promises to keep. (Not implied by the first: a finite guarantee under an infinite
+    // capacity does have headroom.)
+    if (!_historyLimits.hasHeadroom() || std::holds_alternative<Infinite>(_historyLimits.capacity))
         return;
 
-    // An unbounded scrollback evicts nothing, so there is no eviction to snap to a boundary. Without
-    // this the ring's current allocation would read as the capacity and the trim would start cutting
-    // the very history `infinite` promises to keep.
-    if (std::holds_alternative<Infinite>(_historyLimits.capacity))
-        return;
-
-    // A zero-history grid is every page but the primary one. Returning here also makes the
+    // Also covers the zero-history grid -- every page but the primary one -- which is what makes the
     // monotone-floor reasoning below unconditional rather than true-by-audit: rotateBuffersRight has
     // a zero-history branch that LOWERS _stableFloor, and it is the only path that ever does.
     auto const historyLineCount = this->historyLineCount();
-    if (historyLineCount <= LineCount(0))
-        return;
-
     auto const guaranteed = guaranteedHistoryLineCount();
     if (historyLineCount <= guaranteed)
         return;
@@ -1108,10 +1103,9 @@ void Grid::clampHistory()
         return;
 
     auto const boundId = stableLineIdOf(bound);
-    auto const topId = stableLineIdOf(top);
 
-    // Examine only the rows that have BECOME eligible since the last call, newest-eligible-first
-    // being remembered rather than searched for again.
+    // Examine only the rows that have BECOME eligible since the last call, remembering the newest
+    // boundary rather than searching for it again.
     //
     // Rescanning the window each time is what makes the no-boundary case quadratic, and that case is
     // not rare -- it is every shell without OSC 133 integration, and every command whose output is
@@ -1122,37 +1116,35 @@ void Grid::clampHistory()
     // A row becomes eligible exactly when `bound` reaches its id, so watching the rows that cross
     // `bound` observes every one of them, once. The first call has nothing remembered and sweeps the
     // window whole; after that the work is proportional to the lines scrolled, not to the depth.
-    auto const scanFrom = _eligibleScanId.has_value()
-                              ? std::max(top, LineOffset::cast_from(*_eligibleScanId + 1 - _stableBase))
-                              : top;
+    auto& scan = _evictionScan.has_value() ? *_evictionScan : _evictionScan.emplace(boundId, std::nullopt);
+    auto const scanFrom = std::max(top, LineOffset::cast_from(scan.examinedThrough + 1 - _stableBase));
     for (auto y = scanFrom; y <= bound; ++y)
         if (lineAt(y).marked())
-            _newestEligibleBlockStart = stableLineIdOf(y);
-    _eligibleScanId = std::max(_eligibleScanId.value_or(boundId), boundId);
+            scan.newestBlockStart = stableLineIdOf(y);
+    scan.examinedThrough = std::max(scan.examinedThrough, boundId);
 
-    if (!_newestEligibleBlockStart)
+    if (!scan.newestBlockStart)
         return;
 
     // A reverse scroll walks _stableBase -- and with it `bound` -- BACKWARDS, so what was eligible a
     // moment ago may not be now. Trimming to it would retain less than the guarantee. Skipping is
     // enough: the rows are still there and become eligible again as the base advances.
-    if (*_newestEligibleBlockStart > boundId)
+    if (*scan.newestBlockStart > boundId)
         return;
 
     // Evicted by the line-wise path since it was recorded, so it names no row any more.
-    if (*_newestEligibleBlockStart < topId)
+    auto const blockStart = lineOffsetOf(*scan.newestBlockStart);
+    if (!blockStart)
     {
-        _newestEligibleBlockStart.reset();
+        scan.newestBlockStart.reset();
         return;
     }
 
-    auto const blockStart = LineOffset::cast_from(*_newestEligibleBlockStart - _stableBase);
-
     // Measured from the real bottom of the ring's history rather than from addressableTop(), so any
     // unaddressable garbage below the floor is dropped along with the rest instead of being left to
-    // occupy slots nothing can read.
-    auto const dropCount = LineCount::cast_from(unbox<int>(blockStart) + unbox<int>(historyLineCount));
-    if (dropCount <= LineCount(0))
+    // occupy slots nothing can read. Zero when the last trim already reached this boundary.
+    auto const dropCount = LineCount::cast_from(unbox<int>(*blockStart) + unbox<int>(historyLineCount));
+    if (!dropCount)
         return;
 
     // The dropped rows are deliberately NOT reset here, though they still hold their cells and their
