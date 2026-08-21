@@ -40,6 +40,7 @@
 #include <net/Sockets.hpp>
 #include <net/Tls.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/HostedShell.hpp>
 #include <vthost/LastSessionWatcher.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/NativeSession.hpp>
@@ -80,6 +81,9 @@ namespace
     [[nodiscard]] PtyFactory makeShellPtyFactory(vtpty::Process::ExecInfo shell,
                                                  std::filesystem::path const& socketPath)
     {
+        // insert_or_assign, so the daemon wins over a profile that set the same name: a hosted
+        // shell being told where a DIFFERENT daemon lives is never what was meant, and the shell has
+        // no other way to learn where this one is.
         for (auto const& [name, value]: hostedShellEnvironment(socketPath))
             shell.env.insert_or_assign(name, value);
 

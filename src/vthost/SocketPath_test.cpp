@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 
+#include <vthost/HostedShell.hpp>
 #include <vthost/SocketPath.hpp>
 
 using vthost::muxSocketPath;
