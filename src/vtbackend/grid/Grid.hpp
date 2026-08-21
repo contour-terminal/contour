@@ -993,11 +993,15 @@ class Grid
     /// which keeps memory bounded when no boundary can be honoured.
     ///
     /// Called when the history is about to cross capacity rather than the moment it passes the
-    /// guarantee: one backward scan per (capacity - guaranteed) scrolled lines is amortised free,
-    /// whereas scanning at the guarantee would rescan the same rows on every single line of a large
-    /// command's output -- the exact case this exists for. It also means the headroom is genuinely
-    /// used rather than merely allocated, and that an attached mirror resyncs once per trim instead
-    /// of once per command (@see ScreenMirror's floor-outran-scroll replay).
+    /// guarantee. That keeps the headroom genuinely used rather than merely allocated, and lets an
+    /// attached mirror resync once per trim instead of once per command (@see ScreenMirror's
+    /// floor-outran-scroll replay).
+    ///
+    /// A row is examined once, as it crosses the guarantee, and the newest block start seen is
+    /// remembered (@see _newestEligibleBlockStart). The one thing that misses is a mark stamped on a
+    /// history row that has already been passed -- Vi's `mm` deep in the scrollback, or a mirror
+    /// replaying one. That boundary is then simply not used, which costs an eviction its snapping
+    /// and never the guarantee, and is the price of not re-walking the scrollback per line.
     void clampHistory();
 
     // {{{ buffer helpers
@@ -1118,6 +1122,12 @@ class Grid
         // Row identity is gone, so an id-keyed history watermark means nothing now. Consumers
         // resync on the generation mismatch anyway.
         _dirtyHistoryFloor = NoHistoryFloor;
+        // Same reason, and the only invalidation the eviction scan needs: its two ids name rows, so
+        // a rebuild that renames every row leaves them naming nothing. Everything else -- scrolling
+        // either way, a line-count resize, an eviction -- keeps row identity and therefore keeps
+        // them meaningful, which is what lets the scan carry no other invalidation hooks.
+        _eligibleScanId.reset();
+        _newestEligibleBlockStart.reset();
         _changedHistoryFloor = NoHistoryFloor;
         _changedHistorySeqno = 0;
         // Re-anchor the finalize scan: the pre-rebuild base delta is meaningless now.
@@ -1140,6 +1150,17 @@ class Grid
     PageSize _pageSize;
     bool _reflowOnResize = false;
     HistoryLimits _historyLimits;
+
+    /// The highest stable id whose eligibility for @ref clampHistory has been examined, or nullopt
+    /// before the first examination. Together with @ref _newestEligibleBlockStart this turns the
+    /// eviction scan from a per-scroll walk of the whole scrollback into a walk of the rows that
+    /// just crossed the guarantee. @see clampHistory for why that matters.
+    std::optional<int64_t> _eligibleScanId;
+
+    /// The newest block start seen at or below the guarantee, or nullopt if none has been. Validated
+    /// against the current bound and floor at use rather than invalidated eagerly, because a reverse
+    /// scroll can move the bound back underneath it.
+    std::optional<int64_t> _newestEligibleBlockStart;
     Lines _lines;
     LineCount _linesUsed;
 

@@ -1095,8 +1095,8 @@ void Grid::clampHistory()
     if (historyLineCount <= guaranteed)
         return;
 
-    // Rows at offsets below `bound` may go; a block start AT bound leaves exactly the guarantee.
-    // Clamped to -1 because offset 0 is the page, not the scrollback.
+    // Rows above `bound` may go; a block start AT bound leaves exactly the guarantee. Clamped to -1
+    // because offset 0 is the page, not the scrollback.
     auto const bound = std::min(LineOffset::cast_from(-unbox<int>(guaranteed)), LineOffset(-1));
 
     // The scan stops at addressableTop() rather than at -historyLineCount(): at capacity, scrollDown
@@ -1107,33 +1107,66 @@ void Grid::clampHistory()
     if (bound < top)
         return;
 
-    auto blockStart = std::optional<LineOffset> {};
-    for (auto y = bound; y >= top; --y)
-    {
+    auto const boundId = stableLineIdOf(bound);
+    auto const topId = stableLineIdOf(top);
+
+    // Examine only the rows that have BECOME eligible since the last call, newest-eligible-first
+    // being remembered rather than searched for again.
+    //
+    // Rescanning the window each time is what makes the no-boundary case quadratic, and that case is
+    // not rare -- it is every shell without OSC 133 integration, and every command whose output is
+    // longer than the whole headroom. Once the buffer sits at capacity EVERY scroll asks again, and
+    // only a SUCCESSFUL trim buys the headroom back, so an unsuccessful one would re-walk the same
+    // thousands of rows per line forever. Measured at 12x the scroll cost before this.
+    //
+    // A row becomes eligible exactly when `bound` reaches its id, so watching the rows that cross
+    // `bound` observes every one of them, once. The first call has nothing remembered and sweeps the
+    // window whole; after that the work is proportional to the lines scrolled, not to the depth.
+    auto const scanFrom = _eligibleScanId.has_value()
+                              ? std::max(top, LineOffset::cast_from(*_eligibleScanId + 1 - _stableBase))
+                              : top;
+    for (auto y = scanFrom; y <= bound; ++y)
         if (lineAt(y).marked())
-        {
-            blockStart = y;
-            break;
-        }
+            _newestEligibleBlockStart = stableLineIdOf(y);
+    _eligibleScanId = std::max(_eligibleScanId.value_or(boundId), boundId);
+
+    if (!_newestEligibleBlockStart)
+        return;
+
+    // A reverse scroll walks _stableBase -- and with it `bound` -- BACKWARDS, so what was eligible a
+    // moment ago may not be now. Trimming to it would retain less than the guarantee. Skipping is
+    // enough: the rows are still there and become eligible again as the base advances.
+    if (*_newestEligibleBlockStart > boundId)
+        return;
+
+    // Evicted by the line-wise path since it was recorded, so it names no row any more.
+    if (*_newestEligibleBlockStart < topId)
+    {
+        _newestEligibleBlockStart.reset();
+        return;
     }
 
-    if (!blockStart)
-        return;
+    auto const blockStart = LineOffset::cast_from(*_newestEligibleBlockStart - _stableBase);
 
     // Measured from the real bottom of the ring's history rather than from addressableTop(), so any
     // unaddressable garbage below the floor is dropped along with the rest instead of being left to
     // occupy slots nothing can read.
-    auto const dropCount = LineCount::cast_from(unbox<int>(*blockStart) + unbox<int>(historyLineCount));
+    auto const dropCount = LineCount::cast_from(unbox<int>(blockStart) + unbox<int>(historyLineCount));
     if (dropCount <= LineCount(0))
         return;
 
-    // Reset before forgetting them: an inflated LineSoA would otherwise sit on its heap buffers until
-    // the slot happened to be reused, and a stale Marked flag would be a phantom block start for the
-    // next scan. rowAt rather than changingLineAt -- these rows are leaving, so announcing them to
-    // the delta stream would arm a history watermark for content no client will ever ask for.
-    for (auto y = LineOffset::cast_from(-unbox<int>(historyLineCount)); y < *blockStart; ++y)
-        rowAt(y).reset(defaultLineFlags(), GraphicsAttributes {});
-
+    // The dropped rows are deliberately NOT reset here, though they still hold their cells and their
+    // Marked flag. Both are unreachable the moment _linesUsed shrinks: syncStableFloor() puts the
+    // floor exactly at the new oldest row, addressableTop() is the max of the floor and the history,
+    // and every walk over "the rows this grid has" starts there -- so no scan, no render and no
+    // snapshot can see them. A slot coming back into use is re-initialised on the way: scrollUp's
+    // below-capacity branch fill_n's a fresh Line into it, and its at-capacity branch reset()s it.
+    //
+    // Resetting anyway would be pure cost. It does not lower the high-water mark, because at capacity
+    // every one of the ring's rows is materialised regardless; it only frees a row's cells slightly
+    // earlier than its reuse would. Measured, it was the single most expensive thing this function
+    // did -- roughly doubling the per-line scroll cost of a marked buffer.
+    //
     // The whole eviction, in two lines: the ring keeps its slots and its rotation, the rows simply
     // stop being counted, and the freed slots rejoin the free region scrollUp appends into. No
     // generation bump -- every surviving row keeps the id it had, and the rising floor is the
@@ -1142,6 +1175,7 @@ void Grid::clampHistory()
     syncStableFloor();
     verifyState();
 }
+
 // }}}
 // {{{ dumpGrid impl
 std::ostream& dumpGrid(std::ostream& os, Grid const& grid)
