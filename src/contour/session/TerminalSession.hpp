@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <format>
 #include <initializer_list>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -875,8 +876,21 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return uptimeSecs;
     }
 
+    /// The permission the active profile configures for @p role.
+    ///
+    /// The single place that pairs a role with its configuration field, so a role's setting is named
+    /// once rather than at each call site. @return Ask for a role the configuration has no field for.
+    [[nodiscard]] config::Permission configuredPermissionFor(GuardedRole role) const;
+
+    /// Hands @p role's permission decision to the GUI thread, where every guarded executor belongs.
+    /// Does nothing for a display-less session, which has no queue to hand it to.
+    void postPermissionRequest(GuardedRole role);
+
     void requestPermission(config::Permission allowedByConfig, GuardedRole role);
     void executeRole(GuardedRole role, bool allow, bool remember);
+
+    /// Sends @p text to the application as one paste, repeated @p count times.
+    void sendPasteRepeatedly(std::string const& text, unsigned count);
 
     /// Derives the terminal's image canvas ceiling from the monitor the display currently sits on.
     ///
@@ -1176,9 +1190,33 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         vtbackend::LineCount lines;
         bool logical;
     };
-    std::optional<CaptureBufferRequest> _pendingBufferCapture;
+
+    /// Capture requests accepted but not yet answered, oldest first.
+    ///
+    /// A queue rather than one slot, and mutex-guarded, because the two ends sit on different threads:
+    /// requestCaptureBuffer() is a Terminal::Events hook and appends from the terminal thread, while
+    /// the permission gate drains it on the GUI thread. A single slot silently dropped whichever
+    /// request arrived while another was outstanding, and every dropped request is a client blocked
+    /// forever -- the protocol has no way to say "no reply is coming".
+    /// @see docs/vt-extensions/buffer-capture.md
+    std::vector<CaptureBufferRequest> _pendingBufferCaptures;
+    std::mutex _pendingBufferCaptureMutex;
+
     std::optional<vtbackend::FontDef> _pendingFontChange;
-    std::optional<QClipboard*> _pendingBigPaste;
+
+    /// A paste that exceeded the soft limit and is waiting for the user's verdict.
+    ///
+    /// The text is stored already normalized and stripped, exactly as the immediate path would have
+    /// sent it, rather than a @c QClipboard* re-read on approval: the clipboard may hold something
+    /// else entirely by the time the dialog is answered, so re-reading would paste content the user
+    /// never approved and never measured against the hard limit. It also spares a second synchronous
+    /// round-trip to the clipboard's owning process. @see pasteFromClipboard.
+    struct BigPasteRequest
+    {
+        std::string text;
+        unsigned count;
+    };
+    std::optional<BigPasteRequest> _pendingBigPaste;
     PermissionCache _rememberedPermissions;
     std::unique_ptr<QThread> _exitWatcherThread;
 
