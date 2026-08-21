@@ -68,10 +68,12 @@ struct SandboxInfo
 
 /// The sandbox this process actually runs in.
 ///
-/// Read once and memoized, as Process::isFlatpak() is: neither the file nor the answer changes
-/// during the life of a process. Off a sandbox this is a default SandboxInfo — Host, network
-/// permitted, no application id — so callers never have to ask whether they are sandboxed before
-/// asking what they may do.
+/// Read once and memoized: neither the file nor the answer changes during the life of a process.
+/// This is the process's ONLY reader of /.flatpak-info — Process::isFlatpak() is the narrow
+/// predicate over it, not a second look at the same file.
+///
+/// Off a sandbox this is a default SandboxInfo — Host, network permitted, no application id — so
+/// callers never have to ask whether they are sandboxed before asking what they may do.
 ///
 /// @return The description; a reference to process-wide storage.
 [[nodiscard]] SandboxInfo const& currentSandbox();

@@ -304,3 +304,23 @@ TEST_CASE("forEachKeyValue")
     CHECK(result.size() == 1);
     CHECK(result["key_only"].empty());
 }
+
+TEST_CASE("utils.trim")
+{
+    // constexpr, so the whole table is settled at compile time -- these are the cases the
+    // /.flatpak-info walk in vtpty relies on, a key-file writing `shared = ipc ;` as readily as
+    // `shared=ipc;`. @see vtpty::parseFlatpakInfo.
+    STATIC_CHECK(crispy::trim("  padded  "sv) == "padded"sv);
+    STATIC_CHECK(crispy::trimLeft("  padded  "sv) == "padded  "sv);
+    STATIC_CHECK(crispy::trimRight("  padded  "sv) == "  padded"sv);
+
+    // Every character of the set, at both ends, and interior ones left alone.
+    STATIC_CHECK(crispy::trim(" \t\r\nx y\t \r\n"sv) == "x y"sv);
+
+    // Nothing to trim, nothing but whitespace, and nothing at all.
+    STATIC_CHECK(crispy::trim("bare"sv) == "bare"sv);
+    STATIC_CHECK(crispy::trim(" \t\r\n"sv).empty());
+    STATIC_CHECK(crispy::trim(""sv).empty());
+    STATIC_CHECK(crispy::trimLeft(" \t"sv).empty());
+    STATIC_CHECK(crispy::trimRight(" \t"sv).empty());
+}
