@@ -65,6 +65,7 @@ set(vtbackend_HEADERS
     screen/Settings.hpp
     vt/SgrWriter.hpp
     shell/ShellIntegration.hpp
+    graphics/SixelEncoder.hpp
     graphics/SixelParser.hpp
     grid/SoAClusterWriter.hpp
     screen/StatusLineBuilder.hpp
@@ -124,6 +125,7 @@ set(vtbackend_SOURCES
     grid/SoAClusterWriter.cpp
     vt/Screenshot.cpp
     vt/Sequence.cpp
+    graphics/SixelEncoder.cpp
     graphics/SixelParser.cpp
     graphics/regis/ReGISColor.cpp
     graphics/regis/ReGISRasterizer.cpp
@@ -236,6 +238,7 @@ if(LIBTERMINAL_TESTING)
         grid/LineSoA_test.cpp
         grid/SoAClusterWriter_test.cpp
         graphics/SixelParser_test.cpp
+        graphics/SixelEncoder_test.cpp
         graphics/regis/ReGISScreen_test.cpp
         graphics/regis/ReGISTables_test.cpp
         graphics/regis/ReGISColor_test.cpp
