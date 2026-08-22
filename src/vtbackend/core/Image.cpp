@@ -14,7 +14,7 @@
     #include <simd>
     namespace simd = std;
     #define VTBACKEND_SIMD_FOUND 1
-#elif __has_include(<experimental/simd>) && !defined(__APPLE__) && !defined(__FreeBSD__)
+#elif __has_include(<experimental/simd>) && !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(_LIBCPP_VERSION)
     #include <experimental/simd>
     namespace simd = std::experimental;
     #define VTBACKEND_SIMD_FOUND 1

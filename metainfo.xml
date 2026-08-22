@@ -134,6 +134,7 @@
           <li>Fixes an SSH connection attempt skipping every other address a host name resolved to, so a host reachable only at its second address appeared to be down</li>
           <li>Fixes Contour hanging when an SSH handshake failed: the failure path took a lock the calling thread already held</li>
           <li>Fixes Contour spinning when the SSH agent could not be reached — the normal case inside a Flatpak, where $SSH_AUTH_SOCK names a host path the sandbox does not mount — instead of falling through to the next authentication method</li>
+          <li>Fixes the build on Linux with Clang and libc++, which selected the broken &lt;experimental/simd&gt;. The guard excluded it by platform — Apple and FreeBSD — but the header belongs to libc++, not to those systems, so any libc++ build reached it; it is now excluded by _LIBCPP_VERSION instead (#2087)</li>
         </ul>
       </description>
     </release>
