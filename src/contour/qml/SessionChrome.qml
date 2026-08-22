@@ -176,7 +176,7 @@ Item {
     // Permission-wall dialogs.
     RequestPermission {
         id: requestFontChangeDialog
-        text: "The host application is requesting to change the display font."
+        text: qsTr("The host application is requesting to change the display font.")
         onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(true, true);
         onYesClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(true, false);
         onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(false, true);
@@ -186,7 +186,7 @@ Item {
 
     RequestPermission {
         id: requestLargeFilePaste
-        text: "The host application is going to paste large file, are you sure?"
+        text: qsTr("The host application is going to paste a large file. Are you sure?")
         onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(true, true);
         onYesClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(true, false);
         onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(false, true);
@@ -196,7 +196,7 @@ Item {
 
     RequestPermission {
         id: requestBufferCaptureDialog
-        text: "The host application is requesting to capture the terminal buffer."
+        text: qsTr("The host application is requesting to capture the terminal buffer.")
         onYesToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(true, true);
         onYesClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(true, false);
         onNoToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(false, true);
@@ -206,7 +206,7 @@ Item {
 
     RequestPermission {
         id: requestShowHostWritableStatusLine
-        text: "The host application is requesting to show the host-writable statusline."
+        text: qsTr("The host application is requesting to show the host-writable status line.")
         onYesToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(true, true);
         onYesClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(true, false);
         onNoToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, true);

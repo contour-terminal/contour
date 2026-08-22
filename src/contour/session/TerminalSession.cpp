@@ -1275,9 +1275,8 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
             // A display-less session (background pane, headless test) has nowhere to toast the
             // rejection; the paste is ignored either way.
             if (_display)
-                _display->post([this]() {
-                    emit showNotification("Screenshot", QString::fromStdString("Paste is too big"));
-                });
+                _display->post(
+                    [this]() { emit showNotification(tr("Paste"), tr("The pasted content is too large.")); });
             return;
         }
         // 512 KB soft limit to ask user for permission
@@ -2864,22 +2863,22 @@ bool TerminalSession::operator()(actions::SaveScreenshot)
         / fs::path(std::format("contour-screenshot-{:%Y-%m-%d-%H-%M-%S}.png", chrono::system_clock::now()));
 
     _display->setScreenshotOutput(savePath);
-    auto message = std::format("Saving screenshot to {}", savePath.string());
-    sessionLog()(message);
+    sessionLog()("Saving screenshot to {}", savePath.string());
 
-    _display->post(
-        [this, message]() { emit showNotification("Screenshot", QString::fromStdString(message)); });
+    // The log line and the toast are deliberately separate strings: one is for a developer reading a
+    // log in English, the other is shown to the user and therefore goes through tr().
+    auto const notice = tr("Saving screenshot to %1").arg(QString::fromStdString(savePath.string()));
+    _display->post([this, notice]() { emit showNotification(tr("Screenshot"), notice); });
     return true;
 }
 
 bool TerminalSession::operator()(actions::CopyScreenshot)
 {
     _display->setScreenshotOutput(std::monostate {});
-    auto message = std::format("Saving screenshot to clipboard");
-    sessionLog()(message);
+    sessionLog()("Saving screenshot to clipboard");
 
-    _display->post(
-        [this, message]() { emit showNotification("Screenshot", QString::fromStdString(message)); });
+    auto const notice = tr("Screenshot copied to the clipboard.");
+    _display->post([this, notice]() { emit showNotification(tr("Screenshot"), notice); });
 
     return true;
 }
