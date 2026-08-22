@@ -1627,26 +1627,53 @@ void TerminalSession::setSearchPattern(QString const& pattern)
         if (text.empty())
         {
             _terminal.clearSearch();
+            _searchStatus = {};
         }
-        // Backwards from the cursor, which is what the terminal's search has always done and what
-        // makes an incremental search land on the nearest match behind you rather than jumping to the
-        // top of the scrollback on every keystroke.
-        else if (auto const match =
-                     _terminal.searchReverse(std::move(text), _terminal.normalModeCursorPosition()))
+        else
         {
-            // The cursor MUST follow the match, exactly as the vi `/` flow did. Three things read it:
-            // the tally's ordinal (so "3 of 27" has a 3 at all), the renderer's choice of
-            // searchHighlightFocused (so one match reads as the current one), and Enter, which steps
-            // from wherever the cursor is. Dropping the returned location broke all three at once.
-            _terminal.moveNormalModeCursorTo(*match);
+            // Two steps rather than searchReverse(text, pos): that overload short-circuits when the
+            // term is unchanged and hands back the position it was given, which is indistinguishable
+            // from a match. Here the result has to actually mean "found something".
+            (void) _terminal.setNewSearchTerm(std::move(text), vtbackend::SearchOrigin::Typed);
+
+            // Backwards from the cursor, which is what the terminal's search has always done and what
+            // makes an incremental search land on the nearest match behind you rather than jumping to
+            // the top of the scrollback on every keystroke.
+            auto const match = _terminal.searchReverse(_terminal.normalModeCursorPosition());
+            if (match)
+            {
+                // The cursor MUST follow the match, exactly as the vi `/` flow did. Three things read
+                // it: the tally's ordinal (so "3 of 27" has a 3 at all), the renderer's choice of
+                // searchHighlightFocused (so one match reads as the current one), and Enter, which
+                // steps from wherever the cursor is. Dropping the location broke all three.
+                _terminal.moveNormalModeCursorTo(*match);
+            }
+
+            // NOT tallied here. Counting walks the whole grid, and this runs on every keystroke, on
+            // the GUI thread, with the terminal locked -- on a deep scrollback that is the difference
+            // between a find bar and a stutter. What is knowable WITHOUT the walk goes in right away:
+            // whether anything matched, which is what tints the field and enables the buttons. The
+            // count follows on the debounce below.
+            _searchStatus = describeSearchCounting(match ? MatchPresence::Some : MatchPresence::None);
         }
 
-        // Under the SAME lock, and so against the same grid the search just ran over: taking it twice
-        // per keystroke meant two full traversals and a window in which the grid could change between
-        // the search and the tally describing it.
-        refreshSearchStatusLocked();
+        _searchPatternText = pattern;
+        _searchSummary = renderSearchSummary(_searchStatus);
     }
+
     emit searchStateChanged();
+    scheduleSearchTally();
+}
+
+void TerminalSession::scheduleSearchTally()
+{
+    if (!_isSearchBarOpen.load(std::memory_order_relaxed))
+        return;
+
+    // start() RESTARTS a running timer, which is what makes this a debounce: a fast typist pays one
+    // tally when they pause, not one per character. The output path deliberately does NOT restart it
+    // (see screenUpdated), so a busy terminal still refreshes the count at a steady cadence.
+    _searchTallyTimer.start();
 }
 
 void TerminalSession::cycleSearchCaseSensitivity()
@@ -1739,10 +1766,50 @@ void TerminalSession::refreshSearchStatus()
     emit searchStateChanged();
 }
 
+QString TerminalSession::renderSearchSummary(SearchStatus const& status) const
+{
+    switch (status.outcome)
+    {
+        case SearchOutcome::Idle: return {};
+        case SearchOutcome::NoMatch: return tr("No results");
+        case SearchOutcome::Matched: break;
+    }
+
+    // The count is still being walked. Saying so beats both a stale number and a blank that fills in
+    // a moment later looking like a glitch.
+    if (status.readiness == CountReadiness::Counting)
+        return tr("…");
+
+    auto const capped = status.tally.exactness == vtbackend::TallyExactness::Capped;
+
+    // Standing on a match: "3 of 27". SearchMatchTally documents when ordinal can be 0.
+    if (status.tally.ordinal != 0)
+        return capped ? tr("%1 of %2+").arg(status.tally.ordinal).arg(status.tally.total)
+                      : tr("%1 of %2").arg(status.tally.ordinal).arg(status.tally.total);
+
+    // Not on one, so there is no first number to report -- only how many there are. Through tr()'s
+    // plural form rather than an English ternary, so a language with other plural rules can say it.
+    return capped ? tr("%1+ matches").arg(status.tally.total)
+                  : tr("%n match(es)", nullptr, static_cast<int>(status.tally.total));
+}
+
+QString TerminalSession::renderSearchCaseTooltip(vtbackend::SearchCaseSensitivity mode) const
+{
+    switch (mode)
+    {
+        case vtbackend::SearchCaseSensitivity::Smart:
+            return tr("Match case: smart — exact only when the term has a capital");
+        case vtbackend::SearchCaseSensitivity::Sensitive: return tr("Match case: on");
+        case vtbackend::SearchCaseSensitivity::Insensitive: return tr("Match case: off");
+    }
+    crispy::unreachable();
+}
+
 void TerminalSession::refreshSearchStatusLocked()
 {
     auto const& search = _terminal.search();
     _searchCase = describeSearchCase(search.caseSensitivity);
+    _searchCaseTooltip = renderSearchCaseTooltip(search.caseSensitivity);
     // Cached rather than read through on demand: searchPattern() is a Q_PROPERTY whose NOTIFY is
     // searchStateChanged, so a binding woken by that signal reads it -- and if reading it took the
     // terminal lock, every emit made while holding that lock would deadlock. Caching it here makes
@@ -1759,6 +1826,7 @@ void TerminalSession::refreshSearchStatusLocked()
                                    search.pattern.empty()
                                        ? vtbackend::SearchMatchTally {}
                                        : _terminal.tallySearchMatches(_terminal.normalModeCursorPosition()));
+    _searchSummary = renderSearchSummary(_searchStatus);
 }
 // }}}
 

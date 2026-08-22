@@ -3,30 +3,38 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+using contour::session::CasePinned;
+using contour::session::CountReadiness;
 using contour::session::describeSearch;
+using contour::session::describeSearchCase;
+using contour::session::describeSearchCounting;
 using contour::session::MatchNavigation;
+using contour::session::MatchPresence;
+using contour::session::nextSearchCase;
 using contour::session::SearchOutcome;
+using vtbackend::SearchCaseSensitivity;
 using vtbackend::SearchMatchTally;
 using vtbackend::TallyExactness;
 
+// NB: no strings are asserted here. What the bar SAYS is rendered by TerminalSession through tr(),
+// so it can be translated; what is decided here is which of the three things to say, and whether
+// stepping is possible -- the parts with rules.
+
 TEST_CASE("describeSearch.idle", "[searchstatus]")
 {
-    // No pattern: the bar shows a placeholder and no count whatsoever, not "0 matches".
+    // No pattern: the bar shows no count whatsoever, not "0 matches".
     auto const status = describeSearch(U"", SearchMatchTally {});
-    CHECK(status.summary.empty());
     CHECK(status.outcome == SearchOutcome::Idle);
     CHECK(status.navigation == MatchNavigation::Unavailable);
 
     // A tally left over from a previous pattern must not resurrect a count.
     auto const stale = describeSearch(U"", SearchMatchTally { .total = 27, .ordinal = 3 });
-    CHECK(stale.summary.empty());
     CHECK(stale.outcome == SearchOutcome::Idle);
 }
 
 TEST_CASE("describeSearch.noMatch", "[searchstatus]")
 {
     auto const status = describeSearch(U"zsh", SearchMatchTally {});
-    CHECK(status.summary == "No results");
     CHECK(status.outcome == SearchOutcome::NoMatch);
     CHECK(status.navigation == MatchNavigation::Unavailable);
 }
@@ -34,32 +42,13 @@ TEST_CASE("describeSearch.noMatch", "[searchstatus]")
 TEST_CASE("describeSearch.matched", "[searchstatus]")
 {
     auto const status = describeSearch(U"search", SearchMatchTally { .total = 27, .ordinal = 3 });
-    CHECK(status.summary == "3 of 27");
     CHECK(status.outcome == SearchOutcome::Matched);
     CHECK(status.navigation == MatchNavigation::Available);
-}
+    CHECK(status.readiness == CountReadiness::Settled);
 
-TEST_CASE("describeSearch.cappedTallyIsMarked", "[searchstatus]")
-{
-    // The "+" is the difference between "there are 9999" and "there are at least 9999".
-    auto const capped = describeSearch(
-        U"e", SearchMatchTally { .total = 9999, .ordinal = 3, .exactness = TallyExactness::Capped });
-    CHECK(capped.summary == "3 of 9999+");
-
-    auto const offMatch = describeSearch(
-        U"e", SearchMatchTally { .total = 9999, .ordinal = 0, .exactness = TallyExactness::Capped });
-    CHECK(offMatch.summary == "9999+ matches");
-}
-
-TEST_CASE("describeSearch.offMatchReportsTheCountAlone", "[searchstatus]")
-{
-    // Standing on no match, "N of M" would have to invent N, so only M is reported.
-    auto const many = describeSearch(U"search", SearchMatchTally { .total = 27, .ordinal = 0 });
-    CHECK(many.summary == "27 matches");
-    CHECK(many.outcome == SearchOutcome::Matched);
-
-    auto const one = describeSearch(U"search", SearchMatchTally { .total = 1, .ordinal = 0 });
-    CHECK(one.summary == "1 match"); // not "1 matches"
+    // The tally rides along, because the layer that renders the words needs the numbers.
+    CHECK(status.tally.total == 27);
+    CHECK(status.tally.ordinal == 3);
 }
 
 TEST_CASE("describeSearch.navigationNeedsSomewhereToGo", "[searchstatus]")
@@ -75,5 +64,50 @@ TEST_CASE("describeSearch.navigationNeedsSomewhereToGo", "[searchstatus]")
     CHECK(navigation(1, 0) == MatchNavigation::Available);
 
     CHECK(navigation(2, 1) == MatchNavigation::Available);
-    CHECK(navigation(27, 27) == MatchNavigation::Available); // stepping wraps
+    // The last of many is still navigable, because the find bar wraps -- see wrapSearchTo().
+    CHECK(navigation(27, 27) == MatchNavigation::Available);
+}
+
+TEST_CASE("describeSearchCounting", "[searchstatus]")
+{
+    // Typing knows whether anything matched without paying for the count, and that is enough to
+    // tint the field and enable the buttons while the tally is still being walked.
+    auto const some = describeSearchCounting(MatchPresence::Some);
+    CHECK(some.outcome == SearchOutcome::Matched);
+    CHECK(some.navigation == MatchNavigation::Available);
+    CHECK(some.readiness == CountReadiness::Counting);
+
+    // Nothing matched: that is already final, so there is nothing left to count.
+    auto const none = describeSearchCounting(MatchPresence::None);
+    CHECK(none.outcome == SearchOutcome::NoMatch);
+    CHECK(none.navigation == MatchNavigation::Unavailable);
+    CHECK(none.readiness == CountReadiness::Settled);
+}
+
+TEST_CASE("describeSearchCase.glyphNamesTheState", "[searchstatus]")
+{
+    // The mapping that was once inverted in three places at once. The glyph's own case is the claim:
+    // "Aa" for a comparison that respects case, "aa" for one that ignores it.
+    CHECK(describeSearchCase(SearchCaseSensitivity::Sensitive).glyph == "Aa");
+    CHECK(describeSearchCase(SearchCaseSensitivity::Insensitive).glyph == "aa");
+
+    // Smart shows the capitalised glyph too -- it becomes exact as soon as the term has a capital.
+    CHECK(describeSearchCase(SearchCaseSensitivity::Smart).glyph == "Aa");
+}
+
+TEST_CASE("describeSearchCase.onlyPinnedModesAreLit", "[searchstatus]")
+{
+    // Lit means "you chose this"; unlit means smart case is still deciding.
+    CHECK(describeSearchCase(SearchCaseSensitivity::Smart).pinned == CasePinned::No);
+    CHECK(describeSearchCase(SearchCaseSensitivity::Sensitive).pinned == CasePinned::Yes);
+    CHECK(describeSearchCase(SearchCaseSensitivity::Insensitive).pinned == CasePinned::Yes);
+}
+
+TEST_CASE("nextSearchCase.cyclesAllThreeAndCloses", "[searchstatus]")
+{
+    // Smart -> Sensitive -> Insensitive -> Smart. The order is stated here rather than derived from
+    // the enumerator values, which do not run in that order.
+    CHECK(nextSearchCase(SearchCaseSensitivity::Smart) == SearchCaseSensitivity::Sensitive);
+    CHECK(nextSearchCase(SearchCaseSensitivity::Sensitive) == SearchCaseSensitivity::Insensitive);
+    CHECK(nextSearchCase(SearchCaseSensitivity::Insensitive) == SearchCaseSensitivity::Smart);
 }

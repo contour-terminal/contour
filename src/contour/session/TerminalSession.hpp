@@ -167,8 +167,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The active search pattern, or empty when nothing is being searched for.
     [[nodiscard]] QString searchPattern() const { return _searchPatternText; }
 
-    /// The label beside the field: "3 of 27", "No results", "" while idle. @see describeSearch.
-    [[nodiscard]] QString searchSummary() const { return QString::fromStdString(_searchStatus.summary); }
+    /// The label beside the field: "3 of 27", "No results", "" while idle.
+    [[nodiscard]] QString searchSummary() const { return _searchSummary; }
 
     /// Whether the active pattern matches anything. Drives the field's error tint.
     [[nodiscard]] bool searchHasMatches() const noexcept
@@ -186,10 +186,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         return QString::fromUtf8(_searchCase.glyph.data(), qsizetype(_searchCase.glyph.size()));
     }
-    [[nodiscard]] QString searchCaseTooltip() const
-    {
-        return QString::fromUtf8(_searchCase.tooltip.data(), qsizetype(_searchCase.tooltip.size()));
-    }
+    [[nodiscard]] QString searchCaseTooltip() const { return _searchCaseTooltip; }
     [[nodiscard]] bool searchCasePinned() const noexcept { return _searchCase.pinned == CasePinned::Yes; }
 
     /// Installs @p pattern as the search term and moves to its nearest match, live as the user types.
@@ -221,6 +218,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The half of refreshSearchStatus() that reads the terminal, for callers already holding its
     /// lock -- so typing does not take the lock twice and walk the grid twice per keystroke.
     void refreshSearchStatusLocked();
+
+    /// Renders @p status as the label the bar shows, translated.
+    ///
+    /// Here rather than in SearchStatus.hpp because tr() needs a QObject: that header decides WHICH
+    /// thing to say, which is the part with rules worth testing, and this turns it into words.
+    [[nodiscard]] QString renderSearchSummary(SearchStatus const& status) const;
+
+    /// The case toggle's tooltip for @p mode, translated. @see describeSearchCase for the glyph.
+    [[nodiscard]] QString renderSearchCaseTooltip(vtbackend::SearchCaseSensitivity mode) const;
+
+    /// Arms the debounced tally. @see setSearchPattern for why counting is not done inline.
+    void scheduleSearchTally();
 
     /// Restarts the search from @p edge, which is how the find bar wraps. @see searchNext.
     void wrapSearchTo(SearchWrapEdge edge);
@@ -1078,6 +1087,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     SearchStatus _searchStatus;
     SearchCaseAffordance _searchCase = describeSearchCase(vtbackend::SearchCaseSensitivity::Smart);
     QString _searchPatternText;
+    QString _searchSummary;
+    QString _searchCaseTooltip;
     /// Coalesces re-tallying while output keeps arriving: a tally walks the whole scrollback, so it
     /// must never run once per frame. Armed by screenUpdated(), and only while the bar is open.
     QTimer _searchTallyTimer;

@@ -1918,13 +1918,20 @@ TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given
         CHECK_FALSE(session->searchNavigable());
     }
 
-    SECTION("a matching pattern reports its count")
+    SECTION("a matching pattern reports a match immediately, and its count once tallied")
     {
         session->setSearchPattern(QStringLiteral("needle"));
         CHECK(session->searchPattern() == QStringLiteral("needle"));
+
+        // Known without walking the grid, so it is there the moment the key is pressed: the field's
+        // tint and the step buttons do not wait for the count.
         CHECK(session->searchHasMatches());
-        CHECK(session->searchSummary().contains(QStringLiteral("5")));
         CHECK(session->searchNavigable());
+
+        // The count itself is debounced, because counting walks the whole scrollback. Forcing it here
+        // is what the timer does 250 ms after the user stops typing.
+        session->refreshSearchStatus();
+        CHECK(session->searchSummary().contains(QStringLiteral("5")));
     }
 
     SECTION("a pattern that matches nothing says so, and offers nowhere to step")
@@ -1992,22 +1999,25 @@ TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given
         CHECK_FALSE(session->searchNavigable());
     }
 
-    SECTION("typing reports the ordinal, because the cursor follows the match")
+    SECTION("the tallied label carries an ordinal, because the cursor follows the match")
     {
         // The whole point of the label: "3 of 5", not "5 matches". It only works if the incremental
         // search moves the normal-mode cursor onto what it found -- the tally's ordinal, the renderer's
         // focused-match highlight and Enter's starting point all read that cursor.
         session->setSearchPattern(QStringLiteral("needle"));
+        session->refreshSearchStatus();
         CHECK(session->searchSummary().contains(QStringLiteral(" of ")));
     }
 
     SECTION("stepping wraps at both ends")
     {
         session->setSearchPattern(QStringLiteral("needle"));
+        session->refreshSearchStatus();
         REQUIRE(session->searchNavigable());
 
         // Walk past the last match; the bar wraps even though Terminal::searchNextMatch does not,
         // so the navigable promise holds at the ends rather than offering an inert button.
+        // Stepping tallies immediately -- the user pressed a key expecting the ordinal to move.
         for (auto i = 0; i < 10; ++i)
             session->searchNext();
         CHECK(session->searchHasMatches());

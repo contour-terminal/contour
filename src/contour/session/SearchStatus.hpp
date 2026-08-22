@@ -6,7 +6,6 @@
 #include <crispy/Assert.hpp>
 
 #include <cstdint>
-#include <format>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -36,13 +35,80 @@ enum class MatchNavigation : uint8_t
     Available,
 };
 
+/// Whether a search that has not been tallied yet matched anything at all.
+///
+/// Known the moment the search runs, unlike the count, which costs a walk of the whole grid. It is
+/// what lets the bar tint the field and enable its buttons immediately while the count catches up.
+enum class MatchPresence : uint8_t
+{
+    None = 0,
+    Some,
+};
+
+/// Whether the tally in a @c SearchStatus is authoritative yet.
+enum class CountReadiness : uint8_t
+{
+    Settled = 0, //!< The tally describes the grid as it stands.
+    Counting,    //!< A tally is pending; only the outcome is known.
+};
+
 /// Everything the find bar derives from the terminal's search state.
+///
+/// Deliberately no rendered text: the words are the Qt layer's business, because they have to go
+/// through tr() to be translatable, and this header is Qt-free on purpose. What is decided here is
+/// WHICH thing to say and whether stepping is possible -- the parts with rules worth testing.
 struct SearchStatus
 {
-    std::string summary;
     SearchOutcome outcome = SearchOutcome::Idle;
     MatchNavigation navigation = MatchNavigation::Unavailable;
+    CountReadiness readiness = CountReadiness::Settled;
+    vtbackend::SearchMatchTally tally {};
 };
+
+/// Derives the bar's state from the active pattern and its completed tally.
+///
+/// @param pattern What is being searched for. Empty means no search is active.
+/// @param tally   The match tally for @p pattern. @see vtbackend::Terminal::tallySearchMatches.
+[[nodiscard]] inline SearchStatus describeSearch(std::u32string_view pattern,
+                                                 vtbackend::SearchMatchTally tally)
+{
+    if (pattern.empty())
+        return {};
+
+    if (tally.empty())
+        return SearchStatus { .outcome = SearchOutcome::NoMatch,
+                              .navigation = MatchNavigation::Unavailable,
+                              .readiness = CountReadiness::Settled,
+                              .tally = tally };
+
+    // Somewhere else to go = more than one match, or exactly one that we are not already on. The bar
+    // WRAPS (TerminalSession::wrapSearchTo), so being on the last of several is still navigable --
+    // Terminal::searchNextMatch alone does not wrap, which is why the wrap lives in the session.
+    auto const navigation =
+        (tally.total > 1 || tally.ordinal != 1) ? MatchNavigation::Available : MatchNavigation::Unavailable;
+
+    return SearchStatus { .outcome = SearchOutcome::Matched,
+                          .navigation = navigation,
+                          .readiness = CountReadiness::Settled,
+                          .tally = tally };
+}
+
+/// The bar's state for a search that has run but not yet been counted.
+///
+/// Typing re-runs the search on every keystroke, and counting its matches walks the whole grid --
+/// so the count is debounced while this fills the gap. Everything here is known without the walk:
+/// whether anything matched (the field's tint) and whether stepping will go somewhere.
+[[nodiscard]] inline SearchStatus describeSearchCounting(MatchPresence presence)
+{
+    if (presence == MatchPresence::None)
+        return SearchStatus { .outcome = SearchOutcome::NoMatch,
+                              .navigation = MatchNavigation::Unavailable,
+                              .readiness = CountReadiness::Settled };
+
+    return SearchStatus { .outcome = SearchOutcome::Matched,
+                          .navigation = MatchNavigation::Available,
+                          .readiness = CountReadiness::Counting };
+}
 
 /// Whether the user has pinned the case policy, or left it to decide for itself.
 ///
@@ -57,9 +123,9 @@ enum class CasePinned : uint8_t
 struct SearchCaseAffordance
 {
     /// The glyph on the button. Its own case IS the state it names -- "Aa" for a comparison that
-    /// respects case, "aa" for one that ignores it -- so the button reads without its tooltip.
+    /// respects case, "aa" for one that ignores it -- so the button reads without its tooltip. Not
+    /// prose, so unlike the tooltip it stays here rather than moving to the translatable layer.
     std::string_view glyph;
-    std::string_view tooltip;
     CasePinned pinned = CasePinned::No;
 };
 
@@ -73,14 +139,10 @@ struct SearchCaseAffordance
 {
     switch (mode)
     {
-        case vtbackend::SearchCaseSensitivity::Smart:
-            return { .glyph = "Aa",
-                     .tooltip = "Match case: smart — exact only when the term has a capital",
-                     .pinned = CasePinned::No };
-        case vtbackend::SearchCaseSensitivity::Sensitive:
-            return { .glyph = "Aa", .tooltip = "Match case: on", .pinned = CasePinned::Yes };
+        case vtbackend::SearchCaseSensitivity::Smart: return { .glyph = "Aa", .pinned = CasePinned::No };
+        case vtbackend::SearchCaseSensitivity::Sensitive: return { .glyph = "Aa", .pinned = CasePinned::Yes };
         case vtbackend::SearchCaseSensitivity::Insensitive:
-            return { .glyph = "aa", .tooltip = "Match case: off", .pinned = CasePinned::Yes };
+            return { .glyph = "aa", .pinned = CasePinned::Yes };
     }
     crispy::unreachable();
 }
@@ -101,44 +163,6 @@ struct SearchCaseAffordance
         case vtbackend::SearchCaseSensitivity::Insensitive: return vtbackend::SearchCaseSensitivity::Smart;
     }
     crispy::unreachable();
-}
-
-/// Derives what the find bar shows from the active pattern and its tally.
-///
-/// Pure, so the wording and the enabled/disabled rules are testable without a terminal, a window or
-/// a Qt event loop -- which is the whole reason this is a header and not a method on TerminalSession.
-///
-/// @param pattern What is being searched for. Empty means no search is active.
-/// @param tally   The match tally for @p pattern. @see vtbackend::Terminal::tallySearchMatches.
-/// @return The summary text, why it says that, and whether stepping is possible.
-[[nodiscard]] inline SearchStatus describeSearch(std::u32string_view pattern,
-                                                 vtbackend::SearchMatchTally tally)
-{
-    if (pattern.empty())
-        return {};
-
-    if (tally.empty())
-        return SearchStatus { .summary = "No results",
-                              .outcome = SearchOutcome::NoMatch,
-                              .navigation = MatchNavigation::Unavailable };
-
-    // A capped tally is a floor, not a total, and the trailing "+" is the only thing that says so.
-    auto const* const more = tally.exactness == vtbackend::TallyExactness::Capped ? "+" : "";
-
-    // "3 of 27" is a claim about standing ON a match. When the caller is not on one -- they scrolled,
-    // or the pattern came from a double-clicked word rather than from stepping -- there is no third
-    // number to report, so the count is reported on its own instead of inventing a position.
-    auto summary = tally.ordinal != 0
-                       ? std::format("{} of {}{}", tally.ordinal, tally.total, more)
-                       : std::format("{}{} {}", tally.total, more, tally.total == 1 ? "match" : "matches");
-
-    // Somewhere else to go = more than one match, or exactly one that we are not already on.
-    auto const navigation =
-        (tally.total > 1 || tally.ordinal != 1) ? MatchNavigation::Available : MatchNavigation::Unavailable;
-
-    return SearchStatus { .summary = std::move(summary),
-                          .outcome = SearchOutcome::Matched,
-                          .navigation = navigation };
 }
 
 } // namespace contour::session

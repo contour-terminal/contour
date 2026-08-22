@@ -4575,10 +4575,8 @@ class MockSearchSession: public QObject
     {
         return QString::fromUtf8(contour::session::describeSearchCase(_caseMode).glyph.data());
     }
-    [[nodiscard]] QString searchCaseTooltip() const
-    {
-        return QString::fromUtf8(contour::session::describeSearchCase(_caseMode).tooltip.data());
-    }
+    // The real session renders this through tr(); the bar only needs a non-empty string here.
+    [[nodiscard]] QString searchCaseTooltip() const { return QStringLiteral("match case"); }
     [[nodiscard]] bool searchCasePinned() const
     {
         return contour::session::describeSearchCase(_caseMode).pinned == contour::session::CasePinned::Yes;
