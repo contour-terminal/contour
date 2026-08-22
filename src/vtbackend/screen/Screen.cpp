@@ -7624,8 +7624,15 @@ optional<CellLocation> Screen::searchReverse(std::u32string_view searchText,
                                              CellLocation startPosition,
                                              SearchCaseSensitivity mode)
 {
+    return searchReverseFrom(searchText, startPosition, caseComparisonFor(searchText, mode));
+}
+
+optional<CellLocation> Screen::searchReverseFrom(std::u32string_view searchText,
+                                                 CellLocation startPosition,
+                                                 CaseComparison comparison)
+{
     // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
-    auto const isCaseSensitive = caseComparisonFor(searchText, mode) == CaseComparison::Exact;
+    auto const isCaseSensitive = comparison == CaseComparison::Exact;
 
     if (searchText.empty())
         return nullopt;

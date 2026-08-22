@@ -5142,7 +5142,10 @@ optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation sear
 optional<CellLocation> Terminal::search(CellLocation searchPosition)
 {
     auto const searchText = u32string_view(_search.pattern);
-    auto const matchLocation = currentScreen().search(searchText, searchPosition, _search.caseSensitivity);
+    // Through the cached comparison rather than the policy: Search::comparison is kept in step with
+    // the pattern by this class's own setters, and re-deriving it here would put a UCD lookup per
+    // codepoint of the needle on every keystroke of an incremental search. @see Search::comparison.
+    auto const matchLocation = currentScreen().searchFrom(searchText, searchPosition, _search.comparison);
 
     if (matchLocation)
         viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
@@ -5218,8 +5221,9 @@ std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
 optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 {
     auto const searchText = u32string_view(_search.pattern);
+    // The cached comparison, for the reason Terminal::search() states.
     auto const matchLocation =
-        currentScreen().searchReverse(searchText, searchPosition, _search.caseSensitivity);
+        currentScreen().searchReverseFrom(searchText, searchPosition, _search.comparison);
 
     if (matchLocation)
         viewport().makeVisibleWithinSafeArea(matchLocation.value().line);

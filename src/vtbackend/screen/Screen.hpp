@@ -707,17 +707,31 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
                                                 SearchCaseSensitivity mode,
                                                 size_t limit);
 
-  private:
-    /// search()'s body, for callers that have already resolved the case policy.
+    /// search() for callers that have already resolved the case policy.
     ///
-    /// tallyMatches() calls search() once per match, and resolving Smart case means a UCD lookup per
-    /// codepoint of the needle -- so resolving it once per TALLY rather than once per match is the
-    /// difference between one such scan and ten thousand.
+    /// Resolving @c Smart means a UCD lookup per codepoint of the needle, and the two callers that
+    /// have the answer in hand call these on the hot path: tallyMatches() searches once per match, and
+    /// Terminal caches the resolved policy on @c Search::comparison precisely so that a keystroke does
+    /// not re-derive it. @see caseComparisonFor.
+    ///
+    /// @param searchText    The needle. An empty needle matches nothing.
+    /// @param startPosition Where to begin; a match starting exactly here is returned.
+    /// @param comparison    The already-resolved case policy.
+    /// @return The first match at or after @p startPosition, or nullopt if there is none.
     [[nodiscard]] std::optional<CellLocation> searchFrom(std::u32string_view searchText,
                                                          CellLocation startPosition,
                                                          CaseComparison comparison);
 
-  public:
+    /// searchReverse() for callers that have already resolved the case policy. @see searchFrom.
+    ///
+    /// @param searchText    The needle. An empty needle matches nothing.
+    /// @param startPosition Where to begin; a match starting exactly here is returned.
+    /// @param comparison    The already-resolved case policy.
+    /// @return The first match at or before @p startPosition, or nullopt if there is none.
+    [[nodiscard]] std::optional<CellLocation> searchReverseFrom(std::u32string_view searchText,
+                                                                CellLocation startPosition,
+                                                                CaseComparison comparison);
+
     [[nodiscard]] CellProxy usePreviousCell() noexcept
     {
         return useCellAt(_lastCursorPosition.line, _lastCursorPosition.column);
