@@ -692,22 +692,22 @@ int ContourApp::daemonAction()
     config.socketPath = vthost::muxSocketPath(parameters().get<string>("contour.daemon.label"),
                                               parameters().get<string>("contour.daemon.socket"));
 
-    // The hosted terminals' emulation settings. The profile's `history.limit` is
-    // load-bearing here rather than cosmetic -- @see vthost::DefaultSessionHistoryLineCount.
-    auto const settings =
-        config::resolveEmulationSettings(parameters().get<string>("contour.daemon.config"),
-                                         parameters().get<string>("contour.daemon.profile"));
-    if (!settings)
+    // The hosted terminals' full session configuration: emulation settings, presentation/color
+    // fields, the shell to run and its sandbox policy. The profile's `history.limit` is
+    // load-bearing here rather than cosmetic -- @see vthost::DefaultSessionHistoryLineCount. This
+    // is also, deliberately, the ONE place a daemon's hosted sessions get their shell and
+    // presentation from: a profile the user named must not be silently overridden by the bare OS
+    // login shell -- @see the contour daemon / contour client profile-resolution issue.
+    auto const resolved = config::resolveSessionConfig(parameters().get<string>("contour.daemon.config"),
+                                                       parameters().get<string>("contour.daemon.profile"));
+    if (!resolved)
     {
-        cerr << std::format("contour daemon: {}\n", settings.error());
+        cerr << std::format("contour daemon: {}\n", resolved.error());
         return EXIT_FAILURE;
     }
-    config.settings = *settings;
-
-    auto const shellCommand = vtpty::Process::loginShell(/*escapeSandbox=*/false);
-    config.shell.program = shellCommand.front();
-    config.shell.arguments.assign(std::next(shellCommand.begin()), shellCommand.end());
-    config.shell.workingDirectory = vtpty::Process::homeDirectory();
+    config.settings = resolved->settings;
+    config.shell = resolved->shell;
+    config.escapeSandbox = resolved->escapeSandbox;
 
     if (auto label = parameters().get<string>("contour.daemon.tmux-compat-socket"); !label.empty())
         config.tmuxCompatLabel = std::move(label);

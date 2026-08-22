@@ -80,6 +80,10 @@ struct DaemonConfig
     vtbackend::Settings settings = defaultSessionSettings();
     /// The shell each new session runs.
     vtpty::Process::ExecInfo shell;
+    /// Whether a spawned shell escapes its sandbox (Flatpak). `true` by default, matching a local
+    /// session's profile default (`escape_sandbox: true`); `contour daemon` overwrites it from the
+    /// resolved profile, same as `settings` and `shell` above.
+    bool escapeSandbox = true;
     /// When set, ALSO binds tmux's own discovery path
     /// `/tmp/tmux-<uid>/<label>` for the imsg endpoint, so a plain
     /// `tmux -L <label> -C attach-session` finds this daemon. Opt-in only.

@@ -3971,6 +3971,103 @@ profiles:
     CHECK_FALSE(settings.error().empty());
 }
 
+TEST_CASE("Config: resolveSessionConfig carries a profile's shell, sandbox policy and presentation "
+          "fields",
+          "[config]")
+{
+    // The regression this guards: `contour daemon` (and therefore `contour client`) used to resolve
+    // only emulationSettings() and hardcode the OS login shell plus escapeSandbox=true, silently
+    // dropping everything below for every session it hosts.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /usr/bin/fish
+        arguments: ["-l"]
+        escape_sandbox: false
+        colors: coverage
+        status_line:
+            display: indicator
+        cursor:
+            shape: underscore
+color_schemes:
+    coverage:
+        default:
+            background: '#102030'
+            foreground: '#D0D0D0'
+)"sv);
+
+    auto const resolved = contour::config::resolveSessionConfig(path.string(), "main");
+    REQUIRE(resolved.has_value());
+
+    SECTION("shell")
+    {
+        CHECK(resolved->shell.program == "/usr/bin/fish");
+        REQUIRE(resolved->shell.arguments.size() == 1);
+        CHECK(resolved->shell.arguments.front() == "-l");
+    }
+
+    SECTION("CONTOUR_PROFILE is set, matching a local session's environment")
+    {
+        REQUIRE(resolved->shell.env.contains("CONTOUR_PROFILE"));
+        CHECK(resolved->shell.env.at("CONTOUR_PROFILE") == "main");
+    }
+
+    SECTION("escape_sandbox: false is honored, not hardcoded true")
+    {
+        CHECK_FALSE(resolved->escapeSandbox);
+    }
+
+    SECTION("the profile's color scheme reaches Settings.colorPalette")
+    {
+        CHECK(resolved->settings.colorPalette.defaultBackground == vtbackend::RGBColor(0x10, 0x20, 0x30));
+        CHECK(resolved->settings.colorPalette.defaultForeground == vtbackend::RGBColor(0xD0, 0xD0, 0xD0));
+    }
+
+    SECTION("presentation fields (status line type, cursor shape) reach Settings")
+    {
+        CHECK(resolved->settings.statusDisplayType == vtbackend::StatusDisplayType::Indicator);
+        CHECK(resolved->settings.cursorShape == vtbackend::CursorShape::Underscore);
+    }
+}
+
+TEST_CASE("Config: resolveSessionConfig defaults match a profile that sets nothing explicitly", "[config]")
+{
+    // escape_sandbox defaults to true (DaemonConfig's own prior default), so a profile that says
+    // nothing about it must not regress to false.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const resolved = contour::config::resolveSessionConfig(path.string(), "main");
+    REQUIRE(resolved.has_value());
+    CHECK(resolved->escapeSandbox);
+    CHECK(resolved->shell.program == "/bin/sh");
+    REQUIRE(resolved->shell.env.contains("CONTOUR_PROFILE"));
+    CHECK(resolved->shell.env.at("CONTOUR_PROFILE") == "main");
+}
+
+TEST_CASE("Config: resolveSessionConfig refuses an unknown profile, matching resolveEmulationSettings",
+          "[config]")
+{
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const resolved = contour::config::resolveSessionConfig(path.string(), "nope");
+    REQUIRE_FALSE(resolved.has_value());
+    CHECK(resolved.error().contains("nope"));
+}
+
 // {{{ history.hard_limit (issue #836)
 namespace
 {
