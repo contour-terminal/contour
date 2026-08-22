@@ -8,6 +8,7 @@
 #include <vtbackend/testing/TestHelpers.hpp>
 #include <vtbackend/vt/Charset.hpp>
 
+#include <crispy/Base64.hpp>
 #include <crispy/Escape.hpp>
 #include <crispy/Utils.hpp>
 
@@ -866,3 +867,230 @@ TEST_CASE("OSC.105 resets the special colors", "[screen]")
 }
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
+
+// {{{ OSC 533 -- screenshot
+
+namespace
+{
+/// Decodes the base64 payloads of the `PM 533` data messages in @p reply and concatenates them.
+///
+/// @param reply Everything the terminal wrote back.
+/// @return The screenshot the reply carries.
+[[nodiscard]] std::string decodeScreenshot(std::string_view reply)
+{
+    auto content = std::string {};
+    auto rest = reply;
+    while (true)
+    {
+        auto const start = rest.find("\033^533;");
+        if (start == std::string_view::npos)
+            break;
+        auto const end = rest.find("\033\\", start);
+        REQUIRE(end != std::string_view::npos);
+        // Skip the whole "ESC ^ 533 ;" introducer, leaving Pid;Ps;Pt;Pl;Pb;Pr;Pf;Pw;Ph;<base64>.
+        auto const message = rest.substr(start + 6, end - start - 6);
+        rest = rest.substr(end + 2);
+
+        // Pid;Ps;... -- a data message is the only one with a payload after the pixel extent.
+        auto const fields = crispy::split(message, ';');
+        if (fields.size() < 10)
+            continue;
+        content += crispy::base64::decode(fields[9]);
+    }
+    return content;
+}
+} // namespace
+
+TEST_CASE("screenshot.OSC533", "[screen][screenshot]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    mock.writeToScreen("ABCDE\r\nfghij\r\n12345");
+    mock.discardPendingReplies();
+
+    SECTION("no parameters captures the whole main page")
+    {
+        mock.writeToScreen("\033]533\033\\");
+        auto const reply = mock.terminal.peekInput();
+        // A PM reply, never an OSC -- replaying it into a terminal must not start a new screenshot.
+        CHECK(reply.starts_with("\033^533;0;1;1;1;3;5;0;0;0;"));
+        CHECK(!reply.contains("\033]533"));
+        CHECK(decodeScreenshot(reply) == "ABCDE\nfghij\n12345\n");
+        // ... and it ends with the end-of-data message.
+        CHECK(reply.ends_with("\033^533;0;0\033\\"));
+    }
+
+    SECTION("an explicit region captures exactly that rectangle")
+    {
+        // Rows 1..2, columns 2..4 -- one-based and inclusive on every edge.
+        mock.writeToScreen("\033]533;0;1;2;2;4\033\\");
+        CHECK(decodeScreenshot(mock.terminal.peekInput()) == "BCD\nghi\n");
+    }
+
+    SECTION("the request id is echoed in every reply message")
+    {
+        mock.writeToScreen("\033]533;99;1;1;1;5\033\\");
+        auto const reply = mock.terminal.peekInput();
+        CHECK(reply.starts_with("\033^533;99;1;"));
+        CHECK(reply.ends_with("\033^533;99;0\033\\"));
+    }
+
+    SECTION("the region is clamped to the page")
+    {
+        mock.writeToScreen("\033]533;0;1;1;999;999\033\\");
+        auto const reply = mock.terminal.peekInput();
+        CHECK(reply.starts_with("\033^533;0;1;1;1;3;5;0;0;0;"));
+        CHECK(decodeScreenshot(reply) == "ABCDE\nfghij\n12345\n");
+    }
+
+    SECTION("the VT-sequence format carries SGR and CRLF")
+    {
+        // Repaint the top row in red, so there is a rendition for the format to carry. Plain text
+        // with default attributes would legitimately produce no SGR at all.
+        mock.writeToScreen("\033[H\033[31mABCDE\033[m");
+        mock.discardPendingReplies();
+
+        mock.writeToScreen("\033]533;0;1;1;1;5;1\033\\");
+        auto const reply = mock.terminal.peekInput();
+        CHECK(reply.starts_with("\033^533;0;1;1;1;1;5;1;0;0;"));
+        auto const content = decodeScreenshot(reply);
+        CHECK(content.ends_with("\r\n"));
+        CHECK(content.contains("ABCDE"));
+        // The ESC bytes live inside the base64 payload, never raw on the wire -- which is the whole
+        // reason the payload is encoded.
+        CHECK(content.contains('\033'));
+        CHECK(!reply.contains("\033[31m"));
+    }
+
+    SECTION("an inverted region is refused rather than answered with nothing")
+    {
+        mock.writeToScreen("\033]533;5;3;1;1;5\033\\");
+        CHECK(mock.terminal.peekInput() == "\033^533;5;5\033\\");
+    }
+
+    SECTION("a format the protocol does not name is refused")
+    {
+        // Pf = 4 is past the last format this extension assigns. Asking for it is answered, rather
+        // than met with silence. @see screenshot::Format.
+        mock.writeToScreen("\033]533;6;1;1;3;5;4\033\\");
+        CHECK(mock.terminal.peekInput() == "\033^533;6;4\033\\");
+    }
+
+    SECTION("a renderer format with no renderer behind it is unavailable, not denied")
+    {
+        // PNG is implemented, but only where there is something rasterizing glyphs. A MockTerm is a
+        // headless session: nothing refused the read, there is simply no picture to take.
+        mock.writeToScreen("\033]533;8;1;1;3;5;3\033\\");
+        CHECK(mock.terminal.peekInput() == "\033^533;8;6\033\\");
+    }
+
+    SECTION("a malformed request is still answered")
+    {
+        mock.writeToScreen("\033]533;7;1;1;nope;5\033\\");
+        CHECK(mock.terminal.peekInput() == "\033^533;7;3\033\\");
+    }
+}
+
+TEST_CASE("screenshot.captureScreenshot reads the grid directly", "[screen][screenshot]")
+{
+    // The grid half of OSC 533 returns its bytes rather than replying with them, so it is checkable
+    // as a function of the grid -- no sequence to write, no reply queue to decode, no PTY. The tests
+    // above still drive the whole sequence; this one pins what the region actually reads.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    mock.writeToScreen("ABCDE\r\nfghij\r\n12345");
+
+    auto const wholePage = screenshot::Request {
+        .id = 0,
+        .area = Rect { .top = Top(0), .left = Left(0), .bottom = Bottom(2), .right = Right(4) },
+        .format = screenshot::Format::PlainText,
+    };
+
+    SECTION("plain text is LF-terminated, one line per row, and carries no pixel extent")
+    {
+        auto const capture = mock.terminal.primaryScreen().captureScreenshot(wholePage);
+        CHECK(capture.content == "ABCDE\nfghij\n12345\n");
+        CHECK(capture.pixelSize == ImageSize {});
+    }
+
+    SECTION("a sub-rectangle reads exactly those cells")
+    {
+        auto request = wholePage;
+        request.area = Rect { .top = Top(0), .left = Left(1), .bottom = Bottom(1), .right = Right(3) };
+        CHECK(mock.terminal.primaryScreen().captureScreenshot(request).content == "BCD\nghi\n");
+    }
+
+    SECTION("the VT-sequence format ends each row with CRLF")
+    {
+        // A bare LF would leave every row starting where the one above it ended, once written back.
+        auto request = wholePage;
+        request.format = screenshot::Format::VTSequences;
+        auto const capture = mock.terminal.primaryScreen().captureScreenshot(request);
+        CHECK(capture.content.ends_with("\r\n"));
+        CHECK(capture.content.contains("ABCDE"));
+        CHECK(capture.pixelSize == ImageSize {});
+    }
+}
+
+TEST_CASE("screenshot.OSC533.chunking", "[screen][screenshot]")
+{
+    // A page whose screenshot comfortably exceeds one chunk: 60 rows of 80 columns plus a newline
+    // each is 4860 bytes, against a 4095-byte chunk.
+    auto mock = MockTerm { PageSize { LineCount(60), ColumnCount(80) } };
+    for (auto const row: std::views::iota(0, 60))
+    {
+        mock.writeToScreen(std::string(80, static_cast<char>('a' + (row % 26))));
+        if (row != 59)
+            mock.writeToScreen("\r\n");
+    }
+    mock.discardPendingReplies();
+
+    mock.writeToScreen("\033]533;1\033\\");
+    auto const reply = mock.terminal.peekInput();
+
+    // More than one data message, and an end-of-data message closing the sequence.
+    auto const dataMessages = [&] {
+        auto count = size_t { 0 };
+        auto rest = std::string_view { reply };
+        while (true)
+        {
+            auto const at = rest.find("\033^533;1;1;");
+            if (at == std::string_view::npos)
+                return count;
+            ++count;
+            rest = rest.substr(at + 1);
+        }
+    }();
+    CHECK(dataMessages > 1);
+    CHECK(reply.ends_with("\033^533;1;0\033\\"));
+
+    // Every row survives reassembly, in order and unabridged.
+    auto expected = std::string {};
+    for (auto const row: std::views::iota(0, 60))
+    {
+        expected += std::string(80, static_cast<char>('a' + (row % 26)));
+        expected += '\n';
+    }
+    CHECK(decodeScreenshot(reply) == expected);
+}
+
+TEST_CASE("screenshot.OSC533.denied", "[screen][screenshot]")
+{
+    // What the frontend does when the user says no, or the configuration already did. A refusal is
+    // still a reply: an application that wrote a request and is reading must not be left hanging.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+    mock.writeToScreen("abcd\r\nefgh");
+    mock.discardPendingReplies();
+
+    auto const request = screenshot::Request {
+        .id = 8,
+        .area = Rect { .top = Top(0), .left = Left(0), .bottom = Bottom(1), .right = Right(3) },
+        .format = screenshot::Format::PlainText
+    };
+    mock.terminal.answerScreenshot(request, screenshot::Decision::Denied);
+    CHECK(mock.terminal.peekInput() == "\033^533;8;2\033\\");
+
+    // ... and the same request allowed does hand the screen over.
+    mock.terminal.answerScreenshot(request, screenshot::Decision::Allowed);
+    CHECK(decodeScreenshot(mock.terminal.peekInput()) == "abcd\nefgh\n");
+}
+
+// }}}

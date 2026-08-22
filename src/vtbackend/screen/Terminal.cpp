@@ -2953,6 +2953,47 @@ void Terminal::requestCaptureBuffer(LineCount lines, bool logical)
     _eventListener.requestCaptureBuffer(lines, logical);
 }
 
+void Terminal::requestScreenshot(screenshot::Request const& request)
+{
+    if (_eventListener.requestScreenshot(request) == screenshot::Disposition::Unhandled)
+        answerScreenshot(request, screenshot::Decision::Denied);
+}
+
+void Terminal::answerScreenshot(screenshot::Request const& request, screenshot::Decision decision)
+{
+    if (decision == screenshot::Decision::Denied)
+    {
+        screenshot::writeError(
+            request.id, screenshot::Status::Denied, [this](std::string_view message) { reply(message); });
+        return;
+    }
+
+    // Which half serves the request is a property of the format, read off the format table rather than
+    // decided here -- so a format added there is routed without this function being touched.
+    if (screenshot::producerOf(request.format) == screenshot::Producer::Renderer)
+    {
+        // Permitted, but the pixels are the renderer's to make. A frontend that declines leaves nobody
+        // able to produce them, which is Unavailable rather than Denied: nothing refused the read.
+        if (_eventListener.renderScreenshot(request) == screenshot::Disposition::Unhandled)
+            answerScreenshot(request, std::unexpected { screenshot::Status::Unavailable });
+        return;
+    }
+
+    answerScreenshot(request, currentScreen().captureScreenshot(request));
+}
+
+void Terminal::answerScreenshot(screenshot::Request const& request, screenshot::CaptureResult const& capture)
+{
+    auto const sink = [this](std::string_view message) {
+        reply(message);
+    };
+
+    if (!capture)
+        screenshot::writeError(request.id, capture.error(), sink);
+    else
+        screenshot::writeReply(request, *capture, sink);
+}
+
 void Terminal::requestShowHostWritableStatusLine()
 {
     _eventListener.requestShowHostWritableStatusLine();

@@ -68,6 +68,7 @@ enum class GuardedRole : uint8_t
     CaptureBuffer,
     ShowHostWritableStatusLine,
     BigPaste,
+    Screenshot,
 };
 
 /**
@@ -537,6 +538,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_INVOKABLE void applyPendingFontChange(bool allow, bool remember);
     Q_INVOKABLE void applyPendingPaste(bool allow, bool remember);
     Q_INVOKABLE void executePendingBufferCapture(bool allow, bool remember);
+
+    /// Answers the `OSC 533` screenshot request currently held at the permission wall.
+    ///
+    /// @param allow    Whether the application may read the screen.
+    /// @param remember Whether that answer stands for the rest of the session.
+    ///
+    /// The two adjacent bools are what executeRole() dispatches to for every guarded role; they are
+    /// also what QML can call. @see GuardedRole.
+    Q_INVOKABLE void executePendingScreenshot(bool allow, bool remember);
     Q_INVOKABLE void executeShowHostWritableStatusLine(bool allow, bool remember);
     Q_INVOKABLE void resizeTerminalToDisplaySize();
 
@@ -545,6 +555,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // vtbackend::Events
     //
     void requestCaptureBuffer(vtbackend::LineCount lines, bool logical) override;
+    [[nodiscard]] vtbackend::screenshot::Disposition requestScreenshot(
+        vtbackend::screenshot::Request const& request) override;
+
+    [[nodiscard]] vtbackend::screenshot::Disposition renderScreenshot(
+        vtbackend::screenshot::Request const& request) override;
     void bell() override;
     void bufferChanged(vtbackend::ScreenType) override;
     void renderBufferUpdated() override;
@@ -813,6 +828,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void requestPermissionForFontChange();
     void requestPermissionForPasteLargeFile();
     void requestPermissionForBufferCapture();
+    void requestPermissionForScreenshot();
     void requestPermissionForShowHostWritableStatusLine();
     void showNotification(QString const& title, QString const& content);
     void fontSizeChanged();
@@ -1051,6 +1067,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         bool logical;
     };
     std::optional<CaptureBufferRequest> _pendingBufferCapture;
+    std::optional<vtbackend::screenshot::Request> _pendingScreenshot;
     std::optional<vtbackend::FontDef> _pendingFontChange;
     std::optional<QClipboard*> _pendingBigPaste;
     PermissionCache _rememberedPermissions;
@@ -1092,6 +1109,7 @@ struct std::formatter<contour::session::GuardedRole>: std::formatter<std::string
             case contour::session::GuardedRole::CaptureBuffer: output = "Capture Buffer"; break;
             case contour::session::GuardedRole::ShowHostWritableStatusLine:  output = "show Host Writable Statusline"; break;
             case contour::session::GuardedRole::BigPaste:  output = "paste large number of characters"; break;
+            case contour::session::GuardedRole::Screenshot:  output = "Screenshot"; break;
         }
         // clang-format on
         return formatter<string_view>::format(output, ctx);

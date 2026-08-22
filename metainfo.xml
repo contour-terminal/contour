@@ -97,7 +97,8 @@
     <release version="x.y.z" urgency="medium" type="development">
       <description>
         <ul>
-          <li> ... </li>
+          <li>Adds OSC 533, which reads a rectangular region of the page back to the application as plain text, as the VT sequences that reproduce it, or as a picture of the pixels it is rendered with (PNG, or sixel that can be written straight back to a terminal). It is the region-addressable counterpart to buffer capture: where that answers "what scrolled past", this answers "what is on screen here". The reply is a PM 533, chunked and base64-encoded, and every request is answered — including one that is refused — so an application waiting on a reply is never left hanging (#161, #1648)</li>
+          <li>Adds the screenshot permission, defaulting to ask. Handing the screen to whichever program asked for it is the same kind of decision as letting one capture the buffer, and it is now guarded the same way</li>
         </ul>
       </description>
     </release>

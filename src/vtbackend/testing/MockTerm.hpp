@@ -273,6 +273,15 @@ class MockTerm: public Terminal::NullEvents
     {
         terminal.primaryScreen().captureBuffer(lines, logical);
     }
+
+    /// Serves every screenshot request, so a test drives the sequence without a permission wall in
+    /// front of it. What the wall itself does is a frontend concern, tested there.
+    [[nodiscard]] vtbackend::screenshot::Disposition requestScreenshot(
+        vtbackend::screenshot::Request const& request) override
+    {
+        terminal.answerScreenshot(request, vtbackend::screenshot::Decision::Allowed);
+        return vtbackend::screenshot::Disposition::Pending;
+    }
 };
 
 template <typename PtyDevice>

@@ -6,6 +6,7 @@
 
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/vt/Screenshot.hpp>
 
 #include <vtrasterizer/Decorator.hpp>
 #include <vtrasterizer/FontDescriptions.hpp>
@@ -179,6 +180,26 @@ class DisplaySurface
     /// Arms (or disarms) a one-shot capture of the next rendered frame.
     /// @param where Where the frame goes. @see ScreenshotOutput.
     virtual void setScreenshotOutput(ScreenshotOutput where) = 0;
+
+    /// Receives a finished screenshot, or the reason it could not be made.
+    using ScreenshotCaptureCallback = std::function<void(vtbackend::screenshot::CaptureResult)>;
+
+    /// Renders the cell region @p request names and encodes it in the format it asks for (`OSC 533`).
+    ///
+    /// This is the pixel half of the screenshot extension, and it lives here because pixels do: the
+    /// terminal engine has cells, and only a renderer has rasterized glyphs to photograph. The capture
+    /// is deferred — the frame must be submitted before its texture can be read back — so @p onReady
+    /// runs on a later frame rather than before this returns, and may run on the render thread.
+    ///
+    /// @param request What to capture; already permitted, and its format is a renderer format.
+    /// @param onReady Invoked exactly once with the result, unless this returns @c Unhandled.
+    /// @return Whether this surface has taken the request on. @c Unhandled when it cannot capture it
+    ///         now -- no render target, or another capture already in flight -- in which case
+    ///         @p onReady never runs and the caller must answer the request itself. The same
+    ///         vocabulary Events::renderScreenshot answers in, so the two seams do not have to be
+    ///         translated between.
+    [[nodiscard]] virtual vtbackend::screenshot::Disposition renderScreenshot(
+        vtbackend::screenshot::Request const& request, ScreenshotCaptureCallback onReady) = 0;
 
     /// Opens the terminal state inspector, dumping the current state to it.
     virtual void inspect() = 0;

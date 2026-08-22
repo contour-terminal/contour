@@ -16,6 +16,7 @@
 #include <vtbackend/vt/Capabilities.hpp>
 #include <vtbackend/vt/Charset.hpp>
 #include <vtbackend/vt/KittyClipboard.hpp>
+#include <vtbackend/vt/Screenshot.hpp>
 #include <vtbackend/vt/Sequence.hpp>
 #include <vtbackend/vt/TextSizing.hpp>
 #include <vtbackend/vt/VTType.hpp>
@@ -263,6 +264,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Applies one `OSC 3008` (hierarchical context signalling) sequence.
     [[nodiscard]] ApplyResult processHierarchicalContext(std::string_view payload);
 
+    /// Handles one `OSC 533` (screenshot) request.
+    ///
+    /// Reading the screen back to the application is guarded, so this only decodes the request and
+    /// hands it to the frontend; the reply is written once that has decided. A request that cannot be
+    /// decoded is refused here and now, because there is nothing to ask about.
+    [[nodiscard]] ApplyResult processScreenshot(std::string_view payload);
+
     /// Stamps the OSC-133-equivalent marks an OSC 3008 transition stands in for, when the arbiter says
     /// this session's marks are OSC 3008's to stamp. @see MarkArbiter.
     void synthesizeSemanticMarks(ContextTransition const& transition, ContextCommand const& command);
@@ -339,6 +347,17 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @returns necessary commands needed to draw the current screen state,
     ///          including initial clear screen, and initial cursor hide.
     [[nodiscard]] std::string screenshot(std::function<std::string(LineOffset)> const& postLine = {}) const;
+
+    /// Reads the region an `OSC 533` request names off the cells.
+    ///
+    /// Returns the bytes rather than replying with them, so that Terminal::answerScreenshot() stays
+    /// the single writer of a screenshot reply whichever half produced it — the grid here, or a
+    /// renderer through the frontend. That also makes this a pure function of the grid, checkable
+    /// without a Terminal or a PTY in the way.
+    ///
+    /// @param request The request to serve; its format must be a screenshot::Producer::Grid one.
+    /// @return The region's content, with no pixel extent.
+    [[nodiscard]] screenshot::Capture captureScreenshot(screenshot::Request const& request) const;
 
     void crlf() { linefeed(margin().horizontal.from); }
     void crlfIfWrapPending();

@@ -756,6 +756,7 @@ void TerminalSession::executeRole(GuardedRole role, bool allow, bool remember)
             executeShowHostWritableStatusLine(allow, remember);
             break;
         case GuardedRole::BigPaste: applyPendingPaste(allow, remember); break;
+        case GuardedRole::Screenshot: executePendingScreenshot(allow, remember); break;
     }
 }
 
@@ -790,6 +791,7 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
                     case GuardedRole::CaptureBuffer: emit requestPermissionForBufferCapture(); break;
                     case GuardedRole::ShowHostWritableStatusLine: emit requestPermissionForShowHostWritableStatusLine(); break;
                     case GuardedRole::BigPaste: emit requestPermissionForPasteLargeFile(); break;
+                    case GuardedRole::Screenshot: emit requestPermissionForScreenshot(); break;
                         // clang-format on
                 }
             }
@@ -841,6 +843,67 @@ void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
     _terminal.primaryScreen().captureBuffer(capture.lines, capture.logical);
 
     sessionLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
+    flushInput();
+}
+
+vtbackend::screenshot::Disposition TerminalSession::requestScreenshot(
+    vtbackend::screenshot::Request const& request)
+{
+    // No display to ask, or a screenshot already at the wall -- only one is held there at a time, since
+    // a second arriving while the user is still looking at the dialog would overwrite the first and
+    // leave it unanswered. Either way nobody here will answer this one, and Terminal::requestScreenshot
+    // refuses it on our behalf. Declining beats replying from in here: this runs inside the very
+    // requestScreenshot() call the terminal has not returned from yet.
+    if (!_display || _pendingScreenshot)
+        return vtbackend::screenshot::Disposition::Unhandled;
+
+    _pendingScreenshot = request;
+    _display->post(
+        [this]() { requestPermission(_profile.permissions.value().screenshot, GuardedRole::Screenshot); });
+    return vtbackend::screenshot::Disposition::Pending;
+}
+
+vtbackend::screenshot::Disposition TerminalSession::renderScreenshot(
+    vtbackend::screenshot::Request const& request)
+{
+    // Reached from executePendingScreenshot() on the GUI thread, so the display may be touched
+    // directly. The capture itself completes frames later, and the surface answers on this thread.
+    if (!_display)
+        return vtbackend::screenshot::Disposition::Unhandled;
+
+    // The capture outlives this call by a frame or two, and a session does NOT outlive every surface it
+    // was shown on -- releaseSession() exists precisely because a session can be torn down while its
+    // display carries on. A raw `this` would therefore be answering into freed memory on that path, so
+    // the answer is guarded by the session's own QObject lifetime. The check is not a race: the surface
+    // answers on the GUI thread, which is also where a session is destroyed.
+    return _display->renderScreenshot(request,
+                                      [this, guard = QPointer<TerminalSession> { this }, request](
+                                          vtbackend::screenshot::CaptureResult capture) {
+                                          if (!guard)
+                                              return;
+                                          _terminal.answerScreenshot(request, capture);
+                                          sessionLog()("renderScreenshot: {} as {}. Waking up I/O thread.",
+                                                       capture ? "captured" : "unavailable",
+                                                       request.format);
+                                          flushInput();
+                                      });
+}
+
+void TerminalSession::executePendingScreenshot(bool allow, bool remember)
+{
+    if (remember)
+        _rememberedPermissions[GuardedRole::Screenshot] = allow;
+
+    if (!_pendingScreenshot)
+        return;
+
+    auto const request = _pendingScreenshot.value();
+    _pendingScreenshot.reset();
+
+    _terminal.answerScreenshot(
+        request, allow ? vtbackend::screenshot::Decision::Allowed : vtbackend::screenshot::Decision::Denied);
+
+    sessionLog()("requestScreenshot: {}. Waking up I/O thread.", allow ? "allowed" : "denied");
     flushInput();
 }
 

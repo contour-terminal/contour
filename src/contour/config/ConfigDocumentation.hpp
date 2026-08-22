@@ -562,6 +562,10 @@ constexpr StringLiteral PermissionsConfig {
     "    change_font: {}\n"
     "    {comment} Allows displaying the \" Host Writable Statusline \" programmatically using `DECSSDT 2`.\n"
     "    display_host_writable_statusline: {}\n"
+    "    {comment} Allows reading a region of the screen back via `OSC 533 ; Pid ; Pt ; Pl ; Pb ; Pr ; Pf "
+    "ST`.\n"
+    "    {comment} The response can be read from stdin as `PM 533 ; ... ; <base64 screenshot> ST`\n"
+    "    screenshot: {}\n"
     "\n"
 };
 
@@ -2180,6 +2184,7 @@ constexpr StringLiteral PermissionsWeb {
     "      change_font: ask\n"
     "      capture_buffer: ask\n"
     "      display_host_writable_statusline: ask\n"
+    "      screenshot: ask\n"
     "```\n"
     ":octicons-horizontal-rule-16: ==change_font== This option determines the access permission for changing "
     "the font using the VT sequence `OSC 50 ; Pt ST`. The possible values are: allow, deny, ask. <br/>\n"
@@ -2190,6 +2195,10 @@ constexpr StringLiteral PermissionsWeb {
     ":octicons-horizontal-rule-16: ==display_host_writable_statusline== This option determines the access "
     "permission for displaying the \"Host Writable Statusline\" programmatically using the VT sequence "
     "`DECSSDT 2`. The possible values are: allow, deny, ask. <br/>\n"
+    ":octicons-horizontal-rule-16: ==screenshot== This option determines the access permission for reading a "
+    "region of the screen back to the application using the VT sequence "
+    "`OSC 533 ; Pid ; Pt ; Pl ; Pb ; Pr ; Pf ST`. The response can be read from stdin as the sequence "
+    "`PM 533 ; ... ; <base64 screenshot> ST`. The possible values are: allow, deny, ask. <br/>\n"
     "\n"
 };
 

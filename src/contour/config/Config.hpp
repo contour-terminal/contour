@@ -465,6 +465,7 @@ struct PermissionsConfig
     Permission captureBuffer { Permission::Ask };
     Permission changeFont { Permission::Ask };
     Permission displayHostWritableStatusLine { Permission::Ask };
+    Permission screenshot { Permission::Ask };
 };
 
 struct InputModeConfig
@@ -1982,7 +1983,7 @@ struct Writer
 
     [[nodiscard]] std::string format(std::string_view doc, PermissionsConfig const& v)
     {
-        return format(doc, v.captureBuffer, v.changeFont, v.displayHostWritableStatusLine);
+        return format(doc, v.captureBuffer, v.changeFont, v.displayHostWritableStatusLine, v.screenshot);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, InputModeConfig v)

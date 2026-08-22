@@ -25,6 +25,7 @@
 #include <vtbackend/vt/DesktopNotification.hpp>
 #include <vtbackend/vt/PointerShape.hpp>
 #include <vtbackend/vt/ProgressState.hpp>
+#include <vtbackend/vt/Screenshot.hpp>
 #include <vtbackend/vt/Sequence.hpp>
 #include <vtbackend/vt/SequenceBuilder.hpp>
 
@@ -284,6 +285,41 @@ class Terminal
         virtual ~Events() = default;
 
         virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
+
+        /// Asks the frontend whether the application may read the screen back, and to serve the
+        /// request if so.
+        ///
+        /// The default refuses, and deliberately so: a frontend that does not implement this has no
+        /// way to ask the user, and silently handing over the screen is not the safe reading of that.
+        /// The refusal is still a reply, so the application is never left waiting.
+        ///
+        /// @param request What was asked for.
+        /// @return Whether the frontend has taken ownership of @p request and will answer it.
+        [[nodiscard]] virtual screenshot::Disposition requestScreenshot(
+            screenshot::Request const& /*request*/)
+        {
+            return screenshot::Disposition::Unhandled;
+        }
+
+        /// Asks the frontend to rasterize an ALREADY-PERMITTED screenshot request whose format only a
+        /// renderer can produce (@ref screenshot::Producer::Renderer), and to answer it with
+        /// @ref Terminal::answerScreenshot(screenshot::Request const&, screenshot::CaptureResult const&).
+        ///
+        /// Separate from @ref requestScreenshot because it asks a different question of a different
+        /// layer: that one is "may this be read at all", decided by configuration and possibly by the
+        /// user, while this one is "produce these pixels", decided by whether a renderer exists. Both
+        /// answer late -- the wall waits on a dialog, the capture on a GPU readback.
+        ///
+        /// The default refuses, which is what a headless session is: there are no glyphs rasterized
+        /// anywhere, so there is nothing to photograph.
+        ///
+        /// @param request What was asked for.
+        /// @return Whether the frontend has taken ownership of @p request and will answer it.
+        [[nodiscard]] virtual screenshot::Disposition renderScreenshot(screenshot::Request const& /*request*/)
+        {
+            return screenshot::Disposition::Unhandled;
+        }
+
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void renderBufferUpdated() {}
@@ -386,6 +422,16 @@ class Terminal
     {
       public:
         void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) override {}
+        [[nodiscard]] screenshot::Disposition requestScreenshot(
+            screenshot::Request const& /*request*/) override
+        {
+            return screenshot::Disposition::Unhandled;
+        }
+        [[nodiscard]] screenshot::Disposition renderScreenshot(
+            screenshot::Request const& /*request*/) override
+        {
+            return screenshot::Disposition::Unhandled;
+        }
         void bell() override {}
         void bufferChanged(ScreenType) override {}
         void renderBufferUpdated() override {}
@@ -1723,6 +1769,25 @@ class Terminal
     // Screen's EventListener implementation
     //
     void requestCaptureBuffer(LineCount lines, bool logical);
+
+    /// Routes a decoded screenshot request to the frontend, and refuses it here if none will answer.
+    /// @param request What the application asked for.
+    void requestScreenshot(screenshot::Request const& request);
+
+    /// Answers a screenshot request the frontend was asked to decide on.
+    ///
+    /// Allowing one serves it: a @ref screenshot::Producer::Grid format is read off the cells here and
+    /// answered on the spot, while a @ref screenshot::Producer::Renderer format is handed on to
+    /// @ref Events::renderScreenshot and answered whenever the capture completes.
+    ///
+    /// @param request  The request being answered.
+    /// @param decision What the frontend, or the user, decided.
+    void answerScreenshot(screenshot::Request const& request, screenshot::Decision decision);
+
+    /// Answers a screenshot request the frontend was asked to rasterize.
+    /// @param request The request being answered.
+    /// @param capture The finished capture, or why it could not be made.
+    void answerScreenshot(screenshot::Request const& request, screenshot::CaptureResult const& capture);
     void requestShowHostWritableStatusLine();
     void bell();
     void bufferChanged(ScreenType);

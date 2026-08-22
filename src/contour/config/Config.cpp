@@ -2141,6 +2141,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         loadFromEntry(child, "capture_buffer", where.captureBuffer);
         loadFromEntry(child, "change_font", where.changeFont);
         loadFromEntry(child, "display_host_writable_statusline", where.displayHostWritableStatusLine);
+        loadFromEntry(child, "screenshot", where.screenshot);
     }
 }
 

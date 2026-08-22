@@ -5,7 +5,10 @@
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/ImeQueryRect.hpp>
 #include <contour/display/Logging.hpp>
+#include <contour/display/QImageBridge.hpp>
 #include <contour/display/RhiRenderer.hpp>
+#include <contour/display/ScreenshotAnswer.hpp>
+#include <contour/display/ScreenshotEncoder.hpp>
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/TerminalRenderNode.hpp>
@@ -403,21 +406,9 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
             if (image.isNull())
                 return std::nullopt;
 
-            image = image.convertToFormat(QImage::Format_RGBA8888);
-
-            size = vtbackend::ImageSize { vtbackend::Width::cast_from(image.width()),
-                                          vtbackend::Height::cast_from(image.height()) };
-
-            auto const rowBytes = static_cast<size_t>(image.width()) * 4;
-            vtbackend::Image::Data pixels;
-            pixels.resize(static_cast<size_t>(image.height()) * rowBytes);
-            auto* p = pixels.data();
-            for (auto const row: std::views::iota(0, image.height()))
-            {
-                memcpy(p, image.constScanLine(row), rowBytes);
-                p += rowBytes;
-            }
-            return pixels;
+            image = toWireFormat(image);
+            size = extentOf(image);
+            return tightlyPackedRgba(image);
         });
 
     emit sessionChanged(newSession);
@@ -1781,6 +1772,48 @@ void TerminalDisplay::requestScreenshot(std::function<void(QImage)> onReady)
         if (window())
             update();
     });
+}
+
+vtbackend::screenshot::Disposition TerminalDisplay::renderScreenshot(
+    vtbackend::screenshot::Request const& request, ScreenshotCaptureCallback onReady)
+{
+    if (!_renderTarget)
+        return vtbackend::screenshot::Disposition::Unhandled;
+
+    // A capture is already in flight, and the render target holds exactly one callback: taking this
+    // request would silently drop the pending one -- a screenshot key binding that never writes its
+    // file, or the at-exit state dump whose callback owns terminating the session. Declining costs the
+    // application an Unavailable it may retry, which is the cheaper of the two losses.
+    if (_renderTarget->screenshotRequested())
+        return vtbackend::screenshot::Disposition::Unhandled;
+
+    // Read the grid the frame will be cropped against HERE, on the GUI thread, rather than from the
+    // readback callback: a resize between the two would otherwise have the crop use metrics the
+    // captured frame was not rendered with.
+    auto const metrics = gridMetrics();
+
+    // The renderer numbers its rows from the top of everything DRAWN, while the request names rows of
+    // the main page: a status line positioned above the grid occupies the first rows and pushes every
+    // page row down by its height. The same shift the render buffer applies when it places cells, and
+    // the hit-tests when they map a pixel back. @see vtbackend::Terminal::mainPageTopRow.
+    auto const topRow = _session != nullptr ? unbox<int>(_session->terminal().mainPageTopRow()) : 0;
+    auto const area =
+        vtbackend::Rect { .top = vtbackend::Top::cast_from(unbox(request.area.top) + topRow),
+                          .left = request.area.left,
+                          .bottom = vtbackend::Bottom::cast_from(unbox(request.area.bottom) + topRow),
+                          .right = request.area.right };
+
+    // The display outlives every callback the render target holds, because it owns the renderer that
+    // holds them -- which is what makes capturing `this` for the hop sound here.
+    auto answer = std::make_shared<ScreenshotAnswer>(
+        [this](std::function<void()> const& work) { post(work); }, std::move(onReady));
+
+    requestScreenshot([area, format = request.format, metrics, answer](QImage const& frame) {
+        // Encoded here, on the render thread, so a page-sized PNG is not deflated on the GUI thread.
+        answer->deliver(encodeScreenshot(frame, area, metrics, format));
+    });
+
+    return vtbackend::screenshot::Disposition::Pending;
 }
 
 void TerminalDisplay::doDumpStateInternal()

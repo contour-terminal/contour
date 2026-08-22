@@ -239,6 +239,7 @@ constexpr inline auto ITERM2 = FunctionDocumentation { .mnemonic = "ITERM2", .co
 constexpr inline auto TEXTSIZING = FunctionDocumentation { .mnemonic = "TEXTSIZING", .comment = "Kitty text sizing protocol: sized/scaled text.", .parameters = "metadata ; text" };
 constexpr inline auto KITTYCLIPBOARD = FunctionDocumentation { .mnemonic = "KITTYCLIPBOARD", .comment = "Kitty clipboard protocol: chunked, MIME-typed clipboard read/write.", .parameters = "metadata ; base64" };
 constexpr inline auto POINTERSHAPE = FunctionDocumentation { .mnemonic = "POINTERSHAPE", .comment = "Kitty pointer shape protocol: set, push, pop or query the mouse pointer shape.", .parameters = "=|>|<|? name[,name...]" };
+constexpr inline auto SCREENSHOT = FunctionDocumentation { .mnemonic = "SCREENSHOT", .comment = "Reads a rectangular region of the page back to the application.", .parameters = "Pid ; Pt ; Pl ; Pb ; Pr ; Pf", .description = "Requests a screenshot of the region whose corners are Pt;Pl and Pb;Pr, one-based and inclusive, in the format Pf (0 = plain text, 1 = VT sequences, 2 = sixel, 3 = PNG). Every parameter is optional; the region defaults to the whole main page. The reply is one or more `PM 533` messages whose payload is base64-encoded, ending with a status-0 message. Pid is echoed in every reply so a delayed answer can be matched to its request, and Pw;Ph carry the payload's pixel extent (zero for the text formats).", .notes = "Reading the screen is guarded by a permission the user controls, so a request may be refused; every request is answered either way. The region is measured from the page, not from the origin, so DECOM does not move it. The pixel formats are produced by the RENDERER, so they photograph what is on screen -- cursor, selection and viewport included -- and a session with no renderer answers them with status 6 (unavailable) rather than pixels. The sixel payload carries its own DCS envelope, so a decoded reply can be written straight back to a terminal.", .examples = "OSC 533 ST\nOSC 533 ; 42 ; 1 ; 1 ; 5 ; 20 ; 1 ST" };
 constexpr inline auto HIERCONTEXT = FunctionDocumentation { .mnemonic = "HIERCONTEXT", .comment = "Hierarchical context signalling (UAPI.15): the nesting a shell, run0, ssh or a container runtime opens around what runs inside it.", .parameters = "start=CTXID|end=CTXID [; field=value ...]", .description = "Maintains a stack of contexts, each carrying metadata about the component in control of the terminal. `start=` initiates, updates or returns to a context; `end=` terminates one. Ordinary reset sequences deliberately do NOT clear the stack.", .examples = "OSC 3008 ; start=bed86fab ; type=container ; container=foobar ST\nOSC 3008 ; end=bed86fab ; exit=success ST" };
 
 // DEC Multi-Page Navigation (VT420)
@@ -887,6 +888,7 @@ constexpr inline auto ITERM2           = detail::OSC(1337, VTExtension::Unknown,
 constexpr inline auto TEXTSIZING       = detail::OSC(66, VTExtension::Unknown, documentation::TEXTSIZING);
 constexpr inline auto KITTYCLIPBOARD   = detail::OSC(5522, VTExtension::Unknown, documentation::KITTYCLIPBOARD);
 constexpr inline auto POINTERSHAPE     = detail::OSC(22, VTExtension::Unknown, documentation::POINTERSHAPE);
+constexpr inline auto SCREENSHOT       = detail::OSC(533, VTExtension::Contour, documentation::SCREENSHOT);
 constexpr inline auto HIERCONTEXT      = detail::OSC(3008, VTExtension::Unknown, documentation::HIERCONTEXT);
 
 // NOLINTEND(readability-identifier-naming)
@@ -1153,6 +1155,7 @@ constexpr static auto allFunctionsArray() noexcept
         TEXTSIZING,
         KITTYCLIPBOARD,
         POINTERSHAPE,
+        SCREENSHOT,
         HIERCONTEXT,
         DUMPSTATE,
     };
