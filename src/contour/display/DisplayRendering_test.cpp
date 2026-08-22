@@ -677,15 +677,34 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
         QTest::qWait(10);
     CHECK(fontAsks == 1); // remembered: applied without asking again
 
-    // CaptureBuffer: the pending request executes on explicit approval and lands the captured text
-    // back on the terminal (as VT input), exercising executePendingBufferCapture's allow path; the
-    // deny path afterwards must be a silent no-op.
+    // CaptureBuffer rides the same queue. requestCaptureBuffer() only ENQUEUES the request and posts the
+    // gate, so the dialog has to be waited for and answered through it -- answering the executor before
+    // the gate arrives would leave the gate to raise a dialog for a request already served.
+    auto captureAsks = 0;
+    QObject::connect(h.session.get(),
+                     &contour::session::TerminalSession::requestPermissionForBufferCapture,
+                     h.session.get(),
+                     [&captureAsks]() { ++captureAsks; });
+
     h.feedAndSettle("capture me\r\n"sv);
     h.session->requestCaptureBuffer(vtbackend::LineCount(2), /*logical=*/false);
+    for (int i = 0; i < 50 && captureAsks == 0; ++i)
+        QTest::qWait(10);
+    REQUIRE(captureAsks == 1);
     h.session->executePendingBufferCapture(/*allow=*/true, /*remember=*/false);
     QTest::qWait(20);
+
+    // A remembered deny resolves the next request without asking again -- and still answers it, since a
+    // refused capture owes its client the terminating chunk.
     h.session->requestCaptureBuffer(vtbackend::LineCount(1), /*logical=*/true);
+    for (int i = 0; i < 50 && captureAsks == 1; ++i)
+        QTest::qWait(10);
+    REQUIRE(captureAsks == 2);
     h.session->executePendingBufferCapture(/*allow=*/false, /*remember=*/true);
+    h.session->requestCaptureBuffer(vtbackend::LineCount(1), /*logical=*/true);
+    QTest::qWait(20);
+    h.pump();
+    CHECK(captureAsks == 2); // remembered: resolved without asking again
 
     // ShowHostWritableStatusLine rides the display queue too; a remembered deny resolves silently.
     h.session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/true);

@@ -454,6 +454,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     void captureBuffer(LineCount lineCount, bool logicalLines);
 
+    /// Replies the empty terminating PM chunk that closes every capture reply, and nothing else.
+    ///
+    /// This is what a *refused* capture owes its client: the protocol has no way to say "no reply is
+    /// coming", and a client reading until the empty chunk would otherwise block forever.
+    /// @see docs/vt-extensions/buffer-capture.md
+    void replyCaptureBufferEnd();
+
     void setForegroundColor(Color color);
     void setBackgroundColor(Color color);
     void setUnderlineColor(Color color);
