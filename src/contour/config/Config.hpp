@@ -2250,6 +2250,65 @@ void compareEntries(Config& config, auto const& output);
 [[nodiscard]] std::expected<vtbackend::Settings, std::string> resolveEmulationSettings(
     std::string const& configPath, std::string const& profileName);
 
+/// Picks the color palette @p colorConfig yields for @p preference: the matching half of a dual
+/// (dark/light) config, or the single palette of a simple one.
+/// @return The palette, or nullptr if @p colorConfig holds neither known alternative.
+[[nodiscard]] vtbackend::ColorPalette const* preferredColorPalette(
+    ColorConfig const& colorConfig, vtbackend::ColorPreference preference);
+
+/// Everything a HOSTED session needs beyond @ref emulationSettings: the shell to run, whether it
+/// escapes its sandbox, and the presentation fields (cursor, status line, scrolling, colors, ...)
+/// that decide how the terminal looks rather than what it is.
+///
+/// Split out from @ref emulationSettings for the reason its own doc comment gives: `contour
+/// daemon` hosts terminals no LOCAL display presents, but every one of them is presented by
+/// whichever client attaches — `contour client` included — so the daemon needs this whole picture,
+/// not just the emulation half. Before this type existed, `ContourApp::daemonAction()` resolved
+/// only `emulationSettings()` and hardcoded the shell and sandbox policy, silently dropping a
+/// profile's `shell:`, presentation and color configuration for every session it hosts.
+struct ResolvedSessionConfig
+{
+    /// The VT-emulation settings, presentation fields and color palette applied — everything
+    /// `vtbackend::Terminal` needs to both emulate AND look the way the profile says.
+    vtbackend::Settings settings;
+    /// The shell (program, arguments, working directory, environment) each new session runs.
+    /// Carries `CONTOUR_PROFILE` in its environment, matching what a local session sets.
+    vtpty::Process::ExecInfo shell;
+    /// Whether a spawned shell escapes its sandbox (Flatpak), from `profile.escape_sandbox`.
+    bool escapeSandbox = true;
+};
+
+/// Resolves @p profile's hosted-session configuration: @ref emulationSettings plus the shell,
+/// sandbox policy and presentation/color fields a local and a daemon-hosted session both need. The
+/// one place `TerminalSession` and `ContourApp::daemonAction()` both call, so the two paths cannot
+/// disagree about what a profile means.
+///
+/// @param config The loaded configuration (global entries).
+/// @param profile The resolved profile.
+/// @param profileName The name @p profile was resolved under — `TerminalProfile` does not carry
+///        its own name, and the shell environment's `CONTOUR_PROFILE` needs it.
+/// @param colorPreference Which half of a dual (dark/light) color config to prefer; irrelevant for
+///        a simple (single) color config.
+/// @param initialPageSize Overrides `profile.terminal_size` when set (a new tab/split inherits the
+///        live window's running grid rather than starting at the profile's configured size).
+/// @return The resolved configuration.
+[[nodiscard]] ResolvedSessionConfig resolvedSessionConfig(
+    Config const& config,
+    TerminalProfile const& profile,
+    std::string const& profileName,
+    vtbackend::ColorPreference colorPreference,
+    std::optional<vtbackend::PageSize> initialPageSize = std::nullopt);
+
+/// Loads a configuration and resolves one profile's @ref resolvedSessionConfig from it — the
+/// `resolveEmulationSettings` counterpart for callers that also need the shell, sandbox policy and
+/// presentation fields, chiefly `ContourApp::daemonAction()`.
+///
+/// @param configPath Configuration file to read; empty selects the default location.
+/// @param profileName Profile to resolve; empty selects the configuration's default.
+/// @return The resolved configuration, or a human-readable reason it could not be resolved.
+[[nodiscard]] std::expected<ResolvedSessionConfig, std::string> resolveSessionConfig(
+    std::string const& configPath, std::string const& profileName);
+
 /// Loads ONLY the `layouts:` map contained in the single file at @p path (no sibling-merge, no
 /// inline-config layouts). A missing file yields an empty map (nothing saved yet is not an
 /// error); a file that fails to parse yields the parse error instead, so SaveLayout can REFUSE to
