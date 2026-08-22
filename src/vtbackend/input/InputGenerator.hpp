@@ -95,7 +95,8 @@ constexpr auto AllChordModifiers = [] {
 }();
 
 /// Number of low bits the chord modifiers occupy, derived from ChordModifierTable. Consumers that
-/// pack a chord next to other data shift by this width, see ViInputHandler's InputMatch.
+/// pack a chord next to other data shift by this width -- LockKey below is the one that does, whose
+/// enumerators start immediately above the run this names.
 constexpr auto ChordModifierBitWidth = static_cast<unsigned>(std::bit_width(AllChordModifiers.value()));
 
 static_assert(static_cast<unsigned>(AllChordModifiers.value()) == (1u << ChordModifierBitWidth) - 1u,
