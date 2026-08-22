@@ -118,6 +118,18 @@ Popup {
             root._search.cycleSearchCaseSensitivity();
     }
 
+    // The search can be cleared from outside this bar -- Ctrl+Shift+H, or entering Vi Insert mode --
+    // and the terminal then holds no pattern while the field still shows one. Resync only in that
+    // direction: the field is the source of truth while the user is typing into it.
+    Connections {
+        target: root._search
+        ignoreUnknownSignals: true
+        function onSearchStateChanged() {
+            if (root._search && root._search.searchPattern === "" && field.text !== "")
+                field.text = "";
+        }
+    }
+
     // Enter / Shift+Enter. Split out so both Return and Enter (the keypad one) reach the same rule.
     function step(event) {
         if (!root._search)
@@ -141,6 +153,9 @@ Popup {
             anchors.verticalCenter: parent.verticalCenter
             width: chromeStyle.cellWidth * 26
             placeholderText: qsTr("Find")
+            // Room for the count that floats over the field's right end, so a long term scrolls
+            // rather than running underneath "9999+ matches".
+            rightPadding: count.width + 2 * chromeStyle.labelPadding
 
             // Both chrome styles draw a focused field's edge in the Highlight role -- ContourTui says
             // so outright, and Fusion's focus frame uses it too -- so re-pointing that one role is how

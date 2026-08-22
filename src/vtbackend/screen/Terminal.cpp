@@ -5183,13 +5183,15 @@ void Terminal::clearSearch()
 {
     _search.pattern.clear();
     _search.origin = SearchOrigin::Typed;
-    _search.comparison = CaseComparison::Folded;
+    // Kept in step with the (now empty) pattern by the same rule the setters use, rather than pinned
+    // to a constant: an empty needle under a pinned Sensitive policy still compares exactly.
+    _search.comparison = caseComparisonFor(_search.pattern, _search.caseSensitivity);
 
-    // The highlights of the pattern just dropped are still in the render buffer, and nothing else on
-    // this path rebuilds it -- unlike search()/searchReverse(), which raise this themselves. Without
-    // it the matches of a cleared search stay painted until some unrelated event forces a frame. The
-    // deleted ViCommands::searchCancel() ended with this call, for this reason.
-    screenUpdated();
+    // The highlights of the pattern just dropped are still in the render buffer, and nothing on this
+    // path rebuilds it -- unlike search()/searchReverse(). Raised as its own event rather than as
+    // screenUpdated(), whose auto-scroll would additionally yank the viewport to the bottom and lose
+    // whatever the user had scrolled back to read.
+    _eventListener.searchCleared();
 }
 
 bool Terminal::wordDelimited(CellLocation position) const noexcept

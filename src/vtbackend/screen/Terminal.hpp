@@ -385,6 +385,15 @@ class Terminal
         virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
 
+        /// The active search was cleared, by whatever route -- the NoSearchHighlight action, entering
+        /// Insert mode, or the find bar's term being emptied.
+        ///
+        /// A frontend showing search state has to hear about it: the matches it had lit are gone, and
+        /// anything displaying the pattern is now displaying one the terminal no longer has. Narrower
+        /// than screenUpdated() on purpose -- that one also auto-scrolls the viewport to the bottom,
+        /// which would throw away the position the user was reading.
+        virtual void searchCleared() {}
+
         /// The user asked for the search prompt -- by the SearchReverse action, or by `/` in vi mode.
         ///
         /// The terminal states the request and never learns what draws it. A frontend opens its find
@@ -1922,7 +1931,9 @@ class Terminal
     /// on the underlying std::string (torn read / use-after-free on reallocation).
     [[nodiscard]] std::optional<std::string> resolvedTabName() const;
     [[nodiscard]] bool focused() const noexcept { return _focused; }
-    [[nodiscard]] Search& search() noexcept { return _search; }
+    /// Read-only by design: @c Search::comparison is a cache of the other two fields, and the setters
+    /// are what keep it in step. A mutable handle here is how the matcher and the highlighter came to
+    /// disagree in the first place, so there is no longer one.
     [[nodiscard]] Search const& search() const noexcept { return _search; }
 
     // {{{ hint mode

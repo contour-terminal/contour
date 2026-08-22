@@ -746,7 +746,14 @@ void TerminalSession::screenUpdated()
             // 250 ms window. Clearing it here instead let every following screen update post again
             // while the timer was still running -- one queued call per PTY read chunk, which under
             // heavy output is thousands a second.
-            [this]() { _searchTallyTimer.start(); },
+            [this]() {
+                // Re-checked here: the bar can close between this post and its delivery, and starting
+                // the timer then would fire a tally 250 ms later for a bar that is gone.
+                if (_isSearchBarOpen.load(std::memory_order_relaxed))
+                    _searchTallyTimer.start();
+                else
+                    _searchTallyPostPending.clear(std::memory_order_release);
+            },
             Qt::QueuedConnection);
     }
 
@@ -1568,6 +1575,19 @@ void TerminalSession::searchPromptRequested()
 // {{{ Find bar
 void TerminalSession::searchBarOpened()
 {
+    {
+        auto const l = scoped_lock { _terminal };
+
+        // The search runs from the NORMAL-mode cursor, which ViCommands only syncs to the real screen
+        // cursor on an Insert -> Normal transition -- and this bar deliberately makes no such
+        // transition. Without this, a search started from Insert mode begins wherever the vi cursor
+        // was last left (usually the top of the page) and cannot see anything below it: the old
+        // startSearchExternally() got the sync for free by switching mode, purely to reveal the
+        // status line.
+        if (_terminal.inputHandler().mode() == vtbackend::ViMode::Insert)
+            _terminal.moveNormalModeCursorTo(_terminal.currentScreen().cursor().position);
+    }
+
     _isSearchBarOpen.store(true, std::memory_order_relaxed);
     refreshSearchStatus();
 }
@@ -1588,10 +1608,14 @@ void TerminalSession::searchBarClosed()
     _searchTallyPostPending.clear(std::memory_order_release);
 }
 
-QString TerminalSession::searchPattern() const
+void TerminalSession::searchCleared()
 {
-    auto const l = scoped_lock { _terminal };
-    return QString::fromStdU32String(_terminal.search().pattern);
+    // Reached from the parser thread and from under Terminal's state mutex (Vi mode changes clear the
+    // search mid-input), so both halves are posted rather than done here.
+    if (auto* display = _display)
+        display->scheduleRedraw();
+
+    QMetaObject::invokeMethod(this, &TerminalSession::refreshSearchStatus, Qt::QueuedConnection);
 }
 
 void TerminalSession::setSearchPattern(QString const& pattern)
@@ -1647,15 +1671,38 @@ void TerminalSession::cycleSearchCaseSensitivity()
 
 void TerminalSession::searchNext()
 {
-    if (!(*this)(actions::FocusNextSearchMatch {}))
-        wrapSearchTo(SearchWrapEdge::Top);
-    refreshSearchStatus();
+    stepSearch(SearchWrapEdge::Top);
 }
 
 void TerminalSession::searchPrevious()
 {
-    if (!(*this)(actions::FocusPreviousSearchMatch {}))
-        wrapSearchTo(SearchWrapEdge::Bottom);
+    stepSearch(SearchWrapEdge::Bottom);
+}
+
+void TerminalSession::stepSearch(SearchWrapEdge edge)
+{
+    auto const before = [this]() {
+        auto const l = scoped_lock { _terminal };
+        return _terminal.normalModeCursorPosition();
+    }();
+
+    if (edge == SearchWrapEdge::Top)
+        (void) (*this)(actions::FocusNextSearchMatch {});
+    else
+        (void) (*this)(actions::FocusPreviousSearchMatch {});
+
+    // Wrapped on "did the cursor actually move", not on the action's return value: at the very first
+    // cell of the scrollback searchPrevMatch() cannot step back any further, so it re-finds the match
+    // the cursor already stands on and reports success -- which left the button live and inert, the
+    // one thing MatchNavigation promises not to do.
+    auto const after = [this]() {
+        auto const l = scoped_lock { _terminal };
+        return _terminal.normalModeCursorPosition();
+    }();
+
+    if (after == before)
+        wrapSearchTo(edge);
+
     refreshSearchStatus();
 }
 
@@ -1696,6 +1743,11 @@ void TerminalSession::refreshSearchStatusLocked()
 {
     auto const& search = _terminal.search();
     _searchCase = describeSearchCase(search.caseSensitivity);
+    // Cached rather than read through on demand: searchPattern() is a Q_PROPERTY whose NOTIFY is
+    // searchStateChanged, so a binding woken by that signal reads it -- and if reading it took the
+    // terminal lock, every emit made while holding that lock would deadlock. Caching it here makes
+    // the whole property group lock-free to read, so the emit is safe wherever it happens.
+    _searchPatternText = QString::fromStdU32String(search.pattern);
 
     // Skipped entirely while the bar is closed: nothing displays the answer, and walking the
     // scrollback to compute one nobody reads is the cost this guard exists to avoid. The LAST status
@@ -2953,12 +3005,13 @@ bool TerminalSession::operator()(actions::ScrollUp)
 
 bool TerminalSession::operator()(actions::SearchReverse)
 {
-    // Locked: the request reaches the frontend synchronously, and what it opens reads terminal state
-    // (the active pattern and its match tally) to populate itself.
-    auto const l = scoped_lock { _terminal };
-
-    // No vi-mode switch. The old prompt forced Normal mode only so the status line carrying it became
-    // visible; the find bar floats over the terminal, so the user keeps whatever mode they were in.
+    // Unlocked, deliberately: requestSearchPrompt() only posts, and the bar reads terminal state from
+    // its own searchBarOpened() once the post is delivered -- by which time any lock taken here would
+    // long since have been released. Taking one would contend with the parser thread and protect
+    // nothing.
+    //
+    // No vi-mode switch either. The old prompt forced Normal mode only so the status line carrying it
+    // became visible; the find bar floats over the terminal, so the user keeps the mode they were in.
     _terminal.requestSearchPrompt();
 
     return true;
@@ -3689,9 +3742,14 @@ void TerminalSession::configureTerminal()
     // profile switch resets a policy the Aa button had pinned, the same way it resets every other
     // profile-derived setting here. The notify is what keeps the button honest about it: without one,
     // an open bar kept showing the lit glyph of a mode the terminal had already stopped using.
+    // Already under this function's own lock (see its first statement) -- taking a second one here
+    // self-deadlocks, because Terminal's state mutex is a plain non-recursive std::mutex.
     (void) _terminal.setSearchCaseSensitivity(_profile.searchCaseSensitivity.value());
-    _searchCase = describeSearchCase(_profile.searchCaseSensitivity.value());
-    emit searchStateChanged();
+    refreshSearchStatusLocked();
+
+    // Posted rather than emitted: this function holds the lock for its whole body, and a QML binding
+    // woken by this signal reads back into the session.
+    QMetaObject::invokeMethod(this, [this]() { emit searchStateChanged(); }, Qt::QueuedConnection);
     _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
     _terminal.settings().blinkStyle = _profile.blinkStyle.value();
     _terminal.settings().screenTransitionStyle = _profile.screenTransitionStyle.value();

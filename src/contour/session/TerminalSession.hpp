@@ -165,7 +165,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     // {{{ Find bar
     /// The active search pattern, or empty when nothing is being searched for.
-    [[nodiscard]] QString searchPattern() const;
+    [[nodiscard]] QString searchPattern() const { return _searchPatternText; }
 
     /// The label beside the field: "3 of 27", "No results", "" while idle. @see describeSearch.
     [[nodiscard]] QString searchSummary() const { return QString::fromStdString(_searchStatus.summary); }
@@ -224,6 +224,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Restarts the search from @p edge, which is how the find bar wraps. @see searchNext.
     void wrapSearchTo(SearchWrapEdge edge);
+
+    /// One step of the find bar's navigation, wrapping at @p edge when it cannot go further.
+    void stepSearch(SearchWrapEdge edge);
 
   public:
     // }}}
@@ -655,6 +658,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void discardImage(vtbackend::Image const&) override;
     void inputModeChanged(vtbackend::ViMode mode) override;
     void searchPromptRequested() override;
+    void searchCleared() override;
     void updateHighlights() override;
     void playSound(vtbackend::Sequence::Parameters const& params) override;
     void requestShowHostWritableStatusLine() override;
@@ -1073,6 +1077,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// What the find bar currently shows, re-derived by refreshSearchStatus().
     SearchStatus _searchStatus;
     SearchCaseAffordance _searchCase = describeSearchCase(vtbackend::SearchCaseSensitivity::Smart);
+    QString _searchPatternText;
     /// Coalesces re-tallying while output keeps arriving: a tally walks the whole scrollback, so it
     /// must never run once per frame. Armed by screenUpdated(), and only while the bar is open.
     QTimer _searchTallyTimer;
