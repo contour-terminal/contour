@@ -49,7 +49,7 @@ Additionally one can filter input mappings based on special terminal modes using
 *  AppKeypad : The application keypad mode is enabled (otherwise it's the numeric keypad mode).
 * Select    : The terminal has currently an active grid cell selection (such as selected text).
 * Insert    : The Insert input mode is active, that is the default and one way to test that the input mode is not in normal mode or any of the visual select modes.
-* Search    : A search term is currently active (the find bar is open, or its highlights are still shown).
+* Search    : A search term is currently set. It outlives the find bar, so this stays true for as long as the matches are still highlighted; an open bar with nothing typed into it does not match.
 * Trace     : The terminal is currently in trace-mode, i.e., each VT sequence can be interactively single-step executed using custom actions. See TraceEnter/TraceStep/TraceLeave actions.
 
 You can combine these modes by concatenating them via `|` and negate a single one by prefixing with `~`. The `modes` option defaults to not filter at all (the input mappings always match based on modifier and key press/mouse event).

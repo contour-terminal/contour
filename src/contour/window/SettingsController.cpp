@@ -138,10 +138,6 @@ namespace
     ProfileFieldDescriptor enumFieldFromTable(
         QString key, QString label, QString help, Getter getter, Setter setter)
     {
-        auto options = QStringList {};
-        for (auto const& info: config::configEnumValues<Enum>())
-            options.push_back(toQString(info.token));
-
         return { std::move(key),
                  std::move(label),
                  std::move(help),
@@ -153,7 +149,7 @@ namespace
                      if (auto const value = config::configEnumFromToken<Enum>(v.toString().toStdString()))
                          setter(p, *value);
                  },
-                 std::move(options) };
+                 configEnumTokens<Enum>() };
     }
 
     /// Builds an enum profile-field descriptor from a token-to-value table.

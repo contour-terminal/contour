@@ -2972,6 +2972,20 @@ TEST_CASE("config.search_case_sensitivity", "[config]")
         CHECK(modeOf("search_case_sensitivity: whatever") == SearchCaseSensitivity::Smart);
     }
 
+    SECTION("the retired search_mode_switch still loads, and does not disturb this one")
+    {
+        // The promise made when search_mode_switch was deprecated: a configuration carrying it keeps
+        // loading. The reader warns on its presence and parses nothing, so the rest of the profile --
+        // this key included, which sits directly after it -- must come through untouched.
+        auto const config = loadFromYaml(dir,
+                                         "profiles:\n  main:\n    shell: \"/bin/bash\"\n"
+                                         "    search_mode_switch: true\n"
+                                         "    search_case_sensitivity: sensitive\n");
+        auto const profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->searchCaseSensitivity.value() == SearchCaseSensitivity::Sensitive);
+    }
+
     SECTION("round-trips through the generated config")
     {
         // Pins the reflection walk AND the formatter: a field the writer skipped would silently reset
