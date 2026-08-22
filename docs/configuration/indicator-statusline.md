@@ -10,7 +10,7 @@ profiles:
     your_profile:
         status_line:
             indicator:
-                left: "{VTType} │ {InputMode:Bold,Color=#C0C030}{SearchPrompt:Left= │ }{TraceMode:Bold,Color=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }"
+                left: "{VTType} │ {InputMode:Bold,Color=#C0C030}{TraceMode:Bold,Color=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }"
                 middle: "{Tabs}{Title:Left= « ,Right= » ,Color=#20c0c0}"
                 right: "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold} "
 ```
@@ -31,7 +31,7 @@ Variable             | Description
 `{InputMode}`        | current input mode (e.g. INSERT, NORMAL, VISUAL)
 `{ProtectedMode}`    | indicates protected mode, if currently enabled
 `{SearchMode}`       | indicates search highlight mode, if currently active
-`{SearchPrompt}`     | search input prompt, if currently active
+`{SearchPrompt}`     | the active search pattern, if any (read-only; search is typed into the find bar)
 `{Tabs}`             | indicates active tabs
 `{Text}`             | given text (makes only sense when customized with flags)
 `{Title}`            | current window title

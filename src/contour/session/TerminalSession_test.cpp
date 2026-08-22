@@ -1887,12 +1887,166 @@ TEST_CASE("TerminalSession: search-match focus actions move the vi cursor onto a
     // Set a search pattern through the terminal, then the match-focus actions have somewhere to go.
     {
         auto const l = std::scoped_lock { session->terminal() };
-        session->terminal().setNewSearchTerm(U"needle", /*initiatedByDoubleClick*/ false);
+        session->terminal().setNewSearchTerm(U"needle", vtbackend::SearchOrigin::Typed);
     }
     // At least one of next/prev must find a match now (position-dependent), and neither throws.
     auto const nextFound = (*session)(actions::FocusNextSearchMatch {});
     auto const prevFound = (*session)(actions::FocusPreviousSearchMatch {});
     CHECK((nextFound || prevFound));
+}
+
+TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given",
+          "[contour][session][search]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+
+    for (int i = 0; i < 5; ++i)
+        session->terminal().writeToScreen(std::format("needle row {}\r\n", i));
+
+    // The bar has to be open for a tally to be computed at all: walking the scrollback for a label
+    // nobody is displaying is exactly the cost that guard exists to avoid. In production the bar
+    // itself says so from its onOpened handler.
+    session->searchBarOpened();
+
+    SECTION("an empty pattern reports nothing at all")
+    {
+        session->setSearchPattern(QString {});
+        CHECK(session->searchPattern().isEmpty());
+        CHECK(session->searchSummary().isEmpty());
+        CHECK_FALSE(session->searchNavigable());
+    }
+
+    SECTION("a matching pattern reports a match immediately, and its count once tallied")
+    {
+        session->setSearchPattern(QStringLiteral("needle"));
+        CHECK(session->searchPattern() == QStringLiteral("needle"));
+
+        // Known without walking the grid, so it is there the moment the key is pressed: the field's
+        // tint and the step buttons do not wait for the count.
+        CHECK(session->searchHasMatches());
+        CHECK(session->searchNavigable());
+
+        // The count itself is debounced, because counting walks the whole scrollback. Forcing it here
+        // is what the timer does 250 ms after the user stops typing.
+        session->refreshSearchStatus();
+        CHECK(session->searchSummary().contains(QStringLiteral("5")));
+    }
+
+    SECTION("a pattern that matches nothing says so, and offers nowhere to step")
+    {
+        session->setSearchPattern(QStringLiteral("haystack"));
+        CHECK_FALSE(session->searchHasMatches());
+        CHECK(session->searchSummary() == QStringLiteral("No results"));
+        CHECK_FALSE(session->searchNavigable());
+    }
+
+    SECTION("cycling the case policy re-runs the search, and says which way it is pinned")
+    {
+        session->terminal().writeToScreen("NEEDLE upper\r\n");
+        session->setSearchPattern(QStringLiteral("needle"));
+
+        // Smart, and unpinned: the glyph is the capitalised one and the button is not lit.
+        CHECK(session->searchCaseGlyph() == QStringLiteral("Aa"));
+        CHECK_FALSE(session->searchCasePinned());
+        auto const smart = session->searchSummary();
+
+        // Smart -> Sensitive. Still "Aa", now lit, and the uppercase line stops counting.
+        session->cycleSearchCaseSensitivity();
+        CHECK(session->searchCaseGlyph() == QStringLiteral("Aa"));
+        CHECK(session->searchCasePinned());
+        CHECK(session->searchSummary() != smart);
+
+        // Sensitive -> Insensitive. THIS is the one that shows the lowercase glyph. An earlier
+        // version had it the other way round, and a test asserting enumerator integers could not
+        // tell -- which is why this asserts what the user actually sees.
+        session->cycleSearchCaseSensitivity();
+        CHECK(session->searchCaseGlyph() == QStringLiteral("aa"));
+        CHECK(session->searchCasePinned());
+        CHECK(session->searchHasMatches());
+
+        // Insensitive -> Smart, closing the cycle.
+        session->cycleSearchCaseSensitivity();
+        CHECK(session->searchCaseGlyph() == QStringLiteral("Aa"));
+        CHECK_FALSE(session->searchCasePinned());
+    }
+
+    SECTION("closing the bar stops the tallying but keeps the pattern lit for F3")
+    {
+        session->setSearchPattern(QStringLiteral("needle"));
+        REQUIRE(session->searchHasMatches());
+
+        session->searchBarClosed();
+
+        // The pattern deliberately outlives the bar -- that is what F3 keeps stepping through.
+        CHECK(session->searchPattern() == QStringLiteral("needle"));
+        // And re-opening picks the count back up rather than showing a stale or empty one.
+        session->searchBarOpened();
+        CHECK(session->searchHasMatches());
+        CHECK_FALSE(session->searchSummary().isEmpty());
+    }
+
+    SECTION("emptying the field drops the pattern and the summary together")
+    {
+        session->setSearchPattern(QStringLiteral("needle"));
+        REQUIRE(session->searchHasMatches());
+
+        // What deleting the term in the field does -- there is no separate "clear" entry point.
+        session->setSearchPattern(QString {});
+        CHECK(session->searchPattern().isEmpty());
+        CHECK(session->searchSummary().isEmpty());
+        CHECK_FALSE(session->searchNavigable());
+    }
+
+    SECTION("the tallied label carries an ordinal, because the cursor follows the match")
+    {
+        // The whole point of the label: "3 of 5", not "5 matches". It only works if the incremental
+        // search moves the normal-mode cursor onto what it found -- the tally's ordinal, the renderer's
+        // focused-match highlight and Enter's starting point all read that cursor.
+        session->setSearchPattern(QStringLiteral("needle"));
+        session->refreshSearchStatus();
+        CHECK(session->searchSummary().contains(QStringLiteral(" of ")));
+    }
+
+    SECTION("stepping wraps at both ends")
+    {
+        session->setSearchPattern(QStringLiteral("needle"));
+        session->refreshSearchStatus();
+        REQUIRE(session->searchNavigable());
+
+        // Walk past the last match; the bar wraps even though Terminal::searchNextMatch does not,
+        // so the navigable promise holds at the ends rather than offering an inert button.
+        // Stepping tallies immediately -- the user pressed a key expecting the ordinal to move.
+        for (auto i = 0; i < 10; ++i)
+            session->searchNext();
+        CHECK(session->searchHasMatches());
+        CHECK(session->searchSummary().contains(QStringLiteral(" of ")));
+
+        for (auto i = 0; i < 10; ++i)
+            session->searchPrevious();
+        CHECK(session->searchSummary().contains(QStringLiteral(" of ")));
+    }
+}
+
+TEST_CASE("TerminalSession: SearchReverse asks for the find bar without switching Vi mode",
+          "[contour][session][search]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    namespace actions = contour::actions;
+
+    auto requests = 0;
+    QObject::connect(
+        session.get(), &contour::session::TerminalSession::searchBarRequested, [&]() { ++requests; });
+
+    auto const modeBefore = session->terminal().inputHandler().mode();
+    CHECK((*session)(actions::SearchReverse {}));
+    QCoreApplication::processEvents();
+
+    CHECK(requests == 1);
+    // The old prompt forced Normal mode purely to reveal the status line carrying it. Nothing is
+    // revealed any more, so nothing may be switched.
+    CHECK(session->terminal().inputHandler().mode() == modeBefore);
 }
 
 TEST_CASE("TerminalSession: open and paste-shell actions run headlessly without a display",
@@ -2873,6 +3027,89 @@ TEST_CASE("TerminalSession::attachDisplay publishes the scrollbar's travel it ac
     CHECK(session->historyLineCount() > 0);
 
     session->detachDisplay(surface);
+}
+
+TEST_CASE("TerminalSession: a find-bar search into the scrollback outlives the auto-scroll",
+          "[contour][session][search][view]")
+{
+    // The regression a display-less session cannot see, because screenUpdated() returns before the
+    // auto-scroll without one. Search used to force Vi Normal mode, which is the only reason that
+    // auto-scroll ("Insert mode and the viewport is scrolled -> jump to the bottom") never collided
+    // with it. The find bar deliberately switches no mode, so a search now runs in Insert mode -- and
+    // both Terminal::searchReverse() and ViCommands::moveCursorTo() reveal their match and then raise
+    // screenUpdated(), which would scroll the viewport straight back off it.
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+
+    held->terminal().writeToScreen("needle in the haystack\r\n");
+    for (auto const i: std::views::iota(0, 100))
+        held->terminal().writeToScreen(std::format("filler {}\r\n", i));
+
+    REQUIRE(held->terminal().inputHandler().mode() == vtbackend::ViMode::Insert);
+    REQUIRE_FALSE(held->terminal().viewport().scrolled());
+
+    held->searchBarOpened();
+    held->setSearchPattern(QStringLiteral("needle"));
+
+    CHECK(held->searchHasMatches());
+    // The match lives far above the page, so the viewport must have travelled to it AND stayed.
+    CHECK(held->terminal().viewport().scrolled());
+
+    // Output arriving while the bar is open must not yank it back either -- the user is reading
+    // something they went looking for.
+    held->terminal().writeToScreen("more output\r\n");
+    CHECK(held->terminal().viewport().scrolled());
+
+    // Closing the bar hands the terminal back to its ordinary follow-the-output behaviour.
+    held->searchBarClosed();
+    held->terminal().writeToScreen("and more\r\n");
+    CHECK_FALSE(held->terminal().viewport().scrolled());
+}
+
+TEST_CASE("TerminalSession: stepping PAST the last match keeps the one already revealed",
+          "[contour][session][search][view]")
+{
+    // F3 is bound to the Search match mode -- "a pattern is set", which outlives the bar -- so
+    // stepping runs with the bar shut and only _searchMatchRevealed holding the viewport in place. A
+    // step that finds nothing must therefore leave that flag as it found it: the user is still
+    // standing on the match the PREVIOUS step revealed, and clearing it here handed the viewport back
+    // to the auto-scroll, which threw that match away on the very next byte of output.
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+
+    held->terminal().writeToScreen("needle one\r\n");
+    for (auto const i: std::views::iota(0, 50))
+        held->terminal().writeToScreen(std::format("filler {}\r\n", i));
+    held->terminal().writeToScreen("needle two\r\n");
+    for (auto const i: std::views::iota(50, 100))
+        held->terminal().writeToScreen(std::format("filler {}\r\n", i));
+
+    // Reach the nearer of the two matches through the bar, then shut it: from here on, only the
+    // revealed-match flag can hold the viewport.
+    held->searchBarOpened();
+    held->setSearchPattern(QStringLiteral("needle"));
+    REQUIRE(held->searchHasMatches());
+    held->searchBarClosed();
+
+    // A step that DOES reveal something, which is what raises the flag in the first place.
+    REQUIRE((*held)(contour::actions::FocusPreviousSearchMatch {}));
+    REQUIRE(held->terminal().viewport().scrolled());
+
+    // Back onto the last match, and then one step past it -- the step that finds nothing. Forwards
+    // rather than backwards, because searchPrevMatch() at the very top of the scrollback cannot step
+    // back at all and so re-finds the match it is standing on, reporting success. @see stepSearch.
+    REQUIRE((*held)(contour::actions::FocusNextSearchMatch {}));
+    CHECK_FALSE((*held)(contour::actions::FocusNextSearchMatch {}));
+
+    held->terminal().writeToScreen("more output\r\n");
+    CHECK(held->terminal().viewport().scrolled());
+
+    // Dropping the pattern ends the parking with it. Nothing is left to step to -- the Search match
+    // mode F3 is bound to is "a pattern is set" -- so the pane goes back to following its output,
+    // rather than sitting off the bottom until the user scrolls back down by hand.
+    held->terminal().clearSearch();
+    held->terminal().writeToScreen("after the clear\r\n");
+    CHECK_FALSE(held->terminal().viewport().scrolled());
 }
 
 TEST_CASE("TerminalSession applies the profile's history limits to the terminal",

@@ -5,6 +5,7 @@
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/Search.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
@@ -165,11 +166,25 @@ class Modes
 };
 // }}}
 
+/// The terminal's one active search: what is being looked for, and how.
+///
+/// There is exactly one per terminal, and it outlives whatever surface put it there -- closing the
+/// find bar leaves the pattern (and therefore the highlights) standing, which is what lets F3 keep
+/// stepping afterwards. Terminal::clearSearch() is what ends it.
 struct Search
 {
     std::u32string pattern;
-    ScrollOffset initialScrollOffset {};
-    bool initiatedByDoubleClick = false;
+    SearchCaseSensitivity caseSensitivity = SearchCaseSensitivity::Smart;
+    SearchOrigin origin = SearchOrigin::Typed;
+
+    /// The cached result of caseComparisonFor(pattern, caseSensitivity).
+    ///
+    /// Derived, and maintained by Terminal's setters -- never assigned from anywhere else. It is
+    /// cached because RenderBufferBuilder asks it once per RENDERED CELL, and under the default Smart
+    /// policy the honest answer is a UCD lookup per codepoint of the needle: ~109ns against ~8ns for
+    /// the (incorrect) <cctype> test it replaced, which at 240x70 is over a millisecond per frame
+    /// spent re-deriving a constant.
+    CaseComparison comparison = CaseComparison::Folded;
 };
 
 /// Folds the 7-bit C1 control introducers in a terminal reply to their single-byte 8-bit forms, as
@@ -369,6 +384,23 @@ class Terminal
         virtual void setTerminalProfile(std::string const& /*configProfileName*/) {}
         virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
+
+        /// The active search was cleared, by whatever route -- the NoSearchHighlight action, entering
+        /// Insert mode, or the find bar's term being emptied.
+        ///
+        /// A frontend showing search state has to hear about it: the matches it had lit are gone, and
+        /// anything displaying the pattern is now displaying one the terminal no longer has. Narrower
+        /// than screenUpdated() on purpose -- that one also auto-scrolls the viewport to the bottom,
+        /// which would throw away the position the user was reading.
+        virtual void searchCleared() {}
+
+        /// The user asked for the search prompt -- by the SearchReverse action, or by `/` in vi mode.
+        ///
+        /// The terminal states the request and never learns what draws it. A frontend opens its find
+        /// bar here; a headless build inherits the empty default, which is correct, since there is no
+        /// interactive search without something to type into.
+        virtual void searchPromptRequested() {}
+
         virtual void updateHighlights() {}
         virtual void playSound(Sequence::Parameters const&) {}
         /// The render buffer's cursor moved (or appeared/disappeared, including the blink phase).
@@ -909,6 +941,9 @@ class Terminal
     void sendRawInput(std::string_view text);
 
     void inputModeChanged(ViMode mode) { _eventListener.inputModeChanged(mode); }
+
+    /// Asks the frontend to open its search prompt. @see Events::searchPromptRequested.
+    void requestSearchPrompt() { _eventListener.searchPromptRequested(); }
     void updateHighlights() { _eventListener.updateHighlights(); }
     void playSound(vtbackend::Sequence::Parameters const& params) { _eventListener.playSound(params); }
 
@@ -1896,7 +1931,9 @@ class Terminal
     /// on the underlying std::string (torn read / use-after-free on reallocation).
     [[nodiscard]] std::optional<std::string> resolvedTabName() const;
     [[nodiscard]] bool focused() const noexcept { return _focused; }
-    [[nodiscard]] Search& search() noexcept { return _search; }
+    /// Read-only by design: @c Search::comparison is a cache of the other two fields, and the setters
+    /// are what keep it in step. A mutable handle here is how the matcher and the highlighter came to
+    /// disagree in the first place, so there is no longer one.
     [[nodiscard]] Search const& search() const noexcept { return _search; }
 
     // {{{ hint mode
@@ -2073,7 +2110,32 @@ class Terminal
     [[nodiscard]] std::optional<CellLocation> searchNextMatch(CellLocation cursorPosition);
     [[nodiscard]] std::optional<CellLocation> searchPrevMatch(CellLocation cursorPosition);
 
-    bool setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick);
+    /// Installs @p text as the active search pattern.
+    /// @param text   The needle. Replaces whatever was being searched for.
+    /// @param origin Where it came from; selects which highlight colors its matches take.
+    /// @return false if @p text was already the pattern, so callers can skip a redundant search.
+    bool setNewSearchTerm(std::u32string text, SearchOrigin origin);
+
+    /// Re-points the active search at @p mode. Does not itself move the viewport or the cursor --
+    /// the caller re-runs the search, because only it knows where from.
+    /// @return false if @p mode was already in effect.
+    bool setSearchCaseSensitivity(SearchCaseSensitivity mode);
+
+    /// Counts the active pattern's matches across the whole grid, scrollback included, and locates
+    /// @p position among them.
+    ///
+    /// One traversal answers both halves of a "3 of 27" label. It is O(grid), so it is meant to be
+    /// called when the pattern or the grid changes -- not per rendered frame.
+    ///
+    /// @param position Where the caller is standing; reported back as @c SearchMatchTally::ordinal.
+    /// @param limit    Stop after this many matches and report @c TallyExactness::Capped.
+    /// @return The tally. All-zero and @c Exact when the pattern is empty.
+    ///
+    /// @note Not const, only because Grid's logical-line iteration is not: search() walks it, and
+    ///       const-correcting that family is a refactor of its own rather than part of this one.
+    [[nodiscard]] SearchMatchTally tallySearchMatches(CellLocation position,
+                                                      size_t limit = DefaultSearchMatchLimit);
+
     void clearSearch();
 
     // Tests if the grid cell at the given location does contain a word delimiter.

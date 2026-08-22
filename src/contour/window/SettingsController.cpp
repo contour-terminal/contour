@@ -93,15 +93,6 @@ namespace
         std::pair { "bar"sv, vtbackend::CursorShape::Bar },
     };
 
-    /// Builds an enum profile-field descriptor from a token-to-value table.
-    ///
-    /// The combo-box options, the getter's display token and the setter's parse are all derived from
-    /// @p mappings, so the set of values a user can pick and the set the setter understands cannot drift
-    /// apart. Both halves used to be written out by hand -- an option list beside a chain of string
-    /// comparisons -- while the getter derived its token from `std::format`, a third spelling again:
-    /// the formatters render values for people ("host writable", "Logical", "Bold"), not as the tokens
-    /// this option list and the config grammar use. A `Decorator` field would have shown nothing
-    /// selected, because "dotted-underline" lowercases to itself but "DottedUnderline" does not.
     /// One of the profile's `history:` depths, in the configuration's own `-1 == unlimited` spelling.
     ///
     /// A pointer-to-member rather than a getter/setter pair, because the two rows this builds differ
@@ -138,6 +129,38 @@ namespace
                  } };
     }
 
+    /// enumField() for an enum that already has a ConfigEnum table.
+    ///
+    /// The overload below takes the token/value pairs by hand, which for a table-backed enum means
+    /// spelling every value a second time, in a file that no test compares against the table. This
+    /// one reads the table, so adding a value stays what ConfigEnum.hpp promises it is: adding a row.
+    template <typename Enum, typename Getter, typename Setter>
+    ProfileFieldDescriptor enumFieldFromTable(
+        QString key, QString label, QString help, Getter getter, Setter setter)
+    {
+        return { std::move(key),
+                 std::move(label),
+                 std::move(help),
+                 "enum",
+                 [getter](TerminalProfile const& p) -> QVariant {
+                     return QVariant(toQString(config::configEnumToken(getter(p))));
+                 },
+                 [setter](TerminalProfile& p, QVariant const& v) {
+                     if (auto const value = config::configEnumFromToken<Enum>(v.toString().toStdString()))
+                         setter(p, *value);
+                 },
+                 configEnumTokens<Enum>() };
+    }
+
+    /// Builds an enum profile-field descriptor from a token-to-value table.
+    ///
+    /// The combo-box options, the getter's display token and the setter's parse are all derived from
+    /// @p mappings, so the set of values a user can pick and the set the setter understands cannot drift
+    /// apart. Both halves used to be written out by hand -- an option list beside a chain of string
+    /// comparisons -- while the getter derived its token from `std::format`, a third spelling again:
+    /// the formatters render values for people ("host writable", "Logical", "Bold"), not as the tokens
+    /// this option list and the config grammar use. A `Decorator` field would have shown nothing
+    /// selected, because "dotted-underline" lowercases to itself but "DottedUnderline" does not.
     template <typename Enum, size_t N, typename Getter, typename Setter>
     ProfileFieldDescriptor enumField(QString key,
                                      QString label,
@@ -287,10 +310,6 @@ namespace
                             "Escape sandbox",
                             "Escape a Flatpak/Snap sandbox when spawning.",
                             [](auto& p) -> auto& { return p.escapeSandbox; }),
-                  boolField("search_mode_switch",
-                            "Search mode switch",
-                            "Switch to Vi normal mode when a search starts.",
-                            [](auto& p) -> auto& { return p.searchModeSwitch; }),
                   boolField("insert_after_yank",
                             "Insert after yank",
                             "Enter insert mode after yanking in Vi mode.",
@@ -373,6 +392,13 @@ namespace
                         m.vertical = config::VerticalMargin(static_cast<unsigned>(v.toInt()));
                         p.margins = m;
                     } },
+                  enumFieldFromTable<vtbackend::SearchCaseSensitivity>(
+                      "search_case_sensitivity",
+                      "Search case sensitivity",
+                      "How the find bar compares letters when it opens. Its Aa button cycles the same "
+                      "three at any time.",
+                      [](TerminalProfile const& p) { return p.searchCaseSensitivity.value(); },
+                      [](TerminalProfile& p, auto v) { p.searchCaseSensitivity = v; }),
                   enumField(
                       "pixel_reporting",
                       "Pixel reporting",

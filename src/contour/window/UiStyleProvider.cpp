@@ -2,6 +2,8 @@
 #include <contour/config/Config.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
+#include <vtbackend/vt/ProgressState.hpp>
+
 #include <crispy/LogStore.hpp>
 
 #include <QtGui/QFontMetricsF>
@@ -179,6 +181,11 @@ QColor UiStyleProvider::progressColor(int state) const
     if (state < 0 || std::cmp_greater_equal(state, colors.size()))
         return { Qt::transparent };
     return QColor::fromRgb(colors[static_cast<size_t>(state)]);
+}
+
+QColor UiStyleProvider::errorColor() const
+{
+    return progressColor(static_cast<int>(vtbackend::ProgressState::Error));
 }
 
 QFont resolveChromeFont(config::Config const& config, std::string const& profileName)

@@ -50,6 +50,7 @@ set(vtbackend_HEADERS
     vt/ModifyKeys.hpp
     vt/PointerShape.hpp
     core/Primitives.hpp
+    core/Search.hpp
     vt/ProgressState.hpp
     shell/PromptRegion.hpp
     vt/RectangularAreaChecksum.hpp
@@ -138,6 +139,7 @@ set(vtbackend_SOURCES
     input/vi/ViCommands.cpp
     input/vi/JumpHistory.cpp
     core/Primitives.cpp
+    core/Search.cpp
 )
 
 add_library(vtbackend STATIC ${vtbackend_SOURCES} ${vtbackend_HEADERS})
@@ -222,6 +224,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_macros_test.cpp
         screen/Screen_multipage_test.cpp
         core/Image_test.cpp
+        core/Search_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp
         core/WindowSizeStack_test.cpp

@@ -133,6 +133,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(qreal shadowMargin READ shadowMargin CONSTANT)
     Q_PROPERTY(bool hasPopupShadow READ hasPopupShadow CONSTANT)
 
+    Q_PROPERTY(QColor errorColor READ errorColor CONSTANT)
+
     Q_PROPERTY(QString tabSeparator READ tabSeparator CONSTANT)
     Q_PROPERTY(QString trafficLightGlyph READ trafficLightGlyph CONSTANT)
     Q_PROPERTY(QString closeGlyph READ closeGlyph CONSTANT)
@@ -202,6 +204,13 @@ class UiStyleProvider: public QObject
     /// @param state A vtbackend::ProgressState as its underlying value, as the tab model reports it.
     /// @return The style's color for that state; transparent for a state that paints nothing.
     [[nodiscard]] Q_INVOKABLE QColor progressColor(int state) const;
+
+    /// The colour this style says "this failed" in.
+    ///
+    /// Taken from the same token row the progress bar's failure state uses, rather than invented
+    /// afresh or derived from the OS palette: which hue reads as an error is a statement about
+    /// meaning, and a theme-picked one could render a failure green. @see UiStyleTokens.
+    [[nodiscard]] QColor errorColor() const;
 
     [[nodiscard]] QString const& tabSeparator() const noexcept { return _glyphs.tabSeparator; }
     [[nodiscard]] QString const& trafficLightGlyph() const noexcept { return _glyphs.trafficLight; }

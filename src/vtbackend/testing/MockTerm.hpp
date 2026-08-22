@@ -242,6 +242,13 @@ class MockTerm: public Terminal::NullEvents
 
     void progressChanged(Progress progress) override { progressNotifications.push_back(progress); }
 
+    /// How many times the terminal asked its frontend to open a search prompt -- by `/` in vi mode,
+    /// or by the SearchReverse action. There is nothing to type into headlessly, so counting the
+    /// requests is the whole of what a test can observe here.
+    size_t searchPromptRequests = 0;
+
+    void searchPromptRequested() override { ++searchPromptRequests; }
+
     static vtbackend::Settings createSettings(PageSize pageSize,
                                               HistoryLimits historyLimits,
                                               size_t ptyReadBufferSize)

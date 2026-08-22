@@ -57,8 +57,9 @@ TEST_CASE("InputGenerator.Modifier.chordModifierTable")
         STATIC_REQUIRE(AllChordModifiers.value() == 0b11'1111);
         STATIC_REQUIRE(ChordModifierBitWidth == 6u);
 
-        // The property ViInputHandler's InputMatch packs on: a full chord never reaches above the
-        // shift, so it cannot alias onto the character it is packed next to.
+        // The property anything packing a chord next to other data relies on -- LockKey's enumerators
+        // among them: a full chord never reaches above the shift, so it cannot alias onto the value it
+        // is packed beside.
         STATIC_REQUIRE((AllChordModifiers.value() >> ChordModifierBitWidth) == 0);
     }
 

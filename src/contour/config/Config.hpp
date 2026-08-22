@@ -427,8 +427,7 @@ struct IndicatorConfig
                        "{ProtectedMode:Bold,Left= │ }"
                        // Draws NOTHING until a privilege or machine boundary is in force, so an
                        // ordinary session is unchanged by its presence.
-                       "{Context:Left= │ }"
-                       "{SearchPrompt:Left= │ }" };
+                       "{Context:Left= │ }" };
     std::string middle { "« {Title} »" };
     std::string right { "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}" };
 };
@@ -720,7 +719,6 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::ShowIndicatorOnResize> sizeIndicatorOnResize { true };
     ConfigEntry<bool, documentation::Fullscreen> fullscreen { false };
     ConfigEntry<bool, documentation::Maximized> maximized { false };
-    ConfigEntry<bool, documentation::SearchModeSwitch> searchModeSwitch { true };
     ConfigEntry<bool, documentation::InsertAfterYank> insertAfterYank { false };
     ConfigEntry<Bell, documentation::Bell> bell { { .sound = "default", .alert = true, .volume = 1.0f } };
     ConfigEntry<vtbackend::VTType, documentation::TerminalId> terminalId { vtbackend::VTType::VT525 };
@@ -743,6 +741,8 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::HighlightDoubleClickerWord> highlightDoubleClickedWord { true };
     ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont() };
     ConfigEntry<bool, documentation::DrawBoldTextWithBrightColors> drawBoldTextWithBrightColors { false };
+    ConfigEntry<vtbackend::SearchCaseSensitivity, documentation::SearchCaseSensitivity>
+        searchCaseSensitivity { vtbackend::SearchCaseSensitivity::Smart };
     ConfigEntry<vtbackend::BlinkStyle, documentation::BlinkStyle> blinkStyle {
         vtbackend::BlinkStyle::Smooth
     };
@@ -1553,6 +1553,9 @@ struct YAMLConfigReader
                        std::string const& entry,
                        vtrasterizer::GlyphScalingMethod& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorDisplay& where);
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       vtbackend::SearchCaseSensitivity& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::BlinkStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ScreenTransitionStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::Modifiers& where);
@@ -2469,6 +2472,18 @@ template <>
 struct std::formatter<contour::config::TabBarPosition>: formatter<std::string_view>
 {
     auto format(contour::config::TabBarPosition value, auto& ctx) const
+    {
+        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
+    }
+};
+
+// vtbackend owns the enum, but the TOKEN is a configuration fact, so the formatter lives here with
+// the others and delegates to the same table the reader uses. Spelling it in vtbackend instead would
+// put the written spelling out of reach of the table that defines the accepted one.
+template <>
+struct std::formatter<vtbackend::SearchCaseSensitivity>: formatter<std::string_view>
+{
+    auto format(vtbackend::SearchCaseSensitivity value, auto& ctx) const
     {
         return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
     }

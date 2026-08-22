@@ -3,6 +3,7 @@
 #pragma once
 
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/Search.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 

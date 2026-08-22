@@ -176,7 +176,7 @@ Item {
     // Permission-wall dialogs.
     RequestPermission {
         id: requestFontChangeDialog
-        text: "The host application is requesting to change the display font."
+        text: qsTr("The host application is requesting to change the display font.")
         onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(true, true);
         onYesClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(true, false);
         onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(false, true);
@@ -186,7 +186,7 @@ Item {
 
     RequestPermission {
         id: requestLargeFilePaste
-        text: "The host application is going to paste large file, are you sure?"
+        text: qsTr("The host application is going to paste a large file. Are you sure?")
         onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(true, true);
         onYesClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(true, false);
         onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(false, true);
@@ -196,7 +196,7 @@ Item {
 
     RequestPermission {
         id: requestBufferCaptureDialog
-        text: "The host application is requesting to capture the terminal buffer."
+        text: qsTr("The host application is requesting to capture the terminal buffer.")
         onYesToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(true, true);
         onYesClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(true, false);
         onNoToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(false, true);
@@ -206,12 +206,21 @@ Item {
 
     RequestPermission {
         id: requestShowHostWritableStatusLine
-        text: "The host application is requesting to show the host-writable statusline."
+        text: qsTr("The host application is requesting to show the host-writable status line.")
         onYesToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(true, true);
         onYesClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(true, false);
         onNoToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, true);
         onNoClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, false);
         onRejected: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, false);
+    }
+
+    // The find bar (Ctrl+Shift+F, or `/` in Vi normal mode). Per pane, not per window: each session
+    // keeps its own pattern, count and highlights, so a split shows the bar over the pane being
+    // searched. Opened by the session's searchBarRequested signal, wired in Connections below.
+    SearchBar {
+        id: searchBar
+        session: chrome.session
+        displayItem: chrome.displayItem
     }
 
     // Play a bell, deferring the volume if the sound Loader is not ready yet.
@@ -273,6 +282,14 @@ Item {
 
         // Viewport -> scrollbar thumb (the drag direction lives on the ScrollBar's own handlers).
         function onScrollOffsetChanged() { chrome.updateScrollBarPosition(); }
+
+        // open() is a no-op on an already-open Popup (and onOpened does not re-fire), so focusing
+        // afterwards covers both cases: a second Ctrl+Shift+F means "search for something else"
+        // rather than doing nothing.
+        function onSearchBarRequested() {
+            searchBar.open();
+            searchBar.focusField();
+        }
 
         // Permission-wall hooks.
         function onRequestPermissionForFontChange() { requestFontChangeDialog.open(); }

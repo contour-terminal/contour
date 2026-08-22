@@ -204,7 +204,7 @@ TEST_CASE("ViCommands:modeChanged", "[vi]")
 
     SECTION("clearSearch() must be invoked when switch to ViMode::Insert")
     {
-        mock.terminal.setNewSearchTerm(U"search_term", true);
+        mock.terminal.setNewSearchTerm(U"search_term", vtbackend::SearchOrigin::DoubleClick);
         mock.terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
         REQUIRE(mock.terminal.search().pattern.empty());
     }
@@ -308,18 +308,15 @@ TEST_CASE("vi.locks: Escape leaves visual mode while lock keys are latched", "[v
     }
 }
 
-TEST_CASE("vi.locks: search prompt accepts printable characters while lock keys are latched", "[vi][locks]")
+TEST_CASE("vi.locks: `/` asks for the search prompt while lock keys are latched", "[vi][locks]")
 {
     for (auto const locks: LockCombinations)
     {
         INFO(std::format("lock modifiers {}", locks));
         auto mock = setupEightLineTerminal();
 
-        mock.sendCharSequence("/");
-        REQUIRE(mock.terminal.inputHandler().isEditingSearch());
-
-        mock.sendCharEvent(U'b', locks);
-        CHECK(mock.terminal.search().pattern == U"b");
+        mock.sendCharEvent(U'/', locks);
+        CHECK(mock.searchPromptRequests == 1);
     }
 }
 
@@ -357,14 +354,11 @@ TEST_CASE("vi.locks: chord modifiers still gate the Vi input handler", "[vi][loc
         CHECK(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 0_columnOffset);
     }
 
-    SECTION("Control+b is not literal search input")
+    SECTION("Control+/ does not ask for the search prompt")
     {
         auto mock = setupEightLineTerminal();
-        mock.sendCharSequence("/");
-        REQUIRE(mock.terminal.inputHandler().isEditingSearch());
-
-        mock.sendCharEvent(U'b', Modifiers { Modifier::Control });
-        CHECK(mock.terminal.search().pattern.empty());
+        mock.sendCharEvent(U'/', Modifiers { Modifier::Control });
+        CHECK(mock.searchPromptRequests == 0);
     }
 
     SECTION("Control+5 is not a [count] prefix")
@@ -408,29 +402,24 @@ TEST_CASE("vi.visual: Escape leaves visual mode without sending ESC to the appli
     }
 }
 
-// The search editor switches on a packed (modifiers, character) value. Meta sits in the highest
-// chord-modifier bit, so a mask narrower than the shift width aliased Meta+<key> onto the bare key.
-TEST_CASE("vi.search: Meta-modified keys do not alias onto the unmodified key", "[vi]")
+// `/` used to open a line editor inside the terminal, which then owned every subsequent keystroke.
+// It now only asks the frontend for a prompt, so the terminal must be left exactly as it was.
+TEST_CASE("vi.search: `/` asks for a prompt without capturing input or switching mode", "[vi]")
 {
     auto mock = setupEightLineTerminal();
+    REQUIRE(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
 
     mock.sendCharSequence("/");
-    REQUIRE(mock.terminal.inputHandler().isEditingSearch());
-    mock.sendCharSequence("ab");
-    REQUIRE(mock.terminal.search().pattern == U"ab");
+    CHECK(mock.searchPromptRequests == 1);
 
-    // Alt+Backspace is not a registered search-editor chord, so it is ignored.
-    mock.sendKeyEvent(vtbackend::Key::Backspace, Modifiers { Modifier::Alt });
-    CHECK(mock.terminal.search().pattern == U"ab");
+    // No mode switch: the old prompt forced Normal mode only to make the status line carrying it
+    // visible, and a floating find bar needs nothing of the sort.
+    CHECK(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
 
-    // Meta+Backspace must behave exactly the same. Before the fix the Meta bit was masked away and
-    // this matched the bare-Backspace case, deleting a character.
-    mock.sendKeyEvent(vtbackend::Key::Backspace, Modifiers { Modifier::Meta });
-    CHECK(mock.terminal.search().pattern == U"ab");
-
-    // An unmodified Backspace still deletes.
-    mock.sendKeyEvent(vtbackend::Key::Backspace);
-    CHECK(mock.terminal.search().pattern == U"a");
+    // No capture either. "j" is a motion again, rather than the first letter of a search term.
+    mock.sendCharSequence("j");
+    CHECK(mock.terminal.normalModeCursorPosition() == 1_lineOffset + 0_columnOffset);
+    CHECK(mock.terminal.search().pattern.empty());
 }
 
 // {{{ Select All under Vi mode
