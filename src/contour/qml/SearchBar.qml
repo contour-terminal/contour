@@ -83,25 +83,81 @@ Popup {
     // so the two chrome styles can disagree about it like they do about every other colour value.
     readonly property color errorColor: chromeStyle.errorColor
 
+    // Which session was last told this bar is open, which is emphatically NOT "whatever session is
+    // bound right now": the bar OUTLIVES a rebind, because SessionChrome re-targets on every tab
+    // switch and pane hand-off while the popup stays open. Told-ness therefore has to be HANDED OVER.
+    // Without that, the session left behind kept _isSearchBarOpen set and re-armed a walk of its whole
+    // scrollback every 250 ms for the rest of its life, and the session arriving was never told at all,
+    // so its count never appeared.
+    property var _notifiedSession: null
+
+    // Brings the session's told-ness in line with @p target, which is the bound session while the bar
+    // is open and null otherwise. Idempotent, so every caller can just state the intent.
+    function _syncOpenState(target) {
+        if (target === root._notifiedSession)
+            return;
+        if (root._notifiedSession)
+            root._notifiedSession.searchBarClosed();
+        root._notifiedSession = target;
+        // Tallying costs a walk of the whole scrollback, so the session only does it while something
+        // is displaying the result. It cannot infer that; only this bar knows.
+        if (target)
+            target.searchBarOpened();
+    }
+
+    // A pane torn down with the bar still standing open emits no closed(), so the session it last told
+    // would keep re-arming a walk of its whole scrollback -- and, since screenUpdated() reads the same
+    // flag, keep the viewport pinned off the bottom -- for the rest of its life. The handover rule once
+    // more, with null as the target.
+    Component.onDestruction: root._syncOpenState(null)
+
+    // True while the field is being re-seeded FROM the session, which is not the user typing. The
+    // field's onTextChanged pushes what it holds back into the session, so without this a seed bounces
+    // straight back as a setSearchPattern() -- another walk of the whole scrollback, and a re-run of
+    // the search that moves the very cursor the seed was there to preserve.
+    property bool _seeding: false
+
+    // Shows @p text in the field without pushing it back into the session. QML property writes notify
+    // synchronously, so the flag need only span the assignment.
+    function _seedField(text) {
+        root._seeding = true;
+        field.text = text;
+        root._seeding = false;
+    }
+
+    // Takes @p target on as the session the OPEN bar belongs to: hand the told-ness over, then show
+    // that session's own term. The two always go together -- a bar displaying one session's term while
+    // another is being told it is open is precisely the state the handover exists to prevent -- so both
+    // the initial open and a rebind under an open bar go through here rather than repeating the pair.
+    function _adoptSession(target) {
+        root._syncOpenState(target);
+        root._seedField(target ? target.searchPattern : "");
+    }
+
     // Opening onto an existing pattern selects it, so typing replaces rather than appends -- the
     // behaviour every find bar has, and what makes a second Ctrl+Shift+F a "search for something else"
     // rather than a "keep typing".
     onOpened: {
-        field.text = root._search ? root._search.searchPattern : "";
+        root._adoptSession(root._search);
         root.focusField();
-        // Tallying costs a walk of the whole scrollback, so the session only does it while something
-        // is displaying the result. It cannot infer that; only this bar knows.
-        if (root._search)
-            root._search.searchBarOpened();
     }
 
     // Whatever closed the bar, the terminal must get the keyboard back, or the user is left typing
     // into nothing. Same law, and the same reason, as CommandPalette.qml states at length.
     onClosed: {
-        if (root._search)
-            root._search.searchBarClosed();
+        root._syncOpenState(null);
         if (root.displayItem)
             root.displayItem.forceActiveFocus();
+    }
+
+    // The pane was handed a different session while the bar stood open. Hand the told-ness over, then
+    // re-seed the field from the session that owns it now -- the term on screen belongs to the
+    // scrollback being searched, and the outgoing one's would otherwise be typed into the incoming one.
+    on_SearchChanged: {
+        if (root.visible)
+            root._adoptSession(root._search);
+        else
+            root._syncOpenState(null);
     }
 
     // Re-focusing an already-open bar, for a second Ctrl+Shift+F.
@@ -126,7 +182,7 @@ Popup {
         ignoreUnknownSignals: true
         function onSearchStateChanged() {
             if (root._search && root._search.searchPattern === "" && field.text !== "")
-                field.text = "";
+                root._seedField("");
         }
     }
 
@@ -144,6 +200,11 @@ Popup {
     contentItem: Row {
         id: bar
         spacing: chromeStyle.labelGap
+
+        // The field handles Escape itself so the caret case is direct; this catches the same key when
+        // focus has tabbed onto one of the buttons, where an unhandled Escape would otherwise leave the
+        // only modeless popup in the application with no way out but the mouse.
+        Keys.onEscapePressed: root.close();
 
         // {{{ The term, with its count inside the field — where VS Code puts it, and what keeps the
         // bar from growing a separate column that shifts every time the count changes width.
@@ -165,7 +226,7 @@ Popup {
 
             // Live as the user types: this is an incremental search, so each keystroke re-runs it and
             // moves the viewport onto the nearest match behind the cursor.
-            onTextChanged: if (root._search) root._search.setSearchPattern(text);
+            onTextChanged: if (!root._seeding && root._search) root._search.setSearchPattern(text);
 
             Keys.onEscapePressed: root.close();
 
@@ -196,7 +257,12 @@ Popup {
             objectName: "searchBarCaseToggle"
             anchors.verticalCenter: parent.verticalCenter
             text: root._caseGlyph
-            checkable: true
+            // Deliberately NOT `checkable`. A checkable button toggles `checked` itself on click, and
+            // that write only gets corrected when the binding's value actually changes -- so cycling
+            // Sensitive -> Insensitive, where pinned stays true, left the button unlit while the policy
+            // was pinned. Three states cannot be driven by a two-state toggle; the model is the only
+            // one that knows, so `checked` stays a pure binding and the click only asks for the cycle.
+            //
             // Lit means "you pinned this"; unlit is smart case, which is what the terminal has always
             // done and what an untouched bar opens with.
             checked: root._casePinned

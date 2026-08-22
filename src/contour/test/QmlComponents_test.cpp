@@ -4584,6 +4584,7 @@ class MockSearchSession: public QObject
 
     Q_INVOKABLE void setSearchPattern(QString const& pattern)
     {
+        ++setPatternCalls;
         _pattern = pattern;
         // A crude stand-in for the real tally, enough to drive every state the bar can render.
         if (pattern.isEmpty())
@@ -4618,6 +4619,8 @@ class MockSearchSession: public QObject
 
     int openNotifications = 0;
     int closeNotifications = 0;
+    /// Counts the pushes FROM the field, so a re-seed that bounces back can be told from a keystroke.
+    int setPatternCalls = 0;
     [[nodiscard]] vtbackend::SearchCaseSensitivity caseMode() const { return _caseMode; }
 
     Q_INVOKABLE void searchNext() { ++nextCalls; }
@@ -4647,10 +4650,20 @@ struct SearchBarHost
     [[nodiscard]] int focusRestores() const { return window->property("focusRestores").toInt(); }
 };
 
-[[nodiscard]] SearchBarHost openSearchBar(QQmlEngine& engine, MockSearchSession& session)
+/// Builds the bar's offscreen host and opens it.
+///
+/// @param engine    The QML engine to build in.
+/// @param session   The session the bar is bound to at first.
+/// @param alternate The session `useAlternate` on the host rebinds it to, standing in for the tab
+///                  switch SessionChrome performs under a bar that stays open. Defaults to @p session,
+///                  so a host that never flips the flag sees exactly one binding.
+[[nodiscard]] SearchBarHost openSearchBar(QQmlEngine& engine,
+                                          MockSearchSession& session,
+                                          MockSearchSession* alternate = nullptr)
 {
     contour::test::installChromeStyle(engine);
     engine.rootContext()->setContextProperty("mockSession", &session);
+    engine.rootContext()->setContextProperty("mockSessionAlt", alternate != nullptr ? alternate : &session);
 
     QQmlComponent component(&engine);
     component.setData(
@@ -4661,6 +4674,7 @@ struct SearchBarHost
                           "  id: host\n"
                           "  width: 800; height: 600; visible: true\n"
                           "  property int focusRestores: 0\n"
+                          "  property bool useAlternate: false\n"
                           "  property alias searchBarItem: barItem\n"
                           // Stands in for the ContourTerminal the bar docks against: the bar reads its
                           // width to place itself and calls forceActiveFocus() on it when it closes.
@@ -4671,7 +4685,7 @@ struct SearchBarHost
                           "  }\n"
                           "  SearchBar {\n"
                           "    id: barItem\n"
-                          "    session: mockSession\n"
+                          "    session: host.useAlternate ? mockSessionAlt : mockSession\n"
                           "    displayItem: fakeDisplay\n"
                           "  }\n"
                           "}\n"),
@@ -4818,6 +4832,125 @@ TEST_CASE("The find bar drives the session's search and restores focus (offscree
         CHECK(field->property("text").toString() == QStringLiteral("needle"));
         CHECK(field->property("selectedText").toString() == QStringLiteral("needle"));
     }
+
+    SECTION("re-seeding the field does not bounce the term back into the session")
+    {
+        // The field pushes what it holds into the session, which is right for a keystroke and wrong
+        // for a value the bar just read OUT of that same session: the push costs a walk of the whole
+        // scrollback and re-runs the search from the vi cursor, moving the very position the seed was
+        // there to preserve.
+        field->setProperty("text", QStringLiteral("needle"));
+        QCoreApplication::processEvents();
+
+        QMetaObject::invokeMethod(host.bar, "close");
+        QCoreApplication::processEvents();
+
+        // The session's term has to MOVE, or the re-seed writes the value the field already holds and
+        // no push could happen with or without the guard -- a test that passes either way.
+        session.setSearchPattern(QStringLiteral("other"));
+        auto const pushes = session.setPatternCalls;
+
+        QMetaObject::invokeMethod(host.bar, "open");
+        QCoreApplication::processEvents();
+
+        CHECK(field->property("text").toString() == QStringLiteral("other"));
+        CHECK(session.setPatternCalls == pushes);
+    }
+
+    SECTION("Escape leaves the bar even when a button, not the field, holds the focus")
+    {
+        // The field handles Escape itself, so that path is direct. This is the other one: tab onto a
+        // button and the key would go unhandled, leaving the application's only modeless popup with no
+        // way out but the mouse.
+        auto* window = qobject_cast<QQuickWindow*>(host.window.get());
+        REQUIRE(window != nullptr);
+        auto* toggle = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarCaseToggle"));
+        REQUIRE(toggle != nullptr);
+
+        QMetaObject::invokeMethod(toggle, "forceActiveFocus");
+        QCoreApplication::processEvents();
+        REQUIRE(toggle->hasActiveFocus());
+
+        QTest::keyClick(window, Qt::Key_Escape);
+        QCoreApplication::processEvents();
+
+        CHECK_FALSE(host.bar->property("opened").toBool());
+    }
+
+    SECTION("activating the case toggle for real keeps its lit state in step with the policy")
+    {
+        // The section above cycles through the bar's own function, which a CHECKABLE button would
+        // survive: such a button writes `checked` itself on activation, and that write is corrected
+        // only when the binding's value actually changes -- so Sensitive -> Insensitive, where pinned
+        // stays true both sides, left the button unlit while the policy was pinned. Only a real
+        // activation reaches that write, and Space on a focused button takes the same press/release
+        // path a click does.
+        auto* window = qobject_cast<QQuickWindow*>(host.window.get());
+        REQUIRE(window != nullptr);
+        auto* toggle = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarCaseToggle"));
+        REQUIRE(toggle != nullptr);
+
+        QMetaObject::invokeMethod(toggle, "forceActiveFocus");
+        QCoreApplication::processEvents();
+        REQUIRE(toggle->hasActiveFocus());
+
+        QTest::keyClick(window, Qt::Key_Space); // Smart -> Sensitive
+        QCoreApplication::processEvents();
+        REQUIRE(session.caseMode() == vtbackend::SearchCaseSensitivity::Sensitive);
+        CHECK(toggle->property("checked").toBool());
+
+        QTest::keyClick(window, Qt::Key_Space); // Sensitive -> Insensitive: still pinned, still lit
+        QCoreApplication::processEvents();
+        REQUIRE(session.caseMode() == vtbackend::SearchCaseSensitivity::Insensitive);
+        CHECK(toggle->property("checked").toBool());
+        CHECK(toggle->property("text").toString() == QStringLiteral("aa"));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The find bar hands its open state over when the pane is rebound (offscreen)",
+          "[contour][gui][qml][search]")
+{
+    // SessionChrome re-targets on every tab switch and pane hand-off while the popup stays open, so
+    // "which session was told the bar is open" is emphatically not "which session is bound now". Told-
+    // ness has to be HANDED OVER: the session left behind would otherwise keep re-arming a walk of its
+    // whole scrollback -- and, since screenUpdated() reads the same flag, keep its viewport pinned off
+    // the bottom -- while the session arriving is never told at all and never shows a count.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockSearchSession first;
+    MockSearchSession second;
+    second.setSearchPattern(QStringLiteral("beta")); // the incoming pane is mid-search
+
+    auto const host = openSearchBar(engine, first, &second);
+    REQUIRE(host.bar != nullptr);
+    auto* field = host.bar->findChild<QQuickItem*>(QStringLiteral("searchBarField"));
+    REQUIRE(field != nullptr);
+
+    REQUIRE(first.openNotifications == 1);
+    REQUIRE(first.closeNotifications == 0);
+    REQUIRE(second.openNotifications == 0);
+    auto const secondPushes = second.setPatternCalls;
+
+    // The tab switch, with the bar still standing open.
+    host.window->setProperty("useAlternate", true);
+    QCoreApplication::processEvents();
+
+    CHECK(first.closeNotifications == 1);
+    CHECK(second.openNotifications == 1);
+    CHECK(second.closeNotifications == 0);
+
+    // The term on screen belongs to the scrollback being searched, and re-seeding it must not bounce
+    // back into the session it was just read from.
+    CHECK(field->property("text").toString() == QStringLiteral("beta"));
+    CHECK(second.setPatternCalls == secondPushes);
+
+    // And closing now closes the session that actually holds the bar, not the one it started on.
+    QMetaObject::invokeMethod(host.bar, "close");
+    QCoreApplication::processEvents();
+    CHECK(second.closeNotifications == 1);
+    CHECK(first.closeNotifications == 1);
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
