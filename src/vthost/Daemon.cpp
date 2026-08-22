@@ -74,11 +74,15 @@ namespace
     /// The daemon's PTY factory: every session spawns the configured shell over a
     /// fresh PTY. Shared by the POSIX and Windows runDaemon paths.
     ///
-    /// @param shell      What to spawn.
-    /// @param socketPath The daemon's control socket, which every hosted shell is told about so it
-    ///                   can reach back. Merged in here rather than by the caller, so that every
-    ///                   entry into runDaemon() hosts shells that can find their own daemon.
+    /// @param shell         What to spawn.
+    /// @param escapeSandbox Whether the spawned shell escapes its sandbox (Flatpak), from the
+    ///                      resolved profile's `escape_sandbox`. Was hardcoded `true` before this
+    ///                      parameter existed, silently ignoring a profile's `escape_sandbox: false`.
+    /// @param socketPath    The daemon's control socket, which every hosted shell is told about so
+    ///                      it can reach back. Merged in here rather than by the caller, so that
+    ///                      every entry into runDaemon() hosts shells that can find their own daemon.
     [[nodiscard]] PtyFactory makeShellPtyFactory(vtpty::Process::ExecInfo shell,
+                                                 bool escapeSandbox,
                                                  std::filesystem::path const& socketPath)
     {
         // insert_or_assign, so the daemon wins over a profile that set the same name: a hosted
@@ -87,9 +91,10 @@ namespace
         for (auto const& [name, value]: hostedShellEnvironment(socketPath))
             shell.env.insert_or_assign(name, value);
 
-        return [shell = std::move(shell)](vtbackend::PageSize pageSize) -> std::unique_ptr<vtpty::Pty> {
+        return [shell = std::move(shell), escapeSandbox](vtbackend::PageSize pageSize)
+                   -> std::unique_ptr<vtpty::Pty> {
             return std::make_unique<vtpty::Process>(
-                shell, vtpty::createPty(pageSize, std::nullopt), /*escapeSandbox=*/true);
+                shell, vtpty::createPty(pageSize, std::nullopt), escapeSandbox);
         };
     }
 
@@ -549,7 +554,7 @@ int runDaemon(DaemonConfig const& config)
     auto loop = net::EventLoop { source };
 
     auto host = SessionHost { loop,
-                              makeShellPtyFactory(config.shell, config.socketPath),
+                              makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath),
                               config.settings,
                               crispy::defaultEnvironment(),
                               /*startPumps=*/true,
@@ -734,7 +739,7 @@ int runDaemon(DaemonConfig const& config)
     auto loop = net::EventLoop { source };
 
     auto host = SessionHost { loop,
-                              makeShellPtyFactory(config.shell, config.socketPath),
+                              makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath),
                               config.settings,
                               crispy::defaultEnvironment(),
                               /*startPumps=*/true,
