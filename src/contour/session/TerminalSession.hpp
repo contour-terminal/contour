@@ -1092,9 +1092,20 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Coalesces re-tallying while output keeps arriving: a tally walks the whole scrollback, so it
     /// must never run once per frame. Armed by screenUpdated(), and only while the bar is open.
     QTimer _searchTallyTimer;
-    /// Whether the find bar is open, and therefore whether a tally is worth computing at all.
+    /// Whether the find bar is open. Two things read it: whether a tally is worth computing at all,
+    /// and whether new output may auto-scroll the viewport back to the bottom -- the bar being open
+    /// means the user is reading something they went looking for. @see screenUpdated.
     /// Atomic: written on the GUI thread, read by screenUpdated() on the parser thread.
     std::atomic<bool> _isSearchBarOpen { false };
+    /// Whether the viewport was last moved to show a search match rather than by new output.
+    ///
+    /// The bar-closed half of the same rule @c _isSearchBarOpen carries: F3/Shift+F3 are bound to the
+    /// Search match mode, which is "a pattern is set" and therefore outlives the bar, so a match can be
+    /// stepped to with nothing on screen to say the user is searching. Set by the two
+    /// Focus*SearchMatch actions before they step, and cleared by screenUpdated() the moment the
+    /// viewport is back at the bottom -- so following the output again is all it takes to un-park it.
+    /// Atomic for the same reason as above.
+    std::atomic<bool> _searchMatchRevealed { false };
     /// Collapses repeat re-arm posts to at most one in flight, as _cursorMovedPostPending does.
     std::atomic_flag _searchTallyPostPending = ATOMIC_FLAG_INIT;
 

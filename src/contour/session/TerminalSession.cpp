@@ -727,8 +727,27 @@ void TerminalSession::screenUpdated()
     // the mutex held. The mutex is a plain non-recursive std::mutex, so taking it here self-deadlocks on
     // the very sequence neovim, tmux and every other modern TUI ends each frame with. @see
     // Events::progressChanged for the same contract, stated.
-    if (_profile.history.value().autoScrollOnUpdate && _terminal.viewport().scrolled()
-        && _terminal.inputHandler().mode() == ViMode::Insert)
+    //
+    // Not while the viewport is parked on something the user went looking for. The Vi-mode test used
+    // to be the whole guard, and it worked only because starting a search forced Normal mode; the bar
+    // deliberately switches no mode, so a search now runs with the mode still Insert. Both
+    // Terminal::search()/searchReverse() and ViCommands::moveCursorTo() reveal their match and then
+    // raise screenUpdated(), so without this the very next statement scrolled the viewport straight
+    // back to the bottom -- no match living in the scrollback could be shown at all, and the ones that
+    // could were yanked away by the next byte of output.
+    //
+    // Two ways to be parked, not one. The bar being open is the obvious one. The other is F3, which
+    // the default bindings gate on the Search match mode -- "a pattern is set", which OUTLIVES the bar
+    // (@see searchBarClosed) -- so stepping through matches with the bar shut is a supported flow that
+    // runs in Insert mode with the bar's flag clear. @see _searchMatchRevealed for how it un-parks.
+    auto const viewportScrolled = _terminal.viewport().scrolled();
+    if (!viewportScrolled)
+        _searchMatchRevealed.store(false, std::memory_order_relaxed);
+
+    if (_profile.history.value().autoScrollOnUpdate && viewportScrolled
+        && _terminal.inputHandler().mode() == ViMode::Insert
+        && !_isSearchBarOpen.load(std::memory_order_relaxed)
+        && !_searchMatchRevealed.load(std::memory_order_relaxed))
         _terminal.viewport().scrollToBottom();
 
     auto const scrollable = _terminal.viewport().scrollableLineCount();
@@ -1574,6 +1593,12 @@ void TerminalSession::searchPromptRequested()
 // {{{ Find bar
 void TerminalSession::searchBarOpened()
 {
+    // BEFORE the lock, not after it: moveNormalModeCursorTo() below reaches ViCommands::moveCursorTo(),
+    // which reveals the cursor and then raises screenUpdated() -- and screenUpdated() consults this
+    // very flag to decide whether it may scroll the viewport back to the bottom. Set afterwards, the
+    // open sequence would be the one update that slipped past the guard it is turning on.
+    _isSearchBarOpen.store(true, std::memory_order_relaxed);
+
     {
         auto const l = scoped_lock { _terminal };
 
@@ -1583,11 +1608,22 @@ void TerminalSession::searchBarOpened()
         // was last left (usually the top of the page) and cannot see anything below it: the old
         // startSearchExternally() got the sync for free by switching mode, purely to reveal the
         // status line.
-        if (_terminal.inputHandler().mode() == vtbackend::ViMode::Insert)
+        //
+        // Not when the place the last search left the cursor is still on screen. The bar is HANDED
+        // OVER to whichever session the pane is showing (SearchBar.qml's _syncOpenState), so this
+        // runs again on every tab switch -- and on a session sitting on a match the sync would throw
+        // that place away: the vi cursor is what "3 of 27" counts up to, and what the focused
+        // highlight is drawn from, so moving it to the bottom of the page turns that into
+        // "27 matches" and (through ViCommands::moveCursorTo) scrolls the match off screen. Keyed on
+        // what is VISIBLE rather than merely on a pattern being set, so a stale pattern the user has
+        // long since scrolled away from still starts the next search from where they are looking.
+        auto const restingOnAVisibleMatch =
+            !_terminal.search().pattern.empty()
+            && _terminal.viewport().isLineVisible(_terminal.normalModeCursorPosition().line);
+        if (!restingOnAVisibleMatch && _terminal.inputHandler().mode() == vtbackend::ViMode::Insert)
             _terminal.moveNormalModeCursorTo(_terminal.currentScreen().cursor().position);
     }
 
-    _isSearchBarOpen.store(true, std::memory_order_relaxed);
     refreshSearchStatus();
 }
 
@@ -1609,6 +1645,12 @@ void TerminalSession::searchBarClosed()
 
 void TerminalSession::searchCleared()
 {
+    // Nothing left to be parked ON. F3 is gated on the Search match mode, which is "a pattern is set",
+    // so with the pattern gone there is no longer any way to step to another match -- and a flag left
+    // standing here would keep the viewport off the bottom for the rest of the session, since the only
+    // other thing that clears it is the user scrolling back down by hand. @see _searchMatchRevealed.
+    _searchMatchRevealed.store(false, std::memory_order_relaxed);
+
     // Reached from the parser thread and from under Terminal's state mutex (Vi mode changes clear the
     // search mid-input), so both halves are posted rather than done here.
     if (auto* display = _display)
@@ -1680,10 +1722,14 @@ void TerminalSession::cycleSearchCaseSensitivity()
     {
         auto const l = scoped_lock { _terminal };
 
-        // The early exit skips the RE-SEARCH, never the refresh and the notify below: a policy that
-        // was already in effect still has to leave the glyph, the tooltip and the count consistent.
-        if (_terminal.setSearchCaseSensitivity(nextSearchCase(_terminal.search().caseSensitivity))
-            && !_terminal.search().pattern.empty())
+        // Unconditional: nextSearchCase() never answers with the policy it was given, so
+        // setSearchCaseSensitivity() cannot report "already in effect" here and testing it would only
+        // suggest it could.
+        (void) _terminal.setSearchCaseSensitivity(nextSearchCase(_terminal.search().caseSensitivity));
+
+        // Only the RE-SEARCH is skipped without a pattern, never the refresh and the notify below: the
+        // glyph and the tooltip changed regardless, and the bar has to be told.
+        if (!_terminal.search().pattern.empty())
         {
             // Re-run in place: the old match may not be a match under the new policy.
             if (auto const match = _terminal.searchReverse(_terminal.normalModeCursorPosition()))
@@ -1817,9 +1863,19 @@ void TerminalSession::refreshSearchStatusLocked()
 
     // Skipped entirely while the bar is closed: nothing displays the answer, and walking the
     // scrollback to compute one nobody reads is the cost this guard exists to avoid. The LAST status
-    // is left standing rather than replaced by an idle one, so nothing can publish a wrong label.
+    // is left standing rather than replaced by an idle one, so nothing can publish a wrong label --
+    // except when the pattern itself is gone, where keeping it IS the wrong label: the pattern above
+    // has just been published as empty, and a leftover "3 of 27" beside it is a disagreement anyone
+    // rebinding or re-opening the bar would see before the first tally lands.
     if (!_isSearchBarOpen.load(std::memory_order_relaxed))
+    {
+        if (search.pattern.empty())
+        {
+            _searchStatus = {};
+            _searchSummary = renderSearchSummary(_searchStatus);
+        }
         return;
+    }
 
     _searchStatus = describeSearch(search.pattern,
                                    search.pattern.empty()
@@ -2576,9 +2632,19 @@ bool TerminalSession::operator()(actions::FocusNextSearchMatch)
     // Locked: searchNextMatch() walks the grid and the Vi cursor moves with it. See ViNormalMode.
     auto const l = scoped_lock { _terminal };
 
+    // Set BEFORE the step, not after it: searchNextMatch() reveals the match and raises
+    // screenUpdated() from inside, so the guard has to already be up by then. @see _searchMatchRevealed.
+    auto const wasRevealed = _searchMatchRevealed.exchange(true, std::memory_order_relaxed);
+
     auto const nextPosition = _terminal.searchNextMatch(_terminal.normalModeCursorPosition());
     if (!nextPosition)
+    {
+        // RESTORED, not cleared: this step revealed nothing, but a previous one may well have -- F3
+        // at the last match is exactly that case, and storing false there would un-park the very match
+        // the user is standing on, so the next byte of output scrolls it away.
+        _searchMatchRevealed.store(wasRevealed, std::memory_order_relaxed);
         return false;
+    }
     _terminal.moveNormalModeCursorTo(nextPosition.value());
     _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
     // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToNextMatch not work?
@@ -2587,12 +2653,18 @@ bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 
 bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
 {
-    // Locked for the same reason as FocusNextSearchMatch above.
+    // Locked for the same reason as FocusNextSearchMatch above, and parked for the same reason.
     auto const l = scoped_lock { _terminal };
+
+    auto const wasRevealed = _searchMatchRevealed.exchange(true, std::memory_order_relaxed);
 
     auto const nextPosition = _terminal.searchPrevMatch(_terminal.normalModeCursorPosition());
     if (!nextPosition)
+    {
+        // Restored rather than cleared, for the reason FocusNextSearchMatch above states.
+        _searchMatchRevealed.store(wasRevealed, std::memory_order_relaxed);
         return false;
+    }
     _terminal.moveNormalModeCursorTo(nextPosition.value());
     _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
     // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToPreviousMatch not work?

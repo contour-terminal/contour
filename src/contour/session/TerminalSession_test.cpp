@@ -1900,7 +1900,6 @@ TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given
 {
     contour::test::TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
-    namespace actions = contour::actions;
 
     for (int i = 0; i < 5; ++i)
         session->terminal().writeToScreen(std::format("needle row {}\r\n", i));
@@ -3028,6 +3027,89 @@ TEST_CASE("TerminalSession::attachDisplay publishes the scrollbar's travel it ac
     CHECK(session->historyLineCount() > 0);
 
     session->detachDisplay(surface);
+}
+
+TEST_CASE("TerminalSession: a find-bar search into the scrollback outlives the auto-scroll",
+          "[contour][session][search][view]")
+{
+    // The regression a display-less session cannot see, because screenUpdated() returns before the
+    // auto-scroll without one. Search used to force Vi Normal mode, which is the only reason that
+    // auto-scroll ("Insert mode and the viewport is scrolled -> jump to the bottom") never collided
+    // with it. The find bar deliberately switches no mode, so a search now runs in Insert mode -- and
+    // both Terminal::searchReverse() and ViCommands::moveCursorTo() reveal their match and then raise
+    // screenUpdated(), which would scroll the viewport straight back off it.
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+
+    held->terminal().writeToScreen("needle in the haystack\r\n");
+    for (auto const i: std::views::iota(0, 100))
+        held->terminal().writeToScreen(std::format("filler {}\r\n", i));
+
+    REQUIRE(held->terminal().inputHandler().mode() == vtbackend::ViMode::Insert);
+    REQUIRE_FALSE(held->terminal().viewport().scrolled());
+
+    held->searchBarOpened();
+    held->setSearchPattern(QStringLiteral("needle"));
+
+    CHECK(held->searchHasMatches());
+    // The match lives far above the page, so the viewport must have travelled to it AND stayed.
+    CHECK(held->terminal().viewport().scrolled());
+
+    // Output arriving while the bar is open must not yank it back either -- the user is reading
+    // something they went looking for.
+    held->terminal().writeToScreen("more output\r\n");
+    CHECK(held->terminal().viewport().scrolled());
+
+    // Closing the bar hands the terminal back to its ordinary follow-the-output behaviour.
+    held->searchBarClosed();
+    held->terminal().writeToScreen("and more\r\n");
+    CHECK_FALSE(held->terminal().viewport().scrolled());
+}
+
+TEST_CASE("TerminalSession: stepping PAST the last match keeps the one already revealed",
+          "[contour][session][search][view]")
+{
+    // F3 is bound to the Search match mode -- "a pattern is set", which outlives the bar -- so
+    // stepping runs with the bar shut and only _searchMatchRevealed holding the viewport in place. A
+    // step that finds nothing must therefore leave that flag as it found it: the user is still
+    // standing on the match the PREVIOUS step revealed, and clearing it here handed the viewport back
+    // to the auto-scroll, which threw that match away on the very next byte of output.
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+
+    held->terminal().writeToScreen("needle one\r\n");
+    for (auto const i: std::views::iota(0, 50))
+        held->terminal().writeToScreen(std::format("filler {}\r\n", i));
+    held->terminal().writeToScreen("needle two\r\n");
+    for (auto const i: std::views::iota(50, 100))
+        held->terminal().writeToScreen(std::format("filler {}\r\n", i));
+
+    // Reach the nearer of the two matches through the bar, then shut it: from here on, only the
+    // revealed-match flag can hold the viewport.
+    held->searchBarOpened();
+    held->setSearchPattern(QStringLiteral("needle"));
+    REQUIRE(held->searchHasMatches());
+    held->searchBarClosed();
+
+    // A step that DOES reveal something, which is what raises the flag in the first place.
+    REQUIRE((*held)(contour::actions::FocusPreviousSearchMatch {}));
+    REQUIRE(held->terminal().viewport().scrolled());
+
+    // Back onto the last match, and then one step past it -- the step that finds nothing. Forwards
+    // rather than backwards, because searchPrevMatch() at the very top of the scrollback cannot step
+    // back at all and so re-finds the match it is standing on, reporting success. @see stepSearch.
+    REQUIRE((*held)(contour::actions::FocusNextSearchMatch {}));
+    CHECK_FALSE((*held)(contour::actions::FocusNextSearchMatch {}));
+
+    held->terminal().writeToScreen("more output\r\n");
+    CHECK(held->terminal().viewport().scrolled());
+
+    // Dropping the pattern ends the parking with it. Nothing is left to step to -- the Search match
+    // mode F3 is bound to is "a pattern is set" -- so the pane goes back to following its output,
+    // rather than sitting off the bottom until the user scrolls back down by hand.
+    held->terminal().clearSearch();
+    held->terminal().writeToScreen("after the clear\r\n");
+    CHECK_FALSE(held->terminal().viewport().scrolled());
 }
 
 TEST_CASE("TerminalSession applies the profile's history limits to the terminal",
