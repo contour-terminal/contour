@@ -935,7 +935,17 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "size_indicator_on_resize", where.sizeIndicatorOnResize);
         loadFromEntry(child, "fullscreen", where.fullscreen);
         loadFromEntry(child, "maximized", where.maximized);
-        loadFromEntry(child, "search_mode_switch", where.searchModeSwitch);
+        // search_mode_switch chose the Vi mode to return to after a search. Entering a search no
+        // longer changes the mode -- the find bar floats over the terminal instead of living in the
+        // status line -- so there is nothing left for it to select. Warn on presence rather than
+        // parse-and-ignore, for the reason images.max_width states: a silently ignored setting is
+        // worse than a removed one, because the user has no way to learn it stopped meaning anything.
+        if (child["search_mode_switch"])
+            errorLog()("Config entry profiles.*.search_mode_switch is deprecated and has no effect. "
+                       "Search is typed into the find bar now, which changes no Vi mode. Remove the "
+                       "entry to silence this warning.");
+
+        loadFromEntry(child, "search_case_sensitivity", where.searchCaseSensitivity);
         loadFromEntry(child, "insert_after_yank", where.insertAfterYank);
         loadFromEntry(child, "bell", where.bell);
         loadFromEntry(child, "wm_class", where.wmClass);
@@ -2414,6 +2424,13 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, ShadowSize& where)
+{
+    loadConfigEnum(node, entry, where, logger);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::SearchCaseSensitivity& where)
 {
     loadConfigEnum(node, entry, where, logger);
 }

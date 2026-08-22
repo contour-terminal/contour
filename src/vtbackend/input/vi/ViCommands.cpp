@@ -180,18 +180,10 @@ void ViCommands::scrollViewport(ScrollOffset delta)
 
 void ViCommands::searchStart()
 {
-    _terminal->screenUpdated();
-}
-
-void ViCommands::searchDone()
-{
-    _terminal->screenUpdated();
-}
-
-void ViCommands::searchCancel()
-{
-    _terminal->search().pattern.clear();
-    _terminal->screenUpdated();
+    // `/` no longer opens a prompt inside the terminal, so this only asks the frontend for one. It
+    // deliberately does NOT switch vi mode: the old prompt forced Normal mode solely to make the
+    // status line holding it visible, and there is no longer anything to make visible.
+    _terminal->requestSearchPrompt();
 }
 
 bool ViCommands::jumpToNextMatch(unsigned count)

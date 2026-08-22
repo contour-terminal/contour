@@ -373,6 +373,18 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 SLOT(onConfigReload()));
     }
     _musicalNotesBuffer.reserve(16);
+
+    // A tally walks the whole scrollback, so it must never run on the render path. Output that keeps
+    // arriving only re-arms this; the tally runs once the terminal goes quiet for a beat. Explicit
+    // actions (typing, stepping, switching case) re-tally immediately instead of waiting for it.
+    _searchTallyTimer.setSingleShot(true);
+    _searchTallyTimer.setInterval(std::chrono::milliseconds { 250 });
+    connect(&_searchTallyTimer, &QTimer::timeout, this, [this]() {
+        // Cleared before the tally, so output arriving DURING it still schedules the next one.
+        _searchTallyPostPending.clear(std::memory_order_release);
+        refreshSearchStatus();
+    });
+
     _profile = *_config.profile(_profileName); // XXX do it again. but we've to be more efficient here
     configureTerminal();
 }
@@ -715,11 +727,54 @@ void TerminalSession::screenUpdated()
     // the mutex held. The mutex is a plain non-recursive std::mutex, so taking it here self-deadlocks on
     // the very sequence neovim, tmux and every other modern TUI ends each frame with. @see
     // Events::progressChanged for the same contract, stated.
-    if (_profile.history.value().autoScrollOnUpdate && _terminal.viewport().scrolled()
-        && _terminal.inputHandler().mode() == ViMode::Insert)
+    //
+    // Not while the viewport is parked on something the user went looking for. The Vi-mode test used
+    // to be the whole guard, and it worked only because starting a search forced Normal mode; the bar
+    // deliberately switches no mode, so a search now runs with the mode still Insert. Both
+    // Terminal::search()/searchReverse() and ViCommands::moveCursorTo() reveal their match and then
+    // raise screenUpdated(), so without this the very next statement scrolled the viewport straight
+    // back to the bottom -- no match living in the scrollback could be shown at all, and the ones that
+    // could were yanked away by the next byte of output.
+    //
+    // Two ways to be parked, not one. The bar being open is the obvious one. The other is F3, which
+    // the default bindings gate on the Search match mode -- "a pattern is set", which OUTLIVES the bar
+    // (@see searchBarClosed) -- so stepping through matches with the bar shut is a supported flow that
+    // runs in Insert mode with the bar's flag clear. @see _searchMatchRevealed for how it un-parks.
+    auto const viewportScrolled = _terminal.viewport().scrolled();
+    if (!viewportScrolled)
+        _searchMatchRevealed.store(false, std::memory_order_relaxed);
+
+    if (_profile.history.value().autoScrollOnUpdate && viewportScrolled
+        && _terminal.inputHandler().mode() == ViMode::Insert
+        && !_isSearchBarOpen.load(std::memory_order_relaxed)
+        && !_searchMatchRevealed.load(std::memory_order_relaxed))
         _terminal.viewport().scrollToBottom();
 
     auto const scrollable = _terminal.viewport().scrollableLineCount();
+
+    // New output can add or remove matches, so the find bar's count goes stale. Re-tallying walks the
+    // whole scrollback, so it is neither done here nor once per frame: this only re-arms a timer on
+    // the GUI thread, and only while the bar is open. Posted rather than called, for the reason
+    // stated above -- this runs on the parser thread, sometimes with the state mutex held.
+    if (_isSearchBarOpen.load(std::memory_order_relaxed)
+        && !_searchTallyPostPending.test_and_set(std::memory_order_acq_rel))
+    {
+        QMetaObject::invokeMethod(
+            this,
+            // The flag is cleared where the timer FIRES, not here, so exactly one post is made per
+            // 250 ms window. Clearing it here instead let every following screen update post again
+            // while the timer was still running -- one queued call per PTY read chunk, which under
+            // heavy output is thousands a second.
+            [this]() {
+                // Re-checked here: the bar can close between this post and its delivery, and starting
+                // the timer then would fire a tally 250 ms later for a bar that is gone.
+                if (_isSearchBarOpen.load(std::memory_order_relaxed))
+                    _searchTallyTimer.start();
+                else
+                    _searchTallyPostPending.clear(std::memory_order_release);
+            },
+            Qt::QueuedConnection);
+    }
 
     if (terminal().hasInput())
         _display->post(bind(&TerminalSession::flushInput, this));
@@ -1239,9 +1294,8 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
             // A display-less session (background pane, headless test) has nowhere to toast the
             // rejection; the paste is ignored either way.
             if (_display)
-                _display->post([this]() {
-                    emit showNotification("Screenshot", QString::fromStdString("Paste is too big"));
-                });
+                _display->post(
+                    [this]() { emit showNotification(tr("Paste"), tr("The pasted content is too large.")); });
             return;
         }
         // 512 KB soft limit to ask user for permission
@@ -1528,6 +1582,309 @@ void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
     }
 }
 
+void TerminalSession::searchPromptRequested()
+{
+    // Reached with the terminal's state mutex HELD (SearchReverse takes it, and `/` arrives inside
+    // sendCharEvent). A queued connection is therefore mandatory: the find bar reads terminal state as
+    // it opens, and a direct call would re-enter that non-recursive mutex on this very thread.
+    QMetaObject::invokeMethod(this, [this]() { emit searchBarRequested(); }, Qt::QueuedConnection);
+}
+
+// {{{ Find bar
+void TerminalSession::searchBarOpened()
+{
+    // BEFORE the lock, not after it: moveNormalModeCursorTo() below reaches ViCommands::moveCursorTo(),
+    // which reveals the cursor and then raises screenUpdated() -- and screenUpdated() consults this
+    // very flag to decide whether it may scroll the viewport back to the bottom. Set afterwards, the
+    // open sequence would be the one update that slipped past the guard it is turning on.
+    _isSearchBarOpen.store(true, std::memory_order_relaxed);
+
+    {
+        auto const l = scoped_lock { _terminal };
+
+        // The search runs from the NORMAL-mode cursor, which ViCommands only syncs to the real screen
+        // cursor on an Insert -> Normal transition -- and this bar deliberately makes no such
+        // transition. Without this, a search started from Insert mode begins wherever the vi cursor
+        // was last left (usually the top of the page) and cannot see anything below it: the old
+        // startSearchExternally() got the sync for free by switching mode, purely to reveal the
+        // status line.
+        //
+        // Not when the place the last search left the cursor is still on screen. The bar is HANDED
+        // OVER to whichever session the pane is showing (SearchBar.qml's _syncOpenState), so this
+        // runs again on every tab switch -- and on a session sitting on a match the sync would throw
+        // that place away: the vi cursor is what "3 of 27" counts up to, and what the focused
+        // highlight is drawn from, so moving it to the bottom of the page turns that into
+        // "27 matches" and (through ViCommands::moveCursorTo) scrolls the match off screen. Keyed on
+        // what is VISIBLE rather than merely on a pattern being set, so a stale pattern the user has
+        // long since scrolled away from still starts the next search from where they are looking.
+        auto const restingOnAVisibleMatch =
+            !_terminal.search().pattern.empty()
+            && _terminal.viewport().isLineVisible(_terminal.normalModeCursorPosition().line);
+        if (!restingOnAVisibleMatch && _terminal.inputHandler().mode() == vtbackend::ViMode::Insert)
+            _terminal.moveNormalModeCursorTo(_terminal.currentScreen().cursor().position);
+    }
+
+    refreshSearchStatus();
+}
+
+void TerminalSession::searchBarClosed()
+{
+    // Only the bar's own visibility is dropped here -- NOT the pattern, which deliberately outlives
+    // it so F3 keeps stepping and the matches stay lit. What this ends is the tallying: nothing
+    // displays a count now, and walking the scrollback every 250 ms to compute one is the exact cost
+    // the flag exists to avoid. Told by the bar rather than inferred, because only the bar knows.
+    _isSearchBarOpen.store(false, std::memory_order_relaxed);
+    _searchTallyTimer.stop();
+
+    // Cleared BECAUSE the timer was just stopped: the flag is otherwise only cleared where the timer
+    // fires, so stopping it mid-window would strand the flag set for the rest of the session -- and a
+    // stranded flag means screenUpdated() never posts again, so re-opening the bar would show a count
+    // that no longer follows new output. Same hazard attachDisplay() heals for the cursor-moved flag.
+    _searchTallyPostPending.clear(std::memory_order_release);
+}
+
+void TerminalSession::searchCleared()
+{
+    // Nothing left to be parked ON. F3 is gated on the Search match mode, which is "a pattern is set",
+    // so with the pattern gone there is no longer any way to step to another match -- and a flag left
+    // standing here would keep the viewport off the bottom for the rest of the session, since the only
+    // other thing that clears it is the user scrolling back down by hand. @see _searchMatchRevealed.
+    _searchMatchRevealed.store(false, std::memory_order_relaxed);
+
+    // Reached from the parser thread and from under Terminal's state mutex (Vi mode changes clear the
+    // search mid-input), so both halves are posted rather than done here.
+    if (auto* display = _display)
+        display->scheduleRedraw();
+
+    QMetaObject::invokeMethod(this, &TerminalSession::refreshSearchStatus, Qt::QueuedConnection);
+}
+
+void TerminalSession::setSearchPattern(QString const& pattern)
+{
+    {
+        auto const l = scoped_lock { _terminal };
+
+        auto text = pattern.toStdU32String();
+        if (text.empty())
+        {
+            _terminal.clearSearch();
+            _searchStatus = {};
+        }
+        else
+        {
+            // Two steps rather than searchReverse(text, pos): that overload short-circuits when the
+            // term is unchanged and hands back the position it was given, which is indistinguishable
+            // from a match. Here the result has to actually mean "found something".
+            (void) _terminal.setNewSearchTerm(std::move(text), vtbackend::SearchOrigin::Typed);
+
+            // Backwards from the cursor, which is what the terminal's search has always done and what
+            // makes an incremental search land on the nearest match behind you rather than jumping to
+            // the top of the scrollback on every keystroke.
+            auto const match = _terminal.searchReverse(_terminal.normalModeCursorPosition());
+            if (match)
+            {
+                // The cursor MUST follow the match, exactly as the vi `/` flow did. Three things read
+                // it: the tally's ordinal (so "3 of 27" has a 3 at all), the renderer's choice of
+                // searchHighlightFocused (so one match reads as the current one), and Enter, which
+                // steps from wherever the cursor is. Dropping the location broke all three.
+                _terminal.moveNormalModeCursorTo(*match);
+            }
+
+            // NOT tallied here. Counting walks the whole grid, and this runs on every keystroke, on
+            // the GUI thread, with the terminal locked -- on a deep scrollback that is the difference
+            // between a find bar and a stutter. What is knowable WITHOUT the walk goes in right away:
+            // whether anything matched, which is what tints the field and enables the buttons. The
+            // count follows on the debounce below.
+            _searchStatus = describeSearchCounting(match ? MatchPresence::Some : MatchPresence::None);
+        }
+
+        _searchPatternText = pattern;
+        _searchSummary = renderSearchSummary(_searchStatus);
+    }
+
+    emit searchStateChanged();
+    scheduleSearchTally();
+}
+
+void TerminalSession::scheduleSearchTally()
+{
+    if (!_isSearchBarOpen.load(std::memory_order_relaxed))
+        return;
+
+    // start() RESTARTS a running timer, which is what makes this a debounce: a fast typist pays one
+    // tally when they pause, not one per character. The output path deliberately does NOT restart it
+    // (see screenUpdated), so a busy terminal still refreshes the count at a steady cadence.
+    _searchTallyTimer.start();
+}
+
+void TerminalSession::cycleSearchCaseSensitivity()
+{
+    {
+        auto const l = scoped_lock { _terminal };
+
+        // Unconditional: nextSearchCase() never answers with the policy it was given, so
+        // setSearchCaseSensitivity() cannot report "already in effect" here and testing it would only
+        // suggest it could.
+        (void) _terminal.setSearchCaseSensitivity(nextSearchCase(_terminal.search().caseSensitivity));
+
+        // Only the RE-SEARCH is skipped without a pattern, never the refresh and the notify below: the
+        // glyph and the tooltip changed regardless, and the bar has to be told.
+        if (!_terminal.search().pattern.empty())
+        {
+            // Re-run in place: the old match may not be a match under the new policy.
+            if (auto const match = _terminal.searchReverse(_terminal.normalModeCursorPosition()))
+                _terminal.moveNormalModeCursorTo(*match);
+        }
+
+        refreshSearchStatusLocked();
+    }
+    emit searchStateChanged();
+}
+
+void TerminalSession::searchNext()
+{
+    stepSearch(SearchWrapEdge::Top);
+}
+
+void TerminalSession::searchPrevious()
+{
+    stepSearch(SearchWrapEdge::Bottom);
+}
+
+void TerminalSession::stepSearch(SearchWrapEdge edge)
+{
+    auto const before = [this]() {
+        auto const l = scoped_lock { _terminal };
+        return _terminal.normalModeCursorPosition();
+    }();
+
+    if (edge == SearchWrapEdge::Top)
+        (void) (*this)(actions::FocusNextSearchMatch {});
+    else
+        (void) (*this)(actions::FocusPreviousSearchMatch {});
+
+    // Wrapped on "did the cursor actually move", not on the action's return value: at the very first
+    // cell of the scrollback searchPrevMatch() cannot step back any further, so it re-finds the match
+    // the cursor already stands on and reports success -- which left the button live and inert, the
+    // one thing MatchNavigation promises not to do.
+    auto const after = [this]() {
+        auto const l = scoped_lock { _terminal };
+        return _terminal.normalModeCursorPosition();
+    }();
+
+    if (after == before)
+        wrapSearchTo(edge);
+
+    refreshSearchStatus();
+}
+
+void TerminalSession::wrapSearchTo(SearchWrapEdge edge)
+{
+    // The find bar wraps; Terminal::searchNextMatch does not, and must not -- vi's `n` stopping at
+    // the end of the scrollback is its documented behaviour. So the wrap lives here, where "the last
+    // match" means "start over" rather than "there is nothing more". Without it, the bar's own
+    // MatchNavigation promise would be a lie at both ends of the list.
+    auto const l = scoped_lock { _terminal };
+    if (_terminal.search().pattern.empty())
+        return;
+
+    auto const& screen = _terminal.currentScreen();
+    auto const from =
+        edge == SearchWrapEdge::Top
+            ? CellLocation { .line = -boxed_cast<vtbackend::LineOffset>(screen.historyLineCount()),
+                             .column = vtbackend::ColumnOffset(0) }
+            : CellLocation { .line = boxed_cast<vtbackend::LineOffset>(_terminal.pageSize().lines) - 1,
+                             .column =
+                                 boxed_cast<vtbackend::ColumnOffset>(_terminal.pageSize().columns) - 1 };
+
+    auto const match = edge == SearchWrapEdge::Top ? _terminal.search(from) : _terminal.searchReverse(from);
+    if (match)
+        _terminal.moveNormalModeCursorTo(*match);
+}
+
+void TerminalSession::refreshSearchStatus()
+{
+    {
+        auto const l = scoped_lock { _terminal };
+        refreshSearchStatusLocked();
+    }
+    emit searchStateChanged();
+}
+
+QString TerminalSession::renderSearchSummary(SearchStatus const& status) const
+{
+    switch (status.outcome)
+    {
+        case SearchOutcome::Idle: return {};
+        case SearchOutcome::NoMatch: return tr("No results");
+        case SearchOutcome::Matched: break;
+    }
+
+    // The count is still being walked. Saying so beats both a stale number and a blank that fills in
+    // a moment later looking like a glitch.
+    if (status.readiness == CountReadiness::Counting)
+        return tr("…");
+
+    auto const capped = status.tally.exactness == vtbackend::TallyExactness::Capped;
+
+    // Standing on a match: "3 of 27". SearchMatchTally documents when ordinal can be 0.
+    if (status.tally.ordinal != 0)
+        return capped ? tr("%1 of %2+").arg(status.tally.ordinal).arg(status.tally.total)
+                      : tr("%1 of %2").arg(status.tally.ordinal).arg(status.tally.total);
+
+    // Not on one, so there is no first number to report -- only how many there are. Through tr()'s
+    // plural form rather than an English ternary, so a language with other plural rules can say it.
+    return capped ? tr("%1+ matches").arg(status.tally.total)
+                  : tr("%n match(es)", nullptr, static_cast<int>(status.tally.total));
+}
+
+QString TerminalSession::renderSearchCaseTooltip(vtbackend::SearchCaseSensitivity mode) const
+{
+    switch (mode)
+    {
+        case vtbackend::SearchCaseSensitivity::Smart:
+            return tr("Match case: smart — exact only when the term has a capital");
+        case vtbackend::SearchCaseSensitivity::Sensitive: return tr("Match case: on");
+        case vtbackend::SearchCaseSensitivity::Insensitive: return tr("Match case: off");
+    }
+    crispy::unreachable();
+}
+
+void TerminalSession::refreshSearchStatusLocked()
+{
+    auto const& search = _terminal.search();
+    _searchCase = describeSearchCase(search.caseSensitivity);
+    _searchCaseTooltip = renderSearchCaseTooltip(search.caseSensitivity);
+    // Cached rather than read through on demand: searchPattern() is a Q_PROPERTY whose NOTIFY is
+    // searchStateChanged, so a binding woken by that signal reads it -- and if reading it took the
+    // terminal lock, every emit made while holding that lock would deadlock. Caching it here makes
+    // the whole property group lock-free to read, so the emit is safe wherever it happens.
+    _searchPatternText = QString::fromStdU32String(search.pattern);
+
+    // Skipped entirely while the bar is closed: nothing displays the answer, and walking the
+    // scrollback to compute one nobody reads is the cost this guard exists to avoid. The LAST status
+    // is left standing rather than replaced by an idle one, so nothing can publish a wrong label --
+    // except when the pattern itself is gone, where keeping it IS the wrong label: the pattern above
+    // has just been published as empty, and a leftover "3 of 27" beside it is a disagreement anyone
+    // rebinding or re-opening the bar would see before the first tally lands.
+    if (!_isSearchBarOpen.load(std::memory_order_relaxed))
+    {
+        if (search.pattern.empty())
+        {
+            _searchStatus = {};
+            _searchSummary = renderSearchSummary(_searchStatus);
+        }
+        return;
+    }
+
+    _searchStatus = describeSearch(search.pattern,
+                                   search.pattern.empty()
+                                       ? vtbackend::SearchMatchTally {}
+                                       : _terminal.tallySearchMatches(_terminal.normalModeCursorPosition()));
+    _searchSummary = renderSearchSummary(_searchStatus);
+}
+// }}}
+
 void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
 {
     // The hovered link is recomputed on mouse MOVEMENT only, so scrolling slides a different line under
@@ -1662,7 +2019,7 @@ void TerminalSession::sendCharEvent(char32_t value,
             if (auto const base = input::unshiftedCodepoint(folded); base != folded)
                 actions = config::apply(charMappings, base, modifiers.chord, flags);
 
-        if (actions != nullptr && !_terminal.inputHandler().isEditingSearch())
+        if (actions != nullptr)
         {
             auto executionCount = 0;
             handleAction(actions, eventType, [&](auto const& actions) {
@@ -2275,9 +2632,19 @@ bool TerminalSession::operator()(actions::FocusNextSearchMatch)
     // Locked: searchNextMatch() walks the grid and the Vi cursor moves with it. See ViNormalMode.
     auto const l = scoped_lock { _terminal };
 
+    // Set BEFORE the step, not after it: searchNextMatch() reveals the match and raises
+    // screenUpdated() from inside, so the guard has to already be up by then. @see _searchMatchRevealed.
+    auto const wasRevealed = _searchMatchRevealed.exchange(true, std::memory_order_relaxed);
+
     auto const nextPosition = _terminal.searchNextMatch(_terminal.normalModeCursorPosition());
     if (!nextPosition)
+    {
+        // RESTORED, not cleared: this step revealed nothing, but a previous one may well have -- F3
+        // at the last match is exactly that case, and storing false there would un-park the very match
+        // the user is standing on, so the next byte of output scrolls it away.
+        _searchMatchRevealed.store(wasRevealed, std::memory_order_relaxed);
         return false;
+    }
     _terminal.moveNormalModeCursorTo(nextPosition.value());
     _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
     // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToNextMatch not work?
@@ -2286,12 +2653,18 @@ bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 
 bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
 {
-    // Locked for the same reason as FocusNextSearchMatch above.
+    // Locked for the same reason as FocusNextSearchMatch above, and parked for the same reason.
     auto const l = scoped_lock { _terminal };
+
+    auto const wasRevealed = _searchMatchRevealed.exchange(true, std::memory_order_relaxed);
 
     auto const nextPosition = _terminal.searchPrevMatch(_terminal.normalModeCursorPosition());
     if (!nextPosition)
+    {
+        // Restored rather than cleared, for the reason FocusNextSearchMatch above states.
+        _searchMatchRevealed.store(wasRevealed, std::memory_order_relaxed);
         return false;
+    }
     _terminal.moveNormalModeCursorTo(nextPosition.value());
     _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
     // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToPreviousMatch not work?
@@ -2562,22 +2935,22 @@ bool TerminalSession::operator()(actions::SaveScreenshot)
         / fs::path(std::format("contour-screenshot-{:%Y-%m-%d-%H-%M-%S}.png", chrono::system_clock::now()));
 
     _display->setScreenshotOutput(savePath);
-    auto message = std::format("Saving screenshot to {}", savePath.string());
-    sessionLog()(message);
+    sessionLog()("Saving screenshot to {}", savePath.string());
 
-    _display->post(
-        [this, message]() { emit showNotification("Screenshot", QString::fromStdString(message)); });
+    // The log line and the toast are deliberately separate strings: one is for a developer reading a
+    // log in English, the other is shown to the user and therefore goes through tr().
+    auto const notice = tr("Saving screenshot to %1").arg(QString::fromStdString(savePath.string()));
+    _display->post([this, notice]() { emit showNotification(tr("Screenshot"), notice); });
     return true;
 }
 
 bool TerminalSession::operator()(actions::CopyScreenshot)
 {
     _display->setScreenshotOutput(std::monostate {});
-    auto message = std::format("Saving screenshot to clipboard");
-    sessionLog()(message);
+    sessionLog()("Saving screenshot to clipboard");
 
-    _display->post(
-        [this, message]() { emit showNotification("Screenshot", QString::fromStdString(message)); });
+    auto const notice = tr("Screenshot copied to the clipboard.");
+    _display->post([this, notice]() { emit showNotification(tr("Screenshot"), notice); });
 
     return true;
 }
@@ -2771,11 +3144,14 @@ bool TerminalSession::operator()(actions::ScrollUp)
 
 bool TerminalSession::operator()(actions::SearchReverse)
 {
-    // Locked: starting a search switches Vi mode, which pushes the indicator status line and so
-    // resizes the page -- the same hazard ViNormalMode documents.
-    auto const l = scoped_lock { _terminal };
-
-    terminal().inputHandler().startSearchExternally();
+    // Unlocked, deliberately: requestSearchPrompt() only posts, and the bar reads terminal state from
+    // its own searchBarOpened() once the post is delivered -- by which time any lock taken here would
+    // long since have been released. Taking one would contend with the parser thread and protect
+    // nothing.
+    //
+    // No vi-mode switch either. The old prompt forced Normal mode only so the status line carrying it
+    // became visible; the find bar floats over the terminal, so the user keeps the mode they were in.
+    _terminal.requestSearchPrompt();
 
     return true;
 }
@@ -3501,7 +3877,18 @@ void TerminalSession::configureTerminal()
     _terminal.settings().autoScrollOnUpdate = _profile.history.value().autoScrollOnUpdate;
     _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
-    _terminal.inputHandler().setSearchModeSwitch(_profile.searchModeSwitch.value());
+    // The profile's policy, re-imposed on every profile application -- so a config reload or a
+    // profile switch resets a policy the Aa button had pinned, the same way it resets every other
+    // profile-derived setting here. The notify is what keeps the button honest about it: without one,
+    // an open bar kept showing the lit glyph of a mode the terminal had already stopped using.
+    // Already under this function's own lock (see its first statement) -- taking a second one here
+    // self-deadlocks, because Terminal's state mutex is a plain non-recursive std::mutex.
+    (void) _terminal.setSearchCaseSensitivity(_profile.searchCaseSensitivity.value());
+    refreshSearchStatusLocked();
+
+    // Posted rather than emitted: this function holds the lock for its whole body, and a QML binding
+    // woken by this signal reads back into the session.
+    QMetaObject::invokeMethod(this, [this]() { emit searchStateChanged(); }, Qt::QueuedConnection);
     _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
     _terminal.settings().blinkStyle = _profile.blinkStyle.value();
     _terminal.settings().screenTransitionStyle = _profile.screenTransitionStyle.value();

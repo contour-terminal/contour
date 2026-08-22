@@ -151,10 +151,13 @@ constexpr StringLiteral MouseConfig { "mouse:\n"
                                       "    hide_while_typing: {}\n"
                                       "\n" };
 
-constexpr StringLiteral SearchModeSwitchConfig {
-    "{comment} Whether or not to switch from search mode into insert on exit. If this value is set to true,\n"
-    "{comment} it will go back to insert mode, otherwise it will go back to normal mode.\n"
-    "search_mode_switch: {}\n"
+constexpr StringLiteral SearchCaseSensitivityConfig {
+    "{comment} How the find bar compares letters when it opens. One of:\n"
+    "{comment}   smart       -- case-insensitive until the search term contains a capital (default)\n"
+    "{comment}   insensitive -- never case-sensitive\n"
+    "{comment}   sensitive   -- always case-sensitive\n"
+    "{comment} The bar's \"Aa\" button cycles the three at any time; this is only what it starts as.\n"
+    "search_case_sensitivity: {}\n"
     "\n"
 };
 
@@ -1128,9 +1131,8 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - ScrollToBottom    Scrolls to the bottom of the screen buffer.\n"
     "{comment} - ScrollToTop       Scrolls to the top of the screen buffer.\n"
     "{comment} - ScrollUp          Scrolls up by the multiplier factor.\n"
-    "{comment} - SearchReverse     Initiates search mode (starting to search at current cursor position, "
-    "moving "
-    "upwards).\n"
+    "{comment} - SearchReverse     Opens the find bar, searching upwards from the current cursor "
+    "position.\n"
     "{comment} - SendChars         Writes given characters in `chars` member to the applications input.\n"
     "{comment} - SwitchToTab       Switches to the tab position, given by extra parameter \"position\".\n"
     "{comment}                     The positions start at number 1.\n"
@@ -2535,17 +2537,23 @@ constexpr StringLiteral ShowIndicatorOnResizeWeb {
     "\n"
 };
 
-constexpr StringLiteral SearchModeSwitchWeb {
-    "The configuration option determines whether the editor should automatically switch from search mode "
-    "back to insert mode upon exiting a search. If enabled, the terminal will return to insert mode, "
-    "allowing for immediate text input. If disabled, the terminal will remain in normal mode.\n"
+constexpr StringLiteral SearchCaseSensitivityWeb {
+    "Which case policy the find bar opens with.\n"
+    "\n"
+    "- `smart` (default): the search is case-insensitive until the term contains an uppercase "
+    "letter, at which point it becomes exact. So `error` also finds `Error`, while `Error` finds only "
+    "itself. The test is Unicode-aware, so it works for non-Latin scripts too.\n"
+    "- `insensitive`: never case-sensitive.\n"
+    "- `sensitive`: always case-sensitive.\n"
+    "\n"
+    "The find bar's `Aa` button cycles the same three at any time; this only selects the one it "
+    "starts from.\n"
     "``` yaml\n"
     "profiles:\n"
     "  profile_name:\n"
-    "    search_mode_switch: true\n"
+    "    search_case_sensitivity: smart\n"
     "```\n"
     "\n"
-
 };
 
 constexpr StringLiteral InsertAfterYankWeb {
@@ -2623,7 +2631,7 @@ using WindowShadow = DocumentationEntry<WindowShadowConfig, WindowShadowWeb>;
 using DimUnfocused = DocumentationEntry<DimUnfocusedConfig, DimUnfocusedWeb>;
 using ShowIndicatorOnResize = DocumentationEntry<ShowIndicatorOnResizeConfig, ShowIndicatorOnResizeWeb>;
 using Mouse = DocumentationEntry<MouseConfig, MouseWeb>;
-using SearchModeSwitch = DocumentationEntry<SearchModeSwitchConfig, SearchModeSwitchWeb>;
+using SearchCaseSensitivity = DocumentationEntry<SearchCaseSensitivityConfig, SearchCaseSensitivityWeb>;
 using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYankWeb>;
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;

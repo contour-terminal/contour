@@ -13,6 +13,7 @@
 #include <contour/platform/Notifier.hpp>
 #include <contour/session/DisplaySurface.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
+#include <contour/session/SearchStatus.hpp>
 
 #include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/screen/Terminal.hpp>
@@ -26,6 +27,7 @@
 #include <QtCore/QAbstractItemModel>
 #include <QtCore/QFileSystemWatcher>
 #include <QtCore/QThread>
+#include <QtCore/QTimer>
 #include <QtQml/QJSValue>
 
 #include <atomic>
@@ -132,6 +134,20 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
     Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
 
+    // The find bar's state. All four change together -- a new pattern re-tallies, which re-words the
+    // summary and re-decides whether stepping is possible -- so one signal serves them, as the
+    // hyperlink pair above does.
+    Q_PROPERTY(QString searchPattern READ searchPattern NOTIFY searchStateChanged)
+    Q_PROPERTY(QString searchSummary READ searchSummary NOTIFY searchStateChanged)
+    Q_PROPERTY(bool searchHasMatches READ searchHasMatches NOTIFY searchStateChanged)
+    Q_PROPERTY(bool searchNavigable READ searchNavigable NOTIFY searchStateChanged)
+    // The case affordance as what it SHOWS, not as an enumerator QML would have to interpret. The
+    // bar spoke raw ints before and inverted every one of them; a glyph and a lit flag cannot be
+    // read backwards. @see contour::session::describeSearchCase.
+    Q_PROPERTY(QString searchCaseGlyph READ searchCaseGlyph NOTIFY searchStateChanged)
+    Q_PROPERTY(QString searchCaseTooltip READ searchCaseTooltip NOTIFY searchStateChanged)
+    Q_PROPERTY(bool searchCasePinned READ searchCasePinned NOTIFY searchStateChanged)
+
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
   public:
@@ -146,6 +162,83 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// What the hyperlink tooltip should say, or empty for "show nothing".
     [[nodiscard]] QString hyperlinkTooltipText() const noexcept { return _hyperlinkTooltipText; }
+
+    // {{{ Find bar
+    /// The active search pattern, or empty when nothing is being searched for.
+    [[nodiscard]] QString searchPattern() const { return _searchPatternText; }
+
+    /// The label beside the field: "3 of 27", "No results", "" while idle.
+    [[nodiscard]] QString searchSummary() const { return _searchSummary; }
+
+    /// Whether the active pattern matches anything. Drives the field's error tint.
+    [[nodiscard]] bool searchHasMatches() const noexcept
+    {
+        return _searchStatus.outcome != SearchOutcome::NoMatch;
+    }
+
+    /// Whether previous/next would go anywhere. @see MatchNavigation.
+    [[nodiscard]] bool searchNavigable() const noexcept
+    {
+        return _searchStatus.navigation == MatchNavigation::Available;
+    }
+
+    [[nodiscard]] QString searchCaseGlyph() const
+    {
+        return QString::fromUtf8(_searchCase.glyph.data(), qsizetype(_searchCase.glyph.size()));
+    }
+    [[nodiscard]] QString searchCaseTooltip() const { return _searchCaseTooltip; }
+    [[nodiscard]] bool searchCasePinned() const noexcept { return _searchCase.pinned == CasePinned::Yes; }
+
+    /// Installs @p pattern as the search term and moves to its nearest match, live as the user types.
+    Q_INVOKABLE void setSearchPattern(QString const& pattern);
+
+    /// Moves to the next case policy and re-runs the search in place. @see nextSearchCase.
+    Q_INVOKABLE void cycleSearchCaseSensitivity();
+
+    /// The find bar opened, or closed. Told rather than inferred: only the bar knows, and a tally is
+    /// worth computing only while something displays it.
+    Q_INVOKABLE void searchBarOpened();
+    Q_INVOKABLE void searchBarClosed();
+
+    /// Steps to the next/previous match, updating the summary's ordinal.
+    Q_INVOKABLE void searchNext();
+    Q_INVOKABLE void searchPrevious();
+
+    /// Re-reads the tally and re-derives the summary. Called after anything that can change either.
+    void refreshSearchStatus();
+
+  private:
+    /// Which end of the scrollback a wrapped search restarts from.
+    enum class SearchWrapEdge : uint8_t
+    {
+        Top,    ///< Next-match ran off the bottom; resume at the oldest line.
+        Bottom, ///< Previous-match ran off the top; resume at the newest line.
+    };
+
+    /// The half of refreshSearchStatus() that reads the terminal, for callers already holding its
+    /// lock -- so typing does not take the lock twice and walk the grid twice per keystroke.
+    void refreshSearchStatusLocked();
+
+    /// Renders @p status as the label the bar shows, translated.
+    ///
+    /// Here rather than in SearchStatus.hpp because tr() needs a QObject: that header decides WHICH
+    /// thing to say, which is the part with rules worth testing, and this turns it into words.
+    [[nodiscard]] QString renderSearchSummary(SearchStatus const& status) const;
+
+    /// The case toggle's tooltip for @p mode, translated. @see describeSearchCase for the glyph.
+    [[nodiscard]] QString renderSearchCaseTooltip(vtbackend::SearchCaseSensitivity mode) const;
+
+    /// Arms the debounced tally. @see setSearchPattern for why counting is not done inline.
+    void scheduleSearchTally();
+
+    /// Restarts the search from @p edge, which is how the find bar wraps. @see searchNext.
+    void wrapSearchTo(SearchWrapEdge edge);
+
+    /// One step of the find bar's navigation, wrapping at @p edge when it cannot go further.
+    void stepSearch(SearchWrapEdge edge);
+
+  public:
+    // }}}
 
     /// The cell the pointer entered the hyperlink at, in the display's item-local logical coordinates.
     ///
@@ -573,6 +666,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void setTerminalProfile(std::string const& configProfileName) override;
     void discardImage(vtbackend::Image const&) override;
     void inputModeChanged(vtbackend::ViMode mode) override;
+    void searchPromptRequested() override;
+    void searchCleared() override;
     void updateHighlights() override;
     void playSound(vtbackend::Sequence::Parameters const& params) override;
     void requestShowHostWritableStatusLine() override;
@@ -792,6 +887,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
   signals:
     void hyperlinkHoverChanged();
+    /// The find bar should open and take focus. Raised by searchPromptRequested(), the
+    /// vtbackend::Terminal::Events hook -- which cannot itself be the signal, being an override.
+    void searchBarRequested();
+    /// The pattern, its tally, or the case policy changed.
+    void searchStateChanged();
     void sessionClosed(TerminalSession&);
     void profileNameChanged(QString newValue);
     void lineCountChanged(int newValue);
@@ -982,6 +1082,32 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::unique_ptr<platform::Announcer> _announcer = std::make_unique<platform::NullAnnouncer>();
     QString _hyperlinkTooltipText;
     QRectF _hyperlinkTooltipAnchor;
+
+    /// What the find bar currently shows, re-derived by refreshSearchStatus().
+    SearchStatus _searchStatus;
+    SearchCaseAffordance _searchCase = describeSearchCase(vtbackend::SearchCaseSensitivity::Smart);
+    QString _searchPatternText;
+    QString _searchSummary;
+    QString _searchCaseTooltip;
+    /// Coalesces re-tallying while output keeps arriving: a tally walks the whole scrollback, so it
+    /// must never run once per frame. Armed by screenUpdated(), and only while the bar is open.
+    QTimer _searchTallyTimer;
+    /// Whether the find bar is open. Two things read it: whether a tally is worth computing at all,
+    /// and whether new output may auto-scroll the viewport back to the bottom -- the bar being open
+    /// means the user is reading something they went looking for. @see screenUpdated.
+    /// Atomic: written on the GUI thread, read by screenUpdated() on the parser thread.
+    std::atomic<bool> _isSearchBarOpen { false };
+    /// Whether the viewport was last moved to show a search match rather than by new output.
+    ///
+    /// The bar-closed half of the same rule @c _isSearchBarOpen carries: F3/Shift+F3 are bound to the
+    /// Search match mode, which is "a pattern is set" and therefore outlives the bar, so a match can be
+    /// stepped to with nothing on screen to say the user is searching. Set by the two
+    /// Focus*SearchMatch actions before they step, and cleared by screenUpdated() the moment the
+    /// viewport is back at the bottom -- so following the output again is all it takes to un-park it.
+    /// Atomic for the same reason as above.
+    std::atomic<bool> _searchMatchRevealed { false };
+    /// Collapses repeat re-arm posts to at most one in flight, as _cursorMovedPostPending does.
+    std::atomic_flag _searchTallyPostPending = ATOMIC_FLAG_INIT;
 
     vtbackend::Terminal _terminal;
     bool _terminatedAndWaitingForKeyPress = false;

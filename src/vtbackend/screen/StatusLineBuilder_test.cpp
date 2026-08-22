@@ -122,11 +122,15 @@ TEST_CASE("serializeStatusLineSegment.roundTripsShippedDefaults", "[statusline]"
         " {InputMode:Bold,Color=#FFFF00}"
         "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
         "{Tabs:ActiveColor=#FFFF00,Left= │ }"
-        "{ProtectedMode:Bold,Left= │ }"
-        "{SearchPrompt:Left= │ }"sv,
+        "{ProtectedMode:Bold,Left= │ }"sv,
         "« {Title} »"sv,
         "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}"sv,
     };
+
+    // {SearchPrompt} is deliberately absent above: the find bar shows the same text, so it left the
+    // shipped default. The item still parses and still round-trips, which is what this covers.
+    CHECK(shapeOf(parseStatusLineSegment(canonical("{SearchPrompt:Left= │ }"sv)))
+          == shapeOf(parseStatusLineSegment("{SearchPrompt:Left= │ }"sv)));
 
     for (auto const& original: defaults)
     {

@@ -301,6 +301,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/Main.qml
         qml/BellSound.qml
         qml/RequestPermission.qml
+        qml/SearchBar.qml
         qml/SessionChrome.qml
         qml/TitleBar.qml
         qml/TabStrip.qml
@@ -793,8 +794,11 @@ if(CONTOUR_TESTING)
         cli/CaptureScreen_test.cpp
         cli/CatImageArgs_test.cpp
         cli/ShellIntegration_test.cpp
+        session/SearchStatus_test.cpp
     )
-    target_link_libraries(contour_test PRIVATE contour_command contour_cli Catch2::Catch2)
+    # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally, and
+    # testing it HERE rather than in contour_gui_test is what proves it needs no Qt to reach.
+    target_link_libraries(contour_test PRIVATE contour_command contour_cli vtbackend Catch2::Catch2)
     target_include_directories(contour_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.

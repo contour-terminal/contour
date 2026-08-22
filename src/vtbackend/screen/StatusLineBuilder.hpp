@@ -207,7 +207,7 @@ namespace StatusLineDefinitions
     { static constexpr std::string_view Name = "SearchMode", Label = "Search mode", Sample = "SEARCH"; };
 
     template <> struct ItemTraits<SearchPrompt>
-    { static constexpr std::string_view Name = "SearchPrompt", Label = "Search prompt", Sample = "/needle"; };
+    { static constexpr std::string_view Name = "SearchPrompt", Label = "Search prompt", Sample = "Search: needle"; };
 
     template <> struct ItemTraits<HistoryLineCount>
     { static constexpr std::string_view Name = "HistoryLineCount", Label = "Scrollback position", Sample = "0/1000"; };

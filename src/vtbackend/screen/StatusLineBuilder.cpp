@@ -426,7 +426,7 @@ namespace
 
         std::string visit(StatusLineDefinitions::SearchMode const&)
         {
-            if (!vt.search().pattern.empty() || vt.inputHandler().isEditingSearch())
+            if (!vt.search().pattern.empty())
                 return " SEARCH";
 
             return {};
@@ -434,11 +434,14 @@ namespace
 
         std::string visit(StatusLineDefinitions::SearchPrompt const&)
         {
-            if (vt.inputHandler().isEditingSearch())
-                return std::format("Search: {}█",
-                                   unicode::convert_to<char>(std::u32string_view(vt.search().pattern)));
+            // A read-only echo of the active pattern, not an edit field any more: search is typed
+            // into the find bar now. The block character this used to append was a drawn stand-in for
+            // a caret, and echoing one where nothing can be typed would only mislead.
+            if (vt.search().pattern.empty())
+                return {};
 
-            return {};
+            return std::format("Search: {}",
+                               unicode::convert_to<char>(std::u32string_view(vt.search().pattern)));
         }
 
         std::string visit(StatusLineDefinitions::Command const& item)

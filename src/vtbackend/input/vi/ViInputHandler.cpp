@@ -30,38 +30,6 @@ namespace vtbackend
 // [ ] show cursor if it was hidden and restore it when going back to insert mode
 // [ ] remember initial cursor shae and restore it when going back to insert mode
 
-namespace
-{
-    struct InputMatch
-    {
-        // ViMode mode; // TODO: ideally we also would like to match on input Mode
-        Modifiers modifiers;
-        char32_t ch;
-
-        /// Packs modifiers and character into a single value, so that chords can be switch()ed on.
-        /// No masking is needed: Modifiers is chord-only, ChordModifierBitWidth is derived from the
-        /// chord-modifier table, and lock keys are a distinct type that cannot reach this handler. A
-        /// modifier packed above the shift would alias onto the unmodified key -- that is how Meta
-        /// silently matched a bare Backspace before, so assert the packing is lossless rather than
-        /// trust that every Modifier enumerator made it into the table.
-        constexpr operator uint32_t() const noexcept
-        {
-            assert(AllChordModifiers.contains(modifiers));
-            return (uint32_t(ch) << ChordModifierBitWidth) | uint32_t(modifiers.value());
-        }
-    };
-
-    constexpr InputMatch operator""_key(char ch)
-    {
-        return InputMatch { .modifiers = Modifier::None, .ch = static_cast<char32_t>(ch) };
-    }
-
-    constexpr InputMatch operator|(Modifier modifier, char ch) noexcept
-    {
-        return InputMatch { .modifiers = Modifiers { modifier }, .ch = static_cast<char32_t>(ch) };
-    }
-} // namespace
-
 ViInputHandler::ViInputHandler(Executor& theExecutor, ViMode initialMode):
     _viMode { initialMode }, _executor { &theExecutor }
 {
@@ -332,32 +300,16 @@ void ViInputHandler::setMode(ViMode theMode)
     _viMode = theMode;
     clearPendingInput();
 
+    // No search-clearing here: ViCommands::modeChanged() has already called Terminal::clearSearch()
+    // for Insert by the time this returns, and re-running an empty search on top of that only moved
+    // the viewport for no reason.
     _executor->modeChanged(theMode);
-
-    // clear search term when switching to insert mode
-    if (_viMode == ViMode::Insert)
-        clearSearch();
 }
 
 // Precondition: `modifiers` arrives as a pure chord, with the lock modifiers (CapsLock/NumLock)
 // already stripped by Terminal::sendKeyEvent(). The exact-match logic below relies on that.
 Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
-    if (_searchEditMode != PromptMode::Disabled)
-    {
-        if (eventType == KeyboardEventType::Release)
-            return Handled { true };
-        // TODO: support cursor movements.
-        switch (key)
-        {
-            case Key::Backspace: return handleSearchEditor('\x08', modifiers);
-            case Key::Enter: return handleSearchEditor('\x0D', modifiers);
-            case Key::Escape: return handleSearchEditor('\x1B', modifiers);
-            default: break;
-        }
-        return Handled { true };
-    }
-
     // clang-format off
     switch (_viMode)
     {
@@ -446,105 +398,10 @@ Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, Keyboard
     return Handled { true };
 }
 
-void ViInputHandler::startSearchExternally()
-{
-    _searchTerm.clear();
-    _executor->searchStart();
-
-    if (_viMode != ViMode::Insert)
-        _searchEditMode = PromptMode::Enabled;
-    else
-    {
-        _searchEditMode = PromptMode::ExternallyEnabled;
-        setMode(ViMode::Normal);
-        // ^^^ So that we can see the statusline (which contains the search edit field),
-        // AND it's weird to be in insert mode while typing in the search term anyways.
-    }
-}
-
-static auto handleEditor(char32_t ch,
-                         Modifiers modifiers,
-                         auto& where,
-                         PromptMode& promptEditMode,
-                         auto& settings,
-                         auto setViMode,
-                         auto cancel,
-                         auto done,
-                         auto update)
-{
-    switch (InputMatch { .modifiers = modifiers, .ch = ch })
-    {
-        case '\x1B'_key: {
-            where.clear();
-            if (promptEditMode == PromptMode::ExternallyEnabled)
-                setViMode(ViMode::Insert);
-            promptEditMode = PromptMode::Enabled;
-            cancel();
-            update(where);
-        }
-        break;
-        case '\x0D'_key: {
-            if (settings.fromSearchIntoInsertMode && promptEditMode == PromptMode::ExternallyEnabled)
-                setViMode(ViMode::Insert);
-            promptEditMode = PromptMode::Disabled;
-            done();
-        }
-        break;
-        case '\x08'_key:
-        case '\x7F'_key:
-            if (!where.empty())
-                where.resize(where.size() - 1);
-            update(where);
-            break;
-        case Modifier::Control | 'L':
-        case Modifier::Control | 'U':
-            where.clear();
-            update(where);
-            break;
-        case Modifier::Control | 'A': // TODO: move cursor to BOL
-        case Modifier::Control | 'E': // TODO: move cursor to EOL
-        default:
-            if (ch >= 0x20 && modifiers.without(Modifier::Shift).none())
-            {
-                where += ch;
-                update(where);
-            }
-            else
-                errorLog()("ViInputHandler: Receiving control code {}+0x{:02X} in search mode. Ignoring.",
-                           modifiers,
-                           (unsigned) ch);
-    }
-}
-
-Handled ViInputHandler::handleSearchEditor(char32_t ch, Modifiers modifiers)
-{
-    assert(_searchEditMode != PromptMode::Disabled);
-
-    handleEditor(
-        ch,
-        modifiers,
-        _searchTerm,
-        _searchEditMode,
-        _settings,
-        [&](auto mode) { setMode(mode); },
-        [&]() { _executor->searchCancel(); },
-        [&]() { _executor->searchDone(); },
-        [&](auto const& val) { _executor->updateSearchTerm(val); });
-
-    return Handled { true };
-}
-
 // Precondition: `modifiers` arrives as a pure chord, with the lock modifiers (CapsLock/NumLock)
 // already stripped by Terminal::sendCharEvent(). The exact-match logic below relies on that.
 Handled ViInputHandler::sendCharPressEvent(char32_t ch, Modifiers modifiers, KeyboardEventType eventType)
 {
-    if (_searchEditMode != PromptMode::Disabled)
-    {
-        if (eventType == KeyboardEventType::Release)
-            return Handled { true };
-        return handleSearchEditor(ch, modifiers);
-    }
-
     if (_viMode == ViMode::Insert)
         return Handled { false };
 
@@ -626,24 +483,12 @@ bool ViInputHandler::parseCount(char32_t ch, Modifiers modifiers)
 
 void ViInputHandler::startSearch()
 {
-    _searchEditMode = PromptMode::Enabled;
     _executor->searchStart();
 }
 
 void ViInputHandler::toggleMode(ViMode newMode)
 {
     setMode(newMode != _viMode ? newMode : ViMode::Normal);
-}
-
-void ViInputHandler::setSearchModeSwitch(bool enabled)
-{
-    _settings.fromSearchIntoInsertMode = enabled;
-}
-
-void ViInputHandler::clearSearch()
-{
-    _searchTerm.clear();
-    _executor->updateSearchTerm(_searchTerm);
 }
 
 } // namespace vtbackend

@@ -1157,7 +1157,7 @@ void Terminal::updateSelectionMatches()
 
     auto const text = extractSelectionText();
     auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
-    setNewSearchTerm(text32, true);
+    setNewSearchTerm(text32, SearchOrigin::DoubleClick);
 }
 
 void Terminal::setStatusLineDefinition(StatusLineDefinition&& definition)
@@ -1217,7 +1217,7 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
     switch (_speedClicks)
     {
         case 1:
-            if (_search.initiatedByDoubleClick)
+            if (_search.origin == SearchOrigin::DoubleClick)
                 clearSearch();
             clearSelection();
             if (modifiers == _settings.mouseBlockSelectionModifiers)
@@ -1501,13 +1501,9 @@ void Terminal::sendPaste(string_view text)
     if (!allowInput())
         return;
 
-    if (_inputHandler.isEditingSearch())
-    {
-        _search.pattern += unicode::convert_to<char32_t>(text);
-        screenUpdated();
-        return;
-    }
-
+    // No branch for "is the user typing a search term": the find bar owns a real text field, which
+    // handles its own clipboard. Appending here is what used to corrupt the pattern, since it wrote
+    // past the edit buffer the prompt was actually rendering from.
     _inputGenerator.generatePaste(text);
     flushInput();
 }
@@ -1516,14 +1512,6 @@ void Terminal::sendRawInput(string_view text)
 {
     if (!allowInput())
         return;
-
-    if (_inputHandler.isEditingSearch())
-    {
-        inputLog()("Sending raw input to search input: {}", crispy::escape(text));
-        _search.pattern += unicode::convert_to<char32_t>(text);
-        screenUpdated();
-        return;
-    }
 
     inputLog()("Sending raw input to stdin: {}", crispy::escape(text));
     _inputGenerator.generateRaw(text);
@@ -5115,20 +5103,37 @@ void Terminal::setAllowInput(bool enabled)
     setMode(AnsiMode::KeyboardAction, !enabled);
 }
 
-bool Terminal::setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick)
+bool Terminal::setNewSearchTerm(std::u32string text, SearchOrigin origin)
 {
-    _search.initiatedByDoubleClick = initiatedByDoubleClick;
+    _search.origin = origin;
 
     if (_search.pattern == text)
         return false;
 
     _search.pattern = std::move(text);
+    _search.comparison = caseComparisonFor(_search.pattern, _search.caseSensitivity);
     return true;
+}
+
+bool Terminal::setSearchCaseSensitivity(SearchCaseSensitivity mode)
+{
+    if (_search.caseSensitivity == mode)
+        return false;
+
+    _search.caseSensitivity = mode;
+    _search.comparison = caseComparisonFor(_search.pattern, mode);
+    return true;
+}
+
+SearchMatchTally Terminal::tallySearchMatches(CellLocation position, size_t limit)
+{
+    return currentScreen().tallyMatches(
+        u32string_view(_search.pattern), position, _search.caseSensitivity, limit);
 }
 
 optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)
 {
-    if (!setNewSearchTerm(std::move(text), false))
+    if (!setNewSearchTerm(std::move(text), SearchOrigin::Typed))
         return searchPosition;
 
     return searchReverse(searchPosition);
@@ -5137,7 +5142,10 @@ optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation sear
 optional<CellLocation> Terminal::search(CellLocation searchPosition)
 {
     auto const searchText = u32string_view(_search.pattern);
-    auto const matchLocation = currentScreen().search(searchText, searchPosition);
+    // Through the cached comparison rather than the policy: Search::comparison is kept in step with
+    // the pattern by this class's own setters, and re-deriving it here would put a UCD lookup per
+    // codepoint of the needle on every keystroke of an incremental search. @see Search::comparison.
+    auto const matchLocation = currentScreen().searchFrom(searchText, searchPosition, _search.comparison);
 
     if (matchLocation)
         viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
@@ -5177,7 +5185,16 @@ std::optional<CellLocation> Terminal::searchPrevMatch(CellLocation cursorPositio
 void Terminal::clearSearch()
 {
     _search.pattern.clear();
-    _search.initiatedByDoubleClick = false;
+    _search.origin = SearchOrigin::Typed;
+    // Kept in step with the (now empty) pattern by the same rule the setters use, rather than pinned
+    // to a constant: an empty needle under a pinned Sensitive policy still compares exactly.
+    _search.comparison = caseComparisonFor(_search.pattern, _search.caseSensitivity);
+
+    // The highlights of the pattern just dropped are still in the render buffer, and nothing on this
+    // path rebuilds it -- unlike search()/searchReverse(). Raised as its own event rather than as
+    // screenUpdated(), whose auto-scroll would additionally yank the viewport to the bottom and lose
+    // whatever the user had scrolled back to read.
+    _eventListener.searchCleared();
 }
 
 bool Terminal::wordDelimited(CellLocation position) const noexcept
@@ -5204,7 +5221,9 @@ std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
 optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 {
     auto const searchText = u32string_view(_search.pattern);
-    auto const matchLocation = currentScreen().searchReverse(searchText, searchPosition);
+    // The cached comparison, for the reason Terminal::search() states.
+    auto const matchLocation =
+        currentScreen().searchReverseFrom(searchText, searchPosition, _search.comparison);
 
     if (matchLocation)
         viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
