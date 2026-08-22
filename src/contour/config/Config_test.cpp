@@ -4032,8 +4032,7 @@ color_schemes:
     }
 }
 
-TEST_CASE("Config: resolveSessionConfig defaults match a profile that sets nothing explicitly",
-          "[config]")
+TEST_CASE("Config: resolveSessionConfig defaults match a profile that sets nothing explicitly", "[config]")
 {
     // escape_sandbox defaults to true (DaemonConfig's own prior default), so a profile that says
     // nothing about it must not regress to false.

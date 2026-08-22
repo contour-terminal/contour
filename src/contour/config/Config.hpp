@@ -2253,8 +2253,8 @@ void compareEntries(Config& config, auto const& output);
 /// Picks the color palette @p colorConfig yields for @p preference: the matching half of a dual
 /// (dark/light) config, or the single palette of a simple one.
 /// @return The palette, or nullptr if @p colorConfig holds neither known alternative.
-[[nodiscard]] vtbackend::ColorPalette const* preferredColorPalette(
-    ColorConfig const& colorConfig, vtbackend::ColorPreference preference);
+[[nodiscard]] vtbackend::ColorPalette const* preferredColorPalette(ColorConfig const& colorConfig,
+                                                                   vtbackend::ColorPreference preference);
 
 /// Everything a HOSTED session needs beyond @ref emulationSettings: the shell to run, whether it
 /// escapes its sandbox, and the presentation fields (cursor, status line, scrolling, colors, ...)

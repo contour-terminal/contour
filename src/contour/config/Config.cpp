@@ -510,8 +510,8 @@ namespace
     ///         hosting sessions under a profile the user did not name is a misconfiguration they
     ///         would discover only much later, through the wrong scrollback depth or the wrong
     ///         reported terminal.
-    [[nodiscard]] std::expected<LoadedProfile, std::string> loadAndFindProfile(
-        std::string const& configPath, std::string const& profileName)
+    [[nodiscard]] std::expected<LoadedProfile, std::string> loadAndFindProfile(std::string const& configPath,
+                                                                               std::string const& profileName)
     {
         auto loaded = Config {};
         try
@@ -614,8 +614,7 @@ ResolvedSessionConfig resolvedSessionConfig(Config const& config,
         // references it names how tabs are indexed.
         auto const& indicator = profile.statusLine.value().indicator;
         auto const segments = std::array { &indicator.left, &indicator.middle, &indicator.right };
-        auto const it =
-            std::ranges::find_if(segments, [](auto const* s) { return s->contains("Tabs"); });
+        auto const it = std::ranges::find_if(segments, [](auto const* s) { return s->contains("Tabs"); });
         if (it == segments.end())
             return vtbackend::TabsNamingMode::Indexing;
         std::string_view const segment = **it;
@@ -656,7 +655,7 @@ ResolvedSessionConfig resolvedSessionConfig(Config const& config,
 }
 
 std::expected<ResolvedSessionConfig, std::string> resolveSessionConfig(std::string const& configPath,
-                                                                        std::string const& profileName)
+                                                                       std::string const& profileName)
 {
     return loadAndFindProfile(configPath, profileName).transform([](LoadedProfile const& loaded) {
         // No dark/light preference to honor headlessly: a daemon presents nothing itself, so its

@@ -91,8 +91,8 @@ namespace
         for (auto const& [name, value]: hostedShellEnvironment(socketPath))
             shell.env.insert_or_assign(name, value);
 
-        return [shell = std::move(shell), escapeSandbox](vtbackend::PageSize pageSize)
-                   -> std::unique_ptr<vtpty::Pty> {
+        return [shell = std::move(shell),
+                escapeSandbox](vtbackend::PageSize pageSize) -> std::unique_ptr<vtpty::Pty> {
             return std::make_unique<vtpty::Process>(
                 shell, vtpty::createPty(pageSize, std::nullopt), escapeSandbox);
         };

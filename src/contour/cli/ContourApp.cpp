@@ -698,9 +698,8 @@ int ContourApp::daemonAction()
     // is also, deliberately, the ONE place a daemon's hosted sessions get their shell and
     // presentation from: a profile the user named must not be silently overridden by the bare OS
     // login shell -- @see the contour daemon / contour client profile-resolution issue.
-    auto const resolved =
-        config::resolveSessionConfig(parameters().get<string>("contour.daemon.config"),
-                                     parameters().get<string>("contour.daemon.profile"));
+    auto const resolved = config::resolveSessionConfig(parameters().get<string>("contour.daemon.config"),
+                                                       parameters().get<string>("contour.daemon.profile"));
     if (!resolved)
     {
         cerr << std::format("contour daemon: {}\n", resolved.error());
