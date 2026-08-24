@@ -44,7 +44,10 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <variant>
 
@@ -357,6 +360,48 @@ std::string registerProfile(contour::ContourGuiApp& app, std::string const& name
         std::make_unique<vtpty::MockPty>(vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) });
     return std::make_unique<contour::session::TerminalSession>(
         &app.sessionsManager(), std::move(pty), app, std::move(profileName));
+}
+
+/// A session with a recording surface attached, so the two die together and in the right order.
+struct SessionWithSurface
+{
+    std::unique_ptr<contour::session::TerminalSession> session;
+    std::unique_ptr<contour::test::FakeDisplaySurface> surface;
+
+    contour::session::TerminalSession* operator->() const noexcept { return session.get(); }
+    contour::session::TerminalSession& operator*() const noexcept { return *session; }
+
+    ~SessionWithSurface()
+    {
+        // The session outlives nothing here, but it holds a raw back-pointer to the surface: detach
+        // first so a destructor-time post cannot reach freed memory.
+        if (session && surface && session->display() == surface.get())
+            session->detachDisplay(*surface);
+    }
+
+    SessionWithSurface(SessionWithSurface const&) = delete;
+    SessionWithSurface& operator=(SessionWithSurface const&) = delete;
+    SessionWithSurface(SessionWithSurface&&) = default;
+    SessionWithSurface& operator=(SessionWithSurface&&) = delete;
+
+    SessionWithSurface(std::unique_ptr<contour::session::TerminalSession> s,
+                       std::unique_ptr<contour::test::FakeDisplaySurface> d):
+        session { std::move(s) }, surface { std::move(d) }
+    {
+    }
+};
+
+/// Builds a MockPty-backed session with a recording surface already attached.
+/// @param profileName A profile registered via registerProfile(); absent takes the app's default one.
+[[nodiscard]] SessionWithSurface makeSessionWithSurface(contour::ContourGuiApp& app,
+                                                        std::optional<std::string> profileName = std::nullopt)
+{
+    auto session =
+        profileName ? makeSessionWithProfile(app, *std::move(profileName)) : makeDisplaylessSession(app);
+    auto surface = std::make_unique<contour::test::FakeDisplaySurface>();
+    surface->attachedSession = session.get();
+    session->attachDisplay(*surface);
+    return { std::move(session), std::move(surface) };
 }
 
 } // namespace
@@ -846,6 +891,102 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
     session->pasteFromClipboard(1, false);
     CHECK(permissionRequests == 1);
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
+
+    // "Yes to all" applies the paste and stores the verdict — and (#2089) the next big paste must resolve
+    // from that memory rather than asking a second time. Only requestPermission() reads the remembered
+    // answer, so a bare emit here would ask again forever.
+    session->applyPendingPaste(/*allow=*/true, /*remember=*/true);
+    CHECK(mockPtyOf(*session).stdinBuffer().contains("yyy"));
+
+    mockPtyOf(*session).stdinBuffer().clear();
+    session->pasteFromClipboard(1, false);
+    CHECK(permissionRequests == 1);
+    CHECK(mockPtyOf(*session).stdinBuffer().contains("yyy"));
+
+    clipboard->clear();
+}
+
+TEST_CASE("TerminalSession: an approved large paste sends what was approved, not what the clipboard "
+          "holds later",
+          "[contour][session][clipboard][permission]")
+{
+    // A >512 KB paste is held until the user answers, and the answer applies to the payload that was
+    // measured and shown — not to a fresh read of the clipboard, which may hold something else by then.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto* clipboard = QGuiApplication::clipboard();
+    REQUIRE(clipboard != nullptr);
+
+    SECTION("the payload is normalized the same way a small paste is")
+    {
+        // A large paste must be normalized exactly as the immediate path normalizes a small one: under
+        // bracketed paste a stray CR reads as Enter, so a CRLF script that skipped the normalization
+        // would EXECUTE line by line instead of being inserted. What that normalization *does* is
+        // platform-dependent -- on Windows the clipboard resolves CRLF itself, so normalizeCrlf() is
+        // deliberately a no-op there -- so the small paste establishes the expectation rather than a
+        // hard-coded string.
+        auto const line = QStringLiteral("echo hello\r\n");
+
+        clipboard->setText(line);
+        session->pasteFromClipboard(1, /*strip=*/false);
+        auto const smallPaste = mockPtyOf(*session).stdinBuffer();
+        REQUIRE_FALSE(smallPaste.empty());
+
+        // Sized against the *normalized* line: normalization runs before the soft limit is measured, so
+        // a count derived from the CRLF length lands under that limit wherever CRLF becomes LF -- and
+        // the paste would take the immediate path, leaving the deferred one untested.
+        auto const repeats = static_cast<int>(((size_t { 1024 } * 512) / smallPaste.size()) + 1);
+        mockPtyOf(*session).stdinBuffer().clear();
+        clipboard->setText(line.repeated(repeats));
+        session->pasteFromClipboard(1, /*strip=*/false);
+        REQUIRE(mockPtyOf(*session).stdinBuffer().empty()); // held for the verdict, not sent
+
+        session->applyPendingPaste(/*allow=*/true, /*remember=*/false);
+
+        auto expected = std::string {};
+        expected.reserve(smallPaste.size() * static_cast<size_t>(repeats));
+        for ([[maybe_unused]] auto const _: std::views::iota(0, repeats))
+            expected += smallPaste;
+
+        auto const& written = mockPtyOf(*session).stdinBuffer();
+        CHECK(written.size() == expected.size());
+        // Parenthesized so Catch2 reports a bare false: decomposing this would print both operands, and
+        // both are half a megabyte of shell script.
+        CHECK((written == expected));
+    }
+
+    SECTION("swapping the clipboard while the dialog is up does not swap the paste")
+    {
+        clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
+        session->pasteFromClipboard(1, /*strip=*/false);
+
+        // The user is looking at a dialog about the 'y' payload; something else lands on the clipboard.
+        clipboard->setText(QStringLiteral("substituted"));
+        session->applyPendingPaste(/*allow=*/true, /*remember=*/false);
+
+        auto const& written = mockPtyOf(*session).stdinBuffer();
+        CHECK(written.contains("yyy"));
+        CHECK_FALSE(written.contains("substituted"));
+    }
+
+    SECTION("a remembered refusal keeps refusing")
+    {
+        auto asks = 0;
+        QObject::connect(session.get(),
+                         &contour::session::TerminalSession::requestPermissionForPasteLargeFile,
+                         [&asks] { ++asks; });
+
+        clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
+        session->pasteFromClipboard(1, /*strip=*/false);
+        REQUIRE(asks == 1);
+
+        session->applyPendingPaste(/*allow=*/false, /*remember=*/true);
+        CHECK(mockPtyOf(*session).stdinBuffer().empty());
+
+        session->pasteFromClipboard(1, /*strip=*/false);
+        CHECK(asks == 1); // remembered: no second dialog
+        CHECK(mockPtyOf(*session).stdinBuffer().empty());
+    }
 
     clipboard->clear();
 }
@@ -2178,23 +2319,236 @@ TEST_CASE("TerminalSession: openDocument routes through the injected external la
     CHECK_FALSE(launcher.openedUrls.back().isLocalFile());
 }
 
-TEST_CASE("TerminalSession: config-driven permissions resolve without asking the user",
+TEST_CASE("TerminalSession: a pre-allowed change_font applies without asking the user",
           "[contour][session][permission]")
 {
-    // A profile that pre-allows ChangeFont and denies CaptureBuffer drives the requestPermission
-    // Allow/Deny branches straight to executeRole — no permission dialog signal is emitted.
+    // A profile that pre-allows ChangeFont drives requestPermission's Allow branch straight to
+    // executeRole — no permission dialog signal is emitted.
     contour::test::TestApp testApp;
     auto const profileName = registerProfile(testApp.app(), "perm", [](contour::config::TerminalProfile& p) {
         p.permissions.value().changeFont = contour::config::Permission::Allow;
-        p.permissions.value().captureBuffer = contour::config::Permission::Deny;
     });
     auto session = makeSessionWithProfile(testApp.app(), profileName);
     namespace actions = contour::actions;
 
-    // A font-change action with a pre-allowed permission applies without asking (no crash, no dialog).
     CHECK_NOTHROW((*session)(actions::ResetFontSize {}));
-    // Requesting a capture with a config-denied permission resolves to the deny path.
-    CHECK_NOTHROW(session->executePendingBufferCapture(false, false));
+}
+
+namespace
+{
+
+/// The line sessionCapturing() puts on the screen, the APC introducer a capture reply opens with, and
+/// the empty terminating chunk that closes EVERY reply — including a refused one, which consists of
+/// nothing else. Spelled out rather than derived from @c vtbackend::CaptureBufferCode, so a test pins
+/// the bytes that go on the wire. @see docs/vt-extensions/buffer-capture.md
+constexpr auto SeededLine = std::string_view { "capture me" };
+constexpr auto CaptureReplyMarker = std::string_view { "\033^314;" };
+constexpr auto CaptureReplyTerminator = std::string_view { "\033^314;\033\\" };
+
+/// Builds a session whose profile answers capture_buffer with @p permission, with a recording surface
+/// attached — requestCaptureBuffer() early-returns without a display, so the gate is only reachable
+/// with one. The screen is seeded and the PTY buffer cleared, so what a test reads back afterwards is
+/// the capture and nothing else.
+[[nodiscard]] SessionWithSurface sessionCapturing(contour::ContourGuiApp& app,
+                                                  contour::config::Permission permission)
+{
+    auto const name = registerProfile(app, "capture-perm", [permission](contour::config::TerminalProfile& p) {
+        p.permissions.value().captureBuffer = permission;
+    });
+    auto held = makeSessionWithSurface(app, name);
+    held->terminal().writeToScreen(std::format("{}\r\n", SeededLine));
+    mockPtyOf(*held).stdinBuffer().clear();
+    return held;
+}
+
+/// Asks @p session to capture its whole page — the seeded line sits at the top, and a capture is
+/// counted from the page's bottom upwards, so a shorter request would take only blank lines.
+void captureWholePage(contour::session::TerminalSession& session)
+{
+    session.requestCaptureBuffer(session.terminal().pageSize().lines, /*logical=*/false);
+}
+
+/// Whether @p session's PTY holds a capture of the seeded screen. Both halves matter: capturing an
+/// empty region still emits the closing marker, so the marker alone would not tell a capture that
+/// carried the screen from one that carried nothing.
+[[nodiscard]] bool capturedSeededScreen(contour::session::TerminalSession& session)
+{
+    auto const& written = mockPtyOf(session).stdinBuffer();
+    return written.contains(CaptureReplyMarker) && written.contains(SeededLine);
+}
+
+/// How many (non-overlapping) times @p needle occurs in @p haystack.
+[[nodiscard]] size_t countOccurrences(std::string_view haystack, std::string_view needle)
+{
+    auto found = size_t { 0 };
+    for (auto at = haystack.find(needle); at != std::string_view::npos;
+         at = haystack.find(needle, at + needle.size()))
+        ++found;
+    return found;
+}
+
+/// XTCAPTURE for the whole page: `CSI > Ps ; Ps , t`, physical lines, count defaulted to the page.
+/// The ',' intermediate is load-bearing — the bare `CSI > Ps ; Ps t` is xterm's XTSMTITLE.
+constexpr auto CaptureWholePageSequence = std::string_view { "\033[>0,t" };
+
+/// Counts the buffer-capture permission dialogs @p session raises into @p asks. The connection lives
+/// with the session, which every caller outlives.
+void countCaptureAsks(contour::session::TerminalSession& session, int& asks)
+{
+    QObject::connect(
+        &session, &contour::session::TerminalSession::requestPermissionForBufferCapture, [&asks] { ++asks; });
+}
+
+} // namespace
+
+TEST_CASE("TerminalSession: the configured capture_buffer permission decides the request",
+          "[contour][session][permission]")
+{
+    // The regression behind #2089: requestCaptureBuffer() emitted the dialog signal directly instead of
+    // going through requestPermission(), so neither the configured permission nor the remembered answer
+    // was ever consulted. These drive requestCaptureBuffer() — the function that skipped the gate —
+    // rather than executePendingBufferCapture(), which is the executor *after* it.
+    contour::test::TestApp testApp;
+    auto asks = 0;
+
+    SECTION("deny refuses the request without asking, but still terminates the reply")
+    {
+        auto held = sessionCapturing(testApp.app(), contour::config::Permission::Deny);
+        countCaptureAsks(*held, asks);
+
+        captureWholePage(*held);
+
+        CHECK(asks == 0);
+        // Refused, so the screen must not be on the wire — but the empty terminating chunk must be, or a
+        // client reading until it blocks forever. @see docs/vt-extensions/buffer-capture.md
+        CHECK_FALSE(mockPtyOf(*held).stdinBuffer().contains(SeededLine));
+        CHECK(mockPtyOf(*held).stdinBuffer() == CaptureReplyTerminator);
+    }
+
+    SECTION("allow captures without asking")
+    {
+        auto held = sessionCapturing(testApp.app(), contour::config::Permission::Allow);
+        countCaptureAsks(*held, asks);
+
+        captureWholePage(*held);
+
+        CHECK(asks == 0);
+        CHECK(capturedSeededScreen(*held));
+    }
+
+    SECTION("ask consults the answer the user asked to be remembered")
+    {
+        auto held = sessionCapturing(testApp.app(), contour::config::Permission::Ask);
+        countCaptureAsks(*held, asks);
+
+        captureWholePage(*held);
+        REQUIRE(asks == 1);
+        CHECK(mockPtyOf(*held).stdinBuffer().empty()); // nothing happens until the user answers
+
+        // "Yes to all": the answer is stored, and the capture runs.
+        held->executePendingBufferCapture(/*allow=*/true, /*remember=*/true);
+        CHECK(capturedSeededScreen(*held));
+
+        // The second request must resolve from that memory instead of asking again.
+        mockPtyOf(*held).stdinBuffer().clear();
+        captureWholePage(*held);
+        CHECK(asks == 1);
+        CHECK(capturedSeededScreen(*held));
+    }
+
+    SECTION("ask remembers a refusal too, and keeps answering the client")
+    {
+        // The other half of what the changelog promises: "No to all" has to stick for the session the
+        // same way "Yes to all" does, and a remembered refusal still owes each request its terminator.
+        auto held = sessionCapturing(testApp.app(), contour::config::Permission::Ask);
+        countCaptureAsks(*held, asks);
+
+        captureWholePage(*held);
+        REQUIRE(asks == 1);
+
+        held->executePendingBufferCapture(/*allow=*/false, /*remember=*/true);
+        CHECK(mockPtyOf(*held).stdinBuffer() == CaptureReplyTerminator);
+
+        mockPtyOf(*held).stdinBuffer().clear();
+        captureWholePage(*held);
+        CHECK(asks == 1); // remembered: no second dialog
+        CHECK_FALSE(mockPtyOf(*held).stdinBuffer().contains(SeededLine));
+        CHECK(mockPtyOf(*held).stdinBuffer() == CaptureReplyTerminator);
+    }
+
+    SECTION("the sequence itself resolves, arriving under the terminal's lock")
+    {
+        // The cases above call the Events hook directly, on the test thread. Production reaches it from
+        // parseFragmentChunked(), with writeToScreen() holding the terminal's NON-RECURSIVE state mutex
+        // — so anything on this path that takes that mutex inline deadlocks the parser thread. Driving
+        // the real sequence is what pins that; posts are held back because the queue a display would
+        // hand this to is exactly what makes the locked work safe.
+        auto held = sessionCapturing(testApp.app(), contour::config::Permission::Allow);
+        held.surface->runPostsImmediately = false;
+        countCaptureAsks(*held, asks);
+
+        held->terminal().writeToScreen(CaptureWholePageSequence);
+
+        REQUIRE(held.surface->pendingPosts.size() == 1);
+        held.surface->drainPosts();
+        CHECK(asks == 0);
+        CHECK(capturedSeededScreen(*held));
+    }
+
+    SECTION("every request queued before the user answers gets its own reply")
+    {
+        // A single pending slot dropped whichever request arrived while another was outstanding, and a
+        // dropped request is a client blocked forever — the protocol cannot say "no reply is coming".
+        auto held = sessionCapturing(testApp.app(), contour::config::Permission::Ask);
+        countCaptureAsks(*held, asks);
+
+        captureWholePage(*held);
+        captureWholePage(*held);
+
+        // One verdict answers both, and both replies are on the wire.
+        held->executePendingBufferCapture(/*allow=*/true, /*remember=*/false);
+        CHECK(countOccurrences(mockPtyOf(*held).stdinBuffer(), CaptureReplyTerminator) == 2);
+        CHECK(capturedSeededScreen(*held));
+    }
+
+    SECTION("the request is handed to the display's queue, not run where it arrives")
+    {
+        // requestCaptureBuffer() is a Terminal::Events hook, so it arrives on the terminal thread, while
+        // the Allow branch reaches captureBuffer() and flushInput() — GUI-thread work. Holding the posts
+        // back shows the hop is load-bearing rather than incidental.
+        auto held = sessionCapturing(testApp.app(), contour::config::Permission::Allow);
+        countCaptureAsks(*held, asks);
+        held.surface->runPostsImmediately = false;
+
+        captureWholePage(*held);
+
+        CHECK(held.surface->pendingPosts.size() == 1);
+        CHECK(mockPtyOf(*held).stdinBuffer().empty());
+
+        held.surface->drainPosts();
+        CHECK(asks == 0);
+        CHECK(capturedSeededScreen(*held));
+    }
+}
+
+TEST_CASE("TerminalSession: a capture asked of a background pane is refused, not dropped",
+          "[contour][session][permission]")
+{
+    // A display-less session (a background split or tab) has no GUI queue to run the gate on, but the
+    // client is still owed the terminating chunk — dropping the request silently blocks it forever.
+    //
+    // This drives the real sequence rather than the hook, deliberately: writeToScreen() holds the
+    // terminal's non-recursive state mutex across the parse, so a reply written inline here must NOT
+    // re-take it. A regression would hang this test rather than fail it.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen(std::format("{}\r\n", SeededLine));
+    mockPtyOf(*session).stdinBuffer().clear();
+
+    session->terminal().writeToScreen(CaptureWholePageSequence);
+
+    CHECK_FALSE(mockPtyOf(*session).stdinBuffer().contains(SeededLine));
+    CHECK(mockPtyOf(*session).stdinBuffer() == CaptureReplyTerminator);
 }
 
 namespace
@@ -2740,51 +3094,8 @@ TEST_CASE("TerminalSession: things with no place in the accessibility tree are a
 // Every case above runs display-less, because until session::DisplaySurface existed the only view was a
 // QQuickItem needing a window, a scene graph and an RHI device — so "does this reach the display?" could
 // not be asked at all, only "does it survive the display being absent?". These attach a recording
-// surface and assert the other half.
-
-namespace
-{
-
-/// A session with a recording surface attached, so the two die together and in the right order.
-struct SessionWithSurface
-{
-    std::unique_ptr<contour::session::TerminalSession> session;
-    std::unique_ptr<contour::test::FakeDisplaySurface> surface;
-
-    contour::session::TerminalSession* operator->() const noexcept { return session.get(); }
-    contour::session::TerminalSession& operator*() const noexcept { return *session; }
-
-    ~SessionWithSurface()
-    {
-        // The session outlives nothing here, but it holds a raw back-pointer to the surface: detach
-        // first so a destructor-time post cannot reach freed memory.
-        if (session && surface && session->display() == surface.get())
-            session->detachDisplay(*surface);
-    }
-
-    SessionWithSurface(SessionWithSurface const&) = delete;
-    SessionWithSurface& operator=(SessionWithSurface const&) = delete;
-    SessionWithSurface(SessionWithSurface&&) = default;
-    SessionWithSurface& operator=(SessionWithSurface&&) = delete;
-
-    SessionWithSurface(std::unique_ptr<contour::session::TerminalSession> s,
-                       std::unique_ptr<contour::test::FakeDisplaySurface> d):
-        session { std::move(s) }, surface { std::move(d) }
-    {
-    }
-};
-
-/// Builds a MockPty-backed session with a recording surface already attached.
-[[nodiscard]] SessionWithSurface makeSessionWithSurface(contour::ContourGuiApp& app)
-{
-    auto session = makeDisplaylessSession(app);
-    auto surface = std::make_unique<contour::test::FakeDisplaySurface>();
-    surface->attachedSession = session.get();
-    session->attachDisplay(*surface);
-    return { std::move(session), std::move(surface) };
-}
-
-} // namespace
+// surface and assert the other half. The SessionWithSurface fixture they share lives up with the other
+// session factories, because the permission cases need it too.
 
 TEST_CASE("TerminalSession::attachDisplay hands the surface the state it missed", "[contour][session][view]")
 {

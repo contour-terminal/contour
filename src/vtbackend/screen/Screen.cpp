@@ -2397,7 +2397,12 @@ void Screen::captureBuffer(LineCount lineCount, bool logicalLines)
         reply("\033\\"); // ST
 
     vtCaptureBufferLog()("Capturing buffer finished.");
-    reply("\033^{};\033\\", CaptureBufferCode); // mark the end
+    replyCaptureBufferEnd();
+}
+
+void Screen::replyCaptureBufferEnd()
+{
+    reply("\033^{};\033\\", CaptureBufferCode);
 }
 
 void Screen::cursorForwardTab(TabStopCount count)
