@@ -874,9 +874,11 @@ void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
 
     _pendingBufferCapture = CaptureBufferRequest { .lines = lines, .logical = logical };
 
-    emit requestPermissionForBufferCapture();
-    // _display->post(
-    //     [this]() { requestPermission(_profile.permissions.captureBuffer, GuardedRole::CaptureBuffer); });
+    // Consult config + remembered answers via the shared gate (same shape as other roles).
+    // post() keeps executeRole / captureBuffer on the GUI thread (#2089).
+    _display->post([this]() {
+        requestPermission(_profile.permissions.value().captureBuffer, GuardedRole::CaptureBuffer);
+    });
 }
 
 void TerminalSession::executePendingBufferCapture(bool allow, bool remember)

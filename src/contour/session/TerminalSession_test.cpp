@@ -2193,8 +2193,25 @@ TEST_CASE("TerminalSession: config-driven permissions resolve without asking the
 
     // A font-change action with a pre-allowed permission applies without asking (no crash, no dialog).
     CHECK_NOTHROW((*session)(actions::ResetFontSize {}));
-    // Requesting a capture with a config-denied permission resolves to the deny path.
-    CHECK_NOTHROW(session->executePendingBufferCapture(false, false));
+
+    // Drive the real gate for CaptureBuffer (not only the post-gate executor).
+    // Deny must not write a capture reply into the PTY stdin buffer (#2089).
+    auto const stdinBeforeDeny = mockPtyOf(*session).stdinBuffer().size();
+    CHECK_NOTHROW(session->requestCaptureBuffer(vtbackend::LineCount(10), false));
+    CHECK(mockPtyOf(*session).stdinBuffer().size() == stdinBeforeDeny);
+}
+
+TEST_CASE("TerminalSession: capture_buffer allow resolves without dialog path side effects",
+          "[contour][session][permission]")
+{
+    contour::test::TestApp testApp;
+    auto const profileName = registerProfile(testApp.app(), "perm-allow", [](contour::config::TerminalProfile& p) {
+        p.permissions.value().captureBuffer = contour::config::Permission::Allow;
+    });
+    auto session = makeSessionWithProfile(testApp.app(), profileName);
+
+    // Allow should execute the pending capture through requestPermission without throwing.
+    CHECK_NOTHROW(session->requestCaptureBuffer(vtbackend::LineCount(5), false));
 }
 
 namespace
