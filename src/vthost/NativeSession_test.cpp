@@ -30,6 +30,7 @@
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
 
@@ -165,7 +166,8 @@ vtbackend::Settings hostSettings(vtbackend::LineCount history)
 struct HarnessOptions
 {
     std::size_t writeQueueBytes = NativeSession::DefaultWriteQueueBytes;
-    vtbackend::LineCount history { 0 }; ///< The hosted terminals' scrollback depth.
+    vtbackend::LineCount history { 0 };   ///< The hosted terminals' scrollback depth.
+    vtworkspace::Layout startupLayout {}; ///< Realized into the host BEFORE any handshake.
 };
 
 /// Drives a NativeSession over an in-memory socket pair.
@@ -177,10 +179,14 @@ struct NativeHarness
     net::EventLoop loop { source };
     HarnessOptions options {}; // set by the constructor, before `host` and `session` read it
     SessionHost host { loop,
-                       [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
                        hostSettings(options.history),
                        crispy::defaultEnvironment(),
-                       /*startPumps=*/false };
+                       /*startPumps=*/false,
+                       vthost::ClientSizePolicy::Latest,
+                       options.startupLayout };
     net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
     std::unique_ptr<NativeSession> session =
         std::make_unique<NativeSession>(loop,
@@ -306,7 +312,9 @@ struct TwoClientHarness
     net::PollEventSource source;
     net::EventLoop loop { source };
     SessionHost host { loop,
-                       [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
                        hostSettings(vtbackend::LineCount(0)),
                        crispy::defaultEnvironment(),
                        /*startPumps=*/false };
@@ -420,6 +428,54 @@ TEST_CASE("the native handshake answers ServerHello and a full snapshot", "[vtho
 
     // The written text arrived cell by cell on the first row.
     CHECK(textOf(delta->lines.front()) == "hello native");
+}
+
+TEST_CASE("a ClientHello attaching to a daemon with a configured startup layout sees the real "
+          "tab/pane shape on the very first LayoutState, not a single default tab",
+          "[vthost][native][layout]")
+{
+    // End-to-end regression for the reported symptom: contour client always showed one flat pane
+    // on first attach, even when the profile's default_layout configured several tabs -- because
+    // SessionHost never realized one and completeHandshake's "attaching to an empty daemon spawns
+    // the first session" fallback always built exactly one. With the daemon already populated
+    // (as runDaemon() now does via DaemonConfig::startupLayout), that fallback must not fire, and
+    // the FIRST LayoutState a client ever sees must already show both tabs.
+    auto layout = vtworkspace::Layout {};
+    auto firstTab = vtworkspace::LayoutTab {};
+    firstTab.root.command = "nvim";
+    layout.tabs.push_back(firstTab);
+    auto secondTab = vtworkspace::LayoutTab {};
+    secondTab.root.command = "htop";
+    layout.tabs.push_back(secondTab);
+
+    auto h = NativeHarness { HarnessOptions { .startupLayout = layout } };
+
+    // Expect at least ServerHello, LayoutState, then a SessionState + Delta snapshot PER hosted
+    // session (two sessions now, not one). Asserted structurally (find each PDU by type) rather
+    // than by exact count/position, so an unrelated protocol addition elsewhere in the attach
+    // sequence cannot make this LAYOUT test fail and misdirect whoever investigates it.
+    auto const received = h.exchange({ proto::ClientHello {} }, 6);
+    REQUIRE(received.size() >= 6);
+
+    auto const helloIt = std::ranges::find_if(
+        received, [](auto const& frame) { return std::holds_alternative<proto::ServerHello>(frame.pdu); });
+    REQUIRE(helloIt != received.end());
+
+    auto const layoutIt = std::ranges::find_if(
+        received, [](auto const& frame) { return std::holds_alternative<proto::LayoutState>(frame.pdu); });
+    REQUIRE(layoutIt != received.end());
+    auto const* wireLayout = std::get_if<proto::LayoutState>(&layoutIt->pdu);
+    REQUIRE(wireLayout != nullptr);
+    REQUIRE(wireLayout->tabs.size() == 2);
+
+    // Both tabs are single-leaf (no split in this layout), each naming a distinct live session.
+    CHECK(wireLayout->tabs[0].root.split == 0);
+    CHECK(wireLayout->tabs[1].root.split == 0);
+    CHECK(wireLayout->tabs[0].root.session != wireLayout->tabs[1].root.session);
+
+    // The host itself already had two sessions before this ClientHello was ever sent -- proving
+    // completeHandshake's empty-daemon fallback did not run (it would have left exactly one).
+    CHECK(h.host.sessionCount() == 2);
 }
 
 TEST_CASE("the attach snapshot carries scrollback that predates the attach", "[vthost][native]")
@@ -1057,7 +1113,9 @@ TEST_CASE("a token mismatch is reported without either token", "[vthost][native]
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };

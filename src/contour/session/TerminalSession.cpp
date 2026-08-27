@@ -153,24 +153,6 @@ namespace
     }
 #endif
 
-    ColorPalette const* preferredColorPalette(config::ColorConfig const& config,
-                                              vtbackend::ColorPreference preference)
-    {
-        if (auto const* dualColorConfig = std::get_if<config::DualColorConfig>(&config))
-        {
-            switch (preference)
-            {
-                case vtbackend::ColorPreference::Dark: return &dualColorConfig->darkMode;
-                case vtbackend::ColorPreference::Light: return &dualColorConfig->lightMode;
-            }
-        }
-        else if (auto const* simpleColorConfig = std::get_if<config::SimpleColorConfig>(&config))
-            return &simpleColorConfig->colors;
-
-        errorLog()("preferredColorPalette: Unknown color config type.");
-        return nullptr;
-    }
-
     string normalizeCrlf(QString text)
     {
 #ifndef _WIN32
@@ -196,97 +178,6 @@ namespace
         } while (input != output);
 
         return output;
-    }
-
-    vtbackend::Settings createSettingsFromConfig(config::Config const& config,
-                                                 config::TerminalProfile const& profile,
-                                                 ColorPreference colorPreference,
-                                                 std::optional<vtbackend::PageSize> initialPageSize)
-    {
-        // The emulation half comes from the shared table, so a GUI-hosted session and a
-        // daemon-hosted one can never disagree on what the terminal IS; only the
-        // presentation fields below are the GUI's own.
-        auto settings = config::emulationSettings(config, profile);
-
-        // A new tab/split inherits the live window's running grid; a brand-new window keeps the
-        // profile's configured terminalSize, which the shared table already applied. Overridden here
-        // so the terminal is BORN at the right size, not just corrected once a display attaches
-        // (which never happens for a background tab).
-        if (initialPageSize)
-            settings.pageSize = *initialPageSize;
-
-        // Focus is granted, never assumed: TerminalSessionManager::setFocusedSession is the sole
-        // authority, and it only focus-OUTs the session that previously held focus. A session born
-        // focused (a background tab, a non-active split pane, any tab of a window that does not own
-        // focus) would therefore stay "focused" forever -- rendering an active cursor and withholding
-        // the DECSET 1004 focus-out its application is due.
-        settings.focused = false;
-        settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
-        settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
-        settings.mouseWheelScrollMultiplier = profile.history.value().historyScrollMultiplier;
-        settings.autoScrollOnUpdate = profile.history.value().autoScrollOnUpdate;
-        settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset.value();
-        settings.cursorBlinkInterval = profile.modeInsert.value().cursor.cursorBlinkInterval;
-        settings.cursorShape = profile.modeInsert.value().cursor.cursorShape;
-        settings.cursorDisplay = profile.modeInsert.value().cursor.cursorDisplay;
-        settings.blinkStyle = profile.blinkStyle.value();
-        settings.screenTransitionStyle = profile.screenTransitionStyle.value();
-        settings.screenTransitionDuration = profile.screenTransitionDuration.value();
-        settings.cursorMotionAnimationDuration = profile.cursorMotionAnimationDuration.value();
-        settings.smoothLineScrolling = profile.smoothLineScrolling.value();
-        settings.smoothScrolling = profile.smoothScrolling.value();
-        settings.momentumScrolling = profile.momentumScrolling.value();
-        settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
-        settings.statusDisplayType = profile.statusLine.value().initialType;
-        settings.statusDisplayPosition = profile.statusLine.value().position;
-        settings.indicatorStatusLine.left = profile.statusLine.value().indicator.left;
-        settings.indicatorStatusLine.middle = profile.statusLine.value().indicator.middle;
-        settings.indicatorStatusLine.right = profile.statusLine.value().indicator.right;
-        settings.tabNamingMode = [&]() {
-            // try to find Tab section in one of the status line segments
-
-            std::string segment;
-            if (profile.statusLine.value().indicator.left.contains("Tabs"))
-            {
-                segment = profile.statusLine.value().indicator.left;
-            }
-            else if (profile.statusLine.value().indicator.middle.contains("Tabs"))
-            {
-                segment = profile.statusLine.value().indicator.middle;
-            }
-            else if (profile.statusLine.value().indicator.right.contains("Tabs"))
-            {
-                segment = profile.statusLine.value().indicator.right;
-            }
-
-            // check if indexing is defined
-            if (segment.contains("Indexing="))
-            {
-                // cut the string after indexing=
-                std::string indexing = segment.substr(segment.find("Indexing=") + 9);
-                // cut right part of the string
-                indexing = indexing.substr(0, indexing.find(','));
-                indexing = indexing.substr(0, indexing.find('}'));
-
-                std::ranges::transform(
-                    indexing, indexing.begin(), [](unsigned char c) { return std::tolower(c); });
-
-                if (indexing == "title")
-                {
-                    return vtbackend::TabsNamingMode::Title;
-                }
-            }
-            return vtbackend::TabsNamingMode::Indexing;
-        }();
-
-        settings.syncWindowTitleWithHostWritableStatusDisplay =
-            profile.statusLine.value().syncWindowTitleWithHostWritableStatusDisplay;
-        if (auto const* p = preferredColorPalette(profile.colors.value(), colorPreference))
-            settings.colorPalette = *p;
-        settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord.value();
-        settings.highlightTimeout = profile.highlightTimeout.value();
-
-        return settings;
     }
 
     int createSessionId()
@@ -353,7 +244,9 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _terminal { *this,
                 app.processEnvironment(),
                 std::move(pty),
-                createSettingsFromConfig(_config, _profile, _currentColorPreference, initialPageSize),
+                config::resolvedSessionConfig(
+                    _config, _profile, _profileName, _currentColorPreference, initialPageSize)
+                    .settings,
                 std::chrono::steady_clock::now() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
     // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is
@@ -887,7 +780,7 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
         return;
 
     _currentColorPreference = preference;
-    if (auto const* colorPalette = preferredColorPalette(_profile.colors.value(), preference))
+    if (auto const* colorPalette = config::preferredColorPalette(_profile.colors.value(), preference))
     {
         _terminal.resetColorPalette(*colorPalette);
 

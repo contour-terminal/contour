@@ -4037,6 +4037,196 @@ profiles:
     CHECK_FALSE(settings.error().empty());
 }
 
+TEST_CASE("Config: resolveSessionConfig carries a profile's shell, sandbox policy and presentation "
+          "fields",
+          "[config]")
+{
+    // The regression this guards: `contour daemon` (and therefore `contour client`) used to resolve
+    // only emulationSettings() and hardcode the OS login shell plus escapeSandbox=true, silently
+    // dropping everything below for every session it hosts.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /usr/bin/fish
+        arguments: ["-l"]
+        escape_sandbox: false
+        colors: coverage
+        status_line:
+            display: indicator
+        cursor:
+            shape: underscore
+color_schemes:
+    coverage:
+        default:
+            background: '#102030'
+            foreground: '#D0D0D0'
+)"sv);
+
+    auto const resolved = contour::config::resolveSessionConfig(path.string(), "main");
+    REQUIRE(resolved.has_value());
+
+    SECTION("shell")
+    {
+        CHECK(resolved->shell.program == "/usr/bin/fish");
+        REQUIRE(resolved->shell.arguments.size() == 1);
+        CHECK(resolved->shell.arguments.front() == "-l");
+    }
+
+    SECTION("CONTOUR_PROFILE is set, matching a local session's environment")
+    {
+        REQUIRE(resolved->shell.env.contains("CONTOUR_PROFILE"));
+        CHECK(resolved->shell.env.at("CONTOUR_PROFILE") == "main");
+    }
+
+    SECTION("escape_sandbox: false is honored, not hardcoded true")
+    {
+        CHECK_FALSE(resolved->escapeSandbox);
+    }
+
+    SECTION("the profile's color scheme reaches Settings.colorPalette")
+    {
+        CHECK(resolved->settings.colorPalette.defaultBackground == vtbackend::RGBColor(0x10, 0x20, 0x30));
+        CHECK(resolved->settings.colorPalette.defaultForeground == vtbackend::RGBColor(0xD0, 0xD0, 0xD0));
+    }
+
+    SECTION("presentation fields (status line type, cursor shape) reach Settings")
+    {
+        CHECK(resolved->settings.statusDisplayType == vtbackend::StatusDisplayType::Indicator);
+        CHECK(resolved->settings.cursorShape == vtbackend::CursorShape::Underscore);
+    }
+}
+
+TEST_CASE("Config: resolveSessionConfig defaults match a profile that sets nothing explicitly", "[config]")
+{
+    // escape_sandbox defaults to true (DaemonConfig's own prior default), so a profile that says
+    // nothing about it must not regress to false.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const resolved = contour::config::resolveSessionConfig(path.string(), "main");
+    REQUIRE(resolved.has_value());
+    CHECK(resolved->escapeSandbox);
+    CHECK(resolved->shell.program == "/bin/sh");
+    REQUIRE(resolved->shell.env.contains("CONTOUR_PROFILE"));
+    CHECK(resolved->shell.env.at("CONTOUR_PROFILE") == "main");
+}
+
+TEST_CASE("Config: resolveSessionConfig refuses an unknown profile, matching resolveEmulationSettings",
+          "[config]")
+{
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const resolved = contour::config::resolveSessionConfig(path.string(), "nope");
+    REQUIRE_FALSE(resolved.has_value());
+    CHECK(resolved.error().contains("nope"));
+}
+
+TEST_CASE("Config: resolveSessionConfig carries the profile's default_layout into startupLayout", "[config]")
+{
+    // The regression this guards: a freshly spawned daemon always started with exactly one
+    // window/tab/pane, silently ignoring default_layout/layouts: even after shell/presentation
+    // resolution was fixed (#2092). contour client mirrors whatever tab/pane tree the daemon
+    // has, so this is what made a configured multi-pane layout invisible on first attach.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+default_layout: work
+profiles:
+    main:
+        shell: /bin/sh
+layouts:
+    work:
+        tabs:
+            - title: "editor"
+              command: "nvim"
+            - title: "servers"
+              split:
+                orientation: vertical
+                panes:
+                    - command: "npm run dev"
+                      ratio: 0.6
+                    - command: "htop"
+)"sv);
+
+    auto const resolved = contour::config::resolveSessionConfig(path.string(), "main");
+    REQUIRE(resolved.has_value());
+
+    REQUIRE(resolved->startupLayout.tabs.size() == 2);
+
+    auto const& editorTab = resolved->startupLayout.tabs[0];
+    CHECK(editorTab.title == "editor");
+    CHECK(editorTab.root.isLeaf());
+    REQUIRE(editorTab.root.command.has_value());
+    CHECK(*editorTab.root.command == "nvim");
+
+    auto const& serversTab = resolved->startupLayout.tabs[1];
+    CHECK(serversTab.title == "servers");
+    REQUIRE_FALSE(serversTab.root.isLeaf());
+    CHECK(serversTab.root.orientation == vtworkspace::SplitState::Vertical);
+    REQUIRE(serversTab.root.children.size() == 2);
+    CHECK(*serversTab.root.children[0].command == "npm");
+    CHECK(*serversTab.root.children[1].command == "htop");
+}
+
+TEST_CASE("Config: resolveSessionConfig leaves startupLayout empty when default_layout is unset", "[config]")
+{
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+layouts:
+    work:
+        tabs:
+            - command: "nvim"
+)"sv);
+
+    auto const resolved = contour::config::resolveSessionConfig(path.string(), "main");
+    REQUIRE(resolved.has_value());
+    CHECK(resolved->startupLayout.tabs.empty());
+}
+
+TEST_CASE("Config: resolveSessionConfig leaves startupLayout empty for an unknown default_layout "
+          "name, not fatal to the rest of resolution",
+          "[config]")
+{
+    // A typo'd default_layout must not fail the whole daemon startup: it degrades to "no startup
+    // layout" (a single default tab), matching TerminalSessionManager::findLayout's own
+    // "no layout named X" + fall back behavior on the local-GUI path.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+default_layout: nonexistent
+profiles:
+    main:
+        shell: /bin/sh
+layouts:
+    work:
+        tabs:
+            - command: "nvim"
+)"sv);
+
+    auto const resolved = contour::config::resolveSessionConfig(path.string(), "main");
+    REQUIRE(resolved.has_value());
+    CHECK(resolved->startupLayout.tabs.empty());
+    // The rest of resolution is unaffected by the bad layout name.
+    CHECK(resolved->shell.program == "/bin/sh");
+}
+
 // {{{ history.hard_limit (issue #836)
 namespace
 {

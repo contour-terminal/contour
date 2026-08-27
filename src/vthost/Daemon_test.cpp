@@ -232,6 +232,25 @@ TEST_CASE("a daemon hosts sessions with scrollback by default", "[vthost][daemon
           == std::get<vtbackend::LineCount>(settings.historyLimits.capacity));
 }
 
+TEST_CASE("DaemonConfig defaults to escaping the sandbox, matching the prior hardcoded behavior",
+          "[vthost][daemon]")
+{
+    // makeShellPtyFactory used to hardcode escapeSandbox=true regardless of DaemonConfig, silently
+    // ignoring a profile's `escape_sandbox: false`. A bare DaemonConfig{} (no profile resolved, e.g.
+    // in tests that construct one directly) must still default to the behavior every hosted shell
+    // had before this field existed.
+    CHECK(vthost::DaemonConfig {}.escapeSandbox);
+}
+
+TEST_CASE("DaemonConfig defaults to an empty startup layout, matching the prior single-tab behavior",
+          "[vthost][daemon]")
+{
+    // A bare DaemonConfig{} (no profile resolved, e.g. constructed directly in a test) must keep
+    // behaving exactly as before this field existed: no configured layout, so SessionHost falls
+    // back to its usual single default tab.
+    CHECK(vthost::DaemonConfig {}.startupLayout.tabs.empty());
+}
+
 TEST_CASE("joinCommandLine quotes every argument, argv[0] included", "[vthost][spawn]")
 {
     // The Windows spawn path used to quote only the socket VALUE, leaving argv[0] bare — which

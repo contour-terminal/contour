@@ -74,11 +74,15 @@ namespace
     /// The daemon's PTY factory: every session spawns the configured shell over a
     /// fresh PTY. Shared by the POSIX and Windows runDaemon paths.
     ///
-    /// @param shell      What to spawn.
-    /// @param socketPath The daemon's control socket, which every hosted shell is told about so it
-    ///                   can reach back. Merged in here rather than by the caller, so that every
-    ///                   entry into runDaemon() hosts shells that can find their own daemon.
+    /// @param shell         What to spawn.
+    /// @param escapeSandbox Whether the spawned shell escapes its sandbox (Flatpak), from the
+    ///                      resolved profile's `escape_sandbox`. Was hardcoded `true` before this
+    ///                      parameter existed, silently ignoring a profile's `escape_sandbox: false`.
+    /// @param socketPath    The daemon's control socket, which every hosted shell is told about so
+    ///                      it can reach back. Merged in here rather than by the caller, so that
+    ///                      every entry into runDaemon() hosts shells that can find their own daemon.
     [[nodiscard]] PtyFactory makeShellPtyFactory(vtpty::Process::ExecInfo shell,
+                                                 bool escapeSandbox,
                                                  std::filesystem::path const& socketPath)
     {
         // insert_or_assign, so the daemon wins over a profile that set the same name: a hosted
@@ -87,9 +91,31 @@ namespace
         for (auto const& [name, value]: hostedShellEnvironment(socketPath))
             shell.env.insert_or_assign(name, value);
 
-        return [shell = std::move(shell)](vtbackend::PageSize pageSize) -> std::unique_ptr<vtpty::Pty> {
+        return [shell = std::move(shell),
+                escapeSandbox](vtbackend::PageSize pageSize,
+                               std::optional<vtpty::Process::ExecInfo> const& commandOverride)
+                   -> std::unique_ptr<vtpty::Pty> {
+            // Work on a local copy: `shell` is captured by the closure and reused for every
+            // session this factory spawns, so writing one session's override back into it would
+            // leak that pane's command/directory into every later session with no override of
+            // its own. Mirrors AppSessionFactory::createPty's identical local-copy comment for
+            // the same reason on the local-GUI path.
+            auto effective = shell;
+            if (commandOverride)
+            {
+                // Replace the program/args only when a program was actually given: an engaged
+                // override with an empty program (a directory-only pane) must not wipe the
+                // daemon's configured default arguments.
+                if (!commandOverride->program.empty())
+                {
+                    effective.program = commandOverride->program;
+                    effective.arguments = commandOverride->arguments;
+                }
+                if (!commandOverride->workingDirectory.empty())
+                    effective.workingDirectory = commandOverride->workingDirectory;
+            }
             return std::make_unique<vtpty::Process>(
-                shell, vtpty::createPty(pageSize, std::nullopt), /*escapeSandbox=*/true);
+                effective, vtpty::createPty(pageSize, std::nullopt), escapeSandbox);
         };
     }
 
@@ -549,11 +575,12 @@ int runDaemon(DaemonConfig const& config)
     auto loop = net::EventLoop { source };
 
     auto host = SessionHost { loop,
-                              makeShellPtyFactory(config.shell, config.socketPath),
+                              makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath),
                               config.settings,
                               crispy::defaultEnvironment(),
                               /*startPumps=*/true,
-                              config.sizePolicy };
+                              config.sizePolicy,
+                              config.startupLayout };
 
     auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
     if (!listener)
@@ -734,11 +761,12 @@ int runDaemon(DaemonConfig const& config)
     auto loop = net::EventLoop { source };
 
     auto host = SessionHost { loop,
-                              makeShellPtyFactory(config.shell, config.socketPath),
+                              makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath),
                               config.settings,
                               crispy::defaultEnvironment(),
                               /*startPumps=*/true,
-                              config.sizePolicy };
+                              config.sizePolicy,
+                              config.startupLayout };
 
     auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
     if (!listener)
