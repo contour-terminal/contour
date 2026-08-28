@@ -188,8 +188,7 @@ class ContourHeadlessBench: public crispy::App
             Project { "mimalloc", "", "" },
 #endif
             Project { "yaml-cpp", "MIT", "https://github.com/jbeder/yaml-cpp" },
-            Project { "termbench-pro", "Apache-2.0", "https://github.com/contour-terminal/termbench-pro" },
-            Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });
+            Project { "termbench-pro", "Apache-2.0", "https://github.com/contour-terminal/termbench-pro" });
         link("bench-headless.parser", bind(&ContourHeadlessBench::benchParserOnly, this));
         link("bench-headless.grid", bind(&ContourHeadlessBench::benchGrid, this));
         link("bench-headless.sixel", bind(&ContourHeadlessBench::benchSixel, this));

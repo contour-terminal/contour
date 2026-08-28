@@ -415,7 +415,7 @@ class ImagePool
 
 } // namespace vtbackend
 
-// {{{ fmtlib support
+// {{{ fmt support
 template <>
 struct std::formatter<vtbackend::ImageFormat>: formatter<std::string_view>
 {

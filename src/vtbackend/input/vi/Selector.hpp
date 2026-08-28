@@ -184,7 +184,7 @@ void renderSelection(Selection const& selection, Renderer&& render)
 
 } // namespace vtbackend
 
-// {{{ fmtlib custom formatter support
+// {{{ fmt custom formatter support
 template <>
 struct std::formatter<vtbackend::Selection::State>: formatter<std::string_view>
 {

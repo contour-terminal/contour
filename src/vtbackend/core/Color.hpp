@@ -505,7 +505,7 @@ constexpr Opacity& operator--(Opacity& value) noexcept
 
 } // namespace vtbackend
 
-// {{{ fmtlib custom formatter
+// {{{ fmt custom formatter
 template <>
 struct std::formatter<vtbackend::Color>: std::formatter<std::string>
 {
