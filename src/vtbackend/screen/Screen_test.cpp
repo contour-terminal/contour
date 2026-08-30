@@ -4468,4 +4468,48 @@ TEST_CASE("a prompt mark on a scrolled-out logical line reaches the change strea
     CHECK_FALSE(reported.empty());
 }
 
+TEST_CASE("DECSWBV: sets the warning bell volume", "[screen]")
+{
+    // Ps 0/1 is off, 2-4 low, 5-8 high for warning bell
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[1 t");
+    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::Off);
+
+    mock.writeToScreen("\033[3 t");
+    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::Low);
+
+    mock.writeToScreen("\033[8 t");
+    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::High);
+
+    mock.writeToScreen("\033[0 t");
+    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::Off);
+}
+
+TEST_CASE("DECSWBV: default parameter turns the bell off", "[screen]")
+{
+    // Omitted Ps maps to 0 which VT520 maps to off
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[8 t");
+    REQUIRE(mock.terminal.settings().warningBellVolume == BellVolume::High);
+
+    mock.writeToScreen("\033[ t");
+    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::Off);
+}
+
+TEST_CASE("DECSWBV: the volume is restored by RIS", "[screen]")
+{
+    // If a program turns off the warning bell volume and then it exits, the user
+    // is left with a terminal with no bell volume. RIS serves the purpose of restoring
+    // the bell volume when this happens and this test enforces that.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[1 t");
+    REQUIRE(mock.terminal.settings().warningBellVolume == BellVolume::Off);
+
+    mock.writeToScreen("\033c"); // RIS
+    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::High);
+}
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

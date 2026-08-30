@@ -141,6 +141,7 @@
           <li>Fixes Contour hanging when an SSH handshake failed: the failure path took a lock the calling thread already held</li>
           <li>Fixes Contour spinning when the SSH agent could not be reached — the normal case inside a Flatpak, where $SSH_AUTH_SOCK names a host path the sandbox does not mount — instead of falling through to the next authentication method</li>
           <li>Fixes the build on Linux with Clang and libc++, which selected the broken &lt;experimental/simd&gt;. The guard excluded it by platform — Apple and FreeBSD — but the header belongs to libc++, not to those systems, so any libc++ build reached it; it is now excluded by _LIBCPP_VERSION instead (#2087)</li>
+          <li>Implements DECSWBV (CSI Ps SP t), the VT520 sequence for setting the warning-bell volume: Ps 0 or 1 silences the bell, 2 to 4 halves it, 5 to 8 keeps it at the profile's configured volume. An application can only mute or halve that volume, never raise it, and RIS restores the default (#732)</li>
         </ul>
       </description>
     </release>

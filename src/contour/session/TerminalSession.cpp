@@ -689,7 +689,19 @@ void TerminalSession::announce(QString const& message, QAccessible::Announcement
 
 void TerminalSession::bell()
 {
-    emit onBell(_profile.bell.value().volume);
+    auto const configured = _profile.bell.value().volume;
+    auto const volume = [configured](vtbackend::BellVolume level) {
+        switch (level)
+        {
+            case vtbackend::BellVolume::Off: return 0.0f;
+            case vtbackend::BellVolume::Low: return configured * 0.5f;
+            case vtbackend::BellVolume::High: return configured;
+        }
+
+        return configured;
+    }(terminal().settings().warningBellVolume);
+
+    emit onBell(volume);
 
     if (_profile.bell.value().alert)
         emit onAlert();

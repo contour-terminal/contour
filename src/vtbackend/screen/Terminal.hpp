@@ -1864,6 +1864,7 @@ class Terminal
     /// @param enable Whether the mode is being set or reset.
     void setMouseCoordinateMode(DECMode mode, bool enable);
     void setMouseWheelMode(InputGenerator::MouseWheelMode mode);
+    void setWarningBellVolume(BellVolume volume);
 
     /// The RESOLVED mouse-reporting state, as the input generator will actually encode it. This is
     /// not derivable from the DEC mode register: nine mouse modes write these three values, several
