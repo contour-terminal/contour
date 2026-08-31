@@ -826,6 +826,34 @@ void TerminalSession::executeRole(GuardedRole role, bool allow, bool remember)
     }
 }
 
+config::Permission TerminalSession::configuredPermissionFor(GuardedRole role) const
+{
+    auto const& permissions = _profile.permissions.value();
+    switch (role)
+    {
+        case GuardedRole::ChangeFont: return permissions.changeFont;
+        case GuardedRole::CaptureBuffer: return permissions.captureBuffer;
+        case GuardedRole::ShowHostWritableStatusLine: return permissions.displayHostWritableStatusLine;
+        // BigPaste is gated on payload size, not on configuration; what the gate adds for it is the
+        // answer the user asked to be remembered for the session.
+        case GuardedRole::BigPaste: return config::Permission::Ask;
+    }
+    return config::Permission::Ask;
+}
+
+void TerminalSession::postPermissionRequest(GuardedRole role)
+{
+    if (!_display)
+        return;
+
+    // The hop to the GUI thread is load-bearing, not decoration. These requests arrive on the terminal
+    // thread (Terminal::Events hooks, raised with the terminal's state mutex held), while the gate's
+    // Allow branch runs the role's executor synchronously -- work that belongs on the GUI thread, like
+    // every other guarded role's executor. The configured permission is read inside the lambda, on the
+    // GUI thread, because a config reload may replace the profile under us.
+    _display->post([this, role]() { requestPermission(configuredPermissionFor(role), role); });
+}
+
 void TerminalSession::requestPermission(config::Permission allowedByConfig, GuardedRole role)
 {
     switch (allowedByConfig)
@@ -881,14 +909,27 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
 
 void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
 {
+    // A display-less session (a background split/tab pane) has no GUI queue to decide on, and the client
+    // is owed an answer either way -- so refuse it here rather than dropping it silently.
+    //
+    // Deliberately WITHOUT scoped_lock { _terminal }: this is a Terminal::Events hook, raised from
+    // parseFragmentChunked() while writeToScreen() holds the terminal's state mutex, and that mutex is a
+    // plain non-recursive std::mutex -- taking it here self-deadlocks the parser thread. The explicit
+    // flush is needed for the same reason the branch exists: screenUpdated() returns early without a
+    // display, so nothing else would ever push this reply to the PTY.
     if (!_display)
+    {
+        _terminal.primaryScreen().replyCaptureBufferEnd();
+        flushInput();
         return;
+    }
 
-    _pendingBufferCapture = CaptureBufferRequest { .lines = lines, .logical = logical };
+    {
+        auto const _ = std::scoped_lock { _pendingBufferCaptureMutex };
+        _pendingBufferCaptures.emplace_back(CaptureBufferRequest { .lines = lines, .logical = logical });
+    }
 
-    emit requestPermissionForBufferCapture();
-    // _display->post(
-    //     [this]() { requestPermission(_profile.permissions.captureBuffer, GuardedRole::CaptureBuffer); });
+    postPermissionRequest(GuardedRole::CaptureBuffer);
 }
 
 void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
@@ -896,28 +937,42 @@ void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
     if (remember)
         _rememberedPermissions[GuardedRole::CaptureBuffer] = allow;
 
-    if (!_pendingBufferCapture)
+    // One verdict answers every request outstanding at this moment: the user was asked once, about
+    // capturing this buffer, and each request still owes its own reply.
+    auto requests = std::vector<CaptureBufferRequest> {};
+    {
+        auto const _ = std::scoped_lock { _pendingBufferCaptureMutex };
+        requests = std::exchange(_pendingBufferCaptures, {});
+    }
+
+    if (requests.empty())
         return;
 
-    auto const capture = _pendingBufferCapture.value();
-    _pendingBufferCapture.reset();
+    // Both the grid walk and the reply touch terminal state from the GUI thread, so they take the state
+    // mutex like every other GUI-thread access in this file. The parser thread held it while raising the
+    // Events hook and released it with that chunk; by now it may well be inside the next one.
+    auto const l = scoped_lock { _terminal };
 
-    if (!allow)
-        return;
+    for (auto const& request: requests)
+    {
+        if (allow)
+            _terminal.primaryScreen().captureBuffer(request.lines, request.logical);
+        else
+            // A refusal is still a reply. The protocol cannot express "no reply is coming", so a client
+            // reading until the empty terminating chunk would otherwise block forever -- which is what
+            // `capture_buffer: deny` would mean if it just returned here.
+            _terminal.primaryScreen().replyCaptureBufferEnd();
+    }
 
-    _terminal.primaryScreen().captureBuffer(capture.lines, capture.logical);
-
-    sessionLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
+    sessionLog()("requestCaptureBuffer: Answered {} request(s) with {}. Waking up I/O thread.",
+                 requests.size(),
+                 allow ? "allow" : "deny");
     flushInput();
 }
 
 void TerminalSession::requestShowHostWritableStatusLine()
 {
-    if (_display)
-        _display->post([this]() {
-            requestPermission(_profile.permissions.value().displayHostWritableStatusLine,
-                              GuardedRole::ShowHostWritableStatusLine);
-        });
+    postPermissionRequest(GuardedRole::ShowHostWritableStatusLine);
 }
 
 void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remember)
@@ -959,8 +1014,7 @@ void TerminalSession::setFontDef(vtbackend::FontDef const& fontDef)
 
     _pendingFontChange = fontDef;
 
-    _display->post(
-        [this]() { requestPermission(_profile.permissions.value().changeFont, GuardedRole::ChangeFont); });
+    postPermissionRequest(GuardedRole::ChangeFont);
 }
 
 void TerminalSession::applyPendingFontChange(bool allow, bool remember)
@@ -1297,6 +1351,9 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
                 sessionLog()("pasteFromClipboard[{}]: {}\n", i, md->formats().at(i).toStdString());
         }
 
+        // Read the clipboard ONCE: text() is a synchronous round-trip to whichever process owns the
+        // clipboard and drags the entire payload across, so the guards, the immediate path and the
+        // deferred one all work from this one copy.
         auto const text = clipboard->text(QClipboard::Clipboard);
 
         // 1 MB hard limit
@@ -1310,31 +1367,48 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
                     [this]() { emit showNotification(tr("Paste"), tr("The pasted content is too large.")); });
             return;
         }
+
+        // Normalize before the soft limit, not after: what the user is asked to approve, and what is
+        // measured, must be the bytes that would actually reach the application.
+        auto pasteText = stripIf(normalizeCrlf(text), strip);
+
         // 512 KB soft limit to ask user for permission
-        if (text.size() > static_cast<qsizetype>(1024 * 512))
+        if (pasteText.size() > static_cast<size_t>(1024 * 512))
         {
-            _pendingBigPaste = clipboard;
-            emit requestPermissionForPasteLargeFile();
+            _pendingBigPaste = BigPasteRequest { .text = std::move(pasteText), .count = count };
             sessionLog()("Clipboard contains huge text. Requesting permission.");
+            // BigPaste is the one guarded role with no configuration field, so the gate resolves it as
+            // Ask; what it adds over a bare emit is the remembered per-session answer, which only
+            // requestPermission() ever reads. No post() here, unlike requestCaptureBuffer(): both entry
+            // points (the PasteClipboard action and Vi's paste commands) are GUI-thread input paths, as
+            // the QClipboard dereference above already requires.
+            requestPermission(configuredPermissionFor(GuardedRole::BigPaste), GuardedRole::BigPaste);
             return;
         }
 
-        string const strippedText = stripIf(normalizeCrlf(clipboard->text(QClipboard::Clipboard)), strip);
-        sessionLog()("Size of text: {}", strippedText.size());
-        if (strippedText.empty())
+        sessionLog()("Size of text: {}", pasteText.size());
+        if (pasteText.empty())
             sessionLog()("Clipboard does not contain text.");
-        else if (count == 1)
-            terminal().sendPaste(string_view { strippedText });
         else
-        {
-            string fullPaste;
-            for (unsigned i = 0; i < count; ++i)
-                fullPaste += strippedText;
-            terminal().sendPaste(string_view { fullPaste });
-        }
+            sendPasteRepeatedly(pasteText, count);
     }
     else
         sessionLog()("Could not access clipboard.");
+}
+
+void TerminalSession::sendPasteRepeatedly(std::string const& text, unsigned count)
+{
+    if (count == 1)
+    {
+        terminal().sendPaste(string_view { text });
+        return;
+    }
+
+    auto repeated = string {};
+    repeated.reserve(text.size() * count);
+    for ([[maybe_unused]] auto const _: std::views::iota(0U, count))
+        repeated += text;
+    terminal().sendPaste(string_view { repeated });
 }
 
 void TerminalSession::applyPendingPaste(bool allow, bool remember)
@@ -1346,15 +1420,15 @@ void TerminalSession::applyPendingPaste(bool allow, bool remember)
     if (!_pendingBigPaste)
         return;
 
-    if (!allow)
-    {
-        _pendingBigPaste = std::nullopt;
-        return;
-    }
+    // Take the request out either way: a refused paste is finished, not still pending.
+    auto const request = std::exchange(_pendingBigPaste, std::nullopt).value();
 
-    auto* clipboard = _pendingBigPaste.value();
-    auto text = clipboard->text(QClipboard::Clipboard);
-    terminal().sendPaste(string_view { text.toStdString() });
+    if (!allow)
+        return;
+
+    // The stored text is the one that was measured and approved -- deliberately not a fresh read of the
+    // clipboard, whose contents may have changed while the dialog was up. @see BigPasteRequest.
+    sendPasteRepeatedly(request.text, request.count);
 }
 
 void TerminalSession::onSelectionCompleted()
