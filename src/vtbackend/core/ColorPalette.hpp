@@ -492,7 +492,7 @@ RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target
 
 } // namespace vtbackend
 
-// {{{ fmtlib custom formatter support
+// {{{ fmt custom formatter support
 template <>
 struct std::formatter<vtbackend::ColorPreference>: std::formatter<std::string_view>
 {

@@ -61,7 +61,7 @@ graph TD
     *   Logging (`logstore`).
     *   Data structures (`Trie`, `LRUCache`, `RingBuffer`).
     *   Utilities (`base64`, `file_descriptor`, `signals`).
-*   **Key Dependencies:** `fmt`, `range-v3`, `GSL`.
+*   **Key Dependencies:** `range-v3`, `GSL`.
 
 ### 2. `vtparser` (ANSI Parser)
 **Location:** `src/vtparser/`

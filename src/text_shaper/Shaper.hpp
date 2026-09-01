@@ -172,7 +172,7 @@ class Shaper
 
 } // end namespace text
 
-// {{{ fmtlib support
+// {{{ fmt support
 template <>
 struct std::formatter<text::BitmapFormat>: std::formatter<std::string_view>
 {
