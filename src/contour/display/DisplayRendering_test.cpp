@@ -1607,6 +1607,12 @@ TEST_CASE("display: a multi-line drag selecting a wrapped logical line copies it
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness h;
     h.display->forceActiveFocus();
+    // Settle any pending geometry/font reflow left over from a PREVIOUS test case before reading
+    // pageSize() and deriving click positions from gridMetrics() -- both are snapshots of the live
+    // renderer, and this suite runs every case in one process, so a font/DPI change a prior test made
+    // can still be mid-flight (recomputeGeometryAfterFontReconfig runs async) when this one starts.
+    h.pump();
+    h.pump();
     auto const columns = unbox<int>(h.session->terminal().pageSize().columns);
     REQUIRE(columns > 0);
 
