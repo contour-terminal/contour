@@ -1169,6 +1169,14 @@ void Terminal::updateSelectionMatches()
     if (!_settings.visualizeSelectedWord)
         return;
 
+    // Visualizing "other occurrences" only makes sense for a WORD -- the case a double/triple-click
+    // selects. An ordinary linear (or rectangular) drag selection is not a word: it is arbitrary text
+    // the user is actively choosing, and serializing every intermediate extension of it into the
+    // search pattern overwrote whatever the user had actually typed into the find bar/search prompt on
+    // every single mouse-move of a plain click-and-drag selection.
+    if (!selectionAvailable() || dynamic_cast<WordWiseSelection const*>(selector()) == nullptr)
+        return;
+
     auto const text = extractSelectionText();
     auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
     setNewSearchTerm(text32, SearchOrigin::DoubleClick);

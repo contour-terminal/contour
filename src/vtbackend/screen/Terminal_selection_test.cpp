@@ -149,6 +149,50 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
     CHECK(mock.terminal.extractSelectionText().empty());
 }
 
+TEST_CASE("Terminal.plain_drag_selection_does_not_overwrite_the_search_pattern", "[terminal]")
+{
+    // Regression: updateSelectionMatches() serializes the selection into Terminal::search().pattern
+    // so double/triple-click word-selection can highlight the word's other occurrences elsewhere on
+    // screen (SearchOrigin::DoubleClick). It used to run unconditionally on EVERY selection-extending
+    // mouse-move -- including an ordinary single-click drag, which is not a word at all -- so dragging
+    // out any plain text selection silently overwrote whatever search pattern the user had typed (and,
+    // wherever a status line or find-bar echoes it, made the selected text visibly appear as a live
+    // search).
+    auto mock = MockTerm { ColumnCount(5), LineCount(5) };
+    mock.writeToScreen("12345\r\n"
+                       "67890\r\n"
+                       "ABCDE\r\n"
+                       "abcde\r\n"
+                       "fghij");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    // Seed a search pattern the way a user typing into the find bar would.
+    mock.terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
+    REQUIRE(mock.terminal.search().pattern == U"needle");
+
+    // An ordinary single-click drag across two lines -- not a double/triple-click word selection.
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 2_lineOffset + 2_columnOffset, PixelCoordinate, UiHandledHint);
+    REQUIRE(mock.terminal.extractSelectionText() == "7890\nABC");
+
+    // The drag must not have touched the search pattern.
+    CHECK(mock.terminal.search().pattern == U"needle");
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    CHECK(mock.terminal.search().pattern == U"needle");
+}
+
 TEST_CASE("Terminal.TextSelection_wrapped_line", "[terminal]")
 {
     // Create empty TE
