@@ -1177,6 +1177,14 @@ void Terminal::updateSelectionMatches()
     if (!selectionAvailable() || dynamic_cast<WordWiseSelection const*>(selector()) == nullptr)
         return;
 
+    // Also stops being a word the moment it is DRAGGED past its own line: RenderBufferBuilder's
+    // search-match scanner matches the pattern's bytes -- newlines included -- against the flat,
+    // single-line stream of rendered cells, so a multi-line pattern can (and did) never really
+    // match anything stable, and its highlight visibly jumped around as the pattern kept growing
+    // with every further mouse-move of the drag.
+    if (selector()->from().line != selector()->to().line)
+        return;
+
     auto const text = extractSelectionText();
     auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
     setNewSearchTerm(text32, SearchOrigin::DoubleClick);

@@ -1407,6 +1407,65 @@ TEST_CASE("display: a mouse drag spanning multiple lines selects the exact cell 
              "abcde");
 }
 
+TEST_CASE("display: dragging a double-clicked word past its line freezes the search highlight",
+          "[display][mouse]")
+{
+    // Regression: updateSelectionMatches() re-derives the search pattern from the CURRENT selection
+    // text on every mouse-move of a WordWiseSelection, so its other-occurrences highlight tracks a
+    // double-click as it grows into a longer word. But RenderBufferBuilder's search-match scanner
+    // matches the pattern's bytes -- newlines included -- against the flat, single-line stream of
+    // rendered cells; once the drag crosses a line boundary the "word" becomes a multi-line blob that
+    // keeps changing on every further move and essentially never matches anything stable, so the
+    // highlight visibly jumped around the screen for as long as the drag continued. The fix freezes
+    // the pattern the moment the selection stops fitting on one line, rather than feeding the scanner
+    // an ever-growing, newline-bearing target.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    h.display->forceActiveFocus();
+    h.feedAndSettle("hello world\r\n"
+                    "second row\r\n"
+                    "third here\r\n");
+
+    // Double-click on "hello" (column 2, line 0): press, release, then a second press at the same
+    // spot within the terminal's 1000ms speed-click window.
+    auto const wordPos =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(2) };
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, wordPos.line, wordPos.column));
+    h.pump();
+    sendMouse(
+        h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, wordPos.line, wordPos.column));
+    h.pump();
+    sendMouse(
+        h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, wordPos.line, wordPos.column));
+    h.pump();
+    QTest::qWait(100);
+    sendMouse(
+        h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, wordPos.line, wordPos.column));
+    h.pump();
+
+    REQUIRE(h.session->terminal().extractSelectionText() == "hello");
+    auto const patternAfterDoubleClick = h.session->terminal().search().pattern;
+    CHECK(patternAfterDoubleClick == U"hello");
+
+    // Drag across two further line boundaries (in one jump, as a fast drag would deliver it).
+    auto const dragTo =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(3) };
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, dragTo.line, dragTo.column));
+    h.pump();
+
+    // The selected text keeps growing normally...
+    CHECK(h.session->terminal().extractSelectionText()
+          == "hello world\n"
+             "second row\n"
+             "third");
+    // ...but the search pattern must have frozen at the original single-line word, not followed it.
+    CHECK(h.session->terminal().search().pattern == patternAfterDoubleClick);
+
+    sendMouse(
+        h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, dragTo.line, dragTo.column));
+    h.pump();
+}
+
 TEST_CASE("display: a press with no fresh preceding move still anchors at the press position",
           "[display][mouse]")
 {
