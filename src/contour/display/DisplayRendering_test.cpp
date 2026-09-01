@@ -1342,7 +1342,7 @@ void sendMouse(contour::display::TerminalDisplay* display,
 {
     auto const devicePoint = display.gridMetrics().mapTopLeft(line, column);
     auto const dpr = display.devicePixelRatio();
-    return QPointF(double(devicePoint.x) / dpr, double(devicePoint.y) / dpr);
+    return { double(devicePoint.x) / dpr, double(devicePoint.y) / dpr };
 }
 
 /// The item-local logical pixel position of a point INSIDE a grid cell (its top-left plus a half-cell
