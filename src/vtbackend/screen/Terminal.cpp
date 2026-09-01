@@ -1097,9 +1097,23 @@ Handled Terminal::sendCharEvent(char32_t ch,
 
 Handled Terminal::sendMousePressEvent(Modifiers modifiers,
                                       MouseButton button,
+                                      CellLocation newPosition,
                                       PixelCoordinate pixelPosition,
                                       bool uiHandledHint)
 {
+    // A press is not necessarily preceded by a MouseMove landing exactly here: the windowing system
+    // usually delivers one, which is why a slow, deliberate drag never showed this, but a fast click
+    // can arrive as a bare press while _currentMousePosition is still wherever the pointer last idled
+    // (a previous selection, a different pane, ...). Without this, handleMouseSelection() below
+    // anchors the drag on that stale position instead of where the button actually went down, and the
+    // whole selection appears to jump the moment the drag starts. Mirrors the same update
+    // sendMouseMoveEvent already does for exactly this reason.
+    if (newPosition != _currentMousePosition)
+    {
+        _currentMousePosition = newPosition;
+        updateHoveringHyperlinkState();
+    }
+
     if (button == MouseButton::Left)
     {
         _leftMouseButtonPressed = true;

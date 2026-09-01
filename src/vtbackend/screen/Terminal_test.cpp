@@ -1704,7 +1704,8 @@ TEST_CASE("Terminal.CancelSelection_with_selection", "[terminal]")
     terminal.sendMouseMoveEvent(
         Modifier::None, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
     terminal.tick(ClockBase + 3s);
-    terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
     terminal.tick(ClockBase + 4s);
     terminal.sendMouseMoveEvent(
         Modifier::None, 1_lineOffset + 2_columnOffset, PixelCoordinate, UiHandledHint);
@@ -1742,7 +1743,8 @@ TEST_CASE("Terminal.CancelSelection_double_clear", "[terminal]")
     terminal.sendMouseMoveEvent(
         Modifier::None, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
     terminal.tick(ClockBase + 3s);
-    terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
     terminal.tick(ClockBase + 4s);
     terminal.sendMouseMoveEvent(
         Modifier::None, 1_lineOffset + 2_columnOffset, PixelCoordinate, UiHandledHint);
@@ -1786,7 +1788,8 @@ TEST_CASE("Terminal.ScrollWhileSelecting", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 1_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 1_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(3s);
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
@@ -1821,7 +1824,8 @@ TEST_CASE("Terminal.ScrollWhileSelecting", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(3s);
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 1_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
@@ -1862,7 +1866,8 @@ TEST_CASE("Terminal.PerformAutoScroll", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 1_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 1_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(3s);
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
@@ -1894,7 +1899,8 @@ TEST_CASE("Terminal.PerformAutoScroll", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(3s);
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 1_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
@@ -1914,7 +1920,8 @@ TEST_CASE("Terminal.PerformAutoScroll", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 1_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 1_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(3s);
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
@@ -1962,7 +1969,8 @@ TEST_CASE("Terminal.PassiveMouseTracking_Selection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(3s);
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 0_lineOffset + 4_columnOffset, PixelCoord, UiHandledHint);
@@ -1980,8 +1988,8 @@ TEST_CASE("Terminal.PassiveMouseTracking_Selection", "[terminal]")
 
         // Press left button — should start selection AND forward to app
         mock.terminal.tick(2s);
-        auto const handled =
-            mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        auto const handled = mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
 
         // Passive tracking should return Handled{false} so session can also process action mappings
         CHECK(handled == Handled { false });
@@ -2012,7 +2020,8 @@ TEST_CASE("Terminal.PassiveMouseTracking_Selection", "[terminal]")
 
         // Now click to deselect
         mock.terminal.tick(5s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 0_lineOffset + 4_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
         CHECK(mock.terminal.extractSelectionText().empty());
     }

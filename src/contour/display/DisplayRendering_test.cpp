@@ -1316,6 +1316,340 @@ TEST_CASE("display: mouse press/move drive selection and the cursor shape on the
     h.pump();
 }
 
+namespace
+{
+/// Sends a synthetic QMouseEvent of @p type/@p button at the display-item-local logical position @p
+/// pos, exactly as the real windowing system would deliver it to TerminalDisplay's event handlers.
+void sendMouse(contour::display::TerminalDisplay* display,
+               QEvent::Type type,
+               QPointF pos,
+               Qt::MouseButton button = Qt::LeftButton)
+{
+    QMouseEvent ev(type, pos, display->mapToGlobal(pos), button, button, Qt::NoModifier);
+    QCoreApplication::sendEvent(display, &ev);
+}
+
+/// The item-local LOGICAL pixel position of a grid cell's top-left corner.
+///
+/// makeMouseCellLocation() (SessionInput.cpp) walks this mapping in reverse -- logical position *
+/// devicePixelRatio -> DEVICE pixel -> minus the renderer's pageMargin -> divided by the device
+/// cellSize -> grid row/column. Going forward through the identical quantities (gridMetrics(),
+/// devicePixelRatio()) is what makes a synthetic drag name an EXACT cell regardless of font metrics
+/// or the test machine's DPI, rather than a guessed pixel offset that happens to land inside one.
+[[nodiscard]] QPointF logicalCellTopLeft(contour::display::TerminalDisplay const& display,
+                                         vtbackend::LineOffset line,
+                                         vtbackend::ColumnOffset column)
+{
+    auto const devicePoint = display.gridMetrics().mapTopLeft(line, column);
+    auto const dpr = display.devicePixelRatio();
+    return QPointF(double(devicePoint.x) / dpr, double(devicePoint.y) / dpr);
+}
+
+/// The item-local logical pixel position of a point INSIDE a grid cell (its top-left plus a half-cell
+/// nudge), so a drag reliably lands inside the target cell rather than exactly on its boundary, where
+/// rounding could tip it into the previous row/column.
+[[nodiscard]] QPointF logicalCellCenter(contour::display::TerminalDisplay const& display,
+                                        vtbackend::LineOffset line,
+                                        vtbackend::ColumnOffset column)
+{
+    auto const topLeft = logicalCellTopLeft(display, line, column);
+    auto const cellSize = display.gridMetrics().cellSize;
+    auto const dpr = display.devicePixelRatio();
+    return topLeft
+           + QPointF(double(cellSize.width.as<int>()) / dpr / 2.0,
+                     double(cellSize.height.as<int>()) / dpr / 2.0);
+}
+} // namespace
+
+TEST_CASE("display: a mouse drag spanning multiple lines selects the exact cell range", "[display][mouse]")
+{
+    // The headless Selection/Selector tests (Terminal_selection_test.cpp) inject CellLocation
+    // directly and never exercise the pixel math a real drag runs through -- makeMouseCellLocation's
+    // device-pixel round trip via gridMetrics().pageMargin, cellSize and mainPageRowNear. Driving
+    // real QMouseEvents through the live TerminalDisplay is the only path that also exercises that
+    // translation, so this is where a rounding or off-by-one in the pixel->cell mapping would show up
+    // for a selection spanning more than one row -- as opposed to a bug in Selector::ranges() itself,
+    // which is already covered headlessly.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    h.display->forceActiveFocus();
+    h.feedAndSettle("0123456789\r\n"
+                    "ABCDEFGHIJ\r\n"
+                    "abcdefghij\r\n"
+                    "9876543210\r\n");
+
+    auto const from =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(3) };
+    auto const to =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(4) };
+
+    // A press anchors the selection at the terminal's _currentMousePosition, which only a preceding
+    // MouseMove updates (Terminal::sendMouseMoveEvent) -- exactly what a real windowing system always
+    // delivers before a button press. Skipping it anchors at whatever position an earlier move left
+    // behind (the origin, on a fresh session), which is the mistake this comment is here to head off.
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, from.line, from.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, from.line, from.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, to.line, to.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, to.line, to.column));
+    h.pump();
+
+    REQUIRE(h.session->terminal().selectionAvailable());
+    CHECK(h.session->terminal().isSelectionComplete());
+
+    // Row 0 from column 3 to the right margin, row 1 whole, row 2 from column 0 up to column 4 --
+    // exactly Selection::ranges()'s documented 3-line shape (first partial, inner full, last partial).
+    CHECK(h.session->terminal().extractSelectionText()
+          == "3456789\n"
+             "ABCDEFGHIJ\n"
+             "abcde");
+}
+
+TEST_CASE("display: a press with no fresh preceding move still anchors at the press position",
+          "[display][mouse]")
+{
+    // Regression for the "fast drag drifts" bug: Terminal::sendMousePressEvent has a pixelPosition
+    // argument but never converts it to a cell -- handleMouseSelection() anchors on
+    // _currentMousePosition, which ONLY Terminal::sendMouseMoveEvent ever writes. A real windowing
+    // system usually delivers a hover/move at the click point before the press, which is why a SLOW,
+    // deliberate drag hides this: the anchor is fresh. A fast flick can arrive as a bare press with the
+    // pointer's last recorded position stale from wherever it idled beforehand (a prior selection, a
+    // different pane, ...), so the drag then extends from that stale point instead of the actual click
+    // -- the whole selected region appears to have "moved".
+    //
+    // This is reproduced here directly: move to one spot, then press and drag at a DIFFERENT spot with
+    // no move in between -- exactly the gap between the two event types the fix must close.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    h.display->forceActiveFocus();
+    h.feedAndSettle("0123456789\r\n"
+                    "ABCDEFGHIJ\r\n"
+                    "abcdefghij\r\n"
+                    "9876543210\r\n");
+
+    auto const stalePosition =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(4) };
+    auto const from =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(3) };
+    auto const to =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(4) };
+
+    // Leave the pointer's last-known position somewhere else entirely (no press here -- this only
+    // updates the hover-tracked _currentMousePosition, mirroring the pointer idling after a previous,
+    // unrelated interaction).
+    sendMouse(h.display,
+              QEvent::MouseMove,
+              logicalCellCenter(*h.display, stalePosition.line, stalePosition.column));
+    h.pump();
+
+    // Press directly at `from` with NO intervening MouseMove there -- the gap a fast flick leaves.
+    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, from.line, from.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, to.line, to.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, to.line, to.column));
+    h.pump();
+
+    // The drag must run from the ACTUAL press position (from) to `to`, not from the stale hover
+    // position -- i.e. the selection must not have silently anchored somewhere the pointer never was
+    // pressed down.
+    CHECK(h.session->terminal().extractSelectionText()
+          == "3456789\n"
+             "ABCDEFGHIJ\n"
+             "abcde");
+}
+
+TEST_CASE("display: dragging upward across lines selects the same range as dragging downward",
+          "[display][mouse]")
+{
+    // Selection::ranges() normalizes from/to by lexicographic order before building per-line ranges
+    // (Selector.cpp's prepare()); the direction the mouse actually moved must not matter to the
+    // resulting text. This pins that symmetry through the real pixel-driven mouse path rather than
+    // through Selection::extend() called directly.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    h.display->forceActiveFocus();
+    h.feedAndSettle("0123456789\r\n"
+                    "ABCDEFGHIJ\r\n"
+                    "abcdefghij\r\n");
+
+    auto const top =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(2) };
+    auto const bottom =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(6) };
+
+    // Downward: press at top, release at bottom. Every press is preceded by a MouseMove to the SAME
+    // position -- a press alone anchors at whatever position an earlier move left _currentMousePosition
+    // at (Terminal::sendMouseMoveEvent is the only writer), which a real windowing system never does:
+    // the pointer always arrives via motion before a button event fires.
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, top.line, top.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, top.line, top.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, bottom.line, bottom.column));
+    h.pump();
+    sendMouse(
+        h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, bottom.line, bottom.column));
+    h.pump();
+    auto const downward = h.session->terminal().extractSelectionText();
+
+    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, top.line, top.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, top.line, top.column));
+    h.pump();
+    REQUIRE(h.session->terminal().extractSelectionText().empty()); // plain click cleared it
+
+    // The terminal's own click-speed counter (_speedClicks in Terminal::handleMouseSelection) counts
+    // presses within 1s of REAL elapsed time (Terminal::_currentTime, advanced from steady_clock by the
+    // live display's render loop -- unlike the headless MockTerm tests, which advance a simulated clock
+    // explicitly). Without a real pause here, this press lands within that window of the deselect click
+    // above and the one before it, so it reads as a double/triple-click and selects a word or a whole
+    // line instead of starting a plain drag.
+    QTest::qWait(1100);
+
+    // Upward: press at bottom, release at top.
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, bottom.line, bottom.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, bottom.line, bottom.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, top.line, top.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, top.line, top.column));
+    h.pump();
+    auto const upward = h.session->terminal().extractSelectionText();
+
+    CHECK(downward
+          == "23456789\n"
+             "ABCDEFGHIJ\n"
+             "abcdefg");
+    CHECK(upward == downward);
+}
+
+TEST_CASE("display: a multi-line drag selection extends and shrinks live as the mouse moves",
+          "[display][mouse]")
+{
+    // A selection is a live, redrawn thing while InProgress, not just a value read once at release.
+    // Each intermediate MouseMove must already report the range up to THAT point -- so this checks
+    // extractSelectionText() after every move, not only after the final release.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    h.display->forceActiveFocus();
+    h.feedAndSettle("first line\r\n"
+                    "second row\r\n"
+                    "third here\r\n");
+
+    auto const anchor =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(0) };
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, anchor.line, anchor.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, anchor.line, anchor.column));
+    h.pump();
+
+    // Still on line 0: single-line partial selection.
+    sendMouse(h.display,
+              QEvent::MouseMove,
+              logicalCellCenter(*h.display, vtbackend::LineOffset(0), vtbackend::ColumnOffset(4)));
+    h.pump();
+    CHECK(h.session->terminal().extractSelectionText() == "first");
+
+    // Extends onto line 1: two-line selection, first line taken whole to its right margin.
+    sendMouse(h.display,
+              QEvent::MouseMove,
+              logicalCellCenter(*h.display, vtbackend::LineOffset(1), vtbackend::ColumnOffset(5)));
+    h.pump();
+    CHECK(h.session->terminal().extractSelectionText()
+          == "first line\n"
+             "second");
+
+    // Extends onto line 2: three-line selection -- first and second line each taken whole, third
+    // partial. This is the "middle line(s) rendered full" branch of Selector.cpp's ranges().
+    sendMouse(h.display,
+              QEvent::MouseMove,
+              logicalCellCenter(*h.display, vtbackend::LineOffset(2), vtbackend::ColumnOffset(4)));
+    h.pump();
+    CHECK(h.session->terminal().extractSelectionText()
+          == "first line\n"
+             "second row\n"
+             "third");
+
+    // Retracting back onto line 1 must shrink the selection again, not merely stop growing it.
+    sendMouse(h.display,
+              QEvent::MouseMove,
+              logicalCellCenter(*h.display, vtbackend::LineOffset(1), vtbackend::ColumnOffset(2)));
+    h.pump();
+    CHECK(h.session->terminal().extractSelectionText()
+          == "first line\n"
+             "sec");
+
+    sendMouse(h.display,
+              QEvent::MouseButtonRelease,
+              logicalCellCenter(*h.display, vtbackend::LineOffset(1), vtbackend::ColumnOffset(2)));
+    h.pump();
+    CHECK(h.session->terminal().isSelectionComplete());
+}
+
+TEST_CASE("display: a multi-line drag selecting a wrapped logical line copies it as one run",
+          "[display][mouse]")
+{
+    // A line that wraps is still ONE logical line: dragging from inside it, across the wrap point,
+    // must not insert a newline at the wrap boundary the way it does at a real row break. This drives
+    // that through the same pixel-mapped mouse path as the fixed-width case above, so a regression in
+    // wrappedLine() handling under the real makeMouseCellLocation() path would show up here even
+    // though it is invisible to a direct-CellLocation Selection test.
+    //
+    // Deliberately does NOT resize the window (CSI 8 needs a bound controller and a settled OS-window
+    // round trip to actually change pageSize() -- see the controller-routed resize tests above): the
+    // harness reflows the profile's default page to whatever the 800x600 display and its resolved font
+    // actually fit, so the column count is read back rather than assumed -- writing a line ten columns
+    // longer than that is enough to get a real wrap boundary at a known column.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    h.display->forceActiveFocus();
+    auto const columns = unbox<int>(h.session->terminal().pageSize().columns);
+    REQUIRE(columns > 0);
+
+    // Row 0 fills the page exactly (built by repeating the alphabet, so it fits whatever width this
+    // display/font combination actually resolves to); "mnop" is the wrapped continuation on row 1.
+    auto constexpr Alphabet = "abcdefghijklmnopqrstuvwxyz"sv;
+    auto rowOne = std::string {};
+    while (rowOne.size() < size_t(columns))
+        rowOne += Alphabet;
+    rowOne.resize(size_t(columns));
+
+    // No CR/LF between rowOne and "mnop": an autowrap only commits the Wrapped line flag
+    // (Screen::crlfIfWrapPending) once the NEXT character is WRITTEN, and it does that as an IMPLICIT
+    // wrap -- \r\n right after filling the last column instead runs linefeed() directly (LF is handled
+    // by the parser, never reaching crlfIfWrapPending), which never sets the flag and would make this
+    // a false negative rather than what it looks like it is testing.
+    h.feedAndSettle(rowOne + "mnop");
+    h.feedAndSettle("\r\nthird\r\n"sv);
+    // isLineWrapped() marks the CONTINUATION line (row 1 here), not the line it wrapped from -- see
+    // LineFlag::Wrapped, set on the chunk a wrap produces, never on the one it wrapped out of.
+    REQUIRE(h.session->terminal().isLineWrapped(vtbackend::LineOffset(1)));
+
+    // Row 0 holds `rowOne` (wrapped), row 1 holds "mnop" then a real line break, row 2 holds "third".
+    auto const from = vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
+                                                .column = vtbackend::ColumnOffset(columns - 3) };
+    auto const to =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(1), .column = vtbackend::ColumnOffset(1) };
+
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, from.line, from.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, from.line, from.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, to.line, to.column));
+    h.pump();
+    sendMouse(h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, to.line, to.column));
+    h.pump();
+
+    // No newline at the wrap point: the tail of row 0 ("xyz", its last 3 columns) concatenates
+    // directly with the head of row 1 ("mn", its first 2 columns of "mnop").
+    auto const expectedFirstPart = rowOne.substr(size_t(columns - 3), 3);
+    CHECK(h.session->terminal().extractSelectionText() == expectedFirstPart + "mn");
+}
+
 TEST_CASE("display: focus in/out toggle the terminal's focus state on the live display", "[display][focus]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
