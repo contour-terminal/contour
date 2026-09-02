@@ -1331,7 +1331,7 @@ struct std::hash<vtbackend::Function>
     constexpr uint32_t operator()(vtbackend::Function const& fun) const noexcept { return fun.id(); }
 };
 
-// {{{ fmtlib support
+// {{{ fmt support
 template <>
 struct std::formatter<vtbackend::FunctionCategory>: std::formatter<std::string_view>
 {

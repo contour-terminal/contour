@@ -163,7 +163,7 @@ std::string toParams(DeviceAttributes v);
 
 } // namespace vtbackend
 
-// {{{ fmtlib support
+// {{{ fmt support
 template <>
 struct std::formatter<vtbackend::VTType>: std::formatter<std::string_view>
 {

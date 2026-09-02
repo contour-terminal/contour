@@ -574,7 +574,6 @@ install_deps_darwin() {
         cairo \
         catch2 \
         cpp-gsl \
-        fmt \
         fontconfig \
         freetype \
         harfbuzz \

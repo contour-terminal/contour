@@ -842,7 +842,7 @@ static_assert(std::tuple_size_v<std::remove_cvref_t<decltype(actionCatalog())>>
 
 } // namespace contour::actions
 
-// {{{ fmtlib custom formatters
+// {{{ fmt custom formatters
 
 template <>
 struct std::formatter<contour::actions::Direction>: std::formatter<std::string_view>

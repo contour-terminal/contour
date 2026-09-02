@@ -250,7 +250,7 @@ class ViInputHandler: public InputHandler
 
 } // namespace vtbackend
 
-// {{{ fmtlib custom formatters
+// {{{ fmt custom formatters
 template <>
 struct std::formatter<vtbackend::TextObjectScope>: formatter<std::string_view>
 {

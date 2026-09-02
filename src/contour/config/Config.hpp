@@ -2319,7 +2319,7 @@ std::string documentationProfileConfig();
 
 } // namespace contour::config
 
-// {{{ fmtlib custom formatter support
+// {{{ fmt custom formatter support
 
 template <>
 struct std::formatter<contour::config::Permission>: formatter<std::string_view>

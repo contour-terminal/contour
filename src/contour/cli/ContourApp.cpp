@@ -253,8 +253,7 @@ ContourApp::ContourApp(crispy::Environment const& env):
         // Project{"Catch2", "BSL-1.0", "https://github.com/catchorg/Catch2"},
         Project { "libunicode", "Apache-2.0", "https://github.com/contour-terminal/libunicode" },
         Project { "yaml-cpp", "MIT", "https://github.com/jbeder/yaml-cpp" },
-        Project { "termbench-pro", "Apache-2.0", "https://github.com/contour-terminal/termbench-pro" },
-        Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });
+        Project { "termbench-pro", "Apache-2.0", "https://github.com/contour-terminal/termbench-pro" });
 
 #ifdef __linux__
     auto crashLogDirPath = crispy::App::instance()->localStateDir() / "crash";

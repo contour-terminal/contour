@@ -105,7 +105,7 @@ constexpr bool operator!=(MatchModes a, MatchModes b) noexcept
 
 } // namespace vtbackend
 
-// {{{ fmtlib support
+// {{{ fmt support
 template <>
 struct std::formatter<vtbackend::MatchModes>: formatter<std::string>
 {

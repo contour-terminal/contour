@@ -464,7 +464,7 @@ struct numeric_limits<vtparser::Action>
 };
 } // namespace std
 
-// {{{ fmtlib custom formatter specializations
+// {{{ fmt custom formatter specializations
 template <>
 struct std::formatter<vtparser::State>: formatter<std::string_view>
 {

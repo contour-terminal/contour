@@ -846,7 +846,7 @@ inline std::string toString(InputGenerator::MouseEventType value)
 
 } // namespace vtbackend
 
-// {{{ fmtlib custom formatter support
+// {{{ fmt custom formatter support
 
 template <>
 struct std::formatter<vtbackend::KeyboardEventType>: formatter<std::string_view>
