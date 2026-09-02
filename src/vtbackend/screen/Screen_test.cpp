@@ -4486,6 +4486,47 @@ TEST_CASE("DECSWBV: sets the warning bell volume", "[screen]")
     CHECK(mock.terminal.settings().warningBellVolume == BellVolume::Off);
 }
 
+TEST_CASE("DECSWBV: a Ps outside 0-8 is rejected", "[screen]")
+{
+    // Ps 9 falls past the 5-8 (High) case into the switch's default, which is Invalid; the
+    // volume must be left exactly as it was rather than snapping to some fallback level.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[3 t");
+    REQUIRE(mock.terminal.settings().warningBellVolume == BellVolume::Low);
+
+    mock.writeToScreen("\033[9 t");
+    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::Low);
+}
+
+TEST_CASE("DECSWBV: a hand-built two-parameter sequence is rejected", "[screen]")
+{
+    // DECSWBV is registered with maximumParameters = 1, so Functions::select() already refuses a
+    // two-parameter "CSI Ps ; Ps SP t" before Screen::apply() is ever called -- writeToScreen() can't
+    // reach the handler's own multi-parameter guard at all. This bypasses the parser and calls
+    // apply() directly, to pin down what the guard itself does if that dispatch-layer invariant is
+    // ever weakened, rather than relying on select() alone to keep bad input out.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[3 t");
+    REQUIRE(mock.terminal.settings().warningBellVolume == BellVolume::Low);
+
+    auto seq = Sequence {};
+    seq.setCategory(FunctionCategory::CSI);
+    seq.intermediateCharacters() = " ";
+    seq.setFinalChar('t');
+    auto builder = SequenceParameterBuilder { seq.parameters() };
+    builder.set(1);
+    builder.nextParameter();
+    builder.set(2);
+    builder.fixiate();
+    REQUIRE(seq.parameterCount() == 2);
+
+    auto const result = mock.terminal.primaryScreen().apply(DECSWBV, seq);
+    CHECK(result == ApplyResult::Invalid);
+    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::Low);
+}
+
 TEST_CASE("DECSWBV: default parameter turns the bell off", "[screen]")
 {
     // Omitted Ps maps to 0 which VT520 maps to off

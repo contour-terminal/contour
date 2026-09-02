@@ -698,7 +698,7 @@ void TerminalSession::bell()
             case vtbackend::BellVolume::High: return configured;
         }
 
-        return configured;
+        crispy::unreachable();
     }(terminal().settings().warningBellVolume);
 
     emit onBell(volume);
