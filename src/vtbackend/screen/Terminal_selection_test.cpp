@@ -193,6 +193,77 @@ TEST_CASE("Terminal.plain_drag_selection_does_not_overwrite_the_search_pattern",
     CHECK(mock.terminal.search().pattern == U"needle");
 }
 
+TEST_CASE("Terminal.word_selection_across_a_soft_wrap_still_updates_the_search_pattern", "[terminal]")
+{
+    // Regression: updateSelectionMatches() used to reject a word-wise selection whose from() and to()
+    // sat on different PHYSICAL rows, on the theory that a multi-line pattern cannot match the flat,
+    // single-line stream RenderBufferBuilder's search-match scanner walks. But a word straddling a soft
+    // wrap spans two rows while extracting as ONE line -- SelectionRenderer emits a break only where
+    // `!isLineWrapped` -- so the guard refused a perfectly good pattern and left the previous search
+    // term standing, costing the wrapped word its matching-word highlights.
+    auto mock = MockTerm { ColumnCount(5), LineCount(2) };
+    mock.terminal.setWordDelimiters(" ");
+
+    // One 10-character word: fills row 0 and soft-wraps into row 1.
+    mock.writeToScreen(std::string(10, 'a'));
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    mock.terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
+    REQUIRE(mock.terminal.search().pattern == U"needle");
+
+    // Double-click inside the word: two presses at the same cell, inside the one-second window.
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+
+    // The selection crossed the wrap, yet extracts as a single line...
+    auto const selected = mock.terminal.extractSelectionText();
+    REQUIRE(selected == std::string(10, 'a'));
+    REQUIRE(!selected.contains('\n'));
+
+    // ...so it IS a word, and must have become the pattern.
+    CHECK(mock.terminal.search().pattern == std::u32string(10, U'a'));
+    CHECK(mock.terminal.search().origin == SearchOrigin::DoubleClick);
+}
+
+TEST_CASE("Terminal.a_press_at_a_new_cell_starts_a_fresh_click_sequence", "[terminal]")
+{
+    // Regression: sendMousePressEvent() anchors a bare press at the cell it landed on (a fast click can
+    // arrive with no preceding MouseMove), but it did so WITHOUT resetting the speed-click counter that
+    // sendMouseMoveEvent resets for exactly the same cell change. A second fast click at a DIFFERENT
+    // cell, still inside the one-second window, therefore inherited the first one's count and opened as
+    // a double-click word selection instead of a fresh drag.
+    auto mock = MockTerm { ColumnCount(11), LineCount(2) };
+    mock.terminal.setWordDelimiters(" ");
+    mock.writeToScreen("hello world");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    // First click, on "hello".
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+
+    // A second bare press at a DIFFERENT cell, arriving well inside the one-second double-click window
+    // and with no MouseMove in between -- the fast-click path.
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 7_columnOffset, PixelCoordinate, UiHandledHint);
+
+    // It must open a fresh, empty drag -- not select the word under it.
+    CHECK(mock.terminal.selector() != nullptr);
+    CHECK(dynamic_cast<WordWiseSelection const*>(mock.terminal.selector()) == nullptr);
+    CHECK(mock.terminal.extractSelectionText().empty());
+}
+
 TEST_CASE("Terminal.TextSelection_wrapped_line", "[terminal]")
 {
     // Create empty TE

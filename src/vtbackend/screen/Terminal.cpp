@@ -1110,6 +1110,12 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
     // sendMouseMoveEvent already does for exactly this reason.
     if (newPosition != _currentMousePosition)
     {
+        // For the same reason sendMouseMoveEvent resets it: a multi-click sequence is only a
+        // sequence while it stays on one cell. A press that lands somewhere else starts a new one,
+        // and without this a fast click arriving as a bare press within the one-second window would
+        // inherit the previous cell's count and open as a word- or line-selection instead of a drag.
+        _speedClicks = 0;
+
         _currentMousePosition = newPosition;
         updateHoveringHyperlinkState();
     }
@@ -1177,15 +1183,22 @@ void Terminal::updateSelectionMatches()
     if (!selectionAvailable() || dynamic_cast<WordWiseSelection const*>(selector()) == nullptr)
         return;
 
-    // Also stops being a word the moment it is DRAGGED past its own line: RenderBufferBuilder's
+    auto const text = extractSelectionText();
+
+    // Also stops being a word the moment it is DRAGGED past its own logical line: RenderBufferBuilder's
     // search-match scanner matches the pattern's bytes -- newlines included -- against the flat,
     // single-line stream of rendered cells, so a multi-line pattern can (and did) never really
     // match anything stable, and its highlight visibly jumped around as the pattern kept growing
     // with every further mouse-move of the drag.
-    if (selector()->from().line != selector()->to().line)
+    //
+    // The test is the extracted TEXT, not `from().line != to().line`: a double-clicked word that
+    // straddles a soft wrap spans two physical rows, and SelectionRenderer deliberately joins those
+    // without a break (it flushes a line only where `!isLineWrapped`). Keying on physical rows
+    // therefore refused a perfectly good single-line pattern and left the previous search term
+    // standing, costing the wrapped word its matching-word highlights.
+    if (text.contains('\n'))
         return;
 
-    auto const text = extractSelectionText();
     auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
     setNewSearchTerm(text32, SearchOrigin::DoubleClick);
 }
