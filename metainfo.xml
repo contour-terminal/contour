@@ -107,6 +107,8 @@
     <release version="0.7.1" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes a fast mouse click starting a drag selection from a stale position instead of where the button actually went down, making the selected region appear to jump the moment the drag started. A slow, deliberate drag never showed this, because the pointer's tracked position was refreshed by the preceding movement; a quick click could arrive with no such movement right before it</li>
+          <li>Fixes dragging out an ordinary text selection silently overwriting the active search term, so the selected text appeared as a live search wherever a status line or the find bar echoes it. Only a double or triple click's word selection is meant to do that</li>
           <li>Fixes permissions.capture_buffer never being consulted: a profile saying deny still raised the dialog and let the capture through once approved, and one saying allow was still interrupted by it. Both now decide the request outright, and with ask, "Yes to all" / "No to all" is remembered for the rest of the session instead of being stored and ignored (#2089)</li>
           <li>Fixes "Yes to all" on a larger-than-512-KB paste not being remembered either, so every such paste asked again</li>
           <li>Fixes a refused buffer capture leaving the requesting program hanging. The reply always ends with an empty PM 314 chunk, and a refusal sent nothing at all — so a client reading until that marker waited forever. A denial now sends the terminator, and so does a capture asked of a background pane</li>

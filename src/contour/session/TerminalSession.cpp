@@ -2108,6 +2108,7 @@ void TerminalSession::sendCharEvent(char32_t value,
 
 void TerminalSession::sendMousePressEvent(Modifiers modifiers,
                                           MouseButton button,
+                                          CellLocation pos,
                                           PixelCoordinate pixelPosition)
 {
     auto const uiHandledHint = false;
@@ -2116,7 +2117,7 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
     terminal().tick(steady_clock::now());
 
     if (crispy::locked(_terminal, [&]() {
-            return _terminal.sendMousePressEvent(modifiers, button, pixelPosition, uiHandledHint);
+            return _terminal.sendMousePressEvent(modifiers, button, pos, pixelPosition, uiHandledHint);
         }))
         return;
 
