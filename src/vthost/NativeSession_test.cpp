@@ -173,7 +173,7 @@ struct HarnessOptions
 /// Drives a NativeSession over an in-memory socket pair.
 struct NativeHarness
 {
-    explicit NativeHarness(HarnessOptions opts = {}): options { opts } {}
+    explicit NativeHarness(HarnessOptions opts = {}): options { std::move(opts) } {}
 
     net::PollEventSource source;
     net::EventLoop loop { source };
