@@ -3832,6 +3832,30 @@ namespace impl
         }
 
         // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+        ApplyResult DECSWBV(Sequence const& seq, Terminal& terminal)
+        {
+            if (seq.parameterCount() <= 1)
+            {
+                switch (seq.paramOr(0, Sequence::Parameter { 0 }))
+                {
+                    case 0:
+                    case 1: terminal.setWarningBellVolume(BellVolume::Off); break;
+                    case 2:
+                    case 3:
+                    case 4: terminal.setWarningBellVolume(BellVolume::Low); break;
+                    case 5:
+                    case 6:
+                    case 7:
+                    case 8: terminal.setWarningBellVolume(BellVolume::High); break;
+                    default: return ApplyResult::Invalid;
+                }
+                return ApplyResult::Ok;
+            }
+            else
+                return ApplyResult::Invalid;
+        }
+
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult EL(Sequence const& seq, Screen& screen)
         {
             switch (seq.paramOr(0, Sequence::Parameter { 0 }))
@@ -6856,6 +6880,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                 return ApplyResult::Invalid;
             _terminal->softReset();
             break;
+        case DECSWBV: return impl::DECSWBV(seq, *_terminal);
         case DECTST: return impl::invokeConfidenceTest(seq, *_terminal);
         case NP: nextPage(seq.paramOr(0, 1)); break;
         case PP: previousPage(seq.paramOr(0, 1)); break;
