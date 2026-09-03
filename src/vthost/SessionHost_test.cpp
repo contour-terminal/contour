@@ -961,6 +961,40 @@ TEST_CASE("SessionHost honors a startup layout pane's directory-only override, "
     CHECK(seen->workingDirectory == std::filesystem::path { "/tmp/project" });
 }
 
+TEST_CASE("SessionHost engages no override for a startup layout pane's arguments without a command",
+          "[vthost][host][layout]")
+{
+    // Arguments name what a command is run with, so a pane carrying them without one is malformed.
+    // Such a pane must not engage an override at all: an empty-program ExecInfo would tell the
+    // factory this session overrides the shell while carrying nothing to run. The arguments are
+    // dropped, with a log line rather than in silence.
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = net::EventLoop { source };
+
+    auto tab = vtworkspace::LayoutTab {};
+    tab.root.arguments = { "--flag", "value" };
+    // command, directory and profile are left unset/empty
+    auto layout = vtworkspace::Layout { .tabs = { tab } };
+
+    auto seen = std::optional<vtpty::Process::ExecInfo> {};
+    auto host = SessionHost { loop,
+                              [&](vtbackend::PageSize size,
+                                  std::optional<vtpty::Process::ExecInfo> const& commandOverride) {
+                                  seen = commandOverride;
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/false,
+                              vthost::ClientSizePolicy::Latest,
+                              layout };
+
+    REQUIRE(host.sessionCount() == 1);
+
+    // The pane still spawns the daemon's configured shell -- just with no override at all.
+    CHECK(!seen.has_value());
+}
+
 TEST_CASE("SessionHost falls back to an empty window when every startup-layout seed is refused",
           "[vthost][host][layout]")
 {

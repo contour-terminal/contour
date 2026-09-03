@@ -253,17 +253,29 @@ void SessionHost::realizeStartupLayout(vtworkspace::WindowId window, vtworkspace
         // A pane's profile has no resolution path on the daemon (no Config object to look an
         // arbitrary named profile up in) -- see the design doc's "Out of scope". Warn once per
         // such pane so a user who wrote one is not left guessing why it did not take effect.
-        // command/arguments/directory ARE honored, via the same overlay rule a local session's
-        // AppSessionFactory::createPty applies: an override is engaged only when the pane
-        // actually names a program (a directory-only pane still runs the daemon's configured
-        // shell, just at a different cwd) or a directory.
+        // command/arguments/directory ARE honored: an override is engaged when the pane names a
+        // program, or a directory. A directory-only pane still runs the daemon's configured shell,
+        // just at a different cwd.
+        //
+        // The directory half deliberately DIVERGES from the local path, which routes a directory
+        // through its separate `cwd` channel because engaging an empty-program override there would
+        // bypass an SSH profile's SshSession. The daemon has neither that channel nor an SSH path,
+        // so the override is the only way a pane's directory can reach the session at all.
         auto const seeder = [&](vtworkspace::LayoutPane const& leaf) -> bool {
             if (leaf.profile)
                 sessionLog()("startup layout: ignoring pane override (profile); spawning the "
                              "daemon's configured shell.");
 
+            // Arguments name what @c command is run with, so without one there is nothing for them
+            // to belong to. Say so rather than dropping them where nobody can see it: the local path
+            // forwards them to a factory that declines an empty program just the same, so the pane
+            // is malformed either way -- silence is the only part worth fixing here.
+            if (!leaf.command && !leaf.arguments.empty())
+                sessionLog()("startup layout: ignoring pane arguments ({}) given without a command.",
+                             leaf.arguments.size());
+
             auto commandOverride = std::optional<vtpty::Process::ExecInfo> {};
-            if (leaf.command || !leaf.arguments.empty() || leaf.directory)
+            if (leaf.command || leaf.directory)
             {
                 commandOverride = vtpty::Process::ExecInfo {};
                 if (leaf.command)
