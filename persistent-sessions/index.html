@@ -1,0 +1,2647 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+      
+      
+        <meta name="author" content="Christian Parpart">
+      
+      
+      
+        <link rel="prev" href="../features/">
+      
+      
+        <link rel="next" href="../demo/font-ligatures/">
+      
+      
+      <link rel="icon" href="/assets/contour-logo.png">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.17">
+    
+    
+      
+        <title>Persistent sessions - Contour Terminal Emulator</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.bcfcd587.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#persistent-sessions-daemon-mode" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Contour Terminal Emulator" class="md-header__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Contour Terminal Emulator
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Persistent sessions
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5c-.84 0-1.65.15-2.39.42L12 2M3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29L3.34 7m.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14L3.36 17M20.65 7l-1.77 3.79a7.023 7.023 0 0 0-2.38-4.15l4.15.36m-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29L20.64 17M12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44L12 22Z"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-red" data-md-color-accent="red" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3 3.19.09m3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95 2.06.05m-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31Z"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"></path></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required="">
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard="" data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08Z"></path></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"></path></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix="">
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href=".." class="md-tabs__link">
+          
+  
+    
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../install/" class="md-tabs__link">
+          
+  
+    
+  
+  Getting started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../configuration/" class="md-tabs__link">
+          
+  
+    
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../features/" class="md-tabs__link">
+          
+  
+    
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../vt-sequence/" class="md-tabs__link">
+          
+  
+    
+  
+  VT sequence reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../vt-extensions/" class="md-tabs__link">
+          
+  
+    
+  
+  VT extensions
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../internals/" class="md-tabs__link">
+          
+  
+    
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Contour Terminal Emulator" class="md-nav__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    Contour Terminal Emulator
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix="">
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1">
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href=".." class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Home
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Contribution Guidelines
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2">
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Getting started
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Getting started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../release-notes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Release Notes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3">
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../configuration/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Configuration
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/profiles/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Profiles
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/layouts/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layouts
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/colors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Colors
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/indicator-statusline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Indicator Statusline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/paths/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Path Handling in Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/key-mapping/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Key Mapping
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked="">
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Features
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    List of features
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Persistent sessions
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Persistent sessions
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick start
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detaching-versus-ending-a-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      Detaching versus ending a session
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-several-daemons-side-by-side" class="md-nav__link">
+    <span class="md-ellipsis">
+      Running several daemons side by side
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contour-daemon-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      contour daemon options
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contour-client-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      contour client options
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tmux-interoperability" class="md-nav__link">
+    <span class="md-ellipsis">
+      tmux interoperability
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="tmux interoperability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#attach-tmux-tooling-to-a-contour-daemon" class="md-nav__link">
+    <span class="md-ellipsis">
+      Attach tmux tooling to a Contour daemon
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#show-a-real-tmux-server-in-a-contour-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      Show a real tmux server in a Contour window
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remote-access-over-tcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      Remote access over TCP
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stopping-a-daemon" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stopping a daemon
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diagnostics
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#platform-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Platform notes
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#after-upgrading-contour-restart-the-daemon" class="md-nav__link">
+    <span class="md-ellipsis">
+      After upgrading Contour, restart the daemon
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      Current limitations
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/font-ligatures/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Font ligatures
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/images/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Images
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/regis-graphics/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ReGIS vector graphics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/ime/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Input method editor (IME)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/line-marks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Line marks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/statusline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Status line
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/hint-mode/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Hint mode
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../input-modes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Input modes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../accessibility/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Accessibility
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/size_indicator/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Size indicator
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demo/git-branch-drawings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Git branch drawings
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5">
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../vt-sequence/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    VT sequence reference
+  </span>
+  
+
+            </a>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            VT sequence reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6">
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../vt-extensions/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    VT extensions
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            VT extensions
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/clickable-links/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Clickable Links
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/unicode-core/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Unicode Core
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/vertical-line-marks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Vertical Line Markers
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/color-palette-update-notifications/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Dark and Light Mode detection
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/synchronized-output/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Synchronized Output
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/buffer-capture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Buffer Capture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/font-settings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Query or Change Font Settings
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/line-reflow-mode/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Line Reflow Reconfiguration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/save-and-restore-sgr-attributes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Save and Restore SGR attributes.
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/osc-133-shell-integration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OSC 133 - Shell Integration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/osc-3008-context/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OSC 3008 — Hierarchical Context Signalling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/osc-9-4-progress/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Progress indicator (OSC 9;4)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/semantic-block-query/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Semantic Block Query (DEC Mode 2034)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-extensions/private-use-glyphs/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Private Use Glyphs
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7">
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../internals/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/CODING_STYLE/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Coding Style Guidelines
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/vthost/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Daemon mode
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/text-stack/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    A terminal emulator's text stack.
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/vt-conformance/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    VT conformance testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/macos-code-signing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    macOS code signing, notarization and packaging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick start
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detaching-versus-ending-a-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      Detaching versus ending a session
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-several-daemons-side-by-side" class="md-nav__link">
+    <span class="md-ellipsis">
+      Running several daemons side by side
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contour-daemon-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      contour daemon options
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contour-client-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      contour client options
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tmux-interoperability" class="md-nav__link">
+    <span class="md-ellipsis">
+      tmux interoperability
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="tmux interoperability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#attach-tmux-tooling-to-a-contour-daemon" class="md-nav__link">
+    <span class="md-ellipsis">
+      Attach tmux tooling to a Contour daemon
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#show-a-real-tmux-server-in-a-contour-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      Show a real tmux server in a Contour window
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remote-access-over-tcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      Remote access over TCP
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stopping-a-daemon" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stopping a daemon
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diagnostics
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#platform-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Platform notes
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#after-upgrading-contour-restart-the-daemon" class="md-nav__link">
+    <span class="md-ellipsis">
+      After upgrading Contour, restart the daemon
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      Current limitations
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/contour-terminal/contour/edit/master/docs/persistent-sessions.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4v-2m10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1 2.1 2.1Z"></path></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/contour-terminal/contour/raw/master/docs/persistent-sessions.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.15 8.15 0 0 1-1.23-2Z"></path></svg>
+    </a>
+  
+
+
+<div><h1 id="persistent-sessions-daemon-mode">Persistent sessions (daemon mode)</h1>
+<div class="admonition warning">
+<p class="admonition-title">Experimental</p>
+<p>Daemon mode is new in 0.7.0 and still settling. It is built into every Contour and covered by
+the test suite, but its command-line flags and its wire protocol may change between releases.</p>
+</div>
+<p>Contour already gives you tabs and split panes inside one window. Daemon mode is different: it
+moves your sessions into a <strong>background process</strong>, so they survive the window that shows them.
+Close the window, reattach later, or attach from another machine — the shells keep running
+either way.</p>
+<p>That buys you three things:</p>
+<ul>
+<li>A long build, a database migration or a training run keeps going after you close the window —
+  deliberately or by accident.</li>
+<li>Work done over SSH survives the link dropping. Reconnect, reattach, carry on.</li>
+<li>The same sessions are reachable from a second machine, over an encrypted connection.</li>
+</ul>
+<p>If you have used <code>tmux</code> or <code>screen</code>, this is the same idea, with two differences: the sessions are
+rendered by a real Contour window (images, hyperlinks, sized text and all), and Contour can speak
+tmux's own protocol in both directions — so it interoperates with tmux rather than replacing it.</p>
+<h2 id="quick-start">Quick start</h2>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>contour<span class="w"> </span>client
+</span></code></pre></div>
+<p>That is the whole thing. <code>contour client</code> looks for a daemon, <strong>starts one if none is running</strong>,
+and opens a window showing its sessions. Close the window and the shells stay alive; run
+<code>contour client</code> again to pick them back up — with their scrollback, so you can scroll back through
+what the session did while nothing was watching.</p>
+<p>To manage the daemon yourself, start it first:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>contour<span class="w"> </span>daemon<span class="w"> </span><span class="p">&amp;</span><span class="w">      </span><span class="c1"># runs in the FOREGROUND; background it or use a service manager</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>contour<span class="w"> </span>client<span class="w">        </span><span class="c1"># attaches to the daemon you started</span>
+</span></code></pre></div>
+<p>The distinction matters, because the two daemons have different lifetimes:</p>
+<table>
+<thead>
+<tr>
+<th>How it started</th>
+<th>When it exits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Auto-started by <code>contour client</code></td>
+<td>Once its <strong>last session</strong> is gone — it belongs to the client that needed it, so nothing is left behind</td>
+</tr>
+<tr>
+<td>Started by you (<code>contour daemon</code>)</td>
+<td>Never on its own. It keeps serving with zero sessions, ready for the next client</td>
+</tr>
+</tbody>
+</table>
+<p><code>contour daemon --exit-with-last-session</code> opts a hand-started daemon into the first behaviour
+(tmux spells this <code>exit-empty</code>). The policy rides on the <em>daemon</em>, so a second client attaching
+inherits it, and the daemon ends only when every session across every client is gone.</p>
+<div class="admonition note">
+<p class="admonition-title"><code>contour daemon</code> does not detach by itself</p>
+<p>It runs in the foreground and logs to standard error, which is what you want under a service
+manager or in a container. Background it with <code>&amp;</code>, or let <code>contour client</code> start it for you.</p>
+</div>
+<h2 id="detaching-versus-ending-a-session">Detaching versus ending a session</h2>
+<p>Because sessions outlive the window, "close" needs two answers — and Contour gives you both.
+Which one you get depends on <em>what</em> you close:</p>
+<table>
+<thead>
+<tr>
+<th>What you close</th>
+<th>What happens to the shell</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The window (its close button, or quitting Contour)</td>
+<td><strong>Detach.</strong> It keeps running; the next <code>contour client</code> shows it again</td>
+</tr>
+<tr>
+<td>A <strong>pane</strong> — <em>Close Pane</em> in the right-click menu, or the <code>ClosePane</code> action</td>
+<td><strong>Ends.</strong> That session is closed on the daemon and does not come back</td>
+</tr>
+<tr>
+<td>A <strong>tab</strong> — its ✕, or the <code>CloseTab</code> action</td>
+<td><strong>Ends</strong>, together with every pane in it</td>
+</tr>
+<tr>
+<td>Typing <code>exit</code> in the shell</td>
+<td><strong>Ends</strong>, as always — the shell decided</td>
+</tr>
+</tbody>
+</table>
+<p>This is the same split tmux draws between detaching a client and <code>kill-pane</code>, and it works the same
+for a local session as for one hosted by a daemon: a pane you end is ended everywhere, including for
+any other client attached to that daemon.</p>
+<p>Neither <code>ClosePane</code> nor <code>CloseTab</code> ships with a default key binding — bind them yourself if you want
+one:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">input_mapping</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> mods</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Ctrl</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Shift</span><span class="p p-Indicator">],</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="s">'W'</span><span class="p p-Indicator">,</span><span class="nt"> action</span><span class="p">:</span><span class="w"> </span><span class="nv">ClosePane</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<div class="admonition tip">
+<p class="admonition-title">Ending a whole daemon's worth of sessions</p>
+<p>Closing panes one at a time is the fine-grained way. To end everything at once, stop the daemon
+— see <a href="#stopping-a-daemon">Stopping a daemon</a>.</p>
+</div>
+<h2 id="running-several-daemons-side-by-side">Running several daemons side by side</h2>
+<p>Daemons are told apart by a <strong>label</strong>, exactly as tmux's <code>-L</code> does:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>contour<span class="w"> </span>daemon<span class="w"> </span>--label<span class="w"> </span>work
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>contour<span class="w"> </span>client<span class="w"> </span>--label<span class="w"> </span>work
+</span></code></pre></div>
+<p>The label names a socket under your per-user runtime directory. Resolution order:</p>
+<ol>
+<li><code>--socket PATH</code> — used verbatim.</li>
+<li><code>$CONTOUR_MUX</code> — used verbatim (analogous to tmux's <code>$TMUX</code>).</li>
+<li><code>$XDG_RUNTIME_DIR/contour/&lt;label&gt;</code>.</li>
+<li><code>&lt;temp&gt;/contour-&lt;uid&gt;/&lt;label&gt;</code> when there is no runtime directory (tmux's
+   <code>/tmp/tmux-&lt;uid&gt;/&lt;label&gt;</code> shape).</li>
+</ol>
+<p>The daemon binds three endpoints, all derived from that one path: the control socket itself,
+<code>&lt;socket&gt;-native</code> for Contour's own clients, and <code>&lt;socket&gt;-tmux</code> for the tmux binary.</p>
+<p>The socket directory is created <code>0700</code> and checked on every bind: it must be a real directory,
+owned by you, and must not be world-accessible. Group access is permitted, matching tmux.</p>
+<div class="admonition warning">
+<p class="admonition-title">Keep socket paths short</p>
+<p>A Unix socket path is limited to roughly 100 bytes by the operating system, not by Contour. A
+deeply nested <code>--socket</code> path will fail to bind.</p>
+</div>
+<h2 id="contour-daemon-options"><code>contour daemon</code> options</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--socket PATH</code></td>
+<td>Path of the control socket file. Defaults to <code>$XDG_RUNTIME_DIR/contour/LABEL</code>, respecting <code>$CONTOUR_MUX</code>.</td>
+</tr>
+<tr>
+<td><code>--label NAME</code></td>
+<td>Socket label distinguishing daemon instances. Default <code>default</code>.</td>
+</tr>
+<tr>
+<td><code>--config FILE</code></td>
+<td>Configuration file whose profile supplies the hosted sessions' terminal settings — including <code>history.limit</code>, which is how much scrollback a session keeps for clients that attach later.</td>
+</tr>
+<tr>
+<td><code>--profile NAME</code></td>
+<td>Which profile of that configuration to take them from. Defaults to the configuration's default profile.</td>
+</tr>
+<tr>
+<td><code>--exit-with-last-session</code></td>
+<td>Terminates the daemon once its last hosted session is gone (tmux's <code>exit-empty</code>). Off by default.</td>
+</tr>
+<tr>
+<td><code>--tmux-compat-socket LABEL</code></td>
+<td>Additionally binds tmux's own discovery path <code>/tmp/tmux-&lt;uid&gt;/&lt;LABEL&gt;</code>, so a plain <code>tmux -L LABEL -C attach-session</code> finds this daemon.</td>
+</tr>
+<tr>
+<td><code>--listen-tcp HOST:PORT</code></td>
+<td>Also serve the native protocol over TCP. Opt-in; always TLS-encrypted and token-authenticated. See <a href="#remote-access-over-tcp">Remote access</a>.</td>
+</tr>
+<tr>
+<td><code>--token TOKEN</code></td>
+<td>Preshared token every TCP client must present. Required with <code>--listen-tcp</code>. Visible to other local users through the process list — prefer <code>--token-file</code>.</td>
+</tr>
+<tr>
+<td><code>--token-file FILE</code></td>
+<td>Reads the token from <code>FILE</code> instead, so the secret is protected by that file's permissions. Trailing newlines are ignored.</td>
+</tr>
+<tr>
+<td><code>--tls-cert FILE</code>, <code>--tls-key FILE</code></td>
+<td>PEM certificate and matching private key for the TCP listener. Omit both to have the daemon generate an ephemeral self-signed certificate.</td>
+</tr>
+<tr>
+<td><code>--log TAGS</code></td>
+<td>Enable logging for a comma-separated list of tags, or <code>all</code>. See <a href="#diagnostics">Diagnostics</a>.</td>
+</tr>
+<tr>
+<td><code>--log-file FILE</code></td>
+<td>Append log output to <code>FILE</code> instead of standard error; <code>-</code> means standard error explicitly.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="contour-client-options"><code>contour client</code> options</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--socket PATH</code>, <code>--label NAME</code></td>
+<td>Which daemon to attach to; same resolution as above.</td>
+</tr>
+<tr>
+<td><code>--tmux</code></td>
+<td>Attach to a <strong>real tmux server</strong> instead of a Contour daemon. See <a href="#tmux-interoperability">tmux interoperability</a>.</td>
+</tr>
+<tr>
+<td><code>--tmux-socket PATH</code></td>
+<td>The tmux server socket (tmux's <code>-S</code>) for <code>--tmux</code>.</td>
+</tr>
+<tr>
+<td><code>--profile NAME</code></td>
+<td>Config profile the window renders remote sessions with.</td>
+</tr>
+<tr>
+<td><code>--config FILE</code></td>
+<td>Configuration file to load.</td>
+</tr>
+<tr>
+<td><code>--connect-tcp HOST:PORT</code></td>
+<td>Connect to a remote daemon over TLS instead of a local socket.</td>
+</tr>
+<tr>
+<td><code>--token TOKEN</code>, <code>--token-file FILE</code></td>
+<td>The preshared token to present, inline or read from a file.</td>
+</tr>
+<tr>
+<td><code>--tls-ca FILE</code></td>
+<td>PEM trust anchor pinning the daemon's certificate. Omitted means encrypt-but-do-not-verify.</td>
+</tr>
+<tr>
+<td><code>--log TAGS</code>, <code>--log-file FILE</code></td>
+<td>As above — and <strong>passed on to a daemon this client auto-starts</strong>, which is otherwise the one instance nobody can configure.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tmux-interoperability">tmux interoperability</h2>
+<p>Contour speaks tmux's control-mode protocol in both directions, pinned to tmux 3.7b semantics.</p>
+<h3 id="attach-tmux-tooling-to-a-contour-daemon">Attach tmux tooling to a Contour daemon</h3>
+<p><code>&lt;socket&gt;-tmux</code> speaks the binary protocol the stock tmux client uses, so the real tmux binary can
+attach to a Contour daemon:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>tmux<span class="w"> </span>-S<span class="w"> </span><span class="s2">"</span><span class="nv">$XDG_RUNTIME_DIR</span><span class="s2">/contour/default-tmux"</span><span class="w"> </span>-C<span class="w"> </span>attach-session
+</span></code></pre></div>
+<p>To let tmux find the daemon by label alone, have the daemon bind tmux's own discovery path too:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>contour<span class="w"> </span>daemon<span class="w"> </span>--tmux-compat-socket<span class="w"> </span>mine
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>tmux<span class="w"> </span>-L<span class="w"> </span>mine<span class="w"> </span>-C<span class="w"> </span>attach-session
+</span></code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title"><code>--tmux-compat-socket</code> is opt-in for a reason</p>
+<p>That path is where tmux looks for <em>its</em> server. With the Contour daemon down, a <code>new-session</code>
+against it would silently start a real tmux server there instead.</p>
+</div>
+<p>Control mode (<code>-C</code>) is supported; <code>-CC</code> is not — Contour never renders a full terminal client for
+tmux. Arbitrary startup commands are refused; the endpoint accepts attach- and new-session-shaped
+startup only.</p>
+<h3 id="show-a-real-tmux-server-in-a-contour-window">Show a real tmux server in a Contour window</h3>
+<p>The other direction: point Contour at a tmux server and mirror it.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>contour<span class="w"> </span>client<span class="w"> </span>--tmux<span class="w">                       </span><span class="c1"># the default tmux server</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>contour<span class="w"> </span>client<span class="w"> </span>--tmux<span class="w"> </span>--tmux-socket<span class="w"> </span>/tmp/x<span class="w">  </span><span class="c1"># a specific one</span>
+</span></code></pre></div>
+<p>tmux windows become Contour tabs, tmux panes become splits, and input travels back as
+<code>send-keys</code>. Content mirrors live.</p>
+<div class="admonition note">
+<p class="admonition-title">tmux replay carries text, not images</p>
+<p>Contour replays each pane's full history through <code>capture-pane</code>, so scrollback survives a
+reattach on this path too. Images do not, and that is a tmux limitation rather than Contour's:
+<code>capture-pane</code> serialises text and colour, never image data. Images drawn <em>while you are
+attached</em> display normally; images drawn <em>before</em> you attached cannot be recovered. Contour's
+own native protocol has no such gap — it transfers images by id.</p>
+</div>
+<h2 id="remote-access-over-tcp">Remote access over TCP</h2>
+<p>By default a daemon is reachable only through its Unix socket, where the filesystem permissions
+are the access control. <code>--listen-tcp</code> additionally exposes the native protocol over the network:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># On the host running the sessions:</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nb">umask</span><span class="w"> </span><span class="m">077</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>openssl<span class="w"> </span>rand<span class="w"> </span>-base64<span class="w"> </span><span class="m">32</span><span class="w"> </span>&gt;<span class="w"> </span>~/.contour-token
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>contour<span class="w"> </span>daemon<span class="w"> </span>--listen-tcp<span class="w"> </span><span class="m">127</span>.0.0.1:9090<span class="w"> </span>--token-file<span class="w"> </span>~/.contour-token
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># On the machine you are sitting at:</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>contour<span class="w"> </span>client<span class="w"> </span>--connect-tcp<span class="w"> </span>server.example.com:9090<span class="w"> </span>--token-file<span class="w"> </span>~/.contour-token
+</span></code></pre></div>
+<p>Properties worth knowing before you open a port:</p>
+<ul>
+<li><strong>TLS is not optional.</strong> The TCP endpoint is always encrypted; there is no plaintext mode.</li>
+<li><strong>A token is required.</strong> TCP has no filesystem gate to fall back on, so <code>--listen-tcp</code> without
+  <code>--token</code>/<code>--token-file</code> refuses to start rather than serving anonymously.</li>
+<li><strong>Prefer <code>--token-file</code>.</strong> A token passed as <code>--token</code> is readable by every other user on the
+  machine through the process list; a file carries permissions.</li>
+<li><strong>Without <code>--tls-cert</code>/<code>--tls-key</code> the daemon generates an ephemeral self-signed certificate</strong>,
+  and without <code>--tls-ca</code> the client encrypts but does <strong>not</strong> verify who it is talking to. That is
+  a trust-on-first-use posture: it stops passive eavesdropping, not an active
+  machine-in-the-middle. For anything beyond a trusted network, pass a real certificate on the
+  daemon and pin it with <code>--tls-ca</code> on the client — the certificate must then also be <strong>issued for
+  the host you connect to</strong>, not merely signed by that CA.</li>
+<li><strong>Bind deliberately.</strong> <code>127.0.0.1</code> reaches only the local machine; <code>0.0.0.0</code> reaches everyone who
+  can route to you. Prefer forwarding the loopback port over SSH to exposing it directly.</li>
+</ul>
+<h2 id="stopping-a-daemon">Stopping a daemon</h2>
+<p>Send it <code>SIGINT</code> or <code>SIGTERM</code> — <kbd>Ctrl</kbd>+<kbd>C</kbd> if it is in the foreground, or
+<code>kill &lt;pid&gt;</code>. On Windows, a console-control event does the same.</p>
+<p>There is deliberately <strong>no</strong> <code>contour daemon --stop</code> verb, no pid file, and no bundled systemd
+unit; use your service manager if you want supervision.</p>
+<div class="admonition warning">
+<p class="admonition-title">Sessions do not survive the daemon</p>
+<p>Persistence is against the <em>client</em>, not against the daemon process. Stopping the daemon ends
+every shell it hosts. Shutdown is abrupt by design — attached clients see the connection close
+with no goodbye, exactly as a real <code>tmux kill-server</code> looks to them.</p>
+</div>
+<h2 id="diagnostics">Diagnostics</h2>
+<p>The daemon logs through Contour's category system; <code>contour list-debug-tags</code> prints every tag.
+The <code>vthost.*</code> categories are the daemon's:</p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Default</th>
+<th>What it records</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vthost.daemon</code></td>
+<td><strong>on</strong></td>
+<td>Endpoints bound, listeners started, signals, shutdown</td>
+</tr>
+<tr>
+<td><code>vthost.conn</code></td>
+<td>off</td>
+<td>Per-connection accept, handshake, disconnect</td>
+</tr>
+<tr>
+<td><code>vthost.session</code></td>
+<td>off</td>
+<td>Session spawn, resize, exit</td>
+</tr>
+<tr>
+<td><code>vthost.tmux</code></td>
+<td>off</td>
+<td>Control-mode and tmux-binary attach or rejection</td>
+</tr>
+<tr>
+<td><code>vthost.client</code></td>
+<td>off</td>
+<td>The client side of the native protocol</td>
+</tr>
+<tr>
+<td><code>vthost.trace.proto</code></td>
+<td>off</td>
+<td>One line per protocol message, both directions</td>
+</tr>
+<tr>
+<td><code>vthost.trace.tmux</code></td>
+<td>off</td>
+<td>Every control-mode line, both directions</td>
+</tr>
+</tbody>
+</table>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>contour<span class="w"> </span>daemon<span class="w"> </span>--log<span class="w"> </span><span class="s1">'vthost.conn,vthost.session'</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>contour<span class="w"> </span>daemon<span class="w"> </span>--log<span class="w"> </span><span class="s1">'vthost.*'</span><span class="w"> </span>--log-file<span class="w"> </span>/var/log/contour-daemon.log
+</span></code></pre></div>
+<p>Three behaviours to know:</p>
+<ul>
+<li><code>*</code> is a plain prefix match, so <code>vthost.*</code> sweeps in the verbose <code>vthost.trace.*</code> tier as well.
+  Name <code>vthost.trace.*</code> to select the trace tier alone.</li>
+<li>A filter is a <em>selection</em>: it disables the categories it does not name. Real failures are exempt
+  — asking for extra detail never takes error reporting away.</li>
+<li><code>--log-file</code> <strong>appends</strong> and never writes colour escapes, so restarting a daemon against the
+  same file does not erase why the previous run died.</li>
+</ul>
+<p>Traces report sizes, never payloads: a keystroke message shows a byte count, a screen update a
+line count, and a token only as present or absent. A trace of a busy session must not become a
+transcript of what you typed.</p>
+<h2 id="platform-notes">Platform notes</h2>
+<p>Daemon mode works on Linux, macOS, BSD and Windows 10 1803 or newer, over Unix domain sockets
+everywhere. On Windows, sessions are backed by ConPTY, the socket directory is governed by NTFS
+ACLs rather than POSIX permission bits, and the tmux-binary (<code>&lt;socket&gt;-tmux</code>) endpoint is absent —
+it needs file-descriptor passing, which Windows sockets do not have.</p>
+<h2 id="after-upgrading-contour-restart-the-daemon">After upgrading Contour, restart the daemon</h2>
+<p>The client and the daemon must be the <strong>same build</strong>. The protocol handshake requires an exact
+version match, so a daemon left running from before an upgrade will refuse the new client — and it
+refuses in a way that is deliberately indistinguishable from a wrong token, so that a
+network attacker learns nothing from probing. The cost of that choice is that the error cannot tell
+you which of the two it was.</p>
+<p>So if a client will not attach right after an upgrade, stop the daemon and let it start again:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">kill</span><span class="w"> </span><span class="s2">"</span><span class="k">$(</span>pgrep<span class="w"> </span>-f<span class="w"> </span><span class="s1">'contour daemon'</span><span class="k">)</span><span class="s2">"</span><span class="w">   </span><span class="c1"># or Ctrl+C in its terminal</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>contour<span class="w"> </span>client<span class="w">                        </span><span class="c1"># starts a matching daemon</span>
+</span></code></pre></div>
+<p>Remember that this ends the sessions it was hosting. An auto-started daemon avoids the problem
+entirely, since it exits with its last session.</p>
+<h2 id="current-limitations">Current limitations</h2>
+<ul>
+<li><strong><code>contour client</code> opens a window.</strong> There is no terminal-only client at present; if you need
+  one, attach with <code>tmux -C</code> through the compatibility endpoint described above.</li>
+<li><strong>You get the scrollback the daemon still holds, and no more.</strong> Attaching replays a session's
+  history, but the daemon keeps only <code>history.limit</code> lines of it per session — 1000 unless the
+  profile it was started with says otherwise. Lines that scrolled past that are gone, and there is
+  no way to ask for them back.</li>
+<li><strong>A session sitting on the alternate screen has no scrollback to show.</strong> Attach while <code>vim</code>,
+  <code>less</code> or <code>htop</code> is running and you get that program's screen, which never has history of its
+  own; the shell's scrollback appears when the program exits.</li>
+<li>Sessions end with the daemon (see <a href="#stopping-a-daemon">Stopping a daemon</a>).</li>
+<li>Images are not recoverable through tmux-mode replay (see the note under
+  <a href="#tmux-interoperability">tmux interoperability</a>).</li>
+</ul>
+<p>For the architecture behind all of this — the two protocols, the delta transport, the stable row
+identity in the grid — see <a href="../internals/vthost/">the internals page</a>.</p></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var tab,labels=set.querySelector(".tabbed-labels");for(tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden="">
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12Z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer">
+        
+          
+          <a href="../features/" class="md-footer__link md-footer__link--prev" aria-label="Previous: List of features">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"></path></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                List of features
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../demo/font-ligatures/" class="md-footer__link md-footer__link--next" aria-label="Next: Font ligatures">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Font ligatures
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11H4Z"></path></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["content.action.edit", "content.action.view", "content.code.copy", "content.tabs.link", "navigation.expand", "navigation.footer", "navigation.indexes", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.sections", "navigation.tracking", "search.highlight", "search.share", "search.suggest", "toc.follow"], "search": "../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.1e8ae164.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>
