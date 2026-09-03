@@ -1114,7 +1114,12 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
         // sequence while it stays on one cell. A press that lands somewhere else starts a new one,
         // and without this a fast click arriving as a bare press within the one-second window would
         // inherit the previous cell's count and open as a word- or line-selection instead of a drag.
-        _speedClicks = 0;
+        //
+        // Left only: it is the sole button that opens a selection, so it is the only one whose
+        // sequence this counts. A right-click for the context menu, or a middle-click paste, lands
+        // on some other cell without ending a double-click the user is in the middle of.
+        if (button == MouseButton::Left)
+            _speedClicks = 0;
 
         _currentMousePosition = newPosition;
         updateHoveringHyperlinkState();
@@ -1247,8 +1252,15 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
         auto const anchor = (startPos < selStart) ? selEnd : selStart;
 
         setSelector(std::make_unique<LinearSelection>(_selectionHelper, anchor, selectionUpdatedHelper()));
-        if (selector()->extend(startPos))
-            updateSelectionMatches();
+        (void) selector()->extend(startPos);
+
+        // NOT updateSelectionMatches(): what this builds is a LinearSelection, which that function
+        // rightly refuses to serialize into a search pattern. But a word selection extended this way
+        // leaves the double-click's pattern behind it, still painting its matches for a selection
+        // that is no longer that word -- so the extension must retire it, exactly as an ordinary
+        // single click does below.
+        if (_search.origin == SearchOrigin::DoubleClick)
+            clearSearch();
 
         breakLoopAndRefreshRenderBuffer();
         return true;

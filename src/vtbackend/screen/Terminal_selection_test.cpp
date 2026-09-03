@@ -264,6 +264,45 @@ TEST_CASE("Terminal.a_press_at_a_new_cell_starts_a_fresh_click_sequence", "[term
     CHECK(mock.terminal.extractSelectionText().empty());
 }
 
+TEST_CASE("Terminal.shift_click_extending_a_word_retires_its_search_pattern", "[terminal]")
+{
+    // Regression: a double click makes the word the search pattern (SearchOrigin::DoubleClick) so its
+    // other occurrences highlight. Shift+Click then re-creates the selection as a LinearSelection --
+    // which updateSelectionMatches() rightly refuses to serialize -- so the call it used to make there
+    // became a no-op, and the double click's pattern stayed live, painting matches for a word the
+    // selection no longer is. The extension must retire it, as an ordinary single click already does.
+    auto mock = MockTerm { ColumnCount(11), LineCount(2) };
+    mock.terminal.setWordDelimiters(" ");
+    mock.writeToScreen("hello world");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    // Double-click "hello": two presses at the same cell inside the one-second window.
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+
+    REQUIRE(mock.terminal.extractSelectionText() == "hello");
+    REQUIRE(mock.terminal.search().pattern == U"hello");
+    REQUIRE(mock.terminal.search().origin == SearchOrigin::DoubleClick);
+
+    // Shift+Click out to "world": the selection stops being that word.
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(
+        Modifier::Shift, MouseButton::Left, 0_lineOffset + 9_columnOffset, PixelCoordinate, UiHandledHint);
+
+    CHECK(mock.terminal.extractSelectionText() != "hello");
+
+    // The word's pattern must not have outlived it.
+    CHECK(mock.terminal.search().pattern.empty());
+}
+
 TEST_CASE("Terminal.TextSelection_wrapped_line", "[terminal]")
 {
     // Create empty TE

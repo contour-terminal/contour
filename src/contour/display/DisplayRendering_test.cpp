@@ -1336,11 +1336,18 @@ void sendMouse(contour::display::TerminalDisplay* display,
 /// cellSize -> grid row/column. Going forward through the identical quantities (gridMetrics(),
 /// devicePixelRatio()) is what makes a synthetic drag name an EXACT cell regardless of font metrics
 /// or the test machine's DPI, rather than a guessed pixel offset that happens to land inside one.
-[[nodiscard]] QPointF logicalCellTopLeft(contour::display::TerminalDisplay const& display,
+[[nodiscard]] QPointF logicalCellTopLeft(contour::display::TerminalDisplay& display,
                                          vtbackend::LineOffset line,
                                          vtbackend::ColumnOffset column)
 {
-    auto const devicePoint = display.gridMetrics().mapTopLeft(line, column);
+    // Offset by the main page's top row, because this is the INVERSE of what the production hit-test
+    // does: geometry::mainPageRowNear subtracts mainPageTopRow() to turn a pixel into a main-page
+    // relative line, while mapTopLeft treats its argument as a SCREEN row. The two agree only while
+    // that row is zero -- the default bottom status line -- so without this a profile with a top
+    // status line would land every synthetic click statusLineHeight() rows above its target, and the
+    // failure would read as a selection bug rather than a test-harness one.
+    auto const screenLine = line + unbox<int>(display.session().terminal().mainPageTopRow());
+    auto const devicePoint = display.gridMetrics().mapTopLeft(screenLine, column);
     auto const dpr = display.devicePixelRatio();
     return { double(devicePoint.x) / dpr, double(devicePoint.y) / dpr };
 }
@@ -1348,7 +1355,7 @@ void sendMouse(contour::display::TerminalDisplay* display,
 /// The item-local logical pixel position of a point INSIDE a grid cell (its top-left plus a half-cell
 /// nudge), so a drag reliably lands inside the target cell rather than exactly on its boundary, where
 /// rounding could tip it into the previous row/column.
-[[nodiscard]] QPointF logicalCellCenter(contour::display::TerminalDisplay const& display,
+[[nodiscard]] QPointF logicalCellCenter(contour::display::TerminalDisplay& display,
                                         vtbackend::LineOffset line,
                                         vtbackend::ColumnOffset column)
 {
@@ -1383,10 +1390,11 @@ TEST_CASE("display: a mouse drag spanning multiple lines selects the exact cell 
     auto const to =
         vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(4) };
 
-    // A press anchors the selection at the terminal's _currentMousePosition, which only a preceding
-    // MouseMove updates (Terminal::sendMouseMoveEvent) -- exactly what a real windowing system always
-    // delivers before a button press. Skipping it anchors at whatever position an earlier move left
-    // behind (the origin, on a fresh session), which is the mistake this comment is here to head off.
+    // The MouseMove before the press is what a real windowing system always delivers -- the pointer
+    // arrives via motion before a button event fires -- so the drags below are written in that order
+    // to stay faithful to it, not because the press needs it: sendMousePressEvent now anchors at the
+    // cell it was given. The bare-press case, which a fast click really does produce, is covered by
+    // its own test rather than by omitting the move here.
     sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, from.line, from.column));
     h.pump();
     sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, from.line, from.column));
@@ -1540,9 +1548,10 @@ TEST_CASE("display: dragging upward across lines selects the same range as dragg
         vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(6) };
 
     // Downward: press at top, release at bottom. Every press is preceded by a MouseMove to the SAME
-    // position -- a press alone anchors at whatever position an earlier move left _currentMousePosition
-    // at (Terminal::sendMouseMoveEvent is the only writer), which a real windowing system never does:
-    // the pointer always arrives via motion before a button event fires.
+    // position, because that is what a real windowing system does -- the pointer arrives via motion
+    // before a button event fires. (The press itself now also anchors at the cell it landed on, so
+    // this sequence no longer DEPENDS on the preceding move; it stays because it is the realistic
+    // event order, and the bare-press case has its own test above.)
     sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, top.line, top.column));
     h.pump();
     sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, top.line, top.column));
