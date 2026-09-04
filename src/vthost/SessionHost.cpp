@@ -4,8 +4,8 @@
 #include <chrono>
 #include <mutex>
 #include <ranges>
+#include <string_view>
 #include <utility>
-#include <vector>
 
 #include <vthost/Logging.hpp>
 #include <vthost/SessionSettings.hpp>
@@ -112,7 +112,8 @@ SessionHost::SessionHost(net::EventLoop& loop,
                          vtbackend::Settings settings,
                          crispy::Environment const& env,
                          bool startPumps,
-                         ClientSizePolicy sizePolicy):
+                         ClientSizePolicy sizePolicy,
+                         vtworkspace::Layout const& startupLayout):
     _loop(loop),
     _ptyFactory(std::move(ptyFactory)),
     // Normalized once, here, so _pageSize and every session that does not override it are derived
@@ -137,6 +138,10 @@ SessionHost::SessionHost(net::EventLoop& loop,
            }),
     _window(_model.createWindow()->id())
 {
+    // Realized here, in the BODY: _window is the last member to construct, so this is the
+    // earliest point a tab can legally be created on it. Runs before runDaemon() binds any
+    // listener, so the layout is in place before a client could possibly attach.
+    realizeStartupLayout(_window, startupLayout);
 }
 
 SessionHost::~SessionHost()
@@ -149,7 +154,7 @@ SessionHost::~SessionHost()
 std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& request)
 {
     auto const id = SessionId { _nextSessionId++ };
-    auto pty = _ptyFactory(_pageSize);
+    auto pty = _ptyFactory(_pageSize, request.commandOverride);
     if (!pty)
     {
         // Until this line existed, a shell that could not be spawned produced NOTHING: the
@@ -239,6 +244,57 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
                  unbox(_pageSize.lines),
                  _sessions.size());
     return id;
+}
+
+void SessionHost::realizeStartupLayout(vtworkspace::WindowId window, vtworkspace::Layout const& layout)
+{
+    for (auto const& tabSpec: layout.tabs)
+    {
+        // A pane's profile has no resolution path on the daemon (no Config object to look an
+        // arbitrary named profile up in) -- see the design doc's "Out of scope". Warn once per
+        // such pane so a user who wrote one is not left guessing why it did not take effect.
+        // command/arguments/directory ARE honored: an override is engaged when the pane names a
+        // program, or a directory. A directory-only pane still runs the daemon's configured shell,
+        // just at a different cwd.
+        //
+        // The directory half deliberately DIVERGES from the local path, which routes a directory
+        // through its separate `cwd` channel because engaging an empty-program override there would
+        // bypass an SSH profile's SshSession. The daemon has neither that channel nor an SSH path,
+        // so the override is the only way a pane's directory can reach the session at all.
+        auto const seeder = [&](vtworkspace::LayoutPane const& leaf) -> bool {
+            if (leaf.profile)
+                sessionLog()("startup layout: ignoring pane override (profile); spawning the "
+                             "daemon's configured shell.");
+
+            // Arguments name what @c command is run with, so without one there is nothing for them
+            // to belong to. Say so rather than dropping them where nobody can see it: the local path
+            // forwards them to a factory that declines an empty program just the same, so the pane
+            // is malformed either way -- silence is the only part worth fixing here. An engaged but
+            // EMPTY command (e.g. a quoted `command: "''"` that shellSplit tokenizes to a leading
+            // empty token) is just as program-less as an absent one -- applyCommandOverride declines
+            // to overlay program/arguments for either, so both must warn the same way.
+            if ((!leaf.command || leaf.command->empty()) && !leaf.arguments.empty())
+                sessionLog()("startup layout: ignoring pane arguments ({}) given without a command.",
+                             leaf.arguments.size());
+
+            auto commandOverride = std::optional<vtpty::Process::ExecInfo> {};
+            if (leaf.command || leaf.directory)
+            {
+                commandOverride = vtpty::Process::ExecInfo {};
+                if (leaf.command)
+                {
+                    commandOverride->program = *leaf.command;
+                    commandOverride->arguments = leaf.arguments;
+                }
+                if (leaf.directory)
+                    commandOverride->workingDirectory = *leaf.directory;
+            }
+            return seedSession(SessionSpawnRequest { .commandOverride = std::move(commandOverride) })
+                .has_value();
+        };
+        std::ignore = vtworkspace::realizeLayoutTab(_model, window, tabSpec, seeder);
+        _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
+    }
 }
 
 Tab* SessionHost::createTab(SessionSpawnRequest const& request, std::optional<SessionId> beside)

@@ -54,19 +54,7 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     // one pane/tab's cwd into every later session created with no explicit cwd. The copy keeps the
     // override session-local.
     auto shell = profile->shell.value();
-    if (commandOverride)
-    {
-        // Replace the shell program/args with the layout pane's command; keep env from the profile.
-        // Only overlay when a program was actually given: a directory-only pane override has an empty
-        // program, and must not wipe the profile shell's default arguments.
-        if (!commandOverride->program.empty())
-        {
-            shell.program = commandOverride->program;
-            shell.arguments = commandOverride->arguments;
-        }
-        if (!commandOverride->workingDirectory.empty())
-            shell.workingDirectory = commandOverride->workingDirectory;
-    }
+    vtpty::Process::applyCommandOverride(shell, commandOverride);
     if (cwd)
         shell.workingDirectory = std::filesystem::path(cwd.value());
     // Spawn the child at the caller's requested grid size when given (a new tab/split inherits the live

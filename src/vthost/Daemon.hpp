@@ -25,6 +25,7 @@
 
 #include <coro/Task.hpp>
 #include <net/ISocket.hpp>
+#include <vtworkspace/LayoutTree.hpp>
 // Supplies DaemonConfig::settings' default, plus DefaultSessionHistoryLineCount and
 // defaultSessionSettings(), which used to be DECLARED here. They moved down because SessionHost.h
 // needs them too and sits BELOW this header — a lower layer must not reach up for them.
@@ -80,6 +81,16 @@ struct DaemonConfig
     vtbackend::Settings settings = defaultSessionSettings();
     /// The shell each new session runs.
     vtpty::Process::ExecInfo shell;
+    /// Whether a spawned shell escapes its sandbox (Flatpak). `true` by default, matching a local
+    /// session's profile default (`escape_sandbox: true`); `contour daemon` overwrites it from the
+    /// resolved profile, same as `settings` and `shell` above.
+    bool escapeSandbox = true;
+    /// The profile's configured startup layout (`default_layout` + `layouts:`), realized by
+    /// `SessionHost` before any client attaches. Empty `tabs` (the default) means no layout is
+    /// configured — `contour daemon` overwrites it from the resolved profile, same as `settings`,
+    /// `shell` and `escapeSandbox` above; a bare `DaemonConfig{}` keeps today's single-default-tab
+    /// behavior.
+    vtworkspace::Layout startupLayout {};
     /// When set, ALSO binds tmux's own discovery path
     /// `/tmp/tmux-<uid>/<label>` for the imsg endpoint, so a plain
     /// `tmux -L <label> -C attach-session` finds this daemon. Opt-in only.

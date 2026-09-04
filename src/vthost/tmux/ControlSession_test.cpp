@@ -183,7 +183,9 @@ struct ControlHarness
                             vtbackend::Settings settings = {},
                             std::unique_ptr<net::ISocket> connection = nullptr):
         host { loop,
-               [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                   return std::make_unique<vtpty::MockPty>(size);
+               },
                std::move(settings),
                crispy::defaultEnvironment(),
                /*startPumps=*/false }

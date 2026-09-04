@@ -489,28 +489,220 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
     return settings;
 }
 
+namespace
+{
+    /// A config loaded from disk together with the one profile @p profileName resolved to.
+    struct LoadedProfile
+    {
+        Config config;
+        std::string profileName; ///< The name actually resolved (the config's default, if empty).
+        TerminalProfile const* profile = nullptr;
+    };
+
+    /// The load-resolve-refuse sequence @ref resolveEmulationSettings and @ref resolveSessionConfig
+    /// both need: load @p configPath (or the default location, if empty), then resolve @p
+    /// profileName (or the configuration's default, if empty) within it.
+    ///
+    /// One place for both, so a daemon and the client that attaches to it -- which each go through
+    /// one of the two callers -- cannot come to load or refuse configuration differently.
+    /// @return The loaded config and resolved profile, or a human-readable reason it could not be
+    ///         resolved. An unknown profile is a failure rather than a fall back to the default one:
+    ///         hosting sessions under a profile the user did not name is a misconfiguration they
+    ///         would discover only much later, through the wrong scrollback depth or the wrong
+    ///         reported terminal.
+    [[nodiscard]] std::expected<LoadedProfile, std::string> loadAndFindProfile(std::string const& configPath,
+                                                                               std::string const& profileName)
+    {
+        auto loaded = Config {};
+        try
+        {
+            // The same two-overload split every other verb uses: empty means the default location,
+            // which loadConfig() resolves (and creates, if absent).
+            loaded = configPath.empty() ? loadConfig() : loadConfigFromFile(configPath);
+        }
+        catch (std::exception const& e)
+        {
+            return std::unexpected { std::format("cannot load config: {}", e.what()) };
+        }
+
+        auto name = profileName.empty() ? loaded.defaultProfileName.value() : profileName;
+        auto const* const profile = loaded.findProfile(name);
+        if (profile == nullptr)
+            return std::unexpected { std::format(
+                "unknown profile '{}' in '{}'", name, loaded.configFile.string()) };
+
+        return LoadedProfile {
+            .config = std::move(loaded),
+            .profileName = std::move(name),
+            .profile = profile,
+        };
+    }
+} // namespace
+
 std::expected<vtbackend::Settings, std::string> resolveEmulationSettings(std::string const& configPath,
                                                                          std::string const& profileName)
 {
-    auto loaded = Config {};
-    try
+    return loadAndFindProfile(configPath, profileName).transform([](LoadedProfile const& loaded) {
+        return emulationSettings(loaded.config, *loaded.profile);
+    });
+}
+
+vtbackend::ColorPalette const* preferredColorPalette(ColorConfig const& colorConfig,
+                                                     vtbackend::ColorPreference preference)
+{
+    if (auto const* dualColorConfig = std::get_if<DualColorConfig>(&colorConfig))
     {
-        // The same two-overload split every other verb uses: empty means the default location,
-        // which loadConfig() resolves (and creates, if absent).
-        loaded = configPath.empty() ? loadConfig() : loadConfigFromFile(configPath);
+        switch (preference)
+        {
+            case vtbackend::ColorPreference::Dark: return &dualColorConfig->darkMode;
+            case vtbackend::ColorPreference::Light: return &dualColorConfig->lightMode;
+        }
     }
-    catch (std::exception const& e)
+    else if (auto const* simpleColorConfig = std::get_if<SimpleColorConfig>(&colorConfig))
+        return &simpleColorConfig->colors;
+
+    errorLog()("preferredColorPalette: Unknown color config type.");
+    return nullptr;
+}
+
+vtbackend::Settings sessionSettings(Config const& config,
+                                    TerminalProfile const& profile,
+                                    vtbackend::ColorPreference colorPreference,
+                                    std::optional<vtbackend::PageSize> initialPageSize)
+{
+    // The emulation half comes from the shared table, so a GUI-hosted session and a
+    // daemon-hosted one can never disagree on what the terminal IS; only the presentation
+    // fields below decide how it is PRESENTED, which used to be applied for a local session
+    // only (see TerminalSession::createSettingsFromConfig, which this replaces).
+    auto settings = emulationSettings(config, profile);
+
+    // A new tab/split inherits the live window's running grid; a brand-new window keeps the
+    // profile's configured terminalSize, which the shared table already applied. Overridden here
+    // so the terminal is BORN at the right size, not just corrected once a display attaches
+    // (which never happens for a background tab).
+    if (initialPageSize)
+        settings.pageSize = *initialPageSize;
+
+    // Focus is granted, never assumed: a session born focused (a background tab, a non-active
+    // split pane, a daemon-hosted session before any client attaches) would otherwise render an
+    // active cursor and withhold the DECSET 1004 focus-out its application is due.
+    settings.focused = false;
+    settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
+    settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
+    settings.mouseWheelScrollMultiplier = profile.history.value().historyScrollMultiplier;
+    settings.autoScrollOnUpdate = profile.history.value().autoScrollOnUpdate;
+    settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset.value();
+    settings.cursorBlinkInterval = profile.modeInsert.value().cursor.cursorBlinkInterval;
+    settings.cursorShape = profile.modeInsert.value().cursor.cursorShape;
+    settings.cursorDisplay = profile.modeInsert.value().cursor.cursorDisplay;
+    settings.blinkStyle = profile.blinkStyle.value();
+    settings.screenTransitionStyle = profile.screenTransitionStyle.value();
+    settings.screenTransitionDuration = profile.screenTransitionDuration.value();
+    settings.cursorMotionAnimationDuration = profile.cursorMotionAnimationDuration.value();
+    settings.smoothLineScrolling = profile.smoothLineScrolling.value();
+    settings.smoothScrolling = profile.smoothScrolling.value();
+    settings.momentumScrolling = profile.momentumScrolling.value();
+    settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
+    settings.statusDisplayType = profile.statusLine.value().initialType;
+    settings.statusDisplayPosition = profile.statusLine.value().position;
+    settings.indicatorStatusLine.left = profile.statusLine.value().indicator.left;
+    settings.indicatorStatusLine.middle = profile.statusLine.value().indicator.middle;
+    settings.indicatorStatusLine.right = profile.statusLine.value().indicator.right;
+    settings.tabNamingMode = [&]() {
+        // Find the Tabs segment among the status line's three (left/middle/right): whichever one
+        // references it names how tabs are indexed.
+        auto const& indicator = profile.statusLine.value().indicator;
+        auto const segments = std::array { &indicator.left, &indicator.middle, &indicator.right };
+        auto const it = std::ranges::find_if(segments, [](auto const* s) { return s->contains("Tabs"); });
+        if (it == segments.end())
+            return vtbackend::TabsNamingMode::Indexing;
+        std::string_view const segment = **it;
+
+        // check if indexing is defined
+        auto constexpr IndexingKey = std::string_view { "Indexing=" };
+        if (auto const key = segment.find(IndexingKey); key != std::string_view::npos)
+        {
+            // cut the string after indexing=, then cut its right part off at the next delimiter
+            auto value = segment.substr(key + IndexingKey.size());
+            value = value.substr(0, std::min(value.find(','), value.find('}')));
+
+            if (crispy::toLower(value) == "title")
+                return vtbackend::TabsNamingMode::Title;
+        }
+        return vtbackend::TabsNamingMode::Indexing;
+    }();
+
+    settings.syncWindowTitleWithHostWritableStatusDisplay =
+        profile.statusLine.value().syncWindowTitleWithHostWritableStatusDisplay;
+    if (auto const* p = preferredColorPalette(profile.colors.value(), colorPreference))
+        settings.colorPalette = *p;
+    settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord.value();
+    settings.highlightTimeout = profile.highlightTimeout.value();
+
+    return settings;
+}
+
+ResolvedSessionConfig resolvedSessionConfig(Config const& config,
+                                            TerminalProfile const& profile,
+                                            std::string const& profileName,
+                                            vtbackend::ColorPreference colorPreference,
+                                            std::optional<vtbackend::PageSize> initialPageSize)
+{
+    auto settings = sessionSettings(config, profile, colorPreference, initialPageSize);
+
+    // The shell: a copy of the profile's configured ExecInfo (program/arguments/workingDirectory
+    // already carry the profile's `shell:` block), with CONTOUR_PROFILE added exactly as a local
+    // session's does (see ContourGuiApp::terminalGuiAction) so a hosted shell can tell which
+    // profile it is running under just like a local one can.
+    auto shell = profile.shell.value();
+    shell.env["CONTOUR_PROFILE"] = profileName;
+
+    // An unset `initial_working_directory` resolves to empty (YAMLConfigReader::loadFromEntry
+    // only substitutes `~`, not "absent"), which vtpty::Process then leaves as "inherit the
+    // hosting process's cwd" -- fine for a locally-launched GUI inheriting the user's shell cwd,
+    // wrong for a daemon whose own cwd is whatever started it (e.g. systemd's WorkingDirectory=).
+    // Falling back to the home directory here matches what every hosted shell used to get
+    // unconditionally (see the old ContourApp::daemonAction, which set
+    // config.shell.workingDirectory = Process::homeDirectory()) and is exactly what an
+    // interactive shell's own "no explicit cwd" default is.
+    if (shell.workingDirectory.empty())
+        shell.workingDirectory = Process::homeDirectory();
+
+    // The profile's configured startup layout: looked up by name in `layouts:`, exactly like
+    // TerminalSessionManager::findLayout does for the local-GUI path. An unset or unknown name
+    // degrades to "no startup layout" rather than failing resolution — a typo'd default_layout
+    // must not keep the daemon from starting at all.
+    auto startupLayout = Layout {};
+    if (auto const& layoutName = config.defaultLayoutName.value(); !layoutName.empty())
     {
-        return std::unexpected { std::format("cannot load config: {}", e.what()) };
+        auto const& layouts = config.layouts.value();
+        if (auto const it = layouts.find(layoutName); it != layouts.end())
+            startupLayout = it->second;
+        else
+            configLog()("resolveSessionConfig: no layout named '{}' (default_layout); "
+                        "the daemon will start with a single default tab.",
+                        layoutName);
     }
 
-    auto const& name = profileName.empty() ? loaded.defaultProfileName.value() : profileName;
-    auto const* const profile = loaded.findProfile(name);
-    if (profile == nullptr)
-        return std::unexpected { std::format(
-            "unknown profile '{}' in '{}'", name, loaded.configFile.string()) };
+    return ResolvedSessionConfig {
+        .settings = std::move(settings),
+        .shell = std::move(shell),
+        .escapeSandbox = profile.escapeSandbox.value(),
+        .startupLayout = std::move(startupLayout),
+    };
+}
 
-    return emulationSettings(loaded, *profile);
+std::expected<ResolvedSessionConfig, std::string> resolveSessionConfig(std::string const& configPath,
+                                                                       std::string const& profileName)
+{
+    return loadAndFindProfile(configPath, profileName).transform([](LoadedProfile const& loaded) {
+        // No dark/light preference to honor headlessly: a daemon presents nothing itself, so its
+        // hosted sessions get the color config's default (light) half until an attaching client's
+        // presentation states its own preference over the wire, the same way it states any other
+        // per-client preference.
+        return resolvedSessionConfig(
+            loaded.config, *loaded.profile, loaded.profileName, vtbackend::ColorPreference::Light);
+    });
 }
 
 void compareEntries(Config& config, auto const& output)

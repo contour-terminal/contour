@@ -71,7 +71,9 @@ struct DaemonFixture
     {
         host = std::make_unique<vthost::SessionHost>(
             loop,
-            [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+            [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                return std::make_unique<vtpty::MockPty>(size);
+            },
             vtbackend::Settings {},
             crispy::defaultEnvironment(),
             /*startPumps=*/false);
