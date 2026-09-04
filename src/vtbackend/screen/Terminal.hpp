@@ -1465,6 +1465,14 @@ class Terminal
     /// Switches the active cursor page. See Phase 2 for full implementation.
     void setPage(PageIndex target, bool moveCursorHome);
 
+    /// Makes @p target the page the viewport draws, carrying the viewport's position across.
+    ///
+    /// THE one seam that changes `_displayedPage`, so the saved scroll offset is parked and restored
+    /// in exactly one place. A no-op when the page is already displayed, which is what keeps a
+    /// cursor-page change under a reset DECPCCM from touching the viewport at all.
+    /// @see _savedScrollOffset for why the slot is keyed per page.
+    void setDisplayedPage(PageIndex target);
+
     /// Saves the current cursor page index (called by DECSC).
     void saveCursorPage();
 
@@ -2017,11 +2025,38 @@ class Terminal
     ///
     /// A no-op unless DEC mode 2048 is set. Sent on every resize, and once when the mode is enabled.
     void reportInBandWindowResize();
-    void onBufferScrolled(LineCount n) noexcept;
+
+    /// Keeps everything anchored to the grid on the content it was anchored to, after @p n lines
+    /// left @p screen's page into its scrollback.
+    ///
+    /// THE statement of what a scroll rebases and what it leaves alone; every other mention defers
+    /// here.
+    ///
+    /// "Scrolled" in the sense that matters: at capacity the oldest lines are evicted in exchange
+    /// rather than the depth increasing, but the grid-line rebase -- every retained line is now @p n
+    /// further from line 0 -- is the same either way, and that rebase is what an anchor has to
+    /// absorb to keep addressing the same rows.
+    ///
+    /// @param screen The screen that scrolled. Only the one the viewport draws may move the
+    ///        viewport, the Normal-mode cursor or the selection: a status line is a Screen too --
+    ///        one row, no scrollback -- and both the DECSASD-selected one and the indicator line
+    ///        (written while the ACTIVE display is still Main, so no `_activeStatusDisplay` test can
+    ///        see it) scroll whenever their text wraps. Following such a scroll clamps the main
+    ///        display's offset against a zero-history grid, i.e. throws the user's position away.
+    ///        The identity is passed rather than inferred for exactly that reason.
+    /// @param n How many lines left the page.
+    /// @param rebaseBoundary The first page row that did NOT move, so rows below a top-anchored
+    ///        partial DECSTBM region stay put while the scrollback above them rebases. Equal to the
+    ///        page height for a scroll that moved the whole page, which is the common case and the
+    ///        only one that also moves the live area.
+    ///
+    /// Not noexcept: it reaches Viewport::scrollableLineCount(), which builds the fold projection
+    /// lazily and therefore allocates. @see Viewport::isLineVisible, which states the same.
+    void onScreenScrolled(Screen const& screen, LineCount n, LineOffset rebaseBoundary);
 
     /// Pulls the viewport and the Normal-mode cursor back inside the scrollback that still exists.
     ///
-    /// Distinct from onBufferScrolled, which SHIFTS them to keep the same rows under the user as new
+    /// Distinct from onScreenScrolled, which SHIFTS them to keep the same rows under the user as new
     /// content arrives. This only refuses to name a row that is gone, which is why it may run on the
     /// paths that must not shift anything: a top-anchored partial DECSTBM region feeds the scrollback
     /// through the same scrollUp while the live area below it does not move.
@@ -2290,17 +2325,20 @@ class Terminal
     void forceAutoScrollToBottomIfEnabled();
 
   private:
-    /// Whether the screen being written to right now is the one the viewport draws.
+    /// Whether @p screen is the one the viewport draws, and therefore the only one whose scrolls
+    /// may move the viewport, the Normal-mode cursor or the selection.
     ///
-    /// A status line is a Screen too -- one row, no scrollback -- and DECSASD makes it the ACTIVE
-    /// one, so an application writing past its single row scrolls it and Screen::scrollUp reports
-    /// that scroll like any other. Nothing the viewport, the Normal-mode cursor or a selection
-    /// describes lives on it; and because Viewport takes its bounds from currentScreen(), whose
-    /// history is zero while a status line is active, following such a scroll clamps the main
-    /// display's offset to zero and throws the user's position away. @see setActiveStatusDisplay.
-    [[nodiscard]] bool isMainDisplayActive() const noexcept
+    /// Asked of the screen that scrolled rather than of `_activeStatusDisplay`, which cannot answer
+    /// it: the indicator status line is written while the active display is still Main (@see
+    /// updateIndicatorStatusLine, which requires exactly that), so a wrap in its single row reads as
+    /// a main-display scroll to any test of that member. Both status lines have zero history, and
+    /// following their scroll clamps the main display's offset against it.
+    ///
+    /// The DISPLAYED page, not the current one: with DECPCCM reset the cursor page and the drawn
+    /// page differ, and output going to a page nobody is looking at must not move the viewport.
+    [[nodiscard]] bool isViewportShowing(Screen const& screen) const noexcept
     {
-        return _activeStatusDisplay == ActiveStatusDisplay::Main;
+        return &screen == &displayedPage();
     }
 
     /// Whether the viewport is sitting somewhere in the scrollback rather than at the bottom.
@@ -2597,6 +2635,24 @@ class Terminal
     /// two screens' saved cursors never cross. Defaults are each screen's own page, so a DECRC with no
     /// prior DECSC stays put.
     std::array<PageIndex, 2> _savedCursorPage { PageIndex { 0 }, AlternateScreenPageIndex };
+
+    /// The viewport's scroll offset, kept per PAGE.
+    ///
+    /// It describes how far into one page's scrollback the user has scrolled, and no two pages share
+    /// a scrollback: every page is its own Screen with its own Grid, and only page 1 is constructed
+    /// with any scrollback at all. There is a single Viewport, so without this the offset is terminal
+    /// state -- and switching to a page with no scrollback then either destroyed the position on the
+    /// page being left (the clear-on-enter of DECSET 1049 scrolls a page into "history", which clamps
+    /// the shared offset to zero) or carried a nonzero offset onto a screen with no history to
+    /// address, which Grid::render asserts against and Grid::rowAt would otherwise resolve by
+    /// wrapping its ring buffer onto unrelated storage (DECSET 47/1047, which do not clear).
+    ///
+    /// Keyed by page index like _pageMargins, and emphatically NOT slotted primary-vs-alternate like
+    /// _savedCursorPage: DECSC's saved cursor is per screen by specification, whereas a scroll offset
+    /// belongs to the scrollback it addresses. Two slots would put every VT420 page in page 1's, so
+    /// an NP/PP round trip would clamp the live offset to that page's empty history and then park the
+    /// zero back where page 1's real offset had been.
+    std::array<ScrollOffset, MaxPageCount> _savedScrollOffset {};
     Screen _hostWritableStatusLineScreen;
     Screen _indicatorStatusScreen;
     gsl::not_null<Screen*> _currentScreen;

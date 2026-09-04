@@ -1121,20 +1121,19 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
     auto const scrollCount = _grid.scrollUp(n, sgr, margin);
     updateCursorIterator();
 
-    // Only notify the viewport/Vi-cursor/selection of a scrollback scroll when the
-    // scroll covered the whole page. A scroll confined to a sub-page margin region
-    // (e.g. a top-anchored partial DECSTBM region) may still feed lines into
-    // scrollback, but the live area below the region did not move, so shifting the
-    // viewport, the Normal-mode cursor, or the active selection would be wrong.
-    auto const isFullPageMargin =
-        margin.horizontal.from.value == 0 && margin.horizontal.to.value + 1 == pageSize().columns.value
-        && margin.vertical.from.value == 0 && margin.vertical.to.value + 1 == pageSize().lines.value;
-    if (isFullPageMargin)
-        _terminal->onBufferScrolled(scrollCount);
+    // The scroll, with the two facts that decide what may follow it: WHICH screen scrolled, and how
+    // far down the rebase reached. A top-anchored partial DECSTBM region still feeds lines into the
+    // scrollback -- so a viewport parked in that scrollback must follow -- while the live area below
+    // the region did not move, so anchors sitting there must not.
+    //
+    // The boundary is reported rather than re-derived: Grid::scrollUp's top-anchored branch rebases
+    // the history and page rows [0, margin.vertical.to], and it is the one that knows so.
+    // @see Terminal::onScreenScrolled, which states what each consumer does with it.
+    _terminal->onScreenScrolled(*this, scrollCount, margin.vertical.to + LineOffset(1));
 
-    // After either branch, because the scrollback may have just LOST rows rather than gained them.
+    // Unconditional, because the scrollback may have just LOST rows rather than gained them.
     // Block-atomic eviction drops a whole command at once, and it reaches this path even for a
-    // partial region, where the branch above deliberately shifts nothing. Clamping is not shifting --
+    // partial region, where the call above deliberately shifts nothing. Clamping is not shifting --
     // it only refuses to name a row that is gone.
     //
     // Gated on the headroom for cost, not for correctness: without it the history cannot shrink here

@@ -116,7 +116,7 @@ template <typename T = vtpty::MockPty>
 ///
 /// What a scrolled-back viewport is SHOWING, which is the thing to assert on when the claim is "the
 /// viewport did not move": the scroll offset is only how that row is addressed, and it legitimately
-/// changes when the scrollback grows underneath it (@see Terminal::onScrollbackGrew).
+/// changes when the scrollback grows underneath it (@see Terminal::onScreenScrolled).
 [[nodiscard]] inline std::string topViewportLineText(Terminal const& terminal)
 {
     return terminal.primaryScreen().grid().lineText(terminal.viewport().topLine());

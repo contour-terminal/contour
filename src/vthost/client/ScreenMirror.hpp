@@ -23,7 +23,7 @@
 ///
 ///  - cells through `applyWireLine`/`writeCellToSoA` (the `trivial` render fast-path flag, the
 ///    grapheme-cluster pool, image-fragment replacement),
-///  - scrolling through `Screen::scrollUp` (cursor iterator, plus `onBufferScrolled` for the
+///  - scrolling through `Screen::scrollUp` (cursor iterator, plus `onScreenScrolled` for the
 ///    viewport, the Vi cursor and any live selection),
 ///  - the cursor through `Screen::moveCursorTo`, and the frame through `Terminal::screenUpdated`.
 ///
