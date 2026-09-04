@@ -112,6 +112,16 @@ template <typename T = vtpty::MockPty>
     return screen.renderMainPageText();
 }
 
+/// The text of the grid row @p terminal's viewport currently draws at its top.
+///
+/// What a scrolled-back viewport is SHOWING, which is the thing to assert on when the claim is "the
+/// viewport did not move": the scroll offset is only how that row is addressed, and it legitimately
+/// changes when the scrollback grows underneath it (@see Terminal::onScrollbackGrew).
+[[nodiscard]] inline std::string topViewportLineText(Terminal const& terminal)
+{
+    return terminal.primaryScreen().grid().lineText(terminal.viewport().topLine());
+}
+
 inline void logScreenTextAlways(Screen const& screen, std::string const& headline = "")
 {
     std::cout << std::format("{}: ZI={} cursor={} HM={}..{}\n",

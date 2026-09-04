@@ -236,7 +236,7 @@ void ViCommands::modeChanged(ViMode mode)
             // Force re-render as viewport & cursor might have changed.
             _terminal->setMode(DECMode::VisibleCursor, _lastCursorVisible);
             _terminal->setCursorShape(_lastCursorShape);
-            _terminal->viewport().forceScrollToBottom();
+            _terminal->forceAutoScrollToBottomIfEnabled();
             _terminal->clearSearch();
             _terminal->popStatusDisplay();
             break;

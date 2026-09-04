@@ -2270,28 +2270,82 @@ class Terminal
 
     TabsNamingMode getTabsNamingMode() const noexcept { return _settings.tabNamingMode; }
 
-  private:
-    /// Scroll the viewport to the bottom if `settings().autoScrollOnUpdate` is enabled.
-    /// Intended for PTY/app-caused code paths only (e.g. key/char forwarding,
-    /// scrollback clears). User-initiated transitions should call
-    /// `_viewport.forceScrollToBottom()` directly.
+    /// Scrolls the viewport to the bottom, unless `settings().autoScrollOnUpdate` says not to.
+    ///
+    /// THE funnel for every snap the terminal performs *on its own* -- the ones this class raises
+    /// (scrollback clears, buffer switches, leaving Vi mode) and the one the frontend raises when
+    /// output arrives (@see contour::session::TerminalSession::screenUpdated, which adds its own
+    /// conditions and then defers the setting to here). Public for that caller.
+    ///
+    /// Two kinds of scroll deliberately do NOT come through here. A scroll the user asked for by
+    /// name goes to `Viewport` directly -- the `ScrollToBottom` action, the scrollbar, `G` in Vi
+    /// mode -- because that is not the terminal deciding anything. And input the user typed goes
+    /// through `scrollToBottomOnInput()`, for the reason stated there.
     void autoScrollToBottomIfEnabled();
 
-    /// Like `autoScrollToBottomIfEnabled()` but bypasses the `scrollingDisabled()`
-    /// check (used e.g. on alt-screen switch, where scrolling is "disabled" on the
-    /// target buffer but pixel/offset state still needs to be reset).
+    /// Sets whether automatic snaps are performed, keeping the lock-free mirror in step.
+    ///
+    /// The one supported way to change it after construction: assigning through settings() alone
+    /// updates the field the GUI thread writes and leaves the parser thread reading a stale mirror.
+    /// Live reconfiguration is the documented reason a setter exists here at all -- this is written
+    /// on every config reload and profile switch.
+    void setAutoScrollOnUpdate(AutoScrollOnUpdate value) noexcept
+    {
+        _settings.autoScrollOnUpdate = value;
+        _atomicAutoScrollOnUpdate.store(value, std::memory_order_release);
+    }
+
+    /// Like `autoScrollToBottomIfEnabled()` but bypasses the `scrollingDisabled()` check, for a
+    /// caller whose target buffer has scrolling "disabled" (the alternate screen) while the
+    /// pixel/offset state still needs resetting -- a buffer switch, and leaving Vi mode from
+    /// `ViCommands`, which is the other reason both of these are public. Declined, it still drops
+    /// the sub-cell offset, because that half of `Viewport::forceScrollToBottom()` is not the snap.
     void forceAutoScrollToBottomIfEnabled();
 
-    /// Scrolls the viewport to the bottom in response to *user input* (a key or character
-    /// forwarded to the application). Called only for key/char *press and repeat* events, never for
-    /// releases: a release is not typed content, and snapping on it would undo a viewport-scroll
-    /// shortcut whose press was consumed by the GUI (e.g. Shift+Up) once the protocol reports key
-    /// releases to the application (win32-input-mode, Kitty keyboard protocol). Intentionally
-    /// independent of `settings().autoScrollOnUpdate`, which gates only *output*-driven scrolling:
-    /// typing must always reveal the cursor and the resulting output regardless of that setting.
-    /// Honors the viewport's own alt-screen guard (`scrollToBottom()` no-ops when scrolling is
-    /// disabled).
+  private:
+    /// Snaps the viewport to the bottom because the user typed something that reached the
+    /// application.
+    ///
+    /// Deliberately NOT gated on `settings().autoScrollOnUpdate`. That setting is named for, and
+    /// governs, the terminal moving the viewport when an *update* arrives; a keystroke is not an
+    /// update but the user acting, and the cursor they are typing at has to be on screen or they
+    /// are typing blind into a prompt they cannot see. So `auto_scroll_on_update: false` keeps the
+    /// viewport parked through output, buffer switches and scrollback clears -- and still returns
+    /// to the page the moment a character, a space or Enter is sent.
+    ///
+    /// This is why the setting is not consulted even though xterm's `scrollKey` defaults to false:
+    /// xterm splits the two behaviours across two resources, and the one contour has is spelled
+    /// "on update". Honouring it on input as well left `auto_scroll_on_update: false` with no way
+    /// back to the page short of a deliberate `ScrollToBottom`.
+    ///
+    /// Vi Normal and Visual mode never reach this: `ViInputHandler` consumes the event and the call
+    /// sites return before the forwarding step, so "only in Insert mode" is structural here rather
+    /// than a condition restated at each site. Hint mode is the one seam in that argument -- a
+    /// character `HintModeHandler` does not claim as a label falls through to the application like
+    /// any other, and revealing the cursor is the right answer for it too.
     void scrollToBottomOnInput();
+
+    /// Whether the screen being written to right now is the one the viewport draws.
+    ///
+    /// A status line is a Screen too -- one row, no scrollback -- and DECSASD makes it the ACTIVE
+    /// one, so an application writing past its single row scrolls it and Screen::scrollUp reports
+    /// that scroll like any other. Nothing the viewport, the Normal-mode cursor or a selection
+    /// describes lives on it; and because Viewport takes its bounds from currentScreen(), whose
+    /// history is zero while a status line is active, following such a scroll clamps the main
+    /// display's offset to zero and throws the user's position away. @see setActiveStatusDisplay.
+    [[nodiscard]] bool isMainDisplayActive() const noexcept
+    {
+        return _activeStatusDisplay == ActiveStatusDisplay::Main;
+    }
+
+    /// Whether the viewport is sitting somewhere in the scrollback rather than at the bottom.
+    ///
+    /// The sub-cell remainder counts as parked: a smooth scroll one pixel off the bottom is still a
+    /// scroll the user is in the middle of.
+    [[nodiscard]] bool isViewportParkedInScrollback() const noexcept
+    {
+        return _viewport.scrolled() || _viewport.pixelOffset() > 0.0f;
+    }
 
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
@@ -2385,6 +2439,15 @@ class Terminal
     /// plain read concurrent with the write can tear (columns from one value, lines from another). This
     /// atomic, written in lockstep with _settings.pageSize, gives the render thread a consistent snapshot.
     std::atomic<PageSize> _atomicTotalPageSize { _settings.pageSize };
+
+    /// Lock-free mirror of _settings.autoScrollOnUpdate, for the same reason as the one above.
+    ///
+    /// The field is written by the GUI thread on every config reload and profile switch
+    /// (@see setAutoScrollOnUpdate) but read by the parser thread from screenUpdated(), which the
+    /// parse loop deliberately raises OUTSIDE _stateMutex because it calls back into the GUI. That
+    /// leaves the plain field with no mutex covering both ends -- a data race, and one TSan reports
+    /// on the run this repository gates on. Written in lockstep with _settings.autoScrollOnUpdate.
+    std::atomic<AutoScrollOnUpdate> _atomicAutoScrollOnUpdate { _settings.autoScrollOnUpdate };
 
     // synchronization
     std::mutex mutable _stateMutex;

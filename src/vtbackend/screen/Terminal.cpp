@@ -974,22 +974,36 @@ void Terminal::updateIndicatorStatusLine()
 
 void Terminal::autoScrollToBottomIfEnabled()
 {
-    if (_settings.autoScrollOnUpdate)
+    // Through the atomic mirror: this is reached from screenUpdated() on the parser thread, which the
+    // parse loop raises outside _stateMutex, while the GUI thread writes the setting on config reload.
+    // @see _atomicAutoScrollOnUpdate.
+    if (_atomicAutoScrollOnUpdate.load(std::memory_order_acquire) == AutoScrollOnUpdate::Yes)
         _viewport.scrollToBottom();
-}
-
-void Terminal::forceAutoScrollToBottomIfEnabled()
-{
-    if (_settings.autoScrollOnUpdate)
-        _viewport.forceScrollToBottom();
 }
 
 void Terminal::scrollToBottomOnInput()
 {
-    // Unconditional on purpose: user input must always jump the viewport back to the bottom, even
-    // when `autoScrollOnUpdate` (which governs output-driven scrolling only) is turned off. The
-    // alt-screen guard still applies via `scrollToBottom()`'s own `scrollingDisabled()` check.
+    // Unconditional by design -- @see the declaration for why autoScrollOnUpdate has no say here.
     _viewport.scrollToBottom();
+}
+
+void Terminal::forceAutoScrollToBottomIfEnabled()
+{
+    if (_atomicAutoScrollOnUpdate.load(std::memory_order_acquire) == AutoScrollOnUpdate::Yes)
+    {
+        _viewport.forceScrollToBottom();
+        return;
+    }
+
+    // The snap is declined; the sub-cell remainder goes regardless. It measures a slide between two
+    // adjacent rows on the buffer being left behind, so carrying it onto the new one would offset the
+    // whole page by a fraction of a cell with nothing to bring it back.
+    //
+    // Through Viewport, which pairs the reset with its ModifyEvent (@see dropPixelOffset). Doing it
+    // here and merely refreshing the render buffer redrew the page but told nobody the drawn position
+    // had changed, so an active hint session and the frontend's scroll-offset listener were left
+    // describing the offset the viewport no longer has.
+    _viewport.dropPixelOffset();
 }
 
 Handled Terminal::sendKeyEvent(Key key,

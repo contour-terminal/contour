@@ -142,6 +142,24 @@ class Viewport
     /// Resets the pixel offset to zero.
     void resetPixelOffset() noexcept { _pixelOffset = 0.0f; }
 
+    /// Drops the sub-cell offset and notifies, for a caller that is NOT also scrolling.
+    ///
+    /// resetPixelOffset() alone changes what is drawn without telling anyone, which is why every
+    /// other caller pairs it with `_modified()` by hand (@see forceScrollToBottom,
+    /// clampScrollOffset). This is that pairing, named once: the notification is what runs the Vi
+    /// cursor clamp, the fold snap, the hint refresh and the frontend's scroll-offset listener,
+    /// none of which a bare render-buffer refresh performs.
+    ///
+    /// @return Whether there was an offset to drop.
+    bool dropPixelOffset()
+    {
+        if (_pixelOffset == 0.0f)
+            return false;
+        resetPixelOffset();
+        _modified();
+        return true;
+    }
+
     /// Brings the scroll offset back inside the scrollable range, and reports whether it moved.
     ///
     /// Collapsing a fold takes its rows out of that range, so an offset that was legal a moment ago can

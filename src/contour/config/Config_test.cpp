@@ -222,6 +222,7 @@ profiles:
             lines: 40
         history:
             limit: 4242
+            auto_scroll_on_update: false
 )"sv);
 
     auto const* const profile = config.findProfile("main");
@@ -236,6 +237,10 @@ profiles:
     CHECK(settings.maxImageRegisterCount == 512);
     CHECK(settings.primaryScreen.allowReflowOnResize == false);
     CHECK(settings.graphemeClustering == false);
+    // Omitted from emulationSettings(), this silently handed every daemon- and `--attach`-hosted
+    // session the struct's hardcoded default instead of the configured value -- the GUI escaped it
+    // only because the session factory used to patch the field back in afterwards.
+    CHECK(settings.autoScrollOnUpdate == vtbackend::AutoScrollOnUpdate::No);
 }
 
 TEST_CASE("Config: emulationSettings carries an unlimited history", "[config]")
