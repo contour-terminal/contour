@@ -269,8 +269,11 @@ void SessionHost::realizeStartupLayout(vtworkspace::WindowId window, vtworkspace
             // Arguments name what @c command is run with, so without one there is nothing for them
             // to belong to. Say so rather than dropping them where nobody can see it: the local path
             // forwards them to a factory that declines an empty program just the same, so the pane
-            // is malformed either way -- silence is the only part worth fixing here.
-            if (!leaf.command && !leaf.arguments.empty())
+            // is malformed either way -- silence is the only part worth fixing here. An engaged but
+            // EMPTY command (e.g. a quoted `command: "''"` that shellSplit tokenizes to a leading
+            // empty token) is just as program-less as an absent one -- applyCommandOverride declines
+            // to overlay program/arguments for either, so both must warn the same way.
+            if ((!leaf.command || leaf.command->empty()) && !leaf.arguments.empty())
                 sessionLog()("startup layout: ignoring pane arguments ({}) given without a command.",
                              leaf.arguments.size());
 

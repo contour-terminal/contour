@@ -995,6 +995,44 @@ TEST_CASE("SessionHost engages no override for a startup layout pane's arguments
     CHECK(!seen.has_value());
 }
 
+TEST_CASE("SessionHost still passes through an engaged-but-empty command with its arguments",
+          "[vthost][host][layout]")
+{
+    // A pane whose `command:` resolves (after variable substitution and shell-splitting) to an
+    // empty string is engaged -- leaf.command holds a value, just an empty one -- unlike the
+    // unset-command case above. SessionHost still builds and forwards the override here: it is
+    // vtpty::Process::applyCommandOverride (the shared overlay both the daemon and the local-GUI
+    // path use) that declines to overlay an empty program, so the arguments end up dropped
+    // downstream rather than here. This pane is just as malformed as the unset-command one and
+    // must log the same "ignoring pane arguments" warning (see SessionHost.cpp) -- this test
+    // pins the override that reaches the factory; the warning itself has no harness to assert on.
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = net::EventLoop { source };
+
+    auto tab = vtworkspace::LayoutTab {};
+    tab.root.command = std::string {};
+    tab.root.arguments = { "--flag", "value" };
+    auto layout = vtworkspace::Layout { .tabs = { tab } };
+
+    auto seen = std::optional<vtpty::Process::ExecInfo> {};
+    auto host = SessionHost { loop,
+                              [&](vtbackend::PageSize size,
+                                  std::optional<vtpty::Process::ExecInfo> const& commandOverride) {
+                                  seen = commandOverride;
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/false,
+                              vthost::ClientSizePolicy::Latest,
+                              layout };
+
+    REQUIRE(host.sessionCount() == 1);
+    REQUIRE(seen.has_value());
+    CHECK(seen->program.empty());
+    CHECK(seen->arguments == std::vector<std::string> { "--flag", "value" });
+}
+
 TEST_CASE("SessionHost falls back to an empty window when every startup-layout seed is refused",
           "[vthost][host][layout]")
 {
