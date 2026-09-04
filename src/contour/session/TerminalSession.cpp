@@ -364,12 +364,10 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     if (app.liveConfig())
     {
         sessionLog()("Enable live configuration reloading of file {}.", _config.configFile.generic_string());
-        _configFileChangeWatcher = make_unique<QFileSystemWatcher>();
-        _configFileChangeWatcher->addPath(QString::fromStdString(_config.configFile.generic_string()));
-        connect(_configFileChangeWatcher.get(),
-                SIGNAL(fileChanged(QString const&)),
-                this,
-                SLOT(onConfigReload()));
+        // Parented to this, which is what owns it. @see _configFileChangeWatcher.
+        _configFileChangeWatcher = new QFileSystemWatcher(this);
+        _configFileChangeWatcher->addPath(watchedConfigPath());
+        connect(_configFileChangeWatcher, SIGNAL(fileChanged(QString const&)), this, SLOT(onConfigReload()));
     }
     _musicalNotesBuffer.reserve(16);
 
@@ -4233,11 +4231,29 @@ void TerminalSession::onConfigReload()
     // if (setScreenDirty())
     //     update();
 
-    if (_configFileChangeWatcher)
-        connect(_configFileChangeWatcher.get(),
-                SIGNAL(fileChanged(QString const&)),
-                this,
-                SLOT(onConfigReload()));
+    // Re-arm the WATCH, not the connection. QFileSystemWatcher drops a path once the file it names
+    // is gone, and the overwhelmingly common way a config file is saved -- by an editor, and by our
+    // own AtomicFileWrite -- is to write a temporary and rename it over the top, which is exactly
+    // that. Re-connecting instead left the path unwatched, so live reload worked once and then went
+    // quiet forever; and because Qt permits duplicate SIGNAL/SLOT connections, an in-place write
+    // accumulated one more connection each time, reloading the whole config once per past edit.
+    //
+    // Guarded, because addPath() warns on a path it already holds and the plain in-place-write case
+    // never lost it.
+    //
+    // The result is checked rather than discarded, because nothing else re-arms the watch: a failure
+    // here is PERMANENT, and silently so -- the very "live reload goes quiet forever" this function
+    // exists to prevent. addPath() fails on a path it cannot watch, which after a delete-then-create
+    // save would be the missing file; that particular window is already closed by the reload above,
+    // whose loadConfigFromFile() runs createFileIfNotExists() and so puts the file back before we get
+    // here. What is left is the case that survives even that -- an unwritable or vanished directory,
+    // a full or read-only filesystem -- and for those a log line is the difference between a user
+    // reporting "live reload stopped working" and being able to say why.
+    if (_configFileChangeWatcher && !isWatchingConfigFile()
+        && !_configFileChangeWatcher->addPath(watchedConfigPath()))
+        sessionLog()("Could not re-arm the configuration file watch on {}. Live reloading is now "
+                     "inactive for this session until the configuration is reloaded explicitly.",
+                     _config.configFile.generic_string());
 }
 
 // }}}

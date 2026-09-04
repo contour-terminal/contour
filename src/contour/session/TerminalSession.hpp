@@ -533,6 +533,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void noteTransportLost() noexcept { _transportLost = true; }
 
     config::Config const& config() const noexcept { return _config; }
+
+    /// Whether this session is still watching its config file for changes.
+    ///
+    /// False when `live_config` is off, and -- the reason this is worth asking -- false if the watch
+    /// were ever lost, which QFileSystemWatcher does on its own the moment the file it names is
+    /// replaced by rename. @see onConfigReload, which re-arms it for exactly that reason.
+    [[nodiscard]] bool isWatchingConfigFile() const
+    {
+        return _configFileChangeWatcher && _configFileChangeWatcher->files().contains(watchedConfigPath());
+    }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
 
     /// Resolves @p button through the BUILT-IN fallback mouse mappings alone and runs what it binds.
@@ -1128,7 +1138,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool _terminatedAndWaitingForKeyPress = false;
     DisplaySurface* _display = nullptr;
 
-    std::unique_ptr<QFileSystemWatcher> _configFileChangeWatcher;
+    /// The config file path in the spelling the watcher holds, so the constructor's addPath() and
+    /// onConfigReload()'s re-arm are provably asking about the same string.
+    [[nodiscard]] QString watchedConfigPath() const
+    {
+        return QString::fromStdString(_config.configFile.generic_string());
+    }
+
+    /// Owned by THIS as its QObject parent, hence a non-owning pointer rather than a unique_ptr:
+    /// holding both would be two ownership claims on one object. Null unless `live_config` is on.
+    QFileSystemWatcher* _configFileChangeWatcher = nullptr;
 
     std::atomic<bool> _terminating { false };
 

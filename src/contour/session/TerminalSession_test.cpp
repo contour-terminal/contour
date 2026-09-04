@@ -3611,3 +3611,47 @@ TEST_CASE("TerminalSession: a config reload re-applies auto_scroll_on_update ont
 
     CHECK(session->terminal().settings().autoScrollOnUpdate == vtbackend::AutoScrollOnUpdate::No);
 }
+
+TEST_CASE("TerminalSession: the live-config watcher keeps watching across a reload",
+          "[contour][session][config]")
+{
+    // live_config worked exactly once. onConfigReload() ended by re-connect()ing its signal, which
+    // was never the thing that broke -- @see TerminalSession::onConfigReload, which states why.
+    //
+    // The lost watch is applied here rather than waited for: QFileSystemWatcher learns of it through
+    // inotify, on an event loop this suite deliberately does not run. removePath() puts the watcher
+    // in exactly the state that notification would leave it in, which is the state onConfigReload()
+    // has to recover from -- and it does so with no timeout and no qWait.
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    TestApp testApp;
+    auto const configPath = installConfig(testApp,
+                                          dir,
+                                          "platform_plugin: auto\n"
+                                          "live_config: true\n"
+                                          "profiles:\n"
+                                          "    main:\n"
+                                          "        history:\n"
+                                          "            limit: 1000\n");
+    REQUIRE(testApp.app().liveConfig());
+
+    auto session = makeSessionWithSurface(testApp.app());
+    REQUIRE(session->isWatchingConfigFile());
+
+    // The watcher is a QObject child of the session (which owns it), so the test reaches it the
+    // ordinary Qt way, with no accessor added for the test's benefit.
+    auto* const watcher = session->findChild<QFileSystemWatcher*>();
+    REQUIRE(watcher != nullptr);
+    watcher->removePath(QString::fromStdString(configPath.generic_string()));
+    REQUIRE(!session->isWatchingConfigFile());
+
+    session->onConfigReload();
+
+    CHECK(session->isWatchingConfigFile());
+
+    // Idempotent: a reload while the path is still watched must not add it twice (addPath() warns on
+    // a duplicate, and a warning is a finding in this suite -- @see BenignQtMessages_test).
+    session->onConfigReload();
+    CHECK(session->isWatchingConfigFile());
+}
