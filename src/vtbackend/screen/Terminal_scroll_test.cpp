@@ -1180,8 +1180,16 @@ TEST_CASE("Terminal.screenTransition.reaches_fade_in_phase", "[terminal]")
     CHECK(terminal.isScreenTransitionActive());
 }
 
-TEST_CASE("Terminal.TopAnchoredRegion.PartialScrollKeepsViewportFixed", "[terminal]")
+TEST_CASE("Terminal.TopAnchoredRegion.PartialScrollAdvancesViewportWithScrollback", "[terminal]")
 {
+    // A top-anchored region scroll pushes a line into the scrollback, so every retained line is one
+    // further from grid line 0 -- and a scroll OFFSET counts rows up from the bottom, so it has to
+    // advance by the same amount to keep addressing the rows it addressed before.
+    //
+    // Holding the offset still is what the name of this case used to promise, and it reads as the
+    // viewport staying put only until you notice that the offset is the address rather than the
+    // content: one held offset is one row of drift, and it drifts once per scroll (@see
+    // Terminal.TopAnchoredRegion.RepeatedScrollDoesNotDriftViewport, which measures it).
     auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(8) }, LineCount(20) };
     auto& terminal = mc.terminal;
 
@@ -1190,16 +1198,17 @@ TEST_CASE("Terminal.TopAnchoredRegion.PartialScrollKeepsViewportFixed", "[termin
     terminal.viewport().scrollUp(LineCount(3));
     REQUIRE(terminal.viewport().scrolled());
     auto const scrollOffsetBefore = terminal.viewport().scrollOffset();
+    auto const topLineTextBefore = topViewportLineText(terminal);
 
     // Top-anchored partial region (rows 1..3), cursor at the region bottom.
     mc.writeToScreen("\033[1;3r");
     mc.writeToScreen("\033[3;1H");
 
-    // CSI S (SU) scrolls the region up; the viewport the user scrolled to must
-    // not jump as a side effect.
+    // CSI S (SU) scrolls the region up, feeding one line into the scrollback.
     mc.writeToScreen("\033[S");
 
-    CHECK(terminal.viewport().scrollOffset() == scrollOffsetBefore);
+    CHECK(terminal.viewport().scrollOffset() == scrollOffsetBefore + vtbackend::ScrollOffset(1));
+    CHECK(topViewportLineText(terminal) == topLineTextBefore);
 }
 
 TEST_CASE("Terminal.TopAnchoredRegion.PartialScrollDoesNotMoveNormalModeCursor", "[terminal]")
@@ -1221,6 +1230,11 @@ TEST_CASE("Terminal.TopAnchoredRegion.PartialScrollDoesNotMoveNormalModeCursor",
 
 TEST_CASE("Terminal.TopAnchoredRegion.ScrollCountMatchesScrolledLines", "[terminal]")
 {
+    // At capacity the scrollback does not get DEEPER -- the oldest line is evicted in exchange -- so
+    // Grid::scrollUp returning the full scrolled count here looks like a mismatch to correct for. It
+    // is not: the rebase happened either way, every retained line moved one further from grid line 0,
+    // and the offset advances with it. What the eviction bounds is how far the offset can go, and
+    // Viewport::scrollUp already clamps to exactly that.
     auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, LineCount(2) };
     auto& terminal = mc.terminal;
 
@@ -1235,8 +1249,41 @@ TEST_CASE("Terminal.TopAnchoredRegion.ScrollCountMatchesScrolledLines", "[termin
     mc.writeToScreen("\033[2;1H");
     mc.writeToScreen("\033D");
 
-    // The viewport must not drift by the history/scroll-count mismatch.
-    CHECK(terminal.viewport().scrollOffset() == scrollOffsetBefore);
+    CHECK(terminal.viewport().scrollOffset() == scrollOffsetBefore + vtbackend::ScrollOffset(1));
+    CHECK(terminal.viewport().scrollOffset()
+          <= boxed_cast<vtbackend::ScrollOffset>(terminal.viewport().scrollableLineCount()));
+}
+
+TEST_CASE("Terminal.TopAnchoredRegion.RepeatedScrollDoesNotDriftViewport", "[terminal]")
+{
+    // The honest statement of the bug the three cases above describe one step of: what the user
+    // notices is not one line of offset, it is the drift. A top-anchored region scroll pushes a line
+    // into the scrollback (@see Grid::scrollUp, which delegates to the page-wide overload when the
+    // region starts at row 0), so every scroll moves the content the viewport is parked on one line
+    // further up -- and an offset that stays put therefore shows something one line lower each time.
+    // Repeated by anything reserving bottom rows on the primary screen, that walks to the bottom.
+    //
+    // Asserted on the CONTENT rather than on the offset, because the content is the thing the user
+    // is looking at and the offset is only how we address it.
+    auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(8) }, LineCount(50) };
+    auto& terminal = mc.terminal;
+
+    for (auto const i: std::views::iota(1, 21))
+        mc.writeToScreen(std::format("h{:02}\r\n", i));
+
+    terminal.viewport().scrollUp(LineCount(8));
+    REQUIRE(terminal.viewport().scrolled());
+    auto const topLineTextBefore = topViewportLineText(terminal);
+    REQUIRE(topLineTextBefore.starts_with("h"));
+
+    // Top-anchored partial region (rows 1..3), cursor at the region bottom.
+    mc.writeToScreen("\033[1;3r");
+    mc.writeToScreen("\033[3;1H");
+
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 10))
+        mc.writeToScreen("\033[S");
+
+    CHECK(topViewportLineText(terminal) == topLineTextBefore);
 }
 
 TEST_CASE("Terminal.Wheel.AltScreen.NoProtocol.emits_cursor_keys", "[terminal]")

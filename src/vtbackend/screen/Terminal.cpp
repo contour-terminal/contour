@@ -4112,8 +4112,10 @@ void Terminal::setMode(DECMode mode, bool enable)
                 _currentScreen->restoreCursor();
             break;
         case DECMode::PageCursorCoupling:
+            // Re-coupling changes the drawn page, so it restores that page's viewport position too --
+            // the same seam setPage() goes through, for the same reason. @see setDisplayedPage.
             if (enable && _displayedPage != _cursorPage)
-                _displayedPage = _cursorPage;
+                setDisplayedPage(_cursorPage);
             break;
         case DECMode::DesignateCharsetUSASCII:
             // DEC private mode 2 is DECANM: reset (`CSI ? 2 l`) enters VT52. The set form (`CSI ? 2 h`,
@@ -4399,6 +4401,11 @@ void Terminal::hardReset()
         page->hardReset();
     _cursorPage = PageIndex(0);
     _displayedPage = PageIndex(0);
+
+    // Assigned rather than routed through setDisplayedPage(): a reset does not RESTORE a position, it
+    // discards every one of them, and a slot left holding a pre-reset offset would be handed back the
+    // first time a page it never displayed since came forward.
+    _savedScrollOffset.fill(ScrollOffset(0));
     _hostWritableStatusLineScreen.hardReset();
     _indicatorStatusScreen.hardReset();
 
@@ -4458,6 +4465,20 @@ void Terminal::hardReset()
     primaryScreen().verifyState();
 
     setStatusDisplay(_factorySettings.statusDisplayType);
+
+    // The LIVE viewport offset goes too, and it has to be said separately from _savedScrollOffset
+    // above: that clears the parked slots, this clears the one actually in use. Every grid was emptied
+    // by page->hardReset(), so an offset the user had scrolled to now addresses scrollback that does
+    // not exist -- the out-of-range state @see _savedScrollOffset calls fatal, which Grid::render
+    // asserts against and Grid::rowAt would otherwise resolve by wrapping its ring buffer onto
+    // unrelated storage. Nothing else drops it: setScreen(Primary) at the top early-returns when the
+    // cursor page is already 0, so bufferChanged() -- the one path that consults autoScrollOnUpdate --
+    // never runs on the common RIS.
+    //
+    // Deliberately not gated on autoScrollOnUpdate: declining a snap means KEEPING a position the user
+    // chose, and after RIS there is no position left to keep. Through forceScrollToBottom() so the
+    // sub-cell remainder and the scroll-offset listeners follow, exactly as on any other reset.
+    _viewport.forceScrollToBottom();
 
     // NB: _inputGenerator.reset() deliberately runs near the top of this function, before the mode
     // register is replayed. @see the comment there.
@@ -4541,10 +4562,6 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
     else
         setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
 
-    // When DECPCCM is set, the displayed page follows the cursor page.
-    if (isModeEnabled(DECMode::PageCursorCoupling))
-        _displayedPage = clamped;
-
     _currentScreenType = screenTypeFromPage(clamped);
 
     // Ensure correct screen buffer size for the buffer we've just switched to.
@@ -4553,7 +4570,53 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
     if (moveCursorHome)
         _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0));
 
+    // When DECPCCM is set, the displayed page follows the cursor page -- and the viewport with it.
+    // When it is RESET the drawn page does not change, so neither may the viewport: output going to
+    // a page nobody is looking at must not move the position the user is looking at.
+    //
+    // The alternate screen is exempt, in BOTH directions. DECPCCM decouples the drawn page from the
+    // cursor page among the pages of one buffer; entering or leaving the alternate screen is a buffer
+    // switch, and the drawn page has to follow that whatever the mode says. Left to DECPCCM, `CSI ?64l`
+    // followed by `CSI ?1049h` set _currentScreenType, _currentScreen and therefore
+    // Viewport::scrollingDisabled()/historyLineCount() to the alternate buffer while _displayedPage
+    // stayed on the primary one -- the user looking at the primary page, unable to scroll it, its
+    // offset neither parked nor restored, and measured against a grid it does not belong to.
+    //
+    // Keyed on AlternateScreenPageIndex rather than screenTypeFromPage(), which answers Alternate for
+    // every page but 0 and would therefore drag an ordinary decoupled NP/PP flip along with it.
+    //
+    // AFTER _currentScreenType, and that ordering is load-bearing: Viewport::scrollTo() refuses any
+    // non-zero offset while scrollingDisabled(), which asks isAlternateScreen() -- so restoring the
+    // primary page's offset while the type still says Alternate is silently dropped, and the position
+    // is lost exactly on the way back out. Before bufferChanged(), which is where autoScrollOnUpdate
+    // is consulted and must decide what happens to the position the user left behind.
+    if (isModeEnabled(DECMode::PageCursorCoupling) || clamped == AlternateScreenPageIndex
+        || _displayedPage == AlternateScreenPageIndex)
+        setDisplayedPage(clamped);
+
     bufferChanged(_currentScreenType);
+}
+
+void Terminal::setDisplayedPage(PageIndex target)
+{
+    if (target == _displayedPage)
+        return;
+
+    // Park the outgoing page's viewport position in its own slot; the incoming page's is taken out of
+    // its below. @see _savedScrollOffset -- a scroll offset addresses ONE page's scrollback.
+    _savedScrollOffset[_displayedPage.value] = _viewport.scrollOffset();
+    _displayedPage = target;
+
+    // Through scrollTo() rather than by assignment, so onViewportChanged() runs once and the render
+    // buffer, the selection and the Vi cursor all follow. Ordered before the caller's
+    // bufferChanged(): that is where autoScrollOnUpdate is consulted, and it must decide what happens
+    // to the position the user actually left behind.
+    //
+    // Clamped here rather than left to scrollTo(), which REJECTS an out-of-range request instead of
+    // repairing it: the incoming page's history may have been evicted below this offset while the
+    // other page was in front, and an unclamped restore would then be dropped outright.
+    _viewport.scrollTo(std::min(_savedScrollOffset[target.value],
+                                boxed_cast<ScrollOffset>(_viewport.scrollableLineCount())));
 }
 
 void Terminal::saveCursorPage()
@@ -4670,18 +4733,63 @@ void Terminal::synchronizedOutput(bool enabled)
     _eventListener.screenUpdated();
 }
 
-void Terminal::onBufferScrolled(LineCount n) noexcept
+void Terminal::onScreenScrolled(Screen const& screen, LineCount n, LineOffset rebaseBoundary)
 {
-    // Adjust Normal-mode's cursor accordingly to make it fixed at the scroll-offset as if nothing has
-    // happened.
-    _viCommands.cursorPosition.line -= n;
+    // Nothing left the page, so nothing rebased -- and this is the COMMON case under a scrolling
+    // region: Grid::scrollUp feeds the scrollback only for a full-width region anchored at row 0, and
+    // returns zero for every other margin. Without this, a region with a fixed header (`CSI 2;24r`)
+    // or any horizontal margin ran the whole body per scrolled line -- reaching
+    // scrollableLineCount(), and with one collapsed fold the projection cache behind it -- to move
+    // nothing.
+    if (!n)
+        return;
 
-    // Adjust viewport accordingly to make it fixed at the scroll-offset as if nothing has happened.
+    // Everything below describes what the viewport draws; a scroll of any other screen moves none of
+    // it. @see isViewportShowing, which states why the screen is passed rather than inferred.
+    if (!isViewportShowing(screen))
+        return;
+
+    // Whether the LIVE AREA moved too, or only the scrollback above a top-anchored partial region.
+    // The whole-page case is the only one that may move anchors sitting below the region.
+    auto const wholePageMoved = rebaseBoundary >= boxed_cast<LineOffset>(screen.pageSize().lines);
+
+    // Adjust Normal-mode's cursor to keep it on its own text, but only where that text actually
+    // rebased: rows at or below the boundary did not move, so shifting them would walk the cursor off
+    // the row it stands on -- one row per scroll, which is what a partial region does repeatedly.
+    // BEFORE the viewport moves, because onViewportChanged() clamps this cursor against the viewport,
+    // and shifting it afterwards would fight a clamp that had already run.
+    auto const viCursorRebased = _viCommands.cursorPosition.line < rebaseBoundary;
+    if (viCursorRebased)
+        _viCommands.cursorPosition.line -= n;
+
+    // In Normal mode the viewport follows the live area as well, so the row the Vi cursor stands on
+    // stays on screen even from the bottom. That disjunct is the LIVE-AREA fact, hence the guard:
+    // under a partial region the rows below it do not move, and a viewport showing them must not
+    // move either.
+    //
     // A viewport that actually moved has already run onViewportChanged() (and, in hint mode, the
     // refreshHints() there); remember that so the visible-scope branch below does not re-scan twice.
-    auto viewportFollowedContent = false;
-    if (viewport().scrolled() || _viewport.pixelOffset() > 0.0f || _inputHandler.mode() == ViMode::Normal)
-        viewportFollowedContent = viewport().scrollUp(n);
+    auto const mustFollow =
+        isViewportParkedInScrollback() || (wholePageMoved && _inputHandler.mode() == ViMode::Normal);
+    auto const viewportFollowedContent = mustFollow && _viewport.scrollUp(n);
+
+    // A viewport that moved has just run onViewportChanged(), which puts this cursor back onto a drawn
+    // row. One that did NOT move never runs it -- and the shift above has no bound of its own, so under
+    // a partial top-anchored region (`CSI 1;3r` and repeated `CSI S`) a cursor standing on rebased text
+    // walks one row per scroll straight off the top of a viewport that is deliberately staying put,
+    // ending up in the scrollback: invisible, and unbounded until clampToHistory()'s floor. Only when
+    // the cursor actually rebased, and only in the modes that draw it -- the same guard
+    // onViewportChanged() uses, since this is that same clamp applied where the notification does not
+    // carry it.
+    if (viCursorRebased && !viewportFollowedContent && _inputHandler.mode() != ViMode::Insert)
+        _viCommands.cursorPosition = _viewport.clampCellLocation(_viCommands.cursorPosition);
+
+    // The hint labels and the selection are anchored below the boundary as often as above it, and
+    // neither carries a per-anchor shift -- applyScroll() moves the whole set. So they follow only
+    // the whole-page scroll, exactly as before; a partial region leaves them where they are rather
+    // than moving anchors that did not rebase.
+    if (!wholePageMoved)
+        return;
 
     // Keep an open hint session consistent with content that just scrolled. Scrollback labels are
     // fixed for the session, so shift each match up to stay on its own text. The visible scope
@@ -4709,7 +4817,7 @@ void Terminal::clampToHistory() noexcept
 {
     _viewport.clampScrollOffset();
 
-    // The Normal-mode cursor is walked one line further up on every scroll (@see onBufferScrolled)
+    // The Normal-mode cursor is walked one line further up on every scroll (@see onScreenScrolled)
     // with nothing bounding it, so an eviction leaves it pointing below the oldest row there is.
     // Bounded by addressableTop() rather than by the history depth, because that is the one place
     // allowed to answer "where does this grid start" -- the two differ after a reverse scroll has

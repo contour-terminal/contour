@@ -116,10 +116,16 @@ template <typename T = vtpty::MockPty>
 ///
 /// What a scrolled-back viewport is SHOWING, which is the thing to assert on when the claim is "the
 /// viewport did not move": the scroll offset is only how that row is addressed, and it legitimately
-/// changes when the scrollback grows underneath it (@see Terminal::onScrollbackGrew).
+/// changes when the scrollback grows underneath it (@see Terminal::onScreenScrolled).
+///
+/// Resolved against displayedPage() rather than primaryScreen(), because topLine() is an offset into
+/// the page the viewport DRAWS. On the alternate screen, or a page the cursor left behind while
+/// DECPCCM is reset, indexing the primary grid with it answers about a different buffer entirely --
+/// silently, and for a negative offset against a grid with no history by wrapping Grid's ring buffer
+/// onto unrelated storage. @see Terminal::displayedPage, which states the same rule.
 [[nodiscard]] inline std::string topViewportLineText(Terminal const& terminal)
 {
-    return terminal.primaryScreen().grid().lineText(terminal.viewport().topLine());
+    return terminal.displayedPage().grid().lineText(terminal.viewport().topLine());
 }
 
 inline void logScreenTextAlways(Screen const& screen, std::string const& headline = "")

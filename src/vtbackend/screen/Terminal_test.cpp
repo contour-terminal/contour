@@ -476,6 +476,307 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
 
         CHECK(!terminal.viewport().scrolled());
     }
+
+    SECTION("leaving Vi mode honors autoScrollOnUpdate=No")
+    {
+        // Escape out of Normal mode means "back to typing", and the snap that used to follow is the
+        // same automatic move as the one on a keystroke -- so the same setting declines it. Reading
+        // the scrollback in Vi mode and then leaving it should not throw the position away.
+        terminal.setAutoScrollOnUpdate(vtbackend::AutoScrollOnUpdate::No);
+        terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+        auto const offsetBefore = terminal.viewport().scrollOffset();
+
+        terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
+
+        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+    }
+
+    SECTION("leaving Vi mode honors autoScrollOnUpdate=Yes")
+    {
+        REQUIRE(terminal.settings().autoScrollOnUpdate == vtbackend::AutoScrollOnUpdate::Yes);
+        terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+
+        terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
+
+        CHECK(!terminal.viewport().scrolled());
+    }
+}
+
+TEST_CASE("Terminal.AltScreen.PreservesPrimaryScrollOffset", "[terminal]")
+{
+    // The scroll offset is per-screen state. Entering the alternate screen must not consume the
+    // primary screen's viewport position, and leaving must hand it back.
+    //
+    // Driven through the real DECSET sequences rather than through bufferChanged(): the entry
+    // sequence also CLEARS the alternate page, and that clear is the whole bug -- Screen::clearScreen
+    // scrolls a full page into "history", which used to clamp the shared scroll offset against the
+    // alternate screen's (always empty) scrollback and so destroyed the primary position outright,
+    // before bufferChanged() ever got to consult autoScrollOnUpdate.
+    //
+    // 1049, 1047 and 47 are three views of one piece of state and one code path
+    // (@see alternateScreenBehavior), so each must preserve the offset the same way.
+    auto const mode = GENERATE(1049, 1047, 47);
+    CAPTURE(mode);
+
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(6) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+
+    terminal.setAutoScrollOnUpdate(vtbackend::AutoScrollOnUpdate::No);
+    parkViewportInScrollback(mc);
+    auto const offsetBefore = terminal.viewport().scrollOffset();
+
+    mc.writeToScreen(std::format("\033[?{}h", mode));
+    REQUIRE(terminal.isAlternateScreen());
+
+    // The alternate screen has no scrollback of its own, so it can only ever sit at the bottom.
+    CHECK(terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+
+    mc.writeToScreen(std::format("\033[?{}l", mode));
+    REQUIRE(!terminal.isAlternateScreen());
+
+    CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+}
+
+TEST_CASE("Terminal.MultiPage.PreservesPrimaryScrollOffset", "[terminal]")
+{
+    // The scroll offset is per PAGE, not per primary/alternate pair. VT420 page memory gives every
+    // one of the sixteen pages its own Screen with its own Grid, and only page 1 is built with any
+    // scrollback at all (@see the Terminal constructor, which hands pages 2..16 LineCount(0)) -- so
+    // "the primary pages share the primary scrollback" is false, and keying the saved offset on
+    // primary-vs-alternate would let a round trip through any of them clobber page 1's position:
+    // its zero-history clamp drives the live offset to zero, and coming back parks that zero in the
+    // slot the real offset was in.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(6) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+
+    terminal.setAutoScrollOnUpdate(vtbackend::AutoScrollOnUpdate::No);
+    parkViewportInScrollback(mc);
+    auto const offsetBefore = terminal.viewport().scrollOffset();
+
+    mc.writeToScreen("\033[U"); // NP: forward one page, onto a page with no scrollback.
+    REQUIRE(terminal.cursorPageIndex() == vtbackend::PageIndex(1));
+    CHECK(terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+
+    mc.writeToScreen("\033[V"); // PP: back to page 1.
+    REQUIRE(terminal.cursorPageIndex() == vtbackend::PageIndex(0));
+
+    CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+}
+
+TEST_CASE("Terminal.StatusLine.ScrollDoesNotMoveMainViewport", "[terminal]")
+{
+    // A status line is a Screen of its own -- one row, no scrollback -- and DECSASD makes it the
+    // active display, so an application writing past that row scrolls IT. Screen::scrollUp reports
+    // that like any other scroll, and following it clamped the main display's offset against the
+    // status line's (empty) history, i.e. straight to zero.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(6) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+
+    terminal.setAutoScrollOnUpdate(vtbackend::AutoScrollOnUpdate::No);
+    parkViewportInScrollback(mc);
+    auto const offsetBefore = terminal.viewport().scrollOffset();
+
+    mc.writeToScreen("\033[2$~"); // DECSSDT: show the host-writable status line
+    mc.writeToScreen("\033[1$}"); // DECSASD: make it the active display
+    mc.writeToScreen("status\r\n\r\n\r\n");
+    mc.writeToScreen("\033[0$}"); // DECSASD: back to the main display
+
+    CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+}
+
+TEST_CASE("Terminal.MultiPage.DecoupledPageChangeLeavesViewportAlone", "[terminal]")
+{
+    // With DECPCCM reset the drawn page stops following the cursor page, so NP/PP moves where output
+    // GOES without changing what the user is looking at. The viewport belongs to the drawn page, so a
+    // page switch that does not change the drawn page must not touch it -- saving and restoring on the
+    // cursor page instead yanked the live viewport to the incoming page's offset (zero, for the pages
+    // built with no scrollback) and back again.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(6) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+
+    terminal.setAutoScrollOnUpdate(vtbackend::AutoScrollOnUpdate::No);
+    parkViewportInScrollback(mc);
+    auto const offsetBefore = terminal.viewport().scrollOffset();
+
+    mc.writeToScreen("\033[?64l"); // DECPCCM reset: decouple the drawn page from the cursor page.
+    REQUIRE(!terminal.isModeEnabled(vtbackend::DECMode::PageCursorCoupling));
+
+    mc.writeToScreen("\033[U"); // NP: forward one page -- the CURSOR's page, not the drawn one.
+    REQUIRE(terminal.cursorPageIndex() == vtbackend::PageIndex(1));
+    CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+
+    mc.writeToScreen("\033[V"); // PP: back again.
+    REQUIRE(terminal.cursorPageIndex() == vtbackend::PageIndex(0));
+    CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+}
+
+TEST_CASE("Terminal.HardReset.DropsTheLiveViewportOffset", "[terminal]")
+{
+    // RIS empties every grid, so an offset the user had scrolled to then addresses scrollback that no
+    // longer exists -- the out-of-range state Grid::render asserts against and Grid::rowAt would
+    // otherwise resolve by wrapping its ring buffer onto unrelated storage. The SAVED per-page offsets
+    // were already cleared here; the live one was not, and nothing else drops it: setScreen(Primary)
+    // early-returns when the cursor page is already 0, so bufferChanged() -- the one path that consults
+    // autoScrollOnUpdate -- never runs on the common RIS.
+    //
+    // Deliberately asserted with autoScrollOnUpdate No, since that is the setting under which the
+    // stale offset used to survive: declining a snap means keeping a position, and after RIS there is
+    // no position left to keep.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(6) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+
+    terminal.setAutoScrollOnUpdate(vtbackend::AutoScrollOnUpdate::No);
+    parkViewportInScrollback(mc);
+    REQUIRE(terminal.viewport().scrolled());
+
+    mc.writeToScreen("\033c"); // RIS
+
+    CHECK(!terminal.viewport().scrolled());
+    CHECK(terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+    CHECK(terminal.primaryScreen().historyLineCount() == LineCount(0));
+}
+
+TEST_CASE("Terminal.AltScreen.EnteredEvenWhileDecpccmIsReset", "[terminal]")
+{
+    // DECPCCM decouples the DRAWN page from the cursor page among the pages of ONE buffer. Entering the
+    // alternate screen is a buffer switch, not a page flip, so the drawn page has to follow it whatever
+    // the mode says. Gated on DECPCCM alone, `CSI ?64l` followed by `CSI ?1049h` left _displayedPage on
+    // the primary page while _currentScreenType, currentScreen() and therefore
+    // Viewport::scrollingDisabled()/historyLineCount() had all moved to the alternate one -- the user
+    // looking at the primary page, unable to scroll it, measured against a grid it does not belong to.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(6) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+
+    mc.writeToScreen("\033[?64l"); // DECPCCM reset
+    REQUIRE(!terminal.isModeEnabled(vtbackend::DECMode::PageCursorCoupling));
+
+    mc.writeToScreen("\033[?1049h");
+    REQUIRE(terminal.isAlternateScreen());
+    CHECK(&terminal.displayedPage() == &terminal.alternateScreen());
+
+    // And back out again: leaving is the same buffer switch in the other direction.
+    mc.writeToScreen("\033[?1049l");
+    REQUIRE(!terminal.isAlternateScreen());
+    CHECK(&terminal.displayedPage() == &terminal.primaryScreen());
+}
+
+TEST_CASE("Terminal.TopAnchoredRegion.PartialScrollKeepsViCursorOnScreen", "[terminal]")
+{
+    // The sibling case below parks the viewport, so the viewport follows the scroll and
+    // onViewportChanged() clamps the Vi cursor on the way. This is the branch where it does NOT: the
+    // viewport sits at the bottom, so mustFollow is false, and a PARTIAL top-anchored region makes
+    // wholePageMoved false too -- the viewport deliberately stays put and nothing runs the clamp.
+    //
+    // The cursor was still shifted once per scroll, with no bound of its own, so it walked off the top
+    // of the page into scrollback the viewport is not showing: invisible, and unbounded until
+    // clampToHistory()'s floor. Keeping it on its text is right only while that text is on screen;
+    // once the text has gone the cursor has to stop at the edge, which is the rule
+    // onViewportChanged() applies everywhere else.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(8) }, LineCount(50) };
+    auto& terminal = mc.terminal;
+
+    for (auto const i: std::views::iota(1, 15))
+        mc.writeToScreen(std::format("h{:02}\r\n", i));
+
+    terminal.setAutoScrollOnUpdate(vtbackend::AutoScrollOnUpdate::No);
+
+    // Park the SCREEN cursor mid-page and enter Normal mode there, rather than walking the Vi cursor
+    // up with `k`: every `k` runs Viewport::makeVisibleWithinSafeArea(), which scrolls -- and a
+    // scrolled viewport is the parked branch the sibling case already covers, not this one.
+    mc.writeToScreen("\033[6;1H");
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+
+    // Placed directly rather than with `k`: walking up past the top row scrolls the viewport, which
+    // would PARK it and take the other branch -- the one the sibling case already covers. Mid-page for
+    // the same reason: Viewport::makeVisibleWithinSafeArea() scrolls for a cursor near either edge.
+    INFO("cursor=" << terminal.normalModeCursorPosition().line.value
+                   << " offset=" << terminal.viewport().scrollOffset().value);
+    REQUIRE(!terminal.viewport().scrolled());
+    REQUIRE(terminal.normalModeCursorPosition().line == LineOffset(5));
+
+    // A partial region anchored at the top: rows 1..8 of a 10-row page, so the rebase boundary lands
+    // above the page bottom (wholePageMoved is false) and the cursor sits inside it.
+    mc.writeToScreen("\033[1;8r");
+
+    // More scrolls than the cursor has rows above it, so an unclamped shift goes negative.
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 8))
+        mc.writeToScreen("\033[S");
+
+    // The invariant, stated as the viewport itself defines it: the Normal-mode cursor sits on a row
+    // the viewport draws. The viewport never moved here, so this is simply [0, pageSize).
+    auto const scrollOffset = terminal.viewport().scrollOffset().as<LineOffset>();
+    CHECK(terminal.normalModeCursorPosition().line >= -scrollOffset);
+    CHECK(terminal.normalModeCursorPosition().line
+          <= boxed_cast<LineOffset>(terminal.pageSize().lines) - LineOffset(1) - scrollOffset);
+}
+
+TEST_CASE("Terminal.TopAnchoredRegion.PartialScrollKeepsViCursorOnItsText", "[terminal]")
+{
+    // The Normal-mode cursor is an anchor into the grid like the viewport is, so the same rebase
+    // applies to it: a top-anchored region scroll pushes a line into the scrollback, and a cursor
+    // parked up there has to move with its text. It used to be left where it was while the viewport
+    // followed -- so it drifted onto different text, one row per scroll, which is the same bug the
+    // viewport had and is why the boundary is now reported rather than inferred.
+    auto mc = MockTerm { PageSize { LineCount(6), ColumnCount(8) }, LineCount(50) };
+    auto& terminal = mc.terminal;
+
+    for (auto const i: std::views::iota(1, 21))
+        mc.writeToScreen(std::format("h{:02}\r\n", i));
+
+    terminal.setAutoScrollOnUpdate(vtbackend::AutoScrollOnUpdate::No);
+
+    // Normal mode FIRST, so that scrolling the viewport runs onViewportChanged()'s clamp and parks the
+    // Vi cursor on a scrollback row -- entering the mode alone leaves it on the live cursor.
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    terminal.viewport().scrollUp(LineCount(8));
+    REQUIRE(terminal.viewport().scrolled());
+
+    // Up into the MIDDLE of the viewport. At an edge the cursor is dragged along by
+    // onViewportChanged()'s clamp on every scroll, which happens to track the content and would hide
+    // the drift this pins; in the middle the clamp never fires, so only a real rebase can keep it on
+    // its text.
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 3))
+        terminal.sendCharEvent(U'k',
+                               vtbackend::KeyIdentity { .unshiftedKey = U'k' },
+                               vtbackend::Modifiers {},
+                               vtbackend::KeyboardEventType::Press,
+                               std::chrono::steady_clock::now());
+
+    auto const cursorLineBefore = terminal.normalModeCursorPosition().line;
+    auto const cursorLineTextBefore = terminal.primaryScreen().grid().lineText(cursorLineBefore);
+    REQUIRE(cursorLineTextBefore.starts_with("h"));
+    REQUIRE(cursorLineBefore > terminal.viewport().topLine());
+
+    // Top-anchored partial region (rows 1..3), cursor at the region bottom.
+    mc.writeToScreen("\033[1;3r");
+    mc.writeToScreen("\033[3;1H");
+
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 10))
+        mc.writeToScreen("\033[S");
+
+    CHECK(terminal.primaryScreen().grid().lineText(terminal.normalModeCursorPosition().line)
+          == cursorLineTextBefore);
+}
+
+TEST_CASE("Terminal.AltScreen.HonorsAutoScrollOnUpdateWhenLeaving", "[terminal]")
+{
+    // With the setting ON, coming back from the alternate screen snaps to the bottom -- the restored
+    // offset is what bufferChanged()'s gated snap then acts upon, which is the whole point of
+    // restoring before raising it.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(6) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+
+    REQUIRE(terminal.settings().autoScrollOnUpdate == vtbackend::AutoScrollOnUpdate::Yes);
+    parkViewportInScrollback(mc);
+
+    mc.writeToScreen("\033[?1049h");
+    mc.writeToScreen("\033[?1049l");
+
+    CHECK(!terminal.viewport().scrolled());
 }
 
 TEST_CASE("Terminal.DECCARA", "[terminal]")
@@ -1630,7 +1931,7 @@ TEST_CASE("Terminal.cursorAnimationProgress.no_animation_returns_1", "[terminal]
     CHECK(terminal.cursorAnimationProgress(gridPos) == 1.0f);
 }
 
-TEST_CASE("Terminal.onBufferScrolled.preserves_viewport_with_pixel_offset", "[terminal]")
+TEST_CASE("Terminal.onScreenScrolled.preserves_viewport_with_pixel_offset", "[terminal]")
 {
     auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 10 } };
     auto& terminal = mc.terminal;
@@ -1647,7 +1948,7 @@ TEST_CASE("Terminal.onBufferScrolled.preserves_viewport_with_pixel_offset", "[te
     terminal.applySmoothScrollPixelDelta(5.0f);
     auto const offsetBefore = terminal.viewport().scrollOffset().value;
 
-    // Write more content, triggering onBufferScrolled.
+    // Write more content, triggering onScreenScrolled.
     for (auto i = 0; i < 4; ++i)
         mc.writeToScreen("more\r\n");
 
@@ -3120,7 +3421,7 @@ TEST_CASE("Terminal.historyEviction.clampsAViewportWhenAPartialRegionFeedsTheScr
     REQUIRE(mock.terminal.viewport().scrolled());
 
     // A TOP-ANCHORED partial DECSTBM region still feeds rows into the scrollback -- Grid routes it
-    // through the very same scrollUp -- but Screen deliberately withholds onBufferScrolled, because
+    // through the very same scrollUp -- but the boundary Screen reports keeps it inert, because
     // the live area below the region did not move. So the one path that clamps the viewport on an
     // ordinary scroll is not reached here, and the trim's floor jump goes unnoticed.
     mock.writeToScreen("\033[1;3r");
