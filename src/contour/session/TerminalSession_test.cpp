@@ -3482,11 +3482,7 @@ namespace
 /// reloadConfigWithProfile() re-reads whatever path that copy names.
 std::filesystem::path installConfig(TestApp& app, QTemporaryDir const& dir, std::string_view yaml)
 {
-    auto const path = std::filesystem::path(dir.path().toStdString()) / "contour.yml";
-    {
-        auto out = std::ofstream(path);
-        out << yaml;
-    }
+    auto const path = contour::test::writeConfigFile(std::filesystem::path(dir.path().toStdString()), yaml);
     contour::config::loadConfigFromFile(app.app().config(), path);
     return path;
 }

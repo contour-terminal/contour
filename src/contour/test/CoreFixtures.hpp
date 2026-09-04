@@ -27,6 +27,26 @@
 namespace contour::test
 {
 
+/// Writes @p yaml as the `contour.yml` inside @p dir and returns the path it wrote.
+///
+/// The one spelling of "put a configuration document on disk", because every suite that exercises
+/// loadConfigFromFile() needs a real file to point it at and each had grown its own copy of these
+/// four lines. Takes the directory as a path rather than the QTemporaryDir the GUI suites hold, so
+/// this stays usable from the Qt-free ones -- @see TempDir for why that matters.
+/// @param dir An existing directory to write into.
+/// @param yaml The inline configuration document.
+/// @return The path written.
+[[nodiscard]] inline std::filesystem::path writeConfigFile(std::filesystem::path const& dir,
+                                                           std::string_view yaml)
+{
+    auto const path = dir / "contour.yml";
+    {
+        auto out = std::ofstream(path);
+        out << yaml;
+    }
+    return path;
+}
+
 /// Loads @p yaml through the PRODUCTION config file loader (writing it to a throwaway temp file
 /// first), so a test asserts what a real user's configuration would parse to — including the
 /// sibling-layouts merge and every fallback loadConfigFromFile applies.
@@ -36,13 +56,8 @@ namespace contour::test
 {
     TempDir const dir;
     REQUIRE(dir.isValid());
-    auto const path = dir.path() / "contour.yml";
-    {
-        auto out = std::ofstream(path);
-        out << yaml;
-    }
     auto config = contour::config::Config {};
-    contour::config::loadConfigFromFile(config, path);
+    contour::config::loadConfigFromFile(config, writeConfigFile(dir.path(), yaml));
     return config;
 }
 
