@@ -8,6 +8,7 @@
 
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiConfigStore.hpp>
+#include <contour/test/CoreFixtures.hpp>
 #include <contour/window/SettingsController.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -29,13 +30,10 @@ using namespace contour::window;
 namespace
 {
 
-/// Writes @p yaml as the contour.yml inside @p dir and returns its path.
+/// contour::test::writeConfigFile() for the QTemporaryDir this suite holds.
 [[nodiscard]] std::filesystem::path writeConfig(QTemporaryDir& dir, std::string_view yaml)
 {
-    auto const path = std::filesystem::path(dir.path().toStdString()) / "contour.yml";
-    auto out = std::ofstream(path);
-    out << yaml;
-    return path;
+    return contour::test::writeConfigFile(std::filesystem::path(dir.path().toStdString()), yaml);
 }
 
 /// Owns a controller wired exactly like production: a live Config, a file-backed side-file store rooted

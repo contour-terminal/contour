@@ -11,6 +11,7 @@
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/config/ModifierNames.hpp>
 #include <contour/platform/GuiTheme.hpp>
+#include <contour/test/CoreFixtures.hpp>
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Primitives.hpp>
@@ -39,15 +40,10 @@ using namespace std::string_view_literals;
 namespace
 {
 
-/// Writes @p yaml to a fresh file inside @p dir and returns its path.
+/// contour::test::writeConfigFile() for the QTemporaryDir this suite holds.
 [[nodiscard]] std::filesystem::path writeConfig(QTemporaryDir& dir, std::string_view yaml)
 {
-    auto const path = std::filesystem::path(dir.path().toStdString()) / "contour.yml";
-    {
-        auto out = std::ofstream(path);
-        out << yaml;
-    }
-    return path;
+    return contour::test::writeConfigFile(std::filesystem::path(dir.path().toStdString()), yaml);
 }
 
 /// Loads a config from inline YAML through the production file loader.
