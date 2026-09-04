@@ -3611,3 +3611,98 @@ TEST_CASE("TerminalSession: a config reload re-applies auto_scroll_on_update ont
 
     CHECK(session->terminal().settings().autoScrollOnUpdate == vtbackend::AutoScrollOnUpdate::No);
 }
+
+TEST_CASE("TerminalSession: the live-config watcher keeps watching across a reload",
+          "[contour][session][config]")
+{
+    // live_config worked exactly once. onConfigReload() ended by re-connect()ing its signal, which
+    // was never the thing that broke -- @see TerminalSession::onConfigReload, which states why.
+    //
+    // The lost watch is applied here rather than waited for: QFileSystemWatcher learns of it through
+    // inotify, on an event loop this suite deliberately does not run. removePath() puts the watcher
+    // in exactly the state that notification would leave it in, which is the state onConfigReload()
+    // has to recover from -- and it does so with no timeout and no qWait.
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    TestApp testApp;
+    auto const configPath = installConfig(testApp,
+                                          dir,
+                                          "platform_plugin: auto\n"
+                                          "live_config: true\n"
+                                          "profiles:\n"
+                                          "    main:\n"
+                                          "        history:\n"
+                                          "            limit: 1000\n");
+    REQUIRE(testApp.app().liveConfig());
+
+    auto session = makeSessionWithSurface(testApp.app());
+    REQUIRE(session->isWatchingConfigFile());
+
+    // The watcher is a QObject child of the session (which owns it), so the test reaches it the
+    // ordinary Qt way, with no accessor added for the test's benefit.
+    auto* const watcher = session->findChild<QFileSystemWatcher*>();
+    REQUIRE(watcher != nullptr);
+    watcher->removePath(QString::fromStdString(configPath.generic_string()));
+    REQUIRE(!session->isWatchingConfigFile());
+
+    session->onConfigReload();
+
+    CHECK(session->isWatchingConfigFile());
+
+    // Idempotent: a reload while the path is still watched must not add it twice (addPath() warns on
+    // a duplicate, and a warning is a finding in this suite -- @see BenignQtMessages_test).
+    session->onConfigReload();
+    CHECK(session->isWatchingConfigFile());
+}
+
+TEST_CASE("TerminalSession: the watch is re-armed only after the reload has run",
+          "[contour][session][config]")
+{
+    // DisplaySurface::post() is a QUEUED invocation in production, even when the caller already runs on
+    // the GUI thread (@see platform::postToObject). So a re-arm written after the post() in
+    // onConfigReload() runs BEFORE the reload, not after -- and it then asks addPath() about the file
+    // during exactly the window the reload exists to close. A delete-then-create save leaves the path
+    // absent at that moment, addPath() fails, and nothing re-arms afterwards: live reload is dead for
+    // the rest of the session, which is the failure onConfigReload() was written to prevent.
+    //
+    // The default FakeDisplaySurface runs posts immediately, which HIDES this by making the reload
+    // synchronous -- the sibling case above passes either way. Holding the queue is what reproduces
+    // production ordering, so this asserts the ordering itself rather than one of its symptoms.
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    TestApp testApp;
+    auto const configPath = installConfig(testApp,
+                                          dir,
+                                          "platform_plugin: auto\n"
+                                          "live_config: true\n"
+                                          "profiles:\n"
+                                          "    main:\n"
+                                          "        history:\n"
+                                          "            limit: 1000\n");
+    REQUIRE(testApp.app().liveConfig());
+
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+    REQUIRE(held->isWatchingConfigFile());
+
+    // The state a save that replaces the file leaves behind, applied directly for the reason the
+    // sibling case states: no event loop runs here.
+    auto* const watcher = held->findChild<QFileSystemWatcher*>();
+    REQUIRE(watcher != nullptr);
+    watcher->removePath(QString::fromStdString(configPath.generic_string()));
+    REQUIRE(!held->isWatchingConfigFile());
+
+    surface.runPostsImmediately = false;
+    held->onConfigReload();
+
+    // The load-bearing assertion: the reload is still sitting in the queue, so the re-arm must not
+    // have happened yet. This is what fails when the two are merely adjacent instead of sequenced.
+    CHECK(surface.pendingPosts.size() == 1);
+    CHECK(!held->isWatchingConfigFile());
+
+    surface.drainPosts();
+
+    CHECK(held->isWatchingConfigFile());
+}

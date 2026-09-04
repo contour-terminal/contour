@@ -364,12 +364,10 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     if (app.liveConfig())
     {
         sessionLog()("Enable live configuration reloading of file {}.", _config.configFile.generic_string());
-        _configFileChangeWatcher = make_unique<QFileSystemWatcher>();
-        _configFileChangeWatcher->addPath(QString::fromStdString(_config.configFile.generic_string()));
-        connect(_configFileChangeWatcher.get(),
-                SIGNAL(fileChanged(QString const&)),
-                this,
-                SLOT(onConfigReload()));
+        // Parented to this, which is what owns it. @see _configFileChangeWatcher.
+        _configFileChangeWatcher = new QFileSystemWatcher(this);
+        armConfigFileWatch();
+        connect(_configFileChangeWatcher, SIGNAL(fileChanged(QString const&)), this, SLOT(onConfigReload()));
     }
     _musicalNotesBuffer.reserve(16);
 
@@ -4224,20 +4222,49 @@ void TerminalSession::onConfigReload()
     // is itself display-safe (activateProfile guards its one _display use), so run it directly rather than
     // skip it — otherwise a background tab would keep serving the pre-reload config until it is
     // reactivated.
+    //
+    // The re-arm rides ALONG with the reload rather than following this function: DisplaySurface::post()
+    // is a Qt::QueuedConnection even when the caller is already on the GUI thread (@see
+    // platform::postToObject), so anything written after the post() runs BEFORE the reload, not after.
+    // Re-arming there would ask addPath() about the file during the very window the reload exists to
+    // close, and a delete-then-create save would then fail it permanently. Queued invocations onto one
+    // object keep their order, so pairing them inside the lambda is what actually sequences them.
     if (_display != nullptr)
-        _display->post([this]() { reloadConfigWithProfile(_profileName); });
+        _display->post([this]() {
+            reloadConfigWithProfile(_profileName);
+            armConfigFileWatch();
+        });
     else
+    {
         reloadConfigWithProfile(_profileName);
+        armConfigFileWatch();
+    }
+}
 
-    // TODO: needed still?
-    // if (setScreenDirty())
-    //     update();
-
-    if (_configFileChangeWatcher)
-        connect(_configFileChangeWatcher.get(),
-                SIGNAL(fileChanged(QString const&)),
-                this,
-                SLOT(onConfigReload()));
+void TerminalSession::armConfigFileWatch()
+{
+    // The WATCH, not the connection. QFileSystemWatcher drops a path once the file it names is gone,
+    // and the overwhelmingly common way a config file is saved -- by an editor, and by our own
+    // AtomicFileWrite -- is to write a temporary and rename it over the top, which is exactly that.
+    // Re-connecting instead left the path unwatched, so live reload worked once and then went quiet
+    // forever; and because Qt permits duplicate SIGNAL/SLOT connections, an in-place write accumulated
+    // one more connection each time, reloading the whole config once per past edit.
+    //
+    // The result is checked rather than discarded at BOTH call sites, because nothing else arms this
+    // watch: a failure is PERMANENT, and silently so -- the very "live reload goes quiet forever" the
+    // re-arm exists to prevent. addPath() fails on a path it cannot watch, which after a
+    // delete-then-create save would be the missing file; that window is closed by the reload the
+    // re-arm runs AFTER (@see onConfigReload for why the ordering needs saying), whose
+    // loadConfigFromFile() runs createFileIfNotExists() and so puts the file back first. What is left
+    // is the case that survives even that -- an unwritable or vanished directory, a full or read-only
+    // filesystem, or a config home that does not exist yet at construction -- and for those a log line
+    // is the difference between a user reporting "live reload stopped working" and being able to say
+    // why.
+    if (_configFileChangeWatcher && !isWatchingConfigFile()
+        && !_configFileChangeWatcher->addPath(watchedConfigPath()))
+        sessionLog()("Could not watch the configuration file {} for changes. Live reloading is "
+                     "inactive for this session until the configuration is reloaded explicitly.",
+                     _config.configFile.generic_string());
 }
 
 // }}}
