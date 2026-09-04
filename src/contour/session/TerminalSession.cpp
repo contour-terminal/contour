@@ -244,9 +244,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _terminal { *this,
                 app.processEnvironment(),
                 std::move(pty),
-                config::resolvedSessionConfig(
-                    _config, _profile, _profileName, _currentColorPreference, initialPageSize)
-                    .settings,
+                config::sessionSettings(_config, _profile, _currentColorPreference, initialPageSize),
                 std::chrono::steady_clock::now() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
     // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is

@@ -2287,10 +2287,35 @@ struct ResolvedSessionConfig
     vtworkspace::Layout startupLayout {};
 };
 
-/// Resolves @p profile's hosted-session configuration: @ref emulationSettings plus the shell,
-/// sandbox policy and presentation/color fields a local and a daemon-hosted session both need. The
-/// one place `TerminalSession` and `ContourApp::daemonAction()` both call, so the two paths cannot
-/// disagree about what a profile means.
+/// Resolves @p profile's presentation half: @ref emulationSettings plus the fields that decide how
+/// a session looks rather than what it is (cursor, status line, scrolling, colors, initial page
+/// size, focus) — everything `ResolvedSessionConfig::settings` carries, computed standalone so a
+/// caller that only needs `vtbackend::Settings` (a local `TerminalSession`, which gets its shell
+/// from `SessionFactory` and its startup layout from `TerminalSessionManager::findLayout`) is not
+/// charged for the shell/sandbox/layout resolution @ref resolvedSessionConfig also does.
+///
+/// @param config The loaded configuration (global entries).
+/// @param profile The resolved profile.
+/// @param colorPreference Which half of a dual (dark/light) color config to prefer; irrelevant for
+///        a simple (single) color config.
+/// @param initialPageSize Overrides `profile.terminal_size` when set (a new tab/split inherits the
+///        live window's running grid rather than starting at the profile's configured size).
+/// @return The resolved settings.
+[[nodiscard]] vtbackend::Settings sessionSettings(
+    Config const& config,
+    TerminalProfile const& profile,
+    vtbackend::ColorPreference colorPreference,
+    std::optional<vtbackend::PageSize> initialPageSize = std::nullopt);
+
+/// Resolves @p profile's hosted-session configuration: @ref sessionSettings plus the shell,
+/// sandbox policy and startup layout a daemon-hosted session ALSO needs. The one place
+/// `ContourApp::daemonAction()` and `resolveSessionConfig()`'s daemon callers go through, so no
+/// hosted path can disagree with another about what a profile means.
+///
+/// A local `TerminalSession` calls @ref sessionSettings directly instead: its shell comes from
+/// `SessionFactory` (profile SSH/local, plus a layout pane's command override) and its startup
+/// layout from `TerminalSessionManager::findLayout`, so resolving them here too would be
+/// immediately discarded work.
 ///
 /// @param config The loaded configuration (global entries).
 /// @param profile The resolved profile.

@@ -4118,6 +4118,46 @@ profiles:
     CHECK(resolved->shell.env.at("CONTOUR_PROFILE") == "main");
 }
 
+TEST_CASE("Config: resolveSessionConfig falls back to the home directory when "
+          "initial_working_directory is unset",
+          "[config]")
+{
+    // The regression this guards: a profile that never sets shell.initial_working_directory used
+    // to resolve to an EMPTY workingDirectory (YAMLConfigReader::loadFromEntry's homeResolvedPath
+    // only substitutes `~`, not "absent"), and vtpty::Process then leaves an empty cwd as "inherit
+    // the hosting process's cwd" -- fine for a locally-launched GUI, wrong for `contour daemon`,
+    // whose own cwd is whatever started it (e.g. systemd's WorkingDirectory=). Every hosted shell
+    // used to get vtpty::Process::homeDirectory() unconditionally (the old ContourApp::daemonAction);
+    // resolvedSessionConfig must still land there when the profile leaves the directory unset.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const resolved = contour::config::resolveSessionConfig(path.string(), "main");
+    REQUIRE(resolved.has_value());
+    CHECK(resolved->shell.workingDirectory == vtpty::Process::homeDirectory());
+}
+
+TEST_CASE("Config: resolveSessionConfig honors an explicit initial_working_directory", "[config]")
+{
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        initial_working_directory: /var/tmp
+)"sv);
+
+    auto const resolved = contour::config::resolveSessionConfig(path.string(), "main");
+    REQUIRE(resolved.has_value());
+    CHECK(resolved->shell.workingDirectory == std::filesystem::path("/var/tmp"));
+}
+
 TEST_CASE("Config: resolveSessionConfig refuses an unknown profile, matching resolveEmulationSettings",
           "[config]")
 {

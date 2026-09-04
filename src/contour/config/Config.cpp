@@ -565,11 +565,10 @@ vtbackend::ColorPalette const* preferredColorPalette(ColorConfig const& colorCon
     return nullptr;
 }
 
-ResolvedSessionConfig resolvedSessionConfig(Config const& config,
-                                            TerminalProfile const& profile,
-                                            std::string const& profileName,
-                                            vtbackend::ColorPreference colorPreference,
-                                            std::optional<vtbackend::PageSize> initialPageSize)
+vtbackend::Settings sessionSettings(Config const& config,
+                                    TerminalProfile const& profile,
+                                    vtbackend::ColorPreference colorPreference,
+                                    std::optional<vtbackend::PageSize> initialPageSize)
 {
     // The emulation half comes from the shared table, so a GUI-hosted session and a
     // daemon-hosted one can never disagree on what the terminal IS; only the presentation
@@ -640,12 +639,34 @@ ResolvedSessionConfig resolvedSessionConfig(Config const& config,
     settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord.value();
     settings.highlightTimeout = profile.highlightTimeout.value();
 
+    return settings;
+}
+
+ResolvedSessionConfig resolvedSessionConfig(Config const& config,
+                                            TerminalProfile const& profile,
+                                            std::string const& profileName,
+                                            vtbackend::ColorPreference colorPreference,
+                                            std::optional<vtbackend::PageSize> initialPageSize)
+{
+    auto settings = sessionSettings(config, profile, colorPreference, initialPageSize);
+
     // The shell: a copy of the profile's configured ExecInfo (program/arguments/workingDirectory
     // already carry the profile's `shell:` block), with CONTOUR_PROFILE added exactly as a local
     // session's does (see ContourGuiApp::terminalGuiAction) so a hosted shell can tell which
     // profile it is running under just like a local one can.
     auto shell = profile.shell.value();
     shell.env["CONTOUR_PROFILE"] = profileName;
+
+    // An unset `initial_working_directory` resolves to empty (YAMLConfigReader::loadFromEntry
+    // only substitutes `~`, not "absent"), which vtpty::Process then leaves as "inherit the
+    // hosting process's cwd" -- fine for a locally-launched GUI inheriting the user's shell cwd,
+    // wrong for a daemon whose own cwd is whatever started it (e.g. systemd's WorkingDirectory=).
+    // Falling back to the home directory here matches what every hosted shell used to get
+    // unconditionally (see the old ContourApp::daemonAction, which set
+    // config.shell.workingDirectory = Process::homeDirectory()) and is exactly what an
+    // interactive shell's own "no explicit cwd" default is.
+    if (shell.workingDirectory.empty())
+        shell.workingDirectory = Process::homeDirectory();
 
     // The profile's configured startup layout: looked up by name in `layouts:`, exactly like
     // TerminalSessionManager::findLayout does for the local-GUI path. An unset or unknown name
