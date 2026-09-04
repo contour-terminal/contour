@@ -101,19 +101,7 @@ namespace
             // its own. Mirrors AppSessionFactory::createPty's identical local-copy comment for
             // the same reason on the local-GUI path.
             auto effective = shell;
-            if (commandOverride)
-            {
-                // Replace the program/args only when a program was actually given: an engaged
-                // override with an empty program (a directory-only pane) must not wipe the
-                // daemon's configured default arguments.
-                if (!commandOverride->program.empty())
-                {
-                    effective.program = commandOverride->program;
-                    effective.arguments = commandOverride->arguments;
-                }
-                if (!commandOverride->workingDirectory.empty())
-                    effective.workingDirectory = commandOverride->workingDirectory;
-            }
+            vtpty::Process::applyCommandOverride(effective, commandOverride);
             return std::make_unique<vtpty::Process>(
                 effective, vtpty::createPty(pageSize, std::nullopt), escapeSandbox);
         };
