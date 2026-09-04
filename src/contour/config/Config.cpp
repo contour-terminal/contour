@@ -464,6 +464,7 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
     auto settings = vtbackend::Settings {};
     settings.pageSize = profile.terminalSize.value();
     settings.historyLimits = profile.history.value().limits();
+    settings.autoScrollOnUpdate = profile.history.value().autoScrollPolicy();
     auto const& folding = config.folding.value();
     settings.foldMarkers = folding.markersVisible();
     settings.autoCollapseFoldOnNewCommand = folding.enabled && folding.autoCollapseOnNewCommand;

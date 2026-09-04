@@ -360,7 +360,11 @@ constexpr StringLiteral HistoryConfig {
     "    {comment} limit falls -- so the oldest line kept is a prompt, with its output intact. Needs a\n"
     "    {comment} shell that emits OSC 133; without one the buffer simply bounds here.\n"
     "    hard_limit: {}\n"
-    "    {comment} Boolean indicating whether or not to scroll down to the bottom on screen updates.\n"
+    "    {comment} Whether the viewport snaps back to the bottom on its own. Governs every automatic\n"
+    "    {comment} snap: new output arriving, keys forwarded to the application, switching to and from\n"
+    "    {comment} the alternate screen, a scrollback clear, and leaving Vi mode. Set to false and the\n"
+    "    {comment} viewport stays wherever you left it; a scroll you ask for by name (the\n"
+    "    {comment} ScrollToBottom action, the scrollbar, `G` in Vi mode) still works.\n"
     "    auto_scroll_on_update: {}\n"
     "    {comment} Number of lines to scroll on ScrollUp & ScrollDown events.\n"
     "    scroll_multiplier: {}\n"
@@ -431,12 +435,6 @@ constexpr StringLiteral ScrollbarConfig {
     "    hide_in_alt_screen: {}\n"
     "\n"
 
-};
-
-constexpr StringLiteral AutoScrollOnUpdateConfig {
-    "{comment} Boolean indicating whether or not to scroll down to the bottom on screen updates.\n"
-    "auto_scroll_on_update: {}\n"
-    "\n"
 };
 
 constexpr StringLiteral FontsConfig {
@@ -2059,10 +2057,15 @@ constexpr StringLiteral HistoryWeb {
     "line by line as before. Values below `limit` are raised to it, which disables the feature; -1 "
     "means infinite, and an infinite `limit` makes this infinite too since nothing is ever evicted. "
     "Defaults to `limit`. <br/>\n"
-    ":octicons-horizontal-rule-16: ==auto_scroll_on_update== This boolean option determines whether the "
-    "terminal automatically scrolls down to the bottom when new content is added. If set to true, the "
-    "terminal will scroll down on screen updates. If set to false, the terminal will maintain the current "
-    "scroll position. In the provided example, auto_scroll_on_update is set to true.  <br/>\n"
+    ":octicons-horizontal-rule-16: ==auto_scroll_on_update== Whether the viewport snaps back to the "
+    "bottom on its own. It governs every *automatic* snap, not just the one on new output: content "
+    "arriving, a key forwarded to the application, switching to or from the alternate screen (what a "
+    "pager or a full-screen editor does), a scrollback clear, and leaving Vi mode. Set to `false` and "
+    "the viewport stays wherever you left it through all of them -- which is the point: reading "
+    "something in the scrollback survives both a keystroke and a program that takes over the screen. "
+    "A scroll you ask for by name is unaffected, so the `ScrollToBottom` action, the scrollbar and `G` "
+    "in Vi mode all still take you down. Defaults to `true`, and in the provided example "
+    "auto_scroll_on_update is set to true. <br/>\n"
     ":octicons-horizontal-rule-16: ==scroll_multiplier== This option defines the number of lines to scroll "
     "when the ScrollUp or ScrollDown events occur. By default, scrolling up or down moves three lines at a "
     "time. You can adjust this value as needed. In the provided example, scroll_multiplier is set to 3. "

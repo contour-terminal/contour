@@ -35,6 +35,15 @@ enum class TabsNamingMode : uint8_t
     Title
 };
 
+/// Whether the terminal performs an automatic viewport snap to the bottom.
+///
+/// Zero is the negative case, so a zero-initialized value means what `false` did.
+enum class AutoScrollOnUpdate : uint8_t
+{
+    No = 0,
+    Yes = 1
+};
+
 /// Terminal settings, enabling hardware reset to be easier implemented.
 struct Settings
 {
@@ -116,11 +125,17 @@ struct Settings
     /// Mirrors the frontend history scroll multiplier; values below 1 are treated as 1.
     LineCount mouseWheelScrollMultiplier { LineCount(1) };
 
-    /// When true, PTY/app-caused updates (key input forwarded to the PTY, buffer
-    /// switches, scrollback clears, etc.) force the viewport to snap to the
-    /// bottom. When false, the viewport stays wherever the user parked it.
-    /// User-initiated transitions (e.g. leaving Vi mode) are not affected.
-    bool autoScrollOnUpdate = true;
+    /// Whether the viewport snaps back to the bottom on its own.
+    ///
+    /// `No` means what it says: the viewport stays wherever the user parked it. It governs every
+    /// AUTOMATIC snap -- output arriving, key and character input forwarded to the PTY, primary
+    /// <-> alternate buffer switches, scrollback clears, and leaving Vi mode. What it does NOT
+    /// govern is a scroll the user asked for by name (the ScrollToBottom action, dragging the
+    /// scrollbar, `G` in Vi mode), nor restoring a position across a buffer switch (@see
+    /// Terminal::setPage) -- neither is the terminal deciding to move on the user's behalf.
+    ///
+    /// @see Terminal::autoScrollToBottomIfEnabled, the funnel every one of those goes through.
+    AutoScrollOnUpdate autoScrollOnUpdate = AutoScrollOnUpdate::Yes;
 
     /// Whether a gutter column is reserved left of the grid and a fold marker drawn in it on every
     /// foldable prompt line. The window geometry must agree: the gutter's width is taken out of the

@@ -23,12 +23,14 @@
 #include <contour/test/GuiTestFixtures.hpp>
 
 #include <vtbackend/core/Hyperlink.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <vtpty/MockPty.hpp>
 
 #include <crispy/Utils.hpp>
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QFileSystemWatcher>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
@@ -3446,4 +3448,166 @@ TEST_CASE("TerminalSession applies the profile's history limits to the terminal"
 
     // And the ring really was allocated to the ceiling, not to the guarantee.
     CHECK(session->terminal().primaryScreen().grid().maxHistoryLineCount() == vtbackend::LineCount(2500));
+}
+
+// ============================================================================================
+// auto_scroll_on_update: the output-driven decision, and the reload seam that feeds it.
+// ============================================================================================
+
+namespace
+{
+
+/// A session whose profile sets `history.auto_scroll_on_update` to @p autoScroll, with a surface
+/// attached so screenUpdated() runs at all (it early-returns without a display).
+///
+/// Takes the vtbackend enum rather than the config bool it assigns, so the call sites below read as
+/// what they are choosing instead of as `true`/`false`. The conversion at the assignment is the same
+/// one the production boundary makes (@see config::emulationSettings).
+[[nodiscard]] SessionWithSurface makeAutoScrollSession(contour::ContourGuiApp& app,
+                                                       vtbackend::AutoScrollOnUpdate autoScroll)
+{
+    auto const enabled = autoScroll == vtbackend::AutoScrollOnUpdate::Yes;
+    auto const name = registerProfile(app, enabled ? "autoscroll-yes" : "autoscroll-no", [&](auto& profile) {
+        auto history = profile.history.value();
+        history.autoScrollOnUpdate = enabled;
+        profile.history = history;
+    });
+    return makeSessionWithSurface(app, std::move(name));
+}
+
+/// Writes @p yaml to a `contour.yml` in @p dir and points @p app's config at it.
+///
+/// loadConfigFromFile() assigns `configFile` itself, so loading IS the redirection -- and it has to
+/// happen before the session is built, because TerminalSession keeps its own copy of the config and
+/// reloadConfigWithProfile() re-reads whatever path that copy names.
+std::filesystem::path installConfig(TestApp& app, QTemporaryDir const& dir, std::string_view yaml)
+{
+    auto const path = std::filesystem::path(dir.path().toStdString()) / "contour.yml";
+    {
+        auto out = std::ofstream(path);
+        out << yaml;
+    }
+    contour::config::loadConfigFromFile(app.app().config(), path);
+    return path;
+}
+
+/// vtbackend::test::topViewportLineText() for a session, so the assertions below read as one line.
+[[nodiscard]] std::string topViewportLineText(contour::session::TerminalSession const& session)
+{
+    return vtbackend::test::topViewportLineText(session.terminal());
+}
+
+/// Fills @p session's scrollback and parks the viewport inside it.
+void parkViewportInScrollback(contour::session::TerminalSession& session)
+{
+    for (auto const i: std::views::iota(0, 40))
+        session.terminal().writeToScreen(std::format("line {}\r\n", i));
+
+    REQUIRE(session.terminal().viewport().scrollableLineCount() > vtbackend::LineCount(4));
+    session.terminal().viewport().scrollUp(vtbackend::LineCount(4));
+    REQUIRE(session.terminal().viewport().scrolled());
+}
+
+} // namespace
+
+TEST_CASE("TerminalSession: auto_scroll_on_update governs the output-driven snap",
+          "[contour][session][scroll]")
+{
+    // TerminalSession::screenUpdated() is where the headline behaviour lives -- the vtbackend flag
+    // covers input, buffer switches and scrollback clears, but "follow new output" is decided here.
+    // It is reachable headlessly only with a surface attached, which is why every case below takes
+    // one: without a display the method early-returns before the decision.
+    TestApp testApp;
+
+    SECTION("disabled: output leaves the parked viewport alone")
+    {
+        auto session = makeAutoScrollSession(testApp.app(), vtbackend::AutoScrollOnUpdate::No);
+        parkViewportInScrollback(*session);
+        auto const topLineBefore = topViewportLineText(*session);
+
+        session->terminal().writeToScreen("more output\r\n");
+
+        CHECK(topViewportLineText(*session) == topLineBefore);
+        CHECK(session->terminal().viewport().scrolled());
+    }
+
+    SECTION("enabled: output snaps the viewport back to the bottom")
+    {
+        auto session = makeAutoScrollSession(testApp.app(), vtbackend::AutoScrollOnUpdate::Yes);
+        parkViewportInScrollback(*session);
+
+        session->terminal().writeToScreen("more output\r\n");
+
+        CHECK(!session->terminal().viewport().scrolled());
+    }
+
+    // The remaining conjuncts of that condition, each a documented reason the snap must not fire
+    // even with the setting on. Pinned here because none of them was.
+
+    SECTION("enabled, but Vi mode is not Insert: the viewport is the user's to move")
+    {
+        auto session = makeAutoScrollSession(testApp.app(), vtbackend::AutoScrollOnUpdate::Yes);
+        session->terminal().inputHandler().setMode(vtbackend::ViMode::Normal);
+        parkViewportInScrollback(*session);
+        auto const topLineBefore = topViewportLineText(*session);
+
+        session->terminal().writeToScreen("more output\r\n");
+
+        CHECK(topViewportLineText(*session) == topLineBefore);
+        CHECK(session->terminal().viewport().scrolled());
+    }
+
+    SECTION("enabled, but the search bar is open: the viewport is parked on a match")
+    {
+        auto session = makeAutoScrollSession(testApp.app(), vtbackend::AutoScrollOnUpdate::Yes);
+        parkViewportInScrollback(*session);
+        auto const offsetBeforeOpening = session->terminal().viewport().scrollOffset();
+        session->searchBarOpened();
+        // Opening the bar moves the Normal-mode cursor to the live cursor, which reveals it; park the
+        // viewport again so the assertion is about output and not about that.
+        session->terminal().viewport().scrollTo(offsetBeforeOpening);
+        auto const topLineBefore = topViewportLineText(*session);
+
+        session->terminal().writeToScreen("more output\r\n");
+
+        CHECK(topViewportLineText(*session) == topLineBefore);
+        CHECK(session->terminal().viewport().scrolled());
+    }
+}
+
+TEST_CASE("TerminalSession: a config reload re-applies auto_scroll_on_update onto the live terminal",
+          "[contour][session][config]")
+{
+    // The first test to assert what configureTerminal() actually applies, rather than that it runs.
+    // Driven through the real ReloadConfig action, so the whole seam is in play: re-read the file,
+    // swap _config, re-activate the profile, re-apply onto the live vtbackend::Settings.
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+
+    auto const configWith = [](bool autoScroll) {
+        return std::format("platform_plugin: auto\n"
+                           "profiles:\n"
+                           "    main:\n"
+                           "        history:\n"
+                           "            limit: 1000\n"
+                           "            auto_scroll_on_update: {}\n",
+                           autoScroll);
+    };
+
+    TestApp testApp;
+    installConfig(testApp, dir, configWith(false));
+
+    auto session = makeSessionWithSurface(testApp.app());
+    REQUIRE(session->terminal().settings().autoScrollOnUpdate == vtbackend::AutoScrollOnUpdate::No);
+
+    installConfig(testApp, dir, configWith(true));
+    REQUIRE((*session)(contour::actions::ReloadConfig {}));
+
+    CHECK(session->terminal().settings().autoScrollOnUpdate == vtbackend::AutoScrollOnUpdate::Yes);
+
+    // And back again, so this pins the apply rather than the default.
+    installConfig(testApp, dir, configWith(false));
+    REQUIRE((*session)(contour::actions::ReloadConfig {}));
+
+    CHECK(session->terminal().settings().autoScrollOnUpdate == vtbackend::AutoScrollOnUpdate::No);
 }

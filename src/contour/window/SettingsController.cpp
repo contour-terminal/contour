@@ -476,7 +476,8 @@ namespace
                     } },
                   { "auto_scroll_on_update",
                     "Auto-scroll on update",
-                    "Scroll to the bottom automatically when new output arrives.",
+                    "Snap the viewport back to the bottom on new output, a keystroke, a screen "
+                    "switch or leaving Vi mode. Off, it stays where you left it.",
                     "bool",
                     [](TerminalProfile const& p) { return QVariant(p.history.value().autoScrollOnUpdate); },
                     [](TerminalProfile& p, QVariant const& v) {

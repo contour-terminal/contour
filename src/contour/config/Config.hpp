@@ -312,6 +312,19 @@ struct HistoryConfig
     vtbackend::LineCount historyScrollMultiplier { vtbackend::LineCount(3) };
     bool autoScrollOnUpdate { true };
 
+    /// `autoScrollOnUpdate` in the vocabulary vtbackend speaks, spelled once.
+    ///
+    /// Two independent layers ask it -- the emulation settings the daemon and the GUI session factory
+    /// share, and the re-apply on every config reload -- and the polarity of a mapping kept in two
+    /// files is two chances to disagree. The same reason `limits()` and
+    /// `FoldingConfig::markersVisible()` exist, and not a hypothetical one here: omitting the value
+    /// from one of those two layers is exactly what used to hand every daemon-hosted session the
+    /// engine default instead of the configured one.
+    [[nodiscard]] constexpr vtbackend::AutoScrollOnUpdate autoScrollPolicy() const noexcept
+    {
+        return autoScrollOnUpdate ? vtbackend::AutoScrollOnUpdate::Yes : vtbackend::AutoScrollOnUpdate::No;
+    }
+
     /// Both bounds, in the vocabulary vtbackend speaks, reconciled in this one place.
     ///
     /// A ceiling below the depth it bounds is raised rather than rejected: that lands on "no

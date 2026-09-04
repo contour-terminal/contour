@@ -2270,28 +2270,47 @@ class Terminal
 
     TabsNamingMode getTabsNamingMode() const noexcept { return _settings.tabNamingMode; }
 
-  private:
-    /// Scroll the viewport to the bottom if `settings().autoScrollOnUpdate` is enabled.
-    /// Intended for PTY/app-caused code paths only (e.g. key/char forwarding,
-    /// scrollback clears). User-initiated transitions should call
-    /// `_viewport.forceScrollToBottom()` directly.
+    /// Scrolls the viewport to the bottom, unless `settings().autoScrollOnUpdate` says not to.
+    ///
+    /// THE funnel for every automatic snap -- the ones this class raises (key and character
+    /// forwarding, scrollback clears) and the one the frontend raises when output arrives
+    /// (@see contour::session::TerminalSession::screenUpdated, which adds its own conditions and
+    /// then defers the setting to here). Public for that caller.
+    ///
+    /// A scroll the user asked for by name goes to `Viewport` directly instead -- the
+    /// `ScrollToBottom` action, the scrollbar, `G` in Vi mode. That is not the terminal deciding to
+    /// move on the user's behalf, so the setting has no say in it.
     void autoScrollToBottomIfEnabled();
 
-    /// Like `autoScrollToBottomIfEnabled()` but bypasses the `scrollingDisabled()`
-    /// check (used e.g. on alt-screen switch, where scrolling is "disabled" on the
-    /// target buffer but pixel/offset state still needs to be reset).
+    /// Like `autoScrollToBottomIfEnabled()` but bypasses the `scrollingDisabled()` check, for a
+    /// caller whose target buffer has scrolling "disabled" (the alternate screen) while the
+    /// pixel/offset state still needs resetting -- a buffer switch, and leaving Vi mode from
+    /// `ViCommands`, which is the other reason both of these are public. Declined, it still drops
+    /// the sub-cell offset, because that half of `Viewport::forceScrollToBottom()` is not the snap.
     void forceAutoScrollToBottomIfEnabled();
 
-    /// Scrolls the viewport to the bottom in response to *user input* (a key or character
-    /// forwarded to the application). Called only for key/char *press and repeat* events, never for
-    /// releases: a release is not typed content, and snapping on it would undo a viewport-scroll
-    /// shortcut whose press was consumed by the GUI (e.g. Shift+Up) once the protocol reports key
-    /// releases to the application (win32-input-mode, Kitty keyboard protocol). Intentionally
-    /// independent of `settings().autoScrollOnUpdate`, which gates only *output*-driven scrolling:
-    /// typing must always reveal the cursor and the resulting output regardless of that setting.
-    /// Honors the viewport's own alt-screen guard (`scrollToBottom()` no-ops when scrolling is
-    /// disabled).
-    void scrollToBottomOnInput();
+  private:
+    /// Whether the screen being written to right now is the one the viewport draws.
+    ///
+    /// A status line is a Screen too -- one row, no scrollback -- and DECSASD makes it the ACTIVE
+    /// one, so an application writing past its single row scrolls it and Screen::scrollUp reports
+    /// that scroll like any other. Nothing the viewport, the Normal-mode cursor or a selection
+    /// describes lives on it; and because Viewport takes its bounds from currentScreen(), whose
+    /// history is zero while a status line is active, following such a scroll clamps the main
+    /// display's offset to zero and throws the user's position away. @see setActiveStatusDisplay.
+    [[nodiscard]] bool isMainDisplayActive() const noexcept
+    {
+        return _activeStatusDisplay == ActiveStatusDisplay::Main;
+    }
+
+    /// Whether the viewport is sitting somewhere in the scrollback rather than at the bottom.
+    ///
+    /// The sub-cell remainder counts as parked: a smooth scroll one pixel off the bottom is still a
+    /// scroll the user is in the middle of.
+    [[nodiscard]] bool isViewportParkedInScrollback() const noexcept
+    {
+        return _viewport.scrolled() || _viewport.pixelOffset() > 0.0f;
+    }
 
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);

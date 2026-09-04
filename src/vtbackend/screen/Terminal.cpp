@@ -974,22 +974,29 @@ void Terminal::updateIndicatorStatusLine()
 
 void Terminal::autoScrollToBottomIfEnabled()
 {
-    if (_settings.autoScrollOnUpdate)
+    if (_settings.autoScrollOnUpdate == AutoScrollOnUpdate::Yes)
         _viewport.scrollToBottom();
 }
 
 void Terminal::forceAutoScrollToBottomIfEnabled()
 {
-    if (_settings.autoScrollOnUpdate)
+    if (_settings.autoScrollOnUpdate == AutoScrollOnUpdate::Yes)
+    {
         _viewport.forceScrollToBottom();
-}
+        return;
+    }
 
-void Terminal::scrollToBottomOnInput()
-{
-    // Unconditional on purpose: user input must always jump the viewport back to the bottom, even
-    // when `autoScrollOnUpdate` (which governs output-driven scrolling only) is turned off. The
-    // alt-screen guard still applies via `scrollToBottom()`'s own `scrollingDisabled()` check.
-    _viewport.scrollToBottom();
+    // The snap is declined; the sub-cell remainder goes regardless. It measures a slide between two
+    // adjacent rows on the buffer being left behind, so carrying it onto the new one would offset the
+    // whole page by a fraction of a cell with nothing to bring it back. Refreshed explicitly because
+    // resetPixelOffset() does not notify on its own -- forceScrollToBottom() pairs the two for this
+    // exact case (@see Viewport::forceScrollToBottom), and dropping the remainder without a redraw
+    // leaves the page drawn at the offset it no longer has.
+    if (_viewport.pixelOffset() != 0.0f)
+    {
+        _viewport.resetPixelOffset();
+        breakLoopAndRefreshRenderBuffer();
+    }
 }
 
 Handled Terminal::sendKeyEvent(Key key,
@@ -1031,7 +1038,7 @@ Handled Terminal::sendKeyEvent(Key key,
         {
             _inputGenerator.generateRaw(*udkStr);
             flushInput();
-            scrollToBottomOnInput();
+            autoScrollToBottomIfEnabled();
             return Handled { true };
         }
     }
@@ -1045,7 +1052,7 @@ Handled Terminal::sendKeyEvent(Key key,
         // generates PTY input, and snapping to the bottom here would undo the scroll the press just
         // performed. Only press/repeat reveal the cursor.
         if (!isModifierKey(key) && eventType != KeyboardEventType::Release)
-            scrollToBottomOnInput();
+            autoScrollToBottomIfEnabled();
     }
     return Handled { success };
 }
@@ -1090,7 +1097,7 @@ Handled Terminal::sendCharEvent(char32_t ch,
         // See sendKeyEvent(): key releases are not typed content, so they must not snap the viewport
         // back to the bottom even when the protocol reports them to the application.
         if (eventType != KeyboardEventType::Release)
-            scrollToBottomOnInput();
+            autoScrollToBottomIfEnabled();
     }
     return Handled { success };
 }

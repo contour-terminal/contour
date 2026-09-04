@@ -224,7 +224,6 @@ namespace
         settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
         settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
         settings.mouseWheelScrollMultiplier = profile.history.value().historyScrollMultiplier;
-        settings.autoScrollOnUpdate = profile.history.value().autoScrollOnUpdate;
         settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset.value();
         settings.cursorBlinkInterval = profile.modeInsert.value().cursor.cursorBlinkInterval;
         settings.cursorShape = profile.modeInsert.value().cursor.cursorShape;
@@ -744,11 +743,15 @@ void TerminalSession::screenUpdated()
     if (!viewportScrolled)
         _searchMatchRevealed.store(false, std::memory_order_relaxed);
 
-    if (_profile.history.value().autoScrollOnUpdate && viewportScrolled
-        && _terminal.inputHandler().mode() == ViMode::Insert
+    // Through the funnel, not around it: these four are the frontend's own reasons to decline the
+    // snap, and whether the snap is wanted at all is `autoScrollOnUpdate`, which
+    // Terminal::autoScrollToBottomIfEnabled() is the single reader of. Reading the setting here as
+    // well -- as this did -- left the one case the config key is named after as the only automatic
+    // snap that did not go through it.
+    if (viewportScrolled && _terminal.inputHandler().mode() == ViMode::Insert
         && !_isSearchBarOpen.load(std::memory_order_relaxed)
         && !_searchMatchRevealed.load(std::memory_order_relaxed))
-        _terminal.viewport().scrollToBottom();
+        _terminal.autoScrollToBottomIfEnabled();
 
     auto const scrollable = _terminal.viewport().scrollableLineCount();
 
@@ -3949,7 +3952,7 @@ void TerminalSession::configureTerminal()
     updateColorPreference(_app.colorPreference());
     _terminal.setHistoryLimits(_profile.history.value().limits());
     _terminal.setMouseWheelScrollMultiplier(_profile.history.value().historyScrollMultiplier);
-    _terminal.settings().autoScrollOnUpdate = _profile.history.value().autoScrollOnUpdate;
+    _terminal.settings().autoScrollOnUpdate = _profile.history.value().autoScrollPolicy();
     _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
     _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
     // The profile's policy, re-imposed on every profile application -- so a config reload or a

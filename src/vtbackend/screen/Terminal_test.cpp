@@ -19,6 +19,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -46,6 +47,38 @@ using vtbackend::PageSize;
 using namespace vtbackend::test;
 
 // NOLINTBEGIN(misc-const-correctness)
+
+namespace
+{
+
+/// Writes six numbered lines, so a 4-line page ends up with scrollback to scroll into.
+///
+/// Defaulted over the PTY like every other MockTerm helper (@see trimmedTextScreenshot); every
+/// caller here uses the default one.
+template <typename T = vtpty::MockPty>
+void fillScrollback(MockTerm<T>& mc)
+{
+    mc.writeToScreen("line1\r\n"
+                     "line2\r\n"
+                     "line3\r\n"
+                     "line4\r\n"
+                     "line5\r\n"
+                     "line6\r\n");
+}
+
+/// Fills the scrollback and parks the viewport two lines up in it.
+///
+/// The prologue every scroll-offset case below shares, stated once. Setting `autoScrollOnUpdate` is
+/// left to the caller, because that is the one thing those cases disagree about.
+template <typename T = vtpty::MockPty>
+void parkViewportInScrollback(MockTerm<T>& mc)
+{
+    fillScrollback(mc);
+    mc.terminal.viewport().scrollUp(LineCount(2));
+    REQUIRE(mc.terminal.viewport().scrolled());
+}
+
+} // namespace
 
 TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 {
@@ -99,12 +132,7 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
     terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
 
     // Fill terminal and generate scrollback history
-    mc.writeToScreen("line1\r\n"
-                     "line2\r\n"
-                     "line3\r\n"
-                     "line4\r\n"
-                     "line5\r\n"
-                     "line6\r\n");
+    fillScrollback(mc);
 
     // Scroll up so viewport is not at bottom
     terminal.viewport().scrollUp(LineCount(2));
@@ -276,21 +304,32 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
     auto& terminal = mc.terminal;
 
     // Fill terminal and generate scrollback history.
-    mc.writeToScreen("line1\r\n"
-                     "line2\r\n"
-                     "line3\r\n"
-                     "line4\r\n"
-                     "line5\r\n"
-                     "line6\r\n");
+    fillScrollback(mc);
 
     auto const anyModifiers = vtbackend::Modifiers { vtbackend::Modifier::None };
 
-    SECTION("keypress always scrolls to bottom, even when autoScrollOnUpdate=false")
+    SECTION("keypress honors autoScrollOnUpdate=No")
     {
-        // User input must reveal the cursor regardless of the output-scroll setting: sending a key
-        // snaps the viewport back to the bottom even though autoScrollOnUpdate (which governs
-        // output-driven scrolling only) is disabled.
-        terminal.settings().autoScrollOnUpdate = false;
+        // `No` means the viewport stays where the user parked it, and a keystroke is no exception:
+        // a snap on input is the terminal moving the viewport on the user's behalf, which is exactly
+        // what the setting exists to decline. It is xterm's own default too -- its scrollKey
+        // resource is false while scrollTtyOutput is true.
+        terminal.settings().autoScrollOnUpdate = vtbackend::AutoScrollOnUpdate::No;
+        terminal.viewport().scrollUp(LineCount(2));
+        REQUIRE(terminal.viewport().scrolled());
+        auto const offsetBefore = terminal.viewport().scrollOffset();
+
+        terminal.sendKeyEvent(vtbackend::Key::Enter,
+                              anyModifiers,
+                              vtbackend::KeyboardEventType::Press,
+                              std::chrono::steady_clock::now());
+
+        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+    }
+
+    SECTION("keypress honors autoScrollOnUpdate=Yes (default)")
+    {
+        REQUIRE(terminal.settings().autoScrollOnUpdate == vtbackend::AutoScrollOnUpdate::Yes);
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
 
@@ -302,26 +341,13 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         CHECK(!terminal.viewport().scrolled());
     }
 
-    SECTION("keypress honors autoScrollOnUpdate=true (default)")
+    SECTION("char input honors autoScrollOnUpdate=No")
     {
-        REQUIRE(terminal.settings().autoScrollOnUpdate);
+        // The same rule as the keypress case above, exercised through the char path.
+        terminal.settings().autoScrollOnUpdate = vtbackend::AutoScrollOnUpdate::No;
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
-
-        terminal.sendKeyEvent(vtbackend::Key::Enter,
-                              anyModifiers,
-                              vtbackend::KeyboardEventType::Press,
-                              std::chrono::steady_clock::now());
-
-        CHECK(!terminal.viewport().scrolled());
-    }
-
-    SECTION("char input always scrolls to bottom, even when autoScrollOnUpdate=false")
-    {
-        // Same input-independence as the keypress case above, exercised through the char path.
-        terminal.settings().autoScrollOnUpdate = false;
-        terminal.viewport().scrollUp(LineCount(2));
-        REQUIRE(terminal.viewport().scrolled());
+        auto const offsetBefore = terminal.viewport().scrollOffset();
 
         terminal.sendCharEvent(U'a',
                                vtbackend::KeyIdentity { .unshiftedKey = U'a' },
@@ -329,12 +355,12 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
                                vtbackend::KeyboardEventType::Press,
                                std::chrono::steady_clock::now());
 
-        CHECK(!terminal.viewport().scrolled());
+        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
     }
 
-    SECTION("char input honors autoScrollOnUpdate=true")
+    SECTION("char input honors autoScrollOnUpdate=Yes")
     {
-        REQUIRE(terminal.settings().autoScrollOnUpdate);
+        REQUIRE(terminal.settings().autoScrollOnUpdate == vtbackend::AutoScrollOnUpdate::Yes);
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
 
@@ -351,7 +377,8 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
     // releases to the application (win32-input-mode here, or the Kitty keyboard protocol) the release
     // still produces PTY input, but it must NOT snap the viewport back to the bottom -- otherwise
     // releasing a viewport-scroll shortcut such as Shift+Up (whose press the GUI already consumed as
-    // a ScrollOneUp action) would immediately undo the scroll. See Terminal::scrollToBottomOnInput().
+    // a ScrollOneUp action) would immediately undo the scroll. @see Terminal::sendKeyEvent, which
+    // states the same at the guard.
     SECTION("key release does not scroll to bottom even when it generates input")
     {
         // Win32 input mode reports both presses and releases to the application, so the release below
@@ -400,9 +427,9 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         CHECK(terminal.viewport().scrollOffset() == offsetBefore);
     }
 
-    SECTION("scrollbackBufferCleared (CSI 3 J) honors autoScrollOnUpdate=false")
+    SECTION("scrollbackBufferCleared (CSI 3 J) honors autoScrollOnUpdate=No")
     {
-        terminal.settings().autoScrollOnUpdate = false;
+        terminal.settings().autoScrollOnUpdate = vtbackend::AutoScrollOnUpdate::No;
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
         auto const offsetBefore = terminal.viewport().scrollOffset();
@@ -412,13 +439,11 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         CHECK(terminal.viewport().scrollOffset() == offsetBefore);
     }
 
-    // Note: we exercise `bufferChanged` directly rather than feeding DECSET 1049,
-    // because the full alt-screen entry sequence also clears the screen which in
-    // turn triggers `onBufferScrolled`, clamping the viewport to the (empty) alt
-    // screen history independently of our flag.
-    SECTION("bufferChanged honors autoScrollOnUpdate=false")
+    // `bufferChanged` is exercised directly here to pin the funnel itself; the full DECSET
+    // 1049/1047/47 path has its own case (@see Terminal.AltScreen.PreservesPrimaryScrollOffset).
+    SECTION("bufferChanged honors autoScrollOnUpdate=No")
     {
-        terminal.settings().autoScrollOnUpdate = false;
+        terminal.settings().autoScrollOnUpdate = vtbackend::AutoScrollOnUpdate::No;
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
         auto const offsetBefore = terminal.viewport().scrollOffset();
@@ -428,9 +453,9 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         CHECK(terminal.viewport().scrollOffset() == offsetBefore);
     }
 
-    SECTION("bufferChanged honors autoScrollOnUpdate=true")
+    SECTION("bufferChanged honors autoScrollOnUpdate=Yes")
     {
-        REQUIRE(terminal.settings().autoScrollOnUpdate);
+        REQUIRE(terminal.settings().autoScrollOnUpdate == vtbackend::AutoScrollOnUpdate::Yes);
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
 
