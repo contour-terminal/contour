@@ -31,3 +31,14 @@ indent_size = 2
 [src/vtconformance/test/cmd/*.cmd]
 trim_trailing_whitespace = false
 end_of_line = unset
+
+# VT payloads carrying a literal ESC (0x1b): a sixel image, and the one header that embeds a sixel
+# fixture in a raw string literal. Both are plain ASCII, but a control byte that dense makes
+# editorconfig-checker's charset heuristic read them as ISO-8859-1, which it stopped accepting for
+# `charset = utf-8` in v4.0.0. The bytes are the test data -- escaping them would mean the fixture
+# no longer is what the terminal receives -- so the charset claim is dropped for these two alone.
+[test/images/*.sixel]
+charset = unset
+
+[src/vtbackend/screen/ScreenTestFixtures.hpp]
+charset = unset
