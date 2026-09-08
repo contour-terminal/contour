@@ -46,6 +46,30 @@ class [[nodiscard]] Process: public Pty
     static std::string userName();
     static std::filesystem::path homeDirectory();
 
+    /// Overlays @p commandOverride onto @p shell, in place: the shared rule for a layout pane's
+    /// per-session command override, applied identically by every PTY factory
+    /// (AppSessionFactory::createPty and vthost::Daemon's makeShellPtyFactory) so the local-GUI and
+    /// daemon-hosted startup-layout paths cannot drift apart.
+    ///
+    /// The program/arguments are replaced only when @p commandOverride carries a non-empty program:
+    /// an engaged override with an empty program (a directory-only layout pane) must not wipe the
+    /// shell's configured default arguments. The working directory is overlaid independently of the
+    /// program, so a directory-only pane can still redirect the shell's cwd.
+    /// @param shell            The shell config to overlay onto; modified in place.
+    /// @param commandOverride  A session's command override, if any; no-op when nullopt.
+    static void applyCommandOverride(ExecInfo& shell, std::optional<ExecInfo> const& commandOverride)
+    {
+        if (!commandOverride)
+            return;
+        if (!commandOverride->program.empty())
+        {
+            shell.program = commandOverride->program;
+            shell.arguments = commandOverride->arguments;
+        }
+        if (!commandOverride->workingDirectory.empty())
+            shell.workingDirectory = commandOverride->workingDirectory;
+    }
+
     Process(ExecInfo const& exe, std::unique_ptr<Pty> pty, bool escapeSandbox):
         Process(exe.program, exe.arguments, exe.workingDirectory, exe.env, escapeSandbox, std::move(pty))
     {
