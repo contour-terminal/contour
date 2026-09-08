@@ -156,9 +156,12 @@ target_include_directories(vtbackend PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 
+# contour::tracy is PUBLIC, not PRIVATE: Terminal.hpp declares _stateMutex through TracyLockable,
+# so every consumer of vtbackend compiles that macro and needs the header it comes from.
 target_link_libraries(vtbackend PUBLIC
     Microsoft.GSL::GSL
     Threads::Threads
+    contour::tracy
     crispy::core
     unicode::unicode
     vtparser
