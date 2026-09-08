@@ -171,6 +171,11 @@ option(CONTOUR_WITH_UTEMPTER "Build with utempter support [default: ON]" ON)
 option(CONTOUR_USE_CPM "Use CPM to fetch dependencies [default: ON]" ON)
 option(CONTOUR_BUILD_STATIC "Link to static libraries [default: OFF]" OFF)
 option(CONTOUR_BUILD_NATIVE "Build for native architecture [default: OFF]" OFF)
+option(CONTOUR_TRACY "Compiles Tracy profiler instrumentation into contour [default: OFF]" OFF)
+option(CONTOUR_TRACY_TOOLS "Builds Tracy's capture and csvexport CLI tools [default: OFF]" OFF)
+option(CONTOUR_TRACY_GUI "Builds the Tracy profiler GUI [default: OFF]" OFF)
+option(CONTOUR_TRACY_GUI_X11 "Builds the Tracy GUI against X11 instead of Wayland [default: OFF]" OFF)
+option(CONTOUR_TRACY_SAMPLING "Tracy captures call stacks of every thread [default: ON]" ON)
 if(CONTOUR_BUILD_STATIC)
     set(BUILD_SHARED_LIBS OFF)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -257,6 +262,12 @@ if(CONTOUR_TESTING)
         # gate above skips.
         contour_add_lint_gate(check_spelling_selftest check-spelling.py --self-test)
 
+        # Call sites use Tracy's macros unconditionally, so a macro that reaches src/ without a
+        # matching no-op in the stub breaks the DEFAULT build -- the one CI and every packaging job
+        # run -- while the profiling build stays green. Cheap, offline, and the failure names the
+        # macro and the file.
+        contour_add_lint_gate(check_tracy_stub check-tracy-stub.py)
+
         # 300s, not the 120s these had as shell scripts: a cold cache now downloads the tool on
         # Windows too, and a CI runner's first run pays for both.
         set_tests_properties(${CONTOUR_LINT_GATES} PROPERTIES LABELS "lint" TIMEOUT 300)
@@ -299,6 +310,7 @@ endif()
 set(_CONTOUR_SAVED_CLANG_TIDY "${CMAKE_CXX_CLANG_TIDY}")
 unset(CMAKE_CXX_CLANG_TIDY)
 include(ContourThirdParties)
+include(Tracy)
 set(CMAKE_CXX_CLANG_TIDY "${_CONTOUR_SAVED_CLANG_TIDY}")
 add_subdirectory(src)
 add_subdirectory(examples)
