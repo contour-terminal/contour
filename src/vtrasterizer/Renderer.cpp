@@ -22,6 +22,8 @@
 #include <span>
 #include <stdexcept>
 
+#include <tracy/Tracy.hpp>
+
 using std::initializer_list;
 using std::make_unique;
 using std::optional;
@@ -671,6 +673,7 @@ bool Renderer::render(vtbackend::Terminal& terminal, bool pressure)
 
 bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 {
+    ZoneScoped;
     // Hold _applyMutex across the whole frame: this both applies any staged reconfiguration and then
     // renders from _gridMetrics / the texture atlas. Holding it for the full duration makes a GUI-thread
     // applyStagedReconfigDuringSetup() (the minimized/occluded path) wait for an in-flight frame to
@@ -877,6 +880,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 
 void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells, int yPixelOffset)
 {
+    ZoneScoped;
     for (auto const& cell: cells)
     {
         try
@@ -906,6 +910,7 @@ void Renderer::setSmoothScrollOffset(int offset)
 
 void Renderer::renderLines(std::span<vtbackend::RenderLine const> lines)
 {
+    ZoneScoped;
     for (auto const& line: lines)
     {
         _backgroundRenderer.renderLine(line);
@@ -916,6 +921,7 @@ void Renderer::renderLines(std::span<vtbackend::RenderLine const> lines)
 
 void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter)
 {
+    ZoneScoped;
     for (auto const& marker: gutter)
     {
         // groupStart and groupEnd together make each marker its own shaping group, so it is placed at
