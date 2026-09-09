@@ -57,7 +57,7 @@ TEST_CASE("tracy_stub.arguments_are_not_evaluated", "[tracy]")
 
     // The stub keeps its arguments in an unevaluated sizeof, so neither of those two ran. Under
     // CONTOUR_TRACY=ON the real macros DO evaluate their arguments, hence the two expectations.
-#if !defined(TRACY_ENABLE)
+#ifndef TRACY_ENABLE
     REQUIRE(sideEffectCount == 1);
 #else
     REQUIRE(sideEffectCount == 3);
