@@ -9,6 +9,7 @@ add_library(vtparser STATIC
 )
 target_link_libraries(vtparser PUBLIC
     Microsoft.GSL::GSL
+    contour::tracy
     unicode::unicode
 )
 target_include_directories(vtparser PUBLIC

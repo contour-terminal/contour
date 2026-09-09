@@ -44,6 +44,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include <tracy/Tracy.hpp>
+
 using std::get;
 using std::holds_alternative;
 using std::invalid_argument;
@@ -1305,6 +1307,7 @@ void OpenShaper::shape(FontKey font,
                        unicode::PresentationStyle presentation,
                        ShapeResult& result)
 {
+    ZoneScoped;
     assert(clusters.size() == codepoints.size());
     textShapingLog()("Shaping using font key: {}, text: \"{}\"", font, unicode::convert_to<char>(codepoints));
     if (!_d->fontKeyToHbFontInfoMapping.contains(font))
@@ -1518,6 +1521,7 @@ static optional<RasterizedGlyph> rasterizeOutlined(
 
 optional<RasterizedGlyph> OpenShaper::rasterize(GlyphKey glyph, RenderMode mode, float outlineThickness)
 {
+    ZoneScoped;
     auto const font = glyph.font;
     auto* ftFace = _d->fontKeyToHbFontInfoMapping.at(font).ftFace.get();
     auto const glyphIndex = glyph.index;

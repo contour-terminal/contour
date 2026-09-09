@@ -57,7 +57,7 @@ add_library(vtrasterizer STATIC)
 target_sources(vtrasterizer PRIVATE ${_source_files} PUBLIC ${_header_files})
 
 target_include_directories(vtrasterizer PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(vtrasterizer PUBLIC vtbackend crispy::core text_shaper)
+target_link_libraries(vtrasterizer PUBLIC vtbackend crispy::core text_shaper contour::tracy)
 
 if(CONTOUR_TESTING)
     add_executable(vtrasterizer_test)

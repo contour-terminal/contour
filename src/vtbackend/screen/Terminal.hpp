@@ -62,6 +62,8 @@
 #include <utility>
 #include <vector>
 
+#include <tracy/Tracy.hpp>
+
 namespace vtbackend
 {
 
@@ -2388,7 +2390,13 @@ class Terminal
     std::atomic<PageSize> _atomicTotalPageSize { _settings.pageSize };
 
     // synchronization
-    std::mutex mutable _stateMutex;
+    // TracyLockable, not a bare std::mutex: this is the lock the parser thread and the render path
+    // contend for, so with CONTOUR_TRACY=ON its wait times are what show whether a frame is being
+    // spent waiting on the parser -- the one question the GUI-side zones cannot answer alone.
+    // Expands to a plain `std::mutex _stateMutex` when profiling is off. tracy::Lockable exposes
+    // lock()/unlock(), so lock()/unlock() above and the std::lock_guard CTAD call sites are
+    // unaffected by the change of type.
+    mutable TracyLockable(std::mutex, _stateMutex);
 
     // terminal clock
     std::chrono::steady_clock::time_point _currentTime;

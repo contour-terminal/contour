@@ -48,7 +48,7 @@ endif()
 target_include_directories(ContourTerminalDisplay PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/../..")
 # Note: qt6_add_shaders() links Qt6::ShaderTools via the keyword signature, so every
 # target_link_libraries() call on this target must also use the keyword signature.
-target_link_libraries(ContourTerminalDisplay PUBLIC vtrasterizer)
+target_link_libraries(ContourTerminalDisplay PUBLIC vtrasterizer contour::tracy)
 # The display sources include contour/config/Config.hpp, so they compile against the configuration
 # model's interface -- yaml-cpp included, which Config.hpp exposes in its own right. Linking the
 # target that owns it beats restating its dependencies here.
