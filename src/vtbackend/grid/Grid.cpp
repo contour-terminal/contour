@@ -12,6 +12,8 @@
 #include <ranges>
 #include <utility>
 
+#include <tracy/Tracy.hpp>
+
 using std::max;
 using std::min;
 using std::u32string;
@@ -750,6 +752,7 @@ CellLocation Grid::growLines(LineCount newHeight, CellLocation cursor)
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool wrapPending)
 {
+    ZoneScoped;
     if (_pageSize == newSize)
         return currentCursorPos;
 

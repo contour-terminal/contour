@@ -9,6 +9,8 @@
 #include <string_view>
 #include <tuple>
 
+#include <tracy/Tracy.hpp>
+
 namespace vtparser
 {
 
@@ -380,6 +382,7 @@ constexpr ParserTable ParserTable::get() // {{{
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char const> data)
 {
+    ZoneScoped;
     auto const* input = data.data();
     auto const* const end = data.data() + data.size();
 

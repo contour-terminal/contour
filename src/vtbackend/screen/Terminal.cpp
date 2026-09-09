@@ -43,6 +43,8 @@
 #include <utility>
 #include <variant>
 
+#include <tracy/Tracy.hpp>
+
 using std::nullopt;
 using std::optional;
 using std::string;
@@ -320,6 +322,7 @@ void Terminal::setLastMarkRangeOffset(LineOffset value) noexcept
 
 std::optional<Terminal::PtyReadResult> Terminal::readFromPty()
 {
+    ZoneScoped;
     auto const timeout =
 #ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
         (_renderBuffer.state == RenderBufferState::WaitingForRefresh && !_screenDirty)
@@ -361,6 +364,7 @@ void Terminal::setExecutionMode(ExecutionMode mode)
 
 bool Terminal::processInputOnce()
 {
+    ZoneScoped;
     // clang-format off
     switch (_executionMode.load())
     {
@@ -406,6 +410,7 @@ bool Terminal::processInputOnce()
     }
 
     string_view const buf = ptyReadResult->readResult.data;
+    TracyPlot("pty.read.bytes", static_cast<int64_t>(buf.size()));
     _usingStdoutFastPipe = ptyReadResult->readResult.fromStdoutFastPipe;
 
     if (buf.empty())
@@ -592,6 +597,7 @@ void Terminal::fillRenderBuffer(RenderBuffer& output, bool includeSelection)
 
 void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelection)
 {
+    ZoneScoped;
     verifyState();
 
     output.clear();
@@ -1649,6 +1655,7 @@ void Terminal::processPendingLocalEcho()
 
 void Terminal::parseFragmentChunked(string_view vtStream)
 {
+    ZoneScoped;
     auto const parseGuard = ParseDepthGuard {};
 
     while (!vtStream.empty())
@@ -1666,6 +1673,8 @@ void Terminal::parseFragmentChunked(string_view vtStream)
 
 void Terminal::writeToScreen(string_view vtStream)
 {
+    ZoneScoped;
+    TracyPlot("pty.parse.bytes", static_cast<int64_t>(vtStream.size()));
     auto batchedRendering = false;
     {
         auto const l = std::lock_guard { *this };
@@ -2142,6 +2151,7 @@ void Terminal::resizeScreenKeepingCellSize(PageSize totalPageSize)
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
+    ZoneScoped;
     // The total page must leave room for at least one main-display line ON TOP of the visible status
     // line(s): the main page is derived as `totalPageSize - statusLineHeight()` below, so a 1x1 total
     // with the indicator status line active (statusLineHeight() == 1, the GUI default) would yield a
@@ -3022,6 +3032,7 @@ void Terminal::scrollbackBufferCleared()
 
 void Terminal::screenUpdated()
 {
+    ZoneScoped;
     if (!_renderBufferUpdateEnabled)
         return;
 

@@ -56,6 +56,7 @@
 #include <vector>
 
 #include <rhi/qrhi.h>
+#include <tracy/Tracy.hpp>
 
 namespace fs = std::filesystem;
 
@@ -984,6 +985,7 @@ void TerminalDisplay::prepareFrameRhi(QRhi* rhi,
                                       QMatrix4x4 const& itemToClip,
                                       QPoint itemOriginDevice)
 {
+    ZoneScoped;
     // _session is nulled by releaseSession() independently of _renderTarget teardown, so on pane close there
     // is a window where _renderTarget is still set but _session is already null. paint() (below) dereferences
     // the session via terminal()/_session->terminal(), which is assert-only (a no-op under NDEBUG) — so guard
@@ -1060,6 +1062,7 @@ void TerminalDisplay::prepareFrameRhi(QRhi* rhi,
 
 void TerminalDisplay::recordFrameRhi(QSGRenderNode::RenderState const* state)
 {
+    ZoneScoped;
     if (!_renderTarget)
         return;
 
@@ -1092,10 +1095,17 @@ void TerminalDisplay::recordFrameRhi(QSGRenderNode::RenderState const* state)
 
     // Forget the node clip (member only), so a later code path never intersects against a stale rectangle.
     renderTarget->clearNodeScissorRect();
+
+    // The frame boundary, and the only FrameMark in the tree. A frame is prepareFrameRhi() -- which
+    // calls paint() and through it Renderer::render() -- followed by this recording of the staged
+    // draws, so the frame ends here and nowhere else. Both early returns above skip the mark
+    // deliberately: no frame was produced. Tracy's frame view is then the terminal's real frame rate.
+    FrameMark;
 }
 
 void TerminalDisplay::paint()
 {
+    ZoneScoped;
     // We consider *this* the true initial start-time.
     // That shouldn't be significantly different from the object construction
     // time, but just to be sure, we'll update it here.

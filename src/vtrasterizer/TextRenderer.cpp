@@ -130,6 +130,8 @@ Making use of reserved glyph slots
 #include <algorithm>
 #include <ranges>
 
+#include <tracy/Tracy.hpp>
+
 using crispy::Point;
 using crispy::StrongHash;
 
@@ -449,6 +451,7 @@ void TextRenderer::updateFontMetrics()
 
 void TextRenderer::beginFrame()
 {
+    ZoneScoped;
     _textClusterGrouper.beginFrame();
 }
 
@@ -486,6 +489,7 @@ void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
 
 void TextRenderer::endFrame()
 {
+    ZoneScoped;
     _textClusterGrouper.endFrame();
 }
 

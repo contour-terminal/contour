@@ -80,7 +80,7 @@ endif()
 
 target_include_directories(text_shaper PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(text_shaper PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(text_shaper PRIVATE ${TEXT_SHAPER_LIBS})
+target_link_libraries(text_shaper PRIVATE ${TEXT_SHAPER_LIBS} contour::tracy)
 
 message(STATUS "[text_shaper] Libraries: ${TEXT_SHAPER_LIBS}")
 

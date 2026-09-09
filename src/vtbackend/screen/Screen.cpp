@@ -49,6 +49,8 @@
 #include <utility>
 #include <variant>
 
+#include <tracy/Tracy.hpp>
+
 #ifdef _WIN32
     #include <Windows.h>
 #endif
@@ -391,6 +393,7 @@ void Screen::hardReset()
 
 void Screen::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
 {
+    ZoneScoped;
     auto cursorPosition = _cursor.position;
 
     // Only reset margins when the page size actually changes (during a resize),
@@ -439,6 +442,8 @@ void Screen::advanceCursorAfterWrite(ColumnCount n) noexcept
 
 void Screen::writeText(string_view text, size_t cellCount)
 {
+    ZoneScoped;
+    ZoneValue(static_cast<int64_t>(cellCount));
 #ifdef LIBTERMINAL_LOG_TRACE
     if (vtTraceSequenceLog)
         vtTraceSequenceLog()(
@@ -615,6 +620,7 @@ void Screen::writeText(string_view text, size_t cellCount)
 
 void Screen::writeTextEnd()
 {
+    ZoneScoped;
 #ifdef LIBTERMINAL_LOG_TRACE
     // Do not log individual characters, as we already logged the whole string above
     if (!_pendingCharTraceLog.empty())
@@ -1118,6 +1124,7 @@ void Screen::linefeed(ColumnOffset newColumn)
 
 void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
 {
+    ZoneScoped;
     auto const scrollCount = _grid.scrollUp(n, sgr, margin);
     updateCursorIterator();
 
@@ -1147,6 +1154,7 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
 
 void Screen::scrollDown(LineCount n, Margin margin)
 {
+    ZoneScoped;
     _grid.scrollDown(n, cursor().graphicsRendition, margin);
     updateCursorIterator();
 }
@@ -1462,6 +1470,7 @@ void Screen::clearToBeginOfScreen()
 
 void Screen::clearScreen()
 {
+    ZoneScoped;
     // Under ISO protection the guarded cells must stay put, so we cannot scroll the page into
     // history; erase the non-ISO-guarded cells in place instead (matching xterm's ED 2 under protection).
     if (eraseSkipsProtectedCells())
@@ -4548,6 +4557,7 @@ namespace impl
 
 void Screen::executeControlCode(char controlCode)
 {
+    ZoneScoped;
 #ifdef LIBTERMINAL_LOG_TRACE
     // Flush any pending text trace before processing the control code.
     // Without this, when the parser's bulk text optimization processes
@@ -5336,6 +5346,7 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
 
 void Screen::processAPC(std::string_view body)
 {
+    ZoneScoped;
     // APC carries application-defined protocols that share no grammar, so each is recognised by its
     // own introducer. 'G' is the kitty graphics protocol; anything else is not ours to interpret.
     if (body.empty() || body.front() != 'G')
@@ -5629,6 +5640,7 @@ void Screen::renderKittyImage(kitty_graphics::Command const& command,
 
 void Screen::processSequence(Sequence const& seq)
 {
+    ZoneScoped;
 #ifdef LIBTERMINAL_LOG_TRACE
     if (vtTraceSequenceLog)
     {
@@ -5646,7 +5658,13 @@ void Screen::processSequence(Sequence const& seq)
 
     _terminal->incrementInstructionCounter();
     if (Function const* funcSpec = seq.functionDefinition(_terminal->activeSequences()); funcSpec != nullptr)
+    {
+        // Name the zone after the sequence it is executing, so the timeline reads SGR/CUP/ED rather
+        // than a wall of identical processSequence rows. The mnemonic is a string_view over a
+        // constexpr literal, so this hands Tracy a pointer it can keep.
+        ZoneName(funcSpec->documentation.mnemonic.data(), funcSpec->documentation.mnemonic.size());
         applyAndLog(*funcSpec, seq);
+    }
     else if (seq.category() == FunctionCategory::ESC && tryHandleSCS(seq))
         ; // Handled as SCS designation (e.g., DRCS two-byte designators)
     else if (auto const sel = seq.selector();
