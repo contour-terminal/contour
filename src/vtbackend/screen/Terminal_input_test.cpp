@@ -369,7 +369,11 @@ TEST_CASE("Terminal.passive mouse tracking declines the event so the UI may act 
         mc.writeToScreen("\033[?1000h");
         mc.terminal.flushInput();
 
-        CHECK(mc.terminal.sendMousePressEvent(none, vtbackend::MouseButton::WheelRight, pos, false).value);
+        CHECK(
+            mc.terminal
+                .sendMousePressEvent(
+                    none, vtbackend::MouseButton::WheelRight, mc.terminal.currentMousePosition(), pos, false)
+                .value);
     }
 
     SECTION("passive tracking does not")
@@ -380,7 +384,10 @@ TEST_CASE("Terminal.passive mouse tracking declines the event so the UI may act 
         mc.terminal.flushInput();
 
         CHECK_FALSE(
-            mc.terminal.sendMousePressEvent(none, vtbackend::MouseButton::WheelRight, pos, false).value);
+            mc.terminal
+                .sendMousePressEvent(
+                    none, vtbackend::MouseButton::WheelRight, mc.terminal.currentMousePosition(), pos, false)
+                .value);
     }
 }
 

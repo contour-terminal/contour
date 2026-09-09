@@ -436,7 +436,7 @@ TEST_CASE("TerminalSession: mouse events without a mouse protocol write nothing 
     auto const pixels = vtbackend::PixelCoordinate {};
     (void) now;
 
-    session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Left, pixels);
+    session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Left, pos, pixels);
     session->sendMouseMoveEvent(Modifiers {}, pos, pixels);
     session->sendMouseReleaseEvent(Modifiers {}, vtbackend::MouseButton::Left, pixels);
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
@@ -459,6 +459,7 @@ TEST_CASE("TerminalSession: right-click opens the context menu exactly when a se
     TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     auto const pixels = vtbackend::PixelCoordinate {};
+    auto const pos = vtbackend::CellLocation {};
 
     auto menuRequests = 0;
     QObject::connect(&testApp.app().sessionsManager(),
@@ -467,7 +468,7 @@ TEST_CASE("TerminalSession: right-click opens the context menu exactly when a se
 
     SECTION("no mouse protocol: the application hears nothing, and the menu takes the click")
     {
-        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Right, pixels);
+        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Right, pos, pixels);
         CHECK(menuRequests == 1);
         CHECK(mockPtyOf(*session).stdinBuffer().empty());
     }
@@ -476,7 +477,7 @@ TEST_CASE("TerminalSession: right-click opens the context menu exactly when a se
     {
         // DECSET 1000 -- what vim and tmux turn on.
         session->terminal().writeToScreen("\033[?1000h");
-        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Right, pixels);
+        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Right, pos, pixels);
         CHECK(menuRequests == 0);
         CHECK_FALSE(mockPtyOf(*session).stdinBuffer().empty());
     }
@@ -485,7 +486,7 @@ TEST_CASE("TerminalSession: right-click opens the context menu exactly when a se
     {
         session->terminal().writeToScreen("\033[?1000h");
         session->sendMousePressEvent(
-            Modifiers { vtbackend::Modifier::Shift }, vtbackend::MouseButton::Right, pixels);
+            Modifiers { vtbackend::Modifier::Shift }, vtbackend::MouseButton::Right, pos, pixels);
         // Shift is the bypass modifier, so the application is skipped and the bare `Right` fallback
         // matches (sendMousePressEvent strips the bypass modifier before looking the mapping up).
         CHECK(menuRequests == 1);
@@ -494,14 +495,14 @@ TEST_CASE("TerminalSession: right-click opens the context menu exactly when a se
 
     SECTION("a left-drag in flight keeps the menu shut: the popup would steal the button-release")
     {
-        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Left, pixels);
-        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Right, pixels);
+        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Left, pos, pixels);
+        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Right, pos, pixels);
         CHECK(menuRequests == 0);
     }
 
     SECTION("a middle-click still pastes: the fallback claims the right button and nothing else")
     {
-        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Middle, pixels);
+        session->sendMousePressEvent(Modifiers {}, vtbackend::MouseButton::Middle, pos, pixels);
         CHECK(menuRequests == 0);
         CHECK(mockPtyOf(*session).stdinBuffer().empty());
     }
@@ -1420,7 +1421,7 @@ TEST_CASE("TerminalSession: mouse events encode under an active mouse protocol",
 
     pty.stdinBuffer().clear();
     auto const at = PixelCoordinate { PixelCoordinate::X { 20 }, PixelCoordinate::Y { 20 } };
-    session->sendMousePressEvent(Modifiers {}, MouseButton::Left, at);
+    session->sendMousePressEvent(Modifiers {}, MouseButton::Left, vtbackend::CellLocation {}, at);
     session->sendMouseReleaseEvent(Modifiers {}, MouseButton::Left, at);
     // SGR mouse reports are CSI < ... M/m; at minimum an escape must have been emitted.
     CHECK(pty.stdinBuffer().contains('\033'));

@@ -89,7 +89,9 @@ struct MirrorHarness
     net::PollEventSource source;
     net::EventLoop loop { source };
     SessionHost host { loop,
-                       [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
                        gipSettings(ServerHistoryLines),
                        crispy::defaultEnvironment(),
                        /*startPumps=*/false };
@@ -1376,8 +1378,11 @@ TEST_CASE("a mirror primed while the app already tracks the mouse can encode a c
         // on a mirror that had fallen back to the default (`CSI M`) encoding either.
         auto& mirrorPty = static_cast<vtpty::MockPty&>(h->mirror->device());
         mirrorPty.stdinBuffer().clear();
-        std::ignore = h->mirror->sendMousePressEvent(
-            vtbackend::Modifiers {}, vtbackend::MouseButton::Left, vtbackend::PixelCoordinate {}, false);
+        std::ignore = h->mirror->sendMousePressEvent(vtbackend::Modifiers {},
+                                                     vtbackend::MouseButton::Left,
+                                                     vtbackend::CellLocation {},
+                                                     vtbackend::PixelCoordinate {},
+                                                     false);
         h->mirror->flushInput();
         CHECK(mirrorPty.stdinBuffer().starts_with("\033[<0;"));
 

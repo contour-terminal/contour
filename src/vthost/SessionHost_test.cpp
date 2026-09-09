@@ -28,6 +28,7 @@
 #include <net/testing/ScriptedEventSource.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
 
@@ -171,6 +172,14 @@ struct StubClient final: vthost::SessionStreamEvents
 {
 };
 
+/// A single-pane tab whose leaf runs @p command — the shape most of the new tests build on.
+[[nodiscard]] vtworkspace::LayoutTab leafTab(std::string command)
+{
+    auto tab = vtworkspace::LayoutTab {};
+    tab.root.command = std::move(command);
+    return tab;
+}
+
 /// A host over MockPty sessions with pump threads disabled (tests drive the
 /// model on the calling thread, which stands in for the loop thread).
 struct HostHarness
@@ -189,7 +198,9 @@ struct HostHarness
     StubClient otherClient;          ///< For the multi-client policy cases.
     vthost::ClientSizePolicy policy; // set by the constructor, before `host` reads it
     SessionHost host { loop,
-                       [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
                        vtbackend::Settings {},
                        crispy::defaultEnvironment(),
                        /*startPumps=*/false,
@@ -497,7 +508,9 @@ TEST_CASE("stream events fan out to every subscriber independently", "[vthost][h
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };
@@ -558,7 +571,9 @@ TEST_CASE("a failing PTY factory is reported", "[vthost][host][diagnostics]")
     auto source = net::testing::ScriptedEventSource {};
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize) { return std::unique_ptr<vtpty::Pty> {}; },
+                              [](vtbackend::PageSize, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::unique_ptr<vtpty::Pty> {};
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };
@@ -616,7 +631,7 @@ TEST_CASE("a hosted session with a parked pump can still be torn down", "[vthost
     auto* blocking = static_cast<BlockingPty*>(nullptr);
     auto host = std::make_unique<SessionHost>(
         loop,
-        [&blocking](vtbackend::PageSize size) {
+        [&blocking](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
             auto pty = std::make_unique<BlockingPty>(size);
             blocking = pty.get();
             return pty;
@@ -768,4 +783,279 @@ TEST_CASE("createTab honours the window the request names", "[vthost][host]")
     auto* unknown = h.host.createTab({}, vtworkspace::SessionId { 99999 });
     REQUIRE(unknown != nullptr);
     CHECK(h.host.model().windowOfTab(unknown->id()) == h.host.windowId());
+}
+
+TEST_CASE("SessionHost realizes a single-tab startup layout into its one window", "[vthost][host][layout]")
+{
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = net::EventLoop { source };
+    auto layout = vtworkspace::Layout { .tabs = { leafTab("nvim") } };
+
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/false,
+                              vthost::ClientSizePolicy::Latest,
+                              layout };
+
+    REQUIRE(host.sessionCount() == 1);
+    auto* window = host.model().window(host.windowId());
+    REQUIRE(window != nullptr);
+    REQUIRE(window->tabCount() == 1);
+
+    auto* tab = window->tabAt(0);
+    REQUIRE(tab != nullptr);
+    CHECK(tab->rootPane()->isLeaf());
+    REQUIRE(host.terminal(tab->rootPane()->session()) != nullptr);
+}
+
+TEST_CASE("SessionHost realizes a multi-tab, multi-pane startup layout", "[vthost][host][layout]")
+{
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = net::EventLoop { source };
+
+    auto splitTab = vtworkspace::LayoutTab {};
+    splitTab.title = "servers";
+    splitTab.root.orientation = SplitState::Vertical;
+    auto left = vtworkspace::LayoutPane {};
+    left.command = "npm";
+    left.arguments = { "run", "dev" };
+    left.ratio = 0.6;
+    auto right = vtworkspace::LayoutPane {};
+    right.command = "htop";
+    splitTab.root.children = { left, right };
+
+    auto layout = vtworkspace::Layout { .tabs = { leafTab("nvim"), splitTab } };
+
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/false,
+                              vthost::ClientSizePolicy::Latest,
+                              layout };
+
+    REQUIRE(host.sessionCount() == 3); // one leaf tab + two-pane split tab
+    auto* window = host.model().window(host.windowId());
+    REQUIRE(window != nullptr);
+    REQUIRE(window->tabCount() == 2);
+
+    auto* editorTab = window->tabAt(0);
+    REQUIRE(editorTab != nullptr);
+    CHECK(editorTab->rootPane()->isLeaf());
+
+    auto* serversTab = window->tabAt(1);
+    REQUIRE(serversTab != nullptr);
+    REQUIRE_FALSE(serversTab->rootPane()->isLeaf());
+    REQUIRE(serversTab->rootPane()->first() != nullptr);
+    REQUIRE(serversTab->rootPane()->second() != nullptr);
+    CHECK(host.terminal(serversTab->rootPane()->first()->session()) != nullptr);
+    CHECK(host.terminal(serversTab->rootPane()->second()->session()) != nullptr);
+}
+
+TEST_CASE("SessionHost with an empty startup layout keeps today's single-default-tab behavior",
+          "[vthost][host][layout]")
+{
+    // The default-parameter path: every existing call site (HostHarness included) that does not
+    // pass a layout must be completely unaffected.
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = net::EventLoop { source };
+
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/false,
+                              vthost::ClientSizePolicy::Latest };
+
+    CHECK(host.sessionCount() == 0);
+    auto* window = host.model().window(host.windowId());
+    REQUIRE(window != nullptr);
+    CHECK(window->tabCount() == 0);
+}
+
+TEST_CASE("SessionHost honors a startup layout pane's command/arguments override, "
+          "still ignoring its profile override",
+          "[vthost][host][layout]")
+{
+    // Command/arguments/directory overrides ARE honored (mirrors AppSessionFactory::createPty's
+    // program-overlay rule for the local GUI path); profile stays out of scope (the daemon has
+    // no Config object to resolve an arbitrary named profile at startup) and is still ignored.
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = net::EventLoop { source };
+
+    auto tab = vtworkspace::LayoutTab {};
+    tab.root.command = "nvim";
+    tab.root.arguments = { "-R" };
+    tab.root.profile = "some-other-profile"; // still not honored
+    auto layout = vtworkspace::Layout { .tabs = { tab } };
+
+    auto seen = std::optional<vtpty::Process::ExecInfo> {};
+    auto host = SessionHost { loop,
+                              [&](vtbackend::PageSize size,
+                                  std::optional<vtpty::Process::ExecInfo> const& commandOverride) {
+                                  seen = commandOverride;
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/false,
+                              vthost::ClientSizePolicy::Latest,
+                              layout };
+
+    REQUIRE(host.sessionCount() == 1);
+    auto* window = host.model().window(host.windowId());
+    REQUIRE(window != nullptr);
+    REQUIRE(window->tabCount() == 1);
+    REQUIRE(host.terminal(window->tabAt(0)->rootPane()->session()) != nullptr);
+
+    REQUIRE(seen.has_value());
+    CHECK(seen->program == "nvim");
+    REQUIRE(seen->arguments.size() == 1);
+    CHECK(seen->arguments.front() == "-R");
+}
+
+TEST_CASE("SessionHost honors a startup layout pane's directory-only override, "
+          "leaving its command untouched",
+          "[vthost][host][layout]")
+{
+    // A pane can set ONLY a directory override without naming a command. Mirrors
+    // AppSessionFactory::createPty: an engaged override with an empty program must not wipe the
+    // profile shell's default program/arguments — only the working directory changes.
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = net::EventLoop { source };
+
+    auto tab = vtworkspace::LayoutTab {};
+    tab.root.directory = std::filesystem::path { "/tmp/project" };
+    // command, arguments, and profile are left unset/empty
+    auto layout = vtworkspace::Layout { .tabs = { tab } };
+
+    auto seen = std::optional<vtpty::Process::ExecInfo> {};
+    auto host = SessionHost { loop,
+                              [&](vtbackend::PageSize size,
+                                  std::optional<vtpty::Process::ExecInfo> const& commandOverride) {
+                                  seen = commandOverride;
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/false,
+                              vthost::ClientSizePolicy::Latest,
+                              layout };
+
+    REQUIRE(host.sessionCount() == 1);
+    auto* window = host.model().window(host.windowId());
+    REQUIRE(window != nullptr);
+    REQUIRE(window->tabCount() == 1);
+    REQUIRE(host.terminal(window->tabAt(0)->rootPane()->session()) != nullptr);
+
+    REQUIRE(seen.has_value());
+    CHECK(seen->program.empty()); // no command named: program/arguments stay untouched
+    CHECK(seen->workingDirectory == std::filesystem::path { "/tmp/project" });
+}
+
+TEST_CASE("SessionHost engages no override for a startup layout pane's arguments without a command",
+          "[vthost][host][layout]")
+{
+    // Arguments name what a command is run with, so a pane carrying them without one is malformed.
+    // Such a pane must not engage an override at all: an empty-program ExecInfo would tell the
+    // factory this session overrides the shell while carrying nothing to run. The arguments are
+    // dropped, with a log line rather than in silence.
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = net::EventLoop { source };
+
+    auto tab = vtworkspace::LayoutTab {};
+    tab.root.arguments = { "--flag", "value" };
+    // command, directory and profile are left unset/empty
+    auto layout = vtworkspace::Layout { .tabs = { tab } };
+
+    auto seen = std::optional<vtpty::Process::ExecInfo> {};
+    auto host = SessionHost { loop,
+                              [&](vtbackend::PageSize size,
+                                  std::optional<vtpty::Process::ExecInfo> const& commandOverride) {
+                                  seen = commandOverride;
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/false,
+                              vthost::ClientSizePolicy::Latest,
+                              layout };
+
+    REQUIRE(host.sessionCount() == 1);
+
+    // The pane still spawns the daemon's configured shell -- just with no override at all.
+    CHECK(!seen.has_value());
+}
+
+TEST_CASE("SessionHost still passes through an engaged-but-empty command with its arguments",
+          "[vthost][host][layout]")
+{
+    // A pane whose `command:` resolves (after variable substitution and shell-splitting) to an
+    // empty string is engaged -- leaf.command holds a value, just an empty one -- unlike the
+    // unset-command case above. SessionHost still builds and forwards the override here: it is
+    // vtpty::Process::applyCommandOverride (the shared overlay both the daemon and the local-GUI
+    // path use) that declines to overlay an empty program, so the arguments end up dropped
+    // downstream rather than here. This pane is just as malformed as the unset-command one and
+    // must log the same "ignoring pane arguments" warning (see SessionHost.cpp) -- this test
+    // pins the override that reaches the factory; the warning itself has no harness to assert on.
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = net::EventLoop { source };
+
+    auto tab = vtworkspace::LayoutTab {};
+    tab.root.command = std::string {};
+    tab.root.arguments = { "--flag", "value" };
+    auto layout = vtworkspace::Layout { .tabs = { tab } };
+
+    auto seen = std::optional<vtpty::Process::ExecInfo> {};
+    auto host = SessionHost { loop,
+                              [&](vtbackend::PageSize size,
+                                  std::optional<vtpty::Process::ExecInfo> const& commandOverride) {
+                                  seen = commandOverride;
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/false,
+                              vthost::ClientSizePolicy::Latest,
+                              layout };
+
+    REQUIRE(host.sessionCount() == 1);
+    REQUIRE(seen.has_value());
+    CHECK(seen->program.empty());
+    CHECK(seen->arguments == std::vector<std::string> { "--flag", "value" });
+}
+
+TEST_CASE("SessionHost falls back to an empty window when every startup-layout seed is refused",
+          "[vthost][host][layout]")
+{
+    // A PTY factory that always fails (e.g. resource exhaustion at daemon startup) must not
+    // leave a half-built or crashed host: realization produces zero tabs, and the window stays
+    // empty -- NativeSession::completeHandshake's existing first-attach fallback is unaffected by
+    // this test (it lives above SessionHost) but this confirms SessionHost itself degrades
+    // gracefully.
+    auto source = net::testing::ScriptedEventSource {};
+    auto loop = net::EventLoop { source };
+    auto layout = vtworkspace::Layout { .tabs = { leafTab("nvim"), leafTab("htop") } };
+
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize, std::optional<vtpty::Process::ExecInfo> const&)
+                                  -> std::unique_ptr<vtpty::Pty> { return nullptr; },
+                              vtbackend::Settings {},
+                              crispy::defaultEnvironment(),
+                              /*startPumps=*/false,
+                              vthost::ClientSizePolicy::Latest,
+                              layout };
+
+    CHECK(host.sessionCount() == 0);
+    auto* window = host.model().window(host.windowId());
+    REQUIRE(window != nullptr);
+    CHECK(window->tabCount() == 0);
 }

@@ -71,7 +71,9 @@ struct EndToEndHarness
     net::PollEventSource source;
     net::EventLoop loop { source };
     SessionHost host { loop,
-                       [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
                        vtbackend::Settings {},
                        crispy::defaultEnvironment(),
                        /*startPumps=*/false };
@@ -560,7 +562,9 @@ void tokenAttach(std::string serverToken, std::string clientToken, bool* gotSnap
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };
@@ -676,7 +680,9 @@ TEST_CASE("attach mirrors over a real TCP transport with token auth", "[vthost][
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };
@@ -734,7 +740,9 @@ TEST_CASE("attach mirrors over TLS-encrypted TCP with token auth", "[vthost][att
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };
@@ -770,7 +778,9 @@ TEST_CASE("attach mirrors over TLS with a generated self-signed dev certificate"
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };
@@ -846,7 +856,9 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[vthost][attach]"
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };
@@ -889,7 +901,9 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[v
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };
@@ -928,7 +942,9 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };

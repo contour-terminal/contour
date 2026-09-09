@@ -43,7 +43,9 @@ struct WatcherHarness
     net::testing::ScriptedEventSource source;
     net::EventLoop loop { source };
     SessionHost host { loop,
-                       [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
                        vtbackend::Settings {},
                        crispy::defaultEnvironment(),
                        /*startPumps=*/false };
@@ -154,7 +156,9 @@ TEST_CASE("the last session's exit unwinds the daemon's accept loop", "[vthost][
     auto source = net::PollEventSource {};
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };
@@ -210,7 +214,9 @@ TEST_CASE("the watcher unsubscribes itself before the host outlives it", "[vthos
     net::testing::ScriptedEventSource source;
     auto loop = net::EventLoop { source };
     auto host = SessionHost { loop,
-                              [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
                               vtbackend::Settings {},
                               crispy::defaultEnvironment(),
                               /*startPumps=*/false };

@@ -921,6 +921,7 @@ class Terminal
                           Timestamp now);
     Handled sendMousePressEvent(Modifiers modifiers,
                                 MouseButton button,
+                                CellLocation newPosition,
                                 PixelCoordinate pixelPosition,
                                 bool uiHandledHint);
     void sendMouseMoveEvent(Modifiers modifiers,

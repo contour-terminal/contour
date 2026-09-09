@@ -1065,7 +1065,12 @@ TEST_CASE("TextSizing.a_drag_inside_one_row_of_blocks_stays_on_one_line", "[text
     mock.terminal.tick(std::chrono::steady_clock::time_point {});
     mock.terminal.sendMouseMoveEvent(
         Modifier::None, CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }, Pixels, UiHandled);
-    (void) mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, Pixels, UiHandled);
+    (void) mock.terminal.sendMousePressEvent(
+        Modifier::None,
+        MouseButton::Left,
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+        Pixels,
+        UiHandled);
 
     // The pointer slips one row down while still over the same blocks.
     mock.terminal.sendMouseMoveEvent(
@@ -1094,7 +1099,12 @@ TEST_CASE("TextSizing.a_drag_that_leaves_the_blocks_still_selects_two_lines", "[
     mock.terminal.tick(std::chrono::steady_clock::time_point {});
     mock.terminal.sendMouseMoveEvent(
         Modifier::None, CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) }, Pixels, UiHandled);
-    (void) mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, Pixels, UiHandled);
+    (void) mock.terminal.sendMousePressEvent(
+        Modifier::None,
+        MouseButton::Left,
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+        Pixels,
+        UiHandled);
     mock.terminal.sendMouseMoveEvent(
         Modifier::None, CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) }, Pixels, UiHandled);
 

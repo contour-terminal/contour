@@ -17,6 +17,7 @@
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <vtpty/PageSize.hpp>
+#include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 
 #include <crispy/Environment.hpp>
@@ -34,15 +35,21 @@
 // with — and any a SessionSpawnRequest carries — are normalized through hostedSessionSettings.
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/SessionSettings.hpp>
+#include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/ModelEvents.hpp>
 #include <vtworkspace/SessionModel.hpp>
 
 namespace vthost
 {
 
-/// Creates the backing PTY for one new session. Production spawns the user's
-/// shell over a real PTY (vtpty::Process); tests inject a MockPty factory.
-using PtyFactory = std::function<std::unique_ptr<vtpty::Pty>(vtbackend::PageSize)>;
+/// Creates the backing PTY for one new session. Production spawns the user's shell (or the
+/// override, when a caller names one) over a real PTY (vtpty::Process); tests inject a MockPty
+/// factory. The override, when engaged, replaces the daemon's configured program/arguments
+/// (only when a program is actually named) and/or working directory — see
+/// @ref SessionSpawnRequest::commandOverride and Daemon.cpp's makeShellPtyFactory for the exact
+/// overlay rule, which mirrors AppSessionFactory::createPty's for a local session.
+using PtyFactory = std::function<std::unique_ptr<vtpty::Pty>(
+    vtbackend::PageSize, std::optional<vtpty::Process::ExecInfo> const& commandOverride)>;
 
 /// Whether a resize request actually moved a grid.
 ///
@@ -219,8 +226,8 @@ class HostedSession
 
 /// What ONE session-creating request overrides about the session it spawns.
 ///
-/// A struct rather than a parameter so a future per-spawn knob (a working directory, a shell
-/// override) is a field here instead of a fourth argument at three call sites.
+/// A struct rather than a parameter so a future per-spawn knob is a field here instead of a
+/// fourth argument at three call sites.
 struct SessionSpawnRequest
 {
     /// The emulation settings for this session; nullopt uses the host's factory settings.
@@ -230,6 +237,15 @@ struct SessionSpawnRequest
     /// over one session. Whatever is supplied still goes through
     /// @ref hostedSessionSettings.
     std::optional<vtbackend::Settings> settings {};
+
+    /// Overrides the program/arguments and/or working directory this session's shell runs —
+    /// currently engaged only by @ref SessionHost::realizeStartupLayout for a startup layout
+    /// pane's `command`/`arguments`/`directory`. Passed straight through to the @ref PtyFactory,
+    /// which applies it with the same overlay rule as a local session's
+    /// AppSessionFactory::createPty: `program`/`arguments` overlay only when `program` is
+    /// non-empty (a directory-only override must not wipe the daemon's default arguments), and
+    /// `workingDirectory` overlays independently whenever it is non-empty.
+    std::optional<vtpty::Process::ExecInfo> commandOverride {};
 };
 
 /// Owns every hosted session and the authoritative vtworkspace::SessionModel,
@@ -249,12 +265,18 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///        clients report different ones. Fixed at construction: two differently-configured
     ///        daemons are two different daemons, not one in two states.
     /// @param env The process environment every session this host spawns reads through.
+    /// @param startupLayout The profile's configured startup layout. A pane's
+    ///        `command`/`arguments`/`directory` are honored (see @ref SessionSpawnRequest::commandOverride);
+    ///        `profile` is not — the daemon has no `Config` object to resolve an arbitrary named
+    ///        profile at startup, so a pane naming one is logged and otherwise ignored. Empty
+    ///        `tabs` (the default) keeps today's behavior: the window starts with no tab at all.
     SessionHost(net::EventLoop& loop,
                 PtyFactory ptyFactory,
                 vtbackend::Settings settings,
                 crispy::Environment const& env,
                 bool startPumps = true,
-                ClientSizePolicy sizePolicy = ClientSizePolicy::Latest);
+                ClientSizePolicy sizePolicy = ClientSizePolicy::Latest,
+                vtworkspace::Layout const& startupLayout = {});
     ~SessionHost() override;
 
     SessionHost(SessionHost const&) = delete;
@@ -394,6 +416,15 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param request What this creation overrides about the session.
     /// @return The minted id, or nullopt if the PTY factory failed.
     [[nodiscard]] std::optional<vtworkspace::SessionId> seedSession(SessionSpawnRequest const& request);
+
+    /// Realizes @p layout's tabs into @p window in order, via the shared
+    /// vtworkspace::realizeLayoutTab. Called once from the constructor body (never the
+    /// initializer list — @c _window is the LAST member to construct). Each leaf's
+    /// command/arguments/directory become a @ref SessionSpawnRequest::commandOverride; its
+    /// profile (if named) is logged and otherwise ignored.
+    /// @param window The window to realize every tab into (the host's own, freshly created).
+    /// @param layout The resolved startup layout; a no-op when its `tabs` is empty.
+    void realizeStartupLayout(vtworkspace::WindowId window, vtworkspace::Layout const& layout);
 
     /// Resizes every leaf's terminal to its cell-space projection under the
     /// current client area — run after every layout-shape change so PTY sizes

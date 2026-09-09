@@ -1255,14 +1255,14 @@ TEST_CASE("Terminal.Wheel.AltScreen.NoProtocol.emits_cursor_keys", "[terminal]")
     REQUIRE(mock.terminal.isAlternateScreen());
 
     mock.resetReplyData();
-    auto const handledDown =
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, UiHandledHint);
+    auto const handledDown = mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::WheelDown, mock.terminal.currentMousePosition(), NoPixel, UiHandledHint);
     CHECK(handledDown == Handled { true });
     CHECK(e(mock.replyData()) == e("\033[B")); // default multiplier is 1 in MockTerm
 
     mock.resetReplyData();
-    auto const handledUp =
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelUp, NoPixel, UiHandledHint);
+    auto const handledUp = mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::WheelUp, mock.terminal.currentMousePosition(), NoPixel, UiHandledHint);
     CHECK(handledUp == Handled { true });
     CHECK(e(mock.replyData()) == e("\033[A"));
 }
@@ -1281,7 +1281,8 @@ TEST_CASE("Terminal.Wheel.AltScreen.AppCursorKeys.emits_SS3", "[terminal]")
     REQUIRE(mock.terminal.isAlternateScreen());
 
     mock.resetReplyData();
-    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+    CHECK(mock.terminal.sendMousePressEvent(
+              Modifier::None, MouseButton::WheelDown, mock.terminal.currentMousePosition(), NoPixel, false)
           == Handled { true });
     CHECK(e(mock.replyData()) == e("\033OB"));
 }
@@ -1300,7 +1301,8 @@ TEST_CASE("Terminal.Wheel.AltScreen.DECSET1007.emits_cursor_keys", "[terminal]")
     mock.terminal.tick(1s);
 
     mock.resetReplyData();
-    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+    CHECK(mock.terminal.sendMousePressEvent(
+              Modifier::None, MouseButton::WheelDown, mock.terminal.currentMousePosition(), NoPixel, false)
           == Handled { true });
     CHECK(e(mock.replyData()) == e("\033OB"));
 }
@@ -1319,7 +1321,8 @@ TEST_CASE("Terminal.Wheel.AltScreen.AppTracking.passes_through_as_SGR", "[termin
     mock.terminal.tick(1s);
 
     mock.resetReplyData();
-    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+    CHECK(mock.terminal.sendMousePressEvent(
+              Modifier::None, MouseButton::WheelDown, mock.terminal.currentMousePosition(), NoPixel, false)
           == Handled { true });
     // SGR mouse report, not a cursor key.
     CHECK(e(mock.replyData()).starts_with(e("\033[<")));
@@ -1337,7 +1340,8 @@ TEST_CASE("Terminal.Wheel.PrimaryScreen.NoProtocol.local_scroll", "[terminal]")
     REQUIRE(mock.terminal.isPrimaryScreen());
 
     mock.resetReplyData();
-    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+    CHECK(mock.terminal.sendMousePressEvent(
+              Modifier::None, MouseButton::WheelDown, mock.terminal.currentMousePosition(), NoPixel, false)
           == Handled { false });
     CHECK(mock.replyData().empty());
 }
@@ -1356,7 +1360,8 @@ TEST_CASE("Terminal.Wheel.AltScreen.ShiftBypass.not_handled", "[terminal]")
     mock.terminal.tick(1s);
 
     mock.resetReplyData();
-    CHECK(mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::WheelDown, NoPixel, false)
+    CHECK(mock.terminal.sendMousePressEvent(
+              Modifier::Shift, MouseButton::WheelDown, mock.terminal.currentMousePosition(), NoPixel, false)
           == Handled { false });
     CHECK(mock.replyData().empty());
 }
@@ -1374,7 +1379,8 @@ TEST_CASE("Terminal.Wheel.AltScreen.ViNormalMode.no_cursor_keys", "[terminal]")
     mock.terminal.inputHandler().setMode(ViMode::Normal);
 
     mock.resetReplyData();
-    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+    CHECK(mock.terminal.sendMousePressEvent(
+              Modifier::None, MouseButton::WheelDown, mock.terminal.currentMousePosition(), NoPixel, false)
           == Handled { false });
     CHECK(mock.replyData().empty());
 
@@ -1395,7 +1401,8 @@ TEST_CASE("Terminal.Wheel.AltScreen.ScrollMultiplier.repeats_cursor_keys", "[ter
     mock.terminal.setMouseWheelScrollMultiplier(LineCount(3));
 
     mock.resetReplyData();
-    CHECK(mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::WheelDown, NoPixel, false)
+    CHECK(mock.terminal.sendMousePressEvent(
+              Modifier::None, MouseButton::WheelDown, mock.terminal.currentMousePosition(), NoPixel, false)
           == Handled { true });
     CHECK(e(mock.replyData()) == e("\033[B\033[B\033[B"));
 }

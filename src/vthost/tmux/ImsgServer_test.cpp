@@ -186,7 +186,7 @@ struct ImsgHarness
     net::PollEventSource source;
     net::EventLoop loop { source };
     vthost::SessionHost host { loop,
-                               [](vtbackend::PageSize size) {
+                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                    return std::make_unique<vtpty::MockPty>(size);
                                },
                                vtbackend::Settings {},
@@ -505,7 +505,9 @@ TEST_CASE("a real tmux binary attaches over imsg", "[vthost][imsgserver][oracle]
     auto loop = net::EventLoop { source };
     auto host = vthost::SessionHost {
         loop,
-        [](vtbackend::PageSize size) { return std::make_unique<vtpty::MockPty>(size); },
+        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+            return std::make_unique<vtpty::MockPty>(size);
+        },
         vtbackend::Settings {},
         crispy::defaultEnvironment(),
         /*startPumps=*/false,

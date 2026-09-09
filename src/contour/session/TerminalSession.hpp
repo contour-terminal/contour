@@ -690,6 +690,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     void sendMousePressEvent(vtbackend::Modifiers modifiers,
                              vtbackend::MouseButton button,
+                             vtbackend::CellLocation pos,
                              vtbackend::PixelCoordinate pixelPosition);
     void sendMouseMoveEvent(vtbackend::Modifiers modifiers,
                             vtbackend::CellLocation pos,

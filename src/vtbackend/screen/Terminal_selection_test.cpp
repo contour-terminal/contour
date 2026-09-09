@@ -119,8 +119,8 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
         Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
 
     mock.terminal.tick(1s);
-    auto const appHandledMouse =
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    auto const appHandledMouse = mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
 
     // We want to ensure that this call is returning false if the app has not explicitly requested
     // to listen on mouse events (without passive mode being on).
@@ -143,9 +143,164 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
 
     // Clear selection by simply left-clicking.
     mock.terminal.tick(1s);
-    mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 2_lineOffset + 2_columnOffset, PixelCoordinate, UiHandledHint);
     mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
     CHECK(mock.terminal.extractSelectionText().empty());
+}
+
+TEST_CASE("Terminal.plain_drag_selection_does_not_overwrite_the_search_pattern", "[terminal]")
+{
+    // Regression: updateSelectionMatches() serializes the selection into Terminal::search().pattern
+    // so double/triple-click word-selection can highlight the word's other occurrences elsewhere on
+    // screen (SearchOrigin::DoubleClick). It used to run unconditionally on EVERY selection-extending
+    // mouse-move -- including an ordinary single-click drag, which is not a word at all -- so dragging
+    // out any plain text selection silently overwrote whatever search pattern the user had typed (and,
+    // wherever a status line or find-bar echoes it, made the selected text visibly appear as a live
+    // search).
+    auto mock = MockTerm { ColumnCount(5), LineCount(5) };
+    mock.writeToScreen("12345\r\n"
+                       "67890\r\n"
+                       "ABCDE\r\n"
+                       "abcde\r\n"
+                       "fghij");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    // Seed a search pattern the way a user typing into the find bar would.
+    mock.terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
+    REQUIRE(mock.terminal.search().pattern == U"needle");
+
+    // An ordinary single-click drag across two lines -- not a double/triple-click word selection.
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 2_lineOffset + 2_columnOffset, PixelCoordinate, UiHandledHint);
+    REQUIRE(mock.terminal.extractSelectionText() == "7890\nABC");
+
+    // The drag must not have touched the search pattern.
+    CHECK(mock.terminal.search().pattern == U"needle");
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    CHECK(mock.terminal.search().pattern == U"needle");
+}
+
+TEST_CASE("Terminal.word_selection_across_a_soft_wrap_still_updates_the_search_pattern", "[terminal]")
+{
+    // Regression: updateSelectionMatches() used to reject a word-wise selection whose from() and to()
+    // sat on different PHYSICAL rows, on the theory that a multi-line pattern cannot match the flat,
+    // single-line stream RenderBufferBuilder's search-match scanner walks. But a word straddling a soft
+    // wrap spans two rows while extracting as ONE line -- SelectionRenderer emits a break only where
+    // `!isLineWrapped` -- so the guard refused a perfectly good pattern and left the previous search
+    // term standing, costing the wrapped word its matching-word highlights.
+    auto mock = MockTerm { ColumnCount(5), LineCount(2) };
+    mock.terminal.setWordDelimiters(" ");
+
+    // One 10-character word: fills row 0 and soft-wraps into row 1.
+    mock.writeToScreen(std::string(10, 'a'));
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    mock.terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
+    REQUIRE(mock.terminal.search().pattern == U"needle");
+
+    // Double-click inside the word: two presses at the same cell, inside the one-second window.
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+
+    // The selection crossed the wrap, yet extracts as a single line...
+    auto const selected = mock.terminal.extractSelectionText();
+    REQUIRE(selected == std::string(10, 'a'));
+    REQUIRE(!selected.contains('\n'));
+
+    // ...so it IS a word, and must have become the pattern.
+    CHECK(mock.terminal.search().pattern == std::u32string(10, U'a'));
+    CHECK(mock.terminal.search().origin == SearchOrigin::DoubleClick);
+}
+
+TEST_CASE("Terminal.a_press_at_a_new_cell_starts_a_fresh_click_sequence", "[terminal]")
+{
+    // Regression: sendMousePressEvent() anchors a bare press at the cell it landed on (a fast click can
+    // arrive with no preceding MouseMove), but it did so WITHOUT resetting the speed-click counter that
+    // sendMouseMoveEvent resets for exactly the same cell change. A second fast click at a DIFFERENT
+    // cell, still inside the one-second window, therefore inherited the first one's count and opened as
+    // a double-click word selection instead of a fresh drag.
+    auto mock = MockTerm { ColumnCount(11), LineCount(2) };
+    mock.terminal.setWordDelimiters(" ");
+    mock.writeToScreen("hello world");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    // First click, on "hello".
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+
+    // A second bare press at a DIFFERENT cell, arriving well inside the one-second double-click window
+    // and with no MouseMove in between -- the fast-click path.
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 7_columnOffset, PixelCoordinate, UiHandledHint);
+
+    // It must open a fresh, empty drag -- not select the word under it.
+    CHECK(mock.terminal.selector() != nullptr);
+    CHECK(dynamic_cast<WordWiseSelection const*>(mock.terminal.selector()) == nullptr);
+    CHECK(mock.terminal.extractSelectionText().empty());
+}
+
+TEST_CASE("Terminal.shift_click_extending_a_word_retires_its_search_pattern", "[terminal]")
+{
+    // Regression: a double click makes the word the search pattern (SearchOrigin::DoubleClick) so its
+    // other occurrences highlight. Shift+Click then re-creates the selection as a LinearSelection --
+    // which updateSelectionMatches() rightly refuses to serialize -- so the call it used to make there
+    // became a no-op, and the double click's pattern stayed live, painting matches for a word the
+    // selection no longer is. The extension must retire it, as an ordinary single click already does.
+    auto mock = MockTerm { ColumnCount(11), LineCount(2) };
+    mock.terminal.setWordDelimiters(" ");
+    mock.writeToScreen("hello world");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+
+    // Double-click "hello": two presses at the same cell inside the one-second window.
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+
+    REQUIRE(mock.terminal.extractSelectionText() == "hello");
+    REQUIRE(mock.terminal.search().pattern == U"hello");
+    REQUIRE(mock.terminal.search().origin == SearchOrigin::DoubleClick);
+
+    // Shift+Click out to "world": the selection stops being that word.
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(
+        Modifier::Shift, MouseButton::Left, 0_lineOffset + 9_columnOffset, PixelCoordinate, UiHandledHint);
+
+    CHECK(mock.terminal.extractSelectionText() != "hello");
+
+    // The word's pattern must not have outlived it.
+    CHECK(mock.terminal.search().pattern.empty());
 }
 
 TEST_CASE("Terminal.TextSelection_wrapped_line", "[terminal]")
@@ -174,8 +329,8 @@ TEST_CASE("Terminal.TextSelection_wrapped_line", "[terminal]")
         Modifier::None, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
 
     mock.terminal.tick(1s);
-    auto const appHandledMouse =
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    auto const appHandledMouse = mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
 
     REQUIRE(appHandledMouse == Handled { false });
 
@@ -193,7 +348,8 @@ TEST_CASE("Terminal.TextSelection_wrapped_line", "[terminal]")
     CHECK(mock.terminal.extractSelectionText() == "aaaaaa");
 
     mock.terminal.tick(1s);
-    mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
     mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
     CHECK(mock.terminal.extractSelectionText().empty());
 }
@@ -221,7 +377,8 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 1_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(3s);
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 2_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
@@ -235,7 +392,8 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 3_lineOffset + 3_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(7s);
-        mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::Shift, MouseButton::Left, 3_lineOffset + 3_columnOffset, PixelCoord, UiHandledHint);
 
         // Selection should now span from original start to new click position.
         CHECK(mock.terminal.extractSelectionText() == "7890\nABCDE\nabcd");
@@ -248,7 +406,8 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 2_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 2_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(3s);
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 3_lineOffset + 3_columnOffset, PixelCoord, UiHandledHint);
@@ -264,7 +423,8 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(7s);
-        mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::Shift, MouseButton::Left, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
 
         CHECK(mock.terminal.extractSelectionText() == "12345\n67890\nABCDE\nabcd");
     }
@@ -276,7 +436,8 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::Shift, MouseButton::Left, 1_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
 
         // Should create a new selection (Waiting state), not crash.
         REQUIRE(mock.terminal.selectionAvailable());
@@ -293,7 +454,8 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 1_lineOffset + 1_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(3s);
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 2_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
@@ -306,13 +468,15 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 3_lineOffset + 3_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(4s + 500ms);
-        mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::Shift, MouseButton::Left, 3_lineOffset + 3_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.sendMouseReleaseEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
         CHECK_FALSE(mock.terminal.extractSelectionText().empty());
 
         // 3. Normal click shortly after (within 1s) to deselect — must clear selection.
         mock.terminal.tick(4s + 800ms);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 3_lineOffset + 3_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
         CHECK(mock.terminal.extractSelectionText().empty());
     }
@@ -324,7 +488,8 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 1_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 1_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(3s);
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 2_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
@@ -337,7 +502,8 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(7s);
-        mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::Shift, MouseButton::Left, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.sendMouseReleaseEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
         CHECK(mock.terminal.extractSelectionText() == "12345\n67890\nABC");
 
@@ -346,7 +512,8 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 4_lineOffset + 4_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(10s);
-        mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::Shift, MouseButton::Left, 4_lineOffset + 4_columnOffset, PixelCoord, UiHandledHint);
         CHECK(mock.terminal.extractSelectionText() == "12345\n67890\nABCDE\nabcde\nfghij");
     }
 
@@ -357,7 +524,8 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(2s);
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, 0_lineOffset + 0_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(3s);
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 4_lineOffset + 4_columnOffset, PixelCoord, UiHandledHint);
@@ -370,7 +538,8 @@ TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
         mock.terminal.sendMouseMoveEvent(
             Modifier::None, 2_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
         mock.terminal.tick(7s);
-        mock.terminal.sendMousePressEvent(Modifier::Shift, MouseButton::Left, PixelCoord, UiHandledHint);
+        mock.terminal.sendMousePressEvent(
+            Modifier::Shift, MouseButton::Left, 2_lineOffset + 2_columnOffset, PixelCoord, UiHandledHint);
         CHECK(mock.terminal.extractSelectionText() == "12345\n67890\nABC");
     }
 }
@@ -461,7 +630,7 @@ TEST_CASE("Terminal.TextSelection_drag_into_blank_stops_at_the_pointer", "[termi
         Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoordinate, UiHandledHint);
     mock.terminal.tick(1s);
     (void) mock.terminal.sendMousePressEvent(
-        Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+        Modifier::None, MouseButton::Left, 0_lineOffset + 0_columnOffset, PixelCoordinate, UiHandledHint);
 
     // Drag well past "abc", into cells that were never written.
     mock.terminal.tick(1s);
@@ -495,7 +664,7 @@ TEST_CASE("Terminal.TextSelection_multiline_drag_still_takes_the_first_line_whol
         Modifier::None, 0_lineOffset + 0_columnOffset, PixelCoordinate, UiHandledHint);
     mock.terminal.tick(1s);
     (void) mock.terminal.sendMousePressEvent(
-        Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+        Modifier::None, MouseButton::Left, 0_lineOffset + 0_columnOffset, PixelCoordinate, UiHandledHint);
     mock.terminal.tick(1s);
     mock.terminal.sendMouseMoveEvent(
         Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);

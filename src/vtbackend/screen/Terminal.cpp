@@ -1097,9 +1097,34 @@ Handled Terminal::sendCharEvent(char32_t ch,
 
 Handled Terminal::sendMousePressEvent(Modifiers modifiers,
                                       MouseButton button,
+                                      CellLocation newPosition,
                                       PixelCoordinate pixelPosition,
                                       bool uiHandledHint)
 {
+    // A press is not necessarily preceded by a MouseMove landing exactly here: the windowing system
+    // usually delivers one, which is why a slow, deliberate drag never showed this, but a fast click
+    // can arrive as a bare press while _currentMousePosition is still wherever the pointer last idled
+    // (a previous selection, a different pane, ...). Without this, handleMouseSelection() below
+    // anchors the drag on that stale position instead of where the button actually went down, and the
+    // whole selection appears to jump the moment the drag starts. Mirrors the same update
+    // sendMouseMoveEvent already does for exactly this reason.
+    if (newPosition != _currentMousePosition)
+    {
+        // For the same reason sendMouseMoveEvent resets it: a multi-click sequence is only a
+        // sequence while it stays on one cell. A press that lands somewhere else starts a new one,
+        // and without this a fast click arriving as a bare press within the one-second window would
+        // inherit the previous cell's count and open as a word- or line-selection instead of a drag.
+        //
+        // Left only: it is the sole button that opens a selection, so it is the only one whose
+        // sequence this counts. A right-click for the context menu, or a middle-click paste, lands
+        // on some other cell without ending a double-click the user is in the middle of.
+        if (button == MouseButton::Left)
+            _speedClicks = 0;
+
+        _currentMousePosition = newPosition;
+        updateHoveringHyperlinkState();
+    }
+
     if (button == MouseButton::Left)
     {
         _leftMouseButtonPressed = true;
@@ -1155,7 +1180,30 @@ void Terminal::updateSelectionMatches()
     if (!_settings.visualizeSelectedWord)
         return;
 
+    // Visualizing "other occurrences" only makes sense for a WORD -- the case a double/triple-click
+    // selects. An ordinary linear (or rectangular) drag selection is not a word: it is arbitrary text
+    // the user is actively choosing, and serializing every intermediate extension of it into the
+    // search pattern overwrote whatever the user had actually typed into the find bar/search prompt on
+    // every single mouse-move of a plain click-and-drag selection.
+    if (!selectionAvailable() || dynamic_cast<WordWiseSelection const*>(selector()) == nullptr)
+        return;
+
     auto const text = extractSelectionText();
+
+    // Also stops being a word the moment it is DRAGGED past its own logical line: RenderBufferBuilder's
+    // search-match scanner matches the pattern's bytes -- newlines included -- against the flat,
+    // single-line stream of rendered cells, so a multi-line pattern can (and did) never really
+    // match anything stable, and its highlight visibly jumped around as the pattern kept growing
+    // with every further mouse-move of the drag.
+    //
+    // The test is the extracted TEXT, not `from().line != to().line`: a double-clicked word that
+    // straddles a soft wrap spans two physical rows, and SelectionRenderer deliberately joins those
+    // without a break (it flushes a line only where `!isLineWrapped`). Keying on physical rows
+    // therefore refused a perfectly good single-line pattern and left the previous search term
+    // standing, costing the wrapped word its matching-word highlights.
+    if (text.contains('\n'))
+        return;
+
     auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
     setNewSearchTerm(text32, SearchOrigin::DoubleClick);
 }
@@ -1204,8 +1252,15 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
         auto const anchor = (startPos < selStart) ? selEnd : selStart;
 
         setSelector(std::make_unique<LinearSelection>(_selectionHelper, anchor, selectionUpdatedHelper()));
-        if (selector()->extend(startPos))
-            updateSelectionMatches();
+        (void) selector()->extend(startPos);
+
+        // NOT updateSelectionMatches(): what this builds is a LinearSelection, which that function
+        // rightly refuses to serialize into a search pattern. But a word selection extended this way
+        // leaves the double-click's pattern behind it, still painting its matches for a selection
+        // that is no longer that word -- so the extension must retire it, exactly as an ordinary
+        // single click does below.
+        if (_search.origin == SearchOrigin::DoubleClick)
+            clearSearch();
 
         breakLoopAndRefreshRenderBuffer();
         return true;

@@ -307,9 +307,20 @@ namespace
         auto const horizontalScrollEvent =
             columnsScroll.as<int>() > 0 ? VTMouseButton::WheelRight : VTMouseButton::WheelLeft;
 
+        // These are synthesized at the pointer's EXISTING resting position, not a fresh click
+        // elsewhere, so the terminal's own last-tracked cell is exactly right here -- unlike a real
+        // press, there is no new position for this "click" to have missed.
+        // Under the lock: _currentMousePosition is ordinary mutable terminal state, and the resize
+        // path (Terminal::resizeScreen) clamps it from another thread. An unsynchronized read is a
+        // data race TSan would rightly flag, even though the worst it could do here is aim a
+        // synthesized wheel "click" at a stale cell.
+        auto const wheelClickPosition =
+            crispy::locked(terminal, [&] { return terminal.currentMousePosition(); });
+
         for (int i = 0; i < std::abs(columnsScroll.as<int>()); ++i)
         {
-            session.sendMousePressEvent(modifiers, horizontalScrollEvent, currentMousePixelPosition);
+            session.sendMousePressEvent(
+                modifiers, horizontalScrollEvent, wheelClickPosition, currentMousePixelPosition);
         }
 
         auto const verticalScrollEvent =
@@ -317,7 +328,8 @@ namespace
 
         for (int i = 0; i < std::abs(linesScroll.as<int>()); ++i)
         {
-            session.sendMousePressEvent(modifiers, verticalScrollEvent, currentMousePixelPosition);
+            session.sendMousePressEvent(
+                modifiers, verticalScrollEvent, wheelClickPosition, currentMousePixelPosition);
         }
     }
 
@@ -693,6 +705,7 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
 
     session.sendMousePressEvent(input::makeModifiers(event->modifiers()).chord,
                                 input::makeMouseButton(event->button()),
+                                makeMouseCellLocation(event->pos().x(), event->pos().y(), session),
                                 makeMousePixelPosition(event,
                                                        session.display()->gridMetrics().pageMargin,
                                                        session.display()->devicePixelRatio()));
