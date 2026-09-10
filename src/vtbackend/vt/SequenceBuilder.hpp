@@ -196,6 +196,17 @@ class SequenceBuilder
             _apcTruncated = true;
     }
 
+    /// Bulk form of putAPC(char), honouring the same cap: takes what fits and marks the rest
+    /// truncated, so a body that overruns is dropped by dispatchAPC() exactly as before.
+    void putAPC(std::string_view payload)
+    {
+        auto const room = Sequence::MaxOscLength - std::min(_apcBuffer.size(), Sequence::MaxOscLength);
+        auto const chunk = payload.substr(0, room);
+        _apcBuffer.append(chunk);
+        if (chunk.size() != payload.size())
+            _apcTruncated = true;
+    }
+
     void dispatchAPC()
     {
         // A body that hit the cap is DROPPED, not dispatched. Handing the front of it on as though it

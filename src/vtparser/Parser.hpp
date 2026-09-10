@@ -750,6 +750,18 @@ class Parser
     ///         payload (a terminator, or anything the state machine must act on).
     std::tuple<ProcessKind, size_t> parseBulkDcsPassThrough(char const* begin, char const* end) noexcept;
 
+    /// Hands a whole run of APC payload bytes to the handler in one call.
+    ///
+    /// The same argument as parseBulkDcsPassThrough(), for the other protocol that carries bulk
+    /// payload: the kitty graphics protocol sends its images as APC bodies, and without this every
+    /// base64 byte of them walks the state machine individually just to be handed on unchanged.
+    ///
+    /// @param begin First byte to consider.
+    /// @param end   One past the last byte.
+    /// @return ContinueBulk and the run's length, or FallbackToFSM when the next byte is not plain
+    ///         payload (a terminator, or anything the state machine must act on).
+    std::tuple<ProcessKind, size_t> parseBulkApcString(char const* begin, char const* end) noexcept;
+
     void processOnceViaStateMachine(uint8_t ch);
     /// Handles one input byte while in VT52 mode. @see setVT52Mode. Returns true if the byte was
     /// consumed by the VT52 grammar; false if it should fall through to the normal (Ground) handling.
