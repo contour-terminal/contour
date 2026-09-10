@@ -3,6 +3,7 @@
 
 #include <charconv>
 #include <cstdlib>
+#include <utility>
 
 namespace vtbackend::kitty_graphics
 {
@@ -63,6 +64,7 @@ namespace
                     case 100: command.format = Format::Png; break;
                     default: return std::unexpected(Error::InvalidFormat);
                 }
+                command.formatSpecified = true;
                 break;
             }
             case 't': {
@@ -122,6 +124,14 @@ namespace
                 command.deleteTarget = value[0];
                 break;
             }
+            case 'X': {
+                auto number = 0u;
+                (void) assignNumber(value, number);
+                command.compositionMode =
+                    number != 0 ? CompositionMode::Replace : CompositionMode::AlphaBlend;
+                break;
+            }
+            case 'Y': (void) assignNumber(value, command.frameBackground); break;
             default:
                 // Unknown key: ignore, see above.
                 break;
@@ -170,6 +180,41 @@ std::expected<Command, Error> parseCommand(std::string_view apcPayload)
 
         if (auto const result = applyKey(command, pair[0], pair.substr(2)); !result)
             return std::unexpected(result.error());
+    }
+
+    // `c`, `r` and `z` are cell geometry for every command except the animation ones, where they are
+    // frame numbers and a delay. The action can appear anywhere in the control data -- notcurses puts
+    // it first, others put it last -- so the reinterpretation has to happen once the whole block is
+    // decoded, not while walking it. Moving rather than copying leaves no second reading behind for a
+    // later change to pick up by accident.
+    switch (command.action)
+    {
+        case Action::Frame:
+            command.baseFrame = std::exchange(command.columns, 0);
+            command.targetFrame = std::exchange(command.rows, 0);
+            command.frameGapMilliseconds = std::exchange(command.zIndex, 0);
+            break;
+        case Action::Animate:
+            // Animation control overloads two keys more than frame transmission does: `s` is the play
+            // state and `v` the loop count, not the pixel dimensions.
+            command.currentFrame = std::exchange(command.columns, 0);
+            command.targetFrame = std::exchange(command.rows, 0);
+            command.frameGapMilliseconds = std::exchange(command.zIndex, 0);
+            command.loopCount = std::exchange(command.pixelHeight, 0);
+            switch (std::exchange(command.pixelWidth, 0))
+            {
+                case 1: command.animationState = AnimationState::Stop; break;
+                case 2: command.animationState = AnimationState::RunAwaitingFrames; break;
+                case 3: command.animationState = AnimationState::Loop; break;
+                default: command.animationState = AnimationState::Unset; break;
+            }
+            break;
+        case Action::Compose: break;
+        case Action::Query:
+        case Action::Transmit:
+        case Action::TransmitAndDisplay:
+        case Action::Put:
+        case Action::Delete: break;
     }
 
     // NOTE: whether the dimensions a raw pixel transmission needs are actually present is checked by
