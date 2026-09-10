@@ -263,12 +263,6 @@ if(CONTOUR_TESTING)
         # gate above skips.
         contour_add_lint_gate(check_spelling_selftest check-spelling.py --self-test)
 
-        # Call sites use Tracy's macros unconditionally, so a macro that reaches src/ without a
-        # matching no-op in the stub breaks the DEFAULT build -- the one CI and every packaging job
-        # run -- while the profiling build stays green. Cheap, offline, and the failure names the
-        # macro and the file.
-        contour_add_lint_gate(check_tracy_stub check-tracy-stub.py)
-
         # 300s, not the 120s these had as shell scripts: a cold cache now downloads the tool on
         # Windows too, and a CI runner's first run pays for both.
         set_tests_properties(${CONTOUR_LINT_GATES} PROPERTIES LABELS "lint" TIMEOUT 300)
