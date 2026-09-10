@@ -55,6 +55,8 @@
 #include <regex>
 #include <span>
 
+#include <tracy/Tracy.hpp>
+
 #ifdef __OpenBSD__
     #include <pthread_np.h>
     #define pthread_setname_np pthread_set_name_np
@@ -620,6 +622,7 @@ void TerminalSession::bufferChanged(vtbackend::ScreenType type)
 
 void TerminalSession::screenUpdated()
 {
+    ZoneScoped;
     if (!_display)
         return;
 

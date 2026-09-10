@@ -529,6 +529,7 @@ endif()
 # the configuration model.
 target_link_libraries(contour_core
     PUBLIC
+    contour::tracy
     contour_command
     contour_cli
     vtworkspace

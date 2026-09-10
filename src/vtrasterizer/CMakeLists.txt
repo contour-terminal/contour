@@ -59,6 +59,12 @@ target_sources(vtrasterizer PRIVATE ${_source_files} PUBLIC ${_header_files})
 target_include_directories(vtrasterizer PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(vtrasterizer PUBLIC vtbackend crispy::core text_shaper contour::tracy)
 
+# The per-cell zones are off by default: they are cheap to record and expensive to read back, so a
+# trace carrying them can take minutes and gigabytes of RSS to open. @see TracyCellZone.hpp.
+if(CONTOUR_TRACY_CELL_ZONES)
+    target_compile_definitions(vtrasterizer PRIVATE CONTOUR_TRACY_CELL_ZONES)
+endif()
+
 if(CONTOUR_TESTING)
     add_executable(vtrasterizer_test)
     target_sources(vtrasterizer_test PRIVATE ${_test_files})

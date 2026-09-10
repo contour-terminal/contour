@@ -3,6 +3,7 @@
 
 #include <vtrasterizer/GridMetrics.hpp>
 #include <vtrasterizer/Pixmap.hpp>
+#include <vtrasterizer/TracyCellZone.hpp>
 #include <vtrasterizer/UnderlineGeometry.hpp>
 #include <vtrasterizer/shared_defines.h>
 
@@ -103,6 +104,7 @@ void DecorationRenderer::renderLine(vtbackend::RenderLine const& line)
 
 void DecorationRenderer::renderCell(vtbackend::RenderCell const& cell)
 {
+    CONTOUR_TRACY_CELL_ZONE();
     auto const scale = cell.attributes.lineFlags.test(vtbackend::LineFlag::DoubleWidth) ? 2 : 1;
     for (auto const& mapping: CellFlagDecorationMappings)
         if (cell.attributes.flags & mapping.first)

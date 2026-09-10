@@ -176,6 +176,7 @@ option(CONTOUR_TRACY_TOOLS "Builds Tracy's capture and csvexport CLI tools [defa
 option(CONTOUR_TRACY_GUI "Builds the Tracy profiler GUI [default: OFF]" OFF)
 option(CONTOUR_TRACY_GUI_X11 "Builds the Tracy GUI against X11 instead of Wayland [default: OFF]" OFF)
 option(CONTOUR_TRACY_SAMPLING "Tracy captures call stacks of every thread [default: ON]" ON)
+option(CONTOUR_TRACY_CELL_ZONES "Tracy records a zone per cell per renderer; makes traces very large [default: OFF]" OFF)
 if(CONTOUR_BUILD_STATIC)
     set(BUILD_SHARED_LIBS OFF)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)

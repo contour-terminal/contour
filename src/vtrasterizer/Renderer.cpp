@@ -881,6 +881,9 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 void Renderer::renderCells(std::span<vtbackend::RenderCell const> cells, int yPixelOffset)
 {
     ZoneScoped;
+    // Instrumentation: the span this pass actually walks, to reconcile the per-cell zone counts
+    // against the render buffer's own size.
+    ZoneValue(static_cast<int64_t>(cells.size()));
     for (auto const& cell: cells)
     {
         try
