@@ -816,6 +816,36 @@ TEST_CASE("Terminal.DECNCSM", "[terminal]")
     }
 }
 
+TEST_CASE("Terminal.SynchronizedOutputTimesOut", "[terminal]")
+{
+    // An application that opens a synchronized block and never closes it must not be able to freeze
+    // the display. Rendering is suppressed while the block is young and resumes once it has outlived
+    // Settings::synchronizedOutputTimeout, even though the mode itself is still set -- DECRQM must
+    // still report it enabled, because that is what the application asked for.
+    constexpr auto BatchOn = "\033[?2026h"sv;
+
+    auto const now = chrono::steady_clock::now();
+    auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+
+    mc.writeToScreen(BatchOn);
+    mc.writeToScreen("Hello");
+    mc.terminal.tick(now);
+    mc.terminal.ensureFreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mc).empty());
+    CHECK(mc.terminal.isModeEnabled(vtbackend::DECMode::BatchedRendering));
+    CHECK(mc.terminal.isRenderingSuppressed());
+
+    // A zero timeout expires the block that is already open, without the application closing it.
+    mc.terminal.settings().synchronizedOutputTimeout = chrono::milliseconds { 0 };
+
+    CHECK(mc.terminal.isModeEnabled(vtbackend::DECMode::BatchedRendering));
+    CHECK_FALSE(mc.terminal.isRenderingSuppressed());
+
+    mc.terminal.tick(now);
+    mc.terminal.ensureFreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mc) == "Hello");
+}
+
 TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
 {
     constexpr auto BatchOn = "\033[?2026h"sv;

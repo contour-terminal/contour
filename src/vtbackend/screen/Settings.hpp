@@ -101,6 +101,21 @@ struct Settings
     UserPreferredSupplementalSet userPreferredSupplementalSet = DefaultUserPreferredSupplementalSet;
 
     std::chrono::milliseconds cursorBlinkInterval = std::chrono::milliseconds { 500 };
+
+    /// How long synchronized output (DECSET 2026) may suppress rendering before the terminal draws
+    /// anyway.
+    ///
+    /// The mode exists so an application can present a frame atomically, and honouring it is
+    /// correct. Honouring it without limit is not: an application that opens a block and then
+    /// stalls, blocks on a read, or dies before closing it freezes the display with no recovery
+    /// path, because nothing else in the terminal will ask for a repaint while it is open. Other
+    /// terminals cap it for the same reason and the mode's own proposal recommends a timeout.
+    ///
+    /// 150ms is well clear of a legitimate frame -- measured synchronized blocks from notcurses
+    /// average 34.9ms, two refresh intervals -- so this bounds the pathological case without
+    /// truncating the normal one. It is deliberately not a throughput knob: lowering it does not
+    /// make a well-behaved application render faster.
+    std::chrono::milliseconds synchronizedOutputTimeout { 150 };
     RefreshRate refreshRate = { 30.0 };
 
     // Defines the time to wait before the terminal executes the line feed (LF) command.

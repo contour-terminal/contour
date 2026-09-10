@@ -1204,7 +1204,7 @@ void Screen::linefeed()
     {
         _terminal->unlock();
         auto const _ = crispy::Finally([&]() { _terminal->lock(); });
-        if (!_terminal->isModeEnabled(DECMode::BatchedRendering))
+        if (!_terminal->isRenderingSuppressed())
             _terminal->screenUpdated();
         sleepFor(_terminal->settings().smoothLineScrolling);
     }

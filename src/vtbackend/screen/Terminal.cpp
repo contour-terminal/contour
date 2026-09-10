@@ -443,7 +443,7 @@ bool Terminal::processInputOnce()
         // Sampled inside the lock: _modes is written by the GUI thread too (a Vi-mode toggle sets
         // DECMode::VisibleCursor under this lock), and screenUpdated() below must stay OUTSIDE it
         // because it calls back into the GUI.
-        batchedRendering = _modes.enabled(DECMode::BatchedRendering);
+        batchedRendering = isRenderingSuppressed();
     }
 
     if (!batchedRendering)
@@ -478,7 +478,7 @@ bool Terminal::refreshRenderBuffer(bool locked)
 
 bool Terminal::ensureFreshRenderBuffer(bool locked)
 {
-    if (!_renderBufferUpdateEnabled)
+    if (isRenderingSuppressed())
     {
         // _renderBuffer.state = RenderBufferState::WaitingForRefresh;
         return false;
@@ -698,6 +698,10 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     applyHintOverlay(output, mainScreenLine);
     updateCursorMotionAnimation(output);
     applyScreenTransitionBlending(output);
+
+    // Instrumentation: how many RenderCells this frame carries, against the page it was built from.
+    // The two should be close; they are not, and finding out why is an open backlog item.
+    ZoneValue(static_cast<int64_t>(output.cells.size()));
 }
 
 void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
@@ -1684,7 +1688,7 @@ void Terminal::writeToScreen(string_view vtStream)
         processPendingLocalEcho();
 
         // Sampled inside the lock, for the reason processInputOnce() gives at the same test.
-        batchedRendering = _modes.enabled(DECMode::BatchedRendering);
+        batchedRendering = isRenderingSuppressed();
     }
 
     if (!batchedRendering)
@@ -3033,7 +3037,7 @@ void Terminal::scrollbackBufferCleared()
 void Terminal::screenUpdated()
 {
     ZoneScoped;
-    if (!_renderBufferUpdateEnabled)
+    if (isRenderingSuppressed())
         return;
 
     if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
@@ -3048,7 +3052,7 @@ void Terminal::screenUpdated()
 
 void Terminal::renderBufferUpdated()
 {
-    if (!_renderBufferUpdateEnabled)
+    if (isRenderingSuppressed())
         return;
 
     if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
@@ -4654,23 +4658,51 @@ void Terminal::markRegionDirty(Rect area) noexcept
     //     clearSelection();
 }
 
+bool Terminal::isRenderingSuppressed() const noexcept
+{
+    // Keyed on the render-buffer flag rather than the mode register: both are set by the same
+    // transition, but only this one is atomic, and this predicate is read from the render thread.
+    if (_renderBufferUpdateEnabled.load(std::memory_order_acquire))
+        return false;
+
+    return (std::chrono::steady_clock::now() - _synchronizedOutputSince.load(std::memory_order_acquire))
+           < _settings.synchronizedOutputTimeout;
+}
+
 void Terminal::synchronizedOutput(bool enabled)
 {
+    ZoneScoped;
     _renderBufferUpdateEnabled = !enabled;
     if (enabled)
+    {
+        _synchronizedOutputSince.store(std::chrono::steady_clock::now(), std::memory_order_release);
         return;
+    }
 
     tick(chrono::steady_clock::now());
 
     auto const diff = _currentTime - _renderBuffer.lastUpdate;
     if (diff < _refreshInterval.value)
+    {
+        // Instrumentation only: this is the throttle doing its job, and it is the expected outcome
+        // for most block ends. Named so a capture can tell it apart from the branch below.
+        ZoneScopedN("syncOut.dropped.throttled");
         return;
+    }
 
     if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
+    {
+        // Instrumentation only. This branch drops a repaint that the throttle would have allowed,
+        // and nothing re-arms it -- @see the lost-wakeup entry in docs/internals/performance-backlog.md.
+        ZoneScopedN("syncOut.dropped.trySwap");
         return;
+    }
 
-    refreshRenderBuffer(true);
-    _eventListener.screenUpdated();
+    {
+        ZoneScopedN("syncOut.refreshed");
+        refreshRenderBuffer(true);
+        _eventListener.screenUpdated();
+    }
 }
 
 void Terminal::onBufferScrolled(LineCount n) noexcept
