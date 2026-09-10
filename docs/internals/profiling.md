@@ -97,6 +97,55 @@ Two things to know when reading it:
   parser, not a double count.
 - A zone that was never entered is simply absent from the export.
 
+### Self time, and counting frames
+
+Two flags decide what a number means, and mixing them up produces confident nonsense:
+
+- **`-e` gives self time.** Nested totals double-count: `shapeRunWithFallback` once reported 81
+  seconds in a 30-second capture because it recurses. Reach for `-e` whenever the question is "where
+  did the time go".
+- **`-u` gives one row per event**, which is the only way to count *how many* frames missed the
+  budget rather than look at a mean. `prepareFrameRhi`'s duration is the frame's CPU cost, and a
+  frame is `prepareFrameRhi` → `paint` → `renderImpl` → `recordFrameRhi`, with the only `FrameMark`
+  at the end of `recordFrameRhi`.
+- **`-p` (with `-u`) exports plot data**, which is how `pty.read.bytes` answers what the PTY actually
+  delivered.
+
+Per-cell zones are compiled out unless `CONTOUR_TRACY_CELL_ZONES=ON` (@see
+[Options](#options)). They cost about 20 ns each to record and nothing to leave off, but a
+full-screen workload emits tens of millions of them, and every export has to decode all of them to
+answer a question about frames.
+
+### Measuring pipeline latency
+
+Frame *cost* and pipeline *latency* are different questions and need different arithmetic. Latency
+is a join over two zone streams: for each `parseFragment` event, the first `prepareFrameRhi` that
+**starts after it ends** is the earliest frame that could carry that output, and the delta is the
+latency. `tracy-csvexport -u -f <zone>` gives the two streams cheaply — the filter matters, since a
+`notcurses-demo` capture can hold tens of millions of zones.
+
+Two traps, both easy to fall into:
+
+- **`parseFragment` fires on the GUI thread too.** `Terminal::updateIndicatorStatusLine` re-parses
+  the three status-line segments through `writeToScreenInternal`, so a capture has three GUI-thread
+  `parseFragment` events per frame that are *output of* the frame, not input to it. Counting them as
+  PTY input turns a p50 of 0.14 ms into 16.6 ms, because each is matched to the *next* frame. Filter
+  on the thread: the parser thread is the one that is not `prepareFrameRhi`'s.
+- **`parseFragment` nests**, so drop any event contained in the previous one on the same thread.
+
+The result is a lower bound on felt latency: it ends at the frame's *start*, so it excludes the
+frame's own CPU cost, GPU time, the swap and the compositor, and it begins at the PTY parse, so it
+excludes the keyboard leg entirely.
+
+### Two rules worth stating outright
+
+- **Do not record on a busy machine**, and prefer a paired run — the same workload recorded on both
+  builds back to back — over a solo run on a quiet one. Background load that is common to both
+  cancels; load that differs between them does not.
+- **A workload driven by synchronized output does not have a frame rate you can read off our frame
+  count.** Count block closes (`syncOut.refreshed` + `syncOut.dropped.*`) instead: the cap can expire
+  mid-body and draw the same application frame several times.
+
 ## Zone and plot inventory
 
 ### Parser thread (`Terminal.Loop`)
