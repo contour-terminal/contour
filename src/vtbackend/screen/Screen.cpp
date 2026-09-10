@@ -40,12 +40,15 @@
 #include <cstring>
 #include <iostream>
 #include <iterator>
+#include <numeric>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <sstream>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 
@@ -5449,8 +5452,38 @@ void Screen::deleteKittyGraphics(kitty_graphics::Command const& command)
     auto const freesData = static_cast<bool>(std::isupper(static_cast<unsigned char>(command.deleteTarget)));
     auto const target = static_cast<char>(std::tolower(static_cast<unsigned char>(command.deleteTarget)));
 
-    // 'i' names one image, by id; 'a' (and everything Contour does not implement, such as the
-    // positional targets) clears every placement.
+    // `d=f`/`d=F` deletes an image's animation frames, leaving the image itself. It reached the
+    // catch-all below before frames existed, which then cleared every image in the terminal and still
+    // answered OK.
+    if (target == 'f')
+    {
+        if (command.imageId == 0)
+            return;
+        auto const animation = _kittyAnimations.find(command.imageId);
+        if (animation == _kittyAnimations.end())
+            return;
+        // Frames only. The image and whatever is on screen survive -- this verb exists so a client can
+        // reclaim frame memory while keeping the picture up, and clearing the cells would force the
+        // re-transmission it is trying to avoid. What IS showing may be a frame rather than the base,
+        // so put the base back under it before the frames go.
+        if (auto const stored = _kittyImages.find(command.imageId); stored != _kittyImages.end())
+            for (auto const& frame: animation->second.frames)
+                showKittyFrame(frame, stored->second);
+        _kittyAnimations.erase(animation);
+        return;
+    }
+
+    // Only 'a' means "everything". The positional targets Contour does not implement ('n', 'p', 'c',
+    // 'z', 'r', ...) must do NOTHING rather than fall through to clearing the terminal: destroying
+    // every image because one delete verb is unimplemented is far worse than ignoring it.
+    if (target != 'i' && target != 'a')
+        return;
+
+    // `d=i` with no `i=` names id 0, which no image can have, so it deletes nothing. Falling through
+    // would reach the wholesale clear below and destroy every image in the terminal.
+    if (target == 'i' && command.imageId == 0)
+        return;
+
     auto const image = [&]() -> std::shared_ptr<Image const> {
         if (target != 'i' || command.imageId == 0)
             return {};
@@ -5461,15 +5494,56 @@ void Screen::deleteKittyGraphics(kitty_graphics::Command const& command)
     if (target == 'i' && command.imageId != 0 && !image)
         return; // Nothing transmitted under that id; nothing placed from it either.
 
+    // Once a frame has been made current the cells hold that frame, not the base image, so matching
+    // on the base alone leaves the placement on screen -- and, for an upper-case delete, leaves the
+    // frame alive in the grid where no quota can see it.
+    if (target == 'i' && command.imageId != 0)
+    {
+        removeKittyPlacementsOf(command.imageId);
+        if (freesData)
+        {
+            _kittyImages.erase(command.imageId);
+            _kittyAnimations.erase(command.imageId);
+        }
+        return;
+    }
+
     removeKittyPlacements(image);
 
     if (!freesData)
         return;
 
-    if (target == 'i' && command.imageId != 0)
-        _kittyImages.erase(command.imageId);
-    else
-        _kittyImages.clear();
+    // The frames go with the image they were composited from: they are full copies of it, and far
+    // larger than the map holding them, so freeing the image without them reclaims almost nothing.
+    _kittyImages.clear();
+    _kittyAnimations.clear();
+}
+
+void Screen::removeKittyPlacementsOf(uint32_t imageId)
+{
+    // Every frame counts as "this image": after an advance the cells hold a frame Image, and matching
+    // only the base would skip them.
+    auto wanted = std::unordered_set<Image const*> {};
+    if (auto const image = _kittyImages.find(imageId); image != _kittyImages.end())
+        wanted.insert(image->second.get());
+    if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
+        for (auto const& frame: animation->second.frames)
+            if (frame)
+                wanted.insert(frame.get());
+
+    for (auto const line: std::views::iota(0, *pageSize().lines))
+    {
+        for (auto const column: std::views::iota(0, *pageSize().columns))
+        {
+            auto cell = at(LineOffset(line), ColumnOffset(column));
+            auto const fragment = cell.imageFragment();
+            if (!fragment || !wanted.contains(fragment->rasterizedImage().imagePointer().get()))
+                continue;
+            cell.clearImageFragment();
+            _terminal->markCellDirty(
+                CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) });
+        }
+    }
 }
 
 void Screen::resetKittyState() noexcept
@@ -5481,6 +5555,9 @@ void Screen::resetKittyState() noexcept
     _kittyChunkedPayload.clear();
     _kittyChunkedCommand.reset();
     _kittyImages.clear();
+    // The frames are full copies of the image, and far larger than the map holding them. Leaving them
+    // behind would make RIS reclaim the base image and none of the animation built on it.
+    _kittyAnimations.clear();
     _terminal->kittyClipboardWrite().clear();
     _terminal->kittyClipboardWriteOpen() = false;
 }
@@ -5553,18 +5630,28 @@ void Screen::processKittyGraphics(std::string_view body)
                 replyKittyGraphics(command, "ENOENT:no such image");
                 return;
             }
-            renderKittyImage(command, it->second);
+            // The image's CURRENT frame, not its root: placing an animated image after advancing it
+            // would otherwise show frame 1 while the terminal still records a later frame as current,
+            // and a subsequent a=a for that same frame would be a no-op from the client's view.
+            auto const frame = [&] {
+                auto const animation = _kittyAnimations.find(command.imageId);
+                if (animation == _kittyAnimations.end() || animation->second.currentFrame == 0
+                    || animation->second.currentFrame > animation->second.frames.size())
+                    return it->second;
+                return animation->second.frames[animation->second.currentFrame - 1];
+            }();
+            renderKittyImage(command, frame);
             replyKittyGraphics(command, "OK");
             return;
         }
         case Action::Transmit:
         case Action::TransmitAndDisplay: break;
-        case Action::Frame:
-        case Action::Animate:
+        case Action::Frame: transmitKittyFrame(command); return;
+        case Action::Animate: controlKittyAnimation(command); return;
         case Action::Compose:
-            // Animation is not implemented. Say so rather than silently accepting frames that will
-            // never be shown.
-            replyKittyGraphics(command, "ENOTSUP:animation not supported");
+            // Composing one frame onto another is a separate operation from building a frame, and
+            // nothing observed in the wild uses it. Say so rather than silently accepting it.
+            replyKittyGraphics(command, "ENOTSUP:frame composition not supported");
             return;
     }
 
@@ -5614,11 +5701,15 @@ void Screen::processKittyGraphics(std::string_view body)
         // Ids are 32-bit, so without a quota an application can park billions of decoded images in
         // the terminal. Refusing is preferable to evicting: the whole point of storing an image is
         // that a later `a=p` can place it, and silently dropping one turns that into ENOENT.
-        auto const stored = std::accumulate(
-            _kittyImages.begin(), _kittyImages.end(), size_t { 0 }, [&](size_t sum, auto const& entry) {
-                return entry.first == command.imageId ? sum : sum + entry.second->data().size();
-            });
-        if (stored + image->data().size() > MaxStoredImageBytes)
+        // The same accounting the frame path uses. Two independent sums, each blind to the other's
+        // bytes, let resident memory reach roughly twice the documented cap.
+        // The frames go first: they were composited from the image being replaced and describe
+        // nothing once it is gone, so billing the new image against bytes that are about to be freed
+        // refuses a re-transmission that in fact fits.
+        _kittyAnimations.erase(command.imageId);
+        auto const replaced = _kittyImages.find(command.imageId);
+        auto const replacedBytes = replaced != _kittyImages.end() ? replaced->second->data().size() : 0;
+        if (storedKittyBytes() - replacedBytes + image->data().size() > MaxStoredImageBytes)
         {
             replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
             return;
@@ -5628,6 +5719,402 @@ void Screen::processKittyGraphics(std::string_view body)
 
     if (command.action == Action::TransmitAndDisplay)
         renderKittyImage(command, image);
+
+    replyKittyGraphics(command, "OK");
+}
+
+size_t Screen::storedKittyBytes() const
+{
+    // Counted by distinct Image, not by vector slot: frame 1 aliases the stored image, and a gap in
+    // the frame numbering aliases frame 1, so charging every slot would bill one image many times and
+    // refuse legitimate frames with ENOSPC.
+    auto seen = std::unordered_set<Image const*> {};
+    auto total = size_t { 0 };
+    for (auto const& [id, image]: _kittyImages)
+        if (image && seen.insert(image.get()).second)
+            total += image->data().size();
+    for (auto const& [id, animation]: _kittyAnimations)
+        for (auto const& frame: animation.frames)
+            if (frame && seen.insert(frame.get()).second)
+                total += frame->data().size();
+    return total;
+}
+
+Screen::KittyAnimation* Screen::kittyAnimationFor(uint32_t imageId)
+{
+    // Every transmitted image already has a root frame in this protocol -- frame 1 IS the image -- so
+    // an animation exists as soon as the image does. Materialising it here rather than at the first
+    // a=f is what makes `a=a,i=N,r=1,z=48` (the spec's own example for setting the root gap) legal
+    // before any frame has been sent.
+    auto const image = _kittyImages.find(imageId);
+    if (image == _kittyImages.end())
+        return nullptr;
+
+    auto& animation = _kittyAnimations[imageId];
+    if (animation.frames.empty())
+    {
+        animation.frames.push_back(image->second);
+        animation.gapsMilliseconds.push_back(0);
+    }
+    return &animation;
+}
+
+void Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
+                            std::shared_ptr<Image const> const& next)
+{
+    // Deliberately NOT driven from a recorded placement. A placement is the fragments in the cells,
+    // and the cells move: they scroll in either direction, are inserted and deleted, are erased, and
+    // are reflowed by a resize. Tracking coordinates alongside them meant every one of those paths
+    // had to remember to keep the record in step, and the ones that did not produced frames stamped
+    // over live text. Finding the fragments where they actually are cannot drift: if the image was
+    // scrolled away, erased or overwritten, there is nothing to find and nothing happens.
+    if (previous == next || !previous || !next)
+        return;
+
+    auto replacement = std::shared_ptr<RasterizedImage> {};
+    for (auto const line: std::views::iota(0, *pageSize().lines))
+    {
+        for (auto const column: std::views::iota(0, *pageSize().columns))
+        {
+            auto cell = at(LineOffset(line), ColumnOffset(column));
+            auto const fragment = cell.imageFragment();
+            if (!fragment || fragment->rasterizedImage().imagePointer() != previous)
+                continue;
+
+            // Built from the fragment already on screen, so the new frame inherits the geometry,
+            // alignment and gap colour the placement was made with -- rather than whatever the cursor
+            // happens to carry now, which would repaint the letterbox in the current SGR background
+            // and stamp the current hyperlink across every covered cell.
+            if (!replacement)
+            {
+                auto const& previousRaster = fragment->rasterizedImage();
+                replacement = std::make_shared<RasterizedImage>(next,
+                                                                previousRaster.alignmentPolicy(),
+                                                                previousRaster.resizePolicy(),
+                                                                previousRaster.defaultColor(),
+                                                                previousRaster.cellSpan(),
+                                                                previousRaster.cellSize(),
+                                                                previousRaster.layer(),
+                                                                previousRaster.imageOffset(),
+                                                                previousRaster.imageSubSize());
+            }
+            cell.setImageFragment(replacement, fragment->offset());
+            _terminal->markCellDirty(
+                CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) });
+        }
+    }
+}
+
+namespace
+{
+    /// Where a transmitted frame rectangle lands inside the image it belongs to.
+    struct KittyRectangle
+    {
+        size_t imageWidth;
+        uint32_t x;
+        uint32_t y;
+        size_t width;
+        size_t height;
+        size_t bytesPerPixel;
+    };
+
+    /// Writes @p pixmap into @p data at @p rect, blending or overwriting per @p mode.
+    void compositeKittyRectangle(Image::Data& data,
+                                 Image::Data const& pixmap,
+                                 KittyRectangle const& rect,
+                                 kitty_graphics::CompositionMode mode)
+    {
+        for (auto const row: std::views::iota(size_t { 0 }, rect.height))
+        {
+            auto const sourceOffset = row * rect.width * rect.bytesPerPixel;
+            auto const destOffset =
+                ((((static_cast<size_t>(rect.y) + row) * rect.imageWidth) + rect.x) * rect.bytesPerPixel);
+            if (mode == kitty_graphics::CompositionMode::Replace || rect.bytesPerPixel != 4)
+            {
+                std::ranges::copy(
+                    std::views::counted(pixmap.begin() + static_cast<ptrdiff_t>(sourceOffset),
+                                        static_cast<ptrdiff_t>(rect.width * rect.bytesPerPixel)),
+                    data.begin() + static_cast<ptrdiff_t>(destOffset));
+                continue;
+            }
+            // Source-over, which is what the protocol asks for when `X` is absent. The destination is not
+            // assumed opaque: a frame's default canvas is `Y=0`, fully transparent, and the premultiplied
+            // shortcut would darken every pixel composited onto it.
+            for (auto const column: std::views::iota(size_t { 0 }, rect.width))
+            {
+                auto const src = std::span { pixmap }.subspan(sourceOffset + (column * rect.bytesPerPixel),
+                                                              rect.bytesPerPixel);
+                auto const dst = std::span { data }.subspan(destOffset + (column * rect.bytesPerPixel),
+                                                            rect.bytesPerPixel);
+                auto const srcAlpha = static_cast<unsigned>(src[3]);
+                auto const dstAlpha = static_cast<unsigned>(dst[3]);
+                auto const outAlpha = srcAlpha + (dstAlpha * (255u - srcAlpha) / 255u);
+                for (auto const channel: std::views::iota(size_t { 0 }, size_t { 3 }))
+                {
+                    auto const weighted =
+                        (static_cast<unsigned>(src[channel]) * srcAlpha)
+                        + (static_cast<unsigned>(dst[channel]) * dstAlpha * (255u - srcAlpha) / 255u);
+                    // Clamped, not merely divided: the two truncations round at different scales (alpha,
+                    // and channel times alpha), so the quotient can reach 256 and wrap a near-white result
+                    // to black. A faint source over an opaque base -- a fade-in -- hits this squarely.
+                    dst[channel] =
+                        static_cast<uint8_t>(outAlpha != 0 ? std::min(weighted / outAlpha, 255u) : 0u);
+                }
+                dst[3] = static_cast<uint8_t>(outAlpha);
+            }
+        }
+    }
+} // namespace
+
+void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
+{
+    using namespace kitty_graphics;
+
+    // A frame carries a payload exactly as a transmission does, so it owes the same honest answers
+    // about how that payload arrives: without this, `a=f,o=z` is refused for the size its compressed
+    // payload happens to have rather than for being compressed, and one that happened to match the
+    // expected byte count would be composited as raw pixels.
+    if (command.medium != Medium::Direct)
+    {
+        replyKittyGraphics(command, "ENOTSUP:only direct transmission is supported");
+        return;
+    }
+    if (command.compression != Compression::None)
+    {
+        replyKittyGraphics(command, "ENOTSUP:compressed payloads are not supported");
+        return;
+    }
+
+    auto const stored = _kittyImages.find(command.imageId);
+    if (stored == _kittyImages.end())
+    {
+        replyKittyGraphics(command, "ENOENT:no such image");
+        return;
+    }
+
+    auto const& base = *stored->second;
+    auto const bpp = static_cast<size_t>(bytesPerPixel(base.format()));
+    if (bpp == 0)
+    {
+        replyKittyGraphics(command, "ENOTSUP:only raw pixel frames are supported");
+        return;
+    }
+
+    // `f=` is not merely unused here, it is a claim about the payload's layout. Silently reading
+    // 3-byte pixels as 4-byte ones (or a PNG file's header as pixels) is exactly the reinterpretation
+    // the medium and compression checks above exist to prevent.
+    auto const declared = [&]() -> std::optional<ImageFormat> {
+        switch (command.format)
+        {
+            case Format::Rgb: return ImageFormat::RGB;
+            case Format::Rgba: return ImageFormat::RGBA;
+            case Format::Png: return ImageFormat::PNG;
+        }
+        return std::nullopt;
+    }();
+    if (command.formatSpecified && declared != base.format())
+    {
+        replyKittyGraphics(command, "EINVAL:frame format does not match the image");
+        return;
+    }
+
+    auto const imageWidth = static_cast<size_t>(unbox<unsigned>(base.size().width));
+    auto const imageHeight = static_cast<size_t>(unbox<unsigned>(base.size().height));
+
+    // An absent `s=`/`v=` means the whole image, which is the natural spelling for a frame that
+    // replaces everything -- refusing it would reject the common case.
+    auto const rectWidth = command.pixelWidth != 0 ? static_cast<size_t>(command.pixelWidth) : imageWidth;
+    auto const rectHeight = command.pixelHeight != 0 ? static_cast<size_t>(command.pixelHeight) : imageHeight;
+
+    // The rectangle is written into a buffer sized for the whole image, so a rectangle that runs past
+    // an edge is a write past the end rather than a clipped draw.
+    if (static_cast<size_t>(command.sourceX) + rectWidth > imageWidth
+        || static_cast<size_t>(command.sourceY) + rectHeight > imageHeight)
+    {
+        replyKittyGraphics(command, "EINVAL:frame rectangle does not fit the image");
+        return;
+    }
+
+    // Decoded into bytes rather than kept as the std::string base64::decode() returns: `char` is
+    // signed here, so reading a pixel through it turns an opaque 0xFF alpha into 4294967295 and the
+    // blend arithmetic below into nonsense.
+    auto const decoded = crispy::base64::decode(command.payload);
+    auto const pixmap = Image::Data { decoded.begin(), decoded.end() };
+    if (pixmap.size() != rectWidth * rectHeight * bpp)
+    {
+        replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
+        return;
+    }
+
+    // Reads go through the existing entry, if any; the animation is created only once every check
+    // below has passed. Materialising it here would leave a rejected a=f having built one, which the
+    // delete verbs and controlKittyAnimation both take as proof that frames exist.
+    auto const existing = _kittyAnimations.find(command.imageId);
+    auto const frameCount =
+        existing != _kittyAnimations.end() ? static_cast<uint32_t>(existing->second.frames.size()) : 1u;
+    auto const frameAt = [&](uint32_t oneBased) -> std::shared_ptr<Image const> {
+        if (oneBased == 0)
+            return nullptr;
+        if (existing == _kittyAnimations.end())
+            // Only the root frame exists yet, and it is the stored image.
+            return oneBased == 1 ? stored->second : nullptr;
+        return oneBased <= existing->second.frames.size() ? existing->second.frames[oneBased - 1] : nullptr;
+    };
+
+    // `r=` names the frame being edited; absent, a new one is appended. Naming a frame beyond the
+    // next would otherwise fabricate every number in between as an alias of frame 1 and report
+    // success for frames the client never sent -- reaching MaxAnimationFrames in one escape sequence.
+    auto const target = command.targetFrame != 0 ? command.targetFrame : frameCount + 1;
+    if (target > frameCount + 1)
+    {
+        replyKittyGraphics(command, "ENOENT:no such frame");
+        return;
+    }
+    if (target > MaxAnimationFrames)
+    {
+        replyKittyGraphics(command, "ENOSPC:too many animation frames");
+        return;
+    }
+
+    if (command.baseFrame != 0 && !frameAt(command.baseFrame))
+    {
+        replyKittyGraphics(command, "ENOENT:no such frame");
+        return;
+    }
+
+    // The canvas the rectangle is composited onto. The spec makes `c=` the source only when a frame
+    // is being CREATED; when `r=` names one that already exists, that frame is the canvas. Preferring
+    // `c=` there silently discards earlier blocks of a multi-rectangle frame, which is the natural
+    // shape when every block comes from one template.
+    auto data = Image::Data {};
+    if (auto const edited = frameAt(target))
+        data = edited->data();
+    else if (auto const from = command.baseFrame != 0 ? frameAt(command.baseFrame) : nullptr)
+        data = from->data();
+    else
+    {
+        data.resize(imageWidth * imageHeight * bpp);
+        for (auto const i: std::views::iota(size_t { 0 }, imageWidth * imageHeight))
+            for (auto const channel: std::views::iota(size_t { 0 }, bpp))
+                // `Y=` is a 32-bit RGBA literal, most significant byte first.
+                data[(i * bpp) + channel] =
+                    static_cast<uint8_t>((command.frameBackground >> (8 * (3 - channel))) & 0xFFu);
+    }
+
+    if (data.size() != imageWidth * imageHeight * bpp)
+    {
+        replyKittyGraphics(command, "EINVAL:frame does not match the image geometry");
+        return;
+    }
+
+    compositeKittyRectangle(data,
+                            pixmap,
+                            KittyRectangle { .imageWidth = imageWidth,
+                                             .x = command.sourceX,
+                                             .y = command.sourceY,
+                                             .width = rectWidth,
+                                             .height = rectHeight,
+                                             .bytesPerPixel = bpp },
+                            command.compositionMode);
+
+    auto frame = _terminal->imagePool().create(base.format(), base.size(), std::move(data));
+
+    // Frames are full copies of the image, so a frame count alone bounds nothing: 128 MiB of base
+    // images at 128 frames each is 16 GiB of pixels. Charged against the same quota the stored images
+    // are, discounting the frame this one replaces so that editing in place -- the most
+    // bandwidth-efficient thing the protocol offers -- is not billed for both copies.
+    auto const replaced = frameAt(target);
+    auto const replacedBytes = replaced && replaced != stored->second ? replaced->data().size() : 0;
+    if (storedKittyBytes() - replacedBytes + frame->data().size() > MaxStoredImageBytes)
+    {
+        replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
+        return;
+    }
+
+    auto const superseded = frameAt(target);
+    auto* animation = kittyAnimationFor(command.imageId);
+    Require(animation != nullptr); // The image was found above.
+    if (target > animation->frames.size())
+    {
+        animation->frames.push_back(std::move(frame));
+        animation->gapsMilliseconds.push_back(DefaultFrameGapMilliseconds);
+    }
+    else
+        animation->frames[target - 1] = std::move(frame);
+
+    // Editing the root frame must move the stored image with it, or _kittyImages keeps the pre-edit
+    // copy alive: a full-size orphan that nothing can reach and no verb can free, billed against the
+    // quota for as long as the image exists.
+    if (target == 1)
+        _kittyImages[command.imageId] = animation->frames[0];
+
+    if (command.frameGapMilliseconds != 0)
+        animation->gapsMilliseconds[target - 1] = command.frameGapMilliseconds;
+
+    // Editing the frame that is currently displayed must show, or the lowest-bandwidth loop the
+    // protocol offers -- keep editing the current frame, never send a=a again -- freezes on screen
+    // while every later delta is silently accepted.
+    if (target == animation->currentFrame)
+        showKittyFrame(superseded, animation->frames[target - 1]);
+
+    replyKittyGraphics(command, "OK");
+}
+
+void Screen::controlKittyAnimation(kitty_graphics::Command const& command)
+{
+    using namespace kitty_graphics;
+
+    // Keyed on the image, not on whether any frame was transmitted: in this protocol every stored
+    // image already has a root frame, and the spec's own example sets ITS gap with a=a before any a=f.
+    // Answering ENOENT there tells a client its image is gone and provokes a full re-transmission --
+    // the bandwidth this feature exists to save.
+    auto* animation = kittyAnimationFor(command.imageId);
+    if (!animation)
+    {
+        replyKittyGraphics(command, "ENOENT:no such image");
+        return;
+    }
+
+    if (command.currentFrame != 0 && command.currentFrame > animation->frames.size())
+    {
+        // Silently ignoring it and answering OK would leave the client believing that frame is shown.
+        replyKittyGraphics(command, "ENOENT:no such frame");
+        return;
+    }
+    if (command.targetFrame != 0 && command.targetFrame > animation->frames.size())
+    {
+        replyKittyGraphics(command, "ENOENT:no such frame");
+        return;
+    }
+
+    if (command.loopCount != 0)
+        animation->loopCount = command.loopCount;
+    if (command.targetFrame != 0 && command.frameGapMilliseconds != 0)
+        animation->gapsMilliseconds[command.targetFrame - 1] = command.frameGapMilliseconds;
+
+    // Applied BEFORE the playback answer below: the keys are independent, nothing stops a client
+    // sending `a=a,c=2,s=3`, and refusing the half we cannot do must not discard the half we can.
+    if (command.currentFrame != 0)
+    {
+        auto const showing =
+            animation->currentFrame != 0 && animation->currentFrame <= animation->frames.size()
+                ? animation->frames[animation->currentFrame - 1]
+                : nullptr;
+        animation->currentFrame = command.currentFrame;
+        showKittyFrame(showing, animation->frames[command.currentFrame - 1]);
+    }
+
+    // Frames advance only when the application says so with `c=`. Nothing here drives them on a
+    // timer, so answering OK to "play" would leave the client believing an animation is running while
+    // the screen holds one frame forever.
+    if (command.animationState == AnimationState::RunAwaitingFrames
+        || command.animationState == AnimationState::Loop)
+    {
+        replyKittyGraphics(command, "ENOTSUP:self-running animation is not supported");
+        return;
+    }
+    if (command.animationState != AnimationState::Unset)
+        animation->state = command.animationState;
 
     replyKittyGraphics(command, "OK");
 }

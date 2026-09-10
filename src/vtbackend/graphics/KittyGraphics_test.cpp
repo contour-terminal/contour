@@ -10,9 +10,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using namespace std::string_view_literals;
 using namespace vtbackend;
@@ -502,3 +504,451 @@ TEST_CASE("KittyGraphics.a_chunked_transmission_of_the_same_size_still_works", "
 
     CHECK(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
 }
+
+// {{{ animation
+TEST_CASE("KittyGraphics.parse.frame_transmit_reinterprets_cell_keys", "[kitty]")
+{
+    // In an animation command the protocol reuses three keys that mean something else everywhere
+    // else: `c` is the frame to copy from, `r` the frame to edit, and `z` the gap in milliseconds --
+    // not columns, rows and z-index. Decoding them as cell geometry would silently place a frame at
+    // the wrong index and give it no delay.
+    auto const command = parseCommand("a=f,i=7,c=2,r=3,z=75,x=4,y=5,s=6,v=8;QUJD"sv);
+    REQUIRE(command.has_value());
+    CHECK(command->action == Action::Frame);
+    CHECK(command->imageId == 7);
+    CHECK(command->baseFrame == 2);
+    CHECK(command->targetFrame == 3);
+    CHECK(command->frameGapMilliseconds == 75);
+    // The rectangle this frame's pixels cover, which keeps its ordinary meaning.
+    CHECK(command->sourceX == 4);
+    CHECK(command->sourceY == 5);
+    CHECK(command->pixelWidth == 6);
+    CHECK(command->pixelHeight == 8);
+    // The cell-geometry fields must be left alone, so nothing downstream reads a frame number as a
+    // column count.
+    CHECK(command->columns == 0);
+    CHECK(command->rows == 0);
+    CHECK(command->zIndex == 0);
+}
+
+TEST_CASE("KittyGraphics.parse.animate_reinterprets_size_keys", "[kitty]")
+{
+    // Animation control overloads two more keys than frame transmission does: `s` is the play state
+    // and `v` the loop count, where everywhere else they are the pixel width and height. Reading
+    // them as dimensions would treat "loop three times" as a 3-pixel-tall image.
+    auto const command = parseCommand("a=a,i=7,s=3,v=4,c=2,r=5,z=60"sv);
+    REQUIRE(command.has_value());
+    CHECK(command->action == Action::Animate);
+    CHECK(command->imageId == 7);
+    CHECK(command->animationState == AnimationState::Loop);
+    CHECK(command->loopCount == 4);
+    CHECK(command->currentFrame == 2);
+    CHECK(command->targetFrame == 5);
+    CHECK(command->frameGapMilliseconds == 60);
+    // Nothing may leak into the geometry fields.
+    CHECK(command->pixelWidth == 0);
+    CHECK(command->pixelHeight == 0);
+    CHECK(command->columns == 0);
+    CHECK(command->rows == 0);
+    CHECK(command->zIndex == 0);
+}
+
+TEST_CASE("KittyGraphics.parse.animate_states", "[kitty]")
+{
+    // s=1 stop, s=2 run but wait for more frames at the end, s=3 run and loop. Absent means unset,
+    // which must not be confused with "stop".
+    CHECK(parseCommand("a=a,i=1,s=1"sv)->animationState == AnimationState::Stop);
+    CHECK(parseCommand("a=a,i=1,s=2"sv)->animationState == AnimationState::RunAwaitingFrames);
+    CHECK(parseCommand("a=a,i=1,s=3"sv)->animationState == AnimationState::Loop);
+    CHECK(parseCommand("a=a,i=1"sv)->animationState == AnimationState::Unset);
+}
+
+namespace
+{
+/// The pixels a placed image is actually showing, read back out of the grid.
+[[nodiscard]] std::vector<uint8_t> placedPixels(MockTerm<vtpty::MockPty>& mock)
+{
+    auto const& cell = mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0));
+    auto const fragment = cell.imageFragment();
+    if (!fragment)
+        return {};
+    auto const& data = fragment->rasterizedImage().image().data();
+    return { data.begin(), data.end() };
+}
+} // namespace
+
+TEST_CASE("KittyGraphics.animation.frame_transmit_is_accepted", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    // A 2x1 RGB image: red, green.
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    (void) mock.terminal.peekInput();
+    mock.terminal.flushInput();
+
+    // Frame 2, copied from frame 1, overwriting the second pixel with blue. Asserting on OK rather
+    // than merely "not ENOTSUP", which would also pass for EINVAL, ENOENT and ENOSPC.
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("OK"));
+}
+
+TEST_CASE("KittyGraphics.animation.a_frame_is_composited_over_its_base", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    REQUIRE(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 0, 255, 0 });
+
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+    // Building a frame must not disturb what is on screen; only a=a changes that.
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 0, 255, 0 });
+
+    // Frame 2 is frame 1 with the second pixel replaced: red, blue.
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 0, 0, 255 });
+}
+
+TEST_CASE("KittyGraphics.animation.alpha_blends_over_the_base_frame", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    // RGBA this time, because the blend path only runs for four-byte pixels.
+    mock.writeToScreen("\033_Ga=T,f=32,i=7,s=2,v=1;/wAA/wD/AP8=\033\\"sv);
+
+    // Half-transparent blue over the opaque green pixel, with no X=1, so it must be composited
+    // rather than copied. Read through a signed char an opaque alpha becomes 4294967295 and the
+    // arithmetic collapses, so this is the case that catches it.
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,x=1,y=0,s=1,v=1;AAD/gA==\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 127, 128, 255 });
+}
+
+TEST_CASE("KittyGraphics.animation.self_running_playback_is_declined", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+    mock.terminal.flushInput();
+
+    // Nothing advances frames on a timer, so answering OK would leave the client believing an
+    // animation is running while the screen holds one frame forever.
+    mock.writeToScreen("\033_Ga=a,i=7,s=3\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
+}
+
+TEST_CASE("KittyGraphics.animation.control_is_legal_before_any_frame", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.terminal.flushInput();
+
+    // Every transmitted image already has a root frame -- the protocol has no command to send frame 1
+    // separately -- so animation control is legal before any a=f. The spec relies on exactly this to
+    // set the root frame's gap. Answering ENOENT tells a client its image is gone and provokes the
+    // full re-transmission this feature exists to avoid.
+    mock.writeToScreen("\033_Ga=a,i=7,c=1\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("OK"));
+    mock.terminal.flushInput();
+
+    // An id that was never transmitted is the real ENOENT.
+    mock.writeToScreen("\033_Ga=a,i=99,c=1\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
+}
+
+TEST_CASE("KittyGraphics.animation.retransmitting_an_id_drops_its_frames", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+
+    // A new image under the same id: the frames composited from the old one describe nothing, and
+    // their geometry need not even match.
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=1,v=1;AP8A\033\\"sv);
+    mock.terminal.flushInput();
+
+    // Only the new image's root frame remains, so frame 2 is gone rather than stale.
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
+}
+
+TEST_CASE("KittyGraphics.animation.a_frame_may_omit_its_dimensions", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.terminal.flushInput();
+
+    // Absent s=/v= means the whole image, which is the natural spelling for a frame that replaces
+    // everything -- refusing it would reject the common case.
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1;AAD//wAA\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("OK"));
+}
+
+TEST_CASE("KittyGraphics.animation.a_compressed_frame_is_refused_as_unsupported", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.terminal.flushInput();
+
+    // Not EINVAL for whatever size the compressed bytes happen to have: a client cannot tell "wrong
+    // byte count" from "I do not implement this", and a payload that happened to match would be
+    // composited as raw pixels.
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,o=z,x=0,y=0,s=1,v=1;eJw=\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("ENOTSUP"));
+}
+
+TEST_CASE("KittyGraphics.animation.a_faint_source_does_not_wrap_the_blend", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    // A nearly-white, mostly-transparent base pixel.
+    mock.writeToScreen("\033_Ga=T,f=32,i=7,s=1,v=1;////Sg==\033\\"sv);
+
+    // A barely-there source over it. The two roundings in the blend disagree, so the quotient reaches
+    // 256 and wraps a near-white result to black -- and a low source alpha is exactly what a fade-in
+    // animation is made of, so this is the common case rather than a corner.
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,x=0,y=0,s=1,v=1;2traAQ==\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    auto const pixels = placedPixels(mock);
+    REQUIRE(pixels.size() == 4);
+    CHECK(pixels[0] >= 250); // white, not black
+}
+
+TEST_CASE("KittyGraphics.animation.a_rejected_frame_creates_no_animation", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+
+    // A rectangle far larger than the image: rejected. Seeding frame 1 before that check would leave
+    // an animation entry behind, and "has frames" is exactly how a=a decides one exists.
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,x=0,y=0,s=99,v=99;AAD/\033\\"sv);
+    mock.terminal.flushInput();
+
+    // The root frame is always there, but the rejected frame 2 must not be.
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
+}
+
+TEST_CASE("KittyGraphics.animation.naming_a_frame_that_does_not_exist_is_refused", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+    mock.terminal.flushInput();
+
+    // Answering OK would leave the client believing frame 5 is on screen.
+    mock.writeToScreen("\033_Ga=a,i=7,c=5\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
+    mock.terminal.flushInput();
+
+    // Likewise for a frame composited over a base that does not exist.
+    mock.writeToScreen("\033_Ga=f,i=7,r=3,c=99,X=1,x=0,y=0,s=1,v=1;AAD/\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
+}
+
+TEST_CASE("KittyGraphics.animation.a_frame_without_r_appends", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+
+    // The protocol's normal streaming spelling: no r=, meaning "create a new frame". It must APPEND,
+    // not overwrite the base -- and it must behave the same whether the image was displayed (a=T,
+    // which records a placement) or merely stored (a=t, which does not).
+    mock.writeToScreen("\033_Ga=f,i=7,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+    mock.terminal.flushInput();
+
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("OK"));
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 0, 0, 255 });
+}
+
+TEST_CASE("KittyGraphics.animation.deleting_frames_keeps_other_images", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=t,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=t,f=24,i=9,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+    mock.terminal.flushInput();
+
+    // d=F means "delete image 7's animation frames". Before frames existed it fell into the
+    // catch-all that cleared every image in the terminal -- and still answered OK.
+    mock.writeToScreen("\033_Ga=d,d=F,i=7\033\\"sv);
+    mock.terminal.flushInput();
+    mock.writeToScreen("\033_Ga=p,i=9\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("OK"));
+}
+
+TEST_CASE("KittyGraphics.animation.an_unimplemented_delete_target_destroys_nothing", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=t,f=24,i=9,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.terminal.flushInput();
+
+    // A positional target Contour does not implement must do nothing, not clear the terminal.
+    mock.writeToScreen("\033_Ga=d,d=Z\033\\"sv);
+    mock.terminal.flushInput();
+    mock.writeToScreen("\033_Ga=p,i=9\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("OK"));
+}
+
+TEST_CASE("KittyGraphics.animation.editing_the_live_frame_shows", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    REQUIRE(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 0, 0, 255 });
+
+    // The lowest-bandwidth loop the protocol offers: keep editing the frame already on screen, never
+    // send a=a again. Without a redraw the animation freezes and every later delta is invisible.
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,X=1,x=0,y=0,s=1,v=1;AP8A\033\\"sv);
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 0, 255, 0, 0, 0, 255 });
+}
+
+TEST_CASE("KittyGraphics.animation.a_deleted_placement_leaves_no_frame_on_screen", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    REQUIRE_FALSE(placedPixels(mock).empty());
+
+    // The cells now hold a FRAME, not the base image, so a delete matching only the base would leave
+    // the image visible -- and for d=I would strand the frame in the grid, outside every quota.
+    mock.writeToScreen("\033_Ga=d,d=i,i=7\033\\"sv);
+    CHECK(placedPixels(mock).empty());
+}
+
+TEST_CASE("KittyGraphics.animation.a_frame_number_beyond_the_next_is_refused", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=t,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.terminal.flushInput();
+
+    // r=128 on a one-frame image would otherwise fabricate 126 aliases of frame 1 in a single escape,
+    // exhausting MaxAnimationFrames while the byte quota sees nothing, and then report frames the
+    // client never sent as displayable.
+    mock.writeToScreen("\033_Ga=f,i=7,r=128,X=1,x=0,y=0,s=1,v=1;AAD/\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("ENOENT"));
+}
+
+TEST_CASE("KittyGraphics.animation.editing_frame_one_is_seen_by_later_reads", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+
+    // Two edits of the root frame, the spec's multi-block idiom. If a read of frame 1 short-circuits
+    // to the stored image, the second edit re-bases on the untouched original and the first is lost.
+    mock.writeToScreen("\033_Ga=f,i=7,r=1,X=1,x=0,y=0,s=1,v=1;AAD/\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=1,X=1,x=1,y=0,s=1,v=1;AP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,c=1\033\\"sv);
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 0, 0, 255, 0, 255, 0 });
+}
+
+TEST_CASE("KittyGraphics.animation.repeating_c_does_not_discard_earlier_blocks", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+
+    // A frame composed from two rectangles, with c= repeated on both because they come from one
+    // template. `c` is the source only when CREATING a frame; once r= names an existing one, that
+    // frame is the canvas -- preferring c would silently drop the first block.
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=0,y=0,s=1,v=1;AAD/\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 0, 0, 255, 0, 255, 0 });
+}
+
+TEST_CASE("KittyGraphics.animation.a_frame_in_another_format_is_refused", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=t,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.terminal.flushInput();
+
+    // f= is a claim about the payload's layout. Four-byte pixels composited as three-byte ones, or a
+    // PNG file's header blended in as pixels, is the reinterpretation the medium and compression
+    // checks already refuse.
+    mock.writeToScreen("\033_Ga=f,f=32,i=7,r=2,c=1,X=1,x=0,y=0,s=1,v=1;AAD/AA==\033\\"sv);
+    CHECK(mock.terminal.peekInput().contains("EINVAL"));
+}
+
+TEST_CASE("KittyGraphics.animation.selecting_a_frame_survives_a_playback_refusal", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+
+    // The keys are independent and nothing makes a client split them. Refusing the half we cannot do
+    // must not discard the half we can.
+    mock.writeToScreen("\033_Ga=a,i=7,c=2,s=3\033\\"sv);
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 0, 0, 255 });
+}
+
+TEST_CASE("KittyGraphics.animation.a_frame_advance_follows_the_cells_when_the_screen_scrolls", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+
+    // Scroll the image down a row. A frame advance must find it where it now IS -- tracking a
+    // coordinate alongside meant every path that moves cells had to remember to keep it in step.
+    mock.writeToScreen("\033[H\033[1L"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+
+    auto const& cell = mock.terminal.primaryScreen().at(LineOffset(1), ColumnOffset(0));
+    auto const fragment = cell.imageFragment();
+    REQUIRE(fragment != nullptr);
+    auto const& data = fragment->rasterizedImage().image().data();
+    CHECK(std::vector<uint8_t>(data.begin(), data.end()) == std::vector<uint8_t> { 255, 0, 0, 0, 0, 255 });
+    // ... and nothing was stamped at the row it used to occupy.
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment() == nullptr);
+}
+
+TEST_CASE("KittyGraphics.animation.an_erased_image_is_not_resurrected", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+    mock.writeToScreen("\033[2J"sv);
+    REQUIRE(placedPixels(mock).empty());
+
+    // The cells were cleared, so there is nothing to advance. A recorded coordinate would have
+    // repainted the image over whatever occupies those cells now.
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(placedPixels(mock).empty());
+}
+
+TEST_CASE("KittyGraphics.animation.deleting_frames_keeps_the_picture_on_screen", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    REQUIRE(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 0, 0, 255 });
+
+    // d=f reclaims frame memory and keeps the image displayed -- clearing the cells would force the
+    // re-transmission the verb exists to avoid. What was showing was a frame, so the base goes back.
+    mock.writeToScreen("\033_Ga=d,d=f,i=7\033\\"sv);
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 0, 255, 0 });
+}
+
+TEST_CASE("KittyGraphics.animation.a_delete_by_id_without_an_id_destroys_nothing", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    REQUIRE_FALSE(placedPixels(mock).empty());
+
+    // `d=I` names id 0, which no image can have, so it must delete nothing -- not fall through to
+    // the branch that clears every image in the terminal.
+    mock.writeToScreen("\033_Ga=d,d=I\033\\"sv);
+    CHECK_FALSE(placedPixels(mock).empty());
+}
+
+TEST_CASE("KittyGraphics.animation.a_frame_advance_keeps_the_cursor_out_of_it", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+
+    // A hyperlink opened after the placement must not be stamped across the image's cells by a frame
+    // advance: the redraw belongs to the placement, not to whatever the cursor carries now.
+    mock.writeToScreen("\033]8;;http://example.com\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).hyperlink() == HyperlinkId(0));
+}
+// }}}

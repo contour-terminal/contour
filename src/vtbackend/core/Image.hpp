@@ -247,6 +247,8 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     GridSize cellSpan() const noexcept { return _cellSpan; }
     ImageSize cellSize() const noexcept { return _cellSize; }
     ImageLayer layer() const noexcept { return _layer; }
+    PixelCoordinate imageOffset() const noexcept { return _imageOffset; }
+    ImageSize imageSubSize() const noexcept { return _imageSubSize; }
 
     /// @returns an RGBA buffer for a grid cell at given coordinate @p pos of the rasterized image.
     ///
