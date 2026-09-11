@@ -25,6 +25,16 @@ inline constexpr size_t MaxChunkedPayloadSize = static_cast<size_t>(32 * 1024 * 
 /// `ENOSPC` rather than silently evicting an image the application still intends to place.
 inline constexpr size_t MaxStoredImageBytes = static_cast<size_t>(128 * 1024 * 1024);
 
+/// Largest number of animation frames one image may hold.
+///
+/// Each frame is a full copy of the image, so an unbounded frame count is an unbounded allocation
+/// driven straight from the wire -- the same attack the chunked-payload cap exists to stop, one level
+/// up. A frame is created by naming its 1-based number, so a client can ask for frame 4 billion.
+inline constexpr uint32_t MaxAnimationFrames = 128;
+
+/// How long a frame is shown when `z=` does not say. The protocol's own default, not ours to pick.
+inline constexpr int32_t DefaultFrameGapMilliseconds = 40;
+
 /// What the application is asking the terminal to do.
 ///
 /// Kitty spells this `a=`. The letters are the wire values and are not ours to choose.
@@ -64,6 +74,22 @@ enum class Compression : uint8_t
     ZlibDeflate, ///< `o=z`
 };
 
+/// How a transmitted rectangle meets the pixels already in the frame (`X=`).
+enum class CompositionMode : uint8_t
+{
+    AlphaBlend = 0, ///< Source-over, the protocol's default.
+    Replace = 1,    ///< `X=1`: overwrite the destination outright.
+};
+
+/// What `a=a,s=` asks the animation to do.
+enum class AnimationState : uint8_t
+{
+    Unset = 0,             ///< The command said nothing about playback.
+    Stop = 1,              ///< `s=1`
+    RunAwaitingFrames = 2, ///< `s=2`: play, and wait at the last frame for more to arrive.
+    Loop = 3,              ///< `s=3`: play, returning to the first frame after the last.
+};
+
 /// One decoded kitty graphics command.
 ///
 /// Field names follow the protocol's own vocabulary rather than the single letters it puts on the
@@ -72,6 +98,11 @@ struct Command
 {
     Action action = Action::Transmit;
     Format format = Format::Rgba;
+
+    /// Whether `f=` was actually present. The default above is the protocol's, but an animation frame
+    /// that omits `f=` means "the format this image already has", which is not always RGBA -- so the
+    /// frame path must be able to tell a default apart from a claim.
+    bool formatSpecified = false;
     Medium medium = Medium::Direct;
     Compression compression = Compression::None;
 
@@ -114,6 +145,36 @@ struct Command
     /// What a Delete action targets (`d=`), e.g. 'a' for all, 'i' by id, 'n' by number.
     /// An upper-case letter additionally frees the stored image data, not just the placement.
     char deleteTarget = 'a';
+
+    /// Animation only (`a=f`, `a=a`, `a=c`), where the protocol reuses three keys that mean cell
+    /// geometry everywhere else. They are decoded into their own fields rather than read back out of
+    /// `columns`/`rows`/`zIndex` at the use site, so that no caller can mistake a frame number for a
+    /// column count. Frame numbers are 1-based; zero means "unset".
+    /// `c=` under `a=f`: the frame a newly created one is copied from.
+    uint32_t baseFrame = 0;
+
+    /// `c=` under `a=a`: the frame to make current. The same wire key, a different question, which is
+    /// why it gets its own field rather than a second reading of `baseFrame`.
+    uint32_t currentFrame = 0;
+
+    /// `r=`: the frame being edited (`a=f`) or configured (`a=a`). Zero under `a=f` creates one.
+    uint32_t targetFrame = 0;
+
+    /// `z=`: how long this frame is shown. Zero means "unspecified"; negative means no gap at all.
+    int32_t frameGapMilliseconds = 0;
+
+    /// `s=` under `a=a`. Elsewhere `s` is the pixel width.
+    AnimationState animationState = AnimationState::Unset;
+
+    /// `v=` under `a=a`: 0 unspecified, 1 loop forever, n>1 loop n-1 times. Elsewhere `v` is the
+    /// pixel height.
+    uint32_t loopCount = 0;
+
+    /// `Y=`: the RGBA background a newly created frame is filled with.
+    uint32_t frameBackground = 0;
+
+    /// `X=`: how the transmitted rectangle meets what is already in the frame.
+    CompositionMode compositionMode = CompositionMode::AlphaBlend;
 
     /// The payload, still base64-encoded exactly as it arrived.
     std::string payload;

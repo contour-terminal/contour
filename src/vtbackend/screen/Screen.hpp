@@ -229,8 +229,46 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Answers a kitty graphics command, unless it asked to be left alone (`q=`).
     void replyKittyGraphics(kitty_graphics::Command const& command, std::string_view status);
 
+    /// The animation frames of one kitty image.
+    ///
+    /// Frame 1 is the transmitted image itself: the protocol has no separate command to send it, and
+    /// every stored image therefore has one frame from the moment it exists.
+    struct KittyAnimation
+    {
+        std::vector<std::shared_ptr<Image const>> frames; ///< Frame N of the wire is index N-1 here.
+        std::vector<int32_t> gapsMilliseconds;            ///< How long each frame is shown.
+        uint32_t currentFrame = 1;                        ///< Which frame a placement displays.
+        kitty_graphics::AnimationState state = kitty_graphics::AnimationState::Unset;
+        uint32_t loopCount = 0; ///< 0 unspecified, 1 forever, n>1 loop n-1 times.
+    };
+
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
     void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
+
+    /// Builds or edits one animation frame (`a=f`), compositing the transmitted rectangle onto a copy
+    /// of the base frame the command names.
+    void transmitKittyFrame(kitty_graphics::Command const& command);
+
+    /// Applies animation control (`a=a`): play state, loop count, gap, and which frame is current.
+    void controlKittyAnimation(kitty_graphics::Command const& command);
+
+    /// @return the animation for @p imageId, creating it with its root frame, or nullptr if no image
+    ///         is stored under that id.
+    [[nodiscard]] KittyAnimation* kittyAnimationFor(uint32_t imageId);
+
+    /// Replaces every on-screen fragment of @p previous with the same fragment of @p next.
+    ///
+    /// Works from the grid rather than from a recorded position, so it cannot drift as the cells
+    /// scroll, are inserted or deleted, are erased or are reflowed -- if the image is no longer
+    /// there, there is nothing to find and nothing happens.
+    void showKittyFrame(std::shared_ptr<Image const> const& previous,
+                        std::shared_ptr<Image const> const& next);
+
+    /// @return decoded bytes held by stored kitty images and their animation frames.
+    [[nodiscard]] size_t storedKittyBytes() const;
+
+    /// Clears the on-screen fragments of @p imageId, whichever of its frames the cells hold.
+    void removeKittyPlacementsOf(uint32_t imageId);
 
     /// Validates the transmission parameters of @p command against what this terminal implements.
     /// @return the wire status to answer with, or nullopt when the command is acceptable.
@@ -1169,6 +1207,8 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Images transmitted by a kitty graphics command but not yet displayed, keyed by their `i=` id.
     std::unordered_map<uint32_t, std::shared_ptr<Image const>> _kittyImages {};
+
+    std::unordered_map<uint32_t, KittyAnimation> _kittyAnimations {};
 
     // NOTE: the `OSC 5522` write transmission lives on Terminal, not here: an application may switch
     // screens (DECSASD, or a page change) between chunks, and a per-screen buffer would drop the
