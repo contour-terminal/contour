@@ -736,6 +736,14 @@ class Terminal
     // {{{ Modes handling
     bool isModeEnabled(AnsiMode m) const noexcept { return _modes.enabled(m); }
     bool isModeEnabled(DECMode m) const noexcept { return _modes.enabled(m); }
+
+    /// Whether rendering is currently suppressed by synchronized output (DECSET 2026).
+    ///
+    /// Distinct from `isModeEnabled(DECMode::BatchedRendering)`, which reports the mode as the
+    /// application set it and is what DECRQM must answer. This asks the narrower question the
+    /// render paths actually care about, and answers false once the block has outlived
+    /// `Settings::synchronizedOutputTimeout`, so a block left open cannot freeze the display.
+    [[nodiscard]] bool isRenderingSuppressed() const noexcept;
     void setMode(AnsiMode mode, bool enable);
     void setMode(DECMode mode, bool enable);
     void saveModes(std::vector<DECMode> const& modes) { _modes.save(modes); }
@@ -2598,6 +2606,15 @@ class Terminal
     /// Guards _guiTabInfoForStatusLine. Dedicated (not _stateMutex) so the GUI-thread writer
     /// (setGuiTabInfoForStatusLine) does not block on the heavily-contended _stateMutex held by the parser
     /// thread during output bursts. Held only for the small copy in the accessor/mutator.
+    /// When the currently open synchronized-output block began.
+    ///
+    /// steady_clock rather than `_currentTime`: the terminal's own clock only advances when a frame
+    /// is painted, and a display that has stopped painting is precisely the state this deadline
+    /// exists to break out of. Atomic because the parser thread writes it and the render thread
+    /// reads it, the same reason `_renderBufferUpdateEnabled` is. Only meaningful while that flag
+    /// is clear.
+    std::atomic<std::chrono::steady_clock::time_point> _synchronizedOutputSince {};
+
     std::mutex mutable _guiTabInfoMutex;
     // }}}
 

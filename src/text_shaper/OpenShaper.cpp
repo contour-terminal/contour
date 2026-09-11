@@ -584,6 +584,7 @@ namespace
                                           u32string_view codepoints,
                                           std::span<unsigned const> clusters)
     {
+        ZoneScoped;
         assert(hbFont != nullptr);
         assert(hbBuf != nullptr);
 
@@ -717,6 +718,22 @@ struct OpenShaper::PrivateOpenShaper // {{{
     /// Unlike @c locateCache this does NOT survive clearCache(): its values are font_keys owned by
     /// @c fontKeyToHbFontInfoMapping, not font files, and outliving that map would make them dangle.
     unordered_map<char32_t, CoverageCacheEntry> coverageCache;
+
+    /// Faces previously resolved by coverage, in the order they were first needed.
+    ///
+    /// Consulted before the locator is asked again. The coverage cache above is keyed on a single
+    /// codepoint, so a script whose font is already loaded still pays a fontconfig sort for every
+    /// *other* codepoint in it -- and that sort ranks every font on the system, which measured at
+    /// 341us against 0.6us for the HarfBuzz shaping it exists to enable. Asking the faces already
+    /// resolved this way whether they cover the run first is an FT charmap lookup per face, four
+    /// orders of magnitude cheaper, and the answer is overwhelmingly yes: a run reaching this path
+    /// is one script, and its neighbour resolved a moment ago.
+    ///
+    /// Only faces resolved BY COVERAGE are candidates, never the description-ordered chain, and
+    /// only after that chain has already failed -- so this substitutes for a fontconfig answer
+    /// exactly where fontconfig would have been asked, not anywhere a configured font could serve.
+    /// It stays short in practice: one entry per script actually encountered.
+    std::vector<FontKey> coverageResolvedFonts;
 
     /// How many faces resizeFont() has minted, against @c resizedFontLimit.
     size_t resizedFontCount = 0;
@@ -925,6 +942,7 @@ struct OpenShaper::PrivateOpenShaper // {{{
     /// @return The next font to try, or nullopt once both passes are exhausted.
     [[nodiscard]] optional<FontKey> nextFallbackFont(HbFontInfo& fontInfo, FallbackCursor& cursor)
     {
+        ZoneScoped;
         for (;;)
         {
             if (cursor.index >= fontInfo.fallbacks.size() && !extendFallbacks(fontInfo))
@@ -969,8 +987,23 @@ struct OpenShaper::PrivateOpenShaper // {{{
     /// @param fontInfo   The primary font, supplying the size and weight to load a candidate at.
     /// @param codepoints The span that no font in the chain could render.
     /// @return A font covering @p codepoints, or nullopt when the locator names none that loads.
+    /// Tests whether @p face has a glyph for every codepoint in @p codepoints.
+    /// @param face The face to interrogate.
+    /// @param codepoints The run that no configured fallback could render.
+    /// @return @c true when the face covers all of them.
+    [[nodiscard]] static bool coversAll(FT_Face face, u32string_view codepoints) noexcept
+    {
+        if (face == nullptr)
+            return false;
+        for (auto const codepoint: codepoints)
+            if (FT_Get_Char_Index(face, static_cast<FT_ULong>(codepoint)) == 0)
+                return false;
+        return true;
+    }
+
     [[nodiscard]] optional<FontKey> resolveByCoverage(HbFontInfo const& fontInfo, u32string_view codepoints)
     {
+        ZoneScoped;
         if (codepoints.empty() || !locator)
             return nullopt;
 
@@ -989,6 +1022,26 @@ struct OpenShaper::PrivateOpenShaper // {{{
                                                          && i->second.weight == fontInfo.weight)
             return i->second.resolved;
 
+        // A face resolved by coverage for a neighbouring codepoint almost always covers this one too,
+        // and asking it is an FT charmap lookup rather than a fontconfig sort over every installed
+        // font. @see coverageResolvedFonts for why this cannot substitute for a configured fallback.
+        for (auto const candidate: coverageResolvedFonts)
+        {
+            auto const i = fontKeyToHbFontInfoMapping.find(candidate);
+            if (i == fontKeyToHbFontInfoMapping.end())
+                continue;
+            // Same identity rule the cache lookup above applies: a face found at another size would
+            // rasterize this glyph at that size while the text around it scaled.
+            if (i->second.size.pt != fontInfo.size.pt || i->second.weight != fontInfo.weight)
+                continue;
+            if (!coversAll(i->second.ftFace.get(), codepoints))
+                continue;
+            coverageCache[cacheKey] = CoverageCacheEntry { .size = fontInfo.size,
+                                                           .weight = fontInfo.weight,
+                                                           .resolved = candidate };
+            return candidate;
+        }
+
         auto resolved = optional<FontKey> { nullopt };
         for (auto const& source: locator->resolve(gsl::span(codepoints.data(), codepoints.size())))
         {
@@ -1004,6 +1057,9 @@ struct OpenShaper::PrivateOpenShaper // {{{
 
         coverageCache[cacheKey] =
             CoverageCacheEntry { .size = fontInfo.size, .weight = fontInfo.weight, .resolved = resolved };
+        if (resolved.has_value()
+            && std::ranges::find(coverageResolvedFonts, *resolved) == coverageResolvedFonts.end())
+            coverageResolvedFonts.push_back(*resolved);
         return resolved;
     }
 
@@ -1036,6 +1092,7 @@ struct OpenShaper::PrivateOpenShaper // {{{
                               std::span<unsigned const> clusters,
                               ShapeResult& result)
     {
+        ZoneScoped;
         auto const fontInfoIterator = fontKeyToHbFontInfoMapping.find(shapingFont);
         Require(fontInfoIterator != fontKeyToHbFontInfoMapping.end());
         auto const& shapingFontInfo = fontInfoIterator->second;
@@ -1161,6 +1218,7 @@ void OpenShaper::clearCache()
     // live one. Unlike locateCache, this cache is NOT description-independent: it answers with a key,
     // not a font file.
     _d->coverageCache.clear();
+    _d->coverageResolvedFonts.clear();
 
     // The faces the budget was counting are gone with the maps, so the allowance starts over.
     _d->resizedFontCount = 0;

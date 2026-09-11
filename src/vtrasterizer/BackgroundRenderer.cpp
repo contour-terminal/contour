@@ -3,6 +3,7 @@
 
 #include <vtrasterizer/GridMetrics.hpp>
 #include <vtrasterizer/RenderTarget.hpp>
+#include <vtrasterizer/TracyCellZone.hpp>
 
 #include <iostream>
 
@@ -60,6 +61,7 @@ void BackgroundRenderer::renderLine(vtbackend::RenderLine const& line)
 
 void BackgroundRenderer::renderCell(vtbackend::RenderCell const& cell)
 {
+    CONTOUR_TRACY_CELL_ZONE();
     if (cell.attributes.backgroundColor == _defaultColor)
         return;
 

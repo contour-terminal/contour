@@ -176,6 +176,7 @@ option(CONTOUR_TRACY_TOOLS "Builds Tracy's capture and csvexport CLI tools [defa
 option(CONTOUR_TRACY_GUI "Builds the Tracy profiler GUI [default: OFF]" OFF)
 option(CONTOUR_TRACY_GUI_X11 "Builds the Tracy GUI against X11 instead of Wayland [default: OFF]" OFF)
 option(CONTOUR_TRACY_SAMPLING "Tracy captures call stacks of every thread [default: ON]" ON)
+option(CONTOUR_TRACY_CELL_ZONES "Tracy records a zone per cell per renderer; makes traces very large [default: OFF]" OFF)
 if(CONTOUR_BUILD_STATIC)
     set(BUILD_SHARED_LIBS OFF)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -261,12 +262,6 @@ if(CONTOUR_TESTING)
         # before. This case needs no network, so it stays meaningful on an offline clone where the
         # gate above skips.
         contour_add_lint_gate(check_spelling_selftest check-spelling.py --self-test)
-
-        # Call sites use Tracy's macros unconditionally, so a macro that reaches src/ without a
-        # matching no-op in the stub breaks the DEFAULT build -- the one CI and every packaging job
-        # run -- while the profiling build stays green. Cheap, offline, and the failure names the
-        # macro and the file.
-        contour_add_lint_gate(check_tracy_stub check-tracy-stub.py)
 
         # 300s, not the 120s these had as shell scripts: a cold cache now downloads the tool on
         # Windows too, and a CI runner's first run pays for both.

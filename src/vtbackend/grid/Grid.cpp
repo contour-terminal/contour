@@ -236,6 +236,28 @@ void Grid::clearHistory()
     verifyState();
 }
 
+bool Grid::anyUsedLineWrapped() const noexcept
+{
+    for (auto i = -*historyLineCount(); i < *_pageSize.lines; ++i)
+        if (_lines[i].wrapped())
+            return true;
+    return false;
+}
+
+bool Grid::nothingToReflowOrCut(ColumnCount newColumnCount) const noexcept
+{
+    auto const width = unbox<size_t>(newColumnCount);
+    for (auto i = -*historyLineCount(); i < *_pageSize.lines; ++i)
+    {
+        auto const& line = _lines[i];
+        if (line.wrapped())
+            return false;
+        if (trimBlankRight(line.storage(), unbox<size_t>(line.size())) > width)
+            return false;
+    }
+    return true;
+}
+
 void Grid::verifyState() const noexcept
 {
 #ifdef CONTOUR_VERIFY_STATE
@@ -334,7 +356,7 @@ CellProxy Grid::at(LineOffset line, ColumnOffset column) const noexcept
 void Grid::resetPageLines(LineCount count, GraphicsAttributes defaultAttributes) noexcept
 {
     for (auto const line: std::views::iota(0, *count))
-        lineAt(LineOffset(line)).reset(defaultLineFlags(), defaultAttributes);
+        lineAt(LineOffset(line)).reset(defaultLineFlags(), defaultAttributes, _pageSize.columns);
 }
 
 // }}}
@@ -441,7 +463,7 @@ LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defa
         for (auto y = boxed_cast<LineOffset>(_pageSize.lines - linesCountToScrollUp);
              y < boxed_cast<LineOffset>(_pageSize.lines);
              ++y)
-            lineAt(y).reset(defaultLineFlags(), defaultAttributes);
+            lineAt(y).reset(defaultLineFlags(), defaultAttributes, _pageSize.columns);
 
         return linesCountToScrollUp;
     }
@@ -469,7 +491,7 @@ LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defa
             for (auto y = boxed_cast<LineOffset>(_pageSize.lines - linesCountToScrollUp);
                  y < boxed_cast<LineOffset>(_pageSize.lines);
                  ++y)
-                lineAt(y).reset(defaultLineFlags(), defaultAttributes);
+                lineAt(y).reset(defaultLineFlags(), defaultAttributes, _pageSize.columns);
         }
         return LineCount::cast_from(linesAppendCount);
     }
@@ -613,7 +635,7 @@ void Grid::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttributes,
         auto c = std::next(begin(_lines), *margin.vertical.to + 1);
         std::rotate(a, b, c);
         for (auto const i: std::views::iota(*margin.vertical.from, *margin.vertical.from + *n))
-            _lines[i].reset(defaultLineFlags(), defaultAttributes);
+            _lines[i].reset(defaultLineFlags(), defaultAttributes, _pageSize.columns);
     }
     else
     {
@@ -706,7 +728,7 @@ void Grid::reset()
     _linesUsed = _pageSize.lines;
     _lines.rotateRight(_lines.zeroIndex());
     for (int i = 0; i < unbox(_pageSize.lines); ++i)
-        _lines[i].reset(defaultLineFlags(), GraphicsAttributes {});
+        _lines[i].reset(defaultLineFlags(), GraphicsAttributes {}, _pageSize.columns);
     bumpGeneration(RowIdentity::Destroyed);
     verifyState();
 }
@@ -820,7 +842,40 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
             auto const extendCount = newColumnCount - _pageSize.columns;
             Require(*extendCount > 0);
 
+            // Reflow exists to rejoin lines that were split by wrapping. When nothing in the used
+            // range is wrapped there is nothing to rejoin, and the reflow below would emit exactly
+            // the lines already held, only wider -- which is what the non-reflow path above does in
+            // place, without rebuilding the ring.
+            //
+            // Worth the check because rebuilding is not proportional to what the grid holds but to
+            // what it *could* hold: the ring is sized to HistoryLimits::capacity, so a column change
+            // constructs that many blank Lines and destroys as many old ones. At a 100,000-line
+            // scrollback that is 20 MB of memory traffic and ~4.5ms per column change, on an empty
+            // grid, and a window drag pays one per column step. The scan is over the used lines
+            // only, so it costs nothing when there is nothing to skip.
+            if (!anyUsedLineWrapped())
+            {
+                // Only the used lines need widening. The blank tail keeps its old width and is
+                // given the current one when it is recycled -- every Line::reset() call site in
+                // this file passes _pageSize.columns for exactly that reason. Walking the tail here
+                // would be ~100,000 iterations per column change at a large scrollback, whatever
+                // the grid actually holds.
+                for (auto i = -*historyLineCount(); i < *_pageSize.lines; ++i)
+                    if (_lines[i].size() < newColumnCount)
+                        _lines[i].resize(newColumnCount);
+                _pageSize.columns = newColumnCount;
+                verifyState();
+                return CellLocation { .line = LineOffset(0), .column = ColumnOffset(wrapPending ? 1 : 0) };
+            }
+
             Lines grownLines;
+            // Reserved up front, as shrinkColumns() already does for its own buffer. The tail of
+            // this function pads to page + maxHistoryLineCount() -- the CONFIGURED history limit,
+            // not the used one -- so the vector grows to thousands of entries on every column
+            // change even when the grid is empty, and without a reserve it reallocates and moves
+            // every Line it already holds on the way there. Measured at startup, where nine column
+            // changes are negotiated before the window settles.
+            grownLines.reserve(unbox<size_t>(_pageSize.lines + maxHistoryLineCount()));
             LineSoA logicalLineBuffer;
             initializeLineSoA(logicalLineBuffer, ColumnCount(0));
             size_t logicalLineUsed = 0;
@@ -901,10 +956,17 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
             _linesUsed = LineCount::cast_from(grownLines.size());
 
             auto const totalLineCount = unbox<size_t>(_pageSize.lines + maxHistoryLineCount());
-            while (grownLines.size() < totalLineCount)
-                grownLines.emplace_back(newColumnCount, defaultLineFlags(), GraphicsAttributes {});
+            {
+                ZoneScopedN("growColumns.padHistory");
+                ZoneValue(static_cast<int64_t>(totalLineCount - grownLines.size()));
+                while (grownLines.size() < totalLineCount)
+                    grownLines.emplace_back(newColumnCount, defaultLineFlags(), GraphicsAttributes {});
+            }
 
-            _lines = std::move(grownLines);
+            {
+                ZoneScopedN("growColumns.commit");
+                _lines = std::move(grownLines);
+            }
             _pageSize.columns = newColumnCount;
 
             auto const newHistoryLineCount = _linesUsed - _pageSize.lines;
@@ -929,6 +991,30 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
         }
         else
         {
+            // The mirror of the guard in growColumns, but stricter on purpose. Growing can skip
+            // reflow whenever nothing is wrapped, because widening loses nothing. Shrinking can
+            // cut content, so the cheap path is taken only when there is demonstrably none: no
+            // history, and every line in the page empty. That is exactly the startup case, where
+            // the window negotiates its width against a grid that holds nothing, and it avoids
+            // rebuilding a ring sized to the configured scrollback in order to narrow blank lines.
+            // Nothing would be rejoined and nothing would be cut: no line is a continuation, and no
+            // line holds content past the new width, so narrowing trims blank tail only.
+            //
+            // trimBlankRight rather than LineSoA::usedColumns, which is a hint and not an authority:
+            // resizeLineSoA *clamps* it to the new width, so a line whose content was cut still
+            // reports a width that fits. Trusting it here truncated content and failed 13 [grid]
+            // cases. Line::empty() recomputes for the same reason.
+            if (nothingToReflowOrCut(newColumnCount))
+            {
+                // As in growColumns: the blank tail is left alone and re-widthed when recycled.
+                for (auto i = -*historyLineCount(); i < *_pageSize.lines; ++i)
+                    if (newColumnCount < _lines[i].size())
+                        _lines[i].resize(newColumnCount);
+                _pageSize.columns = newColumnCount;
+                verifyState();
+                return cursor + std::min(cursor.column, boxed_cast<ColumnOffset>(newColumnCount));
+            }
+
             Lines shrunkLines;
             LineSoA wrappedColumns;
             initializeLineSoA(wrappedColumns, ColumnCount(0));
@@ -1051,15 +1137,31 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
     using crispy::Comparison;
     switch (crispy::strongCompare(newSize.columns, _pageSize.columns))
     {
-        case Comparison::Greater: cursor += growColumns(newSize.columns); break;
-        case Comparison::Less: cursor = shrinkColumns(newSize.columns, newSize.lines, cursor); break;
+        case Comparison::Greater: {
+            ZoneScopedN("Grid::growColumns");
+            cursor += growColumns(newSize.columns);
+            break;
+        }
+        case Comparison::Less: {
+            ZoneScopedN("Grid::shrinkColumns");
+            cursor = shrinkColumns(newSize.columns, newSize.lines, cursor);
+            break;
+        }
         case Comparison::Equal: break;
     }
 
     switch (crispy::strongCompare(newSize.lines, _pageSize.lines))
     {
-        case Comparison::Greater: cursor += growLines(newSize.lines, cursor); break;
-        case Comparison::Less: cursor += shrinkLines(newSize.lines, cursor); break;
+        case Comparison::Greater: {
+            ZoneScopedN("Grid::growLines");
+            cursor += growLines(newSize.lines, cursor);
+            break;
+        }
+        case Comparison::Less: {
+            ZoneScopedN("Grid::shrinkLines");
+            cursor += shrinkLines(newSize.lines, cursor);
+            break;
+        }
         case Comparison::Equal: break;
     }
 

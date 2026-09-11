@@ -116,6 +116,7 @@ Making use of reserved glyph slots
 #include <vtrasterizer/GlyphAdvance.hpp>
 #include <vtrasterizer/GlyphSlicing.hpp>
 #include <vtrasterizer/GridMetrics.hpp>
+#include <vtrasterizer/TracyCellZone.hpp>
 #include <vtrasterizer/Utils.hpp>
 #include <vtrasterizer/shared_defines.h>
 
@@ -129,8 +130,6 @@ Making use of reserved glyph slots
 
 #include <algorithm>
 #include <ranges>
-
-#include <tracy/Tracy.hpp>
 
 using crispy::Point;
 using crispy::StrongHash;
@@ -466,6 +465,7 @@ void TextRenderer::renderLine(vtbackend::RenderLine const& renderLine)
 
 void TextRenderer::renderCell(vtbackend::RenderCell const& cell)
 {
+    CONTOUR_TRACY_CELL_ZONE();
     // std::cout << std::format("renderCell: {} {} {} {} {}\n",
     //            cell.position,
     //            unicode::convert_to<char>(u32string_view(cell.codepoints)),
@@ -633,6 +633,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
                                    vtbackend::LineFlags lineFlags,
                                    vtbackend::GlyphSizing const& sizing)
 {
+    ZoneScoped;
     if (codepoints.empty())
         return;
 
@@ -994,6 +995,7 @@ void TextRenderer::renderBlockGroup(text::ShapeResult const& glyphPositions,
 Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetadata(
     StrongHash const& hash, text::GlyphKey const& glyphKey, unicode::PresentationStyle presentationStyle)
 {
+    ZoneScoped;
     // clang-format off
     return textureAtlas().getOrTryEmplace(
         hash,
@@ -1012,6 +1014,7 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
                                                StrongHash const& hash)
     -> optional<TextureAtlas::TileCreateData>
 {
+    ZoneScoped;
     auto result = createRasterizedGlyph(tileLocation, glyphKey, presentation);
     if (!result)
         return result;
@@ -1091,6 +1094,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                                          GlyphWidthPolicy widthPolicy)
     -> optional<TextureAtlas::TileCreateData>
 {
+    ZoneScoped;
     auto theGlyphOpt = _textShaper->rasterize(
         glyphKey, _fontDescriptions.renderMode, _fontDescriptions.textOutline.thickness);
     if (!theGlyphOpt.has_value())

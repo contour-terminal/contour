@@ -1224,6 +1224,7 @@ float TerminalDisplay::uptime() const noexcept
 
 QSGNode* TerminalDisplay::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData* /*data*/)
 {
+    ZoneScoped;
     // Runs on the render thread with the GUI thread blocked (safe to touch both). Create the RHI
     // renderer on demand (formerly done from the window's render signals) and the scene-graph node that
     // draws the terminal in z-order.
@@ -2129,6 +2130,7 @@ void TerminalDisplay::setHyperlinkDecoration(vtrasterizer::Decorator normal, vtr
 // {{{ TerminalDisplay: terminal events
 void TerminalDisplay::scheduleRedraw()
 {
+    ZoneScoped;
     // Reached synchronously from the backend/parser thread (TerminalSession::screenUpdated ->
     // scheduleRedraw) while a VT sequence is processed. During a split, the GUI thread hands this session
     // from the hidden single-pane display to the new pane display: attachDisplay() calls the old display's
@@ -2153,6 +2155,7 @@ void TerminalDisplay::scheduleRedraw()
     // null) between the post and its dispatch, and window()->update() on the null window then segfaults
     // (member call on null QQuickWindow). Guarding only the outer post() is a check-then-use-later race.
     post([this]() {
+        ZoneScopedN("scheduleRedraw.dispatch");
         if (window())
             window()->update();
     });

@@ -39,6 +39,8 @@ using vtbackend::Width;
 
 #include <cmath>
 
+#include <tracy/Tracy.hpp>
+
 namespace chrono = std::chrono;
 namespace atlas = vtrasterizer::atlas;
 
@@ -394,6 +396,7 @@ void RhiRenderer::createPipeline(QRhi* rhi,
 
 void RhiRenderer::createPipelines(QRhi* rhi, QRhiRenderPassDescriptor* rpDesc)
 {
+    ZoneScoped;
     Require(rhi != nullptr);
     Require(rpDesc != nullptr);
 
@@ -900,6 +903,7 @@ void RhiRenderer::recordImagePass(std::vector<ImageQuadBatch> const& batches)
 
 void RhiRenderer::flushFrame()
 {
+    ZoneScoped;
     // End of the staging phase (the node's prepare()): upload the frame's accumulated vertex buffers and the
     // shared uniform blocks, schedule any deferred atlas readback, then queue the whole resource batch onto
     // the command buffer so it is processed before the render pass begins.

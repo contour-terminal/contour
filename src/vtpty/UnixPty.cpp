@@ -22,6 +22,8 @@
 #include <thread>
 #include <utility>
 
+#include <tracy/Tracy.hpp>
+
 #if defined(__APPLE__) || defined(__OpenBSD__)
     #include <util.h>
 #elifdef __FreeBSD__
@@ -341,7 +343,10 @@ std::optional<Pty::ReadResult> UnixPty::read(crispy::BufferObject<char>& storage
     // stdout-fastpipe EOF) waitOne() blocks on the break-pipe until the timeout or the next wakeup(),
     // rather than spinning: returning EAGAIN immediately here would make the caller's read loop busy-spin
     // a CPU core until the session is torn down.
-    auto const fd = _readSelector.waitOne(timeout);
+    auto const fd = [&] {
+        ZoneScopedN("pty.waitOne");
+        return _readSelector.waitOne(timeout);
+    }();
     if (!fd.has_value())
     {
         errno = EAGAIN;
@@ -361,6 +366,7 @@ std::optional<Pty::ReadResult> UnixPty::read(crispy::BufferObject<char>& storage
         return std::nullopt;
     }
 
+    ZoneScopedN("pty.readSome");
     auto const l = scoped_lock { storage };
     if (auto x = readSome(*fd, storage.hotEnd(), std::min(size, storage.bytesAvailable())))
         return ReadResult { .data = x.value(), .fromStdoutFastPipe = *fd == _stdoutFastPipe.reader() };

@@ -937,6 +937,24 @@ class Grid
 
     void verifyState() const noexcept;
 
+    /// Whether any line in the used range is a wrapped continuation.
+    ///
+    /// Reflow exists to rejoin such lines; when none is present, growing the column count produces
+    /// exactly the lines already held and can widen them in place instead of rebuilding the ring.
+    /// @return @c true when at least one used line is wrapped.
+    [[nodiscard]] bool anyUsedLineWrapped() const noexcept;
+
+    /// Whether narrowing to @p newColumnCount would neither rejoin nor cut anything.
+    ///
+    /// Stricter than @ref anyUsedLineWrapped because shrinking can lose content: it also requires
+    /// that no line holds anything past the new width. Uses @c trimBlankRight rather than
+    /// @c LineSoA::usedColumns, which @c resizeLineSoA clamps and which therefore reports a width
+    /// that fits even for a line whose content was already cut.
+    ///
+    /// @param newColumnCount The width being narrowed to.
+    /// @return @c true when narrowing is a blank-tail trim on every used line.
+    [[nodiscard]] bool nothingToReflowOrCut(ColumnCount newColumnCount) const noexcept;
+
     [[nodiscard]] CellLocationRange wordRangeUnderCursor(CellLocation position,
                                                          std::u32string_view delimiters) const noexcept;
 

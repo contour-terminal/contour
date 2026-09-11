@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/ImageRenderer.hpp>
 
+#include <vtrasterizer/TracyCellZone.hpp>
+
 #include <crispy/StrongHash.hpp>
 #include <crispy/Times.hpp>
 
@@ -204,6 +206,7 @@ void ImageRenderer::fillGap(crispy::Point pos,
 
 void ImageRenderer::renderImage(crispy::Point pos, vtbackend::ImageFragment const& fragment)
 {
+    CONTOUR_TRACY_CELL_ZONE();
     auto const& rasterizedImage = fragment.rasterizedImage();
     auto const placement = rasterizedImage.fragmentPlacement(fragment.offset(), _cellSize);
     auto const aboveText = rasterizedImage.layer() != vtbackend::ImageLayer::Below;

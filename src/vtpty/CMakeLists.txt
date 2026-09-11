@@ -100,6 +100,7 @@ target_include_directories(vtpty PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 target_link_libraries(vtpty PUBLIC ${vtpty_LIBRARIES})
+target_link_libraries(vtpty PUBLIC contour::tracy)
 
 option(VTPTY_TESTING "Enables building of unittests for vtpty [default: ON]" ${CONTOUR_TESTING})
 if(VTPTY_TESTING)
