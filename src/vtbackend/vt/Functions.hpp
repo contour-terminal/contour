@@ -120,6 +120,7 @@ constexpr inline auto DECSSDT = FunctionDocumentation { .mnemonic = "DECSSDT", .
 constexpr inline auto DECSTBM = FunctionDocumentation { .mnemonic = "DECSTBM", .comment = "Set top/bottom margin" };
 constexpr inline auto DECSTGLT = FunctionDocumentation { .mnemonic = "DECSTGLT", .comment = "Select Color Look-Up Table", .parameters = "table", .description = "Selects the color mode used to display text: 1 or 2 = alternate color (text color comes from the " "attribute combinations assigned via DECATC, and ANSI SGR color parameters are ignored entirely; a " "combination with no DECATC assignment uses the default text colors), 3 = ANSI SGR color (the " "power-up default, and what an omitted parameter selects). The monochrome table (0) of the original " "VT525 is not supported.", .notes = "VT525. See also DECATC and DECAC.", };
 constexpr inline auto DECSTR = FunctionDocumentation { .mnemonic = "DECSTR", .comment = "Soft terminal reset" };
+constexpr inline auto DECSWBV = FunctionDocumentation { .mnemonic = "DECSWBV", .comment = "Set Warning Bell Volume" };
 constexpr inline auto DECTST = FunctionDocumentation {
     .mnemonic = "DECTST",
     .comment = "Invoke Confidence Test",
@@ -778,6 +779,7 @@ constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VT
 constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'r', VTType::VT100, documentation::DECSTBM);
 constexpr inline auto DECSTGLT    = detail::CSI(std::nullopt, 0, 1, ')', '{', VTType::VT525, documentation::DECSTGLT);
 constexpr inline auto DECSTR      = detail::CSI(std::nullopt, 0, 0, '!', 'p', VTType::VT100, documentation::DECSTR);
+constexpr inline auto DECSWBV     = detail::CSI(std::nullopt, 0, 1, ' ', 't', VTType::VT520, documentation::DECSWBV);
 constexpr inline auto DECTST      = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'y', VTType::VT100, documentation::DECTST);
 constexpr inline auto DL          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'M', VTType::VT100, documentation::DL);
 constexpr inline auto DSR         = detail::CSI('?', 1, 2, std::nullopt, 'n', VTType::VT100, documentation::DSR);
@@ -1059,6 +1061,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECSTBM,
         DECSTGLT,
         DECSTR,
+        DECSWBV,
         DECTST,
         DL,
         ECH,

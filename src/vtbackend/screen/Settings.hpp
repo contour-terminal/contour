@@ -77,6 +77,7 @@ struct Settings
     bool syncWindowTitleWithHostWritableStatusDisplay = true;
     CursorDisplay cursorDisplay = CursorDisplay::Steady;
     CursorShape cursorShape = CursorShape::Block;
+    BellVolume warningBellVolume = BellVolume::High;
     BlinkStyle blinkStyle = BlinkStyle::Smooth;
     ScreenTransitionStyle screenTransitionStyle = ScreenTransitionStyle::Fade;
     std::chrono::milliseconds screenTransitionDuration { 250 };

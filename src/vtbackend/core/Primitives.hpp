@@ -636,6 +636,14 @@ enum class ControlTransmissionMode : uint8_t
     S8C1T, // 8-bit controls
 };
 
+/// The warning-bell volume selected by DECSWBV
+enum class BellVolume : uint8_t
+{
+    Off,
+    Low,
+    High,
+};
+
 /// xterm title-mode features, toggled by XTSMTITLE (`CSI > Ps t`) and XTRMTITLE (`CSI > Ps T`).
 ///
 /// Each `Ps` names one independent flag controlling how window/icon title strings are encoded on the
