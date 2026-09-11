@@ -657,6 +657,17 @@ if(CONTOUR_FRONTEND_GUI)
         if(NOT WIN32)
             target_compile_options(contour_gui_test PRIVATE -Wno-c2y-extensions)
         endif()
+
+        # Windows found neither Qt6Test, the one Qt library `contour` does not link, nor the
+        # offscreen QPA the registration below selects, so windeployqt's staging for the application
+        # covers neither and the suite died in the loader before main(). The Windows plugin as well,
+        # so that running the executable by hand needs no more than having built it.
+        include(StageRuntimeDeps)
+        contour_stage_runtime_dlls(contour_gui_test)
+        contour_stage_qt_plugins(contour_gui_test platforms
+                                 Qt6::QOffscreenIntegrationPlugin
+                                 Qt6::QWindowsIntegrationPlugin)
+
         add_test(NAME contour_gui_test COMMAND $<TARGET_FILE:contour_gui_test>)
 
         # The offscreen QPA, because this suite constructs a QGuiApplication and its QML trees: without
