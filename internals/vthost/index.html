@@ -1,0 +1,3178 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Technical Landing Page for Contour Terminal Emulator">
+      
+      
+        <meta name="author" content="Christian Parpart">
+      
+      
+      
+        <link rel="prev" href="../CODING_STYLE/">
+      
+      
+        <link rel="next" href="../text-stack/">
+      
+      
+      <link rel="icon" href="/assets/contour-logo.png">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.17">
+    
+    
+      
+        <title>Daemon mode - Contour Terminal Emulator</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.bcfcd587.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  <link href="../../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#daemon-mode" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Contour Terminal Emulator" class="md-header__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Contour Terminal Emulator
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Daemon mode
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-red" data-md-color-accent="deep-red" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5c-.84 0-1.65.15-2.39.42L12 2M3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29L3.34 7m.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14L3.36 17M20.65 7l-1.77 3.79a7.023 7.023 0 0 0-2.38-4.15l4.15.36m-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29L20.64 17M12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44L12 22Z"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-red" data-md-color-accent="red" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3 3.19.09m3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95 2.06.05m-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31Z"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"></path></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required="">
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard="" data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08Z"></path></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"></path></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix="">
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+    
+  
+  Home
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../install/" class="md-tabs__link">
+          
+  
+    
+  
+  Getting started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../configuration/" class="md-tabs__link">
+          
+  
+    
+  
+  Configuration
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../features/" class="md-tabs__link">
+          
+  
+    
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../vt-sequence/" class="md-tabs__link">
+          
+  
+    
+  
+  VT sequence reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../vt-extensions/" class="md-tabs__link">
+          
+  
+    
+  
+  VT extensions
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+    
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Contour Terminal Emulator" class="md-nav__button md-logo" aria-label="Contour Terminal Emulator" data-md-component="logo">
+      
+  <img src="/assets/contour-logo.png" alt="logo">
+
+    </a>
+    Contour Terminal Emulator
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/contour-terminal/contour/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    contour-terminal/contour
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix="">
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1">
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Home
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Contribution Guidelines
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2">
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Getting started
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Getting started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../release-notes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Release Notes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3">
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../configuration/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Configuration
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Configuration
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/profiles/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Profiles
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/layouts/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layouts
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/colors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Colors
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/indicator-statusline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Indicator Statusline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/paths/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Path Handling in Configuration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/key-mapping/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Key Mapping
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4">
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Features
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    List of features
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../persistent-sessions/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Persistent sessions
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../demo/font-ligatures/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Font ligatures
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../demo/images/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Images
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../demo/regis-graphics/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ReGIS vector graphics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../demo/ime/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Input method editor (IME)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../demo/line-marks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Line marks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../demo/statusline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Status line
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../demo/hint-mode/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Hint mode
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../input-modes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Input modes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../accessibility/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Accessibility
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../demo/size_indicator/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Size indicator
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../demo/git-branch-drawings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Git branch drawings
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5">
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../vt-sequence/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    VT sequence reference
+  </span>
+  
+
+            </a>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            VT sequence reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6">
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../vt-extensions/" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    VT extensions
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            VT extensions
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/clickable-links/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Clickable Links
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/unicode-core/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Unicode Core
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/vertical-line-marks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Vertical Line Markers
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/color-palette-update-notifications/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Dark and Light Mode detection
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/synchronized-output/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Synchronized Output
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/buffer-capture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Buffer Capture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/font-settings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Query or Change Font Settings
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/line-reflow-mode/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Line Reflow Reconfiguration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/save-and-restore-sgr-attributes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Save and Restore SGR attributes.
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/osc-133-shell-integration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OSC 133 - Shell Integration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/osc-3008-context/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    OSC 3008 — Hierarchical Context Signalling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/osc-9-4-progress/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Progress indicator (OSC 9;4)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/semantic-block-query/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Semantic Block Query (DEC Mode 2034)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vt-extensions/private-use-glyphs/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Private Use Glyphs
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked="">
+        
+          
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix="">
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CODING_STYLE/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Coding Style Guidelines
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Daemon mode
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Daemon mode
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#one-session-two-taps" class="md-nav__link">
+    <span class="md-ellipsis">
+      One session, two taps
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tmux-control-mode-pinned-tmux-37b" class="md-nav__link">
+    <span class="md-ellipsis">
+      tmux control mode (pinned: tmux 3.7b)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-native-protocol-cells-deltas" class="md-nav__link">
+    <span class="md-ellipsis">
+      The native protocol (cells + deltas)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The native protocol (cells + deltas)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-there-is-no-closesessionunfollow-verb" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why there is no CloseSession/Unfollow verb
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-a-split-ratio-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      Where a split ratio lives
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-the-client-does-not-render-escape-sequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why the client does not render escape sequences
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-parity-oracle" class="md-nav__link">
+    <span class="md-ellipsis">
+      The parity oracle
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-send-queue-what-a-bound-may-and-may-not-conclude" class="md-nav__link">
+    <span class="md-ellipsis">
+      The send queue: what a bound may and may not conclude
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stable-row-identity-in-the-grid" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stable row identity in the grid
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transport-and-clients" class="md-nav__link">
+    <span class="md-ellipsis">
+      Transport and clients
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-gui-seams-contour-client-contour-client-tmux" class="md-nav__link">
+    <span class="md-ellipsis">
+      The GUI seams (contour client, contour client --tmux)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The GUI seams (contour client, contour client --tmux)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-grid-several-clients" class="md-nav__link">
+    <span class="md-ellipsis">
+      One grid, several clients
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#socket-conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Socket conventions
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#daemon-lifetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      Daemon lifetime
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#binary-imsg-ipc-the-real-tmux-binary-as-a-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      Binary imsg IPC (the real tmux binary as a client)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      Windows
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Windows">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#starting-without-a-terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      Starting without a terminal
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diagnostics
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagnostics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#selecting-and-directing-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      Selecting and directing output
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#correlating-a-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      Correlating a connection
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-a-trace-deliberately-does-not-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      What a trace deliberately does not show
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#threading" class="md-nav__link">
+    <span class="md-ellipsis">
+      Threading
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../text-stack/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    A terminal emulator's text stack.
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vt-conformance/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    VT conformance testing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../macos-code-signing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    macOS code signing, notarization and packaging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#one-session-two-taps" class="md-nav__link">
+    <span class="md-ellipsis">
+      One session, two taps
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tmux-control-mode-pinned-tmux-37b" class="md-nav__link">
+    <span class="md-ellipsis">
+      tmux control mode (pinned: tmux 3.7b)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-native-protocol-cells-deltas" class="md-nav__link">
+    <span class="md-ellipsis">
+      The native protocol (cells + deltas)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The native protocol (cells + deltas)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-there-is-no-closesessionunfollow-verb" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why there is no CloseSession/Unfollow verb
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-a-split-ratio-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      Where a split ratio lives
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-the-client-does-not-render-escape-sequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why the client does not render escape sequences
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-parity-oracle" class="md-nav__link">
+    <span class="md-ellipsis">
+      The parity oracle
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-send-queue-what-a-bound-may-and-may-not-conclude" class="md-nav__link">
+    <span class="md-ellipsis">
+      The send queue: what a bound may and may not conclude
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stable-row-identity-in-the-grid" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stable row identity in the grid
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transport-and-clients" class="md-nav__link">
+    <span class="md-ellipsis">
+      Transport and clients
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-gui-seams-contour-client-contour-client-tmux" class="md-nav__link">
+    <span class="md-ellipsis">
+      The GUI seams (contour client, contour client --tmux)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The GUI seams (contour client, contour client --tmux)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-grid-several-clients" class="md-nav__link">
+    <span class="md-ellipsis">
+      One grid, several clients
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#socket-conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Socket conventions
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#daemon-lifetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      Daemon lifetime
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#binary-imsg-ipc-the-real-tmux-binary-as-a-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      Binary imsg IPC (the real tmux binary as a client)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      Windows
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Windows">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#starting-without-a-terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      Starting without a terminal
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diagnostics
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagnostics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#selecting-and-directing-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      Selecting and directing output
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#correlating-a-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      Correlating a connection
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-a-trace-deliberately-does-not-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      What a trace deliberately does not show
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#threading" class="md-nav__link">
+    <span class="md-ellipsis">
+      Threading
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/contour-terminal/contour/edit/master/docs/internals/vthost.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4v-2m10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1 2.1 2.1Z"></path></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/contour-terminal/contour/raw/master/docs/internals/vthost.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.15 8.15 0 0 1-1.23-2Z"></path></svg>
+    </a>
+  
+
+
+<div><h1 id="daemon-mode">Daemon mode</h1>
+<p>Contour has always multiplexed — tabs and split panes, in one process. Daemon mode moves
+that ownership OUT of the window: a Qt-free daemon process owns the sessions and their
+layout, and thin clients connect over sockets, so the sessions outlive any client showing
+them. Two protocol families are served, and the same code also speaks the client side of
+both:</p>
+<ul>
+<li><strong>tmux control mode</strong> — external tmux-aware tooling (iTerm2-style clients,
+  scripts) drives Contour's tabs and panes over the tmux 3.7b line protocol.</li>
+<li><strong>the native cells+deltas protocol</strong> — the server emulates, the client
+  renders: per-line grid deltas addressed by stable row ids (wezterm's model).</li>
+</ul>
+<p>The module stack, bottom-up: <code>src/coro</code> (C++23 coroutine primitives, a
+verbatim port of endo's <code>src/coro</code> at commit <code>178cb496</code>; the re-sync recipe is
+in <code>src/coro/README.md</code>) → <code>src/net</code> (reactor <code>EventLoop</code>, sockets, buffered
+readers, write queues) → <code>src/vthost</code> (the daemon, both protocol servers,
+and both client engines). The GUI may depend on <code>vthost</code>, never the
+reverse.</p>
+<h2 id="one-session-two-taps">One session, two taps</h2>
+<p>A hosted session is <code>{Pty, vtbackend::Terminal}</code> owned by the daemon's
+<code>SessionHost</code>, pumped by a dedicated blocking-read thread exactly like the
+GUI's <code>TerminalSession::mainLoop</code>. Everything else — sockets, protocol state,
+the <code>vtworkspace::SessionModel</code> — is confined to one reactor thread; the pump
+threads marshal onto it via <code>EventLoop::post()</code>.</p>
+<p>Each session's output is observable at two points:</p>
+<ul>
+<li>the <strong>byte tap</strong> (<code>TappingPty</code>, a <code>vtpty::Pty</code> decorator): raw PTY bytes
+  before the parser consumed them. This feeds tmux control mode's <code>%output</code>,
+  which is byte-exact — the attached client emulates. Sixel/iTerm2/Kitty image
+  bytes, OSC 66 and OSC 8 pass through untouched.</li>
+<li>the <strong>cell tap</strong> (<code>Grid::forEachLineChangedSince</code>): per-line deltas after
+  parsing. This feeds the native protocol — the client runs no parser.</li>
+</ul>
+<p>The pump loop flushes the terminal's queued replies (DA1, DSR, OSC color
+queries) back into the PTY after every processed batch. This is the
+daemon-side stand-in for the GUI's <code>screenUpdated → flushInput</code> hop; without
+it an interactive shell blocks in its startup terminal probes forever.</p>
+<h2 id="tmux-control-mode-pinned-tmux-37b">tmux control mode (pinned: tmux 3.7b)</h2>
+<p>The server (<code>vthost/tmux/ControlSession</code>) speaks the line protocol exactly
+as tmux 3.7b does — the installed oracle and the reference tree agree, and the
+layout codec's conformance tests drive real <code>tmux select-layout</code>:</p>
+<ul>
+<li>guarded command responses <code>%begin/%end/%error &lt;time&gt; &lt;number&gt; &lt;flags&gt;</code>, the
+  same triple on all three lines, flags bit 0 = client-originated;</li>
+<li><code>%output</code> escaping only bytes &lt; 0x20 and backslash as exactly three octal
+  digits (0x7F and ≥ 0x80 pass raw);</li>
+<li>tmux's dual-queue ordering: a notification never lands inside an output
+  block and never before output queued ahead of it;</li>
+<li>pause/continue flow control with tmux's byte budget
+  <code>(high − buffered) / panes / 3</code>, floored at 32; <code>refresh-client -f
+  pause-after=N</code> switches emission to <code>%extended-output %N &lt;age-ms&gt; : …</code>;</li>
+<li>layout strings with the rotate-add checksum; ingest collapses tmux's n-ary
+  containers into right-leaning binary chains (round-trips compare trees, not
+  strings);</li>
+<li><code>refresh-client -C</code> resizes within tmux's <code>[1, 10000]</code> bounds; the host then
+  reprojects every pane's PTY size through <code>vtworkspace::layoutInCells</code>, so
+  advertised layouts and actual shell dimensions never drift.</li>
+</ul>
+<p>The client side (<code>tmux/ControlModeParser</code> + <code>tmux/TmuxGateway</code> +
+<code>tmux/TmuxClientModel</code>) attaches to a real <code>tmux -C</code> (or to this project's own
+daemon — the loopback tests validate both halves against each other): recovery
+mode until the opening guard, FIFO command correlation, and a per-pane replay
+<code>vtbackend::Terminal</code> fed by the raw <code>%output</code> stream. History arrives once
+per pane via <code>capture-pane -peqJ</code>.</p>
+<p><strong>Inherited limitation:</strong> tmux serializes only text and SGR in capture-pane —
+no images. A client attaching <em>after</em> an image was drawn cannot recover it
+from replay; images work while attached (live <code>%output</code> carries the bytes and
+the replay terminal parses them natively). Mitigation, if ever, goes through
+the native protocol — never through capture-pane.</p>
+<h2 id="the-native-protocol-cells-deltas">The native protocol (cells + deltas)</h2>
+<p>The wire format (<code>vthost/proto/</code>) is wezterm's codec shape without the
+dependencies: a frame is <code>varint taggedLength, varint serial, varint ident,
+payload</code>, where the tagged length's low bit is a reserved compression flag
+(never set, always rejected — compression can arrive later without a version
+break). <code>serial == 0</code> marks unsolicited server pushes. Unknown idents decode
+to <code>Invalid{ident}</code> — data, not an error — so newer peers keep talking.
+A <code>ClientHello/ServerHello</code> version handshake precedes everything.</p>
+<p>The handshake is an <strong>exact match</strong>, not a negotiation: a peer one version away is refused, and the
+two ends must therefore be the same build. The refusal is deliberately shaped like a token mismatch
+(same <code>ServerHello</code>, same drop), so an attacker probing it learns neither the version nor whether its
+token was right; the price is that a user who upgraded and left an old daemon running gets no
+diagnosis from the wire.</p>
+<p><strong>While the protocol is unreleased, <code>CodecVersion</code> stays 1 and is NOT bumped per change.</strong> Nothing
+outside this source tree speaks it, so there is no peer for a version number to be compatible with;
+the counter had reached 13 above a changelog of twelve revisions no reader could ever have observed.
+Fields are added, removed and renamed without touching it, and the price — two builds that pass the
+handshake and then disagree about the bytes — is paid by rebuilding the daemon and its clients
+together. Once the protocol ships, versioning resumes and every wire change needs a new number.</p>
+<p>The same reasoning applies to <code>PduType</code>: the catalog is kept <strong>contiguous</strong> and renumbered freely, so
+a retired PDU leaves no gap. A gap exists to keep a tag from being reused while a deployed peer still
+remembers the old meaning; with no deployed peer it is archaeology. Tags become stable at release too.</p>
+<p>Two limits ride here as well, both applying in BOTH directions: <code>MaxFrameSize</code> bounds a declared
+payload, and <code>MaxGridExtent</code> bounds an announced or proposed grid — an announced one because the
+client sizes a repaint buffer from it. Integral fields are decoded with a range check rather than a
+narrowing cast, so an out-of-range value is a <code>MalformedPdu</code> instead of a plausible small one.</p>
+<h3 id="why-there-is-no-closesessionunfollow-verb">Why there is no <code>CloseSession</code>/<code>Unfollow</code> verb</h3>
+<p>Session removal is covered from both ends without one, and the shape is worth stating because the
+absence looks like an oversight:</p>
+<ul>
+<li><strong>Client → daemon</strong> is <code>ClosePane</code>, authored where the <em>intent</em> is known — the manager's
+  pane/tab-close paths, through <code>SessionFactory::requestRemoteClose</code> — never inferred from a
+  destructor. A PTY dies on a pane close, a window close, an app quit and a lost connection alike,
+  so <code>contour::SessionEnd</code> makes every teardown entry point state which it is. Getting that wrong is
+  silent in both directions: authoring on a detach kills sessions the user meant to keep, and <em>not</em>
+  authoring on a close leaves them running headless (the bug this replaced — <code>NativeController::
+  unbind()</code> was the only author, and nothing destroys a <code>TerminalSession</code> until app teardown, so no
+  close was ever sent).</li>
+<li><strong>Daemon → client</strong> is the re-pushed <code>LayoutState</code>: every model change fans out through each
+  connection's layout observer, and the client reconciles structurally rather than per session id
+  (<code>applyRemoteLayout</code>'s subtractive pass). A window whose last tab closed still reports, as an
+  empty tab list, so removal is never signalled by silence.</li>
+<li><strong>Per-session server state</strong> is dropped on <code>SessionStreamEvents::sessionClosed</code>, which erases the
+  session's follow state and pending-delta entry — a dead session cannot accumulate work.</li>
+</ul>
+<p>Adding the verb later is not a compatibility event, which is why it is not rushed in ahead of a
+release: a new tag decodes to <code>Invalid{ident}</code> on an older peer, and the exact-match handshake above
+means both ends are the same build regardless. What genuinely costs a version bump is changing an
+existing PDU's fields.</p>
+<h3 id="where-a-split-ratio-lives">Where a split ratio lives</h3>
+<p><strong>In the daemon's model, or the user loses it.</strong> A client rebuilds every tab from <code>LayoutState</code> on
+attach, so a divider the daemon never heard about comes back at the ratio the split was <em>created</em>
+with. Both client-side mutators — the QML divider drag and the <code>ResizePane</code> keybinding — converge on
+<code>vtworkspace::ModelEvents::paneRatioChanged</code>, and that one callback is where <code>ResizeSplit</code> is
+authored (<code>TerminalSessionManager::paneRatioChanged</code> → <code>SessionFactory::reportSplitRatio</code>).</p>
+<p><code>ResizePane</code> is the near miss worth naming: it carries the CELLS one pane is drawn at, and
+<code>SessionHost::applyPaneSize</code> documents that the next re-projection recomputes those from the ratio
+and discards them. A grid is a consequence of a ratio, not a place to keep one.</p>
+<p>Two details the mechanism rests on:</p>
+<ul>
+<li><strong>The split is named by two of its leaves</strong>, not by a pane id — matching <code>SplitPane</code>/<code>ClosePane</code>/
+  <code>ResizePane</code>, all session-keyed. The server resolves their lowest common ancestor
+  (<code>vtworkspace::Pane::lowestCommonAncestor</code>), which is the same split node in either tree. <em>Any</em>
+  leaf from each side works, so neither end has to agree with the other on how to pick one.</li>
+<li><strong>Ratios are compared in WIRE units</strong> (<code>proto::toWireRatio</code>, 1/10000), on both ends. The daemon
+  ignores a report that re-asserts the ratio it already holds — a client re-asserting its layout on
+  attach would otherwise cost every attached client a re-projection and a fresh <code>LayoutState</code> — and
+  the client's reconciler writes only when the quantized values differ. Comparing decoded doubles
+  instead would see a difference on every push that no write can remove.</li>
+</ul>
+<p><code>applyRemoteLayout</code> therefore has a third pass, after the additive and subtractive ones and on the
+settled tree, that re-flows an already-realized tab when another client moves a divider. It pairs
+each wire tab with the local tab that matches it leaf-for-leaf, so a tab caught mid-reconciliation is
+skipped rather than written onto. That pass is the shape to generalize when a SECOND attribute needs
+the same treatment: <code>WireTab</code> already serializes <code>activePane</code>, <code>zoomedPane</code>, <code>title</code> and <code>color</code>, and
+none of them are reconciled yet — at that point one lockstep <code>reconcile(wire, local)</code> walk subsumes
+all three passes, and the outbound half wants <code>NativeController</code> as a second <code>ModelEvents</code> observer
+rather than a hand-written verb per attribute.</p>
+<p>Line PDUs carry the full per-cell renditional state (grapheme cluster extras,
+widths, OSC 66 scales and packed extras, hyperlink ids, colors, the 20
+CellFlags bits) plus per-batch side tables: hyperlink id→URI (sent once per
+connection on first reference, immune to the server-side LRU evicting the id
+later) and image-covered cells. Image pixels are never inline: clients fetch
+by stable image id (<code>FetchImage</code> → <code>ImageData</code>/<code>ImageGone</code>), served from
+<code>ImagePool</code>'s id→weak_ptr index — eviction stays refcount-driven.</p>
+<p>Full per <em>sent</em> cell, that is — a row does not send the trailing columns that already
+match its own fill, and a uniformly-filled row sends no cells at all. A shell line
+occupies a fraction of the grid's width, so across a scrollback that padding is the
+bulk of a snapshot, at ~24 bytes per unused column. <strong>This makes the fill a shared
+contract rather than a rendering detail</strong>: an absent column means a default cell wearing
+the row's <code>fillForeground</code>/<code>fillBackground</code> and otherwise SGR-reset (the fill carries
+neither an underline color nor flags, so a row whose fill has either has nothing to
+omit), and <em>every</em> client render path must paint that fill across the row before writing
+cells over it. A path that reconstructs the cells alone truncates every filled region at the
+last column that happened to be sent — which is why <code>applyWireLine</code> clears the row to
+<code>fillAttrsOf(row)</code> before writing any cell, and why the same function serves the page,
+the history and the host-writable status line.</p>
+<h3 id="why-the-client-does-not-render-escape-sequences">Why the client does not render escape sequences</h3>
+<p>A thin pane must be indistinguishable from a local one — same behaviour, same rendering — and for
+a while the client got there by re-serializing each delta into VT bytes and feeding them to the
+session's own parser. That was appealing: one mechanism, no new API, and every feature built on
+<code>vtbackend</code> worked because a real <code>vtbackend</code> was doing the work.</p>
+<p>It cannot reach parity, for a reason no amount of extra sequences fixes: <strong>the escape-sequence
+vocabulary cannot express everything a grid holds.</strong></p>
+<ul>
+<li><code>LineFlag::Wrapped</code> has exactly one producer in the whole engine — a real autowrap, in
+  <code>Screen::crlfIfWrapPending</code>. No sequence sets it. A mirror that cannot say "this row continues
+  the one above" has no logical lines, so reflow on resize, double-click selection, search across a
+  wrap and the shell's semantic marks all worked from wrap state it had invented.</li>
+<li><code>Line::promptEndOffset()</code> / <code>commandEndOffset()</code> have no spelling at all. The terminal takes them
+  from wherever the cursor stood when the shell spoke OSC 133, and <code>Line::reset()</code> — which every
+  row erase goes through — clears them, so even a re-emitted OSC 133 would need re-asserting after
+  every repaint.</li>
+<li>Reproducing the marks with real OSC 133 would additionally feed the client's
+  <code>SemanticBlockTracker</code> command text and exit codes it does not have.</li>
+<li>The underline STYLES had no distinct representation either, because the shared flag→SGR table
+  held one integer per flag and could not spell <code>4:3</code>.</li>
+</ul>
+<p>So the client writes the fields the wire names into the fields they name. That has no ceiling, and
+it is cheaper: an update no longer costs ~25 bytes of SGR per cell plus a full re-parse.</p>
+<p><strong>What that obliges the populator to do by hand.</strong> Bypassing the parser means bypassing the
+bookkeeping <code>Screen</code> performs, so every write goes through the narrowest engine primitive that
+maintains it rather than at the arrays underneath — cells via <code>writeCellToSoA</code> (the <code>trivial</code>
+render fast-path flag, the grapheme-cluster pool, image-fragment replacement), scrolling via
+<code>Screen::scrollUp</code> (the cursor iterator, plus <code>onBufferScrolled</code> for the viewport, the Vi cursor
+and any live selection), the cursor via <code>Screen::moveCursorTo</code>, and the frame via
+<code>Terminal::screenUpdated</code> — called outside the terminal lock, exactly where
+<code>Terminal::processInputOnce</code> publishes a parsed chunk.</p>
+<p>Where the wire and the engine disagree, the <strong>sender wins</strong>: <code>applyWireCell</code> restores <code>width</code> and
+<code>scale</code> after those calls, because <code>writeCellToSoA</code> resets scale to 1 and <code>appendCodepointToCluster</code>
+re-measures the cluster. The authority on how many columns a cluster occupies is the terminal that
+ran the emulation, not the one displaying it.</p>
+<h3 id="the-parity-oracle">The parity oracle</h3>
+<p>Parity is a claim about every cell and every line of two grids, which nobody can settle by reading
+code. <code>vthost/testing/GridParity</code> compares them field by field, and <code>[parity]</code>-tagged cases in
+<code>client/ScreenMirror_test.cpp</code> drive one content shape each through the real server + client +
+mirror loop.</p>
+<p>Three things make it trustworthy:</p>
+<ul>
+<li>Both sides are read through the daemon's own <code>toWireLine</code>, so the comparator is exhaustive over
+  the protocol's vocabulary by construction — and rows are expanded to full width first, so a blank
+  row and a materialized row of identical appearance do not read as different.</li>
+<li>Fields are compared from <strong>tables</strong> (<code>LineFields</code>, <code>CellFields</code>), so a field added to the wire is
+  one row here rather than a chain of <code>if</code>s that can silently omit it. Images are the exception, and
+  the reason the tables are not the whole story: they travel in a side table beside the rows, so
+  a comparator built only on wire rows is blind to them — hence <code>describeImage</code>, read off the
+  storage.</li>
+<li>Each probe states what the SERVER must be holding (<code>serverLineFlags</code>, <code>serverHasCellFlag</code>,
+  <code>serverHasImage</code>). Two grids equally EMPTY of the thing under test pass trivially, and a probe
+  that never engaged its feature looks exactly like one that proved parity for it.</li>
+</ul>
+<p>Comparisons resolve the page through <code>Terminal::displayedPageIndex()</code> — the page the daemon
+actually serializes. Not <code>currentScreen()</code> (the page VT output targets, which a decoupled display
+or an NP/PP flip makes a different page), not <code>activeDisplay()</code> (which follows DECSASD), and not
+<code>isAlternateScreen() ? alternateScreen() : primaryScreen()</code> (which reads the xterm alt page, where
+DEC pages 1..14 do not live).</p>
+<p>The resize probes carry the load-bearing assumption: reflow runs <strong>twice</strong>, once per grid, with
+nothing synchronizing them. They agree only because both grids were faithful copies and reflow is
+deterministic in (content, flags, old size, new size) — so that agreement is measured, in both
+directions, rather than argued.</p>
+<h3 id="the-send-queue-what-a-bound-may-and-may-not-conclude">The send queue: what a bound may and may not conclude</h3>
+<p><code>net::WriteQueue</code>'s byte bound exists to detect a peer that stopped draining, and three rules
+keep it from firing on anything else. All three were learned the hard way — the daemon used to
+disconnect perfectly healthy clients on a window resize, and later refused to let them attach
+at all.</p>
+<ul>
+<li><strong>The bound governs the backlog, never a single frame.</strong> A frame landing on an empty
+  backlog is always accepted, however large. A full-grid snapshot of a deep scrollback is
+  legitimately megabytes, and its size says nothing about the peer; refusing it made a
+  session with enough history permanently unattachable, a cliff neither end could avoid.
+  The in-flight frame is still counted as owed to the peer (<code>queuedBytes()</code>), just no
+  longer governed by the bound (<code>backlogBytes()</code>) — it can no longer be superseded or
+  refused.</li>
+<li><strong>A snapshot supersedes what it re-describes.</strong> Frames are tagged with their session, and
+  pushing a snapshot drops that session's unwritten frames (<code>dropTagged</code>) instead of
+  stacking on top of them. Without it a burst of resyncs — a window drag, or an attach
+  immediately followed by the client asserting its area — queues whole grids until the
+  bound trips, for frames the client's mirror would have discarded on arrival anyway.</li>
+<li><strong>A producer that can pace itself must, and a snapshot is split so it can.</strong> The first two
+  rules are about what the queue concludes; this one is about what a producer may hand it.
+  <code>enqueue</code> is non-suspending and the drain is <em>spawned</em> onto the loop — <code>EventLoop::spawn</code>
+  queues a handle, it does not resume one — so a producer that enqueues a burst without
+  suspending never lets the drain run, and the queue is never empty after its first frame. The
+  lone-frame exemption then protects nothing, and the whole burst has to fit the bound at once.
+  That is what made a daemon with two scrollback-heavy panes permanently unattachable: the attach
+  walked every pane pushing a whole grid each, and the second one did not fit. Snapshots
+  therefore go through <code>NativeSession</code>'s streamer, which <code>waitUntilBacklogBelow</code>s a piece's worth
+  before each PDU and splits anything past <code>SnapshotChunkBytes</code> into a <code>proto::SnapshotPart</code> run.
+  The watermark is deliberately a <em>low</em>-water mark. Pacing to <code>bound − piece</code> delivers the
+  snapshot just as well, but does it by riding the backlog just under the bound for the whole
+  run — leaving a single piece of headroom for every producer that <em>cannot</em> pace itself, and
+  refusing the first one that needs more.</li>
+</ul>
+<p>The same rule has a second shape in-tree, for a producer that <em>cannot</em> suspend: <code>ControlOutput::pump</code>
+reads <code>queuedBytes()</code> and spends a headroom-derived per-pane credit, re-arming a timer while work
+remains, rather than waiting. <code>NativeSession</code>'s own debounce re-arm does the same. Suspend where you
+can, budget-and-re-arm where you cannot — one rule, two shapes.</p>
+<p>What the third rule does <strong>not</strong> cover, and what is still open: the burst-in-a-non-suspending-callback
+shape is unprotected in <code>tmux::ControlSession</code>'s <em>reply</em> path (<code>emitGuarded</code> sinks one frame per
+captured row against a 256 KiB bound, bypassing the credit pacer its own <code>%output</code> path uses) and in
+<code>tmux::TmuxGateway</code> (<code>sendKeys</code>/<code>sendRawInput</code> chop a paste into many commands). Both can still
+refuse mid-burst and drop a healthy peer. The deeper fix for the
+whole class is to make the bound mean what its comment says — refuse only when over bound <em>and</em>
+the drain has made no progress for some interval — which would protect the producers that
+structurally cannot pace.</p>
+<p>The complement to the first two lives upstream: a resync is only pushed when a grid actually moved.
+<code>SessionHost</code> reports that (<code>SizeChange</code>) rather than letting callers assume a resize
+request changed something, because clients re-assert an unchanged client area on every
+attach, and each pane's grid is clamped before it is applied — so both "different request,
+same grid" and "same request, discard a per-pane refinement" are real cases.</p>
+<h3 id="stable-row-identity-in-the-grid">Stable row identity in the grid</h3>
+<p>The delta source lives in <code>vtbackend</code> (added by this work, guarded by the
+usual terminal lock, one byte store per mutation on the hot paths):</p>
+<ul>
+<li>every <code>Line</code> carries a dirty bit set by all mutating entry points, and copy/
+  move <em>assignment</em> dirties the destination row (margin scrolls move whole
+  lines between rows);</li>
+<li><code>Grid</code> names physical rows by <strong>stable ids</strong> maintained exclusively inside
+  the ring-rotation primitives: scrolling changes a row's <code>LineOffset</code>, never
+  its id. The eviction floor is monotonic and deliberately not derived from
+  <code>historyLineCount()</code> — at-capacity scroll-down wraps destroyed page rows
+  into the oldest history slots without resetting them, and a derived floor
+  would re-validate evicted ids against garbage;</li>
+<li>wholesale rebuilds (resize/reflow, history-limit change, reset) bump a
+  <strong>generation</strong> instead; ids are only meaningful within one generation;</li>
+<li><code>finalizeRevisions()</code> stamps dirty lines with a batch seqno lazily —
+  only when a consumer queries; an idle or daemon-less terminal pays nothing.
+  <code>forEachLineChangedSince(cursor, f)</code> self-finalizes, reports rows whose
+  revision passed the cursor, and answers <code>ResyncRequired</code> on a generation
+  change — a resync is a <code>forEachValidLine()</code> snapshot, never a "changes since
+  seqno 0" replay, because post-rebuild rows legitimately keep revision 0.</li>
+</ul>
+<p>Perf gate (measured, clang-release, Callgrind): total Ir +0.30 % against the
+pre-retrofit baseline (acceptance was &lt; 0.5 %), <code>writeTextToSoA</code> and
+<code>Screen::writeText</code> byte-identical, wall-clock parity.</p>
+<h3 id="transport-and-clients">Transport and clients</h3>
+<p><code>NativeSession</code> (server) pushes an attach snapshot (SessionState + a snapshot
+Delta per session), then 20 ms-debounced deltas off the host's screen-updated
+signal. Deltas also carry the currently-SET DEC private modes of a
+single-sourced mirrored-mode table (<code>vthost/MirroredModes.hpp</code>: cursor keys,
+keypad, backarrow, bracketed paste, focus, cursor visibility) —
+everything a client needs to encode INPUT correctly; a pure mode flip pushes
+even when no cell changed. Output-side modes (autowrap, origin, margins) stay
+local by design: the server's emulation already applied them to the cells.</p>
+<p><strong>Every mode in that table must be an INDEPENDENT boolean</strong>, because the client replays the set by
+applying its rows in order — so two rows writing one underlying value would let the later one
+overwrite the earlier one's answer. Input state that is not an independent boolean rides its own
+field instead, pull+diffed like every other live value: the Kitty keyboard flag stack's top
+(<code>CSI = flags ; 1 u</code>), xterm's modifyOtherKeys level (<code>CSI &gt; 4 ; level m</code>), and the <strong>resolved
+mouse state</strong> — protocol, coordinate encoding and wheel mode.</p>
+<p>The mouse is the case that proves the rule rather than illustrating it. Nine DEC modes write only
+those three values (9/1000/1002/1003 the protocol, 1005/1006/1015/1016 the encoding, 1007 the
+wheel), so a mode SET cannot express which spelling won: replaying <code>{1000 on, 1002 on, 1003 off}</code>
+in table order ends with the protocol OFF, because resetting <em>any</em> protocol mode clears whichever
+is active — xterm's rule too (<code>really_set_mousemode</code>). The visible symptom was that the mouse was
+dead on exactly those clients whose mirror was built while an application was already tracking,
+which read as an attach-order bug and was really this. <code>SessionState</code>/<code>Delta</code> therefore carry
+<code>mouseProtocol</code> (as its DECSET number, 0 for none), <code>mouseTransport</code> and <code>mouseWheelMode</code>, and
+<code>ScreenMirror</code> writes them straight through <code>Terminal::setMouseProtocol</code>/<code>setMouseTransport</code>/
+<code>setMouseWheelMode</code> — after the modes, since DECCKM rewrites the wheel mode on the alternate screen
+and enabling a protocol resets it.</p>
+<p>While fixing that, <code>vtbackend</code> gained the xterm rule it was missing for the four coordinate modes:
+they are one mutually-exclusive setting, so a reset is effective <em>only against the matching mode</em>
+(xterm <code>charproc.c</code>, <code>srm_EXT_MODE_MOUSE</code>). Contour treated them as four flags, which additionally
+made <code>CSI ? 1005 l</code> and <code>CSI ? 1015 l</code> <em>enable</em> their encodings — they ignored the set/reset bit
+outright.</p>
+<p><strong>A snapshot must state live state outright, defaults included.</strong> Live fields
+(title, cursor shape, cwd, default colors, status display, the two input-encoding
+protocols) are pull+diffed against a per-connection <code>FollowState</code>; on a snapshot
+they travel in <code>SessionState</code> instead of a Delta changed-flag, and the server then
+records them as sent. A client replay that re-emits such a field only when it is
+non-default therefore drops any value that returned to its default inside a
+snapshot — permanently, because the server will not mention it again. That is not
+hypothetical: a shell popping its <code>CSI u</code> flags in the same batch as a child's
+alt-screen entry left clients CSI-u-encoding keys for an app that had stopped
+asking, so <code>Ctrl+A</code> reached tmux as literal <code>CSI 97;5u</code> text.</p>
+<p><strong>The daemon is the authority for scrollback, so it must have some.</strong> A bare
+<code>vtbackend::Settings</code> leaves <code>maxHistoryLineCount</code> at <code>LineCount(0)</code>, and with no
+history the daemon cannot merely fail to replay it — <code>Grid::scrolledOutDepthSince</code>
+clamps to zero, so rows that scrolled off between two deltas cannot be <em>named</em>, and
+a client mirrors them as blank scrollback. <code>DaemonConfig</code> therefore defaults it
+non-zero, and <code>contour daemon --config/--profile</code> derives the emulation half of its
+session settings from the same <code>config::emulationSettings()</code> table the GUI's session
+factory uses (a client auto-spawning a daemon forwards both flags). When a burst
+still outruns what the floor can name, <code>pushDelta</code> promotes it to a snapshot: rows
+the daemon can no longer name become an honest absence rather than fabricated blanks.</p>
+<p><strong>The invariants live at the mechanism, not at the policy above it.</strong> <code>vthost::
+hostedSessionSettings</code> (<code>vthost/SessionSettings.hpp</code>) normalizes any settings a hosted session is
+about to be built with, whatever produced them — the daemon's profile, a client's stated preference,
+or a bare <code>vtbackend::Settings</code>. <code>SessionHost</code> runs it in its constructor and again in
+<code>seedSession</code>, so no caller can open the defect back up. Two things it asserts: a zero scrollback
+becomes <code>DefaultSessionHistoryLineCount</code> (a <em>small</em> one is left alone — the default is a default,
+not a floor), and <code>goodImageProtocol</code> is forced on, because that knob is maturing toward
+non-configurable and daemon mode adopts the end state now. The latter is also why it is absent from
+the wire: carrying a setting about to disappear would buy one release of fidelity and cost a wire
+break to remove.</p>
+<p><strong>Emulation is owned by the daemon; a session inherits the profile of the client that CREATED it.</strong>
+<code>ClientHello</code> optionally carries <code>WireSessionSettings</code> — the emulation half of the client's resolved
+profile (history depth, reported terminal identity, reflow, grapheme clustering, frozen modes, image
+registers; never the page size, which <code>ResizeRequest</code> negotiates). The daemon applies it over its own
+settings, validating every field, and hands the result to the sessions <em>that connection</em> creates:
+<code>CreateTab</code>, <code>SplitPane</code>, <code>NewWindow</code>, and the first session an attach to an empty daemon spawns.
+Sessions that already exist are never re-emulated, which is what makes two clients on different
+profiles conflict-free rather than a race — an application that already read DA1 cannot be told its
+terminal changed identity. Both <code>contour daemon</code> and <code>contour client</code> resolve those settings through
+the one <code>config::resolveEmulationSettings</code> helper, so a warm daemon and the client attaching to it
+cannot disagree about what a profile means.</p>
+<p>Transient session events — bell, desktop notification, OSC 52 clipboard write — are one PDU each
+(<code>SessionBell</code>, <code>SessionNotify</code>, <code>SessionClipboard</code>), projected for consumers as
+<code>proto::SessionEventPdu</code>. They were briefly a single PDU with a <code>kind</code> byte and two anonymous
+strings, which forced every payload into the union of all of them and left nothing but a comment
+saying which field meant what.</p>
+<p><code>client/NativeClient</code> mirrors sessions into a <code>RemoteScreen</code> — plain data any
+frontend can render — and <code>contour client</code> is the GUI frontend on top of it.
+Sessions survive detach; a reattach replays history. The daemon serves the native
+protocol on <code>&lt;control-socket&gt;-native</code>.</p>
+<h2 id="the-gui-seams-contour-client-contour-client-tmux">The GUI seams (<code>contour client</code>, <code>contour client --tmux</code>)</h2>
+<p>The display stack consumes a session exclusively through
+<code>TerminalSession::terminal()</code>, so a REMOTE session is an ordinary
+<code>TerminalSession</code> whose <code>vtbackend::Terminal</code> sits on a <code>vtpty::ChannelPty</code> —
+the blocking-read, sink-driven in-memory Pty (promoted from the GUI test
+fixture, so its semantics were already test-proven). Nothing in the
+display/render/input machinery learns the session is remote:</p>
+<ul>
+<li><strong>Input</strong>: every keystroke funnels through the one <code>_pty-&gt;write()</code> in
+  <code>Terminal::flushInput</code>; the ChannelPty's write sink posts it onto the
+  controller's reactor (native: <code>NativeClient::sendInput</code>; tmux:
+  <code>send-keys -H</code> hex batches — the quoting-proof channel for encoded input).</li>
+<li><strong>Resize</strong>: <code>Terminal::resizeScreen</code>'s <code>_pty-&gt;resizeScreen()</code> fires the ChannelPty's resize sink,
+  which <code>NativeController::reportPaneGeometry</code> coalesces onto the GUI thread and
+  <code>flushGeometry</code> turns into a COMPOSED <code>ResizeRequest</code> (the whole content area, solved back up the
+  pane tree) plus a <code>ResizePane</code> per pane; the tmux path sends <code>resize-pane -x -y</code>. The client area
+  is a report of what this client can display, not an instruction — @see "One grid, several
+  clients" for how the daemon resolves one from all of them.</li>
+<li><strong>Output, native path</strong>: <code>client/ScreenMirror</code> populates the session's
+  <code>vtbackend::Terminal</code> GRID directly from the delta stream — no bytes, no
+  parser — so scrollback, selection and search work natively on mirrored content.
+  History enters by scrolling rows through the page (real scrollback, no filler);
+  hyperlink ids are translated against the connection's side table into the
+  mirror's own store. <code>vthost/GridWire</code>'s <code>applyWireLine</code> is the exact inverse of
+  the <code>toWireLine</code> that produced the row, sitting beside it so the round trip
+  cannot quietly lose a field. See "Why the client does not render escape
+  sequences" below for what forced this.
+  Because that history is the MIRROR's, a full replay must not erase it unless
+  the server discarded its own (<code>LocalHistory::Keep</code> vs <code>Discard</code>): the mirror is
+  routinely deeper than the daemon, so rebuilding from the server's remaining rows
+  truncated the user's scrollback on every resize, page flip and resync — in
+  practice, every time a full-screen app started or quit. A generation bump alone
+  does not earn a discard, because a RESIZE bumps it: this terminal reflowed the
+  same rows at the same moment, so its history is the reflowed truth. Only a first
+  replay, a reset or history-limit change (a bump with the size unchanged), and a
+  server-side <code>clear</code> (detected as the floor outrunning the viewport advance) discard.
+  Two rules keep that decision honest. <strong>Neither the floor nor the generation may be
+  compared across a page change</strong>: the 16 pages are distinct grids whose ids and
+  generations advance independently, so a primary↔alternate flip was being judged on
+  numbers from an unrelated id space — a spurious discard where they differed, and no
+  rebuild at all where they collided. And <strong><code>Keep</code> preserves history, it does not
+  decline to have any</strong>: where the target page holds no local scrollback the replay
+  streams the snapshot's rows in regardless, because there is no second copy to make.
+  Without that, a client attaching while the session sat on the alternate screen never
+  materialized the primary's pre-attach scrollback, though the wire had carried it.
+  The retention bound is the client's own <code>history.limit</code>
+  (<code>RemoteScreen::historyKeep</code>, stamped by <code>NativeClient</code> from the <code>ClientHello</code>'s
+  settings), not a constant: a hardcoded ceiling silently contradicted a user who had
+  configured deeper scrollback — the daemon served the rows and the mirror dropped them.</li>
+<li><strong>Output, tmux path</strong>: the raw <code>%output</code> bytes ARE VT — <code>TmuxClientModel</code>'s
+  injectable <code>PaneSink</code> feeds them (buffering capture-pane replay until the
+  local pty binds). The replay is <code>capture-pane -peqJ -S -</code>; <code>-S -</code> is what reaches
+  past the visible page into the pane's history, and without it this direction
+  replayed only the current screen while our own control-mode server was already
+  answering <code>-S -</code> for tmux clients.</li>
+</ul>
+<p>Each controller (<code>contour/remote/NativeController</code>,
+<code>contour/remote/TmuxController</code>, sharing <code>contour/remote/RemoteController</code>)
+runs the Qt-free client engine on its own reactor thread (<code>ReactorThread</code>) and
+doubles as the app's <code>SessionFactory</code>: the manager's creation entry points ask
+<code>canCreateSession()</code> first, so a "+" click inside a mirror window cannot spawn
+a stray local shell. The app's factory is permanently a
+<code>RoutingSessionFactory</code>; attach mode switches the route, never the manager's
+reference. v1 mapping: one tab per daemon session; tmux windows become tabs
+and additional panes split the tab.</p>
+<h3 id="one-grid-several-clients">One grid, several clients</h3>
+<p>Several clients may attach to one daemon, and they share <strong>one</strong> grid per session — per-client
+server-side viewports were considered and not built (the F8 decision), since the alternative costs
+a viewport per follower in <code>NativeSession</code> plus a per-client delta cursor. Sharing one grid makes
+two questions unavoidable, and both used to be answered by accident.</p>
+<p><strong>Which size is it?</strong> Not "whichever client reported last", which is a race rather than a policy:
+two differently-sized clients took turns resizing every application on the daemon. <code>SessionHost</code>
+keeps each attached client's reported area and resolves ONE authoritative area from all of them
+under <code>vthost::ClientSizePolicy</code> (<code>--size-policy</code>, default <code>latest</code>, mirroring tmux's <code>window-size</code>
+in both the values and the default). The resolution is a pure function of the reported set, which
+is what makes it settle: re-reporting the same areas in any order yields the same answer.
+<code>smallest</code>/<code>largest</code> combine <strong>per axis</strong>, because two clients can each be the wider and the
+shorter one. The registry is keyed by the client's stream subscription, so a detaching client's
+area stops counting — otherwise a client that is gone pins every application to its dimensions for
+the daemon's life. tmux's fourth value, <code>manual</code>, is deliberately absent: it needs a runtime verb
+to set the size with, and nothing here would drive one.</p>
+<p><strong>Who hears about a change?</strong> Everyone, which is the half that was missing: the resync used to be
+issued by the connection that received the <code>ResizeRequest</code>, over its own follow map, so maximizing
+one window left every other client rendering the old grid — <code>Terminal::resizeScreen</code> raises no
+screen update, so nothing else would tell them either until that session next produced output.
+<code>SessionHost::resizeLocked</code> is the one place any grid moves, so it announces each move through
+<code>SessionStreamEvents::sessionResized</code> (with the terminal lock released, since observers take it to
+snapshot). Every path inherits it: a client-area re-projection, a per-pane refinement, a layout
+change. The connection that asked is no longer special.</p>
+<p><strong>What a client that cannot show the grid does.</strong> A client LARGER than the grid letterboxes — the
+sub-cell remainder already renders as background padding, so the surplus simply is not drawn. A
+client SMALLER than it shows a window into the grid, positioned by <code>contour::geometry::
+viewportOrigin</code> — tmux's <code>tty_window_offset1</code> rule, ported as a pure function: centre the cursor
+horizontally once it is past the viewport, keep it on the last visible row vertically, clamp so the
+view never runs off the grid, and decide the two axes independently. The rule and its tests are in
+place; wiring it into the render origin and the mouse hit-test is not yet done, so a too-small
+client currently clips at the top-left instead of following the cursor.</p>
+<h2 id="socket-conventions">Socket conventions</h2>
+<p><code>contour daemon</code>/<code>client</code> default to <code>$XDG_RUNTIME_DIR/contour/&lt;label&gt;</code>,
+overridable per flag and <code>$CONTOUR_MUX</code>. The socket directory hardening
+mirrors tmux exactly: 0700 directory, owner check, refuse <strong>world</strong>-rwx
+(group is permitted — tmux's <code>TMUX_SOCK_PERM == 7</code>).</p>
+<p><code>vthost::daemonLogPath</code> derives <code>&lt;socket&gt;.log</code> beside the socket, as the default destination
+for a daemon with no console to write to (<code>--background</code>, and anything <code>contour daemon-service</code>
+installs). It sits with <code>nativeSocketPath</code>/<code>tmuxSocketPath</code> because it is the same kind of fact:
+one place per label, derived rather than remembered.</p>
+<p><strong>A path an installed daemon is given must be absolute, and resolved at install time.</strong> A
+registration outlives the shell that created it, and a service's <code>%TEMP%</code>/<code>%USERNAME%</code> need not
+be the interactive user's — so a socket left to be derived at start time resolves somewhere the
+user's own client never looks. <code>daemonServiceCommandLine</code> pins both the socket and the log file.</p>
+<h2 id="daemon-lifetime">Daemon lifetime</h2>
+<p>A daemon stops for one of three reasons: <code>SIGINT</code>/<code>SIGTERM</code> (POSIX), a console-control event
+(Windows), or — with <code>--exit-with-last-session</code> — its last hosted session going away. All three
+funnel into one <code>requestDaemonShutdown</code>, which closes every listener and then unwinds the loop.</p>
+<p><code>--exit-with-last-session</code> is <strong>off by default</strong>, because a daemon started by hand exists precisely
+to outlive its sessions and still be there for the next client. <code>ensureDaemon</code> turns it <strong>on</strong> for
+the daemon it auto-spawns: that one belongs to the client that needed it, and "make sure a daemon
+exists" must not mean "leave one behind". The policy rides on the <em>daemon</em>, not on the spawning
+client — a second client attaching inherits it, and the daemon ends when every session across every
+client is gone. Reference-counting attached clients (tmux's separate <code>exit-unattached</code>) is not
+implemented.</p>
+<p>Sessions leave through exactly one funnel, <code>SessionHost::handleSessionExit</code>: a shell exiting (the
+pump thread's posted completion), the native <code>ClosePane</code> PDU, or control mode's <code>kill-pane</code>. The
+orphan reaps after a refused <code>createTab</code> deliberately do <em>not</em> fire <code>sessionClosed</code>, so a failed
+creation is never mistaken for the last session ending.</p>
+<p>Two details in <code>LastSessionWatcher</code> are load-bearing:</p>
+<ul>
+<li><strong>The trigger is edge-triggered, never a level check.</strong> The daemon binds its sockets with <em>zero</em>
+  sessions and only gains one when a client asks — attaching to a daemon with no tabs spawns the
+  first session. "No sessions, therefore quit" would end the daemon before anyone could attach.</li>
+<li><strong>The decision is deferred one pump, then re-checked.</strong> <code>sessionClosed</code> fires from inside
+  <code>SessionHost</code>'s observer fan-out, which the shutdown would mutate as connection flows unwind. More
+  importantly, buffered input is dispatched without touching the reactor (<code>coro::Task</code>
+  tail-transfers; <code>PduPump</code> and <code>net::AsyncBufferedReader</code> return buffered frames and lines without
+  awaiting), so a <code>ClosePane</code> followed by a <code>CreateTab</code> — or <code>kill-pane</code> then <code>new-window</code> —
+  arriving in <strong>one read</strong> is fully dispatched before the loop regains control. The posted check
+  therefore sees the batch's end state and the daemon survives.</li>
+</ul>
+<p>Shutdown is abrupt by design: <code>requestStop</code> cancels each connection's parked read, so the graceful
+epilogues (<code>NativeSession</code>'s <code>flushThenClose</code>, control mode's <code>%exit</code>) are skipped. Peers see a
+clean FIN with no goodbye — which is exactly how a real tmux <code>kill-server</code> looks to them, and frames
+are enqueued whole so none is ever truncated. Closing a unix listener also <strong>unlinks its socket
+file</strong>, so the next <code>ensureDaemon</code> probe fails and spawns a fresh daemon rather than finding a dead
+path.</p>
+<p>One consequence worth knowing when shutting a daemon down by signal: a session whose shell is still
+running blocks teardown, because <code>~HostedSession</code> joins a pump thread parked in a blocking PTY read.
+The last-session path is unaffected (its sessions are already gone by then).</p>
+<h2 id="binary-imsg-ipc-the-real-tmux-binary-as-a-client">Binary imsg IPC (the real tmux binary as a client)</h2>
+<p>The daemon's third endpoint, <code>&lt;control-socket&gt;-tmux</code>, speaks tmux's binary
+client protocol — the rewritten libutil imsg tmux ≥ 3.6 uses: 16-byte
+host-order <code>{type,len,peerid,pid}</code> header, <code>len</code> including the header with
+its top bit marking one SCM_RIGHTS descriptor, masked length in [16, 16384],
+<code>peerid</code>'s low byte carrying <code>PROTOCOL_VERSION</code> (8; a mismatch answers
+<code>MSG_VERSION</code> and drops). The insight that makes this cheap: control mode
+rides ON TOP of imsg. After the <code>MSG_IDENTIFY_*</code> handshake (a data-driven
+table validates payload shapes exactly as the real server does) passes the
+client's STDIN/STDOUT via SCM_RIGHTS and an attach-shaped <code>MSG_COMMAND</code>
+arrives, the ORACLE-VERIFIED control-mode engine simply runs over the passed
+descriptors (<code>net::adoptFd</code> + <code>net::combineHalves</code>); the imsg socket carries
+only lifecycle. So <code>tmux -S &lt;socket&gt;-tmux -C attach-session</code> works with the
+stock tmux binary — proven by an oracle test forking the real client, and
+live against the shipped daemon.</p>
+<p>Deliberate deviations from the real server, all verified against the
+reference tree (<code>3.7b-617-g5ed5e360</code>):</p>
+<ul>
+<li>acceptance requires <code>CLIENT_CONTROL</code> and refuses <code>-CC</code>
+  (<code>CLIENT_CONTROLCONTROL</code>) — we never render a full terminal client;
+  rejections answer <code>MSG_EXIT</code> with a message, as tmux's own idiom does;</li>
+<li>the startup command is a table (<code>attach-session</code>/<code>attach</code>/
+  <code>new-session</code>/<code>new</code>/empty ⇒ attach); arbitrary startup commands are not
+  executed;</li>
+<li>the <code>%exit</code> line is SUPPRESSED on this path — the tmux client binary
+  prints its own after its imsg loop ends — and the preamble guard pair is
+  stamped flag 0 (the MSG_COMMAND-originated command is not
+  client-originated in cmd-queue terms), while stdin-line commands keep 1;</li>
+<li>a detach drains the control stdout fully, THEN sends <code>MSG_EXIT</code>
+  (mirroring <code>control_all_done</code> gating); <code>MSG_EXITING</code> is answered with
+  <code>MSG_EXITED</code>;</li>
+<li>the socket's execute-bit "has attached clients" signal is not maintained
+  (verified informational: no tmux client reads it before connecting).</li>
+</ul>
+<p><code>contour daemon --tmux-compat-socket LABEL</code> additionally binds tmux's own
+discovery path <code>/tmp/tmux-&lt;uid&gt;/LABEL</code>, so a plain
+<code>tmux -L LABEL -C attach-session</code> finds the daemon. Opt-in only: with the
+daemon down, a <code>new-session</code> on that path would silently fork a REAL tmux
+server onto it.</p>
+<h2 id="windows">Windows</h2>
+<p>The Win32 net backend serves AF_UNIX via <code>afunix.h</code> (Windows 10 1803+); the
+socket's parent directory is created but NOT permission-hardened — NTFS ACLs
+govern access, not POSIX mode bits. <code>runDaemon</code> serves the control and native
+endpoints (no imsg: SCM_RIGHTS does not exist on Windows), with
+<code>SetConsoleCtrlHandler</code> marshaling shutdown onto the loop. Sessions are
+ConPTY-backed, exactly as the GUI's local ones are.</p>
+<h3 id="starting-without-a-terminal">Starting without a terminal</h3>
+<p><code>contour daemon --background</code> relaunches its <em>own argv</em> with <code>--background=false</code> appended, through
+<code>spawnDetachedDaemon</code>, then blocks on <code>spawnAndAwaitDaemon</code> until the native socket accepts —
+so returning means "it is serving", not "the process started". Replaying its own tokens rather
+than rebuilding them from parsed flags (<code>crispy::app::commandLine</code>) is what keeps a new daemon
+option from being silently dropped by a second, forgotten spelling of the flag list.</p>
+<p>The flag is <em>overridden</em> rather than filtered out of that argv, because <code>crispy::cli</code> spells it
+four ways — <code>--background</code>, <code>-background</code>, the bare <code>background</code> (its natural style), each
+optionally with a value in the <code>=VALUE</code> or separate-token form — and options are last-one-wins. A
+token filter that misses a spelling makes the child spawn another detached child, for ever.</p>
+<p>On POSIX the child calls <code>setsid()</code> and reopens its standard descriptors on <code>/dev/null</code> before
+<code>execv</code>, which is what <code>DETACHED_PROCESS</code> buys the Windows branch: a daemon left in the invoking
+shell's session and foreground process group takes the terminal's Ctrl-C (killing every hosted
+session) and dies outright on the SIGHUP of a closing terminal, which <code>runDaemon</code> does not block.
+Its diagnostics go to <code>--log-file</code>, which this path always supplies.</p>
+<p><code>contour daemon-service install|uninstall|start|stop|restart|status</code> registers that daemon with
+the OS. Two mechanisms hide behind the verbs, because on Windows <strong>no single one does both
+halves</strong> of what is wanted (<code>vthost/ServiceControl.hpp</code>):</p>
+<table>
+<thead>
+<tr>
+<th><code>--start</code></th>
+<th>Backend</th>
+<th>Trigger</th>
+<th>Elevation</th>
+<th>Password</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>logon</code> <em>(default)</em></td>
+<td>Task Scheduler 2.0 (COM)</td>
+<td>the installing user's logon</td>
+<td>no</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>boot</code> / <code>manual</code></td>
+<td>SCM service</td>
+<td>boot / on demand</td>
+<td>yes</td>
+<td><strong>yes</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The public service-trigger set has <strong>no logon trigger</strong> — <code>SERVICE_AUTO_START</code> means <em>boot</em>, in
+session 0 — and <code>CreateServiceW</code> under a named account needs that account's password, where a
+task registers with <code>TASK_LOGON_INTERACTIVE_TOKEN</code> and needs none. So the start mode selects the
+<em>backend</em>, and <code>logon</code> is the default: a multiplexer is per-user and per-session, and a shell
+spawned from session 0 runs in the service's window station where any GUI program it launches is
+invisible. The SCM backend is <strong>not implemented yet</strong> (it needs the credential prompt plus a
+<code>StartServiceCtrlDispatcherW</code> mode in the daemon, which would be a fourth shutdown trigger
+alongside the three above); <code>boot</code>/<code>manual</code> report exactly that rather than quietly registering
+under LocalSystem, whose different <code>%TEMP%</code>/<code>%USERNAME%</code> would bind a socket no client could find.</p>
+<p>The logon trigger is bound to the installing user's SAM name, not left blank — a blank one fires
+on <em>any</em> user's logon.</p>
+<p>The client side is the GUI (<code>contour client</code>) on Windows as everywhere else.
+There was briefly a console client here — <code>runAttach</code>, raw VT console mode plus
+a dedicated blocking stdin-reader thread, since console handles cannot park on
+the socket reactor — and it was dropped along with the TUI thin client
+(<code>d4ce9c96</code>); a future TUI mode plugs back in at the same seam. The console
+handling is the part worth remembering if it ever returns.</p>
+<p>Windows code is exercised by the Windows CI job (compile under -Werror plus the
+runtime-gated unix-echo net test); it cannot run on the Linux development
+machines.</p>
+<h2 id="diagnostics">Diagnostics</h2>
+<p>The daemon logs through <code>crispy::logstore</code>. Categories are dotted and module-first, so
+<code>vthost.*</code> maps 1:1 onto <code>src/vthost/</code>; <code>contour list-debug-tags</code> prints them all.</p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Default</th>
+<th>What it records</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vthost.daemon</code></td>
+<td><strong>on</strong></td>
+<td>Endpoints bound, listeners started, signals, shutdown. Banner-grade only — with no <code>--log</code> and no <code>$LOG</code> these lines are the foreground user's only feedback.</td>
+</tr>
+<tr>
+<td><code>vthost.conn</code></td>
+<td>off</td>
+<td>Per-connection accept, handshake and disconnect.</td>
+</tr>
+<tr>
+<td><code>vthost.session</code></td>
+<td>off</td>
+<td>Hosted session spawn, resize, model refusal, exit.</td>
+</tr>
+<tr>
+<td><code>vthost.tmux</code></td>
+<td>off</td>
+<td>Control-mode and imsg attach/rejection.</td>
+</tr>
+<tr>
+<td><code>vthost.client</code></td>
+<td>off</td>
+<td>The attach side of the native protocol.</td>
+</tr>
+<tr>
+<td><code>vthost.trace.proto</code></td>
+<td>off</td>
+<td>One line per PDU, both directions.</td>
+</tr>
+<tr>
+<td><code>vthost.trace.tmux</code></td>
+<td>off</td>
+<td>Every control-mode line, both directions.</td>
+</tr>
+</tbody>
+</table>
+<p>Genuine failures — malformed frames, rejected handshakes, refused sends — go to the
+always-enabled <code>error</code> category, deliberately with <strong>no</strong> category of their own: they must be
+visible without anyone having thought to enable a filter first. <code>logstore::configure</code> therefore
+keeps <code>error</code> on no matter what the filter selects.</p>
+<p><code>net</code> has no categories at all. It returns every failure as a <code>std::expected&lt;…, NetError&gt;</code> whose
+<code>context</code> carries the detail (including the OpenSSL text on a TLS handshake), and the connection
+that owns the transport prints it <em>with</em> its identity — so logging inside <code>net</code> would only
+duplicate that line, minus the part that makes it useful.</p>
+<h3 id="selecting-and-directing-output">Selecting and directing output</h3>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>contour<span class="w"> </span>daemon<span class="w"> </span>--log<span class="w"> </span><span class="s1">'vthost.conn,vthost.session'</span><span class="w">   </span><span class="c1"># a specific pair</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>contour<span class="w"> </span>daemon<span class="w"> </span>--log<span class="w"> </span><span class="s1">'vthost.*'</span><span class="w">                     </span><span class="c1"># everything, TRACE INCLUDED (see below)</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>contour<span class="w"> </span>daemon<span class="w"> </span>--log<span class="w"> </span><span class="s1">'vthost.trace.*'</span><span class="w"> </span>--log-file<span class="w"> </span>/var/log/contour-daemon.log
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nv">LOG</span><span class="o">=</span><span class="s1">'vthost.*'</span><span class="w"> </span>contour<span class="w"> </span>daemon<span class="w">                       </span><span class="c1"># the environment variable still works</span>
+</span></code></pre></div>
+<p>Three behaviours worth knowing:</p>
+<ul>
+<li><strong><code>*</code> is a plain prefix match</strong>, so <code>vthost.*</code> sweeps in <code>vthost.trace.*</code> too — exactly as
+  <code>vt.*</code> already sweeps in <code>vt.trace.sequence</code>. Name <code>vthost.trace.*</code> to select the trace tier
+  alone, or list categories explicitly to exclude it.</li>
+<li><strong>A filter is a selection, not a union</strong>: <code>logstore::configure</code> disables every category the
+  filter does not name. <code>error</code> is deliberately exempt — asking for extra detail must never
+  take failure reporting away.</li>
+<li><strong><code>--log-file</code> appends</strong> and never writes SGR escapes, so a daemon restarted against the same
+  file does not erase why the previous run died. <code>--log-file -</code> means standard error explicitly.</li>
+</ul>
+<p><code>contour client</code> accepts both options and <strong>passes them to a daemon it auto-spawns</strong>. That
+matters more than it looks: the auto-spawned daemon is the common case, and without this it is
+the one instance nobody can configure, whose standard error lands in the client's terminal. The
+whole spawn command line — the socket, these two options and <code>--exit-with-last-session</code> — is built
+once in <code>daemonSpawnArgs</code>, so the POSIX <code>execv</code> argv and the Windows <code>CreateProcess</code> command line
+cannot drift apart.</p>
+<h3 id="correlating-a-connection">Correlating a connection</h3>
+<p>Every line about one connection carries its identity — <code>&lt;endpoint&gt;#&lt;n&gt;</code>, plus <code>@&lt;peer&gt;</code> where
+the transport knows one — so a whole connection reads as one story:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>[vthost.conn]        native#3: accepted
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>[vthost.trace.proto] native#3 recv #1 ClientHello version=1 token=yes settings=yes (58 bytes)
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>[vthost.conn]        native#3: handshake complete (codec v1)
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>[vthost.trace.proto] native#3 send #0 Delta session=1 gen=3 seq=98 lines=7 (412 bytes)
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>[error]              native#3: malformed frame (MalformedVarint); dropping the connection
+</span></code></pre></div>
+<p>The endpoint name is constructor-injected into each <code>ConnectionAcceptor</code> (<code>control</code>, <code>native</code>,
+<code>imsg</code>, <code>tmux-compat</code>, <code>native-tcp</code>) and travels to the connection flow as a <code>ConnectionId</code>.</p>
+<h3 id="what-a-trace-deliberately-does-not-show">What a trace deliberately does not show</h3>
+<p><code>proto::summarize</code> reports <strong>sizes, never payloads</strong>: <code>Input</code> gives a byte count, <code>Delta</code> a line
+count, <code>SessionState</code> the lengths of the title and cwd. A <code>ClientHello</code>'s preshared token is
+reported only as present or absent. A trace of a busy session must not become a transcript of
+the user's keystrokes or screen contents, and a token mismatch — which the wire answer
+deliberately makes indistinguishable from a version mismatch — must not be undone on disk.</p>
+<p>Adding a PDU to the catalog means adding one row to <code>TraceTable</code> in <code>proto/PduTrace.cpp</code>; a
+<code>static_assert</code> against <code>std::variant_size_v&lt;DecodedPdu&gt;</code> makes forgetting it a build break.</p>
+<h3 id="threading">Threading</h3>
+<p>Every emission point runs on the event-loop thread. Session pump threads marshal through
+<code>EventLoop::post</code> before anything logs, and both shutdown hooks (the POSIX <code>sigwait</code> thread and
+the Win32 console-control handler) log from inside their <em>posted</em> continuation rather than the
+handler body. <code>logstore</code> has no synchronization of its own, so the daemon's sink serialises
+write-and-flush under a mutex; that covers the residual cross-thread cases.</p></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var tab,labels=set.querySelector(".tabbed-labels");for(tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden="">
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12Z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer">
+        
+          
+          <a href="../CODING_STYLE/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Coding Style Guidelines">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"></path></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Coding Style Guidelines
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../text-stack/" class="md-footer__link md-footer__link--next" aria-label="Next: A terminal emulator's text stack.">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                A terminal emulator's text stack.
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11H4Z"></path></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["content.action.edit", "content.action.view", "content.code.copy", "content.tabs.link", "navigation.expand", "navigation.footer", "navigation.indexes", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.sections", "navigation.tracking", "search.highlight", "search.share", "search.suggest", "toc.follow"], "search": "../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.1e8ae164.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>

@@ -1,0 +1,5 @@
+mkdocs-material
+mkdocs-exclude
+mkdocs-glightbox
+mkdocs-video
+pygments
