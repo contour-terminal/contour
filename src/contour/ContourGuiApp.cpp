@@ -32,6 +32,7 @@
 #include <crispy/Utils.hpp>
 
 #include <QtCore/QEventLoop>
+#include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
 #include <QtQml/qqmlextensionplugin.h>
 
@@ -109,6 +110,60 @@ bool hasStrandedQmlOverrides(fs::path const& configHome)
             return true;
     }
     return false;
+}
+
+namespace
+{
+    /// The production ProgramReachablePredicate: the reachability test every external launch in the
+    /// app already asks, phrased for the CLI's UTF-8 token.
+    [[nodiscard]] bool isReachableProgram(std::string_view program)
+    {
+        return platform::isReachableProgram(
+            QString::fromUtf8(program.data(), static_cast<qsizetype>(program.size())));
+    }
+
+    /// Whether an existing regular file at @p path is one this machine would execute.
+    ///
+    /// Asked of Qt rather than of `fs::perms::owner_exec`, because the POSIX exec bit is not the
+    /// question everywhere: Windows has no such bit, so std::filesystem reports every readable file
+    /// as owner-executable there and `contour terminal notes.txt` was run as a program instead of
+    /// opening a shell beside it. Qt tests the exec bit on POSIX and the suffix against %PATHEXT% on
+    /// Windows -- the same answer platform::isReachableProgram() gives for a token naming a path.
+    ///
+    /// @param path An existing regular file.
+    /// @return true when the file names a program to run.
+    [[nodiscard]] bool namesAnExecutableFile(fs::path const& path)
+    {
+        return QFileInfo(platform::toQString(path)).isExecutable();
+    }
+} // namespace
+
+VerbatimCommand classifyVerbatimCommand(std::string_view token, ProgramReachablePredicate isReachable)
+{
+    auto ec = std::error_code {};
+    auto const status = fs::status(token, ec);
+
+    if (fs::is_regular_file(status))
+    {
+        // An executable file names itself; a plain file names the directory it lives in, which is
+        // what `contour terminal ~/notes.txt` (a file manager's "open terminal here") asks for.
+        auto const path = fs::path(token);
+        if (namesAnExecutableFile(path))
+            return VerbatimCommand { .kind = VerbatimCommandKind::Program, .workingDirectory = {} };
+        return VerbatimCommand { .kind = VerbatimCommandKind::WorkingDirectory,
+                                 .workingDirectory = path.parent_path() };
+    }
+
+    if (fs::is_directory(status))
+        return VerbatimCommand { .kind = VerbatimCommandKind::WorkingDirectory, .workingDirectory = token };
+
+    // Nothing on disk under that name -- but `contour terminal echo hello` names its program the way
+    // anyone names one, and the spawn resolves it through execvp()'s PATH search. Ask the same
+    // question here, or the documented way to run a command is reported as a mistake (#2102).
+    if (isReachable(token))
+        return VerbatimCommand { .kind = VerbatimCommandKind::Program, .workingDirectory = {} };
+
+    return VerbatimCommand { .kind = VerbatimCommandKind::Unknown, .workingDirectory = {} };
 }
 
 ContourGuiApp::ContourGuiApp(crispy::Environment const& env,
@@ -837,25 +892,19 @@ bool ContourGuiApp::loadConfig(string const& target)
         }
         else
         {
-            auto frontCommand = flags.verbatim.front();
+            auto const frontCommand = flags.verbatim.front();
+            auto const verbatim = classifyVerbatimCommand(frontCommand, isReachableProgram);
 
-            // check if this is a file
-            if (fs::exists(frontCommand) && fs::is_regular_file(frontCommand))
+            switch (verbatim.kind)
             {
-                // check if this is an executable file
-                if ((fs::status(frontCommand).permissions() & fs::perms::owner_exec) != fs::perms::none)
+                case VerbatimCommandKind::Program: shell.program = frontCommand; break;
+                case VerbatimCommandKind::WorkingDirectory:
+                    shell.workingDirectory = verbatim.workingDirectory;
+                    break;
+                case VerbatimCommandKind::Unknown:
+                    errorLog()("Do not know what to do with `{}` will use it as a program", frontCommand);
                     shell.program = frontCommand;
-                else // find a path to file and open shell in this path
-                    shell.workingDirectory = fs::path(frontCommand).parent_path();
-            }
-            else if (fs::exists(frontCommand) && fs::is_directory(frontCommand))
-            {
-                shell.workingDirectory = fs::path(frontCommand);
-            }
-            else
-            {
-                errorLog()("Do not know what to do with `{}` will use it as a program", frontCommand);
-                shell.program = frontCommand;
+                    break;
             }
 
             for (size_t i = 1; i < flags.verbatim.size(); ++i)

@@ -1,35 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/platform/QtExternalLauncher.hpp>
 
-#include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
-#include <QtCore/QStandardPaths>
 #include <QtGui/QDesktopServices>
 
 namespace contour::platform
 {
-
-namespace
-{
-    /// Whether @p program names something this machine can actually run.
-    ///
-    /// Determined here because Qt reports one FailedToStart for "there is no such program" and for
-    /// "it is there and would not start", which are different things to tell a user: the first is
-    /// a missing package, the second a permission or a loader problem.
-    ///
-    /// @param program The executable path or bare program name.
-    /// @return true when a file to execute was found.
-    [[nodiscard]] bool isReachableProgram(QString const& program)
-    {
-        // A path names the file directly; a bare name is searched for on $PATH (and, on Windows,
-        // with the suffixes from %PATHEXT%, which is why this is not a plain existence test).
-        if (program.contains(QLatin1Char('/')) || program.contains(QLatin1Char('\\')))
-            return QFileInfo(program).isExecutable();
-
-        return !QStandardPaths::findExecutable(program).isEmpty();
-    }
-
-} // namespace
 
 std::expected<void, LaunchError> QtExternalLauncher::openUrl(QUrl const& url)
 {
