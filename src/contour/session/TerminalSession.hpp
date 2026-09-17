@@ -1125,6 +1125,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::atomic_flag _searchTallyPostPending = ATOMIC_FLAG_INIT;
 
     vtbackend::Terminal _terminal;
+    /// A notice is on screen and the pane is alive only to be dismissed: the shell exited too early,
+    /// the device never started, or the daemon connection went away. It is also what makes
+    /// onClosed() idempotent for those exits, which arrive from two callers (see onClosed()), so it
+    /// is written and read under _onClosedMutex wherever more than the GUI thread can see it.
     bool _terminatedAndWaitingForKeyPress = false;
     DisplaySurface* _display = nullptr;
 
