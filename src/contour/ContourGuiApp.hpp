@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -86,6 +87,44 @@ namespace window
 
 /// The directory a user's own `Contour.Ui` module is loaded from, under @p configHome.
 [[nodiscard]] std::filesystem::path uiModuleOverrideDirectory(std::filesystem::path const& configHome);
+
+/// What the leading token of a verbatim `contour [terminal] PROGRAM ARGS...` invocation names.
+enum class VerbatimCommandKind : uint8_t
+{
+    Unknown,          ///< Nothing under that name: not on disk, and not on PATH either.
+    Program,          ///< An executable to run instead of the configured shell.
+    WorkingDirectory, ///< A directory to open the configured shell in.
+};
+
+/// What classifyVerbatimCommand() made of the token.
+struct VerbatimCommand
+{
+    VerbatimCommandKind kind; ///< What the token names.
+    /// Where to open the configured shell, for WorkingDirectory; empty for the other two, whose
+    /// token the caller runs as the program exactly as it was typed.
+    std::filesystem::path workingDirectory;
+};
+
+/// Whether a token names something this machine can actually run -- the PATH search the spawn
+/// itself performs. Injected so a verdict does not depend on what happens to be installed on the
+/// machine running the tests. @see contour::platform::isReachableProgram.
+using ProgramReachablePredicate = bool (*)(std::string_view);
+
+/// Decides what the leading token of `contour [terminal] PROGRAM ARGS...` asks for. Pure but for
+/// @p isReachable and the file-system probes, so the rule is unit-testable against a temporary
+/// directory and a stub PATH.
+///
+/// A token naming an executable file, or a program the machine can reach, is a program to run. A
+/// directory is a place to open the shell in, and so is a plain (non-executable) file -- its parent
+/// directory. Anything else is Unknown: the caller has nothing better to do than run it and let the
+/// spawn fail, but the distinction is what keeps `contour terminal echo hello` from being reported
+/// as a mistake.
+///
+/// @param token       The first verbatim argument, as typed.
+/// @param isReachable The reachability test to use.
+/// @return What the token names, and where to start the shell if that is what it names.
+[[nodiscard]] VerbatimCommand classifyVerbatimCommand(std::string_view token,
+                                                      ProgramReachablePredicate isReachable);
 
 /// Extends ContourApp with terminal GUI capability.
 class ContourGuiApp: public QObject, public cli::ContourApp
