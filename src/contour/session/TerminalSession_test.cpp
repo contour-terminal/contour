@@ -338,6 +338,17 @@ using vtbackend::Modifiers;
 
 using contour::test::mockPtyOf;
 
+/// Counts how often @p needle appears on @p session's visible page. Used to assert that a notice
+/// the session writes in its own voice is written exactly once.
+[[nodiscard]] size_t countOnScreen(contour::session::TerminalSession& session, std::string_view needle)
+{
+    auto const screen = session.terminal().primaryScreen().renderMainPageText();
+    auto count = size_t { 0 };
+    for (auto pos = screen.find(needle); pos != std::string::npos; pos = screen.find(needle, pos + 1))
+        ++count;
+    return count;
+}
+
 /// Registers a copy of the "main" profile under @p name in @p app's config, letting @p mutate it, so
 /// a session constructed under that name exercises config-driven behaviour (hint patterns, bell
 /// sound, mode cursors, ...) without touching the default profile. Returns @p name for chaining.
@@ -1734,6 +1745,28 @@ TEST_CASE("TerminalSession: a spontaneous early exit shows the notice and a key 
                            vtbackend::KeyboardEventType::Press,
                            std::chrono::steady_clock::now());
     CHECK(closed);
+}
+
+TEST_CASE("TerminalSession: a second onClosed() does not repeat the early-exit notice",
+          "[contour][session][close]")
+{
+    // Regression (#2102, "the message about terminating too quickly appears twice"): ONE exit
+    // reaches onClosed() twice -- from the session's own exit watcher, and from
+    // TerminalDisplay::onBeforeSynchronize(), which fires it when the device is already closed by
+    // the time the first frame is about to be drawn. That is the norm, not a corner case, for a
+    // command that exits immediately (`contour terminal echo hello`). The de-duplication further
+    // down onClosed() is below the early-exit branch's `return`, so only the armed notice itself can
+    // say that this exit has already been reported.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& pty = mockPtyOf(*session);
+
+    pty.close();
+    session->onClosed();
+    session->onClosed();
+
+    CHECK(countOnScreen(*session, "Shell terminated too quickly.") == 1);
+    CHECK(countOnScreen(*session, "The window will not be closed automatically.") == 1);
 }
 
 // ============================================================================================

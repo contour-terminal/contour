@@ -9,6 +9,7 @@
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/TempDir.hpp>
 
 #include <QtCore/QTemporaryDir>
 
@@ -19,6 +20,10 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <system_error>
 
 using contour::test::TestApp;
 
@@ -214,4 +219,131 @@ TEST_CASE("overridesShellProgram only counts a real program override", "[contour
     auto command = Process::ExecInfo {};
     command.program = "htop";
     CHECK(contour::session::overridesShellProgram(command));
+}
+
+// Regression (#2102, "both documented paths produce an error message"): `contour terminal PROGRAM
+// ARGS...` is the documented way to run a command, and a program named the way anyone names one --
+// `echo`, not `/usr/bin/echo` -- was reported as "Do not know what to do with `echo`", because the
+// classification only ever looked on disk. The spawn itself goes through execvp(), which searches
+// PATH; the classification must ask the same question before it calls a token unknown.
+namespace
+{
+/// A machine with nothing installed at all: every classification then rests on what is on disk.
+[[nodiscard]] bool nothingIsReachable(std::string_view /*program*/)
+{
+    return false;
+}
+
+/// A machine with exactly one program on it.
+[[nodiscard]] bool onlyEchoIsReachable(std::string_view program)
+{
+    return program == "echo";
+}
+
+/// Creates a file under @p directory that this platform will execute, named after @p stem.
+///
+/// What makes a file executable is platform-specific, and so is the fixture: POSIX has the exec
+/// bit, while Windows decides by suffix (%PATHEXT%) and would not run a `.sh` whatever its mode.
+///
+/// @param directory Where to create it.
+/// @param stem      The file name, without the platform's executable suffix.
+/// @return The path of the created file.
+[[nodiscard]] std::filesystem::path makeExecutableFile(std::filesystem::path const& directory,
+                                                       std::string_view stem)
+{
+#ifdef _WIN32
+    auto const path = directory / (std::string { stem } + ".cmd");
+    std::ofstream(path) << "@echo off\n";
+#else
+    auto const path = directory / (std::string { stem } + ".sh");
+    std::ofstream(path) << "#!/bin/sh\n";
+    std::filesystem::permissions(
+        path, std::filesystem::perms::owner_exec, std::filesystem::perm_options::add);
+#endif
+    return path;
+}
+
+/// Runs the enclosing scope in another working directory, restoring the previous one on the way
+/// out -- including when an assertion throws, which would otherwise leave every later test in a
+/// directory that TempDir has since deleted.
+class ScopedWorkingDirectory
+{
+  public:
+    explicit ScopedWorkingDirectory(std::filesystem::path const& directory):
+        _previous { std::filesystem::current_path() }
+    {
+        std::filesystem::current_path(directory);
+    }
+
+    ~ScopedWorkingDirectory()
+    {
+        auto ec = std::error_code {};
+        std::filesystem::current_path(_previous, ec);
+    }
+
+    ScopedWorkingDirectory(ScopedWorkingDirectory const&) = delete;
+    ScopedWorkingDirectory& operator=(ScopedWorkingDirectory const&) = delete;
+    ScopedWorkingDirectory(ScopedWorkingDirectory&&) = delete;
+    ScopedWorkingDirectory& operator=(ScopedWorkingDirectory&&) = delete;
+
+  private:
+    std::filesystem::path _previous;
+};
+} // namespace
+
+TEST_CASE("classifyVerbatimCommand resolves a bare program name through PATH", "[contour][app][cli]")
+{
+    using contour::VerbatimCommandKind;
+
+    CHECK(contour::classifyVerbatimCommand("echo", onlyEchoIsReachable).kind == VerbatimCommandKind::Program);
+
+    // Nothing on disk and nothing to reach is the one case that is genuinely unknown.
+    CHECK(contour::classifyVerbatimCommand("echo", nothingIsReachable).kind == VerbatimCommandKind::Unknown);
+}
+
+TEST_CASE("classifyVerbatimCommand tells a program from a place to open a shell in", "[contour][app][cli]")
+{
+    using contour::VerbatimCommandKind;
+
+    auto const tempDir = contour::test::TempDir();
+    REQUIRE(tempDir.isValid());
+    auto const& root = tempDir.path();
+
+    auto const script = makeExecutableFile(root, "run");
+
+    auto const notes = root / "notes.txt";
+    std::ofstream(notes) << "hello\n";
+
+    // An executable file runs; a plain file opens the shell where it lives; a directory opens the
+    // shell in it. None of the three consults PATH -- what is on disk answers first.
+    CHECK(contour::classifyVerbatimCommand(script.string(), nothingIsReachable).kind
+          == VerbatimCommandKind::Program);
+
+    auto const beside = contour::classifyVerbatimCommand(notes.string(), nothingIsReachable);
+    CHECK(beside.kind == VerbatimCommandKind::WorkingDirectory);
+    CHECK(beside.workingDirectory == root);
+
+    auto const directory = contour::classifyVerbatimCommand(root.string(), nothingIsReachable);
+    CHECK(directory.kind == VerbatimCommandKind::WorkingDirectory);
+    CHECK(directory.workingDirectory == root);
+}
+
+TEST_CASE("classifyVerbatimCommand runs an executable sitting in the current directory",
+          "[contour][app][cli]")
+{
+    using contour::VerbatimCommandKind;
+
+    auto const tempDir = contour::test::TempDir();
+    REQUIRE(tempDir.isValid());
+    auto const script = makeExecutableFile(tempDir.path(), "run");
+
+    // A name carrying no separator still names a file when that file is in the current directory,
+    // and what is on disk has to answer before reachability does. A PATH search cannot stand in for
+    // this probe: neither execvp() nor QStandardPaths::findExecutable() looks in the current
+    // directory, so classifying a regular file through the reachability predicate would open a
+    // shell beside this script instead of running it.
+    auto const guard = ScopedWorkingDirectory { tempDir.path() };
+
+    CHECK(contour::classifyVerbatimCommand(script.filename().string(), nothingIsReachable).kind
+          == VerbatimCommandKind::Program);
 }

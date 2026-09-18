@@ -1135,6 +1135,15 @@ void TerminalSession::onClosed()
     auto const _ = std::scoped_lock { _onClosedMutex };
     sessionLog()("Terminal device closed (thread {})", crispy::threadName());
 
+    // One exit reaches here twice: from the exit watcher, and from TerminalDisplay's "the device was
+    // already closed when the first frame was about to be drawn" check -- which is the norm for a
+    // command that exits immediately (`contour terminal echo hello`). The _onClosedHandled guard
+    // further down sits BELOW the notice branches' `return` and so cannot speak for them; an armed
+    // notice is what says this exit has already been reported (#2102). It also covers a start
+    // failure, whose own notice reportDeviceStartFailure() has already written.
+    if (_terminatedAndWaitingForKeyPress)
+        return;
+
     if (!_terminal.device().isClosed())
         _terminal.device().close();
 
