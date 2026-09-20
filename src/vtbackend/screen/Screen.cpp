@@ -3865,6 +3865,30 @@ namespace impl
         }
 
         // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+        ApplyResult DECSMBV(Sequence const& seq, Terminal& terminal)
+        {
+            if (seq.parameterCount() <= 1)
+            {
+                switch (seq.paramOr(0, Sequence::Parameter { 0 }))
+                {
+                    case 0:
+                    case 5:
+                    case 6:
+                    case 7:
+                    case 8: terminal.setMarginBellVolume(BellVolume::High); break;
+                    case 1: terminal.setMarginBellVolume(BellVolume::Off); break;
+                    case 2:
+                    case 3:
+                    case 4: terminal.setMarginBellVolume(BellVolume::Low); break;
+                    default: return ApplyResult::Invalid;
+                }
+                return ApplyResult::Ok;
+            }
+            else
+                return ApplyResult::Invalid;
+        }
+
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult EL(Sequence const& seq, Screen& screen)
         {
             switch (seq.paramOr(0, Sequence::Parameter { 0 }))
@@ -6835,6 +6859,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         }
         case DECSCUSR: return impl::DECSCUSR(seq, *_terminal);
+        case DECSMBV: return impl::DECSMBV(seq, *_terminal);
         case DECSCPP:
             if (auto const columnCount = seq.paramOr(0, 80); columnCount == 80 || columnCount == 132)
             {
