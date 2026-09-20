@@ -1081,10 +1081,17 @@ enum class DECMode : std::uint8_t
     /// While set, a paste is announced to the application with the MIME types the clipboard actually
     /// holds, so a full-screen application can choose how to interpret it rather than guessing.
     PasteMimeNotifications = 72,
+
+    /// The margin bell (`CSI ? 44 h`/`l`): while set, printing near the right margin rings the bell
+    /// automatically, the way a mechanical typewriter warns its carriage is about to run out of room.
+    /// Off by default, and reset by RIS (hardReset() rebuilds the whole mode set from scratch and
+    /// never re-enables this one). NOT reset by DECSTR (softReset()) -- unverified whether it should
+    /// be; softReset() only touches an explicit, curated list of modes and this was not added to it.
+    MarginBell = 73,
     // }}}
 
     /// Sentinel value for sizing the mode bitset. Must remain the last entry.
-    DECModeCount = 73
+    DECModeCount = 74
 };
 
 /// The minimum ANSI conformance level (1..5, matching conformanceLevelOf(VTType)) at which a DEC
@@ -1345,7 +1352,7 @@ struct DECModeNumbering
 /// table, so adding a mode is one new row and the two directions can never fall out of sync.
 ///
 /// Unmapped numbers a real terminal recognises but Contour does not yet implement include 38 (enter
-/// Tektronix mode, DECTEK) and 44 (turn on margin bell); they intentionally have no row.
+/// Tektronix mode, DECTEK); it intentionally has no row.
 constexpr inline auto DECModeNumbers = std::to_array<DECModeNumbering>({
     { DECMode::UseApplicationCursorKeys, 1 },
     { DECMode::DesignateCharsetUSASCII, 2 },
@@ -1395,6 +1402,7 @@ constexpr inline auto DECModeNumbers = std::to_array<DECModeNumbering>({
     { DECMode::PrintFormFeed, 18 },
     { DECMode::HebrewKeyboardMapping, 35 },
     { DECMode::NationalReplacementCharacterSet, 42 },
+    { DECMode::MarginBell, 44 },
     { DECMode::HorizontalCursorCoupling, 60 },
     { DECMode::RightToLeftMode, 34 },
     { DECMode::HebrewEncodingMode, 36 },

@@ -3020,6 +3020,11 @@ void Terminal::bell()
     _eventListener.bell();
 }
 
+void Terminal::marginBell()
+{
+    _eventListener.marginBell();
+}
+
 void Terminal::bufferChanged(ScreenType type)
 {
     clearSelection();
@@ -5717,6 +5722,7 @@ std::string toString(DECMode mode)
         case DECMode::ReportColorPaletteUpdated: return "ReportColorPaletteUpdated";
         case DECMode::InBandWindowResize: return "InBandWindowResize";
         case DECMode::PasteMimeNotifications: return "PasteMimeNotifications";
+        case DECMode::MarginBell: return "MarginBell";
         case DECMode::SemanticBlockProtocol: return "SemanticBlockProtocol";
         case DECMode::PrintFormFeed: return "PrintFormFeed";
         case DECMode::HebrewKeyboardMapping: return "HebrewKeyboardMapping";

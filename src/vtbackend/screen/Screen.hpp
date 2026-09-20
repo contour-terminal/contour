@@ -1078,6 +1078,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     void advanceCursorAfterWrite(ColumnCount n) noexcept;
 
+    /// Rings the margin bell once, if DECMode::MarginBell is set and printing just crossed from
+    /// before to at-or-past the threshold column near the right margin. Takes the column BEFORE and
+    /// AFTER the write (not just the new position) because a bulk write can advance the cursor many
+    /// columns in one call, skipping straight over the threshold column instead of landing on it.
+    void checkMarginBell(ColumnOffset oldColumn, ColumnOffset newColumn) noexcept;
+
     void clearAllTabs();
     void clearTabUnderCursor();
     void setTabUnderCursor();

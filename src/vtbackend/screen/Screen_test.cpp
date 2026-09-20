@@ -4636,4 +4636,72 @@ TEST_CASE("DECSMBV: a hand-built two-parameter sequence is rejected", "[screen]"
     CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Low);
 }
 
+TEST_CASE("DECMode::MarginBell: toggles via CSI ? 44 h/l", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::MarginBell));
+
+    mock.writeToScreen("\033[?44h");
+    CHECK(mock.terminal.isModeEnabled(DECMode::MarginBell));
+
+    mock.writeToScreen("\033[?44l");
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::MarginBell));
+}
+
+TEST_CASE("DECMode::MarginBell: RIS resets it off", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+
+    mock.writeToScreen("\033[?44h");
+    REQUIRE(mock.terminal.isModeEnabled(DECMode::MarginBell));
+
+    mock.writeToScreen("\033c"); // RIS
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::MarginBell));
+}
+
+TEST_CASE("margin bell: does not ring while DECMode::MarginBell is off", "[screen]")
+{
+    // A 20-column page with the default 10-column threshold rings at column 10. Printing straight
+    // across it with the mode at its default (off) must not ring at all.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+
+    mock.writeToScreen("0123456789012345");
+    CHECK(mock.marginBellCount == 0);
+}
+
+TEST_CASE("margin bell: rings once as ordinary typing crosses the threshold", "[screen]")
+{
+    // Plain ASCII with every mode at its default hits writeText's bulk fast path, not
+    // Screen::clearAndAdvance -- the per-character path a real interactive shell session's echoed
+    // keystrokes actually take. Insert mode (IRM) is the fast path's own exclusion (it requires
+    // !isModeEnabled(AnsiMode::Insert)), so turning it on forces every character through
+    // writeCharToCurrentAndAdvance -> clearAndAdvance instead, without depending on character width.
+    // Ten characters moves the cursor from column 0 to column 10, exactly the threshold on a
+    // 20-column page.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    mock.writeToScreen("\033[?44h");
+    mock.writeToScreen("\033[4h"); // IRM: force the per-character path
+
+    mock.writeToScreen("0123456789");
+    CHECK(mock.marginBellCount == 1);
+
+    // Continuing to type further into the danger zone must not ring again -- the old column is
+    // already past the threshold for every subsequent character, so the crossing condition never
+    // re-triggers.
+    mock.writeToScreen("01234");
+    CHECK(mock.marginBellCount == 1);
+}
+
+TEST_CASE("margin bell: a single bulk write that jumps past the threshold still rings", "[screen]")
+{
+    // Writing all 20 columns in one call exercises the old/new column RANGE check rather than an
+    // exact match: the cursor jumps from column 0 straight past column 10 without ever landing on
+    // it, which is exactly the case an exact-column comparison would have missed.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    mock.writeToScreen("\033[?44h");
+
+    mock.writeToScreen("01234567890123456789");
+    CHECK(mock.marginBellCount == 1);
+}
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

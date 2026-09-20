@@ -302,6 +302,7 @@ class Terminal
 
         virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
         virtual void bell() {}
+        virtual void marginBell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
@@ -1771,6 +1772,7 @@ class Terminal
     void requestCaptureBuffer(LineCount lines, bool logical);
     void requestShowHostWritableStatusLine();
     void bell();
+    void marginBell();
     void bufferChanged(ScreenType);
     void scrollbackBufferCleared();
     void screenUpdated();
