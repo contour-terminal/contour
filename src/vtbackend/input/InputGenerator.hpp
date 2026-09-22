@@ -736,7 +736,10 @@ class InputGenerator
 
     void consume(int n)
     {
-        _consumedBytes += n;
+        // Never let the offset run past the queue. An over-consume used to leave _consumedBytes beyond an
+        // emptied queue, so the next sequence appended was sent with its first bytes cut off -- or, if it
+        // was shorter than the offset, peek() computed a wrapped-around length.
+        _consumedBytes = std::min(_consumedBytes + n, static_cast<int>(_pendingSequence.size()));
         if (std::cmp_equal(_consumedBytes, _pendingSequence.size()))
         {
             _consumedBytes = 0;

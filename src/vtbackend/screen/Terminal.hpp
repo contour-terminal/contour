@@ -2406,6 +2406,16 @@ class Terminal
     // unaffected by the change of type.
     mutable TracyLockable(std::mutex, _stateMutex);
 
+    // Guards _inputGenerator's pending byte queue. Two threads flush it: the parser thread (a reply that
+    // cannot wait for the GUI -- reportInBandWindowResize(), sendLocatorReport(), CONTOUR_SYNC_PTY_OUTPUT)
+    // and the GUI thread (TerminalSession::flushInput() posted by screenUpdated(), and key/mouse input).
+    // _stateMutex cannot serve here: the parser thread already holds it when it flushes, and it is
+    // non-recursive. Unguarded, two flushes could both write the same bytes and both consume() them,
+    // leaving the consumed offset past the end of the emptied queue -- so the *next* reply lost its first
+    // bytes and its tail reached the application as keystrokes. Held only around queue access and the
+    // non-blocking PTY write, never across anything that can produce a reply (echoLocally()).
+    mutable std::mutex _inputMutex;
+
     // terminal clock
     std::chrono::steady_clock::time_point _currentTime;
 

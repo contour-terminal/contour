@@ -1039,14 +1039,15 @@ Handled Terminal::sendKeyEvent(Key key,
     {
         if (auto const udkStr = udkStringForKey(key); udkStr.has_value())
         {
-            _inputGenerator.generateRaw(*udkStr);
+            crispy::locked(_inputMutex, [&] { _inputGenerator.generateRaw(*udkStr); });
             flushInput();
             scrollToBottomOnInput();
             return Handled { true };
         }
     }
 
-    bool const success = _inputGenerator.generate(key, modifiers, eventType);
+    bool const success =
+        crispy::locked(_inputMutex, [&] { return _inputGenerator.generate(key, modifiers, eventType); });
     if (success)
     {
         flushInput();
@@ -1093,7 +1094,8 @@ Handled Terminal::sendCharEvent(char32_t ch,
     if (_inputHandler.sendCharPressEvent(ch, chord, eventType))
         return Handled { true };
 
-    auto const success = _inputGenerator.generate(ch, keyIdentity, modifiers, eventType);
+    auto const success = crispy::locked(
+        _inputMutex, [&] { return _inputGenerator.generate(ch, keyIdentity, modifiers, eventType); });
     if (success)
     {
         flushInput();
@@ -1165,8 +1167,10 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
     // generateMousePress() self-rejects the cases where neither applies.
     auto const eventHandledByApp =
         (allowPassMouseEventToApp(modifiers) || allowWheelTranslationToApp(button, modifiers))
-        && _inputGenerator.generateMousePress(
-            modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
+        && crispy::locked(_inputMutex, [&] {
+               return _inputGenerator.generateMousePress(
+                   modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
+           });
 
     // TODO: Ctrl+(Left)Click's should still be caught by the terminal iff there's a hyperlink
     // under the current position
@@ -1453,8 +1457,10 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
     // Do not handle mouse-move events in sub-cell dimensions.
     if (allowPassMouseEventToApp(modifiers))
     {
-        if (_inputGenerator.generateMouseMove(
-                modifiers, relativePos, pixelPosition, uiHandledHint || !selectionAvailable()))
+        if (crispy::locked(_inputMutex, [&] {
+                return _inputGenerator.generateMouseMove(
+                    modifiers, relativePos, pixelPosition, uiHandledHint || !selectionAvailable());
+            }))
             flushInput();
         if (!isModeEnabled(DECMode::MousePassiveTracking))
             return;
@@ -1520,9 +1526,10 @@ Handled Terminal::sendMouseReleaseEvent(Modifiers modifiers,
             return Handled { true };
     }
 
-    if (allowPassMouseEventToApp(modifiers)
-        && _inputGenerator.generateMouseRelease(
-            modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint))
+    if (allowPassMouseEventToApp(modifiers) && crispy::locked(_inputMutex, [&] {
+            return _inputGenerator.generateMouseRelease(
+                modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
+        }))
     {
         flushInput();
 
@@ -1538,7 +1545,7 @@ bool Terminal::sendFocusInEvent()
     _focused = true;
     breakLoopAndRefreshRenderBuffer();
 
-    if (_inputGenerator.generateFocusInEvent())
+    if (crispy::locked(_inputMutex, [&] { return _inputGenerator.generateFocusInEvent(); }))
     {
         flushInput();
         return true;
@@ -1552,7 +1559,7 @@ bool Terminal::sendFocusOutEvent()
     _focused = false;
     breakLoopAndRefreshRenderBuffer();
 
-    if (_inputGenerator.generateFocusOutEvent())
+    if (crispy::locked(_inputMutex, [&] { return _inputGenerator.generateFocusOutEvent(); }))
     {
         flushInput();
         return true;
@@ -1569,7 +1576,7 @@ void Terminal::sendPaste(string_view text)
     // No branch for "is the user typing a search term": the find bar owns a real text field, which
     // handles its own clipboard. Appending here is what used to corrupt the pattern, since it wrote
     // past the edit buffer the prompt was actually rendering from.
-    _inputGenerator.generatePaste(text);
+    crispy::locked(_inputMutex, [&] { _inputGenerator.generatePaste(text); });
     flushInput();
 }
 
@@ -1579,41 +1586,51 @@ void Terminal::sendRawInput(string_view text)
         return;
 
     inputLog()("Sending raw input to stdin: {}", crispy::escape(text));
-    _inputGenerator.generateRaw(text);
+    crispy::locked(_inputMutex, [&] { _inputGenerator.generateRaw(text); });
     flushInput();
 }
 
 bool Terminal::hasInput() const noexcept
 {
+    auto const _ = std::scoped_lock { _inputMutex };
     return !_inputGenerator.peek().empty();
 }
 
 void Terminal::flushInput()
 {
-    if (_inputGenerator.peek().empty())
-        return;
-
-    // Own the bytes before anything is allowed to touch the generator again: peek() returns a view into
-    // InputGenerator::_pendingSequence, and both steps below invalidate it. consume() may clear that
-    // string outright, and the local echo parses these bytes -- a query among them replies, which appends
-    // to that very string and reallocates it, leaving the view dangling. @see echoLocally().
-    auto const input = std::string(_inputGenerator.peek());
-
-    // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
-    auto const rv = _pty->write(input);
-    if (rv <= 0)
+    std::string input;
+    int rv = 0;
     {
-        // EAGAIN/EINTR is backpressure: keep the bytes pending so the caller's deferred retry sends
-        // them. Any other error is fatal for this device -- these bytes will never be delivered, and
-        // leaving them pending keeps hasInput() true, which turns TerminalSession::flushInput()'s
-        // self-repost into an unbounded loop that logs one error per iteration. That is the
-        // "Failed to write to SSH channel" flood a broken SSH session used to produce.
-        if (rv < 0 && errno != EAGAIN && errno != EINTR)
-            _inputGenerator.consume(static_cast<int>(input.size()));
-        return;
-    }
+        // peek, write and consume are one step: this is called from both the parser and the GUI thread,
+        // and if two callers could interleave here both would send the same bytes and both would consume
+        // them. @see _inputMutex.
+        auto const _ = std::scoped_lock { _inputMutex };
 
-    _inputGenerator.consume(rv);
+        if (_inputGenerator.peek().empty())
+            return;
+
+        // Own the bytes before anything is allowed to touch the generator again: peek() returns a view
+        // into InputGenerator::_pendingSequence, and both steps below invalidate it. consume() may clear
+        // that string outright, and the local echo parses these bytes -- a query among them replies, which
+        // appends to that very string and reallocates it, leaving the view dangling. @see echoLocally().
+        input = std::string(_inputGenerator.peek());
+
+        // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
+        rv = _pty->write(input);
+        if (rv <= 0)
+        {
+            // EAGAIN/EINTR is backpressure: keep the bytes pending so the caller's deferred retry sends
+            // them. Any other error is fatal for this device -- these bytes will never be delivered, and
+            // leaving them pending keeps hasInput() true, which turns TerminalSession::flushInput()'s
+            // self-repost into an unbounded loop that logs one error per iteration. That is the
+            // "Failed to write to SSH channel" flood a broken SSH session used to produce.
+            if (rv < 0 && errno != EAGAIN && errno != EINTR)
+                _inputGenerator.consume(static_cast<int>(input.size()));
+            return;
+        }
+
+        _inputGenerator.consume(rv);
+    }
 
     // SRM, reset: the terminal echoes everything it sends. This is the "local echo" a host that does not
     // echo for itself relies on, and it is off by default -- SRM is set, and the host echoes.
@@ -3568,7 +3585,7 @@ void Terminal::reply(string_view text)
     // this is invoked from within the terminal thread.
     // most likely that's not the main thread, which will however write
     // the actual input events.
-    // TODO: introduce new mutex to guard terminal writes.
+    // The pending queue is shared with the GUI thread's flushes and key input; @see _inputMutex.
 
     // Under S8C1T the terminal transmits its C1 control introducers as single 8-bit bytes (CSI -> 0x9B,
     // DCS -> 0x90, ST -> 0x9C, ...). 8-bit C1 transmission is a VT200+ capability, so it applies only
@@ -3576,10 +3593,13 @@ void Terminal::reply(string_view text)
     // after a VT52 round-trip, where setVT52Mode() resets the operating level -- replies in 7-bit even
     // if S8C1T was selected earlier. This is xterm's rule and is exactly what vttest's post-VT52 check
     // expects.
-    if (_c1TransmissionMode == ControlTransmissionMode::S8C1T && conformanceLevelOf(_operatingLevel) >= 2)
-        _inputGenerator.generateRaw(foldC1ControlsToEightBit(text));
-    else
-        _inputGenerator.generateRaw(text);
+    {
+        auto const _ = std::scoped_lock { _inputMutex };
+        if (_c1TransmissionMode == ControlTransmissionMode::S8C1T && conformanceLevelOf(_operatingLevel) >= 2)
+            _inputGenerator.generateRaw(foldC1ControlsToEightBit(text));
+        else
+            _inputGenerator.generateRaw(text);
+    }
 
     if (_syncPtyOutput)
         flushInput();
@@ -4373,7 +4393,7 @@ void Terminal::hardReset()
     // would therefore undo every mode this function is about to (re-)establish -- and for a mode listed
     // in `frozenModes` that damage is permanent, because setMode() early-returns on a frozen mode and
     // nothing can ever resync the two halves again.
-    _inputGenerator.reset();
+    crispy::locked(_inputMutex, [&] { _inputGenerator.reset(); });
 
     _modes = Modes {};
 
