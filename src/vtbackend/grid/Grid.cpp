@@ -987,7 +987,9 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                 if (newColumnCount < line.size())
                     line.resize(newColumnCount);
             verifyState();
-            return cursor + std::min(cursor.column, boxed_cast<ColumnOffset>(newColumnCount));
+            return CellLocation { .line = cursor.line,
+                                  .column =
+                                      std::min(cursor.column, boxed_cast<ColumnOffset>(newColumnCount)) };
         }
         else
         {
@@ -1012,7 +1014,9 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                         _lines[i].resize(newColumnCount);
                 _pageSize.columns = newColumnCount;
                 verifyState();
-                return cursor + std::min(cursor.column, boxed_cast<ColumnOffset>(newColumnCount));
+                return CellLocation { .line = cursor.line,
+                                      .column =
+                                          std::min(cursor.column, boxed_cast<ColumnOffset>(newColumnCount)) };
             }
 
             Lines shrunkLines;
