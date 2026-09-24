@@ -9,12 +9,16 @@
     #include <core/async/WhenAll.hpp>
     #include <core/net/Sockets.hpp>
     #include <core/net/SplitSocket.hpp>
+    #include <core/net/WriteQueue.hpp>
 
     #include <algorithm>
     #include <array>
     #include <chrono>
+    #include <cstddef>
     #include <cstring>
     #include <string>
+    #include <string_view>
+    #include <tuple>
     #include <vector>
 
     #include <unistd.h>
@@ -40,19 +44,36 @@ namespace
         "new",
     });
 
+    /// The most MSG_* bytes one connection may have waiting behind the frame being written. The
+    /// frames sent after attach are a few bytes each; only a client that stopped reading gets near it.
+    constexpr auto ImsgBacklogBound = std::size_t { 64 } * 1024;
+
+    [[nodiscard]] std::vector<std::byte> encodeImsg(uint32_t type, std::span<std::byte const> payload)
+    {
+        return imsg::encodeFrame(type, payload, /*hasFd=*/false, static_cast<uint32_t>(::getpid()));
+    }
+
+    /// Writes one frame directly. Only for the handshake, where the connection has one flow and so
+    /// one writer; once attached, every frame goes through the connection's WriteQueue.
     [[nodiscard]] core::async::Task<void> sendImsg(core::net::ISocket* socket,
                                                    uint32_t type,
                                                    std::span<std::byte const> payload)
     {
-        auto const wire =
-            imsg::encodeFrame(type, payload, /*hasFd=*/false, static_cast<uint32_t>(::getpid()));
+        auto const wire = encodeImsg(type, payload);
         std::ignore = co_await socket->write(wire);
     }
 
+    /// Queues one frame on the connection's single writer. A refusal means the queue has failed or
+    /// closed: the connection is ending, and there is nobody left to tell.
+    void enqueueImsg(core::net::WriteQueue* writer, uint32_t type, std::span<std::byte const> payload)
+    {
+        auto const wire = encodeImsg(type, payload);
+        std::ignore =
+            writer->enqueue(std::string { reinterpret_cast<char const*>(wire.data()), wire.size() });
+    }
+
     /// MSG_EXIT payload: int32 retval, optionally followed by a NUL message.
-    [[nodiscard]] core::async::Task<void> sendExit(core::net::ISocket* socket,
-                                                   int32_t retval,
-                                                   std::string message)
+    [[nodiscard]] std::vector<std::byte> exitPayload(int32_t retval, std::string_view message)
     {
         auto payload = std::vector<std::byte>(sizeof(int32_t));
         std::memcpy(payload.data(), &retval, sizeof(int32_t));
@@ -62,12 +83,21 @@ namespace
             payload.insert(payload.end(), begin, begin + message.size());
             payload.push_back(std::byte { 0 });
         }
-        co_await sendImsg(socket, imsg::msgtype::Exit, payload);
+        return payload;
+    }
+
+    [[nodiscard]] core::async::Task<void> sendExit(core::net::ISocket* socket,
+                                                   int32_t retval,
+                                                   std::string message)
+    {
+        co_await sendImsg(socket, imsg::msgtype::Exit, exitPayload(retval, message));
     }
 
     /// The imsg-side lifecycle loop while the control session serves: answers
     /// MSG_EXITING with MSG_EXITED and unwinds the bridge when this arm ends.
+    /// It reads @p socket, but writes only through @p writer, which the other arm writes through too.
     [[nodiscard]] core::async::Task<void> imsgLifecycle(core::net::ISocket* socket,
+                                                        core::net::WriteQueue* writer,
                                                         imsg::ImsgDecoder* decoder,
                                                         core::net::ISocket* bridge)
     {
@@ -76,7 +106,7 @@ namespace
         // stdin/stdout pair — goes away; unwinding the control session through its transport is
         // the only way to end it from here. A `co_return` that skipped this (a decoder framing
         // error, or a client-sent MSG_EXITING) left run() parked forever, so the whenAll never
-        // resolved: `connection->close()` was never reached, the ScopedStreamSubscription never
+        // resolved: the connection was never closed, the ScopedStreamSubscription never
         // released, and the ControlSession plus every pane it drives stayed resident until daemon
         // shutdown — one leaked session, and one leaked fd, per malformed frame. A scope guard
         // rather than three call sites, so a fourth exit cannot forget.
@@ -95,7 +125,7 @@ namespace
                     break;
                 if ((*frame)->type == imsg::msgtype::Exiting)
                 {
-                    co_await sendImsg(socket, imsg::msgtype::Exited, {});
+                    enqueueImsg(writer, imsg::msgtype::Exited, {});
                     co_return;
                 }
                 // Everything else a control client may send here is ignored.
@@ -234,16 +264,29 @@ namespace
             ControlSessionOptions { .emitExitLine = false, .initialGuardFlag = 0 });
         auto const subscription = makeScopedStreamSubscription(*host, *session);
 
+        // Both arms below write to the imsg socket, and neither waits for the other: MSG_EXIT
+        // follows run(), MSG_EXITED answers the client's MSG_EXITING whenever it comes. Written
+        // directly, the second could be armed while the first is parked on a full socket, which
+        // core-cpp ends the process for -- every session with it. One queue is one writer.
+        auto writer = core::net::WriteQueue { *loop, connection.get(), ImsgBacklogBound };
+        auto flushed = false;
+        auto const closeUnflushed = core::Finally([&writer, &flushed]() noexcept {
+            if (!flushed)
+                writer.close();
+        });
+
         // run() drains its stdout before returning (the control_all_done
         // gating); only then does MSG_EXIT go out on the imsg socket.
-        auto serveAndExit = [](core::net::ISocket* socket,
+        auto serveAndExit = [](core::net::WriteQueue* queue,
                                ControlSession* control) -> core::async::Task<void> {
             co_await control->run();
-            co_await sendExit(socket, 0, {});
+            enqueueImsg(queue, imsg::msgtype::Exit, exitPayload(0, {}));
         };
-        co_await core::async::whenAll(serveAndExit(connection.get(), session.get()),
-                                      imsgLifecycle(connection.get(), &decoder, bridgeView));
-        connection->close();
+        co_await core::async::whenAll(serveAndExit(&writer, session.get()),
+                                      imsgLifecycle(connection.get(), &writer, &decoder, bridgeView));
+        // Closing the queue closes the connection.
+        co_await writer.flushThenClose();
+        flushed = true;
     }
 } // namespace
 
