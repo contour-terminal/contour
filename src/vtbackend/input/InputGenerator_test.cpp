@@ -110,6 +110,28 @@ TEST_CASE("InputGenerator.consume")
     REQUIRE(input.peek().empty());
 }
 
+TEST_CASE("InputGenerator.consume.overconsume_does_not_truncate_next_sequence")
+{
+    // Two unsynchronized flushes used to write the same bytes and consume() them twice. The second
+    // consume() left the offset past the emptied queue, so the next reply lost its first bytes: the
+    // tail of a DA1 reply then reached the application as keystrokes.
+    auto input = InputGenerator {};
+    input.generateRaw("\033]11;rgb:1a1a/1b1b/2626\033\\\033[0n"sv); // 29 bytes
+    input.consume(29);
+    input.consume(29);
+    REQUIRE(input.peek().empty());
+
+    auto constexpr DA1 = "\033[?65;1;3;4;7;9;18;21;22;29;52;314c"sv;
+    input.generateRaw(DA1);
+    CHECK(escape(input.peek()) == escape(DA1));
+
+    // shorter than the stale offset would have been: must not wrap around
+    input.consume(static_cast<int>(DA1.size()));
+    input.consume(29);
+    input.generateRaw("\033[I"sv);
+    CHECK(escape(input.peek()) == escape("\033[I"sv));
+}
+
 TEST_CASE("InputGenerator.Ctrl+Space", "[terminal,input]")
 {
     auto input = InputGenerator {};
