@@ -13,6 +13,7 @@ add_library(vtworkspace STATIC
     Primitives.hpp
 )
 target_link_libraries(vtworkspace PUBLIC
+    boxed-cpp::boxed-cpp
     vtbackend
     crispy::core
 )

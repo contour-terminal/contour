@@ -23,6 +23,7 @@ add_library(contour_config STATIC
 # configuration model compiles against yaml-cpp's headers whether it names them or not.
 target_link_libraries(contour_config PUBLIC
     crispy::core
+    reflection-cpp::reflection-cpp
     vtbackend
     vtpty
     vtrasterizer

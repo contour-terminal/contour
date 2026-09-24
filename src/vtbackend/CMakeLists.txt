@@ -160,6 +160,7 @@ target_include_directories(vtbackend PUBLIC
 # so every consumer of vtbackend compiles that macro and needs the header it comes from.
 target_link_libraries(vtbackend PUBLIC
     Microsoft.GSL::GSL
+    boxed-cpp::boxed-cpp
     Threads::Threads
     contour::tracy
     crispy::core
