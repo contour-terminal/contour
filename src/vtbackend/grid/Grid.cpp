@@ -760,6 +760,14 @@ CellLocation Grid::growLines(LineCount newHeight, CellLocation cursor)
     for ([[maybe_unused]] auto const _: std::views::iota(0, linesToFill))
         _lines.emplace_back(_pageSize.columns, wrappableFlag, GraphicsAttributes {});
 
+    // The lines entering the page come from the ring's unused tail, which a column change leaves at
+    // its old width (see growColumns/shrinkColumns) on the promise that it is re-widthed when
+    // recycled. This is such a recycling, and the page must not hold a line narrower than itself:
+    // the terminal writes to any page column without asking the line how wide it is.
+    for (auto const y: std::views::iota(*_pageSize.lines, *newHeight))
+        if (auto& line = _lines[y]; line.size() != _pageSize.columns)
+            line.resize(_pageSize.columns);
+
     _pageSize.lines += totalLinesToExtend;
     _linesUsed = min(_linesUsed + totalLinesToExtend, LineCount::cast_from(_lines.size()));
     syncStableFloor(); // the min() clamp can shrink the history at ring capacity
