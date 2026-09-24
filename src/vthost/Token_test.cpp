@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/net/Tls.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
@@ -6,7 +8,6 @@
 #include <string>
 #include <string_view>
 
-#include <net/Tls.hpp>
 #include <vthost/Token.hpp>
 
 using vthost::readTokenFile;
@@ -160,14 +161,15 @@ TEST_CASE("constantTimeEquals answers what == would", "[vthost][token]")
     auto const oneByteShorter = secret.substr(0, secret.size() - 1);
     auto const oneByteLonger = secret + " ";
 
-    CHECK(net::constantTimeEquals(secret, secret));
-    CHECK(net::constantTimeEquals("", ""));
-    CHECK_FALSE(net::constantTimeEquals(secret, lastByteDiffers));
-    CHECK_FALSE(net::constantTimeEquals(secret, firstByteDiffers));
-    CHECK_FALSE(net::constantTimeEquals(secret, oneByteShorter)); // a prefix is not a match
-    CHECK_FALSE(net::constantTimeEquals(secret, oneByteLonger));  // nor is a longer string
-    CHECK_FALSE(net::constantTimeEquals("", secret));
+    CHECK(core::net::constantTimeEquals(secret, secret));
+    CHECK(core::net::constantTimeEquals("", ""));
+    CHECK_FALSE(core::net::constantTimeEquals(secret, lastByteDiffers));
+    CHECK_FALSE(core::net::constantTimeEquals(secret, firstByteDiffers));
+    CHECK_FALSE(core::net::constantTimeEquals(secret, oneByteShorter)); // a prefix is not a match
+    CHECK_FALSE(core::net::constantTimeEquals(secret, oneByteLonger));  // nor is a longer string
+    CHECK_FALSE(core::net::constantTimeEquals("", secret));
     // A zero byte inside the token is compared, not treated as a terminator.
-    CHECK(net::constantTimeEquals(std::string_view { "a\0b", 3 }, std::string_view { "a\0b", 3 }));
-    CHECK_FALSE(net::constantTimeEquals(std::string_view { "a\0b", 3 }, std::string_view { "a\0c", 3 }));
+    CHECK(core::net::constantTimeEquals(std::string_view { "a\0b", 3 }, std::string_view { "a\0b", 3 }));
+    CHECK_FALSE(
+        core::net::constantTimeEquals(std::string_view { "a\0b", 3 }, std::string_view { "a\0c", 3 }));
 }

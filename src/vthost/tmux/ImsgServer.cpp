@@ -5,7 +5,10 @@
 
 #ifndef _WIN32
 
-    #include <crispy/Utils.hpp>
+    #include <core/Utils.hpp>
+    #include <core/async/WhenAll.hpp>
+    #include <core/net/Sockets.hpp>
+    #include <core/net/SplitSocket.hpp>
 
     #include <algorithm>
     #include <array>
@@ -16,9 +19,6 @@
 
     #include <unistd.h>
 
-    #include <coro/WhenAll.hpp>
-    #include <net/Sockets.hpp>
-    #include <net/SplitSocket.hpp>
     #include <vthost/imsg/CommandArgv.hpp>
     #include <vthost/imsg/Identify.hpp>
     #include <vthost/imsg/ImsgCodec.hpp>
@@ -40,9 +40,9 @@ namespace
         "new",
     });
 
-    [[nodiscard]] coro::Task<void> sendImsg(net::ISocket* socket,
-                                            uint32_t type,
-                                            std::span<std::byte const> payload)
+    [[nodiscard]] core::async::Task<void> sendImsg(core::net::ISocket* socket,
+                                                   uint32_t type,
+                                                   std::span<std::byte const> payload)
     {
         auto const wire =
             imsg::encodeFrame(type, payload, /*hasFd=*/false, static_cast<uint32_t>(::getpid()));
@@ -50,7 +50,9 @@ namespace
     }
 
     /// MSG_EXIT payload: int32 retval, optionally followed by a NUL message.
-    [[nodiscard]] coro::Task<void> sendExit(net::ISocket* socket, int32_t retval, std::string message)
+    [[nodiscard]] core::async::Task<void> sendExit(core::net::ISocket* socket,
+                                                   int32_t retval,
+                                                   std::string message)
     {
         auto payload = std::vector<std::byte>(sizeof(int32_t));
         std::memcpy(payload.data(), &retval, sizeof(int32_t));
@@ -65,9 +67,9 @@ namespace
 
     /// The imsg-side lifecycle loop while the control session serves: answers
     /// MSG_EXITING with MSG_EXITED and unwinds the bridge when this arm ends.
-    [[nodiscard]] coro::Task<void> imsgLifecycle(net::ISocket* socket,
-                                                 imsg::ImsgDecoder* decoder,
-                                                 net::ISocket* bridge)
+    [[nodiscard]] core::async::Task<void> imsgLifecycle(core::net::ISocket* socket,
+                                                        imsg::ImsgDecoder* decoder,
+                                                        core::net::ISocket* bridge)
     {
         // EVERY exit closes the bridge, not just the EOF one. `serveImsgClient` awaits this arm
         // together with `control->run()`, and run() returns only once the bridge — the passed
@@ -78,7 +80,7 @@ namespace
         // released, and the ControlSession plus every pane it drives stayed resident until daemon
         // shutdown — one leaked session, and one leaked fd, per malformed frame. A scope guard
         // rather than three call sites, so a fourth exit cannot forget.
-        auto const unwindControlSession = crispy::Finally([bridge]() noexcept { bridge->close(); });
+        auto const unwindControlSession = core::Finally([bridge]() noexcept { bridge->close(); });
 
         auto buffer = std::array<std::byte, 4096> {};
         while (true)
@@ -107,10 +109,10 @@ namespace
     }
 
     /// One binary tmux client's whole lifetime.
-    coro::Task<void> serveImsgClient(net::EventLoop* loop,
-                                     SessionHost* host,
-                                     ConnectionId id,
-                                     std::unique_ptr<net::ISocket> connection)
+    core::async::Task<void> serveImsgClient(core::net::EventLoop* loop,
+                                            SessionHost* host,
+                                            ConnectionId id,
+                                            std::unique_ptr<core::net::ISocket> connection)
     {
         auto decoder = imsg::ImsgDecoder {};
         auto state = imsg::IdentifyState {};
@@ -208,15 +210,15 @@ namespace
         }
 
         // Phase 3: the control-mode line protocol over the PASSED descriptors.
-        auto stdinSocket = net::adoptFd(*loop, state.stdinFd.release());
-        auto stdoutSocket = net::adoptFd(*loop, state.stdoutFd.release());
+        auto stdinSocket = core::net::adoptFd(*loop, state.stdinFd.release());
+        auto stdoutSocket = core::net::adoptFd(*loop, state.stdoutFd.release());
         if (!stdinSocket || !stdoutSocket)
         {
             errorLog()("{}: cannot adopt the passed stdin/stdout descriptors", id);
             connection->close();
             co_return;
         }
-        auto bridge = net::combineHalves(std::move(*stdinSocket), std::move(*stdoutSocket));
+        auto bridge = core::net::combineHalves(std::move(*stdinSocket), std::move(*stdoutSocket));
         auto* bridgeView = bridge.get();
 
         auto session = std::make_unique<ControlSession>(
@@ -234,21 +236,22 @@ namespace
 
         // run() drains its stdout before returning (the control_all_done
         // gating); only then does MSG_EXIT go out on the imsg socket.
-        auto serveAndExit = [](net::ISocket* socket, ControlSession* control) -> coro::Task<void> {
+        auto serveAndExit = [](core::net::ISocket* socket,
+                               ControlSession* control) -> core::async::Task<void> {
             co_await control->run();
             co_await sendExit(socket, 0, {});
         };
-        co_await coro::whenAll(serveAndExit(connection.get(), session.get()),
-                               imsgLifecycle(connection.get(), &decoder, bridgeView));
+        co_await core::async::whenAll(serveAndExit(connection.get(), session.get()),
+                                      imsgLifecycle(connection.get(), &decoder, bridgeView));
         connection->close();
     }
 } // namespace
 
-ConnectionHandler makeTmuxImsgHandler(net::EventLoop& loop, SessionHost& host)
+ConnectionHandler makeTmuxImsgHandler(core::net::EventLoop& loop, SessionHost& host)
 {
     // NOT a coroutine itself: it merely constructs the free coroutine's task,
     // so the captures never outlive an activation frame.
-    return [&loop, &host](ConnectionId id, std::unique_ptr<net::ISocket> connection) {
+    return [&loop, &host](ConnectionId id, std::unique_ptr<core::net::ISocket> connection) {
         return serveImsgClient(&loop, &host, std::move(id), std::move(connection));
     };
 }
@@ -260,7 +263,7 @@ ConnectionHandler makeTmuxImsgHandler(net::EventLoop& loop, SessionHost& host)
 namespace vthost::tmux
 {
 
-ConnectionHandler makeTmuxImsgHandler(net::EventLoop&, SessionHost&)
+ConnectionHandler makeTmuxImsgHandler(core::net::EventLoop&, SessionHost&)
 {
     return {};
 }

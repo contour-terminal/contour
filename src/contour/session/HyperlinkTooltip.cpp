@@ -3,7 +3,7 @@
 
 #include <vtbackend/core/FileUrl.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <optional>
 #include <ranges>
@@ -39,14 +39,14 @@ namespace
 
     /// The path a file:// URI names on THIS host, decoded for reading, or nullopt when it names anything
     /// else. A truncated or malformed escape is left as written rather than dropped: showing the user what
-    /// the application actually sent beats silently swallowing it (@see crispy::unescapeURL).
+    /// the application actually sent beats silently swallowing it (@see core::unescapeURL).
     [[nodiscard]] std::optional<std::string> localFilePath(std::string_view uri, std::string_view localHost)
     {
         if (!uri.starts_with("file://"))
             return std::nullopt;
 
         return vtbackend::localWorkingDirectory(std::string { uri }, localHost)
-            .transform([](std::string const& path) { return crispy::unescapeURL(path); });
+            .transform([](std::string const& path) { return core::unescapeURL(path); });
     }
 } // namespace
 

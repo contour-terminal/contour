@@ -3,7 +3,7 @@
 
 #ifdef CONTOUR_FRONTEND_XCB
 
-    #include <crispy/LogStore.hpp>
+    #include <core/log/LogStore.hpp>
 
     #include <QtGui/QGuiApplication>
     #include <QtGui/QWindow>

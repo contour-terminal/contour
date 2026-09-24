@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <text_shaper/CoreTextLocator.hpp>
 #include <text_shaper/Font.hpp>

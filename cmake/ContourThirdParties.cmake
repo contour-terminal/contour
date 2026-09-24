@@ -225,6 +225,52 @@ else()
     HandleThirdparty(reflection-cpp "gh:contour-terminal/reflection-cpp#v${REFLECTION_CPP_VERSION}")
 endif()
 
+# core-cpp, the shared foundation of the Contour Terminal projects (coroutines, the event loop and
+# sockets, logging, the CLI parser and the generic utilities), is carried as a verbatim copy of a
+# tagged release in vendor/core-cpp, so that a distribution build fetches nothing for it. Never edit
+# the copy; see vendor/README.md.
+#
+# Its own dependencies follow CONTOUR_USE_CPM: with CPM off, a missing one stops the configure with
+# the option that needed it rather than reaching the network. TLS is on because vthost serves and
+# dials TLS (core::net_tls); the TUI modules are not vendored, so they are off.
+set(CORE_CPP_FETCH_DEPS ${CONTOUR_USE_CPM})
+set(CORE_CPP_TESTING ${CONTOUR_TESTING_CORE_CPP})
+set(CORE_CPP_WITH_TUI OFF)
+set(CORE_CPP_WITH_TLS ON)
+find_package(OpenSSL REQUIRED)
+file(STRINGS "${PROJECT_SOURCE_DIR}/vendor/core-cpp/MANIFEST" _core_cpp_ref REGEX "^# ref ")
+string(REPLACE "# ref " "" _core_cpp_ref "${_core_cpp_ref}")
+# EXCLUDE_FROM_ALL builds only the core-cpp targets contour links -- and would skip core-cpp's own
+# test executables, so it is left off when those are asked for. A vendored copy older than core-cpp
+# v0.2.1 cannot configure with its tests on at all (it adds a tests/ directory the copy leaves out),
+# so that is refused here, by name, rather than by CMake's error from inside the copy. The version is
+# the copy's own project() line, not the MANIFEST's ref, which may be a commit SHA.
+file(READ "${PROJECT_SOURCE_DIR}/vendor/core-cpp/CMakeLists.txt" _core_cpp_lists)
+string(REGEX MATCH "project\\(core-cpp[^)]*VERSION[ \t\r\n]+([0-9]+[.][0-9]+[.][0-9]+)" _ "${_core_cpp_lists}")
+set(_core_cpp_version "${CMAKE_MATCH_1}")
+if(CONTOUR_TESTING_CORE_CPP AND (_core_cpp_version STREQUAL "" OR _core_cpp_version VERSION_LESS "0.2.1"))
+    message(FATAL_ERROR
+        "CONTOUR_TESTING_CORE_CPP needs a vendored core-cpp of v0.2.1 or later, which carries its test "
+        "suite; vendor/core-cpp is ${_core_cpp_ref} (version '${_core_cpp_version}'). Re-vendor it "
+        "(vendor/README.md), or turn the option off.")
+endif()
+if(CONTOUR_TESTING_CORE_CPP)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/vendor/core-cpp ${PROJECT_BINARY_DIR}/vendor/core-cpp SYSTEM)
+else()
+    add_subdirectory(${PROJECT_SOURCE_DIR}/vendor/core-cpp ${PROJECT_BINARY_DIR}/vendor/core-cpp SYSTEM EXCLUDE_FROM_ALL)
+endif()
+set(THIRDPARTY_BUILTIN_core-cpp "vendored ${_core_cpp_ref} (vendor/core-cpp)")
+
+# The copy is verbatim: this test fails on any byte that differs from its MANIFEST, so a local edit
+# fails the suite instead of drifting from the release it claims to be.
+if(CONTOUR_TESTING)
+    add_test(NAME core-cpp-vendored-copy
+             COMMAND ${CMAKE_COMMAND} -DMODE=check
+                     -DDEST=${PROJECT_SOURCE_DIR}/vendor/core-cpp
+                     -P ${PROJECT_SOURCE_DIR}/vendor/core-cpp/cmake/CoreCppVendor.cmake)
+    set_tests_properties(core-cpp-vendored-copy PROPERTIES LABELS "lint")
+endif()
+
 # Every third-party target now exists, and our own src/ and examples/ trees are not added until after
 # this module returns -- so everything reachable from the top level at this point is vendored code.
 # The embedded projects attach their targets to the scope that calls the Embed function, i.e. here,
@@ -248,6 +294,7 @@ macro(ContourThirdPartiesSummary2)
         message(STATUS "libunicode          ${THIRDPARTY_BUILTIN_unicode_core}")
     endif()
     message(STATUS "boxed-cpp           ${THIRDPARTY_BUILTIN_boxed-cpp}")
+    message(STATUS "core-cpp            ${THIRDPARTY_BUILTIN_core-cpp}")
     message(STATUS "Tracy               ${THIRDPARTY_BUILTIN_Tracy}")
     message(STATUS "------------------------------------------------------------------------------")
 endmacro()

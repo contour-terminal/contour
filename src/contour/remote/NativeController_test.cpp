@@ -17,12 +17,15 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #ifndef _WIN32
     #include <unistd.h>
@@ -30,15 +33,19 @@
 
 #include <contour/remote/RemoteLayout.hpp>
 
+#include <core/async/Cancellation.hpp>
+#include <core/log/LogSink.hpp>
+#include <core/log/LogStore.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/ISocket.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/Sockets.hpp>
+#include <core/net/Tls.hpp>
+
 #include <cstdint>
 
-#include <coro/Cancellation.hpp>
-#include <net/EventLoop.hpp>
-#include <net/ISocket.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/Sockets.hpp>
-#include <net/Tls.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SocketPath.hpp>
@@ -53,14 +60,81 @@ using namespace std::chrono_literals;
 namespace
 {
 
+/// Captures every log category into one buffer that several threads may write while another
+/// reads it. core::log::ScopedCapture is single-threaded by design; a test with a daemon thread and
+/// a GUI reactor thread logging while the test thread polls would race on its buffer, which
+/// corrupts the heap.
+class SharedLogCapture
+{
+  public:
+    SharedLogCapture()
+    {
+        for (auto const& each: core::log::get())
+        {
+            auto& target = each.get();
+            _restorePoints.push_back(RestorePoint {
+                .target = &target, .previousSink = &target.sink(), .wasEnabled = target.isEnabled() });
+            target.enable();
+            target.setSink(_sink);
+        }
+    }
+
+    /// Restores every category. Runs after the threads that logged have been joined: declare the
+    /// capture before the objects that own them.
+    ~SharedLogCapture()
+    {
+        for (auto const& point: _restorePoints)
+        {
+            point.target->setSink(*point.previousSink);
+            point.target->enable(point.wasEnabled);
+        }
+    }
+
+    SharedLogCapture(SharedLogCapture const&) = delete;
+    SharedLogCapture& operator=(SharedLogCapture const&) = delete;
+    SharedLogCapture(SharedLogCapture&&) = delete;
+    SharedLogCapture& operator=(SharedLogCapture&&) = delete;
+
+    /// @param needle The substring to look for.
+    /// @return Whether any captured output contains @p needle.
+    [[nodiscard]] bool contains(std::string_view needle) const
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _text.contains(needle);
+    }
+
+    /// @return A copy of everything captured so far.
+    [[nodiscard]] std::string text() const
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _text;
+    }
+
+  private:
+    struct RestorePoint
+    {
+        core::log::Category* target;
+        core::log::Sink* previousSink;
+        bool wasEnabled;
+    };
+
+    mutable std::mutex _mutex;
+    std::string _text;
+    core::log::Sink _sink { true, [this](std::string_view const& text) {
+                               auto const lock = std::lock_guard { _mutex };
+                               _text += text;
+                           } };
+    std::vector<RestorePoint> _restorePoints;
+};
+
 /// An in-process `contour daemon` (native protocol) on its own thread, serving
 /// TLS over a LOOPBACK TCP socket on an EPHEMERAL port. Using TCP (the same
 /// transport `client --connect-tcp` uses) rather than AF_UNIX lets these
 /// end-to-end tests run on every platform, Windows included.
 struct DaemonFixture
 {
-    net::PollEventSource source;
-    net::EventLoop loop { source };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
     std::unique_ptr<vthost::SessionHost> host;
     std::unique_ptr<vthost::ConnectionAcceptor> server;
     std::uint16_t port = 0; ///< The OS-assigned loopback port the daemon listens on.
@@ -75,21 +149,22 @@ struct DaemonFixture
                 return std::make_unique<vtpty::MockPty>(size);
             },
             vtbackend::Settings {},
-            crispy::defaultEnvironment(),
+            core::defaultEnvironment(),
             /*startPumps=*/false);
-        auto listener = net::listen(loop, "127.0.0.1", 0);
+        auto listener = core::net::listen(loop, "127.0.0.1", 0);
         REQUIRE(listener.has_value());
-        port = (*listener)->localPort();
+        port = (*listener)->boundPort();
         // Encrypt each accepted socket (server-side TLS, self-signed) before the
         // native protocol runs over it — the daemon's real TCP path. This exercises
         // the two-reactor TLS handshake (client + daemon on independent reactors),
         // which NativeClient's concurrent read+write drives.
-        auto tls = net::makeSelfSignedServerContext();
+        auto tls = core::net::makeSelfSignedServerContext();
         REQUIRE(tls.has_value());
         auto native = vthost::makeNativeHandler(loop, *host);
         auto const& context = *tls;
-        auto handler = [context, native](vthost::ConnectionId id, std::unique_ptr<net::ISocket> socket) {
-            return native(std::move(id), context->wrap(std::move(socket)));
+        auto handler = [context, native, &loop = loop](vthost::ConnectionId id,
+                                                       std::unique_ptr<core::net::ISocket> socket) {
+            return native(std::move(id), context->wrap(std::move(socket), loop));
         };
         server = std::make_unique<vthost::ConnectionAcceptor>(loop, "test", std::move(*listener), handler);
         thread = std::thread { [this] {
@@ -97,7 +172,7 @@ struct DaemonFixture
             {
                 loop.blockOn(server->serve());
             }
-            catch (coro::OperationCancelled const&)
+            catch (core::async::OperationCancelled const&)
             {
                 cancelled = true; // teardown cancelled the accept loop
             }
@@ -111,6 +186,12 @@ struct DaemonFixture
             loop.requestStop();
         });
         thread.join();
+        // The accept loop has returned, but the connection flows it spawned may still be parked.
+        // End them now, while the SessionHost they subscribe to still exists; ~EventLoop runs after
+        // the host is gone.
+        {
+            auto const drain = vthost::LoopDrain { loop };
+        }
     }
 
     DaemonFixture(DaemonFixture const&) = delete;
@@ -232,7 +313,7 @@ struct MirrorPane
         settings.pageSize = pty->pageSize();
         auto* device = pty.get();
         terminal = std::make_unique<vtbackend::Terminal>(events,
-                                                         crispy::defaultEnvironment(),
+                                                         core::defaultEnvironment(),
                                                          std::move(pty),
                                                          std::move(settings),
                                                          std::chrono::steady_clock::now());
@@ -346,6 +427,26 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     controller.stop();
     CHECK(pane.pty().isClosed());
     pane.terminal.reset(); // unbind (the controller outlives its ptys' registrations)
+}
+
+TEST_CASE("a GUI detach ends the daemon's TLS connection as a disconnect", "[attach][controller]")
+{
+    // stop() is the GUI's detach: stopMuxReactor posts the detach and only then cancels the loop.
+    // Cancelled too early, the client's orderly close -- close_notify over TLS -- is unwound half
+    // done, and the daemon logs an ordinary detach as a truncated read.
+    auto capture = SharedLogCapture {};
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("detach");
+
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt };
+    REQUIRE(controller.connectAndWait(10s).has_value());
+    controller.stop();
+
+    // The daemon's side of the connection ends a few turns later, on its own thread.
+    CHECK(waitUntil([&] { return capture.contains(": disconnected") || capture.contains("read failed"); }));
+    INFO(capture.text());
+    CHECK(capture.contains(": disconnected"));
+    CHECK_FALSE(capture.contains("read failed"));
 }
 
 // B2 foundation: the controller captures the daemon's authoritative tab/pane
@@ -1233,7 +1334,7 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
     auto pty = std::make_unique<vtpty::MockPty>(settings.pageSize);
     auto* device = pty.get();
     auto terminal = vtbackend::Terminal { events,
-                                          crispy::defaultEnvironment(),
+                                          core::defaultEnvironment(),
                                           std::move(pty),
                                           std::move(settings),
                                           std::chrono::steady_clock::now() };

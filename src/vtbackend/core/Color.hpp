@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/Defines.hpp>
+#include <core/Defines.hpp>
 
 #include <algorithm>
 #include <array>
@@ -303,7 +303,7 @@ enum class ColorType : uint8_t
     RGB
 };
 
-struct CRISPY_PACKED Color
+struct CORE_PACKED Color
 {
     // Layout:
     //

@@ -5,8 +5,9 @@
 #include <vtbackend/input/vi/ViInputHandler.hpp>
 
 #include <crispy/Size.hpp>
-#include <crispy/Times.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Times.hpp>
+#include <core/Utils.hpp>
 
 #include <format>
 #include <functional>
@@ -177,7 +178,7 @@ void renderSelection(Selection const& selection, Renderer&& render)
     // would move from it on the first cell and use it again on every following one.
     auto&& renderer = std::forward<Renderer>(render);
     for (Selection::Range const& range: selection.ranges())
-        for (auto const col: crispy::times(*range.fromColumn, *range.length()))
+        for (auto const col: core::times(*range.fromColumn, *range.length()))
             renderer(CellLocation { .line = range.line, .column = ColumnOffset::cast_from(col) });
 }
 // }}}

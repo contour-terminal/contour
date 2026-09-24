@@ -4,6 +4,8 @@ add_library(vthost STATIC
     MouseWire.hpp
     Daemon.cpp
     Daemon.hpp
+    GracefulClose.hpp
+    LoopDrain.hpp
     ConnectionAcceptor.cpp
     ConnectionAcceptor.hpp
     NativeSession.cpp
@@ -57,12 +59,17 @@ add_library(vthost STATIC
     tmux/TmuxGateway.hpp
 )
 target_link_libraries(vthost PUBLIC
-    net
+    core::async
+    core::base
+    core::log
+    core::net
     vtworkspace
     vtbackend
     vtpty
     crispy::core
 )
+# The daemon serves, and the client dials, TLS; no header of vthost's names it.
+target_link_libraries(vthost PRIVATE core::net_tls)
 if(WIN32)
     # The Task Scheduler 2.0 backend of ServiceControl is COM (taskschd), hence ole32/oleaut32
     # for the apartment and the BSTR/VARIANT allocators.
@@ -78,6 +85,8 @@ if(VTHOST_TESTING)
     enable_testing()
     add_executable(vthost_test
         test_main.cpp
+        GracefulClose_test.cpp
+        LoopDrain_test.cpp
         SessionHost_test.cpp
         SessionSettings_test.cpp
         ConnectionAcceptor_test.cpp
@@ -106,10 +115,11 @@ if(VTHOST_TESTING)
         tmux/TmuxClientModel_test.cpp
         tmux/TmuxGateway_test.cpp
     )
-    target_link_libraries(vthost_test vthost crispy::core Catch2::Catch2)
+    target_link_libraries(vthost_test vthost core::net_tls core::testing Catch2::Catch2)
     add_test(NAME vthost_test COMMAND $<TARGET_FILE:vthost_test>)
     # `ctest -L daemon` selects everything daemon mode must pass to be trusted -- see the same
-    # label on net, coro and vtworkspace, the layers it is built on.
+    # label on vtworkspace, a layer it is built on. The other two, core::async and core::net, are
+    # vendored in vendor/core-cpp, and their suites run in core-cpp's own CI.
     set_tests_properties(vthost_test PROPERTIES LABELS daemon)
 
     if(NOT WIN32)

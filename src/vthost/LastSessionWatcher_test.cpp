@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/MockPty.hpp>
 
+#include <core/async/Cancellation.hpp>
+#include <core/async/Task.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/Sockets.hpp>
+#include <core/net/testing/CoroTestSupport.hpp>
+#include <core/net/testing/ScriptedBackend.hpp>
+#include <core/testing/ScopedTempDir.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
 #include <memory>
 #include <string>
 
-#include <coro/Cancellation.hpp>
-#include <coro/Task.hpp>
-#include <net/EventLoop.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/Sockets.hpp>
-#include <net/testing/CoroTestSupport.hpp>
-#include <net/testing/ScriptedEventSource.hpp>
-#include <net/testing/TempDir.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/LastSessionWatcher.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -31,7 +32,7 @@ namespace
 /// A connection handler that completes immediately. Kept a separate coroutine so the handler lambda
 /// itself is not one: a coroutine may not take reference parameters, while an unused by-value
 /// ConnectionId parameter is a needless copy — only this split satisfies both.
-coro::Task<void> noopConnection()
+core::async::Task<void> noopConnection()
 {
     co_return;
 }
@@ -40,21 +41,21 @@ coro::Task<void> noopConnection()
 /// counter standing in for the daemon's shutdown action.
 struct WatcherHarness
 {
-    net::testing::ScriptedEventSource source;
-    net::EventLoop loop { source };
+    core::net::testing::ScriptedBackend source;
+    core::net::EventLoop loop { source };
     SessionHost host { loop,
                        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                            return std::make_unique<vtpty::MockPty>(size);
                        },
                        vtbackend::Settings {},
-                       crispy::defaultEnvironment(),
+                       core::defaultEnvironment(),
                        /*startPumps=*/false };
     int shutdowns = 0;
     LastSessionWatcher watcher { host, loop, [this] { ++shutdowns; } };
 
     /// Runs the loop's posted callbacks once. `runPostedCallbacks` is the first thing every pump
     /// does, and a zero delay never parks, so this is a deterministic single drain with no real fds.
-    void pump() { loop.blockOn(net::testing::sleepFor(&loop, 0ms)); }
+    void pump() { loop.blockOn(core::net::testing::sleepFor(&loop, 0ms)); }
 
     /// Creates a tab and returns its only pane's session.
     [[nodiscard]] vtworkspace::SessionId createSession()
@@ -150,26 +151,26 @@ TEST_CASE("the last session's exit unwinds the daemon's accept loop", "[vthost][
     // accept coroutine, shut down the way runDaemon does it (close the listener, then requestStop).
     // Proves the watcher's decision actually unwinds the serve loop and returns control — the step
     // between "we decided to exit" and "the process exits".
-    auto const dir = net::testing::TempDir { "contour-lifecycle" };
+    auto const dir = core::testing::ScopedTempDir { "contour-lifecycle" };
     auto const socketPath = (dir / "sock").string();
 
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
 
-    auto listener = net::listenUnix(loop, socketPath);
+    auto listener = core::net::listenUnix(loop, socketPath);
     REQUIRE(listener.has_value());
     auto acceptor =
         vthost::ConnectionAcceptor { loop,
                                      "test",
                                      std::move(*listener),
-                                     [](vthost::ConnectionId const&, std::unique_ptr<net::ISocket>) {
+                                     [](vthost::ConnectionId const&, std::unique_ptr<core::net::ISocket>) {
                                          return noopConnection();
                                      } };
 
@@ -194,7 +195,7 @@ TEST_CASE("the last session's exit unwinds the daemon's accept loop", "[vthost][
         loop.blockOn(acceptor.serve());
         unwound = true;
     }
-    catch (coro::OperationCancelled const&)
+    catch (core::async::OperationCancelled const&)
     {
         unwound = true;
     }
@@ -211,14 +212,14 @@ TEST_CASE("the watcher unsubscribes itself before the host outlives it", "[vthos
 {
     // Constructing the watcher arms it and destroying it disarms it, so a host that outlives one
     // fans out to nothing — no dangling observer in _streamSubscribers.
-    net::testing::ScriptedEventSource source;
-    auto loop = net::EventLoop { source };
+    core::net::testing::ScriptedBackend source;
+    auto loop = core::net::EventLoop { source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
     auto shutdowns = 0;
     {
@@ -229,7 +230,7 @@ TEST_CASE("the watcher unsubscribes itself before the host outlives it", "[vthos
     auto* tab = host.createTab();
     REQUIRE(tab != nullptr);
     host.handleSessionExit(tab->rootPane()->session());
-    loop.blockOn(net::testing::sleepFor(&loop, 0ms));
+    loop.blockOn(core::net::testing::sleepFor(&loop, 0ms));
 
     CHECK(shutdowns == 0);
 }

@@ -163,6 +163,9 @@ target_link_libraries(vtbackend PUBLIC
     boxed-cpp::boxed-cpp
     Threads::Threads
     contour::tracy
+    core::base
+    core::cli
+    core::log
     crispy::core
     unicode::unicode
     vtparser
@@ -250,7 +253,7 @@ if(LIBTERMINAL_TESTING)
         input/vi/ViCommands_test.cpp
         vt/VTWriter_test.cpp
     )
-    target_link_libraries(vtbackend_test Catch2::Catch2 vtbackend)
+    target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend)
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
 
     if(NOT WIN32)

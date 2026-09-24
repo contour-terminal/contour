@@ -17,6 +17,8 @@
 #include <vtpty/ChannelPty.hpp>
 #include <vtpty/Pty.hpp>
 
+#include <core/async/Task.hpp>
+
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -27,9 +29,7 @@
 #include <optional>
 #include <string>
 
-#include <coro/Task.hpp>
-
-namespace net
+namespace core::net
 {
 class EventLoop;
 }
@@ -118,21 +118,30 @@ struct MuxConnectOutcome
 /// @return An unbound `ChannelPty` the session can drive and close cleanly.
 [[nodiscard]] std::unique_ptr<vtpty::Pty> makeUnboundFallbackPty(std::optional<vtbackend::PageSize> pageSize);
 
+/// How long stopMuxReactor lets a detached client end its connection before it cancels the loop:
+/// the graceful close's own deadline plus room for the turns around it.
+inline constexpr auto DefaultDetachBound = std::chrono::milliseconds { 3000 };
+
 /// The reactor teardown both controllers share: flips @p stopped exactly once
 /// (guarded by @p mutex), posts @p detach onto the reactor so a live client
-/// detaches cleanly, then requests stop and joins the reactor thread. A task
-/// still parked in connect has no client to detach; the stop request cancels the
-/// loop so join() cannot block forever.
+/// detaches cleanly, and waits up to @p detachBound for the root task to end by
+/// itself -- so the connection closes in order, with close_notify over TLS, rather
+/// than being cancelled mid-close. Only then does it request stop, and join. A task
+/// still parked in connect has no client to detach, so @p detach itself should
+/// request the stop there (RemoteController::stop does); the wait then ends as soon
+/// as the task has unwound rather than at the bound.
 /// @param mutex Guards @p stopped (locked internally).
 /// @param stopped The controller's one-shot stop flag.
 /// @param reactor The controller's reactor thread.
 /// @param detach Posted onto the reactor to detach the live client/gateway.
+/// @param detachBound How long the detach may take before the loop is cancelled.
 /// @return True when this call performed the teardown; false when it was already
 ///         stopped — so the caller closes its own bindings only on the first stop.
 [[nodiscard]] bool stopMuxReactor(std::mutex& mutex,
                                   bool& stopped,
                                   ReactorThread& reactor,
-                                  std::function<void()> detach);
+                                  std::function<void()> detach,
+                                  std::chrono::milliseconds detachBound = DefaultDetachBound);
 
 /// The connect state machine both GUI mux controllers share: the reactor thread plus the
 /// connection-phase handshake, with `connectAndWait()` / `stop()` implemented ONCE on top of the
@@ -169,9 +178,12 @@ class RemoteController
     ~RemoteController() = default;
 
     /// The reactor's whole lifetime (connect, serve, notify); runs on the reactor thread.
-    [[nodiscard]] virtual coro::Task<void> runClient(net::EventLoop* loop) = 0;
-    /// Posted onto the reactor by `stop()` to detach the live client/gateway (a no-op if none).
-    virtual void detachOnReactor() = 0;
+    [[nodiscard]] virtual core::async::Task<void> runClient(core::net::EventLoop* loop) = 0;
+    /// Posted onto the reactor by `stop()` to detach the live client/gateway.
+    /// @return Whether there was one to detach. Without one -- a stop during connect -- `stop()`
+    ///         cancels the loop at once instead of waiting out the detach bound for a root task
+    ///         that nothing is about to end.
+    [[nodiscard]] virtual bool detachOnReactor() = 0;
     /// Closes every bound pty on the FIRST stop (EOF to each backing session).
     virtual void closeReactorBindings() = 0;
     /// The failure message when the wait times out before the handshake completes.

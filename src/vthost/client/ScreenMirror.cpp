@@ -6,7 +6,7 @@
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/core/Primitives.hpp>
 
-#include <crispy/Overloaded.hpp>
+#include <core/Overloaded.hpp>
 
 #include <algorithm>
 #include <array>
@@ -487,7 +487,7 @@ void ScreenMirror::applyStatusDisplay(uint8_t wireType, uint8_t wireActive)
     // the line costs a row. @see the declaration.
     // Both values are validated rather than cast: they are bytes a peer chose, and an out-of-range
     // StatusDisplayType reaches Terminal::statusLineHeight(), whose switch ends in
-    // crispy::unreachable() — undefined behaviour in this process. A value no enumerator has is
+    // core::unreachable() — undefined behaviour in this process. A value no enumerator has is
     // treated as "the session says nothing", which leaves this terminal's own configuration
     // standing. @see vthost/StatusWire.h.
     auto const asked = statusDisplayTypeOf(wireType).value_or(vtbackend::StatusDisplayType::None);
@@ -563,7 +563,7 @@ void ScreenMirror::applyStatusLines(RemoteScreen const& screen)
         return;
     auto& page = _terminal->hostWritableStatusLineDisplay();
     auto const lines = unbox<std::size_t>(page.pageSize().lines);
-    for (auto const [row, line]: crispy::views::enumerate(screen.statusLines))
+    for (auto const [row, line]: core::views::enumerate(screen.statusLines))
     {
         if (static_cast<std::size_t>(row) >= lines)
             break;
@@ -667,7 +667,7 @@ void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
     // One overload per event shape, so each reads only the fields it has. The visit is exhaustive by
     // construction: a fourth event alternative fails to compile until it gets its own arm.
     std::visit(
-        Overloaded {
+        core::Overloaded {
             [this](proto::SessionBell const&) { _terminal->bell(); },
             [this](proto::SessionNotify const& notify) { _terminal->notify(notify.title, notify.body); },
             [this](proto::SessionClipboard const& clipboard) {

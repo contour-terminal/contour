@@ -4,10 +4,12 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/Primitives.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/LogStore.hpp>
 #include <crispy/StrongHash.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
+
+#include <core/Assert.hpp>
+#include <core/log/Assert.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -32,7 +34,7 @@ namespace vtrasterizer::atlas
 /// overwritten, not the one that overflowed -- which is why it resists being traced back from a
 /// screenshot, and why the check belongs at the upload rather than at the rasterizer.
 auto inline const tileBoundsLog =
-    logstore::Category("vt.rasterizer.tilebounds", "Logs glyph tiles that overflow their atlas slot.");
+    core::log::Category("vt.rasterizer.tilebounds", "Logs glyph tiles that overflow their atlas slot.");
 
 using Buffer = std::vector<uint8_t>;
 
@@ -525,12 +527,12 @@ inline vtbackend::ImageSize computeAtlasSize(AtlasProperties const& atlasPropert
     using std::sqrt;
 
     // clang-format off
-    auto const totalTileCount = crispy::nextPowerOfTwo(1 + atlasProperties.tileCount.value + atlasProperties.directMappingCount);
+    auto const totalTileCount = core::nextPowerOfTwo(1 + atlasProperties.tileCount.value + atlasProperties.directMappingCount);
     //auto const totalTileCount = atlasProperties.tileCount.value + atlasProperties.directMappingCount;
     auto const squareEdgeCount = static_cast<uint32_t>(ceil(sqrt(totalTileCount)));
-    auto const width = vtbackend::Width::cast_from(crispy::nextPowerOfTwo(static_cast<uint32_t>(
+    auto const width = vtbackend::Width::cast_from(core::nextPowerOfTwo(static_cast<uint32_t>(
         squareEdgeCount * unbox(atlasProperties.tileSize.width))));
-    auto const height = vtbackend::Height::cast_from(crispy::nextPowerOfTwo(static_cast<uint32_t>(
+    auto const height = vtbackend::Height::cast_from(core::nextPowerOfTwo(static_cast<uint32_t>(
         squareEdgeCount * unbox(atlasProperties.tileSize.height))));
     // clang-format on
 

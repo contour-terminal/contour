@@ -22,6 +22,8 @@ add_library(contour_config STATIC
 # yaml-cpp is PUBLIC because Config.hpp exposes it in its own interface, so every consumer of the
 # configuration model compiles against yaml-cpp's headers whether it names them or not.
 target_link_libraries(contour_config PUBLIC
+    core::base
+    core::log
     crispy::core
     reflection-cpp::reflection-cpp
     vtbackend

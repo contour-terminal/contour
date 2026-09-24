@@ -11,11 +11,10 @@ both:
 - **the native cells+deltas protocol** — the server emulates, the client
   renders: per-line grid deltas addressed by stable row ids (wezterm's model).
 
-The module stack, bottom-up: `src/coro` (C++23 coroutine primitives, a
-verbatim port of endo's `src/coro` at commit `178cb496`; the re-sync recipe is
-in `src/coro/README.md`) → `src/net` (reactor `EventLoop`, sockets, buffered
-readers, write queues) → `src/vthost` (the daemon, both protocol servers,
-and both client engines). The GUI may depend on `vthost`, never the
+The module stack, bottom-up: core-cpp's `core::async` (C++23 coroutine
+primitives) → `core::net` (reactor `EventLoop`, sockets, buffered readers,
+write queues, TLS), both from the verbatim copy in `vendor/core-cpp` →
+`src/vthost` (the daemon, both protocol servers, and both client engines). The GUI may depend on `vthost`, never the
 reverse.
 
 ## One session, two taps
@@ -578,7 +577,7 @@ Two details in `LastSessionWatcher` are load-bearing:
   first session. "No sessions, therefore quit" would end the daemon before anyone could attach.
 - **The decision is deferred one pump, then re-checked.** `sessionClosed` fires from inside
   `SessionHost`'s observer fan-out, which the shutdown would mutate as connection flows unwind. More
-  importantly, buffered input is dispatched without touching the reactor (`coro::Task`
+  importantly, buffered input is dispatched without touching the reactor (`core::async::Task`
   tail-transfers; `PduPump` and `net::AsyncBufferedReader` return buffered frames and lines without
   awaiting), so a `ClosePane` followed by a `CreateTab` — or `kill-pane` then `new-window` —
   arriving in **one read** is fully dispatched before the loop regains control. The posted check
@@ -715,7 +714,7 @@ The daemon logs through `crispy::logstore`. Categories are dotted and module-fir
 
 Genuine failures — malformed frames, rejected handshakes, refused sends — go to the
 always-enabled `error` category, deliberately with **no** category of their own: they must be
-visible without anyone having thought to enable a filter first. `logstore::configure` therefore
+visible without anyone having thought to enable a filter first. `core::log::configure` therefore
 keeps `error` on no matter what the filter selects.
 
 `net` has no categories at all. It returns every failure as a `std::expected<…, NetError>` whose
@@ -737,7 +736,7 @@ Three behaviours worth knowing:
 - **`*` is a plain prefix match**, so `vthost.*` sweeps in `vthost.trace.*` too — exactly as
   `vt.*` already sweeps in `vt.trace.sequence`. Name `vthost.trace.*` to select the trace tier
   alone, or list categories explicitly to exclude it.
-- **A filter is a selection, not a union**: `logstore::configure` disables every category the
+- **A filter is a selection, not a union**: `core::log::configure` disables every category the
   filter does not name. `error` is deliberately exempt — asking for extra detail must never
   take failure reporting away.
 - **`--log-file` appends** and never writes SGR escapes, so a daemon restarted against the same

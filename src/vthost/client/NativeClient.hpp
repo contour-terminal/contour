@@ -9,6 +9,11 @@
 /// data model any frontend can render (the TTY attach client, later the GUI's
 /// remotely-populated display seam). Input flows the other way as Input PDUs.
 
+#include <core/async/Task.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/ISocket.hpp>
+#include <core/net/WriteQueue.hpp>
+
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -21,10 +26,6 @@
 #include <utility>
 #include <vector>
 
-#include <coro/Task.hpp>
-#include <net/EventLoop.hpp>
-#include <net/ISocket.hpp>
-#include <net/WriteQueue.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/proto/Pdu.hpp>
 
@@ -195,8 +196,8 @@ class NativeClient final
     /// @param onSessionEvent Invoked when a transient session event (bell /
     ///        desktop notification / OSC 52 clipboard write) arrives.
     /// @param onLayout Invoked when the daemon's tab/pane layout arrives.
-    NativeClient(net::EventLoop& loop,
-                 std::unique_ptr<net::ISocket> connection,
+    NativeClient(core::net::EventLoop& loop,
+                 std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
                  UpdateHandler onUpdate,
                  ImageHandler onImage,
@@ -205,7 +206,7 @@ class NativeClient final
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
-    [[nodiscard]] coro::Task<void> run();
+    [[nodiscard]] core::async::Task<void> run();
 
     /// Replaces the update handler at runtime. The constructor is the primary
     /// configuration path; use this only when a handler must be swapped mid-life.
@@ -281,6 +282,8 @@ class NativeClient final
     void handlePdu(proto::DecodedFrame const& frame);
     /// Encodes @p pdu with the next serial, enqueues it, and returns that serial
     /// so image fetches can correlate the (session-less) ImageData/ImageGone reply.
+    /// Once run() has begun to close the connection nothing more is written, so no write can
+    /// start under its half-close; the answer is then 0, which no request carries.
     uint64_t send(proto::DecodedPdu const& pdu);
 
     /// Records why the read loop ended. A protocol or transport failure is the only
@@ -294,8 +297,9 @@ class NativeClient final
     /// @return Its mirror.
     [[nodiscard]] RemoteScreen& screenFor(uint64_t session);
 
-    std::unique_ptr<net::ISocket> _connection;
-    net::WriteQueue _writer;
+    core::net::EventLoop& _loop; ///< The loop the connection runs on; run() ends it in order there.
+    std::unique_ptr<core::net::ISocket> _connection;
+    core::net::WriteQueue _writer;
     /// Declared before _handshake so the constructor can resolve it from its own parameter, rather
     /// than from a member whose initialization order it would otherwise have to reason about.
     std::optional<int64_t> _historyKeep;
@@ -312,6 +316,7 @@ class NativeClient final
     bool _connected = false;
     bool _versionMismatch = false;
     bool _detached = false;
+    bool _closing = false; ///< Set once run() has begun its orderly close; send() then writes nothing.
 };
 
 } // namespace vthost::client

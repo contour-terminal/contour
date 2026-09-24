@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/LogStore.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <gsl/span>
 #include <gsl/span_ext>
@@ -43,10 +43,10 @@ using BufferObjectRelease = std::function<void(BufferObject<T>*)>;
 template <BufferObjectElementType T>
 using BufferObjectPtr = std::shared_ptr<BufferObject<T>>;
 
-auto inline const bufferObjectLog = logstore::Category("BufferObject",
-                                                       "Logs buffer object pool activity.",
-                                                       logstore::Category::State::Disabled,
-                                                       logstore::Category::Visibility::Hidden);
+auto inline const bufferObjectLog = core::log::Category("BufferObject",
+                                                        "Logs buffer object pool activity.",
+                                                        core::log::Category::State::Disabled,
+                                                        core::log::Category::Visibility::Hidden);
 
 /**
  * BufferObject is the buffer object a Pty's read-call will use to store
@@ -246,7 +246,7 @@ template <BufferObjectElementType T>
 BufferObjectPtr<T> BufferObject<T>::create(size_t capacity, BufferObjectRelease<T> release)
 {
 #ifdef BUFFER_OBJECT_INLINE
-    auto const totalCapacity = nextPowerOfTwo(static_cast<uint32_t>(sizeof(BufferObject) + capacity));
+    auto const totalCapacity = core::nextPowerOfTwo(static_cast<uint32_t>(sizeof(BufferObject) + capacity));
     auto const nettoCapacity = totalCapacity - sizeof(BufferObject);
     auto ptr = (BufferObject*) malloc(totalCapacity);
     new (ptr) BufferObject(nettoCapacity);
@@ -344,8 +344,7 @@ inline std::size_t BufferFragment<T>::endOffset() const noexcept
 template <BufferObjectElementType T>
 BufferObjectPool<T>::BufferObjectPool(size_t bufferSize): _bufferSize { bufferSize }
 {
-    bufferObjectLog()("Creating BufferObject pool with chunk size {}",
-                      crispy::humanReadableBytes(bufferSize));
+    bufferObjectLog()("Creating BufferObject pool with chunk size {}", core::humanReadableBytes(bufferSize));
 }
 
 template <BufferObjectElementType T>

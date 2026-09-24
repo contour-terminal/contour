@@ -3,15 +3,17 @@
 
 #include <vtbackend/vt/VTType.hpp>
 
-#include <crispy/Defines.hpp>
-#include <crispy/Escape.hpp>
 #include <crispy/Sort.hpp>
+
+#include <core/Defines.hpp>
+#include <core/Escape.hpp>
 
 #include <gsl/pointers>
 #include <gsl/span>
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <format>
 #include <optional>
@@ -1199,7 +1201,7 @@ class SupportedSequences
         return { cbegin(), _lastIndex };
     }
 
-    CRISPY_CONSTEXPR void reset(VTType vt) noexcept
+    CORE_CONSTEXPR void reset(VTType vt) noexcept
     {
         // Partition the array so the first half holds every sequence available at the given operating
         // level (conformanceLevel <= vt). Two sequences are always kept available regardless of level:
@@ -1228,7 +1230,7 @@ class SupportedSequences
                      [](Function const& a, Function const& b) constexpr { return compare(a, b); });
     }
 
-    CRISPY_CONSTEXPR void disableSequence(Function seq) noexcept
+    CORE_CONSTEXPR void disableSequence(Function seq) noexcept
     {
         Function* seqIter = std::ranges::find(*this, seq);
         if (seqIter != end())
@@ -1239,7 +1241,7 @@ class SupportedSequences
         }
     }
 
-    CRISPY_CONSTEXPR void enableSequence(Function seq) noexcept
+    CORE_CONSTEXPR void enableSequence(Function seq) noexcept
     {
         auto* const endArray = _supportedSequences.data() + _supportedSequences.size();
         auto* seqIter = std::find(end(), endArray, seq);
@@ -1379,7 +1381,7 @@ struct std::formatter<vtbackend::Function>: std::formatter<std::string>
         switch (f.category)
         {
             case vtbackend::FunctionCategory::C0:
-                value = std::format("{}", crispy::escape(static_cast<uint8_t>(f.finalSymbol)));
+                value = std::format("{}", core::escape(static_cast<uint8_t>(f.finalSymbol)));
                 break;
             case vtbackend::FunctionCategory::ESC:
             case vtbackend::FunctionCategory::VT52:

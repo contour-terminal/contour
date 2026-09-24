@@ -533,6 +533,14 @@ target_link_libraries(contour_core
     contour_command
     contour_cli
     vtworkspace
+    # remote/ runs the daemon client on core-cpp's event loop, and main.cpp suppresses the Windows
+    # error dialogs through core::testing, as the test binaries do.
+    core::async
+    core::base
+    core::cli
+    core::log
+    core::net
+    core::testing
     PRIVATE
     vthost
 )
@@ -649,6 +657,7 @@ if(CONTOUR_FRONTEND_GUI)
         target_link_libraries(contour_gui_test
             PRIVATE
             contour_core
+            core::net_tls # remote/NativeController_test serves TLS
             Qt6::Test
             Qt6::GuiPrivate # rhi/qrhi.h + qrhigles2_p.h for the end-to-end screenshot readback test
             Catch2::Catch2
@@ -810,7 +819,7 @@ if(CONTOUR_TESTING)
     )
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally, and
     # testing it HERE rather than in contour_gui_test is what proves it needs no Qt to reach.
-    target_link_libraries(contour_test PRIVATE contour_command contour_cli vtbackend Catch2::Catch2)
+    target_link_libraries(contour_test PRIVATE contour_command contour_cli vtbackend core::testing Catch2::Catch2)
     target_include_directories(contour_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.

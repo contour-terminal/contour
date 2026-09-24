@@ -7,7 +7,7 @@
 
 #include <vtpty/SandboxInfo.hpp>
 
-#include <crispy/Environment.hpp>
+#include <core/Environment.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -81,7 +81,7 @@ struct MuxSocketPathInputs
 /// `$CONTOUR_MUX` — rung 2 — into the shells it hosts.
 ///
 /// The parent directory is NOT created here; the listener's bind path hardens
-/// and creates it (see net::ensureOwnedPrivateDirectory).
+/// and creates it (see core::net::ensureOwnedPrivateDirectory).
 /// @param inputs What the path is derived from.
 /// @return The resolved socket file path.
 [[nodiscard]] inline std::filesystem::path muxSocketPath(MuxSocketPathInputs const& inputs)
@@ -118,7 +118,7 @@ struct MuxSocketPathInputs
 [[nodiscard]] inline std::filesystem::path muxSocketPath(
     std::string_view label = "default",
     std::string_view explicitPath = {},
-    crispy::Environment const& env = crispy::defaultEnvironment(),
+    core::Environment const& env = core::defaultEnvironment(),
     vtpty::SandboxInfo const& sandbox = vtpty::currentSandbox())
 {
     // Held in named locals, because the pure core above views them rather than owning them.

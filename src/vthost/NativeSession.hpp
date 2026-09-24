@@ -23,6 +23,11 @@
 
 #include <vtbackend/core/Primitives.hpp>
 
+#include <core/async/Task.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/ISocket.hpp>
+#include <core/net/WriteQueue.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -36,10 +41,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include <coro/Task.hpp>
-#include <net/EventLoop.hpp>
-#include <net/ISocket.hpp>
-#include <net/WriteQueue.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/SessionHost.hpp>
@@ -75,16 +76,16 @@ class NativeSession final: public SessionStreamEvents
     /// @param expectedToken The preshared token this endpoint requires in the
     ///        ClientHello; empty accepts any (the AF_UNIX default, where the
     ///        socket permissions are the gate).
-    NativeSession(net::EventLoop& loop,
+    NativeSession(core::net::EventLoop& loop,
                   SessionHost& host,
                   ConnectionId id,
-                  std::unique_ptr<net::ISocket> connection,
+                  std::unique_ptr<core::net::ISocket> connection,
                   std::size_t maxWriteQueueBytes = DefaultWriteQueueBytes,
                   std::string expectedToken = {});
 
     /// The connection flow: handshake, initial snapshot, then serve until the
     /// peer disconnects.
-    [[nodiscard]] coro::Task<void> run();
+    [[nodiscard]] core::async::Task<void> run();
 
     /// Marks @p session changed and schedules a debounced delta flush (the
     /// connection subscribes itself to the host's stream fan-out).
@@ -238,7 +239,7 @@ class NativeSession final: public SessionStreamEvents
     /// @param pdu What to send.
     /// @param sessionTag The session this frame describes, or 0 when it describes none
     ///        (hello, layout). A later snapshot for the same session supersedes the
-    ///        tagged ones still unwritten — @see net::WriteQueue::dropTagged.
+    ///        tagged ones still unwritten — @see core::net::WriteQueue::dropTagged.
     void send(uint64_t serial, proto::DecodedPdu const& pdu, uint64_t sessionTag = 0);
 
     /// Records why this connection's read loop ended.
@@ -328,7 +329,7 @@ class NativeSession final: public SessionStreamEvents
 
     /// Parks until the send queue has room for a snapshot piece.
     /// @return False when the connection is going away and the caller should stop.
-    [[nodiscard]] coro::Task<bool> awaitSendRoom();
+    [[nodiscard]] core::async::Task<bool> awaitSendRoom();
 
     /// Arms the debounced delta flush unless one is already armed or the connection is closing.
     void scheduleFlush();
@@ -336,13 +337,14 @@ class NativeSession final: public SessionStreamEvents
     /// The single snapshot streamer: drains @ref _snapshotQueue, one session at a time, waiting
     /// for room in the send queue before each piece. One streamer rather than one coroutine per
     /// snapshot, so two runs for the same session can never interleave on the wire.
-    [[nodiscard]] coro::Task<void> streamSnapshots();
+    [[nodiscard]] core::async::Task<void> streamSnapshots();
 
     /// Emits @p delta as one PDU, or as a run of @ref SnapshotChunkBytes-sized ones when its rows
     /// exceed that, waiting for room before each.
     /// @param delta The snapshot to send (consumed).
     /// @param session The session it describes; also the supersede tag its pieces carry.
-    [[nodiscard]] coro::Task<void> sendSnapshotPieces(proto::Delta delta, vtworkspace::SessionId session);
+    [[nodiscard]] core::async::Task<void> sendSnapshotPieces(proto::Delta delta,
+                                                             vtworkspace::SessionId session);
 
     /// Pulls the session's live renditional state (title, cursor shape, cwd,
     /// colours, status display, Kitty-keyboard flags) into @p delta as diffs and —
@@ -378,12 +380,12 @@ class NativeSession final: public SessionStreamEvents
         return SessionSpawnRequest { .settings = _clientSessionSettings };
     }
 
-    [[nodiscard]] coro::Task<void> flushSoon();
+    [[nodiscard]] core::async::Task<void> flushSoon();
 
-    net::EventLoop& _loop;
+    core::net::EventLoop& _loop;
     SessionHost& _host;
-    std::unique_ptr<net::ISocket> _connection;
-    net::WriteQueue _writer;
+    std::unique_ptr<core::net::ISocket> _connection;
+    core::net::WriteQueue _writer;
     /// The backlog a snapshot piece waits to get under before it is enqueued.
     ///
     /// Derived from the connection's own bound rather than fixed: waiting for room for a WHOLE
@@ -419,7 +421,7 @@ class NativeSession final: public SessionStreamEvents
 /// The daemon's connection-handler factory for native-protocol clients.
 /// @param expectedToken The preshared token required in each ClientHello (empty
 ///        accepts any — the AF_UNIX default).
-[[nodiscard]] ConnectionHandler makeNativeHandler(net::EventLoop& loop,
+[[nodiscard]] ConnectionHandler makeNativeHandler(core::net::EventLoop& loop,
                                                   SessionHost& host,
                                                   std::string expectedToken = {});
 

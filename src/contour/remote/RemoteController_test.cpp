@@ -2,6 +2,10 @@
 #include <contour/remote/ReactorThread.hpp>
 #include <contour/remote/RemoteController.hpp>
 
+#include <core/async/Cancellation.hpp>
+#include <core/async/Task.hpp>
+#include <core/net/EventLoop.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
@@ -12,10 +16,6 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-
-#include <coro/Cancellation.hpp>
-#include <coro/Task.hpp>
-#include <net/EventLoop.hpp>
 
 using namespace std::chrono_literals;
 using contour::remote::awaitMuxConnect;
@@ -120,7 +120,7 @@ TEST_CASE("stopMuxReactor tears the reactor down once and ignores a second stop"
     auto reactor = contour::remote::ReactorThread {};
 
     // A root task that parks forever, so only requestStop can end it.
-    reactor.start([](net::EventLoop* loop) -> coro::Task<void> {
+    reactor.start([](core::net::EventLoop* loop) -> core::async::Task<void> {
         while (true)
             co_await loop->delay(1h);
     });
@@ -131,7 +131,8 @@ TEST_CASE("stopMuxReactor tears the reactor down once and ignores a second stop"
     };
 
     // First stop: performs the teardown (posts the detach, cancels, joins).
-    CHECK(contour::remote::stopMuxReactor(mutex, stopped, reactor, detach));
+    // The root task ignores the detach, so the stop comes after the bound.
+    CHECK(contour::remote::stopMuxReactor(mutex, stopped, reactor, detach, std::chrono::milliseconds { 50 }));
     CHECK(stopped);
     CHECK(detaches.load(std::memory_order_relaxed) == 1);
     CHECK(reactor.wasCancelled());
@@ -149,7 +150,7 @@ namespace
 /// The `if` is what keeps `co_return` reachable, and so keeps this a coroutine at all — an
 /// unconditional throw would make it a plain function and never exercise `blockOn`'s rethrow.
 /// @param thrower Invoked on the reactor thread; must throw.
-[[nodiscard]] coro::Task<void> throwingRootTask(std::function<void()> thrower)
+[[nodiscard]] core::async::Task<void> throwingRootTask(std::function<void()> thrower)
 {
     if (thrower)
         thrower();
@@ -166,7 +167,7 @@ namespace
 /// @return The factory.
 [[nodiscard]] auto rootTaskThrowing(std::function<void()> thrower)
 {
-    return [thrower = std::move(thrower)](net::EventLoop*) {
+    return [thrower = std::move(thrower)](core::net::EventLoop*) {
         return throwingRootTask(thrower);
     };
 }
@@ -219,11 +220,52 @@ TEST_CASE("a cancelled reactor root task is still the silent shutdown", "[mux][c
     auto reactor = contour::remote::ReactorThread {};
     auto reported = std::string {};
 
-    reactor.start(rootTaskThrowing([] { throw coro::OperationCancelled {}; }),
+    reactor.start(rootTaskThrowing([] { throw core::async::OperationCancelled {}; }),
                   [&reported](std::string const& reason) { reported = reason; });
     reactor.join();
 
     CHECK(reactor.wasCancelled());
     CHECK(reactor.failure().empty());
     CHECK(reported.empty());
+}
+
+namespace
+{
+
+/// A controller still connecting: its root task parks until cancelled, and it has nothing to detach.
+class ConnectingController final: public contour::remote::RemoteController
+{
+  public:
+    ConnectingController() = default;
+    ConnectingController(ConnectingController const&) = delete;
+    ConnectingController& operator=(ConnectingController const&) = delete;
+    ConnectingController(ConnectingController&&) = delete;
+    ConnectingController& operator=(ConnectingController&&) = delete;
+    ~ConnectingController() { stop(); }
+
+  protected:
+    [[nodiscard]] core::async::Task<void> runClient(core::net::EventLoop* loop) override
+    {
+        while (true)
+            co_await loop->delay(1h);
+    }
+    [[nodiscard]] bool detachOnReactor() override { return false; }
+    void closeReactorBindings() override {}
+    [[nodiscard]] std::string connectTimeoutMessage() const override { return "timed out"; }
+    [[nodiscard]] std::string connectClosedMessage() const override { return "closed"; }
+};
+
+} // namespace
+
+TEST_CASE("a stop during connect does not wait out the detach bound", "[mux][controller]")
+{
+    // The connect times out and stops the controller. With no client to detach, nothing will end
+    // the root task by itself, so stop() must cancel at once rather than wait out
+    // DefaultDetachBound on the GUI thread.
+    auto controller = ConnectingController {};
+    auto const started = std::chrono::steady_clock::now();
+    auto const connected = controller.connectAndWait(50ms);
+    auto const took = std::chrono::steady_clock::now() - started;
+    CHECK_FALSE(connected.has_value());
+    CHECK(took < contour::remote::DefaultDetachBound / 2);
 }

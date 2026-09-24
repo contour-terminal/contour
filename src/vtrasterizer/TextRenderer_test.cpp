@@ -11,8 +11,8 @@
 #include <text_shaper/MockFontLocator.hpp>
 #include <text_shaper/OpenShaper.hpp>
 
-#include <crispy/SuppressWindowsDialogs.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
+#include <core/testing/SuppressWindowsDialogs.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_session.hpp>
@@ -714,7 +714,7 @@ TEST_CASE("TextRenderer shaping cache key changes with the font generation", "[r
     MockFontLocator::configure(
         { { .description = FontDescription::parse("regular"),
             .source = FontPath { .value = std::filesystem::absolute(testFontPath).string() } } });
-    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+    auto const restoreLocator = core::Finally { [] { MockFontLocator::configure({}); } };
 
     auto locator = MockFontLocator {};
     auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
@@ -784,7 +784,7 @@ TEST_CASE("TextRenderer flushes its caches without a render target", "[renderer]
     MockFontLocator::configure(
         { { .description = FontDescription::parse("regular"),
             .source = FontPath { .value = std::filesystem::absolute(testFontPath).string() } } });
-    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+    auto const restoreLocator = core::Finally { [] { MockFontLocator::configure({}); } };
 
     auto locator = MockFontLocator {};
     auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
@@ -1710,7 +1710,7 @@ TEST_CASE("TextRenderer.a_failed_shaping_is_not_cached", "[renderer][shaping]")
     // hits the cached emptiness and draws nothing, until a font or size change happens to change the
     // key. The cache must refuse an empty result for a non-empty run.
     configureMockFont();
-    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+    auto const restoreLocator = core::Finally { [] { MockFontLocator::configure({}); } };
 
     auto locator = MockFontLocator {};
     auto innerShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
@@ -1775,7 +1775,7 @@ TEST_CASE("TextRenderer.fallback_run_stays_on_the_cell_grid", "[renderer][fallba
         { .description = description, .source = primary.source() },
         { .description = fallbackDescription, .source = fallback.source() },
     });
-    auto const _ = crispy::Finally { [] { MockFontLocator::configure({}); } };
+    auto const _ = core::Finally { [] { MockFontLocator::configure({}); } };
 
     auto locator = MockFontLocator {};
     auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
@@ -1872,7 +1872,7 @@ TEST_CASE("TextRenderer.a_scaled_block_draws_one_cell_sized_tile_per_band", "[re
     description.spacing = text::FontSpacing::Mono;
 
     MockFontLocator::configure({ { .description = description, .source = font.source() } });
-    auto const _ = crispy::Finally { [] { MockFontLocator::configure({}); } };
+    auto const _ = core::Finally { [] { MockFontLocator::configure({}); } };
 
     auto locator = MockFontLocator {};
     auto textShaper = OpenShaper { text::test::BDFFont::Dpi, locator };
@@ -2013,7 +2013,7 @@ TEST_CASE("TextRenderer.a_tile_normalizes_against_its_own_atlas", "[renderer][at
 
     REQUIRE(std::filesystem::exists(testFontPath));
     configureMockFont();
-    auto const restoreLocator = crispy::Finally { [] { MockFontLocator::configure({}); } };
+    auto const restoreLocator = core::Finally { [] { MockFontLocator::configure({}); } };
 
     auto fontLocator = MockFontLocator {};
     auto textShaper = OpenShaper(DPI { 96, 96 }, fontLocator);
@@ -2104,10 +2104,10 @@ TEST_CASE("Renderer.reconfig.tiles_follow_the_atlas_across_a_rebuild", "[rendere
 
 int main(int argc, char* argv[])
 {
-    crispy::suppressWindowsDialogs();
+    core::testing::suppressWindowsDialogs();
 
     auto const tempDir = std::filesystem::temp_directory_path();
-    auto const _ = crispy::Finally { [&] { std::filesystem::remove(testFontPath); } };
+    auto const _ = core::Finally { [&] { std::filesystem::remove(testFontPath); } };
 
     testFontPath = tempDir / "contour_test_font.bdf";
 

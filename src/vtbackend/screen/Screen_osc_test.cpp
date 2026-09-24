@@ -8,8 +8,8 @@
 #include <vtbackend/testing/TestHelpers.hpp>
 #include <vtbackend/vt/Charset.hpp>
 
-#include <crispy/Escape.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Escape.hpp>
+#include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -340,14 +340,14 @@ TEST_CASE("XTGETTCAP")
         auto const st = reply.find("\033\\", eq);
         if (st == std::string_view::npos)
             return std::nullopt;
-        return crispy::fromHexString(reply.substr(eq + 1, st - eq - 1));
+        return core::fromHexString(reply.substr(eq + 1, st - eq - 1));
     };
 
     auto const queryValue = [&](std::string_view name) -> std::optional<std::string> {
         mock.resetReplyData();
-        mock.writeToScreen(std::format("\033P+q{}\033\\", crispy::toHexString(name)));
+        mock.writeToScreen(std::format("\033P+q{}\033\\", core::toHexString(name)));
         auto const reply = std::string(mock.terminal.peekInput());
-        INFO(std::format("Reply: {}", crispy::escape(reply)));
+        INFO(std::format("Reply: {}", core::escape(reply)));
         if (!reply.starts_with("\033P1+r"))
             return std::nullopt;
         return extractValue(reply);

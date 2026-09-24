@@ -5,6 +5,10 @@
 /// The one decode-or-read-more loop every native-protocol endpoint runs.
 /// (Lives beside the transports, not in proto/ — the codec stays std-only.)
 
+#include <core/async/Task.hpp>
+#include <core/net/ISocket.hpp>
+#include <core/net/Sockets.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -13,9 +17,6 @@
 #include <string>
 #include <vector>
 
-#include <coro/Task.hpp>
-#include <net/ISocket.hpp>
-#include <net/Sockets.hpp>
 #include <vthost/proto/Pdu.hpp>
 
 namespace vthost
@@ -39,8 +40,8 @@ enum class PumpStop : std::uint8_t
 struct PumpResult
 {
     PumpStop stop = PumpStop::HandlerStopped;
-    std::optional<proto::DecodeError> decodeError; ///< Set when stop == ProtocolError.
-    std::optional<net::NetError> transportError;   ///< Set when stop == TransportError.
+    std::optional<proto::DecodeError> decodeError;     ///< Set when stop == ProtocolError.
+    std::optional<core::net::NetError> transportError; ///< Set when stop == TransportError.
 
     /// @param stop Why the loop ended, for the reasons that carry no payload.
     /// @return A result carrying only that reason.
@@ -62,7 +63,7 @@ struct PumpResult
 
     /// @param error What the transport reported.
     /// @return The socket read failed.
-    [[nodiscard]] static PumpResult transportFailure(net::NetError error)
+    [[nodiscard]] static PumpResult transportFailure(core::net::NetError error)
     {
         auto result = stopped(PumpStop::TransportError);
         result.transportError = std::move(error);
@@ -105,9 +106,14 @@ struct PumpResult
 /// @param socket The transport to read from (not owned; a pointer, since
 ///        coroutine reference parameters can dangle).
 /// @param handler Consumes one decoded frame; false stops the pump.
+/// @param stopReading Asked before every read; true ends the pump as a handler stop. What lets a
+///        detach end the pump even when the read it retired had already delivered bytes, which
+///        would otherwise send the pump straight back to read. Empty means never.
 /// @return Why the loop ended.
-[[nodiscard]] inline coro::Task<PumpResult> pumpPdus(net::ISocket* socket,
-                                                     std::function<bool(proto::DecodedFrame const&)> handler)
+[[nodiscard]] inline core::async::Task<PumpResult> pumpPdus(
+    core::net::ISocket* socket,
+    std::function<bool(proto::DecodedFrame const&)> handler,
+    std::function<bool()> stopReading = {})
 {
     auto buffer = std::vector<std::byte> {};
     auto consumed = std::size_t { 0 };
@@ -124,7 +130,9 @@ struct PumpResult
             if (decoded.error() != proto::DecodeError::NeedMoreData)
                 co_return PumpResult::protocolError(decoded.error());
 
-            auto const appended = co_await net::appendReadChunk(socket, &buffer);
+            if (stopReading && stopReading())
+                co_return PumpResult::stopped(PumpStop::HandlerStopped);
+            auto const appended = co_await core::net::appendReadChunk(socket, &buffer);
             if (!appended)
                 co_return PumpResult::transportFailure(appended.error());
             if (*appended == 0)

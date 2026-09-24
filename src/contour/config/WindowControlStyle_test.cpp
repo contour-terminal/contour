@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/WindowControlStyle.hpp>
 
-#include <crispy/testing/Environment.hpp>
+#include <core/testing/Environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,10 +20,10 @@ using contour::config::windowControlTokens;
 namespace
 {
 
-// The shared crispy::testing::FakeEnvironment is the whole point of crispy::Environment being an
+// The shared core::testing::FakeEnvironment is the whole point of core::Environment being an
 // interface: the KDE detection can be driven through every case from a test binary running under any
 // desktop at all, including none.
-using crispy::testing::FakeEnvironment;
+using core::testing::FakeEnvironment;
 
 /// Every style a user can actually end up with, i.e. every enumerator except the one that resolves.
 constexpr auto ConcreteStyles =

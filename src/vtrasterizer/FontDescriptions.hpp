@@ -4,8 +4,9 @@
 
 #include <text_shaper/Font.hpp>
 
-#include <crispy/Flags.hpp>
 #include <crispy/Point.hpp>
+
+#include <core/Flags.hpp>
 
 namespace vtrasterizer
 {
@@ -92,7 +93,7 @@ enum class TextSizeFlag : uint8_t
     DoubleWidth = 0x04,
 };
 
-using TextSizeFlags = crispy::Flags<TextSizeFlag>;
+using TextSizeFlags = core::Flags<TextSizeFlag>;
 
 enum class TextStyle : uint8_t
 {

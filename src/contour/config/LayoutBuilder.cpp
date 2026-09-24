@@ -16,7 +16,7 @@ namespace contour::config
 namespace
 {
     /// Escapes each `${` as `$${` so the loader's environment-variable expansion (see
-    /// YAMLConfigReader::resolveVariables and crispy::replaceVariables' `$${` escape) reproduces
+    /// YAMLConfigReader::resolveVariables and core::replaceVariables' `$${` escape) reproduces
     /// the literal text instead of substituting it: a saved command like `s/${VERSION}/1.0/` must
     /// survive the save/load round trip verbatim. Only the fields the parser expands (command and
     /// arguments) need this; YAML quoting itself is the emitter's job.

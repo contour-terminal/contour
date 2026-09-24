@@ -3,7 +3,7 @@
 # binds and releases its control socket, refuses a second daemon on the same socket, and refuses
 # the two configurations that must never start. $1 is the contour binary.
 #
-# The unit suites (vthost_test, net_test) drive the daemon's internals through injected sockets and
+# The unit suites (vthost_test, and core-cpp's core::net suite) drive the daemon's internals through injected sockets and
 # a test event loop. Nothing there starts the actual binary, so the wiring between the CLI verb and
 # vthost::runDaemon -- argument validation, socket path derivation, signal handling, unlink-on-close
 # -- had no coverage at all. That is what this sweep is for.

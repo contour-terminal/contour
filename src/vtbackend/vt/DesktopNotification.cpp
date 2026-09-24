@@ -3,8 +3,8 @@
 
 #include <vtbackend/screen/Terminal.hpp>
 
-#include <crispy/Base64.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Base64.hpp>
+#include <core/Utils.hpp>
 
 #include <charconv>
 #include <format>
@@ -22,8 +22,8 @@ namespace
     /// Parses the colon-separated key=value metadata portion of an OSC 99 sequence.
     void parseMetadata(string_view metadata, DesktopNotification& notification)
     {
-        crispy::forEachKeyValue(
-            crispy::ForEachKeyValueParams {
+        core::forEachKeyValue(
+            core::ForEachKeyValueParams {
                 .text = metadata,
                 .entryDelimiter = ':',
                 .assignmentDelimiter = '=',
@@ -83,7 +83,7 @@ namespace
                     // a= can be a comma-separated list: "focus", "report", "focus,report"
                     notification.focusOnActivation = false;
                     notification.reportOnActivation = false;
-                    crispy::split(value, ',', [&](string_view part) {
+                    core::split(value, ',', [&](string_view part) {
                         if (part == "focus")
                             notification.focusOnActivation = true;
                         else if (part == "report")
@@ -99,7 +99,7 @@ namespace
     void applyPayload(string_view payloadText, DesktopNotification& notification)
     {
         auto const decoded =
-            notification.base64Encoded ? crispy::base64::decode(payloadText) : string(payloadText);
+            notification.base64Encoded ? core::base64::decode(payloadText) : string(payloadText);
 
         switch (notification.currentPayload)
         {

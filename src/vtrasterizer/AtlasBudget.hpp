@@ -4,7 +4,8 @@
 #include <vtbackend/core/Primitives.hpp>
 
 #include <crispy/StrongLRUHashtable.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <bit>
@@ -69,7 +70,7 @@ constexpr uint32_t PageHeadroomFactor = 3;
                                                                   uint32_t directMappingCount) noexcept
 {
     auto const reserved = reservedTileCount(directMappingCount);
-    return crispy::LRUCapacity { crispy::nextPowerOfTwo(tileCount.value + reserved) - reserved };
+    return crispy::LRUCapacity { core::nextPowerOfTwo(tileCount.value + reserved) - reserved };
 }
 
 /// Largest atlas texture edge, in pixels, a budget may lead to.
@@ -115,8 +116,7 @@ constexpr uint32_t MaxAtlasTextureEdge = 8192;
 [[nodiscard]] constexpr crispy::StrongHashtableSize slotCountFor(crispy::StrongHashtableSize configured,
                                                                  crispy::LRUCapacity tileCount) noexcept
 {
-    return crispy::StrongHashtableSize { crispy::nextPowerOfTwo(
-        std::max(configured.value, tileCount.value)) };
+    return crispy::StrongHashtableSize { core::nextPowerOfTwo(std::max(configured.value, tileCount.value)) };
 }
 
 } // namespace vtrasterizer::atlasbudget

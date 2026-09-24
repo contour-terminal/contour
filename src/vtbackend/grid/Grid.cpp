@@ -3,8 +3,8 @@
 
 #include <vtbackend/core/Primitives.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/LogStore.hpp>
+#include <core/Assert.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <algorithm>
 #include <format>
@@ -23,8 +23,8 @@ using std::vector;
 namespace vtbackend
 {
 
-auto inline const gridLog = logstore::Category(
-    "vt.grid", "Grid related", logstore::Category::State::Disabled, logstore::Category::Visibility::Hidden);
+auto inline const gridLog = core::log::Category(
+    "vt.grid", "Grid related", core::log::Category::State::Disabled, core::log::Category::Visibility::Hidden);
 
 namespace detail
 {

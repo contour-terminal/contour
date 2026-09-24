@@ -2,13 +2,12 @@
 #include <contour/remote/NativeController.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
+#include <core/net/Sockets.hpp>
 
 #include <algorithm>
 #include <ranges>
 #include <utility>
-
-#include <net/Sockets.hpp>
 
 namespace contour::remote
 {
@@ -18,7 +17,7 @@ using vthost::client::RemoteScreen;
 
 namespace
 {
-    auto const attachLog = logstore::Category("gui.attach", "GUI native-attach controller.");
+    auto const attachLog = core::log::Category("gui.attach", "GUI native-attach controller.");
 } // namespace
 
 NativeController::NativeController(vthost::AttachEndpoint endpoint,
@@ -35,7 +34,7 @@ NativeController::~NativeController()
 // connectAndWait() and stop() are provided by RemoteController; this controller supplies runClient()
 // and the detach / binding-teardown / message hooks (see NativeController.h).
 
-coro::Task<void> NativeController::runClient(net::EventLoop* loop)
+core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
 {
     auto const token = vthost::endpointToken(_endpoint);
     auto socket = co_await vthost::connectAttach(loop, _endpoint);
@@ -80,7 +79,7 @@ coro::Task<void> NativeController::runClient(net::EventLoop* loop)
     // Forgotten on EVERY exit, not only the epilogue's. An exception other than cancellation
     // unwinds straight past that epilogue (the reactor thread catches it), and `client` is a local
     // — _client would then point at a destroyed object for as long as the controller lives.
-    auto const forgetClient = crispy::Finally { [this] {
+    auto const forgetClient = core::Finally { [this] {
         auto const lock = std::lock_guard { _mutex };
         _client = nullptr;
     } };
@@ -89,7 +88,7 @@ coro::Task<void> NativeController::runClient(net::EventLoop* loop)
     {
         co_await client.run();
     }
-    catch (coro::OperationCancelled const&)
+    catch (core::async::OperationCancelled const&)
     {
         // stop() cancelled the loop mid-serve; fall through to the normal
         // bookkeeping so state and observers still see the closure.

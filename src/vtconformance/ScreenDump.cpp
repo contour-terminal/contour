@@ -5,7 +5,7 @@
 #include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <array>
@@ -77,7 +77,7 @@ namespace
             return "default";
 
         auto result = std::string {};
-        for (auto const& [index, part]: crispy::views::enumerate(parts))
+        for (auto const& [index, part]: core::views::enumerate(parts))
             result += index ? std::format(" {}", part) : part;
         return result;
     }
@@ -225,12 +225,12 @@ std::string dumpScreen(vtbackend::Terminal const& terminal, DumpOptions const& o
         }
 
         out << sectionRule("attributes");
-        for (auto const& [index, row]: crispy::views::enumerate(plane))
+        for (auto const& [index, row]: core::views::enumerate(plane))
             out << std::format("{:02}|{}\n", index + 1, row);
 
         out << sectionRule("legend");
         out << ". = default\n";
-        for (auto const& [index, rendition]: crispy::views::enumerate(legend))
+        for (auto const& [index, rendition]: core::views::enumerate(legend))
             out << std::format("{} = {}\n",
                                static_cast<size_t>(index) < LegendAlphabet.size()
                                    ? LegendAlphabet[static_cast<size_t>(index)]
@@ -258,8 +258,8 @@ std::string diffDumps(std::string_view expected, std::string_view actual)
     if (expected == actual)
         return {};
 
-    auto const expectedLines = crispy::split(expected, '\n');
-    auto const actualLines = crispy::split(actual, '\n');
+    auto const expectedLines = core::split(expected, '\n');
+    auto const actualLines = core::split(actual, '\n');
     auto out = std::ostringstream {};
 
     for (auto const index: std::views::iota(size_t { 0 }, std::max(expectedLines.size(), actualLines.size())))

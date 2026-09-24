@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/IoResult.hpp>
+#include <core/net/Sockets.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -16,10 +20,6 @@
 #include <utility>
 #include <vector>
 
-#include <net/EventLoop.hpp>
-#include <net/IoResult.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/Sockets.hpp>
 #include <vthost/Daemon.hpp>
 #include <vthost/SocketPath.hpp>
 
@@ -75,19 +75,19 @@ TEST_CASE("ensureDaemon: a listening daemon is detected, nothing is spawned", "[
     auto const tmp = TempDir {};
     auto const controlSocket = tmp.path / "control";
 
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
 
     // Stand in for a running daemon by binding exactly the endpoint the probe
     // looks for. No accept loop is needed: reaching the listen backlog is the
     // whole liveness signal ensureDaemon asks for.
-    auto listener = net::listenUnix(loop, vthost::nativeSocketPath(controlSocket).string());
+    auto listener = core::net::listenUnix(loop, vthost::nativeSocketPath(controlSocket).string());
     if (!listener.has_value())
     {
         // Unsupported is the one acceptable failure (no AF_UNIX at all); anything
         // else is a real bind regression, so report what it actually said.
         INFO("listenUnix failed: " << listener.error().toString());
-        REQUIRE(listener.error().code == net::NetErrorCode::Unsupported);
+        REQUIRE(listener.error().code == core::net::NetErrorCode::Unsupported);
         SKIP("AF_UNIX not supported on this platform");
     }
 
@@ -383,7 +383,7 @@ namespace
 /// Joins @p entries with the platform's PATH separator.
 [[nodiscard]] std::string pathList(std::vector<std::string> const& entries)
 {
-    return crispy::joinHumanReadable(entries, std::string { vthost::PathListSeparator });
+    return core::joinHumanReadable(entries, std::string { vthost::PathListSeparator });
 }
 
 } // namespace

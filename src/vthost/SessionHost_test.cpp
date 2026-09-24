@@ -2,7 +2,12 @@
 #include <vtpty/MockPty.hpp>
 
 #include <crispy/BufferObject.hpp>
-#include <crispy/LogSink.hpp>
+
+#include <core/async/Task.hpp>
+#include <core/log/LogSink.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/testing/ScriptedBackend.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -22,10 +27,6 @@
 #include <tuple>
 #include <vector>
 
-#include <coro/Task.hpp>
-#include <net/EventLoop.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/testing/ScriptedEventSource.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vtworkspace/LayoutTree.hpp>
@@ -191,8 +192,8 @@ struct HostHarness
         host.subscribe(&recorder);
     }
 
-    net::testing::ScriptedEventSource source;
-    net::EventLoop loop { source };
+    core::net::testing::ScriptedBackend source;
+    core::net::EventLoop loop { source };
     RecordingEvents recorder;
     StubClient client;
     StubClient otherClient;          ///< For the multi-client policy cases.
@@ -202,7 +203,7 @@ struct HostHarness
                            return std::make_unique<vtpty::MockPty>(size);
                        },
                        vtbackend::Settings {},
-                       crispy::defaultEnvironment(),
+                       core::defaultEnvironment(),
                        /*startPumps=*/false,
                        policy };
 };
@@ -494,7 +495,7 @@ struct StreamRecorder final: vthost::SessionStreamEvents
     }
 };
 
-coro::Task<void> waitFor(net::EventLoop* loop, std::function<bool()> ready)
+core::async::Task<void> waitFor(core::net::EventLoop* loop, std::function<bool()> ready)
 {
     using namespace std::chrono_literals;
     for (auto i = 0; i < 2000 && !ready(); ++i)
@@ -505,14 +506,14 @@ coro::Task<void> waitFor(net::EventLoop* loop, std::function<bool()> ready)
 
 TEST_CASE("stream events fan out to every subscriber independently", "[vthost][host]")
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
     auto first = StreamRecorder {};
     auto second = StreamRecorder {};
@@ -566,16 +567,16 @@ TEST_CASE("stream events fan out to every subscriber independently", "[vthost][h
 
 TEST_CASE("a failing PTY factory is reported", "[vthost][host][diagnostics]")
 {
-    auto capture = logstore::ScopedCapture {};
+    auto capture = core::log::ScopedCapture {};
 
-    auto source = net::testing::ScriptedEventSource {};
-    auto loop = net::EventLoop { source };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::unique_ptr<vtpty::Pty> {};
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
 
     CHECK(host.createTab() == nullptr);
@@ -585,7 +586,7 @@ TEST_CASE("a failing PTY factory is reported", "[vthost][host][diagnostics]")
 
 TEST_CASE("reaping an orphaned session after a model refusal is reported", "[vthost][host][diagnostics]")
 {
-    auto capture = logstore::ScopedCapture {};
+    auto capture = core::log::ScopedCapture {};
     auto h = HostHarness {};
     REQUIRE(h.host.createTab() != nullptr);
 
@@ -598,7 +599,7 @@ TEST_CASE("reaping an orphaned session after a model refusal is reported", "[vth
 
 TEST_CASE("session spawn and exit are recorded once each", "[vthost][host][diagnostics]")
 {
-    auto capture = logstore::ScopedCapture { "vthost.session" };
+    auto capture = core::log::ScopedCapture { "vthost.session" };
     auto h = HostHarness {};
     auto* tab = h.host.createTab();
     REQUIRE(tab != nullptr);
@@ -626,8 +627,8 @@ TEST_CASE("session spawn and exit are recorded once each", "[vthost][host][diagn
 // says what broke instead of only which test never returned.
 TEST_CASE("a hosted session with a parked pump can still be torn down", "[vthost][host]")
 {
-    auto source = net::testing::ScriptedEventSource {};
-    auto loop = net::EventLoop { source };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
     auto* blocking = static_cast<BlockingPty*>(nullptr);
     auto host = std::make_unique<SessionHost>(
         loop,
@@ -637,7 +638,7 @@ TEST_CASE("a hosted session with a parked pump can still be torn down", "[vthost
             return pty;
         },
         vtbackend::Settings {},
-        crispy::defaultEnvironment(),
+        core::defaultEnvironment(),
         /*startPumps=*/true);
 
     REQUIRE(host->createTab() != nullptr);
@@ -662,7 +663,7 @@ TEST_CASE("a hosted session with a parked pump can still be torn down", "[vthost
 
 TEST_CASE("resizing an unknown pane is reported", "[vthost][host][diagnostics]")
 {
-    auto capture = logstore::ScopedCapture {};
+    auto capture = core::log::ScopedCapture {};
     auto h = HostHarness {};
 
     h.host.applyPaneSize(vtworkspace::SessionId { 9999 },
@@ -787,8 +788,8 @@ TEST_CASE("createTab honours the window the request names", "[vthost][host]")
 
 TEST_CASE("SessionHost realizes a single-tab startup layout into its one window", "[vthost][host][layout]")
 {
-    auto source = net::testing::ScriptedEventSource {};
-    auto loop = net::EventLoop { source };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
     auto layout = vtworkspace::Layout { .tabs = { leafTab("nvim") } };
 
     auto host = SessionHost { loop,
@@ -796,7 +797,7 @@ TEST_CASE("SessionHost realizes a single-tab startup layout into its one window"
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false,
                               vthost::ClientSizePolicy::Latest,
                               layout };
@@ -814,8 +815,8 @@ TEST_CASE("SessionHost realizes a single-tab startup layout into its one window"
 
 TEST_CASE("SessionHost realizes a multi-tab, multi-pane startup layout", "[vthost][host][layout]")
 {
-    auto source = net::testing::ScriptedEventSource {};
-    auto loop = net::EventLoop { source };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
 
     auto splitTab = vtworkspace::LayoutTab {};
     splitTab.title = "servers";
@@ -835,7 +836,7 @@ TEST_CASE("SessionHost realizes a multi-tab, multi-pane startup layout", "[vthos
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false,
                               vthost::ClientSizePolicy::Latest,
                               layout };
@@ -863,15 +864,15 @@ TEST_CASE("SessionHost with an empty startup layout keeps today's single-default
 {
     // The default-parameter path: every existing call site (HostHarness included) that does not
     // pass a layout must be completely unaffected.
-    auto source = net::testing::ScriptedEventSource {};
-    auto loop = net::EventLoop { source };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
 
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false,
                               vthost::ClientSizePolicy::Latest };
 
@@ -888,8 +889,8 @@ TEST_CASE("SessionHost honors a startup layout pane's command/arguments override
     // Command/arguments/directory overrides ARE honored (mirrors AppSessionFactory::createPty's
     // program-overlay rule for the local GUI path); profile stays out of scope (the daemon has
     // no Config object to resolve an arbitrary named profile at startup) and is still ignored.
-    auto source = net::testing::ScriptedEventSource {};
-    auto loop = net::EventLoop { source };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
 
     auto tab = vtworkspace::LayoutTab {};
     tab.root.command = "nvim";
@@ -905,7 +906,7 @@ TEST_CASE("SessionHost honors a startup layout pane's command/arguments override
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false,
                               vthost::ClientSizePolicy::Latest,
                               layout };
@@ -929,8 +930,8 @@ TEST_CASE("SessionHost honors a startup layout pane's directory-only override, "
     // A pane can set ONLY a directory override without naming a command. Mirrors
     // AppSessionFactory::createPty: an engaged override with an empty program must not wipe the
     // profile shell's default program/arguments — only the working directory changes.
-    auto source = net::testing::ScriptedEventSource {};
-    auto loop = net::EventLoop { source };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
 
     auto tab = vtworkspace::LayoutTab {};
     tab.root.directory = std::filesystem::path { "/tmp/project" };
@@ -945,7 +946,7 @@ TEST_CASE("SessionHost honors a startup layout pane's directory-only override, "
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false,
                               vthost::ClientSizePolicy::Latest,
                               layout };
@@ -968,8 +969,8 @@ TEST_CASE("SessionHost engages no override for a startup layout pane's arguments
     // Such a pane must not engage an override at all: an empty-program ExecInfo would tell the
     // factory this session overrides the shell while carrying nothing to run. The arguments are
     // dropped, with a log line rather than in silence.
-    auto source = net::testing::ScriptedEventSource {};
-    auto loop = net::EventLoop { source };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
 
     auto tab = vtworkspace::LayoutTab {};
     tab.root.arguments = { "--flag", "value" };
@@ -984,7 +985,7 @@ TEST_CASE("SessionHost engages no override for a startup layout pane's arguments
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false,
                               vthost::ClientSizePolicy::Latest,
                               layout };
@@ -1006,8 +1007,8 @@ TEST_CASE("SessionHost still passes through an engaged-but-empty command with it
     // downstream rather than here. This pane is just as malformed as the unset-command one and
     // must log the same "ignoring pane arguments" warning (see SessionHost.cpp) -- this test
     // pins the override that reaches the factory; the warning itself has no harness to assert on.
-    auto source = net::testing::ScriptedEventSource {};
-    auto loop = net::EventLoop { source };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
 
     auto tab = vtworkspace::LayoutTab {};
     tab.root.command = std::string {};
@@ -1022,7 +1023,7 @@ TEST_CASE("SessionHost still passes through an engaged-but-empty command with it
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false,
                               vthost::ClientSizePolicy::Latest,
                               layout };
@@ -1041,15 +1042,15 @@ TEST_CASE("SessionHost falls back to an empty window when every startup-layout s
     // empty -- NativeSession::completeHandshake's existing first-attach fallback is unaffected by
     // this test (it lives above SessionHost) but this confirms SessionHost itself degrades
     // gracefully.
-    auto source = net::testing::ScriptedEventSource {};
-    auto loop = net::EventLoop { source };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
     auto layout = vtworkspace::Layout { .tabs = { leafTab("nvim"), leafTab("htop") } };
 
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize, std::optional<vtpty::Process::ExecInfo> const&)
                                   -> std::unique_ptr<vtpty::Pty> { return nullptr; },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false,
                               vthost::ClientSizePolicy::Latest,
                               layout };

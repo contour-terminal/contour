@@ -20,13 +20,14 @@
 #include <vtbackend/vt/VTType.hpp>
 #include <vtbackend/vt/VTWriter.hpp>
 
-#include <crispy/App.hpp>
-#include <crispy/Base64.hpp>
 #include <crispy/Comparison.hpp>
-#include <crispy/Escape.hpp>
 #include <crispy/Size.hpp>
-#include <crispy/Times.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Base64.hpp>
+#include <core/Escape.hpp>
+#include <core/Times.hpp>
+#include <core/Utils.hpp>
+#include <core/cli/App.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/emoji_segmenter.h>
@@ -57,9 +58,9 @@
 
 using namespace std::string_view_literals;
 
-using crispy::escape;
-using crispy::times;
-using crispy::toHexString;
+using core::escape;
+using core::times;
+using core::toHexString;
 
 using std::array;
 using std::clamp;
@@ -89,10 +90,10 @@ auto constexpr inline ColorPaletteUpdateDsrReplyId = 997;
 
 auto constexpr inline TabWidth = ColumnCount(8);
 
-auto inline const vtCaptureBufferLog = logstore::Category("vt.ext.capturebuffer",
-                                                          "Capture Buffer debug logging.",
-                                                          logstore::Category::State::Disabled,
-                                                          logstore::Category::Visibility::Hidden);
+auto inline const vtCaptureBufferLog = core::log::Category("vt.ext.capturebuffer",
+                                                           "Capture Buffer debug logging.",
+                                                           core::log::Category::State::Disabled,
+                                                           core::log::Category::Visibility::Hidden);
 
 #define SAFE_SYS_CALL(x)                \
     while ((x) == -1 && errno == EINTR) \
@@ -163,7 +164,7 @@ namespace // {{{ helper
     {
         if (!value)
             return std::nullopt;
-        return crispy::toInteger<10, int>(string_view(*value));
+        return core::toInteger<10, int>(string_view(*value));
     }
 
     optional<ImageAlignment> toImageAlignmentPolicy(string const* value, ImageAlignment defaultValue)
@@ -451,7 +452,7 @@ void Screen::writeText(string_view text, size_t cellCount)
 
     // Do not log individual characters, as we already logged the whole string above
     _logCharTrace = false;
-    auto const _ = crispy::Finally { [&]() { _logCharTrace = true; } };
+    auto const _ = core::Finally { [&]() { _logCharTrace = true; } };
 #endif
 
     assert(std::cmp_less_equal(cellCount, pageSize().columns.value - _cursor.position.column.value));
@@ -1203,7 +1204,7 @@ void Screen::linefeed()
         && _terminal->settings().smoothLineScrolling.count() != 0)
     {
         _terminal->unlock();
-        auto const _ = crispy::Finally([&]() { _terminal->lock(); });
+        auto const _ = core::Finally([&]() { _terminal->lock(); });
         if (!_terminal->isRenderingSuppressed())
             _terminal->screenUpdated();
         sleepFor(_terminal->settings().smoothLineScrolling);
@@ -2859,10 +2860,10 @@ void Screen::renderImage(shared_ptr<Image const> image,
     if (linesToBeRendered != gridSize.lines && autoScroll)
     {
         auto const remainingLineCount = gridSize.lines - linesToBeRendered;
-        for (auto const lineOffset: crispy::times(*remainingLineCount))
+        for (auto const lineOffset: core::times(*remainingLineCount))
         {
             linefeed(topLeft.column);
-            for (auto const columnOffset: crispy::views::iotaAs<ColumnOffset>(*columnsToBeRendered))
+            for (auto const columnOffset: core::views::iotaAs<ColumnOffset>(*columnsToBeRendered))
             {
                 auto const fragOffset =
                     CellLocation { .line = boxed_cast<LineOffset>(linesToBeRendered) + lineOffset,
@@ -2917,7 +2918,7 @@ namespace
             // another tomorrow.
             case ModifyKeysAction::Unknown: return ApplyResult::Unsupported;
         }
-        crispy::unreachable();
+        core::unreachable();
     }
 } // namespace
 
@@ -2938,7 +2939,7 @@ void Screen::requestDynamicColor(DynamicColorName name)
             case DynamicColorName::HighlightBackgroundColor:
                 return resolveCellColor(palette.selection.background, palette);
         }
-        crispy::unreachable();
+        core::unreachable();
     }();
 
     // Every query is answered. Falling silent -- as the highlight colors used to, whenever they were
@@ -3293,7 +3294,7 @@ void Screen::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action action, Xt
                     break;
                 }
                 case Action::SetToValue:
-                    visit(Overloaded {
+                    visit(core::Overloaded {
                               [&](int number) {
                                   _terminal->sixelColorPalette()->setSize(static_cast<unsigned>(number));
                                   reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, number);
@@ -3898,7 +3899,7 @@ namespace impl
         inline std::unordered_map<std::string_view, std::string_view> parseSubParamKeyValuePairs(
             std::string_view const& s)
         {
-            return crispy::splitKeyValuePairs(s, ':');
+            return core::splitKeyValuePairs(s, ':');
         }
 
         /// OSC 10..19 -- sets or queries the dynamic colors, starting at the one the sequence names.
@@ -3919,7 +3920,7 @@ namespace impl
             auto command = setDynamicColorCommand(firstName);
             auto result = ApplyResult::Ok;
 
-            crispy::split(
+            core::split(
                 std::string_view { seq.intermediateCharacters() }, ';', [&](std::string_view specification) {
                     auto const name = getChangeDynamicColorCommand(command);
                     if (command > LastDynamicColorCommand)
@@ -3989,10 +3990,10 @@ namespace impl
             auto pending = std::optional<std::pair<unsigned, size_t>> {};
 
             auto const ok =
-                crispy::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
+                core::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
                     if (!pending.has_value())
                     {
-                        auto const index = crispy::toInteger<10, unsigned>(value);
+                        auto const index = core::toInteger<10, unsigned>(value);
                         if (!index.has_value())
                             return false;
 
@@ -4048,8 +4049,8 @@ namespace impl
             }
 
             auto const ok =
-                crispy::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
-                    auto const index = crispy::toInteger<10, unsigned>(value);
+                core::split(std::string_view { seq.intermediateCharacters() }, ';', [&](string_view value) {
+                    auto const index = core::toInteger<10, unsigned>(value);
                     if (!index.has_value())
                         return false;
 
@@ -4083,7 +4084,7 @@ namespace impl
             // [read]  OSC 60 ST
             // [write] OSC 60 ; size ; regular ; bold ; italic ; bold italic ST
             auto const& params = seq.intermediateCharacters();
-            auto const splits = crispy::split(params, ';');
+            auto const splits = core::split(params, ';');
             auto const param = [&](unsigned index) -> string_view {
                 if (index < splits.size())
                     return splits.at(index);
@@ -4128,7 +4129,7 @@ namespace impl
         ApplyResult setFont(Sequence const& seq, Terminal& terminal)
         {
             auto const& params = seq.intermediateCharacters();
-            auto const splits = crispy::split(params, ';');
+            auto const splits = core::split(params, ';');
 
             if (splits.size() != 1)
                 return ApplyResult::Invalid;
@@ -4153,14 +4154,14 @@ namespace impl
             // OSC 52: `OSC 52 ; Pc ; Pd ST`. Pd is base64 data to store, or "?" to read the clipboard
             // back. Contour models the clipboard ('c') and the default/empty selection.
             auto const& params = seq.intermediateCharacters();
-            auto const splits = crispy::split(params, ';');
+            auto const splits = core::split(params, ';');
             if (splits.size() != 2 || !(splits[0] == "c" || splits[0].empty()))
                 return ApplyResult::Invalid;
 
             if (splits[1] == "?")
                 terminal.requestClipboardRead(splits[0]); // read (gated by Settings::allowClipboardRead)
             else
-                terminal.copyToClipboard(crispy::base64::decode(splits[1]));
+                terminal.copyToClipboard(core::base64::decode(splits[1]));
             return ApplyResult::Ok;
         }
 
@@ -4168,7 +4169,7 @@ namespace impl
         ApplyResult NOTIFY(Sequence const& seq, Screen& screen)
         {
             auto const& value = seq.intermediateCharacters();
-            if (auto const splits = crispy::split(value, ';'); splits.size() == 3 && splits[0] == "notify")
+            if (auto const splits = core::split(value, ';'); splits.size() == 3 && splits[0] == "notify")
             {
                 screen.notify(string(splits[1]), string(splits[2]));
                 return ApplyResult::Ok;
@@ -4622,7 +4623,7 @@ void Screen::executeControlCode(char controlCode)
         case 0x38: restoreCursor(); break;
         default:
             // if (VTParserLog)
-            //     VTParserLog()("Unsupported C0 sequence: {}", crispy::escape((uint8_t) controlCode));
+            //     VTParserLog()("Unsupported C0 sequence: {}", core::escape((uint8_t) controlCode));
             break;
     }
 
@@ -4759,7 +4760,7 @@ void Screen::renderITerm2InlineImage(std::string_view arguments)
     if (!inlineImage)
         return;
 
-    auto const decoded = crispy::base64::decode(encoded);
+    auto const decoded = core::base64::decode(encoded);
     if (decoded.empty())
         return;
 
@@ -4813,7 +4814,7 @@ ApplyResult Screen::processPointerShape(std::string_view payload)
             // cannot, and the actual CSS name for the three introspection pseudo-names. Answering
             // `1` for a shape we would not actually show would be a lie an application acts on.
             auto answers = std::string {};
-            for (auto const& name: crispy::split(names, ','))
+            for (auto const& name: core::split(names, ','))
             {
                 if (!answers.empty())
                     answers += ',';
@@ -4833,7 +4834,7 @@ ApplyResult Screen::processPointerShape(std::string_view payload)
         case Operation::Set:
         case Operation::Push: {
             // A list is pushed left to right, so the last name given ends up current.
-            for (auto const& name: crispy::split(names, ','))
+            for (auto const& name: core::split(names, ','))
             {
                 if (!isSupportedName(name))
                     continue;
@@ -4882,7 +4883,7 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
                 return ApplyResult::Ok;
             }
 
-            auto const requested = crispy::base64::decode(packet.payload);
+            auto const requested = core::base64::decode(packet.payload);
 
             // A payload of a single period asks which MIME types are on the clipboard. The spec
             // serves that WITHOUT a permission prompt, so that a client is not prompted twice: once
@@ -4892,7 +4893,7 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             {
                 respond("OK");
                 reply("\033]5522;type=read:status=DATA:mime={};\033\\",
-                      crispy::base64::encode(std::string_view { "text/plain" }));
+                      core::base64::encode(std::string_view { "text/plain" }));
                 respond("DONE");
                 return ApplyResult::Ok;
             }
@@ -4910,7 +4911,7 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             // this terminal can produce, say so rather than sending text under a type it did not ask
             // for.
             auto accepted = false;
-            for (auto const& mimeType: crispy::split(requested, ' '))
+            for (auto const& mimeType: core::split(requested, ' '))
                 if (isSupportedMimeType(mimeType))
                     accepted = true;
             if (!requested.empty() && !accepted)
@@ -4927,7 +4928,7 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             // a bounded OSC buffer truncates or drops a single oversized packet, and a copied log
             // tail reaches hundreds of KiB routinely.
             auto const content = _terminal->clipboardContent();
-            auto const mime = crispy::base64::encode(std::string_view { "text/plain" });
+            auto const mime = core::base64::encode(std::string_view { "text/plain" });
             respond("OK");
             for (size_t offset = 0; offset < content.size(); offset += kitty_clipboard::ReadChunkSize)
             {
@@ -4935,7 +4936,7 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
                     std::string_view { content }.substr(offset, kitty_clipboard::ReadChunkSize);
                 reply("\033]5522;type=read:status=DATA:mime={};{}\033\\",
                       mime,
-                      crispy::base64::encode(chunk.begin(), chunk.end()));
+                      core::base64::encode(chunk.begin(), chunk.end()));
             }
             respond("DONE");
             return ApplyResult::Ok;
@@ -4991,7 +4992,7 @@ ApplyResult Screen::processKittyClipboard(std::string_view payload)
             // Abandon the whole transmission rather than truncate it: a partial clipboard is not the
             // data the application asked to store. @see kitty_graphics::MaxChunkedPayloadSize, which
             // bounds the other chunked protocol the same way.
-            auto const decoded = crispy::base64::decode(packet.payload);
+            auto const decoded = core::base64::decode(packet.payload);
             if (_terminal->kittyClipboardWrite().size() + decoded.size() > MaxClipboardWriteSize)
             {
                 _terminal->kittyClipboardWriteOpen() = false;
@@ -5574,7 +5575,7 @@ void Screen::processKittyGraphics(std::string_view body)
         return;
     }
 
-    auto const decoded = crispy::base64::decode(command.payload);
+    auto const decoded = core::base64::decode(command.payload);
     auto pixmap = Image::Data(decoded.begin(), decoded.end());
 
     auto const format = [&] {
@@ -5898,7 +5899,7 @@ namespace
                     text += _grid.lineAt(line).toUtf8(from, to);
             }
 
-            text.resize(crispy::trimRight(text).size());
+            text.resize(core::trimRight(text).size());
             return text;
         }
 
@@ -6264,8 +6265,8 @@ void Screen::processShellIntegration(Sequence const& seq)
     _terminal->markArbiter().observedShellIntegration();
 
     auto const forEachKeyValue = []<typename Callback>(std::string_view text, Callback&& callback) {
-        crispy::forEachKeyValue(
-            crispy::ForEachKeyValueParams {
+        core::forEachKeyValue(
+            core::ForEachKeyValueParams {
                 .text = text,
                 .entryDelimiter = ';',
                 .assignmentDelimiter = '=',
@@ -6314,7 +6315,7 @@ void Screen::processShellIntegration(Sequence const& seq)
             auto const params = seq.intermediateCharacters().substr(1);
             forEachKeyValue(params, [&](std::string_view key, std::string_view value) {
                 if (key == "cmdline_url")
-                    commandLine = crispy::unescapeURL(value);
+                    commandLine = core::unescapeURL(value);
             });
             _terminal->shellIntegration().commandOutputStart(commandLine);
             _terminal->semanticBlockTracker().commandOutputStart(commandLine);
@@ -6331,7 +6332,7 @@ void Screen::processShellIntegration(Sequence const& seq)
             markLogicalLineAtCursorWithColumn(ColumnMark::CommandEnd);
 
             auto const exitCode =
-                (cmd.size() > 2 && cmd[1] == ';') ? crispy::toInteger<10, int>(cmd.substr(2)).value_or(0) : 0;
+                (cmd.size() > 2 && cmd[1] == ';') ? core::toInteger<10, int>(cmd.substr(2)).value_or(0) : 0;
             _terminal->shellIntegration().commandFinished(exitCode);
             _terminal->semanticBlockTracker().commandFinished(exitCode);
             break;
@@ -6741,7 +6742,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         }
         case DECRM: {
             ApplyResult r = ApplyResult::Ok;
-            for (auto const i: crispy::times(seq.parameterCount()))
+            for (auto const i: core::times(seq.parameterCount()))
                 r = std::max(r, impl::setModeDEC(seq, i, false, *_terminal));
             return r;
         }
@@ -6883,7 +6884,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECSSCLS: setScrollSpeed(seq.paramOr(0, 2)); break;
         case DECSM: {
             ApplyResult r = ApplyResult::Ok;
-            for (auto const i: crispy::times(seq.parameterCount()))
+            for (auto const i: core::times(seq.parameterCount()))
                 r = std::max(r, impl::setModeDEC(seq, i, true, *_terminal));
             return r;
         }
@@ -6950,13 +6951,13 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                 // xterm folds both with one_if_default(). paramOr() would take an explicit zero
                 // literally and repeat nothing.
                 auto const count = seq.paramPositiveOr<size_t>(0, 1);
-                for ([[maybe_unused]] auto const _: crispy::times(count))
+                for ([[maybe_unused]] auto const _: core::times(count))
                     writeText(precedingChar);
             }
             break;
         case RM: {
             ApplyResult r = ApplyResult::Ok;
-            for (auto const i: crispy::times(seq.parameterCount()))
+            for (auto const i: core::times(seq.parameterCount()))
                 r = std::max(r, impl::setAnsiMode(seq, i, false, *_terminal));
             return r;
         }
@@ -6969,7 +6970,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case SGRSAVE: saveGraphicsRendition(); return ApplyResult::Ok;
         case SM: {
             ApplyResult r = ApplyResult::Ok;
-            for (auto const i: crispy::times(seq.parameterCount()))
+            for (auto const i: core::times(seq.parameterCount()))
                 r = std::max(r, impl::setAnsiMode(seq, i, true, *_terminal));
             return r;
         }
@@ -7122,7 +7123,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                     if (_terminal->activeStatusDisplay() == ActiveStatusDisplay::StatusLine
                         && _terminal->syncWindowTitleWithHostWritableStatusDisplay())
                     {
-                        _terminal->setWindowTitle(crispy::trimRight(
+                        _terminal->setWindowTitle(core::trimRight(
                             _terminal->hostWritableStatusLineDisplay().grid().lineText(LineOffset(0))));
                         _terminal->setSyncWindowTitleWithHostWritableStatusDisplay(false);
                     }
@@ -7458,11 +7459,11 @@ unique_ptr<ParserExtension> Screen::hookXTGETTCAP(Sequence const& /*seq*/)
     //           character).
 
     return make_unique<SimpleStringCollector>([this](string_view const& data) {
-        auto const capsInHex = crispy::split(data, ';');
+        auto const capsInHex = core::split(data, ';');
         for (auto hexCap: capsInHex)
         {
             auto const hexCap8 = unicode::convert_to<char>(hexCap);
-            if (auto const capOpt = crispy::fromHexString(string_view(hexCap8.data(), hexCap8.size())))
+            if (auto const capOpt = core::fromHexString(string_view(hexCap8.data(), hexCap8.size())))
                 requestCapability(capOpt.value());
         }
     });

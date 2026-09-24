@@ -96,7 +96,7 @@ class ChannelPty: public Pty
     /// A threshold rather than "compact every feed" so a burst of small chunks does not pay an
     /// O(n) shift each time, and rather than "compact only when fully drained" so a pane whose
     /// reader is never momentarily idle cannot grow the buffer without bound. Same value, and the
-    /// same reasoning, as vthost::imsg::ImsgDecoder::feed and net::AsyncBufferedReader.
+    /// same reasoning, as vthost::imsg::ImsgDecoder::feed and core::net::AsyncBufferedReader.
     static constexpr std::size_t CompactionThreshold = std::size_t { 64 } * 1024;
 
     mutable std::mutex _mutex;

@@ -3,13 +3,14 @@
 
 #include <vtbackend/core/Color.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
+#include <core/log/Assert.hpp>
 
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
-using crispy::eachElement;
+using core::eachElement;
 
 using std::max;
 using std::string;

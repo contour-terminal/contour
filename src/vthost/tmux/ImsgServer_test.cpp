@@ -3,6 +3,12 @@
 
     #include <vtpty/MockPty.hpp>
 
+    #include <core/async/Task.hpp>
+    #include <core/async/WhenAll.hpp>
+    #include <core/net/EventLoop.hpp>
+    #include <core/net/IoBackend.hpp>
+    #include <core/net/Sockets.hpp>
+
     #include <catch2/catch_test_macros.hpp>
 
     #include <sys/socket.h>
@@ -23,18 +29,14 @@
     #include <fcntl.h>
     #include <unistd.h>
 
-    #include <coro/Task.hpp>
-    #include <coro/WhenAll.hpp>
-    #include <net/EventLoop.hpp>
-    #include <net/PollEventSource.hpp>
-    #include <net/Sockets.hpp>
+    #include <vthost/LoopDrain.hpp>
     #include <vthost/SessionHost.hpp>
     #include <vthost/imsg/CommandArgv.hpp>
     #include <vthost/imsg/Identify.hpp>
     #include <vthost/imsg/ImsgCodec.hpp>
     #include <vthost/tmux/ImsgServer.hpp>
 
-using coro::Task;
+using core::async::Task;
 using namespace std::chrono_literals;
 namespace imsg = vthost::imsg;
 
@@ -136,7 +138,7 @@ struct FakeTmuxClient
 // would deadlock the reactor.
 
 /// Reads (bounded) from @p fd until @p needle appears (or EOF/timeout).
-Task<std::string> readUntil(net::EventLoop* loop, int fd, std::string needle)
+Task<std::string> readUntil(core::net::EventLoop* loop, int fd, std::string needle)
 {
     auto collected = std::string {};
     auto buffer = std::array<char, 4096> {};
@@ -156,7 +158,7 @@ Task<std::string> readUntil(net::EventLoop* loop, int fd, std::string needle)
 }
 
 /// Reads one imsg frame from @p fd (bounded).
-Task<std::optional<imsg::ImsgFrame>> readImsgFrame(net::EventLoop* loop, int fd)
+Task<std::optional<imsg::ImsgFrame>> readImsgFrame(core::net::EventLoop* loop, int fd)
 {
     auto decoder = imsg::ImsgDecoder {};
     auto buffer = std::array<std::byte, 4096> {};
@@ -183,23 +185,23 @@ Task<std::optional<imsg::ImsgFrame>> readImsgFrame(net::EventLoop* loop, int fd)
 /// The served side: a SessionHost plus the imsg handler over a socketpair.
 struct ImsgHarness
 {
-    net::PollEventSource source;
-    net::EventLoop loop { source };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
     vthost::SessionHost host { loop,
                                [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                    return std::make_unique<vtpty::MockPty>(size);
                                },
                                vtbackend::Settings {},
-                               crispy::defaultEnvironment(),
+                               core::defaultEnvironment(),
                                /*startPumps=*/false };
     FakeTmuxClient client;
-    std::unique_ptr<net::ISocket> serverEnd;
+    std::unique_ptr<core::net::ISocket> serverEnd;
 
     ImsgHarness()
     {
         auto fds = std::array<int, 2> { -1, -1 };
         REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds.data()) == 0);
-        auto adopted = net::adoptFd(loop, fds[0]);
+        auto adopted = core::net::adoptFd(loop, fds[0]);
         REQUIRE(adopted.has_value());
         serverEnd = std::move(*adopted);
         client.imsgFd = fds[1];
@@ -212,11 +214,11 @@ struct ImsgHarness
         auto handler = vthost::tmux::makeTmuxImsgHandler(loop, host);
         auto drive = [](ImsgHarness* h,
                         std::function<Task<void>(ImsgHarness*)> inner,
-                        std::function<Task<void>(std::unique_ptr<net::ISocket>)>* serve) -> Task<void> {
-            co_await coro::whenAll((*serve)(std::move(h->serverEnd)), inner(h));
+                        std::function<Task<void>(std::unique_ptr<core::net::ISocket>)>* serve) -> Task<void> {
+            co_await core::async::whenAll((*serve)(std::move(h->serverEnd)), inner(h));
         };
-        auto serve = std::function<Task<void>(std::unique_ptr<net::ISocket>)> {
-            [&handler](std::unique_ptr<net::ISocket> s) {
+        auto serve = std::function<Task<void>(std::unique_ptr<core::net::ISocket>)> {
+            [&handler](std::unique_ptr<core::net::ISocket> s) {
                 return handler(vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(s));
             }
         };
@@ -320,7 +322,7 @@ namespace
 
 /// Reads (bounded) from @p fd until it reports EOF.
 /// @return Whether EOF was observed within the bound.
-Task<bool> awaitEof(net::EventLoop* loop, int fd)
+Task<bool> awaitEof(core::net::EventLoop* loop, int fd)
 {
     auto buffer = std::array<char, 4096> {};
     for (auto i = 0; i < 2000; ++i)
@@ -438,7 +440,10 @@ std::string runShellCapture(std::string const& command)
 }
 
 /// The oracle's client side: drives the tmux binary's pty and reaps it.
-Task<void> oracleScenario(net::EventLoop* loop, int master, pid_t child, vthost::ConnectionAcceptor* server)
+Task<void> oracleScenario(core::net::EventLoop* loop,
+                          int master,
+                          pid_t child,
+                          vthost::ConnectionAcceptor* server)
 {
     makeNonBlocking(master);
 
@@ -501,20 +506,22 @@ TEST_CASE("a real tmux binary attaches over imsg", "[vthost][imsgserver][oracle]
     auto const socketPath = socketDir + "/tmux.sock";
     std::filesystem::remove_all(socketDir);
 
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = vthost::SessionHost {
         loop,
         [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
             return std::make_unique<vtpty::MockPty>(size);
         },
         vtbackend::Settings {},
-        crispy::defaultEnvironment(),
+        core::defaultEnvironment(),
         /*startPumps=*/false,
     };
     host.createTab();
+    // Declared after the host, so the connection flows the server spawns end while it exists.
+    auto const drain = vthost::LoopDrain { loop };
 
-    auto listener = net::listenUnix(loop, socketPath);
+    auto listener = core::net::listenUnix(loop, socketPath);
     REQUIRE(listener.has_value());
     auto server = vthost::ConnectionAcceptor {
         loop, "test", std::move(*listener), vthost::tmux::makeTmuxImsgHandler(loop, host)
@@ -531,7 +538,7 @@ TEST_CASE("a real tmux binary attaches over imsg", "[vthost][imsgserver][oracle]
     }
 
     auto drive = [](vthost::ConnectionAcceptor* srv, Task<void> scenario) -> Task<void> {
-        co_await coro::whenAll(srv->serve(), std::move(scenario));
+        co_await core::async::whenAll(srv->serve(), std::move(scenario));
     };
     loop.blockOn(drive(&server, oracleScenario(&loop, master, child, &server)));
 

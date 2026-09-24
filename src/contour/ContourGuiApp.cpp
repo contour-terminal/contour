@@ -25,11 +25,12 @@
 
 #include <text_shaper/FontLocator.hpp>
 
-#include <crispy/CLI.hpp>
-#include <crispy/LogSink.hpp>
-#include <crispy/LogStore.hpp>
 #include <crispy/ScopedTimer.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Utils.hpp>
+#include <core/cli/CLI.hpp>
+#include <core/log/LogSink.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <QtCore/QEventLoop>
 #include <QtCore/QProcess>
@@ -78,7 +79,7 @@ using namespace std::string_literals;
 
 namespace fs = std::filesystem;
 
-namespace CLI = crispy::cli;
+namespace CLI = core::cli;
 
 namespace contour
 {
@@ -111,7 +112,7 @@ bool hasStrandedQmlOverrides(fs::path const& configHome)
     return false;
 }
 
-ContourGuiApp::ContourGuiApp(crispy::Environment const& env,
+ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<session::SessionFactory> sessionFactory,
                              std::unique_ptr<platform::ExternalLauncher> externalLauncher,
                              std::unique_ptr<config::LayoutStore> layoutStore,
@@ -187,7 +188,7 @@ int ContourGuiApp::clientAction()
         {
             cerr << std::format("contour client: unknown --size-policy '{}' (expected one of: {})\n",
                                 requestedPolicy,
-                                crispy::joinHumanReadable(vthost::ClientSizePolicyNames | std::views::keys));
+                                core::joinHumanReadable(vthost::ClientSizePolicyNames | std::views::keys));
             return EXIT_FAILURE;
         }
         auto const daemonOptions = vthost::DaemonSpawnOptions { .filter = logFilter,
@@ -263,7 +264,7 @@ int ContourGuiApp::clientAction()
                 // accepting it would silently strip the pinning the user asked for.
                 auto caPem = std::string {};
                 if (std::filesystem::is_regular_file(path))
-                    caPem = crispy::readFileAsString(path);
+                    caPem = core::readFileAsString(path);
                 if (caPem.empty())
                 {
                     cerr << std::format("contour client: cannot read --tls-ca file '{}'\n", tlsCaPath);
@@ -381,7 +382,7 @@ int ContourGuiApp::run(int argc, char const* argv[])
     return cli::ContourApp::run(argc, argv);
 }
 
-crispy::cli::Command ContourGuiApp::parameterDefinition() const
+core::cli::Command ContourGuiApp::parameterDefinition() const
 {
     auto command = cli::ContourApp::parameterDefinition();
 
@@ -713,7 +714,7 @@ int ContourGuiApp::checkConfig()
                                    : contour::config::loadConfigFromFile(configPath.toStdString());
 
     contour::config::compareEntries(
-        _config, logstore::Category("", "Console Logger", logstore::Category::State::Enabled));
+        _config, core::log::Category("", "Console Logger", core::log::Category::State::Enabled));
 
     return EXIT_SUCCESS;
 }
@@ -735,7 +736,7 @@ bool ContourGuiApp::loadConfig(string const& target)
         return fromLog.empty() ? flags.get<string>(prefix + "debug") : fromLog;
     }();
 
-    auto const logFile = logstore::parseLogFileSpec(flags.get<string>(prefix + "log-file"));
+    auto const logFile = core::log::parseLogFileSpec(flags.get<string>(prefix + "log-file"));
 
     // A destination is worth installing for EITHER half: a filter needs somewhere to write, and
     // `--log-file` alone is a request to redirect whatever $LOG already enabled. Gating the whole
@@ -749,15 +750,15 @@ bool ContourGuiApp::loadConfig(string const& target)
         // enabled sink for them, and it lets the destination be a file -- which on Windows is the
         // only way to capture this at all (see the log-file option).
         //
-        // NOTE ON THE STREAM. logstore::Sink::console() is constructed disabled (LogStore.cpp:29),
+        // NOTE ON THE STREAM. core::log::Sink::console() is constructed disabled (LogStore.cpp:29),
         // but App::run() enables it via customizeLogStoreOutput() before any verb is dispatched,
-        // so the bare logstore::configure() this replaced was NOT discarding its output -- it went
+        // so the bare core::log::configure() this replaced was NOT discarding its output -- it went
         // to std::cout. A ScopedOutput with no file writes to std::cerr, so `--debug`/`--log`
         // output moves from stdout to stderr here. That is deliberate (diagnostics belong on
         // stderr, and it matches the client and daemon verbs, which route through
         // App::installLogging()), and it is stated in the option help so a pipeline that captured
         // stdout has something to find.
-        auto output = logstore::ScopedOutput::create({
+        auto output = core::log::ScopedOutput::create({
             .filter = logFilter,
             .file = logFile,
             .showProcessId = false,
@@ -771,7 +772,7 @@ bool ContourGuiApp::loadConfig(string const& target)
         if (!output)
         {
             cerr << std::format("contour: {}; logging to standard error instead.\n", output.error());
-            output = logstore::ScopedOutput::create({
+            output = core::log::ScopedOutput::create({
                 .filter = logFilter,
                 .file = std::nullopt,
                 .showProcessId = false,
@@ -786,7 +787,7 @@ bool ContourGuiApp::loadConfig(string const& target)
         // A pattern matching nothing is nearly always a typo, and its symptom -- no output -- is
         // indistinguishable from "the thing you asked about never happened", which is exactly the
         // wrong signal to give someone reproducing a rendering artifact.
-        for (auto const& unmatched: logstore::unmatchedFilters(logFilter))
+        for (auto const& unmatched: core::log::unmatchedFilters(logFilter))
             cerr << std::format("contour: '{}' matches no known tag (see `contour "
                                 "list-debug-tags`).\n",
                                 unmatched);

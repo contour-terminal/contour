@@ -28,7 +28,7 @@ using vtworkspace::WindowId;
 // HostedSession
 
 HostedSession::HostedSession(SessionId id,
-                             crispy::Environment const& env,
+                             core::Environment const& env,
                              std::unique_ptr<vtpty::Pty> pty,
                              vtbackend::Settings settings,
                              std::function<void()> onScreenUpdated,
@@ -107,10 +107,10 @@ void HostedSession::pumpLoop()
 // ---------------------------------------------------------------------------
 // SessionHost
 
-SessionHost::SessionHost(net::EventLoop& loop,
+SessionHost::SessionHost(core::net::EventLoop& loop,
                          PtyFactory ptyFactory,
                          vtbackend::Settings settings,
-                         crispy::Environment const& env,
+                         core::Environment const& env,
                          bool startPumps,
                          ClientSizePolicy sizePolicy,
                          vtworkspace::Layout const& startupLayout):

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <text_shaper/Font.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -138,7 +138,7 @@ TEST_CASE("Font.namesMatch")
 // writer emitted `Regular`, `ExtraBold` and `Monospace`, none of which the parser accepted, so a
 // generated config silently reverted to defaults on load.
 //
-// The enumerators are walked with crispy::eachElement rather than listed here, so an enumerator
+// The enumerators are walked with core::eachElement rather than listed here, so an enumerator
 // added without a parser entry fails this test instead of quietly going untested.
 TEMPLATE_TEST_CASE("Font: every formatted attribute name parses back",
                    "[font]",
@@ -147,7 +147,7 @@ TEMPLATE_TEST_CASE("Font: every formatted attribute name parses back",
                    text::FontSpacing,
                    text::RenderMode)
 {
-    for (auto const value: crispy::eachElement<TestType>())
+    for (auto const value: core::eachElement<TestType>())
     {
         INFO(std::format("{}", value));
         CHECK(parseAttribute<TestType>(std::format("{}", value)) == value);

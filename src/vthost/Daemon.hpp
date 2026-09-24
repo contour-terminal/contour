@@ -9,6 +9,9 @@
 
 #include <vtpty/Process.hpp>
 
+#include <core/async/Task.hpp>
+#include <core/net/ISocket.hpp>
+
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -23,8 +26,6 @@
 #include <variant>
 #include <vector>
 
-#include <coro/Task.hpp>
-#include <net/ISocket.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 // Supplies DaemonConfig::settings' default, plus DefaultSessionHistoryLineCount and
 // defaultSessionSettings(), which used to be DECLARED here. They moved down because SessionHost.h
@@ -32,7 +33,7 @@
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/SessionSettings.hpp>
 
-namespace net
+namespace core::net
 {
 class EventLoop;
 }
@@ -117,7 +118,7 @@ struct DaemonConfig
 /// What `contour daemon --background` runs. The caller supplies the whole argv rather than
 /// options to rebuild one from: the CLI surface lives in `src/contour`, and the backgrounding
 /// daemon relaunches ITSELF, so replaying its own tokens is both exact and immune to a new
-/// option being forgotten here (see crispy::App::commandLine).
+/// option being forgotten here (see core::cli::App::commandLine).
 ///
 /// Returning means the daemon ACCEPTS — not merely that the process started. A `--background`
 /// that returned earlier would hand the shell back before a bind failure could surface, which
@@ -171,8 +172,8 @@ using AttachEndpoint = std::variant<UnixEndpoint, TcpEndpoint>;
 /// @param loop The event loop whose reactor drives the connect (not owned).
 /// @param endpoint The daemon endpoint.
 /// @return The ready transport, or a human-readable error string.
-[[nodiscard]] coro::Task<std::expected<std::unique_ptr<net::ISocket>, std::string>> connectAttach(
-    net::EventLoop* loop, AttachEndpoint endpoint);
+[[nodiscard]] core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, std::string>>
+connectAttach(core::net::EventLoop* loop, AttachEndpoint endpoint);
 
 /// What an auto-spawned daemon inherits from the client that spawned it.
 ///

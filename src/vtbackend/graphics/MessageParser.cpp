@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/graphics/MessageParser.hpp>
 
-#include <crispy/Base64.hpp>
+#include <core/Base64.hpp>
 
 #include <iostream>
 #include <vector>
@@ -67,9 +67,9 @@ void MessageParser::flushHeader()
     if (_parsedValue.size() > 1 && _parsedValue[0] == '!')
     {
         auto decoded = std::string {};
-        decoded.resize(crispy::base64::decodeLength(next(begin(_parsedValue)), end(_parsedValue)));
+        decoded.resize(core::base64::decodeLength(next(begin(_parsedValue)), end(_parsedValue)));
         auto const actualSize =
-            crispy::base64::decode(next(begin(_parsedValue)), end(_parsedValue), decoded.data());
+            core::base64::decode(next(begin(_parsedValue)), end(_parsedValue), decoded.data());
         decoded.resize(actualSize);
         _parsedValue = std::move(decoded);
     }
@@ -92,8 +92,8 @@ void MessageParser::finalize()
             if (_body.size() > 1 && _body[0] == '!')
             {
                 auto decoded = std::vector<uint8_t> {};
-                decoded.resize(crispy::base64::decodeLength(next(begin(_body)), end(_body)));
-                auto const actualSize = crispy::base64::decode(
+                decoded.resize(core::base64::decodeLength(next(begin(_body)), end(_body)));
+                auto const actualSize = core::base64::decode(
                     next(begin(_body)), end(_body), reinterpret_cast<char*>(decoded.data()));
                 decoded.resize(actualSize);
                 _body = std::move(decoded);

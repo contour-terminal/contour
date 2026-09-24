@@ -3,7 +3,7 @@
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/Logging.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
@@ -46,7 +46,7 @@ namespace
         auto const path = fontConfigFilePath();
         if (!path)
             return std::nullopt;
-        return parseForcedFontDpi(crispy::readFileAsString(*path), forcedDpiKey());
+        return parseForcedFontDpi(core::readFileAsString(*path), forcedDpiKey());
     }
 } // namespace
 

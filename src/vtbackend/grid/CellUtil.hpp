@@ -5,7 +5,7 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 
-#include <crispy/Times.hpp>
+#include <core/Times.hpp>
 
 #include <libunicode/case_mapping.h>
 #include <libunicode/width.h>
@@ -218,8 +218,8 @@ template <typename Cell>
     };
 
     // TODO: Should use this line instead - but that breaks on Ubuntu 22.04 with Clang 15
-    // return std::ranges::all_of(crispy::times(cellCodepointCount), testMatchAt);
-    for (auto const i: crispy::times(cellCodepointCount))
+    // return std::ranges::all_of(core::times(cellCodepointCount), testMatchAt);
+    for (auto const i: core::times(cellCodepointCount))
         if (!testMatchAt(i))
             return false;
     return true;

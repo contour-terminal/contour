@@ -18,7 +18,7 @@
 #include <vtrasterizer/ReGISFontRasterizer.hpp>
 #include <vtrasterizer/Renderer.hpp>
 
-#include <crispy/Deferred.hpp>
+#include <core/Deferred.hpp>
 
 #include <QtCore/QPoint>
 #include <QtCore/QSize>

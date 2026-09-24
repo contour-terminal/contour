@@ -38,7 +38,7 @@ PaneView::PaneView(int columns, int lines, vtbackend::LineCount history)
     // The process's own environment: this terminal only mirrors what a remote pane already
     // rendered, so nothing it reads from there describes anything but the client it runs in.
     _terminal = std::make_unique<vtbackend::Terminal>(_events,
-                                                      crispy::defaultEnvironment(),
+                                                      core::defaultEnvironment(),
                                                       std::make_unique<vtpty::MockPty>(pageSize),
                                                       std::move(settings),
                                                       std::chrono::steady_clock::now());

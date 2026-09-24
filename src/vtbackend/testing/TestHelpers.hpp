@@ -5,7 +5,7 @@
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 
-#include <crispy/Escape.hpp>
+#include <core/Escape.hpp>
 
 #include <libunicode/convert.h>
 
@@ -49,7 +49,7 @@ constexpr CellLocation operator+(LineOffset line, ColumnOffset column) noexcept
 template <typename S>
 [[nodiscard]] inline decltype(auto) e(S const& s)
 {
-    return crispy::escape(s);
+    return core::escape(s);
 }
 
 /// Takes a textual screenshot using the terminals render buffer.

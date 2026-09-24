@@ -9,10 +9,10 @@
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/App.hpp>
-#include <crispy/Times.hpp>
-#include <crispy/Utils.hpp>
-#include <crispy/testing/Environment.hpp>
+#include <core/Times.hpp>
+#include <core/Utils.hpp>
+#include <core/cli/App.hpp>
+#include <core/testing/Environment.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>

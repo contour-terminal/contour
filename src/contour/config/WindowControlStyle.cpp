@@ -2,7 +2,8 @@
 #include <contour/config/WindowControlStyle.hpp>
 
 #include <crispy/ASCII.hpp>
-#include <crispy/Environment.hpp>
+
+#include <core/Environment.hpp>
 
 #include <algorithm>
 #include <string_view>
@@ -31,7 +32,7 @@ namespace
     }
 } // namespace
 
-HostPlatform detectDesktopPlatform(crispy::Environment const& env)
+HostPlatform detectDesktopPlatform(core::Environment const& env)
 {
     // XDG_CURRENT_DESKTOP is the standardized answer, so where it says anything at all it is the
     // whole answer -- a desktop that named itself is not overruled by another desktop's marker.
@@ -49,7 +50,7 @@ HostPlatform detectDesktopPlatform(crispy::Environment const& env)
     return HostPlatform::Other;
 }
 
-HostPlatform detectHostPlatform([[maybe_unused]] crispy::Environment const& env)
+HostPlatform detectHostPlatform([[maybe_unused]] core::Environment const& env)
 {
 #ifdef _WIN32
     return HostPlatform::Windows;
