@@ -1,0 +1,3 @@
+# Vendored code is formatted by its upstream, and a formatting run here would break the verbatim
+# copy's MANIFEST. See vendor/README.md.
+vendor/**
