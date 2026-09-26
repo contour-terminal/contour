@@ -4,13 +4,16 @@ endif()
 
 # --------------------------------------------------------------------------------------------------------
 # crispy::core
+#
+# The renderer half of crispy: the caches, rings, hashing and buffer objects the terminal and its
+# rasterizer are built on. The generic half (assertions, logging, the CLI parser, environment, string
+# and escape utilities) is core-cpp's core::base, core::log and core::cli now, vendored in
+# vendor/core-cpp.
 
 option(STRONGHASH_USE_INTRINSICS "Build StrongHash with AES-NI (x86-64) / NEON (ARM64) support [default: ON]" ON)
 
 set(crispy_SOURCES
-    App.cpp App.hpp
     BufferObject.cpp BufferObject.hpp
-    CLI.cpp CLI.hpp
     Comparison.hpp
     LRUCache.hpp
     StrongLRUCache.hpp
@@ -20,24 +23,11 @@ set(crispy_SOURCES
     AlignedAllocator.hpp
     Animation.hpp
     ASCII.hpp
-    Assert.hpp
-    Base64.hpp
     Compose.hpp
-    Defines.hpp
-    Environment.cpp Environment.hpp
-    Escape.hpp
     FileDescriptor.hpp
-    Flags.hpp
     InterpolatedString.cpp InterpolatedString.hpp
-    LogSink.cpp LogSink.hpp
-    LogStore.cpp LogStore.hpp
-    Overloaded.hpp
     Reference.hpp
     Ring.hpp
-    testing/Environment.hpp
-    Times.hpp
-    UserInfo.cpp UserInfo.hpp
-    Utils.cpp Utils.hpp
 )
 
 add_library(crispy-core STATIC ${crispy_SOURCES})
@@ -51,7 +41,7 @@ if(MSVC)
     target_compile_definitions(crispy-core PUBLIC NOMINMAX)
 endif()
 
-set(CRISPY_CORE_LIBS unicode::unicode Microsoft.GSL::GSL boxed-cpp::boxed-cpp reflection-cpp::reflection-cpp)
+set(CRISPY_CORE_LIBS Microsoft.GSL::GSL core::base core::log)
 
 # if compiler is not MSVC
 if(NOT MSVC)
@@ -68,8 +58,8 @@ endif()
 
 target_compile_features(crispy-core PUBLIC cxx_std_17)
 # Threads::Threads is PUBLIC because threading is part of crispy-core's INTERFACE and not merely its
-# implementation: BufferObject.hpp, LogSink.hpp, ReadSelector.hpp, FileDescriptor.hpp and
-# Environment.hpp all expose std::mutex / std::condition_variable / std::thread, so every consumer
+# implementation: BufferObject.hpp, ReadSelector.hpp and FileDescriptor.hpp expose std::mutex /
+# std::condition_variable / std::thread, so every consumer
 # instantiates them and every consumer needs the threading library on its link line.
 #
 # On glibc that link is free -- pthread_create has lived in libc since glibc 2.34 -- so no Linux job
@@ -143,21 +133,15 @@ if(CRISPY_TESTING)
     add_executable(crispy_test
         test_main.cpp
         BufferObject_test.cpp
-        CLI_test.cpp
         LRUCache_test.cpp
         StrongLRUCache_test.cpp
         StrongLRUHashtable_test.cpp
         TrieMap_test.cpp
         Animation_test.cpp
-        Base64_test.cpp
         Compose_test.cpp
-        Environment_test.cpp
         InterpolatedString_test.cpp
-        LogSink_test.cpp
-        Utils_test.cpp
         Ring_test.cpp
         Sort_test.cpp
-        Times_test.cpp
         TracyStub_test.cpp
     )
     # read_selector is a POSIX select()/epoll() construct (uses fd_set, sys/select.h); its header is
@@ -166,7 +150,7 @@ if(CRISPY_TESTING)
     if(NOT WIN32)
         target_sources(crispy_test PRIVATE ReadSelector_test.cpp)
     endif()
-    target_link_libraries(crispy_test Catch2::Catch2 crispy::core contour::tracy)
+    target_link_libraries(crispy_test Catch2::Catch2 crispy::core core::testing contour::tracy)
     add_test(NAME crispy_test COMMAND $<TARGET_FILE:crispy_test>)
 
     if(NOT WIN32)

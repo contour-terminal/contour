@@ -3,7 +3,7 @@
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
-#include <crispy/Escape.hpp>
+#include <core/Escape.hpp>
 
 #include <libunicode/convert.h>
 
@@ -20,7 +20,7 @@ using namespace std;
 using namespace vtbackend;
 using namespace vtbackend::test;
 using Buffer = vtbackend::InputGenerator::Sequence;
-using crispy::escape;
+using core::escape;
 
 TEST_CASE("InputGenerator.Modifier.encodings")
 {
@@ -84,7 +84,7 @@ TEST_CASE("InputGenerator.Modifier.chordModifierTable")
 
     SECTION("a value naming no chord modifier formats empty")
     {
-        // crispy::Flags's formatter walks every bit position of the underlying type and skips the
+        // core::Flags's formatter walks every bit position of the underlying type and skips the
         // ones that format empty. Were a lock bit to name itself here, it would leak into the
         // rendering of a Modifiers set.
         CHECK(std::format("{}", static_cast<Modifier>(LockKey::CapsLock)).empty());

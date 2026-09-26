@@ -34,10 +34,11 @@
 #include <vtpty/Pty.hpp>
 
 #include <crispy/Animation.hpp>
-#include <crispy/Assert.hpp>
 #include <crispy/BufferObject.hpp>
-#include <crispy/Defines.hpp>
-#include <crispy/Environment.hpp>
+
+#include <core/Assert.hpp>
+#include <core/Defines.hpp>
+#include <core/Environment.hpp>
 
 #include <gsl/pointers>
 
@@ -463,7 +464,7 @@ class Terminal
     /// @param factorySettings The settings a hard reset (RIS) restores.
     /// @param now             The current time, as the caller's clock reads it.
     Terminal(Events& eventListener,
-             crispy::Environment const& env,
+             core::Environment const& env,
              std::unique_ptr<vtpty::Pty> pty,
              Settings factorySettings,
              std::chrono::steady_clock::time_point now /* = std::chrono::steady_clock::now()*/);
@@ -868,7 +869,7 @@ class Terminal
             case StatusDisplayType::Indicator: return _indicatorStatusScreen.pageSize().lines;
             case StatusDisplayType::HostWritable: return _hostWritableStatusLineScreen.pageSize().lines;
         }
-        crispy::unreachable();
+        core::unreachable();
     }
 
     /// The screen row the MAIN page starts on.
@@ -1406,7 +1407,7 @@ class Terminal
             case ActiveStatusDisplay::StatusLine: return _hostWritableStatusLineScreen;
             case ActiveStatusDisplay::IndicatorStatusLine: return _indicatorStatusScreen;
         }
-        crispy::unreachable();
+        core::unreachable();
     }
 
     [[nodiscard]] SequenceHandler& sequenceHandler() noexcept
@@ -1419,7 +1420,7 @@ class Terminal
             case ExecutionMode::Waiting: [[fallthrough]];
             case ExecutionMode::SingleStep: return _traceHandler;
         }
-        crispy::unreachable();
+        core::unreachable();
     }
 
     bool isPrimaryScreen() const noexcept { return _currentScreenType == ScreenType::Primary; }
@@ -1444,7 +1445,7 @@ class Terminal
             case ScreenType::Primary: return *_pages[0];
             case ScreenType::Alternate: return *_pages[AlternateScreenPageIndex.value];
         }
-        crispy::unreachable();
+        core::unreachable();
     }
 
     /// Returns a reference to the screen at the given page index.
@@ -3013,11 +3014,11 @@ struct std::formatter<vtbackend::TraceHandler::PendingSequence>: std::formatter<
         if (auto const* p = std::get_if<vtbackend::Sequence>(&pendingSequence))
             value = std::format("{}", p->text());
         else if (auto const* p = std::get_if<vtbackend::TraceHandler::CodepointSequence>(&pendingSequence))
-            value = std::format("\"{}\"", crispy::escape(p->text));
+            value = std::format("\"{}\"", core::escape(p->text));
         else if (auto const* p = std::get_if<char32_t>(&pendingSequence))
             value = std::format("'{}'", unicode::convert_to<char>(*p));
         else
-            crispy::unreachable();
+            core::unreachable();
 
         return formatter<std::string>::format(value, ctx);
     }

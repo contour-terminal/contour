@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/testing/Environment.hpp>
+#include <core/testing/Environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -111,13 +111,13 @@ TEST_CASE("the production overload reads its inputs from the injected environmen
 {
     // What the `env` parameter is for: no variable of the test process is consulted, and none is
     // mutated to arrange this.
-    auto const environment = crispy::testing::FakeEnvironment { { { "XDG_RUNTIME_DIR", "/run/user/4242" } } };
+    auto const environment = core::testing::FakeEnvironment { { { "XDG_RUNTIME_DIR", "/run/user/4242" } } };
 
     CHECK(muxSocketPath("work", "", environment) == "/run/user/4242/contour/work");
 
     SECTION("and $CONTOUR_MUX still outranks it")
     {
-        auto const overridden = crispy::testing::FakeEnvironment { {
+        auto const overridden = core::testing::FakeEnvironment { {
             { "CONTOUR_MUX", "/env/mux.sock" },
             { "XDG_RUNTIME_DIR", "/run/user/4242" },
         } };
@@ -130,7 +130,7 @@ TEST_CASE("the production overload takes the sandbox from where it is injected t
 {
     // The sandbox is a parameter for the same reason the environment is: without one, this case
     // could only be reached by running the suite inside an actual Flatpak.
-    auto const environment = crispy::testing::FakeEnvironment { { { "XDG_RUNTIME_DIR", "/run/user/4242" } } };
+    auto const environment = core::testing::FakeEnvironment { { { "XDG_RUNTIME_DIR", "/run/user/4242" } } };
     auto const sandboxed = vtpty::SandboxInfo { .state = vtpty::SandboxState::Flatpak,
                                                 .network = vtpty::NetworkAccess::Denied,
                                                 .applicationId = SandboxedAs };

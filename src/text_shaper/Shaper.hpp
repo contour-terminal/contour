@@ -5,9 +5,10 @@
 
 #include <text_shaper/Font.hpp>
 
-#include <crispy/LogStore.hpp>
 #include <crispy/Point.hpp>
 #include <crispy/Size.hpp>
+
+#include <core/log/LogStore.hpp>
 
 #include <libunicode/emoji_segmenter.h>
 #include <libunicode/ucd.h>
@@ -26,8 +27,9 @@
 namespace text
 {
 
-auto inline const rasterizerLog = logstore::Category("font.render", "Logs details about rendering glyphs.");
-auto inline const textShapingLog = logstore::Category("font.textshaping", "Logs details about text shaping.");
+auto inline const rasterizerLog = core::log::Category("font.render", "Logs details about rendering glyphs.");
+auto inline const textShapingLog =
+    core::log::Category("font.textshaping", "Logs details about text shaping.");
 
 enum class BitmapFormat : uint8_t
 {

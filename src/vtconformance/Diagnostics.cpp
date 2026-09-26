@@ -3,7 +3,7 @@
 
 #include <vtbackend/Logging.hpp>
 
-#include <crispy/LogStore.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <algorithm>
 #include <array>
@@ -32,9 +32,9 @@ namespace
 
     /// The `vt.parser` category, looked up by name so this module does not have to be a friend of
     /// the engine's logging header layout.
-    [[nodiscard]] logstore::Category* parserCategory() noexcept
+    [[nodiscard]] core::log::Category* parserCategory() noexcept
     {
-        return logstore::get(vtbackend::vtParserLog.name());
+        return core::log::get(vtbackend::vtParserLog.name());
     }
 
     /// A self-echoed DECRQCRA reply, rendered by the engine as `DCS <Pid> ! ~`.
@@ -74,7 +74,7 @@ std::optional<Diagnostic> classifyDiagnostic(std::string_view line)
 }
 
 DiagnosticsCollector::DiagnosticsCollector():
-    _sink(std::make_unique<logstore::Sink>(true, [this](std::string_view const& line) { record(line); }))
+    _sink(std::make_unique<core::log::Sink>(true, [this](std::string_view const& line) { record(line); }))
 {
     auto* const category = parserCategory();
     if (!category)
@@ -83,7 +83,7 @@ DiagnosticsCollector::DiagnosticsCollector():
     category->enable();
     // The default formatter decorates messages with source locations; the oracle wants the bare
     // text so that `classifyDiagnostic` can stay a pure string function.
-    category->setFormatter([](logstore::MessageBuilder const& message) { return message.text(); });
+    category->setFormatter([](core::log::MessageBuilder const& message) { return message.text(); });
     category->setSink(*_sink);
 }
 
@@ -91,8 +91,8 @@ DiagnosticsCollector::~DiagnosticsCollector()
 {
     if (auto* const category = parserCategory())
     {
-        category->setFormatter(&logstore::Category::defaultFormatter);
-        category->setSink(logstore::Sink::console());
+        category->setFormatter(&core::log::Category::defaultFormatter);
+        category->setSink(core::log::Sink::console());
     }
 }
 

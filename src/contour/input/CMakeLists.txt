@@ -13,6 +13,7 @@ add_library(contour_input STATIC
 )
 
 target_link_libraries(contour_input PUBLIC
+    core::log
     crispy::core
     vtbackend
     Qt6::Core

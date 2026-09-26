@@ -7,13 +7,13 @@
 // configured with CONTOUR_FRONTEND_GUI=OFF has no Qt to give them -- which is why that
 // configuration had no unit tests at all before this binary existed.
 
-#include <crispy/SuppressWindowsDialogs.hpp>
+#include <core/testing/SuppressWindowsDialogs.hpp>
 
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>
 
 int main(int argc, char* argv[])
 {
-    crispy::suppressWindowsDialogs();
+    core::testing::suppressWindowsDialogs();
     return Catch::Session().run(argc, argv);
 }

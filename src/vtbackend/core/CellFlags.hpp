@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/Flags.hpp>
+#include <core/Flags.hpp>
 
 #include <array>
 #include <cstdint>
@@ -19,34 +19,34 @@
 /// the flags to iterate, silently omitted the new one, and its protected-area goldens could therefore
 /// not tell a protected cell from an unprotected one -- the dump recorded two visibly different cells
 /// as the same rendition.
-#define VTBACKEND_CELL_FLAGS(_)                                                                   \
-    /* SGR renditions, in SGR order where there is one. */                                        \
-    _(Bold, 0)                                                                                    \
-    _(Faint, 1)                                                                                   \
-    _(Italic, 2)                                                                                  \
-    _(Underline, 3)                                                                               \
-    _(Blinking, 4)                                                                                \
-    _(Inverse, 5)                                                                                 \
-    _(Hidden, 6)                                                                                  \
-    _(CrossedOut, 7)                                                                              \
-    _(DoublyUnderlined, 8)                                                                        \
-    _(CurlyUnderlined, 9)                                                                         \
-    _(DottedUnderline, 10)                                                                        \
-    _(DashedUnderline, 11)                                                                        \
-    _(Framed, 12)                                                                                 \
-    _(Encircled, 13)                                                                              \
-    _(Overline, 14)                                                                               \
-    _(RapidBlinking, 15)                                                                          \
-    /* DECSCA (DEC) protection: spared by the SELECTIVE erases (DECSED, DECSEL). */               \
-    _(CharacterProtected, 16)                                                                     \
-    /* Structural, not a rendition: this cell continues a wide character to its left. */          \
-    _(WideCharContinuation, 17)                                                                   \
-    /* SPA/EPA (ISO 6429) protection: spared by the REGULAR erases (ED, EL). A separate flag from \
-       CharacterProtected because the two are honoured by opposite erase families. */             \
-    _(CharacterProtectedISO, 18)                                                                  \
-    /* Structural: this cell continues a text-sizing block (OSC 66) on the line ABOVE. Distinct   \
-       from WideCharContinuation, which only ever means "to the left" -- a scaled block is the    \
-       first thing in this grid that is taller than one line. */                                  \
+#define VTBACKEND_CELL_FLAGS(_)                                                                       \
+    /* SGR renditions, in SGR order where there is one. */                                            \
+    _(Bold, 0)                                                                                        \
+    _(Faint, 1)                                                                                       \
+    _(Italic, 2)                                                                                      \
+    _(Underline, 3)                                                                                   \
+    _(Blinking, 4)                                                                                    \
+    _(Inverse, 5)                                                                                     \
+    _(Hidden, 6)                                                                                      \
+    _(CrossedOut, 7)                                                                                  \
+    _(DoublyUnderlined, 8)                                                                            \
+    _(CurlyUnderlined, 9)                                                                             \
+    _(DottedUnderline, 10)                                                                            \
+    _(DashedUnderline, 11)                                                                            \
+    _(Framed, 12)                                                                                     \
+    _(Encircled, 13)                                                                                  \
+    _(Overline, 14)                                                                                   \
+    _(RapidBlinking, 15)                                                                              \
+    /* DECSCA (DEC) protection: spared by the SELECTIVE erases (DECSED, DECSEL). */                   \
+    _(CharacterProtected, 16)                                                                         \
+    /* Structural, not a rendition: this cell continues a wide character to its left. */              \
+    _(WideCharContinuation, 17)                                                                       \
+    /* SPA/EPA (ISO 6429) protection: spared by the REGULAR erases (ED, EL). A separate flag from \ \ \
+       CharacterProtected because the two are honoured by opposite erase families. */                 \
+    _(CharacterProtectedISO, 18)                                                                      \
+    /* Structural: this cell continues a text-sizing block (OSC 66) on the line ABOVE. Distinct   \ \ \
+       from WideCharContinuation, which only ever means "to the left" -- a scaled block is the    \ \ \
+       first thing in this grid that is taller than one line. */                                      \
     _(MulticellContinuation, 19)
 
 namespace vtbackend
@@ -63,7 +63,7 @@ enum class CellFlag : uint32_t
 #undef VTBACKEND_CELL_FLAG_ENUMERATOR
 };
 
-using CellFlags = crispy::Flags<CellFlag>;
+using CellFlags = core::Flags<CellFlag>;
 
 /// Every `CellFlag`, in declaration order, excluding `None`.
 ///

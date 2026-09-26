@@ -253,13 +253,15 @@ class TmuxController final:
                                       vtworkspace::WindowId guiWindow);
 
   protected:
-    [[nodiscard]] coro::Task<void> runClient(net::EventLoop* loop) override;
+    [[nodiscard]] core::async::Task<void> runClient(core::net::EventLoop* loop) override;
 
     // RemoteController hooks: the tmux-specific half of the shared connect lifecycle.
-    void detachOnReactor() override
+    [[nodiscard]] bool detachOnReactor() override
     {
-        if (_gateway != nullptr)
-            _gateway->detach();
+        if (_gateway == nullptr)
+            return false;
+        _gateway->detach();
+        return true;
     }
     void closeReactorBindings() override { closeAllPanes(); }
     [[nodiscard]] std::string connectTimeoutMessage() const override

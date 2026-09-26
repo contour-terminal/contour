@@ -2,7 +2,7 @@
 
 #include <vtbackend/vt/ControlCode.hpp>
 
-#include <crispy/Escape.hpp>
+#include <core/Escape.hpp>
 
 #include <numeric>
 #include <sstream>
@@ -77,7 +77,7 @@ string Sequence::text() const
         sstr << ' ' << _finalChar;
 
     if (!_dataString.empty())
-        sstr << " \"" << crispy::escape(_dataString) << "\" ST";
+        sstr << " \"" << core::escape(_dataString) << "\" ST";
 
     return sstr.str();
 }

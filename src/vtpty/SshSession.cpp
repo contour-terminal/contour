@@ -22,8 +22,8 @@
 #include <vtpty/SandboxInfo.hpp>
 #include <vtpty/SshFailureMessage.hpp>
 
-#include <crispy/Escape.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Escape.hpp>
+#include <core/Utils.hpp>
 
 #include <chrono>
 #include <expected>
@@ -82,7 +82,7 @@ struct crispy::CloseNativeHandle<SOCKET>
 namespace vtpty
 {
 
-static auto inline sshLog = logstore::Category("ssh", "SSH I/O logger", logstore::Category::State::Enabled);
+static auto inline sshLog = core::log::Category("ssh", "SSH I/O logger", core::log::Category::State::Enabled);
 
 // {{{ helper
 namespace
@@ -538,7 +538,7 @@ void SshSession::setState(State nextState)
     if (_state == nextState)
         return;
 
-    sshLog()("({}) State transition from {} to {}.\n", crispy::threadName(), _state.load(), nextState);
+    sshLog()("({}) State transition from {} to {}.\n", core::threadName(), _state.load(), nextState);
 
     _state = nextState;
 
@@ -983,8 +983,7 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char
     auto const target = std::string_view { (char const*) storage.hotEnd(), static_cast<size_t>(rc) };
     auto const isStdFastPipe = false; // can never be, because it's an SSH network connection
     if (ptyInLog)
-        ptyInLog()(
-            "{} received: \"{}\"", "ssh", crispy::escape(target.data(), target.data() + target.size()));
+        ptyInLog()("{} received: \"{}\"", "ssh", core::escape(target.data(), target.data() + target.size()));
 
     return ReadResult { .data = target, .fromStdoutFastPipe = isStdFastPipe };
 }
@@ -1000,7 +999,7 @@ void SshSession::wakeupReader()
 
 void SshSession::handlePreAuthenticationPasswordInput(std::string_view buf, State next)
 {
-    // sshLog()("({}) Handling pre-authentication input: \"{}\"", crispy::threadName(), crispy::escape(buf));
+    // sshLog()("({}) Handling pre-authentication input: \"{}\"", core::threadName(), core::escape(buf));
     if (buf.empty())
         return;
 
@@ -1106,7 +1105,7 @@ int SshSession::write(std::string_view buf)
         else
         {
             if (rv >= 0)
-                ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf.data(), buf.data() + rv)); // NOLINT
+                ptyOutLog()("Sending bytes: \"{}\"", core::escape(buf.data(), buf.data() + rv)); // NOLINT
 
             if (0 <= rv && static_cast<size_t>(rv) < buf.size())
                 ptyOutLog()("Partial write. {} bytes written and {} bytes left.",
@@ -1132,7 +1131,7 @@ void SshSession::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
     _pageSize = cells;
     _pixels = pixels;
 
-    sshLog()("({}) Resizing PTY to {}x{}.", crispy::threadName(), cells.columns, cells.lines);
+    sshLog()("({}) Resizing PTY to {}x{}.", core::threadName(), cells.columns, cells.lines);
 
     if (isOperational())
     {
@@ -1256,7 +1255,7 @@ bool SshSession::connect(std::string_view host, int port)
                 SshConnectStage::Resolve, currentSandbox().network, host, gai_strerror(rc)));
             return false;
         }
-        auto const _ = crispy::Finally([&]() { freeaddrinfo(addrList); });
+        auto const _ = core::Finally([&]() { freeaddrinfo(addrList); });
 
         for (addrinfo* addrEntry = addrList; addrEntry != nullptr; addrEntry = addrEntry->ai_next)
         {

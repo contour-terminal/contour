@@ -9,9 +9,9 @@
 
 #include <vtrasterizer/TextureAtlas.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/Defines.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Assert.hpp>
+#include <core/Defines.hpp>
+#include <core/Utils.hpp>
 
 #include <QtCore/QFile>
 #include <QtCore/QVarLengthArray>

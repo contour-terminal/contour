@@ -12,8 +12,13 @@
 
 #include <vthost/Daemon.hpp>
 
-#include <crispy/Environment.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Environment.hpp>
+#include <core/Utils.hpp>
+#include <core/async/WhenAll.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/Sockets.hpp>
+#include <core/net/Tls.hpp>
 
 #include <atomic>
 #include <charconv>
@@ -34,15 +39,11 @@
 #include <variant>
 #include <vector>
 
-#include <coro/WhenAll.hpp>
-#include <net/EventLoop.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/Sockets.hpp>
-#include <net/Tls.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/HostedShell.hpp>
 #include <vthost/LastSessionWatcher.hpp>
 #include <vthost/Logging.hpp>
+#include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SocketPath.hpp>
@@ -62,13 +63,13 @@ namespace vthost
 namespace
 {
     /// Drives every protocol server's accept loop on the one reactor.
-    coro::Task<void> serveAll(std::vector<ConnectionAcceptor*> servers)
+    core::async::Task<void> serveAll(std::vector<ConnectionAcceptor*> servers)
     {
-        auto accepts = std::vector<coro::Task<void>> {};
+        auto accepts = std::vector<core::async::Task<void>> {};
         accepts.reserve(servers.size());
         for (auto* server: servers)
             accepts.push_back(server->serve());
-        co_await coro::whenAll(std::move(accepts));
+        co_await core::async::whenAll(std::move(accepts));
     }
 
     /// The daemon's PTY factory: every session spawns the configured shell over a
@@ -113,18 +114,19 @@ namespace
         std::error_code ec;
         if (!std::filesystem::exists(path, ec))
             return std::nullopt;
-        return crispy::readFileAsString(path);
+        return core::readFileAsString(path);
     }
 
     /// Builds the TLS server context for the native TCP listener: an ephemeral
     /// self-signed certificate when none is configured (the TOFU default), else
     /// the configured PEM cert + key. The TCP transport is always encrypted.
     /// @return The context, or nullptr after printing why it could not be built.
-    [[nodiscard]] std::shared_ptr<net::ITlsContext> makeNativeTcpTls(NativeTcpListenerConfig const& config)
+    [[nodiscard]] std::shared_ptr<core::net::ITlsContext> makeNativeTcpTls(
+        NativeTcpListenerConfig const& config)
     {
         if (config.tlsCertPath.empty() && config.tlsKeyPath.empty())
         {
-            auto context = net::makeSelfSignedServerContext();
+            auto context = core::net::makeSelfSignedServerContext({ .commonName = "contour-daemon" });
             if (!context)
             {
                 errorLog()("cannot build an ephemeral TLS certificate: {}", context.error());
@@ -145,7 +147,7 @@ namespace
                 errorLog()("cannot read the TLS key '{}'", config.tlsKeyPath);
             return nullptr;
         }
-        auto context = net::makeTlsServerContext(*cert, *key);
+        auto context = core::net::makeTlsServerContext(*cert, *key);
         if (!context)
         {
             errorLog()("cannot build the TLS server context: {}", context.error());
@@ -156,25 +158,25 @@ namespace
 
     /// Composes a native connection handler that FIRST encrypts each accepted
     /// socket (server-side TLS), then serves the native protocol over it.
-    [[nodiscard]] ConnectionHandler makeTlsNativeHandler(net::EventLoop& loop,
+    [[nodiscard]] ConnectionHandler makeTlsNativeHandler(core::net::EventLoop& loop,
                                                          SessionHost& host,
-                                                         std::shared_ptr<net::ITlsContext> tls,
+                                                         std::shared_ptr<core::net::ITlsContext> tls,
                                                          std::string token)
     {
         auto base = makeNativeHandler(loop, host, std::move(token));
-        return [tls = std::move(tls), base = std::move(base)](ConnectionId id,
-                                                              std::unique_ptr<net::ISocket> socket) {
-            return base(std::move(id), tls->wrap(std::move(socket)));
+        return [tls = std::move(tls), base = std::move(base), &loop](
+                   ConnectionId id, std::unique_ptr<core::net::ISocket> socket) {
+            return base(std::move(id), tls->wrap(std::move(socket), loop));
         };
     }
 
     /// Binds a unix listener at @p path, or prints the error and yields the process
     /// exit code the caller should return. Collapses the bind/report/return block
     /// every daemon endpoint otherwise repeats verbatim.
-    [[nodiscard]] std::expected<std::unique_ptr<net::IListener>, int> bindDaemonEndpoint(
-        net::EventLoop& loop, std::string const& path)
+    [[nodiscard]] std::expected<std::unique_ptr<core::net::IListener>, int> bindDaemonEndpoint(
+        core::net::EventLoop& loop, std::string const& path)
     {
-        auto listener = net::listenUnix(loop, path);
+        auto listener = core::net::listenUnix(loop, path);
         if (!listener)
         {
             // Naming the path matters: all four unix endpoints funnel through here, so a bare
@@ -182,10 +184,10 @@ namespace
             errorLog()("cannot bind {}: {}", path, listener.error().toString());
             // The overwhelmingly common way a daemon start fails, and the one whose cause the
             // message above still does not act on: a second `contour daemon` on the same label.
-            // Its liveness probe (net::listenUnix) also leaves an accept + immediate EOF in the
+            // Its liveness probe (core::net::listenUnix) also leaves an accept + immediate EOF in the
             // INCUMBENT's log, which reads like a client attaching and quitting — so without a
             // remedy here, the two halves of the story are two processes apart.
-            if (listener.error().code == net::NetErrorCode::AddressInUse)
+            if (listener.error().code == core::net::NetErrorCode::AddressInUse)
                 errorLog()("a daemon is already serving this socket; attach to it with "
                            "'contour client', or start a separate one with --label NAME");
             return std::unexpected(EXIT_FAILURE);
@@ -207,7 +209,7 @@ namespace
     /// @param loop The loop to unwind.
     /// @param servers Every bound endpoint (not owned).
     /// @param reason What asked for the shutdown, for the single log line.
-    void requestDaemonShutdown(net::EventLoop& loop,
+    void requestDaemonShutdown(core::net::EventLoop& loop,
                                std::vector<ConnectionAcceptor*> const& servers,
                                std::string_view reason)
     {
@@ -231,7 +233,7 @@ namespace
     void installLastSessionWatcher(std::optional<LastSessionWatcher>& slot,
                                    DaemonLifecycle lifecycle,
                                    SessionHost& host,
-                                   net::EventLoop& loop,
+                                   core::net::EventLoop& loop,
                                    std::vector<ConnectionAcceptor*> const& servers)
     {
         if (lifecycle != DaemonLifecycle::ExitWhenEmpty)
@@ -250,14 +252,14 @@ namespace
     /// again as soon as the connect returns.
     ///
     /// AF_UNIX is a Windows citizen too (10 1803+ / afunix.h), so this needs no
-    /// platform split — net::connectUnix owns the per-OS detail (winsock
+    /// platform split — core::net::connectUnix owns the per-OS detail (winsock
     /// initialization, the SOCKET/int handle split, the path-length check).
     /// @param loop The reactor driving the connect (not owned).
     /// @param path The native socket file to probe.
     /// @return True if a daemon accepted the connection.
-    [[nodiscard]] bool daemonAccepts(net::EventLoop& loop, std::string const& path)
+    [[nodiscard]] bool daemonAccepts(core::net::EventLoop& loop, std::string const& path)
     {
-        return loop.blockOn(net::connectUnix(&loop, path)).has_value();
+        return loop.blockOn(core::net::connectUnix(&loop, path)).has_value();
     }
 
 #ifndef _WIN32
@@ -291,10 +293,10 @@ namespace
         // Resolved in the PARENT: the child may only call async-signal-safe functions between fork
         // and exec, and a PATH walk is not one. argv[0] itself stays as the caller named it — that
         // is what the daemon's `ps` line and its own commandLine() replay should show.
-        // crispy::Environment, not getenv: this runs on a client that already has a live reactor
+        // core::Environment, not getenv: this runs on a client that already has a live reactor
         // thread, and the snapshot exists precisely so an environment read is not racing it.
         auto const image = resolveExecutablePath(
-            args[0], crispy::defaultEnvironment().get("PATH").value_or(""), isExecutableFile);
+            args[0], core::defaultEnvironment().get("PATH").value_or(""), isExecutableFile);
 
         auto argv = std::vector<char*> {};
         argv.reserve(args.size() + 1);
@@ -371,7 +373,7 @@ namespace
     /// @param nativePath The native endpoint probed for readiness.
     /// @param timeout How long to wait before giving up.
     /// @return EXIT_SUCCESS once it accepts, EXIT_FAILURE on spawn failure or timeout.
-    [[nodiscard]] int spawnAndAwaitDaemon(net::EventLoop& loop,
+    [[nodiscard]] int spawnAndAwaitDaemon(core::net::EventLoop& loop,
                                           std::vector<std::string>& args,
                                           std::string const& nativePath,
                                           std::chrono::seconds timeout)
@@ -407,27 +409,27 @@ std::string endpointToken(AttachEndpoint const& endpoint)
     return {};
 }
 
-coro::Task<std::expected<std::unique_ptr<net::ISocket>, std::string>> connectAttach(net::EventLoop* loop,
-                                                                                    AttachEndpoint endpoint)
+core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, std::string>> connectAttach(
+    core::net::EventLoop* loop, AttachEndpoint endpoint)
 {
     if (auto const* unixEp = std::get_if<UnixEndpoint>(&endpoint))
     {
-        auto socket = co_await net::connectUnix(loop, nativeSocketPath(unixEp->socketPath).string());
+        auto socket = co_await core::net::connectUnix(loop, nativeSocketPath(unixEp->socketPath).string());
         if (!socket)
             co_return std::unexpected(socket.error().toString());
         co_return std::move(*socket);
     }
 
     auto const& tcp = std::get<TcpEndpoint>(endpoint);
-    auto socket = co_await net::connect(loop, tcp.host, tcp.port);
+    auto socket = co_await core::net::connect(loop, tcp.host, tcp.port);
     if (!socket)
         co_return std::unexpected(socket.error().toString());
     // The host we asked for is also the name the certificate must carry: a pinned CA proves who
     // signed, not who was signed for.
-    auto tls = net::makeTlsClientContext(tcp.caPem, tcp.host);
+    auto tls = core::net::makeTlsClientContext(tcp.caPem, tcp.host);
     if (!tls)
         co_return std::unexpected(tls.error());
-    auto encrypted = (*tls)->wrap(std::move(*socket));
+    auto encrypted = (*tls)->wrap(std::move(*socket), *loop);
     if (!encrypted)
         co_return std::unexpected(std::string { "TLS handshake setup failed" });
     co_return std::move(encrypted);
@@ -559,16 +561,19 @@ std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_v
 
 int runDaemon(DaemonConfig const& config)
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
 
     auto host = SessionHost { loop,
                               makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath),
                               config.settings,
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/true,
                               config.sizePolicy,
                               config.startupLayout };
+    // Declared after the host: every connection flow the servers below spawn subscribes to it, so
+    // those flows must end before it is destroyed, not in ~EventLoop after it.
+    auto const drain = LoopDrain { loop };
 
     auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
     if (!listener)
@@ -619,7 +624,7 @@ int runDaemon(DaemonConfig const& config)
     auto nativeTcpServer = std::optional<ConnectionAcceptor> {};
     if (config.nativeTcp)
     {
-        auto tcpListener = net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);
+        auto tcpListener = core::net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);
         if (!tcpListener)
         {
             errorLog()("cannot listen on {}:{}: {}",
@@ -631,7 +636,7 @@ int runDaemon(DaemonConfig const& config)
         auto tls = makeNativeTcpTls(*config.nativeTcp);
         if (!tls)
             return EXIT_FAILURE;
-        auto const boundPort = (*tcpListener)->localPort();
+        auto const boundPort = (*tcpListener)->boundPort();
         nativeTcpServer.emplace(loop,
                                 "native-tcp",
                                 std::move(*tcpListener),
@@ -701,8 +706,8 @@ int ensureDaemon(AttachEndpoint const& endpoint,
     auto const& unixEp = std::get<UnixEndpoint>(endpoint);
     auto const nativePath = nativeSocketPath(unixEp.socketPath).string();
 
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
 
     if (daemonAccepts(loop, nativePath))
         return EXIT_SUCCESS; // daemon is already running
@@ -718,8 +723,8 @@ int runDaemonDetached(std::vector<std::string> commandLine,
                       std::filesystem::path const& socketPath,
                       std::chrono::seconds timeout)
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     return spawnAndAwaitDaemon(loop, commandLine, nativeSocketPath(socketPath).string(), timeout);
 }
 
@@ -745,16 +750,19 @@ namespace
 
 int runDaemon(DaemonConfig const& config)
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
 
     auto host = SessionHost { loop,
                               makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath),
                               config.settings,
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/true,
                               config.sizePolicy,
                               config.startupLayout };
+    // Declared after the host: every connection flow the servers below spawn subscribes to it, so
+    // those flows must end before it is destroyed, not in ~EventLoop after it.
+    auto const drain = LoopDrain { loop };
 
     auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
     if (!listener)
@@ -777,7 +785,7 @@ int runDaemon(DaemonConfig const& config)
     auto nativeTcpServer = std::optional<ConnectionAcceptor> {};
     if (config.nativeTcp)
     {
-        auto tcpListener = net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);
+        auto tcpListener = core::net::listen(loop, config.nativeTcp->host, config.nativeTcp->port);
         if (!tcpListener)
         {
             errorLog()("cannot listen on {}:{}: {}",
@@ -789,7 +797,7 @@ int runDaemon(DaemonConfig const& config)
         auto tls = makeNativeTcpTls(*config.nativeTcp);
         if (!tls)
             return EXIT_FAILURE;
-        auto const boundPort = (*tcpListener)->localPort();
+        auto const boundPort = (*tcpListener)->boundPort();
         nativeTcpServer.emplace(loop,
                                 "native-tcp",
                                 std::move(*tcpListener),

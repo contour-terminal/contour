@@ -4,7 +4,7 @@
 #include <vtrasterizer/ImageRenderer.hpp>
 #include <vtrasterizer/RendererTestHelpers.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -133,7 +133,7 @@ TEST_CASE("ImageRenderer.each cell samples its own slice of the image", "[image]
     REQUIRE(quads.size() == CellCount);
 
     // Every quad names the same texture, lands at its own target x, and samples its own quarter.
-    for (auto const [index, quad]: crispy::views::enumerate(quads))
+    for (auto const [index, quad]: core::views::enumerate(quads))
     {
         INFO("cell " << index);
         CHECK(quad.texture == quads.front().texture);
@@ -262,7 +262,7 @@ TEST_CASE("ImageRenderer.never evicts an image the current frame draws", "[image
 
     imageRenderer.beginFrame();
     imageRenderer.beginPass();
-    for (auto const [index, image]: crispy::views::enumerate(images))
+    for (auto const [index, image]: core::views::enumerate(images))
     {
         // Each image spans one cell, so the fragment names offset (0,0) WITHIN ITS OWN image; only
         // where it lands on the grid differs. An offset outside the image is an alignment gap, which

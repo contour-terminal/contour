@@ -6,8 +6,9 @@ ARG ARCH="x86_64"
 
 # Two additions over the plain build-dependency list, each answering a failure this job hit:
 #
-# libssl-dev -- src/net does find_package(OpenSSL REQUIRED) for the TLS decorator behind its
-# ITlsContext seam, so its absence fails the configure step outright rather than at link time. This
+# libssl-dev -- the build does find_package(OpenSSL REQUIRED) for core-cpp's TLS decorator
+# (core::net_tls) behind its ITlsContext seam, so its absence fails the configure step outright
+# rather than at link time. This
 # image installs its packages by hand instead of through scripts/install-deps.sh, whose Ubuntu list
 # does carry libssl-dev, so the two lists have to be kept in step and were not.
 #

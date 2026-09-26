@@ -9,10 +9,10 @@
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/App.hpp>
-#include <crispy/Times.hpp>
-#include <crispy/Utils.hpp>
-#include <crispy/testing/Environment.hpp>
+#include <core/Times.hpp>
+#include <core/Utils.hpp>
+#include <core/cli/App.hpp>
+#include <core/testing/Environment.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
@@ -180,7 +180,7 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
         file << "test";
     }
 
-    auto const cleanup = crispy::Finally { [&]() { fs::remove_all(tmpRoot); } };
+    auto const cleanup = core::Finally { [&]() { fs::remove_all(tmpRoot); } };
     auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
     auto constexpr UiHandledHint = false;
 
@@ -2792,7 +2792,7 @@ TEST_CASE("Terminal.hint_mode_validates_and_resolves_paths_against_the_working_d
         auto file = std::ofstream(tmpRoot / "Makefile");
         file << "all:\n";
     }
-    auto const cleanup = crispy::Finally { [&]() { fs::remove_all(tmpRoot); } };
+    auto const cleanup = core::Finally { [&]() { fs::remove_all(tmpRoot); } };
 
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(60) }, LineCount(10) };
     mock.terminal.setCurrentWorkingDirectory("file://" + tmpRoot.generic_string());
@@ -2992,7 +2992,7 @@ TEST_CASE("Terminal reports the identity its settings named", "[terminal]")
     settings.pageSize = pageSize;
     settings.terminalId = vtbackend::VTType::VT340;
 
-    auto const environment = crispy::testing::FakeEnvironment {};
+    auto const environment = core::testing::FakeEnvironment {};
     auto terminal = vtbackend::Terminal { events,
                                           environment,
                                           std::make_unique<vtpty::MockPty>(pageSize),
@@ -3022,7 +3022,7 @@ TEST_CASE("a terminal constructed below VT525 narrows its sequence table too", "
     auto events = vtbackend::Terminal::NullEvents {};
     auto const pageSize = vtbackend::PageSize { vtbackend::LineCount(5), vtbackend::ColumnCount(20) };
 
-    auto const environment = crispy::testing::FakeEnvironment {};
+    auto const environment = core::testing::FakeEnvironment {};
     auto makeTerminal = [&](vtbackend::VTType id) {
         auto settings = vtbackend::Settings {};
         settings.pageSize = pageSize;
@@ -3172,7 +3172,7 @@ TEST_CASE("Terminal.historyEviction.theOldestScrollbackLineIsAlwaysAPrompt", "[t
                                            vtbackend::HistoryLimits { LineCount(10), LineCount(24) } };
 
     auto const outputLengths = std::array { 4, 9, 2, 7, 3, 11, 5, 6 };
-    for (auto const [block, length]: crispy::views::enumerate(outputLengths))
+    for (auto const [block, length]: core::views::enumerate(outputLengths))
     {
         writeCommandBlock(mock, static_cast<int>(block), length);
 

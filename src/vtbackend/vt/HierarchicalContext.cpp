@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/vt/HierarchicalContext.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -82,7 +82,7 @@ namespace
 
     /// Parses `UINT64 = 1*20DECIMAL`.
     ///
-    /// The length bound is the GRAMMAR's, not an overflow guard: crispy::toInteger range-checks every
+    /// The length bound is the GRAMMAR's, not an overflow guard: core::toInteger range-checks every
     /// digit against the target type and returns nullopt on overflow, so a 21-digit run would be
     /// rejected anyway. Stating the ABNF here keeps `1*20DECIMAL` enforced where it is written.
     [[nodiscard]] constexpr std::optional<uint64_t> parseUint64(string_view value) noexcept
@@ -91,7 +91,7 @@ namespace
             return std::nullopt;
         if (!std::ranges::all_of(value, [](char ch) { return ch >= '0' && ch <= '9'; }))
             return std::nullopt;
-        return crispy::toInteger<10, uint64_t>(value);
+        return core::toInteger<10, uint64_t>(value);
     }
 
     /// Appends @p raw's decoded bytes to @p scratch and returns a view of them.
@@ -261,7 +261,7 @@ std::expected<ContextCommand, ContextParseError> parseContextSequence(string_vie
 
     // The field order is undefined -- `type=` may appear last, or in the middle -- so each entry is
     // dispatched independently against the field table and nothing is read until the payload is done.
-    crispy::split(payload.substr(firstSeparator + 1), ';', [&](string_view entry) {
+    core::split(payload.substr(firstSeparator + 1), ';', [&](string_view entry) {
         auto const field = splitField(entry);
         if (!field)
             return true; // a bare token with no `=` is not a field; ignore it and keep going

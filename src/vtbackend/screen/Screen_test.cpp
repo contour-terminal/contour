@@ -8,8 +8,8 @@
 #include <vtbackend/testing/TestHelpers.hpp>
 #include <vtbackend/vt/Charset.hpp>
 
-#include <crispy/Escape.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Escape.hpp>
+#include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -3989,7 +3989,7 @@ TEST_CASE("A hard reset leaves VT52", "[screen]")
     mock.writeToScreen("\033c");
     REQUIRE(mock.terminal.isVT52Mode());
 
-    crispy::locked(mock.terminal, [&]() { mock.terminal.hardReset(); });
+    core::locked(mock.terminal, [&]() { mock.terminal.hardReset(); });
     CHECK_FALSE(mock.terminal.isVT52Mode());
 
     // Unlike `ESC <`, which lands at VT100, RIS restores the level the terminal was configured with.

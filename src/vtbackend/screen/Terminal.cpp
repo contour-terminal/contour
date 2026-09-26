@@ -15,11 +15,11 @@
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/Base64.hpp>
-#include <crispy/Environment.hpp>
-#include <crispy/Escape.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Assert.hpp>
+#include <core/Base64.hpp>
+#include <core/Environment.hpp>
+#include <core/Escape.hpp>
+#include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -166,7 +166,7 @@ namespace // {{{ helpers
 // }}}
 
 Terminal::Terminal(Events& eventListener,
-                   crispy::Environment const& env,
+                   core::Environment const& env,
                    std::unique_ptr<vtpty::Pty> pty,
                    Settings factorySettings,
                    chrono::steady_clock::time_point now):
@@ -181,9 +181,9 @@ Terminal::Terminal(Events& eventListener,
     _factorySettings { std::move(factorySettings) },
     _settings { _factorySettings },
     _currentTime { now },
-    _ptyBufferPool { crispy::nextPowerOfTwo(_settings.ptyBufferObjectSize) },
+    _ptyBufferPool { core::nextPowerOfTwo(_settings.ptyBufferObjectSize) },
     _currentPtyBuffer { _ptyBufferPool.allocateBufferObject() },
-    _ptyReadBufferSize { crispy::nextPowerOfTwo(_settings.ptyReadBufferSize) },
+    _ptyReadBufferSize { core::nextPowerOfTwo(_settings.ptyReadBufferSize) },
     _pty { std::move(pty) },
     _lastCursorBlink { now },
     _hostWritableStatusLineScreen { *this,
@@ -898,7 +898,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                  ScrollOffset(0));
             return _hostWritableStatusLineScreen.pageSize().lines;
     }
-    crispy::unreachable();
+    core::unreachable();
 }
 // }}}
 
@@ -923,7 +923,7 @@ void Terminal::updateIndicatorStatusLine()
                 case ViMode::VisualBlock: return colorPalette().indicatorStatusLineVisualMode;
             }
         }
-        crispy::unreachable();
+        core::unreachable();
     }();
 
     auto const backupForeground = _colorPalette.defaultForeground;
@@ -931,7 +931,7 @@ void Terminal::updateIndicatorStatusLine()
     _colorPalette.defaultForeground = colors.foreground;
     _colorPalette.defaultBackground = colors.background;
 
-    auto const _ = crispy::Finally { [&]() {
+    auto const _ = core::Finally { [&]() {
         // Cleaning up.
         _colorPalette.defaultForeground = backupForeground;
         _colorPalette.defaultBackground = backupBackground;
@@ -1578,7 +1578,7 @@ void Terminal::sendRawInput(string_view text)
     if (!allowInput())
         return;
 
-    inputLog()("Sending raw input to stdin: {}", crispy::escape(text));
+    inputLog()("Sending raw input to stdin: {}", core::escape(text));
     _inputGenerator.generateRaw(text);
     flushInput();
 }
@@ -3142,7 +3142,7 @@ void Terminal::requestClipboardRead(string_view pc)
     auto const content = _eventListener.getClipboard();
     // An empty Pc is reported back as xterm's default selection, "s0".
     auto const selection = pc.empty() ? string_view { "s0" } : pc;
-    reply("\033]52;{};{}\033\\", selection, crispy::base64::encode(content.begin(), content.end()));
+    reply("\033]52;{};{}\033\\", selection, core::base64::encode(content.begin(), content.end()));
 }
 
 void Terminal::openDocument(string_view data)
@@ -3811,7 +3811,7 @@ std::string Terminal::decodeTitle(std::string_view raw) const
     // (odd length or a non-hex digit) leaves fromHexString empty; fall back to the raw bytes then, as
     // there is nothing better to decode.
     if (isTitleModeEnabled(TitleModeFeature::SetHex))
-        if (auto decoded = crispy::fromHexString(raw); decoded.has_value())
+        if (auto decoded = core::fromHexString(raw); decoded.has_value())
             return std::move(*decoded);
     return std::string { raw };
 }
@@ -4055,7 +4055,7 @@ void Terminal::setMode(DECMode mode, bool enable)
         case DECMode::DebugLogging:
             // Since this mode (Xterm extension) does not support finer graind control,
             // we'll be just globally enable/disable all debug logging.
-            for (auto& category: logstore::get())
+            for (auto& category: core::log::get())
                 category.get().enable(enable);
             break;
         case DECMode::UseAlternateScreen: // DECSET 47
@@ -4640,7 +4640,7 @@ void Terminal::markCellDirty(CellLocation position) noexcept
     if (!_selection)
         return;
 
-    crispy::ignoreUnused(position);
+    core::ignoreUnused(position);
     // if (_selection->contains(position))
     //     clearSelection();
 }
@@ -4653,7 +4653,7 @@ void Terminal::markRegionDirty(Rect area) noexcept
     if (!_selection)
         return;
 
-    crispy::ignoreUnused(area);
+    core::ignoreUnused(area);
     // if (_selection->intersects(area))
     //     clearSelection();
 }
@@ -5423,13 +5423,13 @@ bool Terminal::isHighlighted(CellLocation cell) const noexcept // NOLINT(bugpron
                    using T = std::decay_t<decltype(highlightRange)>;
                    if constexpr (std::is_same_v<T, LinearHighlight>)
                    {
-                       return crispy::ascending(highlightRange.from, cell, highlightRange.to)
-                              || crispy::ascending(highlightRange.to, cell, highlightRange.from);
+                       return core::ascending(highlightRange.from, cell, highlightRange.to)
+                              || core::ascending(highlightRange.to, cell, highlightRange.from);
                    }
                    else
                    {
-                       return crispy::ascending(highlightRange.from.line, cell.line, highlightRange.to.line)
-                              && crispy::ascending(
+                       return core::ascending(highlightRange.from.line, cell.line, highlightRange.to.line)
+                              && core::ascending(
                                   highlightRange.from.column, cell.column, highlightRange.to.column);
                    }
                },

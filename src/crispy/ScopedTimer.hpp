@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/LogStore.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <chrono>
 #include <string_view>
@@ -17,7 +17,7 @@ class ScopedTimer
     ///
     /// @param category The logstore category to log the timing to.
     /// @param label A human-readable label identifying the timed section.
-    ScopedTimer(logstore::Category const& category, std::string_view label):
+    ScopedTimer(core::log::Category const& category, std::string_view label):
         _category { category }, _label { label }, _start { std::chrono::steady_clock::now() }
     {
     }
@@ -40,7 +40,7 @@ class ScopedTimer
     ScopedTimer& operator=(ScopedTimer&&) = delete;
 
   private:
-    logstore::Category const& _category;
+    core::log::Category const& _category;
     std::string_view _label;
     std::chrono::steady_clock::time_point _start;
 };

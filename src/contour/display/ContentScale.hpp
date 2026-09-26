@@ -3,7 +3,7 @@
 
 #include <contour/geometry/WindowGeometry.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <QtCore/QFileSystemWatcher>
 #include <QtCore/QObject>
@@ -28,12 +28,12 @@ namespace contour::display
 /// @return The forced DPI (>= 96) or std::nullopt.
 [[nodiscard]] inline std::optional<double> parseForcedFontDpi(std::string_view contents, std::string_view key)
 {
-    for (auto const line: crispy::split(contents, '\n'))
+    for (auto const line: core::split(contents, '\n'))
     {
-        auto const fields = crispy::split(line, '=');
+        auto const fields = core::split(line, '=');
         if (fields.size() == 2 && fields[0] == key)
         {
-            auto const forcedDPI = static_cast<double>(crispy::toInteger(fields[1]).value_or(0));
+            auto const forcedDPI = static_cast<double>(core::toInteger(fields[1]).value_or(0));
             if (forcedDPI >= 96.0)
                 return forcedDPI;
             return std::nullopt;

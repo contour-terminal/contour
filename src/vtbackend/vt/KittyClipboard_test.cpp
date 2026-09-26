@@ -5,7 +5,7 @@
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/vt/KittyClipboard.hpp>
 
-#include <crispy/Base64.hpp>
+#include <core/Base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -28,7 +28,7 @@ TEST_CASE("KittyClipboard.parse.read_request", "[kittyclipboard]")
     CHECK(packet->type == PacketType::Read);
     CHECK(packet->id == "abc");
     CHECK(packet->location == Location::Clipboard);
-    CHECK(crispy::base64::decode(packet->payload) == "text/plain");
+    CHECK(core::base64::decode(packet->payload) == "text/plain");
 }
 
 TEST_CASE("KittyClipboard.parse.metadata_is_colon_separated", "[kittyclipboard]")
@@ -42,7 +42,7 @@ TEST_CASE("KittyClipboard.parse.metadata_is_colon_separated", "[kittyclipboard]"
     CHECK(packet->type == PacketType::WriteData);
     CHECK(packet->mimeType == "text/plain");
     CHECK(packet->id == "7");
-    CHECK(crispy::base64::decode(packet->payload) == "AB");
+    CHECK(core::base64::decode(packet->payload) == "AB");
 }
 
 TEST_CASE("KittyClipboard.parse.primary_selection", "[kittyclipboard]")
@@ -95,7 +95,7 @@ TEST_CASE("KittyClipboard.write_transmission_reaches_the_clipboard", "[kittyclip
 
     mock.writeToScreen("\033]5522;type=write:id=1\033\\"sv);
     mock.writeToScreen(std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=1;{}\033\\",
-                                   crispy::base64::encode("hello"sv)));
+                                   core::base64::encode("hello"sv)));
     // An empty chunk ends the transmission.
     mock.writeToScreen("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=1;\033\\"sv);
 
@@ -110,7 +110,7 @@ TEST_CASE("KittyClipboard.chunks_are_reassembled_in_order", "[kittyclipboard]")
     mock.writeToScreen("\033]5522;type=write:id=2\033\\"sv);
     for (auto const& part: { "one "sv, "two "sv, "three"sv })
         mock.writeToScreen(std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=2;{}\033\\",
-                                       crispy::base64::encode(part)));
+                                       core::base64::encode(part)));
     mock.writeToScreen("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=2;\033\\"sv);
 
     // The point of the test: three chunks arrive separately and must land concatenated, in order.
@@ -130,7 +130,7 @@ TEST_CASE("KittyClipboard.an_endless_write_stream_is_abandoned_not_accumulated",
 
     // Chunks stay under Sequence::MaxOscLength; anything larger would be truncated by the parser
     // rather than reaching the accumulator.
-    auto const chunk = crispy::base64::encode(std::string(static_cast<std::size_t>(32 * 1024), 'x'));
+    auto const chunk = core::base64::encode(std::string(static_cast<std::size_t>(32 * 1024), 'x'));
     auto const enough = (kitty_clipboard::MaxClipboardWriteSize / (static_cast<size_t>(32 * 1024))) + 2;
     for ([[maybe_unused]] auto const i: std::views::iota(size_t { 0 }, enough))
         mock.writeToScreen(std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==:id=9;{}\033\\", chunk));
@@ -148,7 +148,7 @@ TEST_CASE("KittyClipboard.data_without_an_open_write_is_refused", "[kittyclipboa
     // packet overwrite the clipboard.
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
     mock.writeToScreen(
-        std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\", crispy::base64::encode("x"sv)));
+        std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\", core::base64::encode("x"sv)));
     CHECK(mock.terminal.peekInput().empty());
     CHECK(mock.clipboardData.empty());
 }
@@ -160,7 +160,7 @@ TEST_CASE("KittyClipboard.an_unsupported_mime_type_is_refused_not_dropped", "[ki
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
     mock.writeToScreen("\033]5522;type=write:id=3\033\\"sv);
     mock.writeToScreen(std::format("\033]5522;type=wdata:mime=aW1hZ2UvcG5n:id=3;{}\033\\",
-                                   crispy::base64::encode("\x89PNG"sv)));
+                                   core::base64::encode("\x89PNG"sv)));
     CHECK(mock.terminal.peekInput() == "\033]5522;type=write:status=ENOSYS\033\\");
     CHECK(mock.clipboardData.empty());
 }
@@ -173,7 +173,7 @@ TEST_CASE("KittyClipboard.read_is_refused_when_not_permitted", "[kittyclipboard]
     mock.terminal.settings().allowClipboardRead = false;
 
     mock.writeToScreen(
-        std::format("\033]5522;type=read:id=4;{}\033\\", crispy::base64::encode("text/plain"sv)));
+        std::format("\033]5522;type=read:id=4;{}\033\\", core::base64::encode("text/plain"sv)));
     CHECK(mock.terminal.peekInput() == "\033]5522;type=read:status=EPERM\033\\");
 }
 
@@ -187,7 +187,7 @@ TEST_CASE("KittyClipboard.a_write_to_the_primary_selection_is_refused", "[kittyc
 
     mock.writeToScreen("\033]5522;type=write:loc=primary\033\\"sv);
     mock.writeToScreen(std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\",
-                                   crispy::base64::encode("clobber"sv)));
+                                   core::base64::encode("clobber"sv)));
     mock.writeToScreen("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;\033\\"sv);
 
     CHECK(mock.terminal.peekInput().contains("status=ENOSYS"));
@@ -203,12 +203,12 @@ TEST_CASE("KittyClipboard.the_targets_probe_lists_the_available_types", "[kittyc
     mock.terminal.settings().allowClipboardRead = true;
     mock.clipboardData = "hello";
 
-    mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", crispy::base64::encode("."sv)));
+    mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", core::base64::encode("."sv)));
 
     auto const reply = std::string(mock.terminal.peekInput());
     CHECK(!reply.contains("status=ENOSYS"));
     // The answer names the type rather than carrying the data.
-    CHECK(reply.contains(std::string(crispy::base64::encode("text/plain"sv))));
+    CHECK(reply.contains(std::string(core::base64::encode("text/plain"sv))));
     CHECK(reply.contains("status=DONE"));
 }
 
@@ -221,7 +221,7 @@ TEST_CASE("KittyClipboard.a_large_read_is_chunked", "[kittyclipboard]")
     mock.terminal.settings().allowClipboardRead = true;
     mock.clipboardData = std::string(10000, 'x');
 
-    mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", crispy::base64::encode("text/plain"sv)));
+    mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", core::base64::encode("text/plain"sv)));
 
     auto const reply = std::string(mock.terminal.peekInput());
     auto dataPackets = size_t { 0 };
@@ -242,10 +242,10 @@ TEST_CASE("KittyClipboard.a_write_survives_a_status_line_switch", "[kittyclipboa
 
     mock.writeToScreen("\033]5522;type=write\033\\"sv);
     mock.writeToScreen(
-        std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\", crispy::base64::encode("one "sv)));
+        std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\", core::base64::encode("one "sv)));
     mock.writeToScreen("\033[1$}"sv); // DECSASD: to the status line
     mock.writeToScreen(
-        std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\", crispy::base64::encode("two"sv)));
+        std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\", core::base64::encode("two"sv)));
     mock.writeToScreen("\033[0$}"sv); // back to the main display
     mock.writeToScreen("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;\033\\"sv);
 
@@ -262,7 +262,7 @@ TEST_CASE("KittyClipboard.a_read_is_answered_in_the_5522_protocol", "[kittyclipb
     mock.terminal.settings().allowClipboardRead = true;
     mock.clipboardData = "hello";
 
-    mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", crispy::base64::encode("text/plain"sv)));
+    mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", core::base64::encode("text/plain"sv)));
 
     auto const reply = std::string(mock.terminal.peekInput());
     CHECK(!reply.contains("\033]52;")); // never the OSC 52 shape
@@ -270,8 +270,8 @@ TEST_CASE("KittyClipboard.a_read_is_answered_in_the_5522_protocol", "[kittyclipb
           == std::format("\033]5522;type=read:status=OK\033\\"
                          "\033]5522;type=read:status=DATA:mime={};{}\033\\"
                          "\033]5522;type=read:status=DONE\033\\",
-                         crispy::base64::encode("text/plain"sv),
-                         crispy::base64::encode("hello"sv)));
+                         core::base64::encode("text/plain"sv),
+                         core::base64::encode("hello"sv)));
 }
 
 TEST_CASE("KittyClipboard.a_read_for_only_unsupported_types_is_refused", "[kittyclipboard]")
@@ -279,7 +279,6 @@ TEST_CASE("KittyClipboard.a_read_for_only_unsupported_types_is_refused", "[kitty
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(3), ColumnCount(10) } };
     mock.terminal.settings().allowClipboardRead = true;
 
-    mock.writeToScreen(
-        std::format("\033]5522;type=read:id=5;{}\033\\", crispy::base64::encode("image/png"sv)));
+    mock.writeToScreen(std::format("\033]5522;type=read:id=5;{}\033\\", core::base64::encode("image/png"sv)));
     CHECK(mock.terminal.peekInput() == "\033]5522;type=read:status=ENOSYS\033\\");
 }

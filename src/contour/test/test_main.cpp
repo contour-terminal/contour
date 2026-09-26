@@ -6,7 +6,7 @@
 
 #include <contour/test/QmlMessageCapture.hpp>
 
-#include <crispy/SuppressWindowsDialogs.hpp>
+#include <core/testing/SuppressWindowsDialogs.hpp>
 
 #include <QtCore/QStringList>
 #include <QtGui/QGuiApplication>
@@ -20,7 +20,7 @@
 
 int main(int argc, char* argv[])
 {
-    crispy::suppressWindowsDialogs();
+    core::testing::suppressWindowsDialogs();
 
     /// Default to the headless "offscreen" platform (CI-safe, no display server). The Qt Quick scene
     /// graph, however, cannot stand up a real render loop there — so the display-gated rendering

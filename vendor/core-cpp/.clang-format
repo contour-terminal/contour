@@ -1,0 +1,94 @@
+---
+BasedOnStyle: Microsoft
+Language: Cpp
+Standard: Latest
+
+AccessModifierOffset: -2
+AlignAfterOpenBracket: Align
+AlignConsecutiveDeclarations: false
+AlignConsecutiveMacros: true
+AlignEscapedNewlines: Left
+AlignOperands: true
+AlignTrailingComments: true
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowShortBlocksOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLambdasOnASingleLine: Inline
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakBeforeMultilineStrings: false
+BinPackArguments: false
+BinPackParameters: false
+BreakAfterAttributes: Never
+BreakAfterReturnType: None
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeBraces: Custom
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: AfterColon
+BreakInheritanceList: AfterColon
+BreakStringLiterals: true
+BreakTemplateDeclarations: Yes
+ColumnLimit: 110
+CompactNamespaces: false
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+Cpp11BracedListStyle: Block
+DerivePointerAlignment: false
+FixNamespaceComments: true
+IncludeBlocks: Regroup
+IndentCaseLabels: true
+IndentPPDirectives: BeforeHash
+IndentWidth: 4
+IndentWrappedFunctionNames: false
+InsertNewlineAtEOF: true
+LineEnding: LF
+MainIncludeChar: Any
+MaxEmptyLinesToKeep: 1
+NamespaceIndentation: Inner
+PackConstructorInitializers: NextLine
+PenaltyBreakAssignment: 0
+PointerAlignment: Left
+QualifierAlignment: Right
+ReflowComments: true
+RemoveSemicolon: true
+SortIncludes: true
+SortUsingDeclarations: true
+SpaceAfterCStyleCast: true
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCpp11BracedList: true
+SpaceBeforeCtorInitializerColon: false
+SpaceBeforeInheritanceColon: false
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: false
+SpacesInAngles: Never
+SpacesInContainerLiterals: false
+SpacesInParens: Never
+SpacesInSquareBrackets: false
+TabWidth: 4
+UseTab: Never
+
+IncludeCategories:
+  - Regex:     '^<core/'
+    Priority:  1
+  - Regex:     '^<libunicode/'
+    Priority:  40
+  - Regex:     '^<tracy/'
+    Priority:  44
+  - Regex:     '^<openssl/'
+    Priority:  48
+  - Regex:     '^<stb_'
+    Priority:  52
+  - Regex:     '^<catch2/'
+    Priority:  70
+  - Regex:     '^<sys/'
+    Priority:  80
+  - Regex:     '^<[[:alnum:]_]+>'
+    Priority:  81
+  - Regex:     '<[[:alnum:]_]+\.h>'
+    Priority:  82
+  - Regex:     '.*'
+    Priority:  99

@@ -3,8 +3,9 @@
 
 #include <text_shaper/Font.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Assert.hpp>
+#include <core/Utils.hpp>
+#include <core/log/Assert.hpp>
 
 #include <fontconfig/fontconfig.h>
 
@@ -87,7 +88,7 @@ namespace
         for (auto const& mapping: FontWeightMappings)
             if (mapping.first == weight)
                 return mapping.second;
-        crispy::fatal("Implementation error. font weight cannot be mapped.");
+        core::log::fatal("Implementation error. font weight cannot be mapped.");
     }
 
     constexpr int fcSlant(FontSlant slant) noexcept
@@ -343,7 +344,7 @@ FontSourceList FontconfigLocator::locate(FontDescription const& description)
     // include that one.on.
     addFont(fs->fonts[0]);
 
-    std::visit(crispy::Overloaded {
+    std::visit(core::Overloaded {
                    [](FontFallbackNone) {},
                    [&](FontFallbackList const& list) {
                        // find font in the fallback list and add it

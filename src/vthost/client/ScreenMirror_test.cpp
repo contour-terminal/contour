@@ -3,7 +3,11 @@
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/Base64.hpp>
+#include <core/Base64.hpp>
+#include <core/async/WhenAll.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/testing/InMemoryTransport.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,10 +24,6 @@
 #include <tuple>
 #include <vector>
 
-#include <coro/WhenAll.hpp>
-#include <net/EventLoop.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/testing/InMemoryTransport.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
@@ -33,7 +33,7 @@
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
 
-using coro::Task;
+using core::async::Task;
 using vthost::NativeSession;
 using vthost::SessionHost;
 using vthost::client::NativeClient;
@@ -86,16 +86,16 @@ struct RecordingEvents final: vtbackend::Terminal::NullEvents
 /// grid must then equal the server terminal's, which is what the [parity] cases below measure.
 struct MirrorHarness
 {
-    net::PollEventSource source;
-    net::EventLoop loop { source };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
     SessionHost host { loop,
                        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                            return std::make_unique<vtpty::MockPty>(size);
                        },
                        gipSettings(ServerHistoryLines),
-                       crispy::defaultEnvironment(),
+                       core::defaultEnvironment(),
                        /*startPumps=*/false };
-    net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
+    core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
     std::unique_ptr<NativeSession> server = std::make_unique<NativeSession>(
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first));
     std::unique_ptr<NativeClient> client;
@@ -110,7 +110,7 @@ struct MirrorHarness
     {
         auto settings = gipSettings(MirrorHistoryLines);
         mirror = std::make_unique<vtbackend::Terminal>(mirrorEvents,
-                                                       crispy::defaultEnvironment(),
+                                                       core::defaultEnvironment(),
                                                        std::make_unique<vtpty::MockPty>(settings.pageSize),
                                                        std::move(settings),
                                                        std::chrono::steady_clock::now());
@@ -155,7 +155,7 @@ struct MirrorHarness
     }
 };
 
-Task<void> waitUntil(net::EventLoop* loop, std::function<bool()> ready)
+Task<void> waitUntil(core::net::EventLoop* loop, std::function<bool()> ready)
 {
     for (auto i = 0; i < 1000 && !ready(); ++i)
         co_await loop->delay(1ms);
@@ -163,7 +163,7 @@ Task<void> waitUntil(net::EventLoop* loop, std::function<bool()> ready)
 
 Task<void> drive(MirrorHarness* h, Task<void> scenario)
 {
-    co_await coro::whenAll(h->server->run(), h->client->run(), std::move(scenario));
+    co_await core::async::whenAll(h->server->run(), h->client->run(), std::move(scenario));
 }
 
 /// Writes @p bytes on the server terminal and pushes the resulting delta.
@@ -242,7 +242,7 @@ struct BareMirror
         settings.pageSize = vtbackend::PageSize { vtbackend::LineCount(1), vtbackend::ColumnCount(5) };
         settings.historyLimits = vtbackend::HistoryLimits::plain(history);
         terminal = std::make_unique<vtbackend::Terminal>(events,
-                                                         crispy::defaultEnvironment(),
+                                                         core::defaultEnvironment(),
                                                          std::make_unique<vtpty::MockPty>(settings.pageSize),
                                                          std::move(settings),
                                                          std::chrono::steady_clock::now());
@@ -1466,7 +1466,7 @@ TEST_CASE("inline images round-trip into the mirror via GIP", "[vthost][mirror]"
     // GIP oneshot (StretchToFill, so both cells are covered). The client fetches the
     // pixels and the mirror re-emits them as GIP, materialising image fragments.
     auto const pixels = std::vector<uint8_t>(static_cast<std::size_t>(8 * 8 * 4), 0xC0);
-    auto const body = crispy::base64::encode(
+    auto const body = core::base64::encode(
         std::string_view { reinterpret_cast<char const*>(pixels.data()), pixels.size() });
     h.serverTerminal(session)->writeToScreen(
         std::format("\033P!go=s,f=3,w=8,h=8,c=2,r=1,z=3;!{}\033\\", body));
@@ -1544,7 +1544,7 @@ TEST_CASE("bell, notification and clipboard events reach the mirror", "[vthost][
         CHECK(h->mirrorEvents.notifyBody == "done ok");
 
         // Clipboard write (OSC 52) → mirror's copyToClipboard() with decoded text.
-        auto const encoded = crispy::base64::encode(std::string_view { "clip-text" });
+        auto const encoded = core::base64::encode(std::string_view { "clip-text" });
         serverWrites(h, session, std::format("\033]52;c;{}\033\\", encoded));
         co_await waitUntil(&h->loop, [&] { return h->mirrorEvents.clipboard == "clip-text"; });
         CHECK(h->mirrorEvents.clipboard == "clip-text");
@@ -2145,7 +2145,7 @@ TEST_CASE("PARITY an inline image", "[vthost][parity]")
                                             "\033P!go=r,n=parityImage,c=2,r=2,a=1,z=3\033\\"
                                             "\033[5;1H"
                                             "below-image",
-                                            crispy::base64::encode(pixels)),
+                                            core::base64::encode(pixels)),
                                 mirrorShows(&h, "below-image"));
     REQUIRE(serverHasImage(&h, session));
     checkParity(gaps);
@@ -2376,7 +2376,7 @@ TEST_CASE("an in-place change below the mirror's history is skipped, not misplac
 
 // Every enum-ish wire field is validated before it is cast. An out-of-range StatusDisplayType used
 // to be `static_cast` straight into the enum, reaching Terminal::statusLineHeight() whose switch
-// ends in crispy::unreachable() — undefined behaviour in the attached client.
+// ends in core::unreachable() — undefined behaviour in the attached client.
 TEST_CASE("out-of-range status-display bytes are rejected, not cast", "[vthost][mirror]")
 {
     auto bare = BareMirror { vtbackend::LineCount(10) };

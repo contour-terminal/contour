@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/Assert.hpp>
 #include <crispy/StrongHash.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Assert.hpp>
+#include <core/Utils.hpp>
 
 #include <optional>
 #include <ostream>
@@ -336,7 +337,7 @@ auto StrongLRUHashtable<Value>::create(StrongHashtableSize hashCount,
     // Entry[]    entries
 
     if (!detail::isPowerOfTwo(hashCount.value))
-        hashCount.value = nextPowerOfTwo(hashCount.value);
+        hashCount.value = core::nextPowerOfTwo(hashCount.value);
 
     Allocator allocator;
     auto const size = requiredMemorySize(hashCount, entryCount);

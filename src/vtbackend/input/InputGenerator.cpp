@@ -4,8 +4,8 @@
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Assert.hpp>
+#include <core/Utils.hpp>
 
 #include <libunicode/case_mapping.h>
 #include <libunicode/convert.h>
@@ -75,7 +75,7 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
                                                   KeyboardEventType eventType)
 {
     // Legacy encoding transmits bytes, not key identities: there is nowhere in it to put one.
-    crispy::ignoreUnused(keyIdentity);
+    core::ignoreUnused(keyIdentity);
 
     if (eventType == KeyboardEventType::Release)
         return false;
@@ -154,7 +154,7 @@ bool StandardKeyboardInputGenerator::generateChar(char32_t characterEvent,
     else
         append(unicode::convert_to<char>(characterEvent));
 
-    inputLog()("Sending {} \"{}\".", modifiers, crispy::escape(unicode::convert_to<char>(characterEvent)));
+    inputLog()("Sending {} \"{}\".", modifiers, core::escape(unicode::convert_to<char>(characterEvent)));
     return true;
 }
 
@@ -172,7 +172,7 @@ std::string StandardKeyboardInputGenerator::selectNumpad(KeyboardModifiers modif
 std::string StandardKeyboardInputGenerator::select(Modifiers chord, FunctionKeyMapping mapping) const
 {
     if (chord && !mapping.mods.empty())
-        return crispy::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(chord));
+        return core::replace(mapping.mods, "{}"sv, makeVirtualTerminalParam(chord));
 
     auto const prefix = chord.contains(Modifier::Alt) ? "\033" : ""s;
 
@@ -548,7 +548,7 @@ static constexpr pair<unsigned, char> mapKey(Key key) noexcept
     // case Key::Numpad_Delete: return { 57426, 'u' };
     // case Key::Numpad_Begin: return { 57427, 'u' };
 
-    crispy::unreachable();
+    core::unreachable();
 }
 
 /// Returns the associated text codepoint for a numpad key, or 0 if none.
@@ -1035,7 +1035,7 @@ bool InputGenerator::generate(char32_t characterEvent,
         append(std::format("\033[27;{};{}~", mod, static_cast<uint32_t>(characterEvent)));
         inputLog()("Sending modifyOtherKeys mode 2 {} \"{}\" {}.",
                    chord,
-                   crispy::escape(unicode::convert_to<char>(characterEvent)),
+                   core::escape(unicode::convert_to<char>(characterEvent)),
                    eventType);
         return true;
     }
@@ -1048,7 +1048,7 @@ bool InputGenerator::generate(char32_t characterEvent,
         _pendingSequence += _keyboardInputGenerator.take();
         inputLog()("Sending {} \"{}\" {}.",
                    modifiers,
-                   crispy::escape(unicode::convert_to<char>(characterEvent)),
+                   core::escape(unicode::convert_to<char>(characterEvent)),
                    eventType);
     }
 

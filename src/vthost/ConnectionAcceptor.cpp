@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/ConnectionAcceptor.hpp>
 
+#include <core/async/Cancellation.hpp>
+
 #include <chrono>
 #include <exception>
 #include <format>
@@ -8,7 +10,6 @@
 #include <string>
 #include <utility>
 
-#include <coro/Cancellation.hpp>
 #include <vthost/Logging.hpp>
 
 namespace vthost
@@ -20,7 +21,7 @@ namespace
 {
     /// Runs one connection's flow and reports anything that escapes it.
     ///
-    /// Without this, a throwing handler disappears without a trace. `coro::Task`'s promise
+    /// Without this, a throwing handler disappears without a trace. `core::async::Task`'s promise
     /// captures an escaping exception into an `exception_ptr` and only rethrows it when someone
     /// awaits the task or asks for its result — but a connection flow is spawned as a ROOT task,
     /// and the loop reaps finished roots by destroying their frames. The `exception_ptr` is
@@ -34,9 +35,9 @@ namespace
     /// @param handler The connection flow to run.
     /// @param id The connection's identity, for the report.
     /// @param connection The accepted transport, moved into the flow.
-    coro::Task<void> superviseConnection(ConnectionHandler handler,
-                                         ConnectionId id,
-                                         std::unique_ptr<net::ISocket> connection)
+    core::async::Task<void> superviseConnection(ConnectionHandler handler,
+                                                ConnectionId id,
+                                                std::unique_ptr<core::net::ISocket> connection)
     {
         // Formatted BEFORE the move: the flow takes ownership of the id.
         auto const identity = std::format("{}", id);
@@ -44,7 +45,7 @@ namespace
         {
             co_await handler(std::move(id), std::move(connection));
         }
-        catch (coro::OperationCancelled const&)
+        catch (core::async::OperationCancelled const&)
         {
             // Not a failure: this is how shutdown reaches a flow parked on a read. Reported on
             // the connection tier rather than as an error, so a trace still shows the whole
@@ -62,7 +63,7 @@ namespace
     }
 } // namespace
 
-bool AcceptFailureThrottle::shouldLog(net::NetError const& error) noexcept
+bool AcceptFailureThrottle::shouldLog(core::net::NetError const& error) noexcept
 {
     if (error.code != _lastCode || error.systemCode != _lastSystemCode)
     {
@@ -80,9 +81,9 @@ bool AcceptFailureThrottle::shouldLog(net::NetError const& error) noexcept
     return (_consecutive - 1) % _everyNth == 0;
 }
 
-ConnectionAcceptor::ConnectionAcceptor(net::EventLoop& loop,
+ConnectionAcceptor::ConnectionAcceptor(core::net::EventLoop& loop,
                                        std::string name,
-                                       std::unique_ptr<net::IListener> listener,
+                                       std::unique_ptr<core::net::IListener> listener,
                                        ConnectionHandler handler,
                                        AcceptFailureThrottle failureThrottle):
     _loop(loop),
@@ -93,7 +94,7 @@ ConnectionAcceptor::ConnectionAcceptor(net::EventLoop& loop,
 {
 }
 
-coro::Task<void> ConnectionAcceptor::serve()
+core::async::Task<void> ConnectionAcceptor::serve()
 {
     // Copied into the coroutine frame at entry, and used in place of _name below.
     //
@@ -109,7 +110,7 @@ coro::Task<void> ConnectionAcceptor::serve()
         auto accepted = co_await _listener->accept();
         if (!accepted.has_value())
         {
-            if (accepted.error().code == net::NetErrorCode::Cancelled)
+            if (accepted.error().code == core::net::NetErrorCode::Cancelled)
             {
                 daemonLog()("{}: listener closed", name);
                 co_return; // listener closed / shutdown requested

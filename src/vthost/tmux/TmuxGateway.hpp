@@ -11,6 +11,11 @@
 /// iTerm2's correlation details). It deliberately knows nothing about panes'
 /// contents: consumers feed %output bytes into their own terminals.
 
+#include <core/async/Task.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/ISocket.hpp>
+#include <core/net/WriteQueue.hpp>
+
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -19,10 +24,6 @@
 #include <string_view>
 #include <vector>
 
-#include <coro/Task.hpp>
-#include <net/EventLoop.hpp>
-#include <net/ISocket.hpp>
-#include <net/WriteQueue.hpp>
 #include <vthost/tmux/ControlModeParser.hpp>
 
 namespace vthost::tmux
@@ -63,11 +64,13 @@ class TmuxGateway final
     /// @param loop The event loop everything runs on.
     /// @param connection The transport to the tmux server (owned).
     /// @param events The notification consumer (not owned; outlives this).
-    TmuxGateway(net::EventLoop& loop, std::unique_ptr<net::ISocket> connection, GatewayEvents& events);
+    TmuxGateway(core::net::EventLoop& loop,
+                std::unique_ptr<core::net::ISocket> connection,
+                GatewayEvents& events);
 
     /// The connection flow: recovery until the opening guard, then serve
     /// notifications and command responses until %exit or disconnect.
-    [[nodiscard]] coro::Task<void> run();
+    [[nodiscard]] core::async::Task<void> run();
 
     /// Queues @p command; @p callback fires when its guard block closes.
     /// FIFO: responses correlate to commands strictly in send order.
@@ -109,8 +112,8 @@ class TmuxGateway final
     void handleLine(std::string_view line);
     void dispatchNotification(ControlEvent const& event);
 
-    std::unique_ptr<net::ISocket> _connection;
-    net::WriteQueue _writer;
+    std::unique_ptr<core::net::ISocket> _connection;
+    core::net::WriteQueue _writer;
     GatewayEvents& _events;
 
     State _state = State::Recovery;

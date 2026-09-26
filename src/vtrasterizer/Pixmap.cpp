@@ -3,6 +3,8 @@
 
 #include <vtrasterizer/Utils.hpp>
 
+#include <core/log/Assert.hpp>
+
 using std::clamp;
 using std::max;
 using std::min;
@@ -147,7 +149,7 @@ Pixmap& Pixmap::segmentBar(int which)
         case 5: return segmentLine(*this, Orientation::Vertical, BaseOffset { r }, From { m + z }, To { b - z });
         case 6: return segmentLine(*this, Orientation::Horizontal, BaseOffset { b }, From { l }, To { r });
         case 7: return segmentLine(*this, Orientation::Vertical, BaseOffset { l }, From { m + z }, To { b - z });
-        default: crispy::unreachable();
+        default: core::unreachable();
     }
     // clang-format on
 

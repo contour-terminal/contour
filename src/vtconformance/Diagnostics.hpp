@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/LogStore.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -99,7 +99,7 @@ class DiagnosticsCollector
 
     mutable std::mutex _mutex;
     std::vector<Diagnostic> _diagnostics;
-    std::unique_ptr<logstore::Sink> _sink;
+    std::unique_ptr<core::log::Sink> _sink;
 };
 
 } // namespace vtconformance

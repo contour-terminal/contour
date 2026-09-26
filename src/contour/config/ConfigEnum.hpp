@@ -38,7 +38,7 @@ namespace detail
 {
     /// ASCII-lowercases @p ch.
     ///
-    /// Spelled out rather than reached for in crispy: crispy::toLower allocates a std::string and is
+    /// Spelled out rather than reached for in crispy: core::toLower allocates a std::string and is
     /// neither constexpr nor ASCII-pinned, and this has to run at compile time over the token tables.
     [[nodiscard]] constexpr char toLowerAscii(char ch) noexcept
     {

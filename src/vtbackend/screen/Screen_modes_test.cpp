@@ -8,8 +8,8 @@
 #include <vtbackend/testing/TestHelpers.hpp>
 #include <vtbackend/vt/Charset.hpp>
 
-#include <crispy/Escape.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Escape.hpp>
+#include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -20,7 +20,7 @@
 #include <ranges>
 #include <set>
 #include <string_view>
-using crispy::escape;
+using core::escape;
 using namespace vtbackend;
 using namespace vtbackend::test;
 using namespace std;
@@ -1494,7 +1494,7 @@ TEST_CASE("DECDSR answers for the devices the terminal does not have", "[screen]
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
 
     auto const check = [&](std::string_view request, std::string_view expected) {
-        INFO("request: " << crispy::escape(request));
+        INFO("request: " << core::escape(request));
         mock.discardPendingReplies();
         mock.writeToScreen(request);
         CHECK(e(mock.terminal.peekInput()) == e(expected));

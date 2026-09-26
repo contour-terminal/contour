@@ -5,7 +5,7 @@
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/App.hpp>
+#include <core/cli/App.hpp>
 
 namespace vtbackend
 {

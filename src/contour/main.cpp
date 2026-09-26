@@ -17,8 +17,8 @@
     #include <contour/cli/ContourApp.hpp>
 #endif
 
-#include <crispy/Environment.hpp>
-#include <crispy/SuppressWindowsDialogs.hpp>
+#include <core/Environment.hpp>
+#include <core/testing/SuppressWindowsDialogs.hpp>
 
 #include <cstddef>
 #include <cstdio>
@@ -158,12 +158,12 @@ int main(int argc, char const* argv[])
     // attached (CI, scripted GUI/verification runs), so an assertion can never block a headless run.
     // Under an attached debugger the dialogs and debug breaks are kept so interactive debugging works.
     if (!IsDebuggerPresent())
-        crispy::suppressWindowsDialogs();
+        core::testing::suppressWindowsDialogs();
 #endif
 
     // This is the process's composition root, and the environment is the one ambient resource
     // everything below reads: the app takes it here, once, and hands it on to what it builds.
-    auto& environment = crispy::defaultEnvironment();
+    auto& environment = core::defaultEnvironment();
 
 #ifdef CONTOUR_FRONTEND_GUI
     qInstallMessageHandler(qtCustomMessageOutput);

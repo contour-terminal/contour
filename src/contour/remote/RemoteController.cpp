@@ -28,7 +28,11 @@ std::unique_ptr<vtpty::Pty> makeUnboundFallbackPty(std::optional<vtbackend::Page
     return std::make_unique<vtpty::ChannelPty>(fallback);
 }
 
-bool stopMuxReactor(std::mutex& mutex, bool& stopped, ReactorThread& reactor, std::function<void()> detach)
+bool stopMuxReactor(std::mutex& mutex,
+                    bool& stopped,
+                    ReactorThread& reactor,
+                    std::function<void()> detach,
+                    std::chrono::milliseconds detachBound)
 {
     {
         auto const lock = std::lock_guard { mutex };
@@ -37,7 +41,8 @@ bool stopMuxReactor(std::mutex& mutex, bool& stopped, ReactorThread& reactor, st
         stopped = true;
     }
     reactor.post(std::move(detach));
-    reactor.requestStop();
+    if (!reactor.waitForExit(detachBound))
+        reactor.requestStop();
     reactor.join();
     return true;
 }
@@ -59,7 +64,7 @@ std::expected<void, std::string> RemoteController::connectAndWait(std::chrono::m
     // The reactor no longer dies silently: an exception that unwinds past runClient's own epilogue
     // leaves the phase stuck in Connecting, and without this the GUI would sit out the full timeout
     // and then blame it on a slow daemon.
-    _reactor.start([this](net::EventLoop* loop) { return runClient(loop); },
+    _reactor.start([this](core::net::EventLoop* loop) { return runClient(loop); },
                    [this](std::string const& reason) { failConnect(reason); });
 
     auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, timeout);
@@ -75,7 +80,11 @@ std::expected<void, std::string> RemoteController::connectAndWait(std::chrono::m
 
 void RemoteController::stop()
 {
-    if (stopMuxReactor(_mutex, _stopped, _reactor, [this] { detachOnReactor(); }))
+    auto const detach = [this] {
+        if (!detachOnReactor())
+            _reactor.requestStop();
+    };
+    if (stopMuxReactor(_mutex, _stopped, _reactor, detach))
         closeReactorBindings();
 }
 

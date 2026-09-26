@@ -4,7 +4,7 @@
 #include <vtbackend/shell/Folding.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -640,7 +640,7 @@ std::vector<std::string> visibleRows(Terminal& terminal)
         auto const line = terminal.viewport().translateScreenToGridCoordinate(
             CellLocation { .line = LineOffset(y), .column = ColumnOffset(0) });
         auto text = screen.grid().lineText(line.line);
-        text.resize(crispy::trimRight(text).size());
+        text.resize(core::trimRight(text).size());
         rows.push_back(std::move(text));
     }
     return rows;

@@ -86,6 +86,8 @@ IncludeCategories:
     Priority:  5
   - Regex:     '^<(crispy)/'
     Priority:  6
+  - Regex:     '^<(core)/'
+    Priority:  7
   - Regex:     '^<(libunicode)/'
     Priority:  40
   - Regex:     '^<(fmt)/'

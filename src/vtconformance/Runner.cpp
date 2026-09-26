@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtconformance/Runner.hpp>
 
-#include <crispy/Environment.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Environment.hpp>
+#include <core/Utils.hpp>
 
 #include <cstdlib>
 #include <deque>
@@ -244,7 +244,7 @@ bool isProgramAvailable(std::string const& program)
     if (program.contains('/'))
         return fs::exists(program);
 
-    auto const pathEnv = crispy::defaultEnvironment().get("PATH");
+    auto const pathEnv = core::defaultEnvironment().get("PATH");
     if (!pathEnv)
         return false;
 

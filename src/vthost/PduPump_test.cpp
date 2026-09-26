@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/async/WhenAll.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/testing/InMemoryTransport.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
@@ -9,13 +14,9 @@
 #include <utility>
 #include <vector>
 
-#include <coro/WhenAll.hpp>
-#include <net/EventLoop.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/testing/InMemoryTransport.hpp>
 #include <vthost/PduPump.hpp>
 
-using coro::Task;
+using core::async::Task;
 using vthost::pumpPdus;
 using vthost::PumpResult;
 using vthost::PumpStop;
@@ -29,7 +30,7 @@ namespace
 /// Takes a pointer, like the coroutines below: a reference parameter would outlive nothing in
 /// particular across the first suspension (clang-tidy's avoid-reference-coroutine-parameters), and
 /// the caller owns the buffer for the whole run anyway.
-Task<void> feedThenClose(net::ISocket* peer, std::vector<std::byte> const* bytes)
+Task<void> feedThenClose(core::net::ISocket* peer, std::vector<std::byte> const* bytes)
 {
     if (!bytes->empty())
         std::ignore = co_await peer->write(std::span<std::byte const> { bytes->data(), bytes->size() });
@@ -39,20 +40,20 @@ Task<void> feedThenClose(net::ISocket* peer, std::vector<std::byte> const* bytes
 /// Runs the pump and stores its outcome. A free function taking pointers, not a capturing
 /// lambda: a lambda coroutine's closure dies at the end of the full-expression that created it,
 /// while the coroutine frame lives on (clang-tidy's avoid-capturing-lambda-coroutines).
-Task<void> runPump(net::ISocket* socket,
+Task<void> runPump(core::net::ISocket* socket,
                    std::function<bool(proto::DecodedFrame const&)> const* handler,
                    PumpResult* out)
 {
     *out = co_await pumpPdus(socket, *handler);
 }
 
-Task<void> pumpAndFeed(net::testing::SocketPair* pair,
+Task<void> pumpAndFeed(core::net::testing::SocketPair* pair,
                        std::vector<std::byte> const* bytes,
                        std::function<bool(proto::DecodedFrame const&)> const* handler,
                        PumpResult* out)
 {
-    co_await coro::whenAll(runPump(pair->first.get(), handler, out),
-                           feedThenClose(pair->second.get(), bytes));
+    co_await core::async::whenAll(runPump(pair->first.get(), handler, out),
+                                  feedThenClose(pair->second.get(), bytes));
 }
 
 /// Runs the pump against a peer that writes @p bytes and hangs up.
@@ -63,9 +64,9 @@ PumpResult pumpOver(
     std::vector<std::byte> const& bytes,
     std::function<bool(proto::DecodedFrame const&)> const& handler = [](auto const&) { return true; })
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
-    auto pair = net::testing::makeSocketPair(loop);
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = core::net::testing::makeSocketPair(loop);
     REQUIRE(pair.has_value());
 
     auto outcome = PumpResult {};

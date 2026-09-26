@@ -5,7 +5,7 @@
 // Unlike the model-layer tests (TabListModel_test / vtworkspace SessionModel_test), these construct an
 // actual TerminalSession around a MockPty and a test-configured ContourGuiApp. That is only possible
 // because the contour frontend is built as the `contour_core` object library the test links against,
-// and because crispy::App exposes parseParametersForTesting() to populate parameters() without
+// and because core::cli::App exposes parseParametersForTesting() to populate parameters() without
 // launching the GUI event loop.
 //
 // The headline case is the regression behind the "close leaks background tabs" finding:
@@ -26,7 +26,7 @@
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QTemporaryDir>
@@ -1361,7 +1361,7 @@ TEST_CASE("TerminalSession: ScreenshotVT writes the screen capture to a file", "
     std::filesystem::create_directories(tmp);
     auto const prev = std::filesystem::current_path();
     std::filesystem::current_path(tmp);
-    auto const restore = crispy::Finally { [&] {
+    auto const restore = core::Finally { [&] {
         std::filesystem::current_path(prev);
         std::filesystem::remove_all(tmp);
     } };

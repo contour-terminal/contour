@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/ShellIntegration.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <ranges>
@@ -30,10 +30,10 @@ std::expected<std::string_view, ShellIntegrationError> shellIntegrationScript(st
 std::string_view supportedShellsText()
 {
     // Function-local static, because the one caller that most needs this is a CLI help string, and
-    // crispy::cli::Option::helpText is a string_view that borrows rather than owns. The list is the
+    // core::cli::Option::helpText is a string_view that borrows rather than owns. The list is the
     // same for every call, so building it once is also what it wants.
     static std::string const text =
-        crispy::joinHumanReadable(supportedShells() | std::views::transform(&ShellIntegrationRow::name));
+        core::joinHumanReadable(supportedShells() | std::views::transform(&ShellIntegrationRow::name));
 
     return text;
 }

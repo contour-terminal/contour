@@ -4,7 +4,7 @@
 #include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
-#include <crispy/Times.hpp>
+#include <core/Times.hpp>
 
 #include <cassert>
 
@@ -67,12 +67,12 @@ CellLocation Selection::stretchedColumn(SelectionHelper const& gridHelper, CellL
 
 bool Selection::contains(CellLocation coord) const noexcept
 {
-    return crispy::ascending(_from, coord, _to) || crispy::ascending(_to, coord, _from);
+    return core::ascending(_from, coord, _to) || core::ascending(_to, coord, _from);
 }
 
 bool Selection::containsLine(LineOffset line) const noexcept
 {
-    return crispy::ascending(_from.line, line, _to.line) || crispy::ascending(_to.line, line, _from.line);
+    return core::ascending(_from.line, line, _to.line) || core::ascending(_to.line, line, _from.line);
 }
 
 bool Selection::intersects(Rect area) const noexcept
@@ -221,8 +221,8 @@ bool RectangularSelection::contains(CellLocation coord) const noexcept
 {
     auto const [from, to] = orderedPoints(_from, _to);
 
-    return crispy::ascending(from.line, coord.line, to.line)
-           && crispy::ascending(from.column, coord.column, to.column);
+    return core::ascending(from.line, coord.line, to.line)
+           && core::ascending(from.column, coord.column, to.column);
 }
 
 bool RectangularSelection::intersects(Rect area) const noexcept

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/TextClusterGrouper.hpp>
 
+#include <core/log/Assert.hpp>
+
 #include <cassert>
 
 namespace vtrasterizer

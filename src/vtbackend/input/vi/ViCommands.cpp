@@ -224,7 +224,7 @@ void ViCommands::updateSearchTerm(std::u32string const& text)
 
 void ViCommands::modeChanged(ViMode mode)
 {
-    auto _ = crispy::Finally { [this, mode]() { _lastMode = mode; } };
+    auto _ = core::Finally { [this, mode]() { _lastMode = mode; } };
 
     inputLog()("mode changed to {}\n", mode);
 
@@ -1174,7 +1174,7 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
             return cursorPosition;
         }
     }
-    crispy::unreachable();
+    core::unreachable();
 }
 
 optional<CellLocation> ViCommands::toCharRight(CellLocation startPosition) const noexcept

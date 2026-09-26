@@ -250,7 +250,7 @@ std::optional<Pty::ReadResult> ConPty::read(crispy::BufferObject<char>& buffer,
         return nullopt;
 
     if (ptyInLog)
-        ptyInLog()("{} received: \"{}\"", "master", crispy::escape(buffer.hotEnd(), buffer.hotEnd() + nread));
+        ptyInLog()("{} received: \"{}\"", "master", core::escape(buffer.hotEnd(), buffer.hotEnd() + nread));
 
     return ReadResult { .data = string_view { buffer.hotEnd(), nread }, .fromStdoutFastPipe = false };
 }
@@ -269,7 +269,7 @@ int ConPty::write(std::string_view data)
     DWORD nwritten {};
     if (WriteFile(_output, buf, static_cast<DWORD>(size), &nwritten, nullptr))
     {
-        ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(data.data(), data.data() + nwritten));
+        ptyOutLog()("Sending bytes: \"{}\"", core::escape(data.data(), data.data() + nwritten));
         return static_cast<int>(nwritten);
     }
     else

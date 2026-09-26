@@ -3,7 +3,7 @@
 
 #include <vtparser/ParserEvents.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <format>
 #include <map>
@@ -21,9 +21,9 @@ auto fillTransitions()
     ParserTable const& table = ParserTable::get();
     // (State, Byte) -> State
     auto transitions = std::map<Transition, RangeSet> {};
-    for (auto const [sourceState, sourceTransitions]: crispy::views::enumerate(table.transitions))
+    for (auto const [sourceState, sourceTransitions]: core::views::enumerate(table.transitions))
     {
-        for (auto const [i, targetState]: crispy::views::enumerate(sourceTransitions))
+        for (auto const [i, targetState]: core::views::enumerate(sourceTransitions))
         {
             auto const ch = static_cast<uint8_t>(i);
             if (targetState != State::Undefined)
@@ -77,7 +77,7 @@ void parserTableDot(std::ostream& os) // {{{
         os << std::format(R"(  "{}" -> "{}" )", sourceState, targetStateName);
         os << "[";
         os << "label=\"";
-        for (auto const [rangeCount, u]: crispy::views::enumerate(t.second))
+        for (auto const [rangeCount, u]: core::views::enumerate(t.second))
         {
             if (rangeCount)
             {

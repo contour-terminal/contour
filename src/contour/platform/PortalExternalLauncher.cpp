@@ -4,7 +4,7 @@
     #include <contour/Logging.hpp>
     #include <contour/platform/PortalExternalLauncher.hpp>
 
-    #include <crispy/Assert.hpp>
+    #include <core/Assert.hpp>
 
     #include <QtCore/QVariantMap>
 

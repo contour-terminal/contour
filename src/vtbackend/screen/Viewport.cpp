@@ -3,7 +3,7 @@
 
 #include <vtbackend/screen/Terminal.hpp>
 
-#include <crispy/LogStore.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <algorithm>
 #include <optional>

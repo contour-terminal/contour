@@ -1,6 +1,6 @@
 #include <crispy/StackTrace.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <cctype>
 #include <cstdlib>
@@ -86,7 +86,7 @@ vector<void*> StackTrace::getFrames(size_t skip, size_t max)
     std::copy(std::next(frames.begin(), (int) skip), frames.end(), frames.begin());
     frames.resize(frames.size() > skip ? frames.size() - skip : std::min(frames.size(), skip));
 #else
-    crispy::ignoreUnused(skip, max);
+    core::ignoreUnused(skip, max);
 #endif
 
     return frames;

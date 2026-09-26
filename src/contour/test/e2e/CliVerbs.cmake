@@ -22,7 +22,7 @@ if(NOT FRONTEND STREQUAL "gui" AND NOT FRONTEND STREQUAL "headless")
     message(FATAL_ERROR "FRONTEND must be 'gui' or 'headless', got '${FRONTEND}'")
 endif()
 
-# Verbs that must be present in EVERY configuration: the crispy::App base plus everything
+# Verbs that must be present in EVERY configuration: the core::cli::App base plus everything
 # ContourApp registers. `daemon` is the one that makes this test worth running; `documentation` is
 # the one the Docs workflow runs, and it runs it against a CONTOUR_FRONTEND_GUI=OFF build -- so a
 # guard slipping around that verb would not fail a build, it would silently stop the website from

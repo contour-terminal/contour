@@ -33,6 +33,9 @@ extend-exclude = [
     # test patterns.
     "src/vtconformance/test/golden/*.dump",
     "src/vtconformance/test/cmd/*.cmd",
+    # A verbatim copy of core-cpp, pinned by its MANIFEST: a misspelling there is fixed upstream and
+    # re-vendored, never here (vendor/README.md).
+    "vendor/**",
 ]
 
 [default]

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtconformance/Report.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <array>
@@ -68,7 +68,7 @@ Ratchet Ratchet::parse(std::string_view text)
 {
     auto gaps = Ratchet {};
 
-    for (auto line: crispy::split(text, '\n'))
+    for (auto line: core::split(text, '\n'))
     {
         while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
             line.remove_suffix(1);
@@ -321,7 +321,7 @@ std::string renderMarkdown(Report const& report)
             notes.emplace_back("advisory — does not gate the build");
 
         auto joined = std::string {};
-        for (auto const& [index, note]: crispy::views::enumerate(notes))
+        for (auto const& [index, note]: core::views::enumerate(notes))
             joined += index ? std::format("; {}", note) : note;
 
         out << std::format("| `{}` | {} | {} | {} |\n",

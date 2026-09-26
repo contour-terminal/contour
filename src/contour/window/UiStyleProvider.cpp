@@ -4,7 +4,7 @@
 
 #include <vtbackend/vt/ProgressState.hpp>
 
-#include <crispy/LogStore.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>

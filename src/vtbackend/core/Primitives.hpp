@@ -4,7 +4,7 @@
 #include <vtpty/ImageSize.hpp>
 #include <vtpty/PageSize.hpp>
 
-#include <crispy/Flags.hpp>
+#include <core/Flags.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1233,7 +1233,7 @@ enum class TitleKind : uint8_t
 };
 
 /// A set of titles a single XTPUSHTITLE, XTPOPTITLE or `OSC 0` acts on.
-using TitleKinds = crispy::Flags<TitleKind>;
+using TitleKinds = core::Flags<TitleKind>;
 
 /// One entry of the title stack: the titles a single XTPUSHTITLE saved.
 ///

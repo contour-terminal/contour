@@ -11,7 +11,7 @@
 #include <span>
 #include <string_view>
 
-namespace crispy
+namespace core
 {
 class Environment;
 }
@@ -287,7 +287,7 @@ constexpr std::span<ConfigEnumInfo<WindowControlStyle> const> configEnumValues()
 ///
 /// @param env The environment to read @c XDG_CURRENT_DESKTOP and @c KDE_FULL_SESSION from.
 /// @return @c KdePlasma for a KDE session, @c Other for anything else.
-[[nodiscard]] HostPlatform detectDesktopPlatform(crispy::Environment const& env);
+[[nodiscard]] HostPlatform detectDesktopPlatform(core::Environment const& env);
 
 /// The host this build is running on.
 ///
@@ -295,6 +295,6 @@ constexpr std::span<ConfigEnumInfo<WindowControlStyle> const> configEnumValues()
 /// everywhere else, where it is the session.
 ///
 /// @param env The environment, consulted only where the platform is a runtime question.
-[[nodiscard]] HostPlatform detectHostPlatform(crispy::Environment const& env);
+[[nodiscard]] HostPlatform detectHostPlatform(core::Environment const& env);
 
 } // namespace contour::config

@@ -13,7 +13,7 @@ if(EXISTS "/.flatpak-info")
     set(CONTOUR_WITH_UTEMPTER OFF)
 endif()
 
-set(vtpty_LIBRARIES crispy::core Microsoft.GSL::GSL)
+set(vtpty_LIBRARIES core::base core::log crispy::core Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
 
 set(vtpty_SOURCES
     ChannelPty.cpp
@@ -116,7 +116,7 @@ if(VTPTY_TESTING)
         # ConPty is the Windows-only PTY backend.
         target_sources(vtpty_test PRIVATE ConPty_test.cpp)
     endif()
-    target_link_libraries(vtpty_test vtpty crispy::core Catch2::Catch2)
+    target_link_libraries(vtpty_test vtpty core::testing Catch2::Catch2)
     add_test(NAME vtpty_test COMMAND $<TARGET_FILE:vtpty_test>)
 
     if(NOT WIN32)

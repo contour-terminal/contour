@@ -4,8 +4,9 @@
 #include <vtpty/Pty.hpp>
 
 #include <crispy/FileDescriptor.hpp>
-#include <crispy/LogStore.hpp>
-#include <crispy/Overloaded.hpp>
+
+#include <core/Overloaded.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <atomic>
 #include <condition_variable>
@@ -360,14 +361,15 @@ struct std::formatter<vtpty::SshSession::ExitStatus>: std::formatter<std::string
 {
     auto format(vtpty::SshSession::ExitStatus const& status, auto& ctx) const
     {
-        return std::visit(Overloaded { [&](vtpty::SshSession::NormalExit exit) {
-                                          return std::formatter<std::string>::format(
-                                              std::format("{} (normal exit)", exit.exitCode), ctx);
-                                      },
-                                       [&](vtpty::SshSession::SignalExit exit) {
-                                           return std::formatter<std::string>::format(
-                                               std::format("{} ({})", exit.signal, exit.errorMessage), ctx);
-                                       } },
+        return std::visit(core::Overloaded { [&](vtpty::SshSession::NormalExit exit) {
+                                                return std::formatter<std::string>::format(
+                                                    std::format("{} (normal exit)", exit.exitCode), ctx);
+                                            },
+                                             [&](vtpty::SshSession::SignalExit exit) {
+                                                 return std::formatter<std::string>::format(
+                                                     std::format("{} ({})", exit.signal, exit.errorMessage),
+                                                     ctx);
+                                             } },
                           status);
     }
 };

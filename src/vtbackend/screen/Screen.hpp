@@ -23,9 +23,10 @@
 
 #include <vtparser/ParserExtension.hpp>
 
-#include <crispy/LogStore.hpp>
 #include <crispy/Size.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Utils.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <libunicode/grapheme_segmenter.h>
 #include <libunicode/width.h>

@@ -6,8 +6,8 @@
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/App.hpp>
-#include <crispy/Environment.hpp>
+#include <core/Environment.hpp>
+#include <core/cli/App.hpp>
 
 #include <libunicode/convert.h>
 
@@ -89,11 +89,11 @@ class MockTerm: public Terminal::NullEvents
 
     void writeToScreen(std::string_view text)
     {
-        // Guard the log: crispy::escape() is a function argument, so it runs whether or not the sink
+        // Guard the log: core::escape() is a function argument, so it runs whether or not the sink
         // is enabled -- and it std::format()s one string per byte. On a 3 MB sixel frame that was
         // 42% of the whole profile, entirely for a message nobody asked for.
         if (vtpty::ptyOutLog)
-            vtpty::ptyOutLog()("writeToScreen: {}", crispy::escape(text));
+            vtpty::ptyOutLog()("writeToScreen: {}", core::escape(text));
         mockPty().appendStdOutBuffer(text);
         while (mockPty().isStdoutDataAvailable())
             terminal.processInputOnce();
@@ -287,15 +287,15 @@ inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
                                      HistoryLimits historyLimits,
                                      size_t ptyReadBufferSize):
     terminal { *this,
-               crispy::defaultEnvironment(),
+               core::defaultEnvironment(),
                std::make_unique<PtyDevice>(pageSize),
                createSettings(pageSize, historyLimits, ptyReadBufferSize),
                std::chrono::steady_clock::time_point() } // explicitly start with empty timepoint
 {
-    if (auto const logFilterString = crispy::defaultEnvironment().get("LOG"))
+    if (auto const logFilterString = core::defaultEnvironment().get("LOG"))
     {
-        logstore::configure(*logFilterString);
-        crispy::App::customizeLogStoreOutput();
+        core::log::configure(*logFilterString);
+        core::cli::App::customizeLogStoreOutput();
     }
 }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/grid/Line.hpp>
 
-#include <crispy/Escape.hpp>
+#include <core/Escape.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

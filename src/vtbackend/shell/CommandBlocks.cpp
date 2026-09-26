@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/shell/CommandBlocks.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <ranges>
 #include <string>
@@ -30,8 +30,8 @@ namespace
         {
             return CommandBlockText {
                 // Reversed, because the walk collected them bottom-up and the screen reads top-down.
-                .prompt = crispy::joinWith(promptLines | std::views::reverse, "\n"),
-                .output = crispy::joinWith(outputLines | std::views::reverse, "\n"),
+                .prompt = core::joinWith(promptLines | std::views::reverse, "\n"),
+                .output = core::joinWith(outputLines | std::views::reverse, "\n"),
                 .outputLineCount = static_cast<int>(outputLines.size()),
             };
         }
