@@ -381,7 +381,7 @@ void ControlSession::handlePeerLost()
     _peerLost = true;
     // The client cannot keep up (or its transport failed): drop it the way a read
     // EOF would. Closing the queue and connection wakes run()'s parked reader with
-    // BadHandle, so it unwinds through the normal teardown epilogue.
+    // Cancelled, so it unwinds through the normal teardown epilogue.
     // The queue closes _connection too. A close resumes a parked read at once, which can end
     // the flow that owns this object, so it comes last and is not repeated.
     _writer.close();

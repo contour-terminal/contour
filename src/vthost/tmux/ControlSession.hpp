@@ -203,7 +203,7 @@ class ControlSession final: public vtworkspace::ModelEvents, public SessionStrea
     void scheduleOutputDrain();
 
     /// Drops the control client: closes the write queue and the connection so
-    /// run()'s parked reader unwinds (BadHandle) through the normal teardown.
+    /// run()'s parked reader unwinds (Cancelled) through the normal teardown.
     /// Idempotent. Invoked when a write is refused — WriteQueue's disconnect
     /// contract (WriteQueue.h) — rather than silently dropping data.
     void handlePeerLost();
