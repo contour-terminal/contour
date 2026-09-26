@@ -636,7 +636,7 @@ enum class ControlTransmissionMode : uint8_t
     S8C1T, // 8-bit controls
 };
 
-/// The warning-bell volume selected by DECSWBV
+/// The bell volume selected by DECSWBV (warning bell) or DECSMBV (margin bell).
 enum class BellVolume : uint8_t
 {
     Off,

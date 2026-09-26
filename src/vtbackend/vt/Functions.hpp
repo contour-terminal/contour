@@ -113,6 +113,7 @@ constexpr inline auto DECSEL = FunctionDocumentation { .mnemonic = "DECSEL", .co
 constexpr inline auto DECSERA = FunctionDocumentation { .mnemonic = "DECSERA", .comment = "Selective Erase in Rectangular Area" };
 constexpr inline auto DECSLRM = FunctionDocumentation { .mnemonic = "DECSLRM", .comment = "Set left/right margin" };
 constexpr inline auto DECSM = FunctionDocumentation { .mnemonic = "DECSM", .comment = "Set DEC-mode" };
+constexpr inline auto DECSMBV = FunctionDocumentation { .mnemonic = "DECSMBV", .comment = "Set Margin Bell Volume" };
 constexpr inline auto DECSNLS = FunctionDocumentation { .mnemonic = "DECSNLS", .comment = "Select number of lines per screen." };
 constexpr inline auto DECSPP = FunctionDocumentation { .mnemonic = "DECSPP", .comment = "Set port parameter" };
 constexpr inline auto DECSSCLS = FunctionDocumentation { .mnemonic = "DECSSCLS", .comment = "Set Scroll Speed." };
@@ -773,6 +774,7 @@ constexpr inline auto DECSEL      = detail::CSI('?', 0, 1, std::nullopt, 'K', VT
 constexpr inline auto DECSERA     = detail::CSI(std::nullopt, 0, 4, '$', '{', VTType::VT240, documentation::DECSERA);
 constexpr inline auto DECSLRM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 's', VTType::VT420, documentation::DECSLRM);
 constexpr inline auto DECSM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'h', VTType::VT100, documentation::DECSM);
+constexpr inline auto DECSMBV     = detail::CSI(std::nullopt, 0, 1, ' ', 'u', VTType::VT520, documentation::DECSMBV);
 constexpr inline auto DECSNLS     = detail::CSI(std::nullopt, 0, 1, '*', '|', VTType::VT420, documentation::DECSNLS);
 constexpr inline auto DECSSCLS    = detail::CSI(std::nullopt, 0, 1, ' ', 'p', VTType::VT510, documentation::DECSSCLS);
 constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VTType::VT320, documentation::DECSSDT);
@@ -1056,6 +1058,7 @@ constexpr static auto allFunctionsArray() noexcept
         DECSLRM,
         DECSSCLS,
         DECSM,
+        DECSMBV,
         DECSNLS,
         DECSSDT,
         DECSTBM,
