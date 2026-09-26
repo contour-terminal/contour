@@ -156,6 +156,8 @@
           <li>Fixes Contour spinning when the SSH agent could not be reached — the normal case inside a Flatpak, where $SSH_AUTH_SOCK names a host path the sandbox does not mount — instead of falling through to the next authentication method</li>
           <li>Fixes the build on Linux with Clang and libc++, which selected the broken &lt;experimental/simd&gt;. The guard excluded it by platform — Apple and FreeBSD — but the header belongs to libc++, not to those systems, so any libc++ build reached it; it is now excluded by _LIBCPP_VERSION instead (#2087)</li>
           <li>Implements DECSWBV (CSI Ps SP t), the VT520 sequence for setting the warning-bell volume: Ps 0 or 1 silences the bell, 2 to 4 halves it, 5 to 8 keeps it at the profile's configured volume. An application can only mute or halve that volume, never raise it, and RIS restores the default (#732)</li>
+          <li>Implements DECSMBV (CSI Ps SP u), the VT520 sequence for setting the margin-bell volume: Ps 0 or 5 to 8 sets it to high, 1 silences it, 2 to 4 halves it, and RIS restores the default (#733)</li>
+          <li>Implements DEC private mode 44 (`CSI ? 44 h`/`l`), the margin bell: while set, printing within 10 columns of the right margin rings the bell once per approach, the way a mechanical typewriter warns its carriage is about to run out of room, scaled by the DECSMBV volume above. Whether explicit cursor movement (CUF, CHA, CR, ...) should also ring it, alongside printing, is unresolved against xterm's actual behaviour; only printing does today</li>
         </ul>
       </description>
     </release>

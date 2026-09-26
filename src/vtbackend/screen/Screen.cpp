@@ -431,6 +431,8 @@ void Screen::advanceCursorAfterWrite(ColumnCount n) noexcept
     assert(_cursor.position.column.value + n.value <= margin().horizontal.to.value + 1);
     //  + 1 here because `to` is inclusive.
 
+    auto const oldColumn = _cursor.position.column;
+
     if (_cursor.position.column.value + n.value < pageSize().columns.value)
         _cursor.position.column.value += n.value;
     else
@@ -438,6 +440,24 @@ void Screen::advanceCursorAfterWrite(ColumnCount n) noexcept
         _cursor.position.column.value += n.value - 1;
         _cursor.wrapPending = true;
     }
+
+    checkMarginBell(oldColumn, _cursor.position.column);
+}
+
+void Screen::checkMarginBell(ColumnOffset oldColumn, ColumnOffset newColumn) noexcept
+{
+    if (!_terminal->isModeEnabled(DECMode::MarginBell))
+        return;
+
+    // xterm's nMarginBell resource: rings once as printing crosses within this many columns of the
+    // right edge, mimicking a mechanical typewriter's carriage-return warning. Fixed rather than
+    // configurable (YAGNI) -- revisit if anyone asks for a tunable distance.
+    constexpr auto MarginBellDistance = ColumnCount(10);
+    auto const thresholdColumn =
+        boxed_cast<ColumnOffset>(pageSize().columns) - boxed_cast<ColumnOffset>(MarginBellDistance);
+
+    if (oldColumn < thresholdColumn && newColumn >= thresholdColumn)
+        _terminal->marginBell();
 }
 
 void Screen::writeText(string_view text, size_t cellCount)
@@ -516,6 +536,8 @@ void Screen::writeText(string_view text, size_t cellCount)
             {
                 _cursor.position.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
             }
+
+            checkMarginBell(ColumnOffset::cast_from(startCol), _cursor.position.column);
 
             // Note: parser's lastCodepointHint is not updated here (private).
             // REP (CSI Ps b) may not work correctly after bulk writes.
@@ -925,11 +947,14 @@ void Screen::applyClusterWidthChange(int delta) noexcept
     // against the last column still leaves the cursor one past it. Moving there unconditionally
     // breaks the `column < pageSize().columns` invariant verifyState() asserts, and in a build
     // without it the next write indexes the line's storage out of bounds.
+    auto const oldColumn = _cursor.position.column;
     auto const landing = _cursor.position.column + ColumnOffset::cast_from(delta);
     if (landing <= lastWritableColumn())
         _cursor.position.column = landing;
     else if (_terminal->isModeEnabled(DECMode::AutoWrap))
         _cursor.wrapPending = true;
+
+    checkMarginBell(oldColumn, _cursor.position.column);
 }
 
 ColumnOffset Screen::lastWritableColumn() const noexcept
@@ -965,11 +990,14 @@ void Screen::clearAndAdvance(int oldWidth, int newWidth) noexcept
     // Landing past the last writable column is the deferred-wrap case: the cursor stays where it is
     // and the wrap happens when the next character arrives. Comparing the landing column against the
     // margin says that directly, where comparing widths against a count only said it by accident.
+    auto const oldColumn = _cursor.position.column;
     auto const landing = _cursor.position.column + ColumnOffset::cast_from(newWidth);
     if (landing <= lastColumn)
         _cursor.position.column = landing;
     else if (_terminal->isModeEnabled(DECMode::AutoWrap))
         _cursor.wrapPending = true;
+
+    checkMarginBell(oldColumn, _cursor.position.column);
 }
 
 std::string Screen::screenshot(function<string(LineOffset)> const& postLine) const
@@ -3865,6 +3893,30 @@ namespace impl
         }
 
         // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+        ApplyResult DECSMBV(Sequence const& seq, Terminal& terminal)
+        {
+            if (seq.parameterCount() <= 1)
+            {
+                switch (seq.paramOr(0, Sequence::Parameter { 0 }))
+                {
+                    case 0:
+                    case 5:
+                    case 6:
+                    case 7:
+                    case 8: terminal.setMarginBellVolume(BellVolume::High); break;
+                    case 1: terminal.setMarginBellVolume(BellVolume::Off); break;
+                    case 2:
+                    case 3:
+                    case 4: terminal.setMarginBellVolume(BellVolume::Low); break;
+                    default: return ApplyResult::Invalid;
+                }
+                return ApplyResult::Ok;
+            }
+            else
+                return ApplyResult::Invalid;
+        }
+
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
         ApplyResult EL(Sequence const& seq, Screen& screen)
         {
             switch (seq.paramOr(0, Sequence::Parameter { 0 }))
@@ -5357,6 +5409,7 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
     // The cursor may not step past the last column -- verifyState() requires it to stay addressable.
     // A block ending exactly at the edge therefore leaves the cursor on the edge with the wrap
     // deferred, exactly as an ordinary write does. @see clearAndAdvance.
+    auto const oldColumn = _cursor.position.column;
     auto const landing = _cursor.position.column + ColumnOffset::cast_from(columns);
     if (landing <= lastWritableColumn())
         _cursor.position.column = landing;
@@ -5366,6 +5419,8 @@ void Screen::writeSizedText(std::u32string_view codepoints, uint8_t columns, Cel
         if (_terminal->isModeEnabled(DECMode::AutoWrap))
             _cursor.wrapPending = true;
     }
+
+    checkMarginBell(oldColumn, _cursor.position.column);
 }
 
 void Screen::processAPC(std::string_view body)
@@ -6835,6 +6890,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         }
         case DECSCUSR: return impl::DECSCUSR(seq, *_terminal);
+        case DECSMBV: return impl::DECSMBV(seq, *_terminal);
         case DECSCPP:
             if (auto const columnCount = seq.paramOr(0, 80); columnCount == 80 || columnCount == 132)
             {

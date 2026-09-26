@@ -605,6 +605,31 @@ void TerminalSession::bell()
     announce(QObject::tr("Bell"));
 }
 
+void TerminalSession::marginBell()
+{
+    // Reuses the same onBell/playBell path as the warning bell -- a real terminal's margin bell is
+    // the same sound, just triggered automatically by column proximity instead of by an explicit BEL,
+    // so a second signal and QML wiring would duplicate this one for no audible difference.
+    auto const configured = _profile.bell.value().volume;
+    auto const volume = [configured](vtbackend::BellVolume level) {
+        switch (level)
+        {
+            case vtbackend::BellVolume::Off: return 0.0f;
+            case vtbackend::BellVolume::Low: return configured * 0.5f;
+            case vtbackend::BellVolume::High: return configured;
+        }
+
+        crispy::unreachable();
+    }(terminal().settings().marginBellVolume);
+
+    emit onBell(volume);
+
+    // Deliberately no onAlert() or announce() here, unlike bell(): the margin bell fires
+    // automatically and repeatedly as ordinary typing nears the edge, not once per application
+    // request -- announcing it to a screen reader on every such line would be constant noise for an
+    // event that reports nothing an application asked to say.
+}
+
 void TerminalSession::bufferChanged(vtbackend::ScreenType type)
 {
     if (!_display)

@@ -302,6 +302,7 @@ class Terminal
 
         virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
         virtual void bell() {}
+        virtual void marginBell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
@@ -1771,6 +1772,7 @@ class Terminal
     void requestCaptureBuffer(LineCount lines, bool logical);
     void requestShowHostWritableStatusLine();
     void bell();
+    void marginBell();
     void bufferChanged(ScreenType);
     void scrollbackBufferCleared();
     void screenUpdated();
@@ -1866,6 +1868,7 @@ class Terminal
     void setCursorStyle(CursorDisplay display, CursorShape shape);
     void setCursorVisibility(bool visible);
     void setGenerateFocusEvents(bool enabled);
+    void setMarginBellVolume(BellVolume volume);
     void setMouseProtocol(MouseProtocol protocol, bool enabled);
     void setMouseTransport(MouseTransport transport);
     /// Applies one of the four coordinate-encoding DEC modes (1005/1006/1015/1016), which select a

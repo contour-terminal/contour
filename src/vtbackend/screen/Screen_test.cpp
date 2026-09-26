@@ -4553,4 +4553,155 @@ TEST_CASE("DECSWBV: the volume is restored by RIS", "[screen]")
     CHECK(mock.terminal.settings().warningBellVolume == BellVolume::High);
 }
 
+TEST_CASE("DECSMBV: sets the margin bell volume", "[screen]")
+{
+    // Ps 0, 5-8 is high, 1 is off, 2-4 is low for the margin bell.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[1 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Off);
+
+    mock.writeToScreen("\033[3 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+
+    mock.writeToScreen("\033[8 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
+
+    mock.writeToScreen("\033[0 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
+}
+
+TEST_CASE("DECSMBV: default parameter selects high, not off", "[screen]")
+{
+    // Unlike DECSWBV, DECSMBV's omitted Ps maps to 0, which this sequence defines as high -- the
+    // inverse of the off-by-default shape a reader might expect from its sibling sequence.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[1 u");
+    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::Off);
+
+    mock.writeToScreen("\033[ u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
+}
+
+TEST_CASE("DECSMBV: the volume is restored by RIS", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[1 u");
+    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::Off);
+
+    mock.writeToScreen("\033c"); // RIS
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
+}
+
+TEST_CASE("DECSMBV: a Ps outside 0-8 is rejected", "[screen]")
+{
+    // Ps 9 falls past every defined value into the switch's default, which is Invalid; the volume
+    // must be left exactly as it was rather than snapping to some fallback level.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[3 u");
+    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+
+    mock.writeToScreen("\033[9 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+}
+
+TEST_CASE("DECSMBV: a hand-built two-parameter sequence is rejected", "[screen]")
+{
+    // DECSMBV is registered with maximumParameters = 1, so Functions::select() already refuses a
+    // two-parameter "CSI Ps ; Ps SP u" before Screen::apply() is ever called -- writeToScreen() can't
+    // reach the handler's own multi-parameter guard at all. This bypasses the parser and calls
+    // apply() directly, to pin down what the guard itself does if that dispatch-layer invariant is
+    // ever weakened, rather than relying on select() alone to keep bad input out.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[3 u");
+    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+
+    auto seq = Sequence {};
+    seq.setCategory(FunctionCategory::CSI);
+    seq.intermediateCharacters() = " ";
+    seq.setFinalChar('u');
+    auto builder = SequenceParameterBuilder { seq.parameters() };
+    builder.set(1);
+    builder.nextParameter();
+    builder.set(2);
+    builder.fixiate();
+    REQUIRE(seq.parameterCount() == 2);
+
+    auto const result = mock.terminal.primaryScreen().apply(DECSMBV, seq);
+    CHECK(result == ApplyResult::Invalid);
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+}
+
+TEST_CASE("DECMode::MarginBell: toggles via CSI ? 44 h/l", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::MarginBell));
+
+    mock.writeToScreen("\033[?44h");
+    CHECK(mock.terminal.isModeEnabled(DECMode::MarginBell));
+
+    mock.writeToScreen("\033[?44l");
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::MarginBell));
+}
+
+TEST_CASE("DECMode::MarginBell: RIS resets it off", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+
+    mock.writeToScreen("\033[?44h");
+    REQUIRE(mock.terminal.isModeEnabled(DECMode::MarginBell));
+
+    mock.writeToScreen("\033c"); // RIS
+    CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::MarginBell));
+}
+
+TEST_CASE("margin bell: does not ring while DECMode::MarginBell is off", "[screen]")
+{
+    // A 20-column page with the default 10-column threshold rings at column 10. Printing straight
+    // across it with the mode at its default (off) must not ring at all.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+
+    mock.writeToScreen("0123456789012345");
+    CHECK(mock.marginBellCount == 0);
+}
+
+TEST_CASE("margin bell: rings once as ordinary typing crosses the threshold", "[screen]")
+{
+    // Plain ASCII with every mode at its default hits writeText's bulk fast path, not
+    // Screen::clearAndAdvance -- the per-character path a real interactive shell session's echoed
+    // keystrokes actually take. Insert mode (IRM) is the fast path's own exclusion (it requires
+    // !isModeEnabled(AnsiMode::Insert)), so turning it on forces every character through
+    // writeCharToCurrentAndAdvance -> clearAndAdvance instead, without depending on character width.
+    // Ten characters moves the cursor from column 0 to column 10, exactly the threshold on a
+    // 20-column page.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    mock.writeToScreen("\033[?44h");
+    mock.writeToScreen("\033[4h"); // IRM: force the per-character path
+
+    mock.writeToScreen("0123456789");
+    CHECK(mock.marginBellCount == 1);
+
+    // Continuing to type further into the danger zone must not ring again -- the old column is
+    // already past the threshold for every subsequent character, so the crossing condition never
+    // re-triggers.
+    mock.writeToScreen("01234");
+    CHECK(mock.marginBellCount == 1);
+}
+
+TEST_CASE("margin bell: a single bulk write that jumps past the threshold still rings", "[screen]")
+{
+    // Writing all 20 columns in one call exercises the old/new column RANGE check rather than an
+    // exact match: the cursor jumps from column 0 straight past column 10 without ever landing on
+    // it, which is exactly the case an exact-column comparison would have missed.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+    mock.writeToScreen("\033[?44h");
+
+    mock.writeToScreen("01234567890123456789");
+    CHECK(mock.marginBellCount == 1);
+}
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
