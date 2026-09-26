@@ -408,6 +408,27 @@ TEST_CASE("resize_grow_lines_with_history_cursor_no_bottom", "[grid]")
     CHECK(grid.lineText(LineOffset(2)) == "   ");
 }
 
+TEST_CASE("Grid.resize.shrinkingColumnsKeepsACursorThatStillFits", "[grid]")
+{
+    // Narrowing a grid that holds nothing past the new width takes the in-place path. A cursor
+    // that still fits must stay where it is, not have its column added to itself.
+    auto const cursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(4) };
+
+    SECTION("reflow")
+    {
+        auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, true, LineCount(10));
+        grid.setLineText(LineOffset(1), "ABCD");
+        CHECK(grid.resize(PageSize { LineCount(3), ColumnCount(8) }, cursor, false) == cursor);
+    }
+
+    SECTION("no reflow")
+    {
+        auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, false, LineCount(10));
+        grid.setLineText(LineOffset(1), "ABCD");
+        CHECK(grid.resize(PageSize { LineCount(3), ColumnCount(8) }, cursor, false) == cursor);
+    }
+}
+
 TEST_CASE("resize_shrink_lines_with_history", "[grid]")
 {
     auto grid = Grid(PageSize { LineCount(2), ColumnCount(3) }, true, LineCount(5));
