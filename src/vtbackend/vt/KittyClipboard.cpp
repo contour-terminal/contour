@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/vt/KittyClipboard.hpp>
 
-#include <crispy/Base64.hpp>
+#include <core/Base64.hpp>
 
 #include <algorithm>
 #include <array>
@@ -34,7 +34,7 @@ namespace
         else if (key == "mime")
             // The protocol base64-encodes this value: `mime=<base64 encoded mime type>`. Storing it
             // raw made every conforming write fail isSupportedMimeType() and be refused with ENOSYS.
-            packet.mimeType = crispy::base64::decode(value);
+            packet.mimeType = core::base64::decode(value);
         else if (key == "id")
             packet.id = value;
         // Unknown keys -- `name`, `pw`, and whatever the protocol grows next -- are ignored rather

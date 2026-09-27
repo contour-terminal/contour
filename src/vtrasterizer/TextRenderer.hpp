@@ -16,11 +16,12 @@
 #include <text_shaper/Font.hpp>
 #include <text_shaper/Shaper.hpp>
 
-#include <crispy/FNV.hpp>
 #include <crispy/Point.hpp>
 #include <crispy/Size.hpp>
 #include <crispy/StrongHash.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
+
+#include <core/FNV.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/run_segmenter.h>

@@ -34,13 +34,14 @@
 #include <text_shaper/MockFontLocator.hpp>
 
 #include <crispy/ASCII.hpp>
-#include <crispy/Assert.hpp>
-#include <crispy/Environment.hpp>
-#include <crispy/Flags.hpp>
-#include <crispy/LogStore.hpp>
 #include <crispy/Size.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Assert.hpp>
+#include <core/Environment.hpp>
+#include <core/Flags.hpp>
+#include <core/Utils.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <yaml-cpp/emitter.h>
 #include <yaml-cpp/node/detail/iterator_fwd.h>
@@ -694,7 +695,7 @@ struct TerminalProfile
         .program =
             []() {
                 auto const program = vtpty::Process::loginShell(true);
-                return program | crispy::views::joinWith(std::string_view(" "));
+                return program | core::views::joinWith(std::string_view(" "));
             }(),
         .arguments = {},
         .workingDirectory = "",
@@ -1374,7 +1375,7 @@ struct Config
         auto const* const found = findProfile(name);
         assert(found != nullptr && "Profile not found.");
         if (found == nullptr)
-            crispy::unreachable();
+            core::unreachable();
         return found;
     }
 
@@ -1382,14 +1383,14 @@ struct Config
     {
         if (auto* prof = profile(defaultProfileName.value()); prof)
             return *prof;
-        crispy::unreachable();
+        core::unreachable();
     }
 
     [[nodiscard]] TerminalProfile const& profile() const noexcept
     {
         if (auto const* prof = profile(defaultProfileName.value()); prof)
             return *prof;
-        crispy::unreachable();
+        core::unreachable();
     }
 };
 
@@ -1400,7 +1401,7 @@ struct YAMLConfigReader
 
     std::filesystem::path configFile;
     YAML::Node doc;
-    logstore::Category const& logger;
+    core::log::Category const& logger;
     VariableReplacer variableReplacer;
 
     /// @param filename The document to parse.
@@ -1409,8 +1410,8 @@ struct YAMLConfigReader
     ///                 default replacer holds a reference to it.
     /// @param replacer An expansion policy of the caller's own; the default one reads @p env.
     YAMLConfigReader(std::string const& filename,
-                     logstore::Category const& log,
-                     crispy::Environment const& env,
+                     core::log::Category const& log,
+                     core::Environment const& env,
                      VariableReplacer replacer = {});
 
     /// Expands `${VAR}` tokens in @p input using the configured variable replacer.
@@ -1741,7 +1742,7 @@ struct Writer
 
         auto result = std::string { "[" };
         result.append(v | std::views::transform([](auto f) { return std::format("{}", f); })
-                      | crispy::views::joinWith(std::string_view(", ")));
+                      | core::views::joinWith(std::string_view(", ")));
         result.append("]");
         return result;
     }
@@ -1796,12 +1797,12 @@ struct Writer
     [[nodiscard]] std::string format(std::string_view doc, vtpty::Process::ExecInfo const& v)
     {
         auto args = std::string { "[" };
-        args.append(v.arguments | crispy::views::joinWith(std::string_view(", ")));
+        args.append(v.arguments | core::views::joinWith(std::string_view(", ")));
         args.append("]");
         return format(doc, v.program, args, [&]() -> std::string {
             auto fromConfig = v.workingDirectory.string();
             if (fromConfig.empty()
-                || fromConfig == crispy::homeResolvedPath("~", vtpty::Process::homeDirectory()))
+                || fromConfig == core::homeResolvedPath("~", vtpty::Process::homeDirectory()))
                 return std::string { "\"~\"" };
             return fromConfig;
         }());
@@ -2502,7 +2503,7 @@ struct std::formatter<std::set<std::basic_string<char>>>: formatter<std::string_
     auto format(std::set<std::basic_string<char>> const& value, auto& ctx) const
     {
         auto result = std::string {};
-        result.append(value | crispy::views::joinWith(std::string_view(", ")));
+        result.append(value | core::views::joinWith(std::string_view(", ")));
         return formatter<std::string_view>::format(result, ctx);
     }
 };

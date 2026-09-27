@@ -3,9 +3,9 @@
 
 #include <vtbackend/core/Primitives.hpp>
 
-#include <crispy/Escape.hpp>
-#include <crispy/Flags.hpp>
-#include <crispy/Overloaded.hpp>
+#include <core/Escape.hpp>
+#include <core/Flags.hpp>
+#include <core/Overloaded.hpp>
 
 #include <libunicode/convert.h>
 
@@ -56,7 +56,7 @@ enum Modifier : uint8_t
     Meta = 32,
 };
 
-using Modifiers = crispy::Flags<Modifier>;
+using Modifiers = core::Flags<Modifier>;
 
 namespace detail
 {
@@ -117,7 +117,7 @@ enum LockKey : uint8_t
     NumLock = 128,
 };
 
-using LockKeys = crispy::Flags<LockKey>;
+using LockKeys = core::Flags<LockKey>;
 
 static_assert(static_cast<unsigned>(LockKey::CapsLock) == (1u << ChordModifierBitWidth)
                   && static_cast<unsigned>(LockKey::NumLock) == (2u << ChordModifierBitWidth),
@@ -339,7 +339,7 @@ enum class Win32ControlKeyFlag : uint16_t
 };
 
 /// Type-safe bitset for Win32 control key state flags.
-using Win32ControlKeyState = crispy::Flags<Win32ControlKeyFlag>;
+using Win32ControlKeyState = core::Flags<Win32ControlKeyFlag>;
 
 std::string toString(Key key);
 
@@ -529,7 +529,7 @@ enum class KeyboardEventFlag : uint8_t
     ReportAssociatedText = 16,
 };
 
-using KeyboardEventFlags = crispy::Flags<KeyboardEventFlag>;
+using KeyboardEventFlags = core::Flags<KeyboardEventFlag>;
 
 // Implements extended CSIu keyboard input mode.
 class ExtendedKeyboardInputGenerator final: public StandardKeyboardInputGenerator
@@ -914,7 +914,7 @@ struct std::formatter<vtbackend::Modifier>: formatter<std::string_view>
         auto const row = std::ranges::find(
             vtbackend::ChordModifierTable, value, &vtbackend::detail::ChordModifierRow::modifier);
 
-        // A value that names no chord modifier formats empty on purpose: crispy::Flags's formatter
+        // A value that names no chord modifier formats empty on purpose: core::Flags's formatter
         // walks every bit position and skips the ones that yield an empty string.
         auto const name = row != vtbackend::ChordModifierTable.end() ? row->name : std::string_view {};
 

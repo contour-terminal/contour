@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/vt/ProgressState.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Assert.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -15,7 +15,7 @@ namespace
 {
     /// Parses one decimal field of the sequence.
     ///
-    /// Wraps @ref crispy::toInteger only to bound the field's LENGTH first: `toInteger` accumulates
+    /// Wraps @ref core::toInteger only to bound the field's LENGTH first: `toInteger` accumulates
     /// without overflow detection, so an absurdly long run of digits would wrap and could land back
     /// on a value the caller accepts. Both fields here are at most three digits.
     ///
@@ -26,7 +26,7 @@ namespace
         constexpr auto MaxDigits = size_t { 3 };
         if (value.size() > MaxDigits)
             return std::nullopt;
-        return crispy::toInteger<10, unsigned>(value);
+        return core::toInteger<10, unsigned>(value);
     }
 } // namespace
 
@@ -73,7 +73,7 @@ std::expected<Progress, ProgressError> applyProgressSequence(Progress current, s
         case ProgressState::Indeterminate:
             return Progress { .state = state, .percentage = current.percentage };
     }
-    crispy::unreachable();
+    core::unreachable();
 }
 
 } // namespace vtbackend

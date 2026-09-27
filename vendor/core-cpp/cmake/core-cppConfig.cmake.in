@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The core-cpp package, as core_cpp_install() (cmake/CoreCppInstall.cmake) installs it: the
+# dependencies its installed targets link, re-found with the arguments of their rows in
+# cmake/CoreCppDependencies.cmake, then the targets themselves, as core::<name>.
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+@CORE_CPP_INSTALL_FIND_DEPENDENCIES@
+include("${CMAKE_CURRENT_LIST_DIR}/core-cppTargets.cmake")
+
+check_required_components(core-cpp)

@@ -5,8 +5,8 @@
 #include <text_shaper/Font.hpp>
 #include <text_shaper/FontLocator.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/Times.hpp>
+#include <core/Assert.hpp>
+#include <core/Times.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/ucd_fmt.h>
@@ -234,7 +234,7 @@ struct hash<FontInfo>
 {
     size_t operator()(FontInfo const& fd) const noexcept
     {
-        auto fnv = crispy::FNV<char>();
+        auto fnv = core::FNV<char>();
         return size_t(
             fnv(fnv(fd.path), std::to_string(fd.size.pt), std::format("{}", fd.weight))); // SSO should
                                                                                           // kick in.
@@ -677,7 +677,7 @@ namespace
 
 struct OpenShaper::PrivateOpenShaper // {{{
 {
-    crispy::Finally ftCleanup;
+    core::Finally ftCleanup;
     FT_Library ft {};
     FontLocator* locator = nullptr;
     DPI dpi;
@@ -1707,7 +1707,7 @@ optional<RasterizedGlyph> OpenShaper::rasterize(GlyphKey glyph, RenderMode mode,
             {
                 for (auto const _: iota(0u, ftBitmap.rows))
                 {
-                    crispy::ignoreUnused(_);
+                    core::ignoreUnused(_);
                     std::copy_n(s, ftBitmap.width, t);
                     s += ftBitmap.pitch;
                     t += ftBitmap.width;

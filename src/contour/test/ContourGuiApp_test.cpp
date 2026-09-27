@@ -35,7 +35,7 @@ TEST_CASE("ContourGuiApp resolves the default profile and its config", "[contour
 TEST_CASE("every verb reaching loadConfig declares the options it reads", "[contour][app][cli]")
 {
     // loadConfig() reads `log` and `log-file` unconditionally, under the prefix of whichever verb is
-    // running, and crispy::cli::FlagStore::get() is a `values.at(key)` over the options that verb
+    // running, and core::cli::FlagStore::get() is a `values.at(key)` over the options that verb
     // DECLARED. A verb missing either one therefore does not "just log nothing": it throws
     // std::out_of_range before doing any of its own work, which is how `contour font-locator` stopped
     // listing fonts. Asserted over the whole verb list rather than for one name, so a third caller of
@@ -43,9 +43,9 @@ TEST_CASE("every verb reaching loadConfig declares the options it reads", "[cont
     TestApp app;
     auto const syntax = app.app().parameterDefinition();
 
-    auto const declares = [](crispy::cli::Command const& command, std::string_view option) {
+    auto const declares = [](core::cli::Command const& command, std::string_view option) {
         return std::ranges::any_of(
-            command.options, [option](crispy::cli::Option const& o) { return o.name.longName == option; });
+            command.options, [option](core::cli::Option const& o) { return o.name.longName == option; });
     };
 
     // Named explicitly, because membership is a fact about the C++ call graph rather than about the
@@ -56,7 +56,7 @@ TEST_CASE("every verb reaching loadConfig declares the options it reads", "[cont
     {
         INFO("verb: " << verbName);
         auto const verb = std::ranges::find_if(
-            syntax.children, [verbName](crispy::cli::Command const& c) { return c.name == verbName; });
+            syntax.children, [verbName](core::cli::Command const& c) { return c.name == verbName; });
         REQUIRE(verb != syntax.children.end());
 
         CHECK(declares(*verb, "debug"));

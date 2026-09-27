@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/Flags.hpp>
+#include <core/Flags.hpp>
 
 #include <array>
 #include <cstdint>
@@ -15,22 +15,22 @@
 /// generated from this table, so **adding a flag is adding one row here** and cannot leave any of the
 /// three behind. This mirrors VTBACKEND_CELL_FLAGS in CellFlags.h, which was converted for exactly this
 /// reason after a hand-maintained copy of the flags rotted the day a flag was added.
-#define VTBACKEND_LINE_FLAGS(_)                                                                    \
-    /* Structural: whether this line may reflow, and whether it continues the one above. */        \
-    _(Wrappable, 0)                                                                                \
-    _(Wrapped, 1)                                                                                  \
-    /* Semantic marks. A prompt starts here (OSC 133;A, or the deprecated SETMARK). */             \
-    _(Marked, 2)                                                                                   \
-    /* Command output begins (OSC 133;C). */                                                       \
-    _(OutputStart, 3)                                                                              \
-    /* Double-width / double-height renditions (DECDWL, DECDHL). */                                \
-    _(DoubleWidth, 4)                                                                              \
-    _(DoubleHeightTop, 5)                                                                          \
-    _(DoubleHeightBottom, 6)                                                                       \
-    /* Command finished (OSC 133;D); the column it stopped at is Line::commandEndOffset(). */      \
-    _(CommandEnd, 7)                                                                               \
-    /* The shell's prompt finished printing and user input begins (OSC 133;B); the column it ended \
-       at is Line::promptEndOffset(). */                                                           \
+#define VTBACKEND_LINE_FLAGS(_)                                                                        \
+    /* Structural: whether this line may reflow, and whether it continues the one above. */            \
+    _(Wrappable, 0)                                                                                    \
+    _(Wrapped, 1)                                                                                      \
+    /* Semantic marks. A prompt starts here (OSC 133;A, or the deprecated SETMARK). */                 \
+    _(Marked, 2)                                                                                       \
+    /* Command output begins (OSC 133;C). */                                                           \
+    _(OutputStart, 3)                                                                                  \
+    /* Double-width / double-height renditions (DECDWL, DECDHL). */                                    \
+    _(DoubleWidth, 4)                                                                                  \
+    _(DoubleHeightTop, 5)                                                                              \
+    _(DoubleHeightBottom, 6)                                                                           \
+    /* Command finished (OSC 133;D); the column it stopped at is Line::commandEndOffset(). */          \
+    _(CommandEnd, 7)                                                                                   \
+    /* The shell's prompt finished printing and user input begins (OSC 133;B); the column it ended \ \ \
+       at is Line::promptEndOffset(). */                                                               \
     _(PromptEnd, 8)
 
 namespace vtbackend
@@ -47,7 +47,7 @@ enum class LineFlag : uint16_t
 #undef VTBACKEND_LINE_FLAG_ENUMERATOR
 };
 
-using LineFlags = crispy::Flags<LineFlag>;
+using LineFlags = core::Flags<LineFlag>;
 
 /// Every `LineFlag`, in declaration order, excluding `None`.
 ///

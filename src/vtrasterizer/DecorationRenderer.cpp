@@ -7,8 +7,9 @@
 #include <vtrasterizer/UnderlineGeometry.hpp>
 #include <vtrasterizer/shared_defines.h>
 
-#include <crispy/Times.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Times.hpp>
+#include <core/Utils.hpp>
+#include <core/log/Assert.hpp>
 
 #include <array>
 #include <cmath>
@@ -18,7 +19,7 @@
 #include <ranges>
 #include <utility>
 
-using crispy::eachElement;
+using core::eachElement;
 
 using std::array;
 using std::ceil;
@@ -150,7 +151,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(imageSize.area(), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
-                    for (auto x: crispy::times(unbox(width)))
+                    for (auto x: core::times(unbox(width)))
                         image[((unbox(height) - y0 - y) * unbox(width)) + x] = 0xFF;
                 return image;
             });
@@ -174,7 +175,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 auto image = atlas::Buffer(imageSize.area(), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
                 {
-                    for (auto x: crispy::times(unbox(width)))
+                    for (auto x: core::times(unbox(width)))
                     {
                         image[((unbox(height) - y1 - y) * unbox(width)) + x] = 0xFF; // top line
                         image[((unbox(height) - y0 - y) * unbox(width)) + x] = 0xFF; // bottom line
@@ -195,7 +196,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const imageSize = ImageSize { width, height };
             auto block = blockElement(imageSize);
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
-                for (auto x: crispy::times(unbox(width)))
+                for (auto x: core::times(unbox(width)))
                 {
                     // Using Wu's antialiasing algorithm to paint the curved line.
                     // See: https://dl.acm.org/doi/pdf/10.1145/127719.122734
@@ -253,7 +254,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
-                    for (auto x: crispy::times(unbox(width)))
+                    for (auto x: core::times(unbox(width)))
                         if (fabsf((float(x) / unbox<float>(width)) - 0.5f) >= 0.25f)
                             image[((unbox(height) - y0 - y) * unbox(width)) + x] = 0xFF;
                 return image;
@@ -290,8 +291,8 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const imageSize = ImageSize { width, cellHeight };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(cellHeight), 0);
-                for (auto y: crispy::times(thickness))
-                    for (auto x: crispy::times(unbox(width)))
+                for (auto y: core::times(thickness))
+                    for (auto x: core::times(unbox(width)))
                         image[(y * unbox(width)) + x] = 0xFF;
                 return image;
             });
@@ -303,7 +304,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
-                    for (auto x: crispy::times(unbox(width)))
+                    for (auto x: core::times(unbox(width)))
                         image[(y * unbox(width)) + x] = 0xFF;
                 return image;
             });

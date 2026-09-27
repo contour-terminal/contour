@@ -6,7 +6,7 @@
 #include <vtbackend/graphics/KittyGraphics.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 
-#include <crispy/Base64.hpp>
+#include <core/Base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -135,7 +135,7 @@ TEST_CASE("KittyGraphics.lower_case_delete_keeps_the_image_data", "[kitty]")
     auto pixels = std::string {};
     for (int i = 0; i < 4; ++i)
         pixels += "\xFF\x00\x00\xFF"sv;
-    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1;{}\033\\", crispy::base64::encode(pixels)));
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1;{}\033\\", core::base64::encode(pixels)));
     REQUIRE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
 
     mock.writeToScreen("\033_Ga=d,d=a,i=1\033\\"sv);
@@ -158,7 +158,7 @@ TEST_CASE("KittyGraphics.upper_case_delete_frees_the_image_data", "[kitty]")
     auto pixels = std::string {};
     for (int i = 0; i < 4; ++i)
         pixels += "\xFF\x00\x00\xFF"sv;
-    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1;{}\033\\", crispy::base64::encode(pixels)));
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1;{}\033\\", core::base64::encode(pixels)));
 
     mock.writeToScreen("\033_Ga=d,d=A,i=1\033\\"sv);
     mock.terminal.flushInput();
@@ -191,7 +191,7 @@ TEST_CASE("KittyGraphics.an_endless_chunk_stream_is_abandoned_not_accumulated", 
     auto pixels = std::string {};
     for (int i = 0; i < 4; ++i)
         pixels += "\xFF\x00\x00\xFF"sv;
-    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=2;{}\033\\", crispy::base64::encode(pixels)));
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=2;{}\033\\", core::base64::encode(pixels)));
     CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
 }
 
@@ -211,7 +211,7 @@ TEST_CASE("KittyGraphics.hard_reset_drops_a_half_open_transmission", "[kitty]")
     for (int i = 0; i < 4; ++i)
         pixels += "\xFF\x00\x00\xFF"sv;
     mock.terminal.flushInput();
-    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=2;{}\033\\", crispy::base64::encode(pixels)));
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=2;{}\033\\", core::base64::encode(pixels)));
 
     CHECK(!mock.terminal.peekInput().contains("EINVAL"));
     CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
@@ -226,7 +226,7 @@ TEST_CASE("KittyGraphics.transmit_and_display_puts_an_image_in_the_grid", "[kitt
     auto pixels = std::string {};
     for (int i = 0; i < 4; ++i)
         pixels += "\xFF\x00\x00\xFF"sv; // opaque red
-    auto const encoded = crispy::base64::encode(pixels);
+    auto const encoded = core::base64::encode(pixels);
 
     mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1;{}\033\\", encoded));
 
@@ -244,8 +244,7 @@ TEST_CASE("KittyGraphics.mismatched_payload_size_is_refused", "[kitty]")
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
 
-    mock.writeToScreen(
-        std::format("\033_Ga=T,f=32,s=64,v=64,i=2;{}\033\\", crispy::base64::encode("AAAA"sv)));
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=64,v=64,i=2;{}\033\\", core::base64::encode("AAAA"sv)));
 
     CHECK(mock.terminal.peekInput().contains("EINVAL"));
     CHECK_FALSE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
@@ -268,7 +267,7 @@ TEST_CASE("KittyGraphics.chunked_transmission_is_reassembled", "[kitty]")
     auto pixels = std::string {};
     for (int i = 0; i < 4; ++i)
         pixels += "\x00\xFF\x00\xFF"sv;
-    auto const encoded = crispy::base64::encode(pixels);
+    auto const encoded = core::base64::encode(pixels);
     auto const half = encoded.size() / 2;
 
     // Only the first chunk carries control data; the rest is payload.
@@ -289,7 +288,7 @@ TEST_CASE("KittyGraphics.transmit_then_put_displays_the_stored_image", "[kitty]"
         pixels += "\x00\x00\xFF\xFF"sv;
 
     // a=t stores without displaying.
-    mock.writeToScreen(std::format("\033_Ga=t,f=32,s=2,v=2,i=9;{}\033\\", crispy::base64::encode(pixels)));
+    mock.writeToScreen(std::format("\033_Ga=t,f=32,s=2,v=2,i=9;{}\033\\", core::base64::encode(pixels)));
     CHECK_FALSE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).imageFragment());
 
     // a=p displays what was stored.
@@ -404,7 +403,7 @@ TEST_CASE("KittyGraphics.a_row_count_above_INT_MAX_does_not_wedge_the_terminal",
     auto pixels = std::string {};
     for (int i = 0; i < 4; ++i)
         pixels += "\xFF\x00\x00\xFF"sv;
-    auto const encoded = crispy::base64::encode(pixels);
+    auto const encoded = core::base64::encode(pixels);
 
     mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1,c=1,r=3000000000;{}\033\\", encoded));
 
@@ -424,7 +423,7 @@ TEST_CASE("KittyGraphics.a_column_count_above_INT_MAX_does_not_wedge_the_termina
     auto pixels = std::string {};
     for (int i = 0; i < 4; ++i)
         pixels += "\x00\x00\xFF\xFF"sv;
-    auto const encoded = crispy::base64::encode(pixels);
+    auto const encoded = core::base64::encode(pixels);
 
     mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1,c=4000000000,r=1;{}\033\\", encoded));
 
@@ -442,7 +441,7 @@ TEST_CASE("KittyGraphics.an_oversized_but_positive_cell_count_is_clamped_to_the_
     auto pixels = std::string {};
     for (int i = 0; i < 4; ++i)
         pixels += "\x00\xFF\x00\xFF"sv;
-    auto const encoded = crispy::base64::encode(pixels);
+    auto const encoded = core::base64::encode(pixels);
 
     mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1,c=99,r=99;{}\033\\", encoded));
 
@@ -463,7 +462,7 @@ TEST_CASE("KittyGraphics.an_APC_body_past_the_cap_is_dropped_not_dispatched_trun
 
     // 100x100 RGBA is 40000 bytes, whose base64 is 53336 -- past the 50 KiB cap.
     auto pixels = std::string(100uz * 100uz * 4uz, '\xFF');
-    auto const encoded = crispy::base64::encode(pixels);
+    auto const encoded = core::base64::encode(pixels);
     REQUIRE(encoded.size() > static_cast<std::size_t>(1024 * 50));
 
     mock.writeToScreen(std::format("\033_Ga=T,f=32,s=100,v=100,i=7;{}\033\\", encoded));
@@ -483,7 +482,7 @@ TEST_CASE("KittyGraphics.a_chunked_transmission_of_the_same_size_still_works", "
     mock.terminal.setCellPixelSize(ImageSize { Width(2), Height(2) });
 
     auto pixels = std::string(100uz * 100uz * 4uz, '\xFF');
-    auto const encoded = crispy::base64::encode(pixels);
+    auto const encoded = core::base64::encode(pixels);
 
     auto constexpr ChunkSize = size_t { 4096 };
     auto first = true;

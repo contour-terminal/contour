@@ -4,7 +4,9 @@
 #include <vtrasterizer/TracyCellZone.hpp>
 
 #include <crispy/StrongHash.hpp>
-#include <crispy/Times.hpp>
+
+#include <core/Times.hpp>
+#include <core/log/Assert.hpp>
 
 #include <algorithm>
 #include <array>

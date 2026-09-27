@@ -62,7 +62,7 @@ std::string describeLayout(std::vector<DrawnGlyph> const& layout)
     for (auto const& glyph: layout)
     {
         result += std::format("{}{}:", result.empty() ? "" : " ", glyph.column);
-        for (auto const [index, codepoint]: crispy::views::enumerate(glyph.codepoints))
+        for (auto const [index, codepoint]: core::views::enumerate(glyph.codepoints))
             result += std::format("{}U+{:04X}", index ? "+" : "", static_cast<uint32_t>(codepoint));
         result += std::format("(w{})", glyph.width);
     }

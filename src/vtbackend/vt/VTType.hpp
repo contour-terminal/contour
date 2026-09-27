@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/Assert.hpp>
+#include <core/Assert.hpp>
 
 #include <array>
 #include <format>

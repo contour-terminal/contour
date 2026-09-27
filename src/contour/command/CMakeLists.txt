@@ -17,7 +17,7 @@ add_library(contour_command STATIC
     TitleBarContextMenu.cpp TitleBarContextMenu.hpp
 )
 
-target_link_libraries(contour_command PUBLIC contour_config)
+target_link_libraries(contour_command PUBLIC contour_config core::base)
 
 target_include_directories(contour_command PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>

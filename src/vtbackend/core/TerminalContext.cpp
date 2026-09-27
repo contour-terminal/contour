@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/TerminalContext.hpp>
 
-#include <crispy/Assert.hpp>
+#include <core/Assert.hpp>
 
 #include <algorithm>
 #include <utility>

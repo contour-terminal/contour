@@ -20,10 +20,11 @@
 
 #include <vtpty/Pty.hpp>
 
-#include <crispy/App.hpp>
-#include <crispy/LogStore.hpp>
 #include <crispy/ScopedTimer.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Utils.hpp>
+#include <core/cli/App.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
@@ -1175,14 +1176,14 @@ void TerminalDisplay::paint()
             auto const destination = _saveScreenshot.value();
             _saveScreenshot = std::nullopt;
             requestScreenshot([destination](QImage const& image) {
-                std::visit(crispy::Overloaded { [&](std::filesystem::path const& path) {
-                                                   image.save(QString::fromStdString(path.string()));
-                                               },
-                                                [&](std::monostate) {
-                                                    if (QClipboard* clipboard = QGuiApplication::clipboard();
-                                                        clipboard != nullptr)
-                                                        clipboard->setImage(image, QClipboard::Clipboard);
-                                                } },
+                std::visit(core::Overloaded { [&](std::filesystem::path const& path) {
+                                                 image.save(QString::fromStdString(path.string()));
+                                             },
+                                              [&](std::monostate) {
+                                                  if (QClipboard* clipboard = QGuiApplication::clipboard();
+                                                      clipboard != nullptr)
+                                                      clipboard->setImage(image, QClipboard::Clipboard);
+                                              } },
                            destination);
             });
         }
@@ -1817,7 +1818,7 @@ void TerminalDisplay::doDumpStateInternal()
     Require(_renderer);
 
     // clang-format off
-    auto const targetBaseDir = _session->app().dumpStateAtExit().value_or(crispy::App::instance()->localStateDir() / "dump");
+    auto const targetBaseDir = _session->app().dumpStateAtExit().value_or(core::cli::App::instance()->localStateDir() / "dump");
     auto const workDirName = fs::path(std::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", chrono::system_clock::now()));
     auto const targetDir = targetBaseDir / workDirName;
     auto const latestDirName = fs::path("latest");

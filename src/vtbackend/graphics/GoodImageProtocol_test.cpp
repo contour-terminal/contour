@@ -5,7 +5,7 @@
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
-#include <crispy/Base64.hpp>
+#include <core/Base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -41,7 +41,7 @@ std::vector<uint8_t> makeRGBA(int width, int height, uint8_t r, uint8_t g, uint8
 std::string gipUpload(std::string_view headers, std::span<uint8_t const> body)
 {
     auto const encoded =
-        crispy::base64::encode(std::string_view(reinterpret_cast<char const*>(body.data()), body.size()));
+        core::base64::encode(std::string_view(reinterpret_cast<char const*>(body.data()), body.size()));
     return std::format("\033P!go=u,{};!{}\033\\", headers, encoded);
 }
 
@@ -55,7 +55,7 @@ std::string gipRender(std::string_view headers)
 std::string gipOneshot(std::string_view headers, std::span<uint8_t const> body)
 {
     auto const encoded =
-        crispy::base64::encode(std::string_view(reinterpret_cast<char const*>(body.data()), body.size()));
+        core::base64::encode(std::string_view(reinterpret_cast<char const*>(body.data()), body.size()));
     return std::format("\033P!go=s,{};!{}\033\\", headers, encoded);
 }
 

@@ -5,14 +5,14 @@
 
 #include <vtrasterizer/TextureAtlas.hpp>
 
-#include <crispy/LogStore.hpp>
+#include <core/log/LogStore.hpp>
 
 namespace vtrasterizer
 {
 
 auto inline const rendererLog =
-    logstore::Category("vt.renderer", "Logs general information about VT renderer.");
-auto inline const rasterizerLog = logstore::Category("vt.rasterizer", "Logs details about text rendering.");
+    core::log::Category("vt.renderer", "Logs general information about VT renderer.");
+auto inline const rasterizerLog = core::log::Category("vt.rasterizer", "Logs details about text rendering.");
 
 std::vector<uint8_t> downsampleRGBA(std::vector<uint8_t> const& bitmap,
                                     vtbackend::ImageSize size,

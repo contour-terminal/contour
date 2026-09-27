@@ -26,7 +26,7 @@
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/Escape.hpp>
+#include <core/Escape.hpp>
 
 #include <QtGui/QWindow>
 #include <QtQuick/QQuickWindow>
@@ -64,7 +64,7 @@ void clearPtyInput(contour::session::TerminalSession& session)
 /// Escaped view of everything @p session wrote towards the shell (readable Catch2 diffs).
 [[nodiscard]] std::string writtenBy(contour::session::TerminalSession& session)
 {
-    return crispy::escape(mockPtyOf(session).stdinBuffer());
+    return core::escape(mockPtyOf(session).stdinBuffer());
 }
 
 /// The session backing the active pane of tab @p index in @p window.
@@ -151,16 +151,16 @@ TEST_CASE("focus: a tab switch writes CSI O and CSI I to the two tabs' PTYs unde
 
         // Tab 1 (b) is active; switching to tab 0 must tell b it lost focus and a that it gained it.
         window->activateTab(0);
-        CHECK(writtenBy(*b) == crispy::escape("\033[O"));
-        CHECK(writtenBy(*a) == crispy::escape("\033[I"));
+        CHECK(writtenBy(*b) == core::escape("\033[O"));
+        CHECK(writtenBy(*a) == core::escape("\033[I"));
 
         clearPtyInput(*a);
         clearPtyInput(*b);
 
         // ...and symmetrically on the way back.
         window->activateTab(1);
-        CHECK(writtenBy(*a) == crispy::escape("\033[O"));
-        CHECK(writtenBy(*b) == crispy::escape("\033[I"));
+        CHECK(writtenBy(*a) == core::escape("\033[O"));
+        CHECK(writtenBy(*b) == core::escape("\033[I"));
     }
 
     SECTION("with focus reporting disabled nothing reaches either PTY")
@@ -220,8 +220,8 @@ TEST_CASE("focus: switching panes within a tab moves focus between the panes' se
     manager.activatePane(tab->id(), firstPaneId);
     CHECK(first->terminal().focused());
     CHECK_FALSE(second->terminal().focused());
-    CHECK(writtenBy(*second) == crispy::escape("\033[O"));
-    CHECK(writtenBy(*first) == crispy::escape("\033[I"));
+    CHECK(writtenBy(*second) == core::escape("\033[O"));
+    CHECK(writtenBy(*first) == core::escape("\033[I"));
 
     closeAllTabs(*window);
 }

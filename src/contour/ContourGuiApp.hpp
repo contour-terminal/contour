@@ -113,7 +113,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       NullSpeechSynthesizer, which keeps the suite off the platform's speech
     ///                       service (on Linux that is a speech-dispatcher connection per use).
     /// @param env            The process environment every part of the application reads through.
-    explicit ContourGuiApp(crispy::Environment const& env,
+    explicit ContourGuiApp(core::Environment const& env,
                            std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
                            std::unique_ptr<platform::ExternalLauncher> externalLauncher = nullptr,
                            std::unique_ptr<config::LayoutStore> layoutStore = nullptr,
@@ -124,7 +124,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
 
     int run(int argc, char const* argv[]) override;
-    [[nodiscard]] crispy::cli::Command parameterDefinition() const override;
+    [[nodiscard]] core::cli::Command parameterDefinition() const override;
 
     /// Opens a new OS window (loads a fresh Main.qml root).
     /// @param targetScreen The screen the new window should open on (the spawning window's screen),
@@ -290,7 +290,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// must outlive every one of them -- hence a member rather than a local of the verb handler.
     /// Separate from app::_logOutput, which is private to the base and serves the client/daemon
     /// verbs that call installLogging() with their own option prefix.
-    std::unique_ptr<logstore::ScopedOutput> _guiLogOutput;
+    std::unique_ptr<core::log::ScopedOutput> _guiLogOutput;
 
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtconformance/EscTestLog.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -62,7 +62,7 @@ namespace
 EscTestSummary parseEscTestLog(std::string_view text)
 {
     auto summary = EscTestSummary {};
-    auto const lines = crispy::split(text, '\n');
+    auto const lines = core::split(text, '\n');
 
     // The last verdict is the run's verdict: esctest prints one when it finishes, and a resumed or
     // re-run log could hold an earlier one.

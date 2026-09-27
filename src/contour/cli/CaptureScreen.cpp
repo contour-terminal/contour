@@ -6,7 +6,7 @@
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserEvents.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <cstdlib>
 #include <format>
@@ -81,7 +81,7 @@ namespace
                     string_view(capturedBuffer.data() + offset, capturedBuffer.size() - offset);
                 if (splitByWord)
                 {
-                    crispy::split(payload, ' ', [&](auto word) -> bool {
+                    core::split(payload, ' ', [&](auto word) -> bool {
                         output.write(word.data(), static_cast<streamsize>(word.size()));
                         output << '\n';
                         return true;
@@ -248,7 +248,7 @@ namespace
             reply.push_back(ch);
         }
 
-        auto const screenSizeReply = crispy::split(reply, ';');
+        auto const screenSizeReply = core::split(reply, ';');
         if (screenSizeReply.size() != 3)
             return nullopt;
 

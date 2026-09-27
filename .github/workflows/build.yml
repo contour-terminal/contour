@@ -83,6 +83,10 @@ jobs:
       run: find ./src/ \( -name "*.cpp" -o -name "*.hpp" -o -name "*.h" \) -print0 | xargs -0 "clang-format-$LLVM_VERSION" --Werror --dry-run
     - name: "Check includes"
       run: ./scripts/check-includes.sh
+    # vendor/core-cpp is a verbatim copy of a core-cpp release (vendor/README.md). The same check
+    # runs as the `core-cpp-vendored-copy` ctest; here it runs on every push, with no build.
+    - name: "Check the vendored core-cpp copy is verbatim"
+      run: cmake -DMODE=check -DDEST=vendor/core-cpp -P vendor/core-cpp/cmake/CoreCppVendor.cmake
 
   check_clang_tidy:
     name: "Check clang-tidy"
@@ -1019,7 +1023,8 @@ jobs:
         # Catch2 SKIP exits 0, so a green suite cannot distinguish "the transport works" from "it
         # was never exercised". `windows-latest` is far past the 10 1803 that introduced AF_UNIX,
         # so a skip here is a regression, not a platform fact. Same assertion the Linux matrix
-        # makes about the tmux oracles.
+        # makes about the tmux oracles. The transport itself is core-cpp's now (vendor/core-cpp), whose
+        # own CI runs its AF_UNIX cases on Windows; vthost_test is what exercises it from here.
         #
         # On WIN32 the top-level CMakeLists redirects CMAKE_RUNTIME_OUTPUT_DIRECTORY to
         # <binaryDir>/bin, so the executables do NOT sit beside their source directory the way they
@@ -1029,7 +1034,6 @@ jobs:
         run: |
           set -o pipefail
           for binary in \
-              "out/build/${CMAKE_PRESET}/bin/net_test.exe" \
               "out/build/${CMAKE_PRESET}/bin/vthost_test.exe"; do
             # A missing binary must not read as "nothing skipped": that is the very failure mode
             # this step exists to catch, one directory layout further out.
@@ -1312,8 +1316,6 @@ jobs:
             out/gcc-debug/src/vtbackend/vtbackend_test
             out/gcc-debug/src/vtbackend/bench-headless
             out/gcc-debug/src/vtrasterizer/vtrasterizer_test
-            out/gcc-debug/src/coro/coro_test
-            out/gcc-debug/src/net/net_test
             out/gcc-debug/src/vtworkspace/vtworkspace_test
             out/gcc-debug/src/vthost/vthost_test
             out/gcc-debug/src/vtconformance/vtconformance-run
@@ -1485,10 +1487,6 @@ jobs:
       # The daemon's suites. Socket buffers, coroutine frames and fd ownership are precisely the
       # code valgrind reads best, and this job is the closest thing the project has to a memory
       # gate (no ASan/TSan job exists).
-      - name: "test: coro (via valgrind)"
-        run: valgrind --error-exitcode=64 ./out/gcc-debug/src/coro/coro_test
-      - name: "test: net (via valgrind)"
-        run: valgrind --error-exitcode=64 ./out/gcc-debug/src/net/net_test
       - name: "test: vtworkspace (via valgrind)"
         run: valgrind --error-exitcode=64 ./out/gcc-debug/src/vtworkspace/vtworkspace_test
       - name: "test: vthost (via valgrind)"

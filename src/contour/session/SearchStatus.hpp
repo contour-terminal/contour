@@ -3,7 +3,7 @@
 
 #include <vtbackend/core/Search.hpp>
 
-#include <crispy/Assert.hpp>
+#include <core/Assert.hpp>
 
 #include <cstdint>
 #include <string_view>
@@ -142,7 +142,7 @@ struct SearchCaseAffordance
         case vtbackend::SearchCaseSensitivity::Insensitive:
             return { .glyph = "aa", .pinned = CasePinned::Yes };
     }
-    crispy::unreachable();
+    core::unreachable();
 }
 
 /// The policy the toggle moves to from @p mode.
@@ -160,7 +160,7 @@ struct SearchCaseAffordance
             return vtbackend::SearchCaseSensitivity::Insensitive;
         case vtbackend::SearchCaseSensitivity::Insensitive: return vtbackend::SearchCaseSensitivity::Smart;
     }
-    crispy::unreachable();
+    core::unreachable();
 }
 
 } // namespace contour::session

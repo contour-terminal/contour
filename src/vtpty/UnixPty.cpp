@@ -5,10 +5,11 @@
 #include <vtpty/UnixUtils.hpp>
 
 #include <crispy/BufferObject.hpp>
-#include <crispy/Deferred.hpp>
-#include <crispy/Environment.hpp>
-#include <crispy/Escape.hpp>
-#include <crispy/LogStore.hpp>
+
+#include <core/Deferred.hpp>
+#include <core/Environment.hpp>
+#include <core/Escape.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <cassert>
 #include <csignal>
@@ -103,7 +104,7 @@ namespace
     std::string hostnameForUtmp()
     {
         for (auto const* env: { "DISPLAY", "WAYLAND_DISPLAY" })
-            if (auto value = crispy::defaultEnvironment().get(env))
+            if (auto value = core::defaultEnvironment().get(env))
                 return std::move(*value);
 
         return {};
@@ -270,11 +271,11 @@ void UnixPty::close()
     auto const _ = std::scoped_lock { _mutex };
     if (_masterFd.isClosed())
     {
-        ptyLog()("PTY closing master from thread {} (already closed).", crispy::threadName());
+        ptyLog()("PTY closing master from thread {} (already closed).", core::threadName());
         return;
     }
 
-    ptyLog()("PTY closing master from thread {} (file descriptor {}).", crispy::threadName(), _masterFd);
+    ptyLog()("PTY closing master from thread {} (file descriptor {}).", core::threadName(), _masterFd);
     _readSelector.cancelRead(_masterFd);
     _masterFd.close();
     wakeupReader();
@@ -313,7 +314,7 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     if (ptyInLog)
         ptyInLog()("{} received: \"{}\"",
                    fd == _masterFd ? "master" : "stdout-fastpipe",
-                   crispy::escape(target, target + rv));
+                   core::escape(target, target + rv));
 
     if (rv == 0 && fd == _stdoutFastPipe.reader())
     {
@@ -395,7 +396,7 @@ int UnixPty::write(std::string_view data)
     if (ptyOutLog)
     {
         if (rv >= 0)
-            ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf, buf + rv));
+            ptyOutLog()("Sending bytes: \"{}\"", core::escape(buf, buf + rv));
 
         if (rv < 0)
             // errorlog()("PTY write failed: {}", strerror(errno));
@@ -416,7 +417,7 @@ int UnixPty::write(std::string_view data)
         if (rv2 >= 0)
         {
             if (ptyOutLog)
-                ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf + rv, buf + rv + rv2));
+                ptyOutLog()("Sending bytes: \"{}\"", core::escape(buf + rv, buf + rv + rv2));
             return static_cast<int>(rv + rv2);
         }
     }

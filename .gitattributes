@@ -1,0 +1,4 @@
+# vendor/core-cpp is a verbatim copy of a core-cpp release, pinned byte for byte by its MANIFEST.
+# A checkout's line-ending conversion would change the bytes the manifest pins, so git must never
+# touch them. See vendor/README.md.
+vendor/core-cpp/** -text

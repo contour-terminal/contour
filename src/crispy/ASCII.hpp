@@ -8,10 +8,10 @@ namespace crispy::ascii
 ///
 /// Identifiers a codebase writes down itself — action names, command titles, config keys — have their
 /// case and word boundaries decided by the character alone. Deliberately NOT std::tolower /
-/// std::isupper (nor crispy::toLower, which is built on them): those consult the C locale, so the
+/// std::isupper (nor core::toLower, which is built on them): those consult the C locale, so the
 /// same title could split into different words — or match a filter differently — depending on where
 /// the program happens to be running. These also stay constexpr and per-character, where
-/// crispy::toLower allocates a whole string.
+/// core::toLower allocates a whole string.
 
 [[nodiscard]] constexpr bool isUpper(char ch) noexcept
 {

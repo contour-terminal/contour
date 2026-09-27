@@ -4,8 +4,8 @@
 #include <vtrasterizer/FontDescriptions.hpp>
 #include <vtrasterizer/TextClusterGrouper.hpp>
 
-#include <crispy/Escape.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Escape.hpp>
+#include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -112,11 +112,11 @@ struct std::formatter<TextClusterGroup>: formatter<std::string>
     {
         return formatter<std::string>::format(
             std::format("TextClusterGroup {{ codepoints: \"{}\", @{}, clusters={}, style: {}, color: {} }}",
-                        crispy::escape(unicode::convert_to<char>(std::u32string_view(group.codepoints))),
+                        core::escape(unicode::convert_to<char>(std::u32string_view(group.codepoints))),
                         group.initialPenPosition,
                         group.clusters | std::views::transform([](int cluster) {
                             return std::to_string(cluster);
-                        }) | crispy::views::joinWith(", "),
+                        }) | core::views::joinWith(", "),
                         group.style,
                         group.color,
                         group.flags),
@@ -201,7 +201,7 @@ namespace std
 {
 static ostream& operator<<(std::ostream& os, u32string_view text)
 {
-    return os << '"' << crispy::escape(unicode::convert_to<char>(text)) << '"';
+    return os << '"' << core::escape(unicode::convert_to<char>(text)) << '"';
 }
 
 static ostream& operator<<(std::ostream& os, TextClusterGroup const& group)

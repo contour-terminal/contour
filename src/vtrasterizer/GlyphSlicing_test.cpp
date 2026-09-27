@@ -6,6 +6,8 @@
 #include <vtrasterizer/GlyphSlicing.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
 
+#include <core/log/Assert.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <ranges>

@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/tmux/TmuxGateway.hpp>
 
+#include <core/net/AsyncBufferedReader.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <format>
 #include <utility>
 #include <variant>
 
-#include <net/AsyncBufferedReader.hpp>
-
 namespace vthost::tmux
 {
 
 using namespace std::chrono_literals;
 
-TmuxGateway::TmuxGateway(net::EventLoop& loop,
-                         std::unique_ptr<net::ISocket> connection,
+TmuxGateway::TmuxGateway(core::net::EventLoop& loop,
+                         std::unique_ptr<core::net::ISocket> connection,
                          GatewayEvents& events):
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 256 } * 1024),
@@ -33,8 +33,9 @@ void TmuxGateway::sendCommand(std::string command, CommandCallback callback)
         // than left dangling in _pending to desync every later reply.
         if (callback)
             callback(false, {});
+        // The queue closes _connection too. A close resumes a parked read at once, which can end
+        // the flow that owns this object, so it comes last and is not repeated.
         _writer.close();
-        _connection->close();
         return;
     }
     _pending.push_back(std::move(callback));
@@ -118,8 +119,9 @@ void TmuxGateway::detach()
                 cb(false, {});
         }
         _pending.clear();
+        // The queue closes _connection too. A close resumes a parked read at once, which can end
+        // the flow that owns this object, so it comes last and is not repeated.
         _writer.close();
-        _connection->close();
     }
 }
 
@@ -217,9 +219,9 @@ void TmuxGateway::handleLine(std::string_view line)
     }
 }
 
-coro::Task<void> TmuxGateway::run()
+core::async::Task<void> TmuxGateway::run()
 {
-    auto reader = net::AsyncBufferedReader { _connection.get() };
+    auto reader = core::net::AsyncBufferedReader { _connection.get() };
     while (!_exited)
     {
         auto line = co_await reader.readLine();

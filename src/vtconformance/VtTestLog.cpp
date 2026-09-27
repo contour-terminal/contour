@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtconformance/VtTestLog.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <array>
 #include <charconv>
@@ -136,8 +136,8 @@ std::vector<VtTestRecord> parseVtTestLog(std::string_view transcript)
 {
     auto records = std::vector<VtTestRecord> {};
 
-    auto const lines = crispy::split(transcript, '\n');
-    for (auto const& [index, line]: crispy::views::enumerate(lines))
+    auto const lines = core::split(transcript, '\n');
+    for (auto const& [index, line]: core::views::enumerate(lines))
     {
         auto const lineNumber = index + 1;
 

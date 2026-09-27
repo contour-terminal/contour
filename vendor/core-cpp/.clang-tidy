@@ -1,0 +1,255 @@
+---
+# clang-tidy configuration for core-cpp's code (src/core/ and tests/).
+#
+# It is contour's .clang-tidy (contour-terminal/contour at 6777ff05) with three changes:
+#   * HeaderFilterRegex names src/core/, core-cpp's only source root, so findings in
+#     dependency headers (Catch2, libunicode) are never reported, wherever those are unpacked.
+#     It accepts either separator: on Windows clang-tidy sees `D:\core-cpp\src\core/testing/...`,
+#     which `.*/src/core/.*` does not match, and every header finding would be dropped silently.
+#   * contour's ExcludeHeaderFilterRegex is gone: it excluded Qt and Wayland generated code,
+#     which core-cpp does not have.
+#   * The readability-identifier-naming block ends with IgnoredRegexps for the names the
+#     language and the standard library bind to by spelling (coroutine hooks, container
+#     members, member typedefs, std specializations), taken from fastcached's .clang-tidy
+#     (eb9c9c68). contour annotated those with NOLINT; core-cpp has no NOLINT at all
+#     (tests/cmake/check-cmake-hygiene.cmake refuses one), so they are exempted here. The
+#     members of std::stop_token, stop_source and stop_callback join them: core::async's
+#     fallback for those spells them as the standard does, so code compiles against either.
+#
+# A bare `-some-check` with no rationale is indistinguishable from an accident, so record
+# the reasoning here when disabling something. YAML folded scalars cannot carry `#`
+# comments, hence this block rather than inline notes.
+#
+# Deliberate, standing policy decisions, inherited from contour, where each was measured:
+#
+#   * Unchecked container access. The whole `pro-bounds-*` family is off: hot paths index
+#     buffers by computed offset, and bounds-checked accessors are neither free nor more
+#     correct there. `pro-bounds-avoid-unchecked-container-access` (new in LLVM 20) is the
+#     fourth member of that family.
+#   * C-style casts. `cppcoreguidelines-pro-type-cstyle-cast` has long been off;
+#     `modernize-avoid-c-style-cast` (new in LLVM 22) restates the same rule.
+#   * Brace style. `readability-braces-around-statements` has long been off;
+#     `readability-inconsistent-ifelse-braces` (new in LLVM 21) polices the same area.
+#     Brace style is settled by .clang-format.
+#   * `modernize-use-designated-initializers` -- deliberate (contour 8cd3d714).
+#   * `portability-avoid-pragma-once` -- `#pragma once` is the house include guard.
+#   * `misc-include-cleaner` -- include hygiene is pursued separately.
+#   * `misc-non-private-member-variables-in-classes` -- exact duplicate of the
+#     cppcoreguidelines- check of the same name, which is already disabled.
+#   * `bugprone-std-namespace-modification` -- every report was a std::formatter
+#     specialization for a program-defined type, which [namespace.std] explicitly permits.
+#   * `misc-multiple-inheritance` -- the `struct overloaded: Ts...` visitor idiom and
+#     interface-plus-base classes, which the check cannot tell from misuse.
+#   * `cppcoreguidelines-use-enum-class` -- bitmask enums whose values are protocol-defined
+#     bit positions, combined with bitwise operators.
+#   * `misc-header-include-cycle` -- a header that includes its template implementation
+#     part at its end is the usual split, not a cycle.
+#   * `clang-analyzer-optin.performance.Padding` -- field order follows meaning, not size.
+#   * `bugprone-command-processor` -- the calls that need a shell are deliberate.
+#   * `readability-function-size` -- a protocol dispatch switch is as large as the protocol.
+#   * `clang-analyzer-unix.BlockInCriticalSection` -- it classifies by function name, not
+#     by the descriptor's flags, so a read of an O_NONBLOCK descriptor reads as blocking.
+#   * `readability-qualified-auto` -- unsound for portable code: it rewrites `auto` to
+#     `auto const*` whenever the initializer is a pointer, and libstdc++'s std::array
+#     iterator IS a raw pointer while MSVC's is a class, so the fix breaks the Windows build.
+#   * `bugprone-chained-comparison` -- unavoidable with Catch2: CHECK(a == b) expands to
+#     `Catch::Decomposer() <= a == b`, a chained comparison by construction.
+#   * `misc-no-recursion` -- recursion is a legitimate tool in a parser; the check flags
+#     the technique rather than any defect.
+#   * `misc-use-anonymous-namespace` -- directly contradicts `misc-use-internal-linkage`,
+#     which is kept: enabling both flags every symbol whichever form it takes.
+#   * `readability-convert-member-functions-to-static` -- its fix emits `static` before
+#     `[[nodiscard]]`, where the attribute then appertains to the return type.
+#   * `readability-redundant-member-init` -- its fix drops a load-bearing `T member {};`
+#     from aggregates built with designated initializers that omit fields.
+#   * `performance-trivially-destructible` -- its fix makes a type trivially destructible, and
+#     `core::async::DetachedTask`'s out-of-line defaulted destructor exists to stop exactly that:
+#     a trivial empty return object is one clang-cl at -O0 reloads from a coroutine frame that
+#     may already be freed (core-cpp#51). An empty in-class body is what
+#     `modernize-use-equals-default` refuses, so out of line is the one spelling left.
+#
+# One directory departs from this list, and says so in its own file:
+# `src/core/tui/.clang-tidy` raises `readability-function-cognitive-complexity` to 210 for
+# core::tui alone, where eighteen lexers, dispatchers and renderers are over the threshold, and
+# turns `readability-enum-initial-value` off for the one enumeration it cannot fit
+# (`core::tui::KeyCode`). Both stay as they are here for every other module.
+#
+# Re-check this list when bumping LLVM: new checks arrive through the `cppcoreguidelines-*`,
+# `modernize-*` and `readability-*` globs and can silently contradict the policy above.
+
+Checks: >-
+  -*,
+  bugprone-*,
+  -bugprone-branch-clone,
+  -bugprone-chained-comparison,
+  -bugprone-command-processor,
+  -bugprone-std-namespace-modification,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  -bugprone-reserved-identifier,
+  -bugprone-suspicious-include,
+  -bugprone-unchecked-optional-access,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.*,
+  clang-analyzer-nullability.*,
+  clang-analyzer-optin.cplusplus.*,
+  -clang-analyzer-optin.cplusplus.UninitializedObject,
+  clang-analyzer-optin.performance.*,
+  -clang-analyzer-optin.performance.Padding,
+  clang-analyzer-optin.portability.*,
+  clang-analyzer-security.*,
+  clang-analyzer-unix.*,
+  -clang-analyzer-unix.BlockInCriticalSection,
+  clang-diagnostic-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-avoid-const-or-ref-data-members,
+  -cppcoreguidelines-use-enum-class,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-no-malloc,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-const-cast,
+  -cppcoreguidelines-pro-type-cstyle-cast,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-static-cast-downcast,
+  -cppcoreguidelines-pro-type-union-access,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-special-member-functions,
+  misc-*,
+  -misc-include-cleaner,
+  -misc-header-include-cycle,
+  -misc-multiple-inheritance,
+  -misc-no-recursion,
+  -misc-use-anonymous-namespace,
+  -misc-non-private-member-variables-in-classes,
+  modernize-*,
+  -modernize-avoid-bind,
+  -modernize-avoid-c-arrays,
+  -modernize-avoid-c-style-cast,
+  -modernize-use-bool-literals,
+  -modernize-use-designated-initializers,
+  -modernize-use-scoped-lock,
+  -modernize-use-trailing-return-type,
+  performance-*,
+  portability-*,
+  -portability-avoid-pragma-once,
+  -performance-no-int-to-ptr,
+  -performance-trivially-destructible,
+  readability-*,
+  -readability-avoid-unconditional-preprocessor-if,
+  -readability-braces-around-statements,
+  -readability-convert-member-functions-to-static,
+  -readability-else-after-return,
+  -readability-function-size,
+  -readability-identifier-length,
+  -readability-implicit-bool-conversion,
+  -readability-inconsistent-ifelse-braces,
+  -readability-magic-numbers,
+  -readability-named-parameter,
+  -readability-qualified-auto,
+  -readability-redundant-access-specifiers,
+  -readability-redundant-member-init,
+  -readability-uppercase-literal-suffix,
+  -readability-use-anyofallof,
+
+# Every enabled check is a hard error, under the zero-warning policy.
+# Fix the cause; core-cpp has no NOLINT.
+WarningsAsErrors: '*'
+
+UseColor: true
+HeaderFilterRegex: '.*[/\\]src[/\\]core[/\\].*'
+FormatStyle: none
+
+CheckOptions:
+  cppcoreguidelines-explicit-virtual-functions.IgnoreDestructors: '1'
+  modernize-loop-convert.MaxCopySize: '16'
+  modernize-loop-convert.MinConfidence: reasonable
+  modernize-loop-convert.NamingStyle: CamelCase
+  modernize-pass-by-value.IncludeStyle: llvm
+  modernize-replace-auto-ptr.IncludeStyle: llvm
+  modernize-use-default-member-init.UseAssignment: '1'
+  modernize-use-nullptr.NullMacros: 'NULL'
+  # Pointer analysis proposes a const *pointee* where only the pointer itself could be
+  # const, which is a different guarantee and breaks callers that write through it.
+  misc-const-correctness.AnalyzePointers: 'false'
+  readability-function-cognitive-complexity.Threshold: '50'
+  readability-function-cognitive-complexity.IgnoreMacros: 'true'
+
+  # Identifier naming. Types are CamelCase, everything else camelBack, with a
+  # leading underscore on non-public data members. This block is what makes that
+  # rule enforceable rather than aspirational, so a category missing from it is a
+  # category nothing checks.
+  #
+  # The names the language and the standard library bind to *by spelling* cannot
+  # follow it: coroutine hooks (await_ready, promise_type), container members
+  # (push_back, value_type), and std::formatter/std::hash specializations. The
+  # *IgnoredRegexp options at the end exempt exactly those names.
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.ClassConstantCase: CamelCase
+  readability-identifier-naming.ClassMemberCase: CamelCase
+  readability-identifier-naming.ConstantCase: camelBack
+  readability-identifier-naming.ConstantMemberCase: camelBack
+  readability-identifier-naming.ConstantMemberPrefix: '_'
+  readability-identifier-naming.ConstexprVariableCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.EnumConstantCase: CamelCase
+  readability-identifier-naming.FunctionCase: camelBack
+  readability-identifier-naming.MethodCase: camelBack
+  readability-identifier-naming.NamespaceCase: lower_case
+  readability-identifier-naming.ParameterCase: camelBack
+  readability-identifier-naming.PrivateMemberCase: camelBack
+  readability-identifier-naming.PrivateMemberPrefix: '_'
+  readability-identifier-naming.ProtectedMemberCase: camelBack
+  readability-identifier-naming.ProtectedMemberPrefix: '_'
+  readability-identifier-naming.PublicMemberCase: camelBack
+  readability-identifier-naming.ScopedEnumConstantCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.TypeAliasCase: CamelCase
+  readability-identifier-naming.TypedefCase: CamelCase
+  readability-identifier-naming.TypeTemplateParameterCase: CamelCase
+  readability-identifier-naming.UnionCase: CamelCase
+  readability-identifier-naming.VariableCase: camelBack
+  readability-identifier-naming.GlobalVariableCase: camelBack
+  # A namespace-scope constant POINTER cannot be constexpr when it is made from an integer, which is
+  # what Windows' `platform::InvalidHandle` is (INVALID_HANDLE_VALUE), and it is a constant like any
+  # other: CamelCase, as the house rule says and as its POSIX twin, a constexpr int, already is.
+  # Without this it falls under ConstantCase, and the one public constant that differs by platform
+  # would have to be spelled differently on one of them. Deliberately the POINTER style and not
+  # GlobalConstantCase: the wider one also claims every namespace-scope `const` value, which the
+  # tree spells camelBack today.
+  readability-identifier-naming.GlobalConstantPointerCase: CamelCase
+  # No Hungarian notation: no g/s_/k prefixes. Globals are plain camelBack.
+  #
+  # The hook names, as fastcached's FunctionIgnoredRegexp lists them: what the language and the
+  # standard library bind to by spelling, for a free function and for a member function alike.
+  #
+  # There is no ClassMethodCase or ClassMethodIgnoredRegexp, and that is how the list below is
+  # written once rather than twice: with no ClassMethod style configured at all, a static member
+  # function falls through to the Method style, which says the same thing. (Checked with the
+  # pinned clang-tidy: a static member named Static_Method is still refused, and one named `get`
+  # is still exempt.) The one duplicate that cannot go is TypeAlias/Typedef below, and the one
+  # thing that cannot express any of them once is YAML: an anchor and an alias make LLVM's parser
+  # answer "unknown node kind" and the whole configuration invalid.
+  readability-identifier-naming.FunctionIgnoredRegexp: '^(main|begin|end|push_back|pop_back|data|str|get|size|length|resize|empty|clear|value|c_str|capacity|to_string|string_view|assign|at|reserve|substr|sv|await_ready|await_suspend|await_resume|initial_suspend|final_suspend|unhandled_exception|return_value|return_void|yield_value|get_return_object|get_return_object_on_allocation_failure|address|operator_new|operator_delete|from_promise|allocate|deallocate)$'
+  # The same, plus the members of std::stop_token, stop_source and stop_callback, which
+  # core::async's fallback for them spells as the standard does (src/core/async/StopToken.hpp).
+  # Those four are members and nothing else: a FREE function of one of those names is not a
+  # standard-library hook, and is held to the naming rule like any other.
+  readability-identifier-naming.MethodIgnoredRegexp: '^(main|begin|end|push_back|pop_back|data|str|get|size|length|resize|empty|clear|value|c_str|capacity|to_string|string_view|assign|at|reserve|substr|sv|await_ready|await_suspend|await_resume|initial_suspend|final_suspend|unhandled_exception|return_value|return_void|yield_value|get_return_object|get_return_object_on_allocation_failure|address|operator_new|operator_delete|from_promise|allocate|deallocate|request_stop|stop_requested|stop_possible|get_token)$'
+  # Member typedefs the standard library looks up by name, and std::stop_callback's callback_type.
+  readability-identifier-naming.TypeAliasIgnoredRegexp: '^(value_type|size_type|difference_type|pointer|const_pointer|reference|const_reference|iterator|const_iterator|reverse_iterator|const_reverse_iterator|iterator_category|iterator_concept|element_type|allocator_type|char_type|traits_type|key_type|mapped_type|promise_type|is_transparent|callback_type)$'
+  readability-identifier-naming.TypedefIgnoredRegexp: '^(value_type|size_type|difference_type|pointer|const_pointer|reference|const_reference|iterator|const_iterator|reverse_iterator|const_reverse_iterator|iterator_category|iterator_concept|element_type|allocator_type|char_type|traits_type|key_type|mapped_type|promise_type|is_transparent|callback_type)$'
+  # Specializations of std templates, a promise type where the coroutine traits look for it, and
+  # a range's nested iterator class, which generic code names as R::iterator.
+  readability-identifier-naming.StructIgnoredRegexp: '^(formatter|hash|tuple_size|tuple_element|coroutine_traits|promise_type|iterator)$'
+  readability-identifier-naming.ClassIgnoredRegexp: '^(formatter|hash|tuple_size|tuple_element|coroutine_traits|promise_type|iterator)$'

@@ -248,13 +248,15 @@ class NativeController final: public QObject, public contour::session::SessionFa
   protected:
     /// The reactor's whole lifetime: connect, serve, notify. Takes the loop
     /// by pointer (coroutine reference parameters can dangle).
-    [[nodiscard]] coro::Task<void> runClient(net::EventLoop* loop) override;
+    [[nodiscard]] core::async::Task<void> runClient(core::net::EventLoop* loop) override;
 
     // RemoteController hooks: the attach-specific half of the shared connect lifecycle.
-    void detachOnReactor() override
+    [[nodiscard]] bool detachOnReactor() override
     {
-        if (_client != nullptr)
-            _client->detach();
+        if (_client == nullptr)
+            return false;
+        _client->detach();
+        return true;
     }
     void closeReactorBindings() override { closeAllBindings(); }
     [[nodiscard]] std::string connectTimeoutMessage() const override

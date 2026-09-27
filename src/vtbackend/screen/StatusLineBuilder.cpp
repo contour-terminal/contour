@@ -6,7 +6,8 @@
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <crispy/InterpolatedString.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -44,7 +45,7 @@ namespace // helper functions
             case ViMode::VisualBlock: return "VISUAL BLOCK"sv;
             case ViMode::Hint: return "HINT"sv;
         }
-        crispy::unreachable();
+        core::unreachable();
     }
 } // namespace
 
@@ -99,7 +100,7 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
             item.verbosity = StatusLineDefinitions::contextVerbosityFrom(*verbosity);
         item.separator = tryParseStringAttribute(interpolation, "Separator");
         if (auto const width = tryParseStringAttribute(interpolation, "MaxWidth"))
-            if (auto const columns = crispy::toInteger<10, int>(*width); columns && *columns > 0)
+            if (auto const columns = core::toInteger<10, int>(*width); columns && *columns > 0)
                 item.maxWidth = ColumnCount(*columns);
         return item;
     }
@@ -319,12 +320,12 @@ namespace
             auto const currentMousePosition = vt.currentMousePosition();
             if (!vt.contains(currentMousePosition))
                 return {};
-            return crispy::escape(vt.currentScreen().cellTextAt(currentMousePosition));
+            return core::escape(vt.currentScreen().cellTextAt(currentMousePosition));
         }
 
         std::string visit(StatusLineDefinitions::Clock const&)
         {
-            crispy::ignoreUnused(this);
+            core::ignoreUnused(this);
 
             // TODO: Find a more convenient way; The following is printing the time in UTC,
             //       but we need it in local time.
@@ -403,7 +404,7 @@ namespace
                 // number carried across the transition belongs to whatever ran before it.
                 case ProgressState::Indeterminate: return "BUSY";
             }
-            crispy::unreachable();
+            core::unreachable();
         }
 
         std::string visit(StatusLineDefinitions::TraceMode const&)
@@ -446,7 +447,7 @@ namespace
 
         std::string visit(StatusLineDefinitions::Command const& item)
         {
-            crispy::ignoreUnused(this);
+            core::ignoreUnused(this);
 
             std::string result;
             if (FILE* fp = popen(item.command.c_str(), "r"); fp)
@@ -469,7 +470,7 @@ namespace
 
         std::string visit(StatusLineDefinitions::Text const& item)
         {
-            crispy::ignoreUnused(this);
+            core::ignoreUnused(this);
             return item.text;
         }
 
@@ -623,7 +624,7 @@ namespace
             };
 
             auto const join = [&](std::vector<std::string> const& parts) {
-                return crispy::joinWith(parts, separator);
+                return core::joinWith(parts, separator);
             };
 
             auto candidate = join(segments);

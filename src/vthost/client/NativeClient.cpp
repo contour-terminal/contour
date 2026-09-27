@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/client/NativeClient.hpp>
 
+#include <core/net/Sockets.hpp>
+
 #include <libunicode/convert.h>
 
 #include <algorithm>
@@ -11,7 +13,7 @@
 #include <variant>
 #include <vector>
 
-#include <net/Sockets.hpp>
+#include <vthost/GracefulClose.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/SessionSettings.hpp>
@@ -222,13 +224,14 @@ std::string RemoteScreen::viewportText() const
 // ---------------------------------------------------------------------------
 // NativeClient
 
-NativeClient::NativeClient(net::EventLoop& loop,
-                           std::unique_ptr<net::ISocket> connection,
+NativeClient::NativeClient(core::net::EventLoop& loop,
+                           std::unique_ptr<core::net::ISocket> connection,
                            HandshakeOptions handshake,
                            UpdateHandler onUpdate,
                            ImageHandler onImage,
                            SessionEventHandler onSessionEvent,
                            LayoutHandler onLayout):
+    _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
     _historyKeep(resolveHistoryKeep(handshake)), // the parameter, before the move below
@@ -265,6 +268,8 @@ RemoteScreen& NativeClient::screenFor(uint64_t session)
 
 uint64_t NativeClient::send(proto::DecodedPdu const& pdu)
 {
+    if (_closing)
+        return 0;
     auto const serial = _nextSerial++;
     auto sink = proto::Writer {};
     proto::encodePdu(sink, serial, pdu);
@@ -276,8 +281,9 @@ uint64_t NativeClient::send(proto::DecodedPdu const& pdu)
         // The queue's overflow contract: dropping a frame mid-stream (a
         // keystroke, a resize) silently desyncs the daemon — sever instead.
         errorLog()("attach: {}; severing", _writer.describeRefusal());
+        // The queue closes _connection too. A close resumes a parked read at once, which can end
+        // the flow that owns this object, so it comes last and is not repeated.
         _writer.close();
-        _connection->close();
     }
     return serial;
 }
@@ -339,8 +345,10 @@ void NativeClient::closePane(uint64_t session)
 void NativeClient::detach()
 {
     _detached = true;
-    _writer.close();
-    _connection->close();
+    // Retires the parked read so run() leaves its pump and ends the connection in order, with
+    // close_notify over TLS. Closing here instead reads as truncation on the daemon's side.
+    // Retiring the read can resume run() at once, so nothing comes after it.
+    _connection->cancelRead();
 }
 
 void NativeClient::handlePdu(proto::DecodedFrame const& frame)
@@ -458,23 +466,28 @@ void NativeClient::reportPumpOutcome(PumpResult const& outcome)
     }
 }
 
-coro::Task<void> NativeClient::run()
+core::async::Task<void> NativeClient::run()
 {
     send(proto::DecodedPdu { proto::ClientHello { .codecVersion = proto::CodecVersion,
                                                   .token = _handshake.token,
                                                   .sessionSettings = _handshake.sessionSettings } });
 
-    auto const outcome = co_await pumpPdus(_connection.get(), [this](proto::DecodedFrame const& frame) {
-        handlePdu(frame);
-        return !_detached && !_versionMismatch;
-    });
+    auto outcome = co_await pumpPdus(
+        _connection.get(),
+        [this](proto::DecodedFrame const& frame) {
+            handlePdu(frame);
+            return !_detached && !_versionMismatch;
+        },
+        [this] { return _detached; });
+    // detach() retires the read it parked on, which the pump reports as a cancelled read. That is
+    // the detach itself, not a failure.
+    if (_detached && outcome.stop == PumpStop::TransportError
+        && outcome.transportError->code == core::net::NetErrorCode::Cancelled)
+        outcome = PumpResult::stopped(PumpStop::HandlerStopped);
     reportPumpOutcome(outcome);
 
-    if (!_detached)
-    {
-        co_await _writer.flushThenClose();
-        _connection->close();
-    }
+    _closing = true;
+    co_await closeGracefully(&_loop, &_writer, _connection.get());
 }
 
 } // namespace vthost::client

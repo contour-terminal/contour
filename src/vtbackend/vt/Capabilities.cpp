@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/vt/Capabilities.hpp>
 
-#include <crispy/Escape.hpp>
+#include <core/Escape.hpp>
 
 #include <algorithm>
 #include <array>
@@ -464,7 +464,7 @@ string StaticDatabase::terminfo() const
 
     for (auto const& cap: strings)
         if (!cap.name.empty() && !cap.value.empty())
-            output << "    " << cap.name << "=" << crispy::escape(cap.value, crispy::NumericEscape::Octal)
+            output << "    " << cap.name << "=" << core::escape(cap.value, core::NumericEscape::Octal)
                    << ",\n";
 
     return output.str();

@@ -3,7 +3,12 @@
 
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/LogSink.hpp>
+#include <core/async/WhenAll.hpp>
+#include <core/log/LogSink.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/testing/CoroTestSupport.hpp>
+#include <core/net/testing/InMemoryTransport.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -22,11 +27,6 @@
 #include <variant>
 #include <vector>
 
-#include <coro/WhenAll.hpp>
-#include <net/EventLoop.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/testing/CoroTestSupport.hpp>
-#include <net/testing/InMemoryTransport.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
@@ -36,7 +36,7 @@
 
 using namespace std::chrono_literals;
 
-using coro::Task;
+using core::async::Task;
 using vthost::NativeSession;
 using vthost::SessionHost;
 namespace proto = vthost::proto;
@@ -45,7 +45,7 @@ namespace
 {
 
 /// Writes the pre-encoded request bytes onto the wire.
-Task<void> feedBytes(net::ISocket* client, std::vector<std::byte> const* bytes)
+Task<void> feedBytes(core::net::ISocket* client, std::vector<std::byte> const* bytes)
 {
     std::ignore = co_await client->write(std::span<std::byte const> { bytes->data(), bytes->size() });
 }
@@ -58,7 +58,7 @@ Task<void> feedBytes(net::ISocket* client, std::vector<std::byte> const* bytes)
 /// snapshot run takes depends on how its rows happen to partition, which is exactly what a test
 /// of the partitioning must not hardcode.
 /// @param done Consulted after each decoded frame; the collector stops when it returns true.
-Task<void> collectUntil(net::ISocket* client,
+Task<void> collectUntil(core::net::ISocket* client,
                         std::function<bool(std::vector<proto::DecodedFrame> const&)> done,
                         std::vector<proto::DecodedFrame>* out)
 {
@@ -84,7 +84,9 @@ Task<void> collectUntil(net::ISocket* client,
 }
 
 /// Collects exactly @p expected PDUs.
-Task<void> collectPdus(net::ISocket* client, std::size_t expected, std::vector<proto::DecodedFrame>* out)
+Task<void> collectPdus(core::net::ISocket* client,
+                       std::size_t expected,
+                       std::vector<proto::DecodedFrame>* out)
 {
     co_await collectUntil(client, [expected](auto const& got) { return got.size() >= expected; }, out);
 }
@@ -97,7 +99,7 @@ bool endsSnapshotRun(proto::DecodedFrame const& frame)
 }
 
 /// Collects a whole snapshot run, plus @p extra PDUs after it.
-Task<void> collectSnapshotRun(net::ISocket* client,
+Task<void> collectSnapshotRun(core::net::ISocket* client,
                               std::vector<proto::DecodedFrame>* out,
                               std::size_t extra = 0)
 {
@@ -112,22 +114,23 @@ Task<void> collectSnapshotRun(net::ISocket* client,
 
 /// driveExchange, but bounded by a snapshot run's completion instead of a PDU count.
 Task<void> driveSnapshotRun(NativeSession* session,
-                            net::ISocket* client,
+                            core::net::ISocket* client,
                             std::vector<std::byte> const* request,
                             std::vector<proto::DecodedFrame>* out,
                             std::size_t extra = 0)
 {
-    co_await coro::whenAll(
+    co_await core::async::whenAll(
         session->run(), feedBytes(client, request), collectSnapshotRun(client, out, extra));
 }
 
 Task<void> driveExchange(NativeSession* session,
-                         net::ISocket* client,
+                         core::net::ISocket* client,
                          std::vector<std::byte> const* request,
                          std::size_t expected,
                          std::vector<proto::DecodedFrame>* out)
 {
-    co_await coro::whenAll(session->run(), feedBytes(client, request), collectPdus(client, expected, out));
+    co_await core::async::whenAll(
+        session->run(), feedBytes(client, request), collectPdus(client, expected, out));
 }
 
 /// Encodes @p pdus into one contiguous request, serials counting from 1.
@@ -175,19 +178,19 @@ struct NativeHarness
 {
     explicit NativeHarness(HarnessOptions opts = {}): options { std::move(opts) } {}
 
-    net::PollEventSource source;
-    net::EventLoop loop { source };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
     HarnessOptions options {}; // set by the constructor, before `host` and `session` read it
     SessionHost host { loop,
                        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                            return std::make_unique<vtpty::MockPty>(size);
                        },
                        hostSettings(options.history),
-                       crispy::defaultEnvironment(),
+                       core::defaultEnvironment(),
                        /*startPumps=*/false,
                        vthost::ClientSizePolicy::Latest,
                        options.startupLayout };
-    net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
+    core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
     std::unique_ptr<NativeSession> session =
         std::make_unique<NativeSession>(loop,
                                         host,
@@ -296,7 +299,7 @@ std::vector<proto::DecodedFrame> exchangeAll(NativeHarness* h, std::vector<proto
     auto const bytes = encodeRequest(pdus);
     auto received = std::vector<proto::DecodedFrame> {};
     // A ceiling far above any expected answer: the drain below ends collection, not this.
-    h->loop.blockOn(net::testing::allOf(
+    h->loop.blockOn(core::net::testing::allOf(
         h->session->run(), feedThenDrain(h, &bytes), collectPdus(h->pair.second.get(), 1000, &received)));
     return received;
 }
@@ -309,17 +312,17 @@ std::vector<proto::DecodedFrame> exchangeAll(NativeHarness* h, std::vector<proto
 /// what does that in production and nothing in NativeSession does it for itself.
 struct TwoClientHarness
 {
-    net::PollEventSource source;
-    net::EventLoop loop { source };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
     SessionHost host { loop,
                        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                            return std::make_unique<vtpty::MockPty>(size);
                        },
                        hostSettings(vtbackend::LineCount(0)),
-                       crispy::defaultEnvironment(),
+                       core::defaultEnvironment(),
                        /*startPumps=*/false };
-    net::testing::SocketPair firstPair = *net::testing::makeSocketPair(loop);
-    net::testing::SocketPair secondPair = *net::testing::makeSocketPair(loop);
+    core::net::testing::SocketPair firstPair = *core::net::testing::makeSocketPair(loop);
+    core::net::testing::SocketPair secondPair = *core::net::testing::makeSocketPair(loop);
     std::unique_ptr<NativeSession> serverOne = std::make_unique<NativeSession>(
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(firstPair.first));
     std::unique_ptr<NativeSession> serverTwo = std::make_unique<NativeSession>(
@@ -329,8 +332,8 @@ struct TwoClientHarness
 };
 
 /// Feeds @p bytes to @p client after @p delay, so a request can be ordered after another client's.
-Task<void> feedAfter(net::EventLoop* loop,
-                     net::ISocket* client,
+Task<void> feedAfter(core::net::EventLoop* loop,
+                     core::net::ISocket* client,
                      std::vector<std::byte> const* bytes,
                      std::chrono::milliseconds delay)
 {
@@ -339,7 +342,7 @@ Task<void> feedAfter(net::EventLoop* loop,
 }
 
 /// Closes @p client after @p delay, ending its collector at EOF so a count is exact.
-Task<void> closeAfter(net::EventLoop* loop, net::ISocket* client, std::chrono::milliseconds delay)
+Task<void> closeAfter(core::net::EventLoop* loop, core::net::ISocket* client, std::chrono::milliseconds delay)
 {
     co_await loop->delay(delay);
     client->close();
@@ -372,7 +375,7 @@ Task<void> runThenMark(NativeSession* session, bool* done)
 /// client, close it from outside after ~1s so the test fails instead of hanging.
 Task<void> closeWatchdog(NativeHarness* h, bool const* done, bool* fired)
 {
-    if (!co_await net::testing::waitUntil(&h->loop, [done] { return *done; }))
+    if (!co_await core::net::testing::waitUntil(&h->loop, [done] { return *done; }))
     {
         *fired = true;
         h->pair.second->close();
@@ -629,10 +632,10 @@ TEST_CASE("an alternate-screen flip forces a resync snapshot with SessionState",
 
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
-    h.loop.blockOn(net::testing::allOf(h.session->run(),
-                                       feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 6, &received),
-                                       flipToAltScreen(&h, sessionId)));
+    h.loop.blockOn(core::net::testing::allOf(h.session->run(),
+                                             feedBytes(h.pair.second.get(), &bytes),
+                                             collectPdus(h.pair.second.get(), 6, &received),
+                                             flipToAltScreen(&h, sessionId)));
     REQUIRE(received.size() == 6);
 
     // [0] ServerHello, [1] LayoutState, [2] SessionState(primary), [3] Delta,
@@ -669,10 +672,10 @@ TEST_CASE("a snapshot carries the input-encoding state, resets included", "[vtho
 
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
-    h.loop.blockOn(net::testing::allOf(h.session->run(),
-                                       feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 6, &received),
-                                       flipToAltScreen(&h, sessionId)));
+    h.loop.blockOn(core::net::testing::allOf(h.session->run(),
+                                             feedBytes(h.pair.second.get(), &bytes),
+                                             collectPdus(h.pair.second.get(), 6, &received),
+                                             flipToAltScreen(&h, sessionId)));
     REQUIRE(received.size() == 6);
 
     auto const* primary = std::get_if<proto::SessionState>(&received[2].pdu);
@@ -710,10 +713,10 @@ TEST_CASE("a burst that outran the scrollback floor is served as a snapshot", "[
 
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
-    h.loop.blockOn(net::testing::allOf(h.session->run(),
-                                       feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 6, &received),
-                                       std::move(burst)));
+    h.loop.blockOn(core::net::testing::allOf(h.session->run(),
+                                             feedBytes(h.pair.second.get(), &bytes),
+                                             collectPdus(h.pair.second.get(), 6, &received),
+                                             std::move(burst)));
     REQUIRE(received.size() == 6);
 
     // [0] ServerHello, [1] LayoutState, [2] SessionState, [3] Delta (the attach snapshot),
@@ -736,10 +739,10 @@ TEST_CASE("a snapshot anchors the cursor so the following delta is incremental",
 
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
-    h.loop.blockOn(net::testing::allOf(h.session->run(),
-                                       feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 5, &received),
-                                       appendThenUpdate(&h, sessionId)));
+    h.loop.blockOn(core::net::testing::allOf(h.session->run(),
+                                             feedBytes(h.pair.second.get(), &bytes),
+                                             collectPdus(h.pair.second.get(), 5, &received),
+                                             appendThenUpdate(&h, sessionId)));
     REQUIRE(received.size() == 5);
 
     // [0] ServerHello, [1] LayoutState, [2] SessionState, [3] Delta(snapshot),
@@ -769,10 +772,10 @@ TEST_CASE("a cursor-only move still produces a delta so the mirror's cursor trac
 
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
-    h.loop.blockOn(net::testing::allOf(h.session->run(),
-                                       feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 5, &received),
-                                       moveCursorThenUpdate(&h, sessionId)));
+    h.loop.blockOn(core::net::testing::allOf(h.session->run(),
+                                             feedBytes(h.pair.second.get(), &bytes),
+                                             collectPdus(h.pair.second.get(), 5, &received),
+                                             moveCursorThenUpdate(&h, sessionId)));
     REQUIRE(received.size() == 5);
 
     // [0] ServerHello, [1] LayoutState, [2] SessionState, [3] Delta(snapshot), [4] cursor-only move.
@@ -805,10 +808,10 @@ TEST_CASE("a scrollback eviction reaches the client though no row changed", "[vt
 
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
-    h.loop.blockOn(net::testing::allOf(h.session->run(),
-                                       feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 5, &received),
-                                       clearHistoryThenUpdate(&h, sessionId)));
+    h.loop.blockOn(core::net::testing::allOf(h.session->run(),
+                                             feedBytes(h.pair.second.get(), &bytes),
+                                             collectPdus(h.pair.second.get(), 5, &received),
+                                             clearHistoryThenUpdate(&h, sessionId)));
     REQUIRE(received.size() == 5);
 
     // [0] ServerHello, [1] LayoutState, [2] SessionState, [3] Delta(snapshot), [4] the eviction.
@@ -829,10 +832,10 @@ TEST_CASE("a window-title change is carried in the following incremental delta",
 
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
-    h.loop.blockOn(net::testing::allOf(h.session->run(),
-                                       feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 5, &received),
-                                       setTitleThenUpdate(&h, sessionId)));
+    h.loop.blockOn(core::net::testing::allOf(h.session->run(),
+                                             feedBytes(h.pair.second.get(), &bytes),
+                                             collectPdus(h.pair.second.get(), 5, &received),
+                                             setTitleThenUpdate(&h, sessionId)));
     REQUIRE(received.size() == 5);
 
     // [4] the incremental delta carries the title, gated on the diff against the last-sent one
@@ -868,16 +871,16 @@ TEST_CASE("a debounce flush pending at disconnect resolves before run() returns"
 
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
-    h.loop.blockOn(net::testing::allOf(h.session->run(),
-                                       feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 4, &received),
-                                       kickThenDisconnect(&h, sessionId)));
+    h.loop.blockOn(core::net::testing::allOf(h.session->run(),
+                                             feedBytes(h.pair.second.get(), &bytes),
+                                             collectPdus(h.pair.second.get(), 4, &received),
+                                             kickThenDisconnect(&h, sessionId)));
 
     // The daemon frees the session the moment run() returns; a flush coroutine
     // still parked in its debounce delay would then resume on freed memory
     // (ASan turns that into a hard failure right here).
     h.session.reset();
-    h.loop.blockOn(net::testing::sleepFor(&h.loop, 30ms));
+    h.loop.blockOn(core::net::testing::sleepFor(&h.loop, 30ms));
     SUCCEED("the debounce flush settled before the session was destroyed");
 }
 
@@ -914,10 +917,10 @@ TEST_CASE("a client that overflows the write queue is disconnected", "[vthost][n
 
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
-    h.loop.blockOn(net::testing::allOf(runThenMark(h.session.get(), &done),
-                                       feedBytes(h.pair.second.get(), &bytes),
-                                       collectPdus(h.pair.second.get(), 1, &received),
-                                       closeWatchdog(&h, &done, &watchdogFired)));
+    h.loop.blockOn(core::net::testing::allOf(runThenMark(h.session.get(), &done),
+                                             feedBytes(h.pair.second.get(), &bytes),
+                                             collectPdus(h.pair.second.get(), 1, &received),
+                                             closeWatchdog(&h, &done, &watchdogFired)));
 
     CHECK(!watchdogFired); // the SESSION closed the connection, not the watchdog
     CHECK(received.empty());
@@ -932,7 +935,7 @@ TEST_CASE("attaching to several scrollback-heavy panes is not refused", "[vthost
     // attach payload therefore had to fit under the send-queue bound at once, the second pane's
     // snapshot did not fit, and the connection was dropped before a single byte reached the client.
     // Nothing on the daemon changed between attempts, so every reconnect reproduced it exactly.
-    auto capture = logstore::ScopedCapture {};
+    auto capture = core::log::ScopedCapture {};
 
     // A bound far smaller than the snapshots it must carry, which is the shape of the report:
     // 4 MiB against two panes of ~1.8 MB each. The point is that the SUM exceeding the bound must
@@ -1044,9 +1047,9 @@ TEST_CASE("an increment is held back until the snapshot it would interleave with
     // well inside a run that pauses for the write queue to drain between each of its ~25 pieces.
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
-    h.loop.blockOn(
-        net::testing::allOf(driveSnapshotRun(h.session.get(), h.pair.second.get(), &bytes, &received, 1),
-                            appendThenUpdate(&h, sessionId)));
+    h.loop.blockOn(core::net::testing::allOf(
+        driveSnapshotRun(h.session.get(), h.pair.second.get(), &bytes, &received, 1),
+        appendThenUpdate(&h, sessionId)));
 
     // The run is intact: every Delta up to and including the terminating piece is a snapshot
     // piece, with no increment wedged among them.
@@ -1078,7 +1081,7 @@ TEST_CASE("an increment is held back until the snapshot it would interleave with
 
 TEST_CASE("a codec-version mismatch is reported with both versions", "[vthost][native][diagnostics]")
 {
-    auto capture = logstore::ScopedCapture {};
+    auto capture = core::log::ScopedCapture {};
     auto harness = NativeHarness {};
     auto const received = harness.exchange(
         { proto::DecodedPdu { proto::ClientHello { .codecVersion = proto::CodecVersion - 1 } } }, 1);
@@ -1095,7 +1098,7 @@ TEST_CASE("a codec-version mismatch is reported with both versions", "[vthost][n
 
 TEST_CASE("a missing ClientHello names what arrived instead", "[vthost][native][diagnostics]")
 {
-    auto capture = logstore::ScopedCapture {};
+    auto capture = core::log::ScopedCapture {};
     auto harness = NativeHarness {};
     std::ignore = harness.exchange({ proto::DecodedPdu { proto::CreateTab {} } }, 1);
 
@@ -1108,18 +1111,18 @@ TEST_CASE("a token mismatch is reported without either token", "[vthost][native]
     // The wire answer deliberately makes this indistinguishable from a version mismatch, so the
     // daemon-side log is the ONLY place the real reason exists. It must still not write the
     // secret down.
-    auto capture = logstore::ScopedCapture {};
+    auto capture = core::log::ScopedCapture {};
 
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
-    auto pair = *net::testing::makeSocketPair(loop);
+    auto pair = *core::net::testing::makeSocketPair(loop);
     auto session = std::make_unique<NativeSession>(
         loop,
         host,
@@ -1194,7 +1197,7 @@ TEST_CASE("a client area that did change is answered with a resync", "[vthost][n
 
 TEST_CASE("an out-of-range resize proposal is reported", "[vthost][native][diagnostics]")
 {
-    auto capture = logstore::ScopedCapture {};
+    auto capture = core::log::ScopedCapture {};
     auto harness = NativeHarness {};
     std::ignore =
         harness.exchange({ proto::DecodedPdu { proto::ClientHello {} },
@@ -1206,7 +1209,7 @@ TEST_CASE("an out-of-range resize proposal is reported", "[vthost][native][diagn
 
 TEST_CASE("an unexpected PDU is reported rather than silently dropped", "[vthost][native][diagnostics]")
 {
-    auto capture = logstore::ScopedCapture {};
+    auto capture = core::log::ScopedCapture {};
     auto harness = NativeHarness {};
     // A server-to-client PDU sent the wrong way: valid on the wire, meaningless here.
     std::ignore = harness.exchange(
@@ -1217,7 +1220,7 @@ TEST_CASE("an unexpected PDU is reported rather than silently dropped", "[vthost
 
 TEST_CASE("the PDU trace records both directions when enabled", "[vthost][native][diagnostics]")
 {
-    auto capture = logstore::ScopedCapture { "vthost.trace.proto" };
+    auto capture = core::log::ScopedCapture { "vthost.trace.proto" };
     auto harness = NativeHarness {};
     std::ignore = harness.exchange({ proto::DecodedPdu { proto::ClientHello {} } }, 1);
 
@@ -1231,7 +1234,7 @@ TEST_CASE("the PDU trace is disabled by default", "[vthost][native][diagnostics]
 {
     // It is one line per frame on a busy session; enabling it by accident would be a
     // performance and a privacy problem at once.
-    auto const* const category = logstore::get("vthost.trace.proto");
+    auto const* const category = core::log::get("vthost.trace.proto");
     REQUIRE(category != nullptr);
     CHECK_FALSE(category->isEnabled());
 }
@@ -1321,14 +1324,15 @@ TEST_CASE("a resize one client asked for resyncs EVERY attached client", "[vthos
     // Client two attaches first and then sits idle; client one attaches and resizes. The delay
     // orders the resize after BOTH handshakes, so client two is attached when the grid moves --
     // which is the whole scenario. Collection ends at EOF, so the counts below are exact.
-    h.loop.blockOn(net::testing::allOf(h.serverOne->run(),
-                                       h.serverTwo->run(),
-                                       feedAfter(&h.loop, h.secondPair.second.get(), &hello, 0ms),
-                                       feedAfter(&h.loop, h.firstPair.second.get(), &helloThenResize, 20ms),
-                                       closeAfter(&h.loop, h.firstPair.second.get(), 90ms),
-                                       closeAfter(&h.loop, h.secondPair.second.get(), 90ms),
-                                       collectPdus(h.firstPair.second.get(), 1000, &fromOne),
-                                       collectPdus(h.secondPair.second.get(), 1000, &fromTwo)));
+    h.loop.blockOn(
+        core::net::testing::allOf(h.serverOne->run(),
+                                  h.serverTwo->run(),
+                                  feedAfter(&h.loop, h.secondPair.second.get(), &hello, 0ms),
+                                  feedAfter(&h.loop, h.firstPair.second.get(), &helloThenResize, 20ms),
+                                  closeAfter(&h.loop, h.firstPair.second.get(), 90ms),
+                                  closeAfter(&h.loop, h.secondPair.second.get(), 90ms),
+                                  collectPdus(h.firstPair.second.get(), 1000, &fromOne),
+                                  collectPdus(h.secondPair.second.get(), 1000, &fromTwo)));
 
     // The client that asked: its attach snapshot, then the resize snapshot.
     auto const* const oneState = lastSessionState(fromOne);

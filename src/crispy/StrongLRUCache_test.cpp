@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <crispy/StrongLRUCache.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -18,27 +19,27 @@ TEST_CASE("StrongLRUCache.operator_index", "")
 
     cache[1] = "1"sv;
     REQUIRE(cache[1] == "1"sv);
-    REQUIRE(joinHumanReadable(cache.keys()) == "1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "1");
 
     cache[2] = "2"sv;
     REQUIRE(cache[2] == "2"sv);
-    REQUIRE(joinHumanReadable(cache.keys()) == "2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "2, 1");
 
     cache[3] = "3"sv;
     REQUIRE(cache[3] == "3"sv);
-    REQUIRE(joinHumanReadable(cache.keys()) == "3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "3, 2, 1");
 
     cache[4] = "4"sv;
     REQUIRE(cache[4] == "4"sv);
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     cache[5] = "5"sv;
     REQUIRE(cache[5] == "5"sv);
-    REQUIRE(joinHumanReadable(cache.keys()) == "5, 4, 3, 2");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "5, 4, 3, 2");
 
     cache[6] = "6"sv;
     REQUIRE(cache[6] == "6"sv);
-    REQUIRE(joinHumanReadable(cache.keys()) == "6, 5, 4, 3");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "6, 5, 4, 3");
 }
 
 TEST_CASE("StrongLRUCache.at", "")
@@ -46,7 +47,7 @@ TEST_CASE("StrongLRUCache.at", "")
     auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     CHECK_THROWS_AS(cache.at(-1), std::out_of_range);
     CHECK_NOTHROW(cache.at(1));
@@ -57,7 +58,7 @@ TEST_CASE("StrongLRUCache.clear", "[lrucache]")
     auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     CHECK(cache.size() == 4);
     cache.clear();
@@ -69,23 +70,23 @@ TEST_CASE("StrongLRUCache.touch", "")
     auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // no-op (not found)
     cache.touch(-1);
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // no-op (found)
     cache.touch(4);
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // middle to front
     cache.touch(3);
-    REQUIRE(joinHumanReadable(cache.keys()) == "3, 4, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "3, 4, 2, 1");
 
     // back to front
     cache.touch(1);
-    REQUIRE(joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
 }
 
 TEST_CASE("StrongLRUCache.contains", "")
@@ -93,23 +94,23 @@ TEST_CASE("StrongLRUCache.contains", "")
     auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // not found: no-op
     REQUIRE(!cache.contains(-1));
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // found: front is no-op
     REQUIRE(cache.contains(4));
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // found: middle to front
     REQUIRE(cache.contains(3));
-    REQUIRE(joinHumanReadable(cache.keys()) == "3, 4, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "3, 4, 2, 1");
 
     // found: back to front
     REQUIRE(cache.contains(1));
-    REQUIRE(joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
 }
 
 TEST_CASE("StrongLRUCache.tryEmplace", "")
@@ -118,18 +119,18 @@ TEST_CASE("StrongLRUCache.tryEmplace", "")
 
     auto rv = cache.tryEmplace(2, [](auto) { return 4; });
     CHECK(rv);
-    CHECK(joinHumanReadable(cache.keys()) == "2");
+    CHECK(core::joinHumanReadable(cache.keys()) == "2");
     CHECK(cache.at(2) == 4);
 
     rv = cache.tryEmplace(3, [](auto) { return 6; });
     CHECK(rv);
-    CHECK(joinHumanReadable(cache.keys()) == "3, 2");
+    CHECK(core::joinHumanReadable(cache.keys()) == "3, 2");
     CHECK(cache.at(2) == 4);
     CHECK(cache.at(3) == 6);
 
     rv = cache.tryEmplace(2, [](auto) { return -1; });
     CHECK_FALSE(rv);
-    CHECK(joinHumanReadable(cache.keys()) == "2, 3");
+    CHECK(core::joinHumanReadable(cache.keys()) == "2, 3");
     CHECK(cache.at(2) == 4);
     CHECK(cache.at(3) == 6);
 }
@@ -139,29 +140,29 @@ TEST_CASE("StrongLRUCache.tryGet", "")
     auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // no-op (not found)
     REQUIRE(cache.tryGet(-1) == nullptr);
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // no-op (found)
     auto* const p1 = cache.tryGet(4);
     REQUIRE(p1 != nullptr);
     REQUIRE(*p1 == "4");
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // middle to front
     auto* const p2 = cache.tryGet(3);
     REQUIRE(p2 != nullptr);
     REQUIRE(*p2 == "3");
-    REQUIRE(joinHumanReadable(cache.keys()) == "3, 4, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "3, 4, 2, 1");
 
     // back to front
     auto* const p3 = cache.tryGet(1);
     REQUIRE(p3 != nullptr);
     REQUIRE(*p3 == "1");
-    REQUIRE(joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
 }
 
 TEST_CASE("StrongLRUCache.getOrEmplace", "[lrucache]")
@@ -172,7 +173,7 @@ TEST_CASE("StrongLRUCache.getOrEmplace", "[lrucache]")
     CHECK(a == 4);
     CHECK(cache.at(2) == 4);
     CHECK(cache.size() == 1);
-    CHECK(joinHumanReadable(cache.keys()) == "2"sv);
+    CHECK(core::joinHumanReadable(cache.keys()) == "2"sv);
 
     int const& a2 = cache.getOrEmplace(2, [](auto) { return -4; });
     CHECK(a2 == 4);
@@ -183,10 +184,10 @@ TEST_CASE("StrongLRUCache.getOrEmplace", "[lrucache]")
     CHECK(b == 6);
     CHECK(cache.at(3) == 6);
     CHECK(cache.size() == 2);
-    CHECK(joinHumanReadable(cache.keys()) == "3, 2"sv);
+    CHECK(core::joinHumanReadable(cache.keys()) == "3, 2"sv);
 
     int const& c = cache.getOrEmplace(4, [](auto) { return 8; });
-    CHECK(joinHumanReadable(cache.keys()) == "4, 3"sv);
+    CHECK(core::joinHumanReadable(cache.keys()) == "4, 3"sv);
     CHECK(c == 8);
     CHECK(cache.at(4) == 8);
     CHECK(cache.size() == 2);
@@ -194,7 +195,7 @@ TEST_CASE("StrongLRUCache.getOrEmplace", "[lrucache]")
     CHECK_FALSE(cache.contains(2)); // thrown out
 
     int const& b2 = cache.getOrEmplace(3, [](auto) { return -3; });
-    CHECK(joinHumanReadable(cache.keys()) == "3, 4"sv);
+    CHECK(core::joinHumanReadable(cache.keys()) == "3, 4"sv);
     CHECK(b2 == 6);
     CHECK(cache.at(3) == 6);
     CHECK(cache.size() == 2);
@@ -205,23 +206,23 @@ TEST_CASE("StrongLRUCache.remove", "")
     auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // remove at head
     cache.remove(4);
-    REQUIRE(joinHumanReadable(cache.keys()) == "3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "3, 2, 1");
 
     // remove in middle
     cache.remove(2);
-    REQUIRE(joinHumanReadable(cache.keys()) == "3, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "3, 1");
 
     // remove at tail
     cache.remove(1);
-    REQUIRE(joinHumanReadable(cache.keys()) == "3");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "3");
 
     // remove last
     cache.remove(3);
-    REQUIRE(joinHumanReadable(cache.keys()).empty());
+    REQUIRE(core::joinHumanReadable(cache.keys()).empty());
 }
 
 namespace
@@ -245,16 +246,16 @@ TEST_CASE("StrongLRUCache.insert_with_cache_collision", "")
     auto cache = StrongLRUCache<int, int, CollidingHasher>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
 
     cache[1] = 1;
-    REQUIRE(joinHumanReadable(cache.keys()) == "1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "1");
 
     cache[2] = 2;
-    REQUIRE(joinHumanReadable(cache.keys()) == "2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "2, 1");
 
     cache[3] = 3;
-    REQUIRE(joinHumanReadable(cache.keys()) == "3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "3, 2, 1");
 
     cache[4] = 4;
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 }
 
 TEST_CASE("StrongLRUCache.remove_with_hashTable_lookup_collision", "")
@@ -262,22 +263,22 @@ TEST_CASE("StrongLRUCache.remove_with_hashTable_lookup_collision", "")
     auto cache = StrongLRUCache<int, int, CollidingHasher>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = 2 * i;
-    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
     // remove at head
     cache.remove(4);
-    REQUIRE(joinHumanReadable(cache.keys()) == "3, 2, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "3, 2, 1");
 
     // remove in middle
     cache.remove(2);
-    REQUIRE(joinHumanReadable(cache.keys()) == "3, 1");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "3, 1");
 
     // remove at tail
     cache.remove(1);
-    REQUIRE(joinHumanReadable(cache.keys()) == "3");
+    REQUIRE(core::joinHumanReadable(cache.keys()) == "3");
 
     // remove last
     cache.remove(3);
-    REQUIRE(joinHumanReadable(cache.keys()).empty());
+    REQUIRE(core::joinHumanReadable(cache.keys()).empty());
 }
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

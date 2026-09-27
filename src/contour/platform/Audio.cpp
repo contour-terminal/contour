@@ -2,8 +2,8 @@
 #include <contour/platform/Audio.hpp>
 #include <contour/platform/AudioNote.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/LogStore.hpp>
+#include <core/Assert.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <QtMultimedia/QMediaDevices>
 

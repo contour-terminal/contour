@@ -93,7 +93,7 @@ class SequenceBuilder
             case '7':
             case '8':
             case '9': paramDigit(ch); break;
-            default: crispy::unreachable();
+            default: core::unreachable();
         }
     }
 

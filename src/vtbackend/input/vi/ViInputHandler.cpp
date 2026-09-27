@@ -4,9 +4,10 @@
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/input/vi/HintModeHandler.hpp>
 
-#include <crispy/Assert.hpp>
 #include <crispy/TrieMap.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Assert.hpp>
+#include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -223,7 +224,7 @@ void ViInputHandler::registerCommand(ModeSelect modes, std::string_view command,
 {
     Require(!!handler);
 
-    auto commandStr = crispy::replace(std::string(command.data(), command.size()), "<Space>", " ");
+    auto commandStr = core::replace(std::string(command.data(), command.size()), "<Space>", " ");
 
     inputLog()(
         "Registering command: {} in mode: {}", commandStr, modes == ModeSelect::Normal ? "Normal" : "Visual");
@@ -240,7 +241,7 @@ void ViInputHandler::registerCommand(ModeSelect modes, std::string_view command,
             _visualMode.insert(commandStr, std::move(handler));
             break;
         }
-        default: crispy::unreachable();
+        default: core::unreachable();
     }
 }
 

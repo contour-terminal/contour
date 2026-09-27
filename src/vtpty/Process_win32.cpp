@@ -4,8 +4,8 @@
 #include <vtpty/Pty.hpp>
 #include <vtpty/SpawnLadder.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/Overloaded.hpp>
+#include <core/Assert.hpp>
+#include <core/Overloaded.hpp>
 
 #include <cassert>
 #include <cerrno>
@@ -178,7 +178,7 @@ Process::Process(string const& path,
                  std::unique_ptr<Pty> pty):
     _d(new Private { path, args, cwd, env, std::move(pty) }, [](Private* p) { delete p; })
 {
-    crispy::ignoreUnused(escapeSandbox);
+    core::ignoreUnused(escapeSandbox);
 }
 
 bool Process::isFlatpak()
@@ -209,7 +209,7 @@ StartResult Process::start()
     auto env = _d->env;
     for (auto const& [name, value]: _d->env)
     {
-        if (crispy::toUpper(name) == "PATH")
+        if (core::toUpper(name) == "PATH")
         {
             char buf[1024];
             size_t len = 0;
@@ -345,7 +345,7 @@ Process::ExitStatus Process::wait()
 
 vector<string> Process::loginShell(bool escapeSandbox)
 {
-    crispy::ignoreUnused(escapeSandbox);
+    core::ignoreUnused(escapeSandbox);
 
     return { "powershell.exe"s }; // TODO: Find out what the user's default shell is.
 }

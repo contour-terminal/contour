@@ -2,7 +2,7 @@
 #pragma once
 
 /// @file
-/// `ReactorThread` — a net::EventLoop running on its own thread, beside Qt's.
+/// `ReactorThread` — a core::net::EventLoop running on its own thread, beside Qt's.
 ///
 /// The GUI's remote controllers (native protocol, tmux mirroring) do all their
 /// socket and protocol work on this reactor; the ONLY thread-safe entry into
@@ -10,23 +10,26 @@
 /// it lands in a thread-safe vtpty::ChannelPty::feed, and the session's own
 /// parser thread does the rest — the identical threading a local session has.
 
+#include <core/async/Cancellation.hpp>
+#include <core/async/Task.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IoBackend.hpp>
+
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <exception>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
 
-#include <coro/Cancellation.hpp>
-#include <coro/Task.hpp>
-#include <net/EventLoop.hpp>
-#include <net/PollEventSource.hpp>
-
 namespace contour::remote
 {
 
-/// @brief Owns a net::EventLoop running on a dedicated thread.
+/// @brief Owns a core::net::EventLoop running on a dedicated thread.
 ///
 /// Two-phase initialization (default-construct then start()) is necessary because
 /// the root coroutine task is supplied by the owning RemoteController at connect
@@ -58,7 +61,7 @@ class ReactorThread
     ///        ends by an exception other than cancellation — so the owner can settle its own
     ///        connection state and wake whoever waits on it. Without it a dead reactor is
     ///        indistinguishable from a slow one until the caller's timeout expires. Optional.
-    void start(std::function<coro::Task<void>(net::EventLoop*)> rootTask,
+    void start(std::function<core::async::Task<void>(core::net::EventLoop*)> rootTask,
                std::function<void(std::string const&)> onFailure = {})
     {
         _thread =
@@ -75,7 +78,7 @@ class ReactorThread
                 {
                     _loop.blockOn(rootTask(&_loop));
                 }
-                catch (coro::OperationCancelled const&)
+                catch (core::async::OperationCancelled const&)
                 {
                     // requestStop() unwound the root task — the intended shutdown.
                     _cancelled.store(true, std::memory_order_release);
@@ -88,7 +91,28 @@ class ReactorThread
                 {
                     recordFailure("unknown exception", onFailure);
                 }
+                {
+                    auto const lock = std::lock_guard { _exitMutex };
+                    _exited = true;
+                }
+                _exitCondition.notify_all();
             } };
+    }
+
+    /// Waits until the root task has ended, for at most @p bound. Thread-safe.
+    ///
+    /// What lets a detach finish in order before anything is cancelled: a detach posted onto the
+    /// loop ends the root task by itself, closing the connection properly on the way out, and a stop
+    /// requested in the same breath would unwind that close half-done.
+    /// @param bound How long to wait.
+    /// @return Whether the root task ended within @p bound (true too if it had already ended, or
+    ///         was never started).
+    [[nodiscard]] bool waitForExit(std::chrono::milliseconds bound)
+    {
+        if (!_thread.joinable())
+            return true; // never started (or already joined): there is nothing to wait for
+        auto lock = std::unique_lock { _exitMutex };
+        return _exitCondition.wait_for(lock, bound, [this] { return _exited; });
     }
 
     /// @return Whether the root task ended by cancellation (requestStop)
@@ -147,11 +171,14 @@ class ReactorThread
         }
     }
 
-    net::PollEventSource _source;
-    net::EventLoop _loop { _source };
+    std::unique_ptr<core::net::IoBackend> _backend = core::net::makeDefaultBackend();
+    core::net::EventLoop _loop { *_backend };
     std::thread _thread;
     std::atomic<bool> _cancelled { false };
-    mutable std::mutex _failureMutex; ///< Guards _failure (written on the reactor, read by the owner).
+    std::mutex _exitMutex;                  ///< Guards _exited.
+    std::condition_variable _exitCondition; ///< Signalled once the root task has ended.
+    bool _exited = false;                   ///< Whether the thread body has finished its root task.
+    mutable std::mutex _failureMutex;       ///< Guards _failure (written on the reactor, read by the owner).
     std::string _failure;
 };
 

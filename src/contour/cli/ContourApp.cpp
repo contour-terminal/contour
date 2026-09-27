@@ -12,12 +12,13 @@
 
 #include <vtpty/Process.hpp>
 
-#include <crispy/App.hpp>
-#include <crispy/Base64.hpp>
-#include <crispy/CLI.hpp>
-#include <crispy/LogSink.hpp>
 #include <crispy/StackTrace.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Base64.hpp>
+#include <core/Utils.hpp>
+#include <core/cli/App.hpp>
+#include <core/cli/CLI.hpp>
+#include <core/log/LogSink.hpp>
 
 #include <charconv>
 #include <chrono>
@@ -57,7 +58,7 @@ using std::unique_ptr;
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-namespace CLI = crispy::cli;
+namespace CLI = core::cli;
 
 namespace contour::cli
 {
@@ -166,9 +167,9 @@ namespace
     /// that fails. Built once here so the spellings and help texts still have a single home.
     /// @param full Whether to include the options only `install` needs.
     /// @return The option list.
-    [[nodiscard]] crispy::cli::OptionList daemonServiceOptions(bool full)
+    [[nodiscard]] core::cli::OptionList daemonServiceOptions(bool full)
     {
-        namespace CLI = crispy::cli;
+        namespace CLI = core::cli;
 
         auto options = CLI::OptionList {
             CLI::Option { "label", CLI::Value { "default"s }, "Socket label the daemon serves.", "NAME" },
@@ -213,11 +214,11 @@ namespace
 
     /// Builds the `daemon-service` sub-verbs from @ref DaemonServiceVerbs.
     /// @return One command per verb, each carrying the options it needs.
-    [[nodiscard]] crispy::cli::CommandList daemonServiceCommands()
+    [[nodiscard]] core::cli::CommandList daemonServiceCommands()
     {
-        auto commands = crispy::cli::CommandList {};
+        auto commands = core::cli::CommandList {};
         for (auto const& verb: DaemonServiceVerbs)
-            commands.emplace_back(crispy::cli::Command {
+            commands.emplace_back(core::cli::Command {
                 .name = verb.name,
                 .helpText = verb.helpText,
                 .options = daemonServiceOptions(verb.action == contour::cli::DaemonServiceAction::Install) });
@@ -226,7 +227,7 @@ namespace
 
     /// Help text for `generate integration`'s `shell` option, naming the shells this binary was
     /// actually built with rather than a list maintained by hand beside them.
-    /// @return A view of storage with process lifetime, because crispy::cli::Option::helpText
+    /// @return A view of storage with process lifetime, because core::cli::Option::helpText
     ///         borrows rather than owns.
     [[nodiscard]] std::string_view integrationShellHelpText()
     {
@@ -239,11 +240,11 @@ namespace
 } // namespace
 // }}}
 
-ContourApp::ContourApp(crispy::Environment const& env):
+ContourApp::ContourApp(core::Environment const& env):
     App(env, "contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
 {
-    using Project = crispy::cli::about::Project;
-    crispy::cli::about::registerProjects(
+    using Project = core::cli::about::Project;
+    core::cli::about::registerProjects(
 #ifdef CONTOUR_BUILD_WITH_MIMALLOC
         Project { "mimalloc", "", "" },
 #endif
@@ -256,7 +257,7 @@ ContourApp::ContourApp(crispy::Environment const& env):
         Project { "termbench-pro", "Apache-2.0", "https://github.com/contour-terminal/termbench-pro" });
 
 #ifdef __linux__
-    auto crashLogDirPath = crispy::App::instance()->localStateDir() / "crash";
+    auto crashLogDirPath = core::cli::App::instance()->localStateDir() / "crash";
     crashLogDir = crashLogDirPath.string();
     auto errorCode = std::error_code {};
     std::filesystem::create_directories(crashLogDirPath, errorCode);
@@ -294,7 +295,7 @@ ContourApp::ContourApp(crispy::Environment const& env):
     link("contour.documentation.configuration.profile", bind(&ContourApp::documentationProfileConfig, this));
     link("contour.cat", bind(&ContourApp::catAction, this));
     link("contour.daemon", bind(&ContourApp::daemonAction, this));
-    // One handler per verb rather than one that switches: crispy::App dispatches on the first
+    // One handler per verb rather than one that switches: core::cli::App dispatches on the first
     // true flag, so the verb IS the dispatch.
     for (auto const& verb: DaemonServiceVerbs)
     {
@@ -307,7 +308,7 @@ ContourApp::ContourApp(crispy::Environment const& env):
 }
 
 template <typename Callback>
-static auto withOutput(crispy::cli::FlagStore const& flags, std::string const& name, Callback callback)
+static auto withOutput(core::cli::FlagStore const& flags, std::string const& name, Callback callback)
 {
     std::ostream* out = &cout;
 
@@ -352,7 +353,7 @@ int ContourApp::documentationVT()
             // colored output for easier reading, and maybe more.
             std::format_to(back,
                            "| `{:}` | {:} | {:} |\n",
-                           crispy::escapeMarkdown(std::format("{}", fn)),
+                           core::escapeMarkdown(std::format("{}", fn)),
                            fn.documentation.mnemonic,
                            fn.documentation.comment);
         }
@@ -648,7 +649,7 @@ namespace
                             static_cast<int>(resizePolicy),
                             layer);
 
-        auto encoderState = crispy::base64::EncoderState {};
+        auto encoderState = core::base64::EncoderState {};
         std::vector<char> buf;
         auto const writer = [&](char a, char b, char c, char d) {
             buf.push_back(a);
@@ -663,11 +664,11 @@ namespace
 
         for (uint8_t const byte: data)
         {
-            crispy::base64::encode(byte, encoderState, writer);
+            core::base64::encode(byte, encoderState, writer);
             if (buf.size() >= 4096)
                 flush();
         }
-        crispy::base64::finish(encoderState, writer);
+        core::base64::finish(encoderState, writer);
         flush();
 
         cout << ST;
@@ -724,7 +725,7 @@ int ContourApp::daemonAction()
     {
         cerr << std::format("contour daemon: unknown --size-policy '{}' (expected one of: {})\n",
                             sizePolicy,
-                            crispy::joinHumanReadable(vthost::ClientSizePolicyNames | std::views::keys));
+                            core::joinHumanReadable(vthost::ClientSizePolicyNames | std::views::keys));
         return EXIT_FAILURE;
     }
 
@@ -785,13 +786,13 @@ int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
 
     // The flag that brought us here is OVERRIDDEN rather than filtered out of them, because a token
     // filter cannot recognize all of its spellings and gets it wrong in both directions.
-    // crispy::cli accepts `--background`, `-background` and the bare `background` (its natural
+    // core::cli accepts `--background`, `-background` and the bare `background` (its natural
     // style), each optionally followed by an explicit value in either the `=VALUE` or the
     // separate-token form. A surviving token makes the child spawn ANOTHER detached child, which
     // spawns another — a slow fork bomb, each generation additionally polling for readiness — while
     // dropping only the flag of `--background true` leaves the orphaned `true` for the parser to
     // reject, and the user is told the daemon did not start with no cause given. Options are
-    // last-one-wins (@see crispy::cli's setOption, which overwrites), so stating it once more at the
+    // last-one-wins (@see core::cli's setOption, which overwrites), so stating it once more at the
     // end settles it whatever the user wrote.
     childArgs.emplace_back("--background=false"); // the child runs in ITS foreground, or nothing binds
 
@@ -831,7 +832,7 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
     {
         cerr << std::format("contour daemon-service: unknown --start '{}' (expected one of: {})\n",
                             parameters().get<string>(prefix + ".start"),
-                            crispy::joinHumanReadable(vthost::ServiceStartModeNames | std::views::keys));
+                            core::joinHumanReadable(vthost::ServiceStartModeNames | std::views::keys));
         return EXIT_FAILURE;
     }
 
@@ -943,7 +944,7 @@ std::expected<std::vector<std::string>, std::string> ContourApp::daemonServiceCo
         return std::unexpected(
             std::format("unknown --size-policy '{}' (expected one of: {})",
                         sizePolicyText,
-                        crispy::joinHumanReadable(vthost::ClientSizePolicyNames | std::views::keys)));
+                        core::joinHumanReadable(vthost::ClientSizePolicyNames | std::views::keys)));
     }
 
     auto logFile = parameters().get<string>(prefix + ".log-file");
@@ -1004,7 +1005,7 @@ int ContourApp::profileAction()
     return EXIT_SUCCESS;
 }
 
-crispy::cli::Command ContourApp::parameterDefinition() const
+core::cli::Command ContourApp::parameterDefinition() const
 {
     // NOLINTBEGIN
     return CLI::Command {

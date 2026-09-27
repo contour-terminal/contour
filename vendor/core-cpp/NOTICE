@@ -1,0 +1,117 @@
+core-cpp
+Copyright 2026 The core-cpp Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes software imported from the following projects, each licensed under
+the Apache License, Version 2.0. Every import was read as a git blob at the
+commit named below.
+
+Contour Terminal Emulator
+  https://github.com/contour-terminal/contour
+  Imported at 6777ff05014f8ff163b071e8b0e942830119db80
+  - .clang-format and .clang-tidy (adapted)
+  - src/core/testing/SuppressWindowsDialogs.{hpp,cpp} (merged from
+    src/crispy/SuppressWindowsDialogs.hpp and
+    src/coro/testing/SuppressWindowsDialogs.hpp)
+  - LICENSE
+  - src/core/{Assert,Base64,Deferred,Defines,Environment,Escape,FNV,Flags,
+    Overloaded,Times,UserInfo,Utils}.{hpp,cpp}, src/core/log/{LogStore,LogSink}.*,
+    src/core/log/Assert.hpp, src/core/cli/{CLI,App}.*,
+    src/core/testing/Environment.hpp and their tests (from src/crispy/, adapted)
+  - src/core/platform/Clock.hpp and src/core/platform/SystemPipe.{hpp,cpp} (merged
+    from src/net/platform/Clock.hpp and src/net/platform/SystemPipe.{hpp,cpp}), and
+    src/core/platform/WinsockInit.{hpp,cpp} (identical to src/net/platform/)
+  - src/core/async/{Awaitable,Cancellation,Task,UniqueCoroHandle,WhenAll,WhenAny}.hpp
+    and {Task,WhenAll,WhenAny}_test.cpp (from src/coro/, adapted), and the std::
+    aliases of src/core/async/StopToken.hpp (from src/coro/Cancellation.hpp)
+  - src/core/net/** and their tests (from src/net/, adapted; NetError.hpp split out
+    of IoResult.hpp, PollEventSource.cpp split into posix/ and windows/, and files
+    moved into detail/, linux/, bsd/, posix/ and windows/), except NetError_test.cpp
+    and CMakeLists.txt
+
+Endo
+  https://github.com/contour-terminal/endo
+  Imported at f774a210ce989e5947b8f61d715068b1dc96088c
+  - src/core/testing/SuppressWindowsDialogs.{hpp,cpp} (merged from
+    src/testing/SuppressWindowsDialogs.hpp)
+  - src/core/testing/SuppressWindowsDialogsAtStartup.cpp
+  - tests/WindowsDialogCanary.cpp
+  - cmake/CPM.cmake (the CPM 0.40.8 pin and its SHA-256)
+  - src/core/platform/** (from the generic half of src/platform/, adapted; Clock.hpp
+    and SystemPipe merged with contour's and fastcached's) and their tests
+  - src/core/Generator.hpp and its test (from src/platform/, adapted)
+  - src/core/testing/{ScopedTempDir,ScopedWorkingDirectory,EnvHelper}.hpp and
+    ScopedTempDir_test.cpp (from src/testing/, adapted)
+  - src/core/tui/** and their tests (from src/tui/, adapted; tui/platform/ and
+    tui/runtime/platform/ split into posix/ and windows/, the byte composition
+    their two arms shared moved into the shared translation unit, and
+    FilesystemImageProvider split out of ImageProvider.hpp), except
+    src/core/tui/runtime/TuiRuntime.hpp, src/core/tui/runtime/TuiRuntime_test.cpp,
+    src/core/tui/TerminalOutput_test.cpp, src/core/tui/CMakeLists.txt and
+    src/core/tui/.clang-tidy
+
+fastcached
+  https://github.com/LASTRADA-Software/fastcached
+  Copyright 2026 The fastcached Authors
+  Imported at eb9c9c68da8fadfd43b0b36366919cb462689f48 (origin/master)
+  - cmake/CPM.cmake (the bounded, status-checked bootstrap download)
+  - src/core/testing/SuppressWindowsDialogs.{hpp,cpp} (merged from
+    src/tests/WindowsErrorPopups.hpp)
+  - the readability-identifier-naming IgnoredRegexp of .clang-tidy
+  Imported at ee71f868547712892b7d9a2ebff60d49c496e25c (origin/master)
+  - src/core/{Profiling,Ranges}.hpp and their tests (from src/FastCache/Core/,
+    adapted)
+  Imported at b461e8b6d367ed22e4bf2935717fa59360a64b7d (origin/master)
+  - src/core/platform/Clock.hpp and Clock_test.cpp (merged from
+    src/FastCache/Core/{Clock.hpp,Clock_test.cpp,WallClockRef_test.cpp})
+  Imported at 5389e29a5eeca9c2319f43757bd7d6d0ac1c1a13 (origin/master)
+  - src/core/tui/runtime/TuiRuntime.hpp and TuiRuntime_test.cpp (from
+    vendor/endo/tui/runtime/, adapted): endo f774a210 plus fastcached 6483abd8,
+    which makes DelayAwaiter::await_ready() a constant
+  Imported at f6ec49f3446b8bc121eba82c64cde2de759e774a
+  - cmake/portable/CompileCache.cmake (verbatim)
+  - cmake/FetchTransferBound.cmake (verbatim)
+  Imported at 0708dd54dc7ee72622c8c0783c2bd4a06f0e9b21 (origin/master)
+  - src/core/async/{ParkedWork,IExecutor,ResumeOn,ThreadPoolExecutor,AsyncQueue}.hpp
+    and their tests (from src/FastCache/Async/, adapted; ThreadPoolExecutor.cpp
+    inlined into its header), src/core/async/{DetachedTask,SyncRun}.hpp (split out
+    of src/FastCache/Async/Task.hpp), and the ownership half of
+    src/core/async/Task.hpp, merged into contour's
+  - src/core/net/IoBackend.hpp and src/core/net/IoBackend_test.cpp (the handler
+    and the callback-selection rule of src/FastCache/Async/EpollReactor.hpp and
+    its test, merged with contour's src/net/EventSource.hpp), and
+    src/core/net/detail/ReadyBatch.hpp (the in-flight batch of
+    src/FastCache/Async/EpollReactor.cpp)
+
+Documentation and CI configuration adapted from the following projects, each
+licensed under the Apache License, Version 2.0, and each read as a git blob at the
+commit named below. The rules in .agent/ cite their origin individually.
+
+Contour Terminal Emulator, at 6777ff05014f8ff163b071e8b0e942830119db80
+  - AGENT.md: the C++ guidelines, the zero-warning policy and the design
+    principles, adapted into .agent/rules/
+
+Endo, at f774a210ce989e5947b8f61d715068b1dc96088c
+  - AGENT.md: dependency injection, data-driven design, error handling and the
+    platform-feature workflow, adapted into .agent/rules/
+  - .github/clang-tidy-matcher.json (verbatim)
+
+fastcached, at b5ded89c5ae6ba5b45337335ce774c5ae6986d65 (origin/master)
+  - AGENT.md, .agent/rules/{README,build-and-toolchain,testing,wire-and-protocol,
+    platform-service-and-config}.md and .agent/guides/{team-run,profiling-tracy}.md:
+    their generic rules, adapted into .agent/
+  - mkdocs.yml, docs/requirements.txt, .github/workflows/docs.yml and
+    .github/release.yml (adapted)
+
+Lightweight
+  https://github.com/LASTRADA-Software/Lightweight
+  at f57dc2e0704d885a3c642a63675873919fc2d128
+  - .agent/cpp-guidelines.md: the self-contained rule set and its checklist,
+    adapted into .agent/rules/cpp-guidelines.md
+
+tuidu
+  https://github.com/contour-terminal/tuidu
+  at 30107fbab72310fde5db89e7882eab288f6b541e
+  - AGENT.md: coroutine parameters by value, and keeping shared code free of
+    application concepts, adapted into .agent/rules/

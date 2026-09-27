@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/vt/Capabilities.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -9,7 +9,7 @@
 #include <string>
 
 using namespace std::string_view_literals;
-using crispy::fromHexString;
+using core::fromHexString;
 
 TEST_CASE("Capabilities.codeFromName")
 {

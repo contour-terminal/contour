@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/Color.hpp>
 
-#include <crispy/Overloaded.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Overloaded.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <array>
@@ -181,7 +181,7 @@ namespace
             return std::nullopt;
 
         auto const fullScale = (uint32_t { 1 } << (4 * text.size())) - 1;
-        return crispy::toInteger<16, uint32_t>(text).transform([fullScale](uint32_t value) {
+        return core::toInteger<16, uint32_t>(text).transform([fullScale](uint32_t value) {
             return static_cast<uint8_t>(((value * 0xFFFFu) / fullScale) >> 8);
         });
     }
@@ -210,7 +210,7 @@ namespace
 
         if (!integerText.empty())
         {
-            auto const digits = crispy::toInteger<10, uint32_t>(integerText);
+            auto const digits = core::toInteger<10, uint32_t>(integerText);
             if (!digits.has_value())
                 return std::nullopt;
             intensity = static_cast<double>(*digits);
@@ -218,7 +218,7 @@ namespace
 
         if (!fractionText.empty())
         {
-            auto const digits = crispy::toInteger<10, uint32_t>(fractionText);
+            auto const digits = core::toInteger<10, uint32_t>(fractionText);
             if (!digits.has_value())
                 return std::nullopt;
             intensity +=
@@ -260,7 +260,7 @@ namespace
 
         auto const width = format->digitsPerChannel;
         auto const parseChannel = [text, width](size_t channel) {
-            return crispy::toInteger<16, uint32_t>(text.substr(channel * width, width))
+            return core::toInteger<16, uint32_t>(text.substr(channel * width, width))
                 .transform([width](uint32_t value) {
                     return static_cast<uint8_t>((value << (16 - (4 * width))) >> 8);
                 });

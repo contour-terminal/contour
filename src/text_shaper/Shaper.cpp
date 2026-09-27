@@ -3,7 +3,7 @@
 
 #include <vtbackend/core/Primitives.hpp>
 
-#include <crispy/LogStore.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <algorithm>
 #include <array>

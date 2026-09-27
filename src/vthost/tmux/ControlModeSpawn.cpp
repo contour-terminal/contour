@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/tmux/ControlModeSpawn.hpp>
 
-#include <format>
+#include <core/net/Sockets.hpp>
 
-#include <net/Sockets.hpp>
+#include <format>
 
 #ifndef _WIN32
     #include <sys/wait.h>
@@ -26,7 +26,7 @@ namespace vthost::tmux
 
 #ifndef _WIN32
 
-std::expected<SpawnedControlMode, std::string> spawnControlMode(net::EventLoop& loop,
+std::expected<SpawnedControlMode, std::string> spawnControlMode(core::net::EventLoop& loop,
                                                                 std::string const& tmuxSocket)
 {
     auto master = -1;
@@ -51,7 +51,7 @@ std::expected<SpawnedControlMode, std::string> spawnControlMode(net::EventLoop& 
         ::_exit(127);
     }
 
-    auto transport = net::adoptFd(loop, master);
+    auto transport = core::net::adoptFd(loop, master);
     if (!transport)
     {
         ::close(master);
@@ -74,7 +74,7 @@ void reapControlMode(int pid)
 
 #else
 
-std::expected<SpawnedControlMode, std::string> spawnControlMode(net::EventLoop& /*loop*/,
+std::expected<SpawnedControlMode, std::string> spawnControlMode(core::net::EventLoop& /*loop*/,
                                                                 std::string const& /*tmuxSocket*/)
 {
     return std::unexpected("tmux control-mode spawning is not supported on Windows");

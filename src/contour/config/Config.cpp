@@ -10,9 +10,10 @@
 
 #include <text_shaper/Font.hpp>
 
-#include <crispy/Environment.hpp>
-#include <crispy/Escape.hpp>
 #include <crispy/StrongHash.hpp>
+
+#include <core/Environment.hpp>
+#include <core/Escape.hpp>
 
 #include <libunicode/convert.h>
 
@@ -39,8 +40,8 @@
 auto constexpr MinimumFontSize = text::FontSize { 8.0 };
 
 using namespace std;
-using crispy::homeResolvedPath;
-using crispy::replaceVariables;
+using core::homeResolvedPath;
+using core::replaceVariables;
 
 using vtpty::Process;
 
@@ -184,11 +185,11 @@ ActionList const* applyBuiltinFallback(Config const& config,
 namespace
 {
 
-    auto const configLog = logstore::Category("config", "Logs configuration file loading.");
+    auto const configLog = core::log::Category("config", "Logs configuration file loading.");
 
     /// This translation unit's one environment reader.
     ///
-    /// A crispy::LiveEnvironment, constructed on the spot rather than the process-wide cached one:
+    /// A core::LiveEnvironment, constructed on the spot rather than the process-wide cached one:
     /// `${VAR}` expansion has to see the environment as it stands when the config is read, not as it
     /// stood when the process started. The live reader is nonetheless thread safe, which is what
     /// rules out a bare getenv() here -- config (re)load runs while the PTY threads are live.
@@ -199,9 +200,9 @@ namespace
     /// user's configuration had never been there.
     ///
     /// @return A reference to a function-local static; it outlives every caller.
-    [[nodiscard]] crispy::Environment const& configEnvironment()
+    [[nodiscard]] core::Environment const& configEnvironment()
     {
-        static crispy::LiveEnvironment const instance;
+        static core::LiveEnvironment const instance;
         return instance;
     }
 
@@ -210,7 +211,7 @@ namespace
     /// @param name Name of the variable to read.
     /// @param env Environment to read from.
     /// @return The variable's value as raw bytes, or an empty string if it is unset.
-    [[nodiscard]] std::string environmentBytes(std::string_view name, crispy::Environment const& env)
+    [[nodiscard]] std::string environmentBytes(std::string_view name, core::Environment const& env)
     {
         return env.get(name).value_or("");
     }
@@ -229,7 +230,7 @@ namespace
             { "up", actions::Direction::Up },
             { "down", actions::Direction::Down },
         } };
-        auto const lowered = crispy::toLower(name);
+        auto const lowered = core::toLower(name);
         for (auto const& [keyword, direction]: Mapping)
             if (keyword == lowered)
                 return direction;
@@ -244,7 +245,7 @@ namespace
     [[nodiscard]] std::string acceptedModifierSpellings()
     {
         return ConfigModifierTable | std::views::transform(&ConfigModifierRow::name)
-               | crispy::views::joinWith(", ");
+               | core::views::joinWith(", ");
     }
 
     /// Renders an `input_mapping` row for a diagnostic, e.g. "action: ClearHistoryAndReset, key: Q".
@@ -265,7 +266,7 @@ namespace
 
         if (described.empty())
             return "<empty>";
-        return described | crispy::views::joinWith(", ");
+        return described | core::views::joinWith(", ");
     }
 
     optional<std::string> readFile(fs::path const& path)
@@ -329,7 +330,7 @@ namespace
 
         if (auto const terminfoDirs = environmentBytes("TERMINFO_DIRS", configEnvironment());
             !terminfoDirs.empty())
-            for (auto const dir: crispy::split(string_view(terminfoDirs), ':'))
+            for (auto const dir: core::split(string_view(terminfoDirs), ':'))
                 locations.emplace_back(string(dir));
 
         locations.emplace_back("/usr/share/terminfo");
@@ -626,7 +627,7 @@ vtbackend::Settings sessionSettings(Config const& config,
             auto value = segment.substr(key + IndexingKey.size());
             value = value.substr(0, std::min(value.find(','), value.find('}')));
 
-            if (crispy::toLower(value) == "title")
+            if (core::toLower(value) == "title")
                 return vtbackend::TabsNamingMode::Title;
         }
         return vtbackend::TabsNamingMode::Indexing;
@@ -948,8 +949,8 @@ optional<std::string> readConfigFile(std::string const& filename)
 }
 
 YAMLConfigReader::YAMLConfigReader(std::string const& filename,
-                                   logstore::Category const& log,
-                                   crispy::Environment const& env,
+                                   core::log::Category const& log,
+                                   core::Environment const& env,
                                    VariableReplacer replacer):
     configFile(filename), logger { log }, variableReplacer { std::move(replacer) }
 {
@@ -1011,7 +1012,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     if (child)
     {
         auto const rawValue = child.as<std::string>();
-        auto const renderBackendStr = crispy::toUpper(rawValue);
+        auto const renderBackendStr = core::toUpper(rawValue);
         if (renderBackendStr == "AUTO" || renderBackendStr == "DEFAULT")
             where = RenderingBackend::Auto;
         else if (renderBackendStr == "OPENGL")
@@ -1316,7 +1317,7 @@ void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPan
     {
         if (auto const orientation = split["orientation"]; orientation && orientation.IsScalar())
         {
-            auto const value = crispy::toLower(orientation.as<std::string>());
+            auto const value = core::toLower(orientation.as<std::string>());
             if (value == "horizontal")
                 where.orientation = vtworkspace::SplitState::Horizontal;
             else if (value == "vertical")
@@ -1696,7 +1697,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      vtbackend::CellRGBColor& where)
 {
     auto parseModifierKey = [&](std::string const& key) -> std::optional<vtbackend::CellRGBColor> {
-        auto const literal = crispy::toUpper(key);
+        auto const literal = core::toUpper(key);
         logger()("Loading entry: {}, value {}", entry, where);
         if (literal == "CELLBACKGROUND")
             return vtbackend::CellBackgroundColor {};
@@ -1737,7 +1738,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, Permission& where)
 {
     auto parseModifierKey = [](std::string const& key) -> std::optional<Permission> {
-        auto const literal = crispy::toLower(key);
+        auto const literal = core::toLower(key);
         if (literal == "allow")
             return Permission::Allow;
         if (literal == "deny")
@@ -1759,7 +1760,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      vtbackend::StatusDisplayType& where)
 {
     auto parseModifierKey = [&](std::string const& key) -> std::optional<vtbackend::StatusDisplayType> {
-        auto const literal = crispy::toLower(key);
+        auto const literal = core::toLower(key);
         logger()("Loading entry: {}, value {}", entry, literal);
         if (literal == "indicator")
             return vtbackend::StatusDisplayType::Indicator;
@@ -1791,7 +1792,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      vtrasterizer::Decorator& where)
 {
     auto parseModifierKey = [](std::string const& key) -> std::optional<vtrasterizer::Decorator> {
-        auto const literal = crispy::toLower(key);
+        auto const literal = core::toLower(key);
 
         using std::pair;
         auto constexpr Mappings = std::array {
@@ -1984,7 +1985,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         // Compare case-insensitively: `key` is lowercased below, so the mapping keys must be too —
         // otherwise NO terminal_id value ever matches and the setting is silently ignored (the
         // mappings were uppercase while the lookup key was lowercased).
-        auto const literal = crispy::toLower(key);
+        auto const literal = core::toLower(key);
 
         using Type = vtbackend::VTType;
         auto constexpr static Mappings = std::array<std::pair<std::string_view, Type>, 10> {
@@ -2038,7 +2039,7 @@ namespace
     bool loadConfigEnum(YAML::Node const& node,
                         std::string const& entry,
                         Enum& where,
-                        logstore::Category const& logger,
+                        core::log::Category const& logger,
                         Parser parse = configEnumFromToken<Enum>)
     {
         auto const child = node[entry];
@@ -2517,7 +2518,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      ScrollBarPosition& where)
 {
     auto parseModifierKey = [&](std::string const& key) -> std::optional<ScrollBarPosition> {
-        auto const literal = crispy::toLower(key);
+        auto const literal = core::toLower(key);
         logger()("Loading entry: {}, value {}", entry, literal);
         if (literal == "left")
             return ScrollBarPosition::Left;
@@ -2542,7 +2543,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     // point of the setting is to correct a visibly wrong image size, so a typo that silently leaves
     // the default would leave the user staring at the very symptom they were trying to fix.
     auto parseReporting = [&](std::string const& key) -> std::optional<PixelReporting> {
-        auto const literal = crispy::toLower(key);
+        auto const literal = core::toLower(key);
         logger()("Loading entry: {}, value {}", entry, literal);
         if (literal == "logical")
             return PixelReporting::Logical;
@@ -2570,7 +2571,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     if (auto const child = node[entry])
     {
         auto const rawValue = child.as<std::string>();
-        if (auto const method = vtrasterizer::methodFromName(crispy::toLower(rawValue)))
+        if (auto const method = vtrasterizer::methodFromName(core::toLower(rawValue)))
             where = *method;
         else
             errorLog()("Invalid value for {}: '{}'. Expected 'stretch' or 'rerasterize'.", entry, rawValue);
@@ -2582,7 +2583,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     // Case-insensitive. An unrecognized value is reported and leaves @p where at its (default)
     // value: a typo in a visible appearance setting should not silently pass unnoticed.
     auto parseTheme = [&](std::string const& key) -> std::optional<GuiTheme> {
-        auto const literal = crispy::toLower(key);
+        auto const literal = core::toLower(key);
         logger()("Loading entry: {}, value {}", entry, literal);
         if (literal == "system")
             return GuiTheme::System;
@@ -2644,7 +2645,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      vtbackend::StatusDisplayPosition& where)
 {
     auto parseModifierKey = [&](std::string const& key) -> std::optional<vtbackend::StatusDisplayPosition> {
-        auto const literal = crispy::toLower(key);
+        auto const literal = core::toLower(key);
         logger()("Loading entry: {}, value {}", entry, literal);
         if (literal == "bottom")
             return vtbackend::StatusDisplayPosition::Bottom;
@@ -2741,7 +2742,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                         unparsed.emplace_back("mode");
                     errorLog()("Dropping input_mapping entry [{}]: could not parse its {}.",
                                describeInputMappingRow(mapping),
-                               unparsed | crispy::views::joinWith(", "));
+                               unparsed | core::views::joinWith(", "));
                 }
             }
         }
@@ -2763,7 +2764,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     using ArcStyle = vtrasterizer::BoxDrawingRenderer::ArcStyle;
     if (auto const child = node[entry])
     {
-        auto const styleName = crispy::toLower(child.as<std::string>());
+        auto const styleName = core::toLower(child.as<std::string>());
         auto constexpr static Mappings = std::array {
             std::pair { "", ArcStyle::Round },
             std::pair { "round", ArcStyle::Round },
@@ -2787,7 +2788,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     using MergeCommitStyle = vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle::MergeCommitStyle;
 
     auto const parseBranchStyle = [&](std::string const& style) -> std::optional<BranchStyle> {
-        auto const styleName = crispy::toLower(style);
+        auto const styleName = core::toLower(style);
         auto constexpr static Mappings = std::array {
             std::pair { "", BranchStyle::None },         //
             std::pair { "none", BranchStyle::None },     //
@@ -2805,7 +2806,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     };
 
     auto const parseMCStyle = [&](std::string const& style) -> std::optional<MergeCommitStyle> {
-        auto const styleName = crispy::toLower(style);
+        auto const styleName = core::toLower(style);
         auto constexpr static Mappings = std::array {
             std::pair { "", MergeCommitStyle::Bullet },       //
             std::pair { "bullet", MergeCommitStyle::Bullet }, //
@@ -2836,7 +2837,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     using BrailleStyle = vtrasterizer::BoxDrawingRenderer::BrailleStyle;
     if (auto const child = node[entry])
     {
-        auto const styleName = crispy::toLower(child.as<std::string>());
+        auto const styleName = core::toLower(child.as<std::string>());
         auto constexpr static Mappings = std::array {
             std::pair { "font", BrailleStyle::Font },                     //
             std::pair { "solid", BrailleStyle::Solid },                   //
@@ -2940,7 +2941,7 @@ std::optional<vtbackend::MouseButton> YAMLConfigReader::parseMouseButton(YAML::N
         std::pair { "MIDDLE"sv, vtbackend::MouseButton::Middle },
         std::pair { "RIGHT"sv, vtbackend::MouseButton::Right },
     };
-    auto const upperName = crispy::toUpper(node.as<std::string>());
+    auto const upperName = core::toUpper(node.as<std::string>());
     for (auto const& mapping: Mappings)
         if (upperName == mapping.first)
             return mapping.second;
@@ -3011,7 +3012,7 @@ std::optional<std::variant<vtbackend::Key, char32_t>> YAMLConfigReader::parseKey
                      std::pair { "SLASH"sv, '/' },         std::pair { "SUBTRACT"sv, '-' },
                      std::pair { "SPACE"sv, ' ' } };
 
-    auto const upperName = crispy::toUpper(name);
+    auto const upperName = core::toUpper(name);
     for (auto const& mapping: NamedChars)
         if (upperName == mapping.first)
             return static_cast<char32_t>(mapping.second);
@@ -3104,10 +3105,10 @@ std::optional<vtbackend::Key> YAMLConfigReader::parseKey(std::string const& name
                      std::pair { "Numpad_8"sv, Key::Numpad_8 },
                      std::pair { "Numpad_9"sv, Key::Numpad_9 } };
 
-    auto const lowerName = crispy::toLower(name);
+    auto const lowerName = core::toLower(name);
 
     for (auto const& mapping: Mappings)
-        if (lowerName == crispy::toLower(mapping.first))
+        if (lowerName == core::toLower(mapping.first))
             return mapping.second;
 
     return std::nullopt;
@@ -3126,7 +3127,7 @@ std::optional<vtbackend::MatchModes> YAMLConfigReader::parseMatchModes(YAML::Nod
     auto matchModes = MatchModes {};
 
     auto const modeStr = node.as<std::string>();
-    auto const args = crispy::split(modeStr, '|');
+    auto const args = core::split(modeStr, '|');
     for (std::string_view arg: args)
     {
         if (arg.empty())
@@ -3139,7 +3140,7 @@ std::optional<vtbackend::MatchModes> YAMLConfigReader::parseMatchModes(YAML::Nod
         }
 
         MatchModes::Flag flag = MatchModes::Flag::Default;
-        std::string const upperArg = crispy::toUpper(arg);
+        std::string const upperArg = core::toUpper(arg);
         if (upperArg == "ALT")
             flag = MatchModes::AlternateScreen;
         else if (upperArg == "ALTSCREEN")
@@ -3354,7 +3355,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
         {
             if (auto chars = node["chars"]; chars && chars.IsScalar())
             {
-                return actions::SendChars { crispy::unescape(chars.as<std::string>()) };
+                return actions::SendChars { core::unescape(chars.as<std::string>()) };
             }
             else
                 return std::nullopt;
@@ -3364,7 +3365,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
         {
             if (auto nodeFormat = node["format"]; nodeFormat && nodeFormat.IsScalar())
             {
-                auto const formatString = crispy::toUpper(nodeFormat.as<std::string>());
+                auto const formatString = core::toUpper(nodeFormat.as<std::string>());
                 static auto constexpr Mappings =
                     std::array<std::pair<std::string_view, actions::CopyFormat>, 4> { {
                         { "TEXT", actions::CopyFormat::Text },
@@ -3453,7 +3454,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             auto hintAction = vtbackend::HintAction::Copy;
             if (auto nodeHintAction = node["hint_action"]; nodeHintAction && nodeHintAction.IsScalar())
             {
-                auto const actionStr = crispy::toUpper(nodeHintAction.as<std::string>());
+                auto const actionStr = core::toUpper(nodeHintAction.as<std::string>());
                 static auto constexpr HintActionMappings =
                     std::array<std::pair<std::string_view, vtbackend::HintAction>, 5> { {
                         { "COPY", vtbackend::HintAction::Copy },
@@ -3478,7 +3479,7 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             auto scope = vtbackend::HintScope::Visible;
             if (auto nodeScope = node["scope"]; nodeScope && nodeScope.IsScalar())
             {
-                auto const scopeStr = crispy::toUpper(nodeScope.as<std::string>());
+                auto const scopeStr = core::toUpper(nodeScope.as<std::string>());
                 static auto constexpr HintScopeMappings =
                     std::array<std::pair<std::string_view, vtbackend::HintScope>, 2> { {
                         { "VISIBLE", vtbackend::HintScope::Visible },
@@ -3519,7 +3520,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     if (child)
     {
 
-        auto const value = crispy::toUpper(child.as<std::string>());
+        auto const value = core::toUpper(child.as<std::string>());
         auto constexpr Mappings = std::array {
             std::pair { "COPYTOCLIPBOARD", contour::config::SelectionAction::CopyToClipboard },
             std::pair { "COPYTOSELECTIONCLIPBOARD",
@@ -3545,7 +3546,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 {
 
     auto parseModifierKey = [&](std::string const& key) -> std::optional<vtbackend::CursorShape> {
-        auto const upperKey = crispy::toUpper(key);
+        auto const upperKey = core::toUpper(key);
         logger()("Loading entry: {}, value {}", entry, upperKey);
         if (upperKey == "BLOCK")
             return vtbackend::CursorShape::Block;
@@ -3586,7 +3587,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      vtbackend::CursorDisplay& where)
 {
     auto parseModifierKey = [&](std::string const& key) -> std::optional<vtbackend::CursorDisplay> {
-        auto const upperKey = crispy::toUpper(key);
+        auto const upperKey = core::toUpper(key);
         logger()("Loading entry: {}, value {}", entry, upperKey);
         if (upperKey == "TRUE")
             return vtbackend::CursorDisplay::Blink;
@@ -3608,7 +3609,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      vtbackend::BlinkStyle& where)
 {
     auto parse = [&](std::string const& key) -> std::optional<vtbackend::BlinkStyle> {
-        auto const upperKey = crispy::toUpper(key);
+        auto const upperKey = core::toUpper(key);
         logger()("Loading entry: {}, value {}", entry, upperKey);
         if (upperKey == "CLASSIC")
             return vtbackend::BlinkStyle::Classic;
@@ -3632,7 +3633,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      vtbackend::ScreenTransitionStyle& where)
 {
     auto parse = [&](std::string const& key) -> std::optional<vtbackend::ScreenTransitionStyle> {
-        auto const upperKey = crispy::toUpper(key);
+        auto const upperKey = core::toUpper(key);
         if (upperKey == "CLASSIC")
             return vtbackend::ScreenTransitionStyle::Classic;
         if (upperKey == "FADE")
@@ -3718,7 +3719,7 @@ static std::string createForGlobal(Config const& c)
             doc.append(writer.process(writer.whichDoc(v), name, escapeSequence(v.value())));
         };
 
-    auto completeOverload = crispy::Overloaded {
+    auto completeOverload = core::Overloaded {
         processConfigEntry,
         processConfigEntryWithEscape,
         // Ignored entries
@@ -3774,19 +3775,19 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& vEntry) {
             auto v = vEntry.value();
             auto args = std::string { "[" };
-            args.append(v.arguments | crispy::views::joinWith(", "sv));
+            args.append(v.arguments | core::views::joinWith(", "sv));
             args.append("]");
 
             doc.append(writer.process(writer.whichDoc(vEntry), name, v.program, args, [&]() -> std::string {
                 auto fromConfig = v.workingDirectory.string();
                 if (fromConfig.empty()
-                    || fromConfig == crispy::homeResolvedPath("~", vtpty::Process::homeDirectory()))
+                    || fromConfig == core::homeResolvedPath("~", vtpty::Process::homeDirectory()))
                     return std::string { "\"~\"" };
                 return fromConfig;
             }()));
         };
 
-    auto completeOverload = crispy::Overloaded {
+    auto completeOverload = core::Overloaded {
         processConfigEntryWithExecInfo,
         processConfigEntry,
         [&]([[maybe_unused]] auto const& name, [[maybe_unused]] auto const& v) {},

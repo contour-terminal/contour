@@ -3,7 +3,7 @@
 
 #include <vtpty/PageSize.hpp>
 
-#include <crispy/Assert.hpp>
+#include <core/Assert.hpp>
 
 #include <algorithm>
 #include <cmath>

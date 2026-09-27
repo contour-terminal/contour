@@ -4,7 +4,9 @@
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/grid/Line.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
+#include <core/net/Sockets.hpp>
+#include <core/net/Tls.hpp>
 
 #include <algorithm>
 #include <bit>
@@ -20,10 +22,9 @@
 #include <utility>
 #include <vector>
 
-#include <net/Sockets.hpp>
-#include <net/Tls.hpp>
 #include <vthost/ContextWire.hpp>
 #include <vthost/CursorStyle.hpp>
+#include <vthost/GracefulClose.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/MirroredModes.hpp>
@@ -133,10 +134,10 @@ namespace
 
 } // namespace
 
-NativeSession::NativeSession(net::EventLoop& loop,
+NativeSession::NativeSession(core::net::EventLoop& loop,
                              SessionHost& host,
                              ConnectionId id,
-                             std::unique_ptr<net::ISocket> connection,
+                             std::unique_ptr<core::net::ISocket> connection,
                              std::size_t maxWriteQueueBytes,
                              std::string expectedToken):
     _loop(loop),
@@ -198,8 +199,9 @@ void NativeSession::send(uint64_t serial, proto::DecodedPdu const& pdu, uint64_t
         // by construction.
         errorLog()("{}: {}; disconnecting", _id, _writer.describeRefusal());
         _closed = true;
+        // The queue closes _connection too. A close resumes a parked read at once, which can end
+        // the flow that owns this object, so it comes last and is not repeated.
         _writer.close();
-        _connection->close();
     }
 }
 
@@ -277,7 +279,7 @@ void NativeSession::pushLayout()
             send(0, proto::DecodedPdu { serializeLayout(*window) });
 }
 
-coro::Task<void> NativeSession::flushSoon()
+core::async::Task<void> NativeSession::flushSoon()
 {
     // Debounce: a busy PTY produces many screenUpdated signals per frame-worth
     // of output; one Delta per ~20ms window is what the client can use anyway.
@@ -786,18 +788,18 @@ void NativeSession::requestSnapshot(SessionId session)
     _loop.spawn(streamSnapshots());
 }
 
-coro::Task<bool> NativeSession::awaitSendRoom()
+core::async::Task<bool> NativeSession::awaitSendRoom()
 {
     co_await _writer.waitUntilBacklogBelow(_snapshotWatermark, [this] { return _closed; });
     co_return !_closed;
 }
 
-coro::Task<void> NativeSession::streamSnapshots()
+core::async::Task<void> NativeSession::streamSnapshots()
 {
     // A scope guard, not an assignment at the end: run()'s teardown polls this for the streamer
     // having let go of `this`, and a cancellation unwinding past a trailing assignment would
     // leave it set — deadlocking the very poll that keeps `this` alive.
-    auto const finished = crispy::Finally { [this] { _streamingSession.reset(); } };
+    auto const finished = core::Finally { [this] { _streamingSession.reset(); } };
 
     while (!_snapshotQueue.empty() && !_closed)
     {
@@ -821,7 +823,7 @@ coro::Task<void> NativeSession::streamSnapshots()
     }
 }
 
-coro::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, SessionId session)
+core::async::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, SessionId session)
 {
     // The rows are the only part of a snapshot that grows without bound; everything else is one
     // session's state. So the rows are what gets split, and the rest rides along.
@@ -1058,7 +1060,7 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     // Preshared-token auth (empty _expectedToken accepts any — the AF_UNIX default,
     // where the socket's permissions are the gate). A mismatch answers the version
     // handshake and drops, exactly as a version mismatch does, revealing nothing.
-    if (!_expectedToken.empty() && !net::constantTimeEquals(hello->token, _expectedToken))
+    if (!_expectedToken.empty() && !core::net::constantTimeEquals(hello->token, _expectedToken))
     {
         // Server-side only, and WITHOUT either token: the wire answer above deliberately makes
         // this indistinguishable from a version mismatch, so the log must not undo on disk what
@@ -1114,7 +1116,7 @@ void NativeSession::reportPumpOutcome(PumpResult const& outcome) const
     }
 }
 
-coro::Task<void> NativeSession::run()
+core::async::Task<void> NativeSession::run()
 {
     // Nothing is valid before a version-matching ClientHello; afterwards the
     // pump serves request PDUs until the peer disconnects.
@@ -1148,20 +1150,19 @@ coro::Task<void> NativeSession::run()
     // parks on the write queue's watermark, which is a far longer park than the flush debounce.
     // `_closed` was set just above, which is what unparks it — waitUntilBacklogBelow returns on
     // a closed queue, and the streamer's loops all test _closed — so this poll is bounded.
-    co_await net::pollUntil(&_loop, [this] { return !_flushScheduled && !_streamingSession; });
-    co_await _writer.flushThenClose();
-    _connection->close();
+    co_await core::net::pollUntil(&_loop, [this] { return !_flushScheduled && !_streamingSession; });
+    co_await closeGracefully(&_loop, &_writer, _connection.get());
 }
 
 namespace
 {
     /// One native client's whole lifetime, as a free coroutine (a capturing
     /// lambda coroutine would dangle its closure; pointers live in the frame).
-    coro::Task<void> serveNativeClient(net::EventLoop* loop,
-                                       SessionHost* host,
-                                       ConnectionId id,
-                                       std::unique_ptr<net::ISocket> connection,
-                                       std::string expectedToken)
+    core::async::Task<void> serveNativeClient(core::net::EventLoop* loop,
+                                              SessionHost* host,
+                                              ConnectionId id,
+                                              std::unique_ptr<core::net::ISocket> connection,
+                                              std::string expectedToken)
     {
         auto session = std::make_unique<NativeSession>(*loop,
                                                        *host,
@@ -1175,12 +1176,12 @@ namespace
     }
 } // namespace
 
-ConnectionHandler makeNativeHandler(net::EventLoop& loop, SessionHost& host, std::string expectedToken)
+ConnectionHandler makeNativeHandler(core::net::EventLoop& loop, SessionHost& host, std::string expectedToken)
 {
     // NOT a coroutine itself: it merely constructs the free coroutine's task,
     // so the captures never outlive an activation frame.
     return [&loop, &host, expectedToken = std::move(expectedToken)](
-               ConnectionId id, std::unique_ptr<net::ISocket> connection) {
+               ConnectionId id, std::unique_ptr<core::net::ISocket> connection) {
         return serveNativeClient(&loop, &host, std::move(id), std::move(connection), expectedToken);
     };
 }

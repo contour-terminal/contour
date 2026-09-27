@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/SandboxInfo.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <filesystem>
 
@@ -21,8 +21,8 @@ namespace
     {
         // split() stops as soon as the callback returns false, and reports that it did -- so "the
         // walk did not run to the end" IS "the item was found".
-        return !crispy::split(
-            list, ';', [wanted](std::string_view item) { return crispy::trim(item) != wanted; });
+        return !core::split(
+            list, ';', [wanted](std::string_view item) { return core::trim(item) != wanted; });
     }
 
 } // namespace
@@ -33,8 +33,8 @@ SandboxInfo parseFlatpakInfo(std::string_view flatpakInfo)
         SandboxInfo { .state = SandboxState::Flatpak, .network = NetworkAccess::Denied, .applicationId = {} };
 
     auto group = std::string_view {};
-    crispy::split(flatpakInfo, '\n', [&](std::string_view rawLine) {
-        auto const line = crispy::trim(rawLine);
+    core::split(flatpakInfo, '\n', [&](std::string_view rawLine) {
+        auto const line = core::trim(rawLine);
 
         if (line.empty() || line.front() == '#')
             return true;
@@ -49,8 +49,8 @@ SandboxInfo parseFlatpakInfo(std::string_view flatpakInfo)
         if (equals == std::string_view::npos)
             return true;
 
-        auto const key = crispy::trim(line.substr(0, equals));
-        auto const value = crispy::trim(line.substr(equals + 1));
+        auto const key = core::trim(line.substr(0, equals));
+        auto const value = core::trim(line.substr(equals + 1));
 
         if (group == "Context" && key == "shared" && listContains(value, "network"))
             info.network = NetworkAccess::Permitted;
@@ -76,7 +76,7 @@ SandboxInfo const& currentSandbox()
         if (!std::filesystem::is_regular_file(path))
             return SandboxInfo {}; // Host, network permitted, no application id.
 
-        return parseFlatpakInfo(crispy::readFileAsString(path));
+        return parseFlatpakInfo(core::readFileAsString(path));
     }();
 
     return info;

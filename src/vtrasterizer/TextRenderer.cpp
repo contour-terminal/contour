@@ -128,6 +128,8 @@ Making use of reserved glyph slots
 #include <crispy/StrongHash.hpp>
 #include <crispy/StrongLRUHashtable.hpp>
 
+#include <core/log/Assert.hpp>
+
 #include <algorithm>
 #include <ranges>
 
@@ -255,7 +257,7 @@ text::FontLocator& createFontLocator(FontLocatorEngine engine)
         default: return text::FontLocatorProvider::get().native();
     }
 
-    crispy::unreachable();
+    core::unreachable();
 }
 
 // TODO: What's a good value here? Or do we want to make that configurable,
@@ -638,7 +640,7 @@ void TextRenderer::renderTextGroup(std::u32string_view codepoints,
         return;
 
     _textRendererEvents.onBeforeRenderingText();
-    auto _ = crispy::Finally { [&]() noexcept { _textRendererEvents.onAfterRenderingText(); } };
+    auto _ = core::Finally { [&]() noexcept { _textRendererEvents.onAfterRenderingText(); } };
 
     auto const hash = shapingCacheKeyFor(codepoints, style);
     text::ShapeResult const& glyphPositions =

@@ -9,7 +9,7 @@
 ///
 /// Decoding is TOTAL, for the reason StatusWire.hpp spells out at length: both values arrive as raw
 /// bytes a peer chose, and a `ProgressState` no enumerator has would reach the status-line renderer's
-/// switch, which ends in `crispy::unreachable()` — undefined behaviour in the attached client.
+/// switch, which ends in `core::unreachable()` — undefined behaviour in the attached client.
 
 #include <vtbackend/vt/ProgressState.hpp>
 

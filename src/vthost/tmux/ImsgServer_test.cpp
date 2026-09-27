@@ -3,38 +3,46 @@
 
     #include <vtpty/MockPty.hpp>
 
+    #include <core/async/Task.hpp>
+    #include <core/async/WhenAll.hpp>
+    #include <core/net/EventLoop.hpp>
+    #include <core/net/IoBackend.hpp>
+    #include <core/net/Sockets.hpp>
+
     #include <catch2/catch_test_macros.hpp>
 
     #include <sys/socket.h>
+    #include <sys/wait.h>
 
+    #include <algorithm>
     #include <array>
     #include <cerrno>
     #include <charconv>
     #include <chrono>
+    #include <csignal>
+    #include <cstdlib>
     #include <cstring>
     #include <format>
     #include <functional>
     #include <memory>
     #include <string>
     #include <string_view>
+    #include <thread>
+    #include <tuple>
     #include <utility>
     #include <vector>
 
     #include <fcntl.h>
     #include <unistd.h>
 
-    #include <coro/Task.hpp>
-    #include <coro/WhenAll.hpp>
-    #include <net/EventLoop.hpp>
-    #include <net/PollEventSource.hpp>
-    #include <net/Sockets.hpp>
+    #include <vthost/LoopDrain.hpp>
     #include <vthost/SessionHost.hpp>
     #include <vthost/imsg/CommandArgv.hpp>
     #include <vthost/imsg/Identify.hpp>
     #include <vthost/imsg/ImsgCodec.hpp>
     #include <vthost/tmux/ImsgServer.hpp>
 
-using coro::Task;
+using core::async::Task;
 using namespace std::chrono_literals;
 namespace imsg = vthost::imsg;
 
@@ -136,7 +144,7 @@ struct FakeTmuxClient
 // would deadlock the reactor.
 
 /// Reads (bounded) from @p fd until @p needle appears (or EOF/timeout).
-Task<std::string> readUntil(net::EventLoop* loop, int fd, std::string needle)
+Task<std::string> readUntil(core::net::EventLoop* loop, int fd, std::string needle)
 {
     auto collected = std::string {};
     auto buffer = std::array<char, 4096> {};
@@ -156,7 +164,7 @@ Task<std::string> readUntil(net::EventLoop* loop, int fd, std::string needle)
 }
 
 /// Reads one imsg frame from @p fd (bounded).
-Task<std::optional<imsg::ImsgFrame>> readImsgFrame(net::EventLoop* loop, int fd)
+Task<std::optional<imsg::ImsgFrame>> readImsgFrame(core::net::EventLoop* loop, int fd)
 {
     auto decoder = imsg::ImsgDecoder {};
     auto buffer = std::array<std::byte, 4096> {};
@@ -183,25 +191,27 @@ Task<std::optional<imsg::ImsgFrame>> readImsgFrame(net::EventLoop* loop, int fd)
 /// The served side: a SessionHost plus the imsg handler over a socketpair.
 struct ImsgHarness
 {
-    net::PollEventSource source;
-    net::EventLoop loop { source };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
     vthost::SessionHost host { loop,
                                [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                    return std::make_unique<vtpty::MockPty>(size);
                                },
                                vtbackend::Settings {},
-                               crispy::defaultEnvironment(),
+                               core::defaultEnvironment(),
                                /*startPumps=*/false };
     FakeTmuxClient client;
-    std::unique_ptr<net::ISocket> serverEnd;
+    std::unique_ptr<core::net::ISocket> serverEnd;
+    int serverFd = -1; ///< serverEnd's descriptor (not owned), for a test that fills it first.
 
     ImsgHarness()
     {
         auto fds = std::array<int, 2> { -1, -1 };
         REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds.data()) == 0);
-        auto adopted = net::adoptFd(loop, fds[0]);
+        auto adopted = core::net::adoptFd(loop, fds[0]);
         REQUIRE(adopted.has_value());
         serverEnd = std::move(*adopted);
+        serverFd = fds[0];
         client.imsgFd = fds[1];
         host.createTab();
     }
@@ -212,11 +222,11 @@ struct ImsgHarness
         auto handler = vthost::tmux::makeTmuxImsgHandler(loop, host);
         auto drive = [](ImsgHarness* h,
                         std::function<Task<void>(ImsgHarness*)> inner,
-                        std::function<Task<void>(std::unique_ptr<net::ISocket>)>* serve) -> Task<void> {
-            co_await coro::whenAll((*serve)(std::move(h->serverEnd)), inner(h));
+                        std::function<Task<void>(std::unique_ptr<core::net::ISocket>)>* serve) -> Task<void> {
+            co_await core::async::whenAll((*serve)(std::move(h->serverEnd)), inner(h));
         };
-        auto serve = std::function<Task<void>(std::unique_ptr<net::ISocket>)> {
-            [&handler](std::unique_ptr<net::ISocket> s) {
+        auto serve = std::function<Task<void>(std::unique_ptr<core::net::ISocket>)> {
+            [&handler](std::unique_ptr<core::net::ISocket> s) {
                 return handler(vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(s));
             }
         };
@@ -320,7 +330,7 @@ namespace
 
 /// Reads (bounded) from @p fd until it reports EOF.
 /// @return Whether EOF was observed within the bound.
-Task<bool> awaitEof(net::EventLoop* loop, int fd)
+Task<bool> awaitEof(core::net::EventLoop* loop, int fd)
 {
     auto buffer = std::array<char, 4096> {};
     for (auto i = 0; i < 2000; ++i)
@@ -404,9 +414,165 @@ TEST_CASE("a client-sent MSG_EXITING unwinds the control session", "[vthost][ims
     h.run([](ImsgHarness* inner) { return clientExitingScenario(inner); });
 }
 
-// {{{ live oracle: the REAL tmux client binary attaches to OUR imsg endpoint
-    #include <sys/wait.h>
+namespace
+{
 
+/// Writes to @p fd until a write would block, so that the next write the server makes parks.
+/// @return How many bytes that took; the client discards exactly these before reading frames.
+std::size_t fillUntilBlocked(int fd)
+{
+    auto const chunk = std::array<char, 4096> {};
+    auto total = std::size_t { 0 };
+    while (true)
+    {
+        auto const n = ::write(fd, chunk.data(), chunk.size());
+        if (n <= 0)
+            return total;
+        total += static_cast<std::size_t>(n);
+    }
+}
+
+/// Reads and discards exactly @p count bytes from @p fd (bounded).
+/// @return Whether all of them arrived within the bound.
+Task<bool> discardBytes(core::net::EventLoop* loop, int fd, std::size_t count)
+{
+    auto buffer = std::array<std::byte, 4096> {};
+    for (auto i = 0; i < 2000 && count > 0; ++i)
+    {
+        auto const n = ::read(fd, buffer.data(), std::min(count, buffer.size()));
+        if (n > 0)
+        {
+            count -= static_cast<std::size_t>(n);
+            continue;
+        }
+        if (n == 0)
+            break;
+        co_await loop->delay(1ms);
+    }
+    co_return count == 0;
+}
+
+/// Reads @p count imsg frames from @p fd through ONE decoder (bounded): frames written back to
+/// back arrive in one read, which a decoder per frame would split and lose.
+Task<std::vector<imsg::ImsgFrame>> readImsgFrames(core::net::EventLoop* loop, int fd, std::size_t count)
+{
+    auto decoder = imsg::ImsgDecoder {};
+    auto frames = std::vector<imsg::ImsgFrame> {};
+    auto buffer = std::array<std::byte, 4096> {};
+    for (auto i = 0; i < 2000 && frames.size() < count; ++i)
+    {
+        auto frame = decoder.next();
+        if (!frame.has_value())
+            break;
+        if (frame->has_value())
+        {
+            frames.push_back(std::move(**frame));
+            continue;
+        }
+        auto const n = ::read(fd, buffer.data(), buffer.size());
+        if (n > 0)
+        {
+            decoder.feed(std::span { buffer.data(), static_cast<std::size_t>(n) });
+            continue;
+        }
+        if (n == 0)
+            break;
+        co_await loop->delay(1ms);
+    }
+    co_return frames;
+}
+
+/// MSG_EXIT parks on a full socket, and MSG_EXITING arrives before it drains, so the server
+/// answers MSG_EXITED while MSG_EXIT is still being written.
+/// @return 0 when the client received MSG_EXIT and then MSG_EXITED; otherwise the failed step.
+Task<int> overlappingExitScenario(ImsgHarness* h, std::size_t filler)
+{
+    co_await readUntil(&h->loop, h->client.stdoutRead, "%session-changed");
+
+    // An empty line detaches: run() returns and MSG_EXIT goes onto the full socket, where it parks.
+    if (::write(h->client.stdinWrite, "\n", 1) != 1)
+        co_return 1;
+    // Time for run() to return and the write to park. The socket stays full meanwhile, so waiting
+    // longer changes nothing; too short a wait would only make the case pass without the overlap.
+    co_await h->loop.delay(200ms);
+
+    // MSG_EXITING now: the server answers it while MSG_EXIT is still parked.
+    sendRaw(h->client.imsgFd, imsg::encodeFrame(imsg::msgtype::Exiting, {}));
+    co_await h->loop.delay(50ms);
+
+    if (!co_await discardBytes(&h->loop, h->client.imsgFd, filler))
+        co_return 2;
+    auto const frames = co_await readImsgFrames(&h->loop, h->client.imsgFd, 2);
+    if (frames.size() != 2)
+        co_return 3;
+    if (frames[0].type != imsg::msgtype::Exit || frames[1].type != imsg::msgtype::Exited)
+        co_return 4;
+
+    auto const closed = co_await awaitEof(&h->loop, h->client.stdoutRead);
+    if (h->client.stdinWrite >= 0)
+    {
+        ::close(h->client.stdinWrite);
+        h->client.stdinWrite = -1;
+    }
+    co_return closed ? 0 : 5;
+}
+
+Task<void> recordOverlappingExit(ImsgHarness* h, std::size_t filler, int* outcome)
+{
+    *outcome = co_await overlappingExitScenario(h, filler);
+}
+
+} // namespace
+
+TEST_CASE("MSG_EXIT and MSG_EXITED sent over each other both arrive, in order", "[vthost][imsgserver]")
+{
+    // Two writes armed on one socket at once is a contract violation core-cpp ends the process
+    // for, so the scenario runs in a child and its exit status is the verdict.
+    auto const child = ::fork();
+    REQUIRE(child >= 0);
+    if (child == 0)
+    {
+        // The child inherits Catch2's handler, which would report a second, bogus run on abort.
+        std::ignore = std::signal(SIGABRT, SIG_DFL);
+        auto outcome = 10;
+        try
+        {
+            auto h = ImsgHarness {};
+            makeNonBlocking(h.serverFd);
+            auto const filler = fillUntilBlocked(h.serverFd);
+            h.client.handshake(imsg::ClientControl);
+            h.run([filler, &outcome](ImsgHarness* inner) {
+                return recordOverlappingExit(inner, filler, &outcome);
+            });
+        }
+        catch (...)
+        {
+            outcome = 11;
+        }
+        std::_Exit(outcome);
+    }
+
+    auto status = 0;
+    auto waited = ::pid_t { 0 };
+    for (auto i = 0; i < 300 && waited == 0; ++i)
+    {
+        waited = ::waitpid(child, &status, WNOHANG);
+        if (waited == 0)
+            std::this_thread::sleep_for(100ms);
+    }
+    if (waited == 0)
+    {
+        ::kill(child, SIGKILL);
+        ::waitpid(child, &status, 0);
+        FAIL("the child did not finish within 30 s");
+    }
+    INFO((WIFSIGNALED(status) ? std::format("the child was killed by signal {}", WTERMSIG(status))
+                              : std::format("the child exited with {}", WEXITSTATUS(status))));
+    CHECK(WIFEXITED(status));
+    CHECK(WEXITSTATUS(status) == 0);
+}
+
+// {{{ live oracle: the REAL tmux client binary attaches to OUR imsg endpoint
     #include <cstdio>
     #include <filesystem>
 
@@ -438,7 +604,10 @@ std::string runShellCapture(std::string const& command)
 }
 
 /// The oracle's client side: drives the tmux binary's pty and reaps it.
-Task<void> oracleScenario(net::EventLoop* loop, int master, pid_t child, vthost::ConnectionAcceptor* server)
+Task<void> oracleScenario(core::net::EventLoop* loop,
+                          int master,
+                          pid_t child,
+                          vthost::ConnectionAcceptor* server)
 {
     makeNonBlocking(master);
 
@@ -501,20 +670,22 @@ TEST_CASE("a real tmux binary attaches over imsg", "[vthost][imsgserver][oracle]
     auto const socketPath = socketDir + "/tmux.sock";
     std::filesystem::remove_all(socketDir);
 
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = vthost::SessionHost {
         loop,
         [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
             return std::make_unique<vtpty::MockPty>(size);
         },
         vtbackend::Settings {},
-        crispy::defaultEnvironment(),
+        core::defaultEnvironment(),
         /*startPumps=*/false,
     };
     host.createTab();
+    // Declared after the host, so the connection flows the server spawns end while it exists.
+    auto const drain = vthost::LoopDrain { loop };
 
-    auto listener = net::listenUnix(loop, socketPath);
+    auto listener = core::net::listenUnix(loop, socketPath);
     REQUIRE(listener.has_value());
     auto server = vthost::ConnectionAcceptor {
         loop, "test", std::move(*listener), vthost::tmux::makeTmuxImsgHandler(loop, host)
@@ -531,7 +702,7 @@ TEST_CASE("a real tmux binary attaches over imsg", "[vthost][imsgserver][oracle]
     }
 
     auto drive = [](vthost::ConnectionAcceptor* srv, Task<void> scenario) -> Task<void> {
-        co_await coro::whenAll(srv->serve(), std::move(scenario));
+        co_await core::async::whenAll(srv->serve(), std::move(scenario));
     };
     loop.blockOn(drive(&server, oracleScenario(&loop, master, child, &server)));
 

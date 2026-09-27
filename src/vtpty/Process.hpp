@@ -4,7 +4,8 @@
 #include <vtpty/Pty.hpp>
 
 #include <crispy/BufferObject.hpp>
-#include <crispy/Overloaded.hpp>
+
+#include <core/Overloaded.hpp>
 
 #include <filesystem>
 #include <format>
@@ -137,20 +138,20 @@ struct std::formatter<vtpty::Process::ExitStatus>: std::formatter<std::string>
     auto format(vtpty::Process::ExitStatus const& status, auto& ctx) const
     {
         auto const text =
-            std::visit(Overloaded { [&](vtpty::Process::NormalExit exit) {
-                                       return std::format("{} (normal exit)", exit.exitCode);
-                                   },
-                                    [&](vtpty::Process::SignalExit exit) {
-                                        char buf[256];
+            std::visit(core::Overloaded { [&](vtpty::Process::NormalExit exit) {
+                                             return std::format("{} (normal exit)", exit.exitCode);
+                                         },
+                                          [&](vtpty::Process::SignalExit exit) {
+                                              char buf[256];
 #ifdef _WIN32
-                                        strerror_s(buf, sizeof(buf), errno);
-                                        return std::format("{} (signal number {})", buf, exit.signum);
+                                              strerror_s(buf, sizeof(buf), errno);
+                                              return std::format("{} (signal number {})", buf, exit.signum);
 #else
-                                        return std::format("{} (signal number {})",
-                                                           strerror_r(errno, buf, sizeof(buf)),
-                                                           exit.signum);
+                                              return std::format("{} (signal number {})",
+                                                                 strerror_r(errno, buf, sizeof(buf)),
+                                                                 exit.signum);
 #endif
-                                    } },
+                                          } },
                        status);
         return std::formatter<std::string>::format(text, ctx);
     }

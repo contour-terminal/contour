@@ -4,15 +4,15 @@
 /// @file
 /// Spawns a real `tmux -C attach-session` as a child on its own PTY — tmux's
 /// client insists on a terminal — and adopts the master side as a reactor
-/// transport (net::adoptFd handles PTY masters: ENOTSOCK fallback, EIO=EOF).
+/// transport (core::net::adoptFd handles PTY masters: ENOTSOCK fallback, EIO=EOF).
 /// This is the production promotion of the gateway oracle test's harness.
+
+#include <core/net/EventLoop.hpp>
+#include <core/net/ISocket.hpp>
 
 #include <expected>
 #include <memory>
 #include <string>
-
-#include <net/EventLoop.hpp>
-#include <net/ISocket.hpp>
 
 namespace vthost::tmux
 {
@@ -21,7 +21,7 @@ namespace vthost::tmux
 struct SpawnedControlMode
 {
     int pid = -1;
-    std::unique_ptr<net::ISocket> transport;
+    std::unique_ptr<core::net::ISocket> transport;
 };
 
 /// Forks `tmux -C attach-session` (against @p tmuxSocket via -S when
@@ -31,7 +31,7 @@ struct SpawnedControlMode
 /// @return The child and its adopted transport, or a reason on failure
 ///         (POSIX only; unsupported on Windows).
 [[nodiscard]] std::expected<SpawnedControlMode, std::string> spawnControlMode(
-    net::EventLoop& loop, std::string const& tmuxSocket = {});
+    core::net::EventLoop& loop, std::string const& tmuxSocket = {});
 
 /// Reaps the spawned client: bounded wait, then SIGKILL. No-op for pid < 0.
 void reapControlMode(int pid);

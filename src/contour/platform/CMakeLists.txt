@@ -73,6 +73,8 @@ endif()
 # palette the configuration model owns.
 target_link_libraries(contour_platform PUBLIC
     contour_config
+    core::base
+    core::log
     Qt6::Core
     Qt6::DBus
     Qt6::Gui

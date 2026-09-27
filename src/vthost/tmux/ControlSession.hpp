@@ -14,6 +14,12 @@
 /// Commands are a data-driven table (the Actions.h catalog idiom): one row per
 /// verb naming its handler; adding a verb is adding a row.
 
+#include <core/async/Task.hpp>
+#include <core/net/AsyncBufferedReader.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/ISocket.hpp>
+#include <core/net/WriteQueue.hpp>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -24,11 +30,6 @@
 #include <string_view>
 #include <vector>
 
-#include <coro/Task.hpp>
-#include <net/AsyncBufferedReader.hpp>
-#include <net/EventLoop.hpp>
-#include <net/ISocket.hpp>
-#include <net/WriteQueue.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/tmux/ControlOutput.hpp>
@@ -85,10 +86,10 @@ class ControlSession final: public vtworkspace::ModelEvents, public SessionStrea
     /// @param wallClock Seconds-since-epoch source for guard timestamps
     ///        (injected so tests are deterministic).
     /// @param options Transport-dialect knobs (defaults = line protocol).
-    ControlSession(net::EventLoop& loop,
+    ControlSession(core::net::EventLoop& loop,
                    SessionHost& host,
                    ConnectionId id,
-                   std::unique_ptr<net::ISocket> connection,
+                   std::unique_ptr<core::net::ISocket> connection,
                    std::function<std::int64_t()> wallClock,
                    Options options = {});
     ~ControlSession() override;
@@ -100,7 +101,7 @@ class ControlSession final: public vtworkspace::ModelEvents, public SessionStrea
 
     /// The connection flow: emits the initial guard pair and session state,
     /// then serves commands until the peer disconnects or sends an empty line.
-    [[nodiscard]] coro::Task<void> run();
+    [[nodiscard]] core::async::Task<void> run();
 
     /// @return True once the client was dropped because the write queue
     ///         overflowed (or its transport failed): the session is tearing down.
@@ -202,23 +203,23 @@ class ControlSession final: public vtworkspace::ModelEvents, public SessionStrea
     void scheduleOutputDrain();
 
     /// Drops the control client: closes the write queue and the connection so
-    /// run()'s parked reader unwinds (BadHandle) through the normal teardown.
+    /// run()'s parked reader unwinds (Cancelled) through the normal teardown.
     /// Idempotent. Invoked when a write is refused — WriteQueue's disconnect
     /// contract (WriteQueue.h) — rather than silently dropping data.
     void handlePeerLost();
 
-    net::EventLoop& _loop;
+    core::net::EventLoop& _loop;
     SessionHost& _host;
     ConnectionId _id; ///< Prefixes this connection's every log line.
-    std::unique_ptr<net::ISocket> _connection;
+    std::unique_ptr<core::net::ISocket> _connection;
     std::function<std::int64_t()> _wallClock;
     Options _options;
-    net::WriteQueue _writer;
+    core::net::WriteQueue _writer;
     ControlOutput _output;
     std::uint32_t _commandNumber = 0;
     /// Commands this client actually issued, reported on detach. Distinct from _commandNumber,
     /// which the preamble's guard pair already consumes: a peer that connected and closed without
-    /// speaking is a liveness probe (net::listenUnix's bind probe is one), and reads in the log
+    /// speaking is a liveness probe (core::net::listenUnix's bind probe is one), and reads in the log
     /// exactly like a real client that attached and quit unless the count says otherwise.
     std::uint32_t _commandsDispatched = 0;
     bool _noOutput = false; ///< refresh-client -f no-output: suppress %output entirely.
@@ -235,6 +236,6 @@ class ControlSession final: public vtworkspace::ModelEvents, public SessionStrea
 /// @param loop The event loop.
 /// @param host The session host (not owned; must outlive the daemon's serving).
 /// @return A handler suitable for ConnectionAcceptor's constructor.
-[[nodiscard]] ConnectionHandler makeControlModeHandler(net::EventLoop& loop, SessionHost& host);
+[[nodiscard]] ConnectionHandler makeControlModeHandler(core::net::EventLoop& loop, SessionHost& host);
 
 } // namespace vthost::tmux

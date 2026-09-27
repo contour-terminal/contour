@@ -4,10 +4,10 @@
 #include <vtpty/SandboxInfo.hpp>
 #include <vtpty/UnixPty.hpp>
 
-#include <crispy/Environment.hpp>
-#include <crispy/Overloaded.hpp>
-#include <crispy/UserInfo.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Environment.hpp>
+#include <core/Overloaded.hpp>
+#include <core/UserInfo.hpp>
+#include <core/Utils.hpp>
 
 #include <array>
 #include <cassert>
@@ -63,7 +63,7 @@ extern "C" char** environ;
 
 using namespace std;
 using namespace std::string_view_literals;
-using crispy::trimRight;
+using core::trimRight;
 
 namespace fs = std::filesystem;
 
@@ -321,7 +321,7 @@ StartResult Process::start()
     // any of that in a child forked from the multi-threaded GUI process can deadlock outright, if a
     // thread happened to hold the malloc arena or the NSS lock at the moment of the fork.
     auto loginShellArgs = loginShell(_d->escapeSandbox);
-    auto const loginShellText = crispy::joinHumanReadableQuoted(loginShellArgs, ' ');
+    auto const loginShellText = core::joinHumanReadableQuoted(loginShellArgs, " ");
 
     // Same layout and lifetime as childEnvp above: the vector's own storage backs the argv, so
     // nothing needs freeing in either process.
@@ -495,10 +495,10 @@ namespace
     /// @return argv of the login shell; `{"/bin/sh"}` if the user has no password-database entry.
     [[nodiscard]] vector<string> resolveLoginShell(bool escapeSandbox)
     {
-        if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value())
+        if (auto const pw = core::currentUserPasswordEntry(); pw.has_value())
         {
 #ifdef __APPLE__
-            crispy::ignoreUnused(escapeSandbox);
+            core::ignoreUnused(escapeSandbox);
             return { pw->shell };
 #else
             if (Process::isFlatpak() && escapeSandbox)
@@ -506,7 +506,7 @@ namespace
                 char buf[1024];
                 auto const cmd = std::format("flatpak-spawn --host getent passwd {}", pw->name);
                 FILE* fp = popen(cmd.c_str(), "r");
-                auto fpCloser = crispy::Finally { [fp]() { pclose(fp); } };
+                auto fpCloser = core::Finally { [fp]() { pclose(fp); } };
                 size_t const nread = fread(buf, sizeof(char), sizeof(buf) / sizeof(char), fp);
                 auto const output = trimRight(string_view(buf, nread));
                 auto const colonIndex = output.rfind(':');
@@ -544,10 +544,10 @@ vector<string> Process::loginShell(bool escapeSandbox)
 
 std::string Process::userName()
 {
-    if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value() && !pw->name.empty())
+    if (auto const pw = core::currentUserPasswordEntry(); pw.has_value() && !pw->name.empty())
         return pw->name;
 
-    if (auto const user = crispy::defaultEnvironment().get("USER"); user.has_value())
+    if (auto const user = core::defaultEnvironment().get("USER"); user.has_value())
         return std::string { *user };
 
     return "unknown";
@@ -555,9 +555,9 @@ std::string Process::userName()
 
 fs::path Process::homeDirectory()
 {
-    if (auto const home = crispy::defaultEnvironment().get("HOME"); home.has_value())
+    if (auto const home = core::defaultEnvironment().get("HOME"); home.has_value())
         return { *home };
-    else if (auto const pw = crispy::currentUserPasswordEntry(); pw.has_value() && !pw->homeDirectory.empty())
+    else if (auto const pw = core::currentUserPasswordEntry(); pw.has_value() && !pw->homeDirectory.empty())
         return { pw->homeDirectory };
     else
         return { "/" };

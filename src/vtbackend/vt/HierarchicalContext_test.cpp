@@ -390,7 +390,7 @@ TEST_CASE("HierarchicalContext.an unknown type is ignored like any unknown field
 
 TEST_CASE("HierarchicalContext.a duplicate field takes the last value", "[context]")
 {
-    // Spec-silent; matches crispy::splitKeyValuePairs and the OSC 99 metadata loop, both last-wins.
+    // Spec-silent; matches core::splitKeyValuePairs and the OSC 99 metadata loop, both last-wins.
     auto const decoded = Decoded { "start=id;user=first;user=second" };
     CHECK(decoded.command.user == "second");
 }

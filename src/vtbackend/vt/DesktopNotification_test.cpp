@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/vt/DesktopNotification.hpp>
 
-#include <crispy/Base64.hpp>
+#include <core/Base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -63,7 +63,7 @@ TEST_CASE("DesktopNotification.ParseAlivePayload", "[DesktopNotification]")
 TEST_CASE("DesktopNotification.ParseBase64Encoded", "[DesktopNotification]")
 {
     // "Hello" in base64 is "SGVsbG8="
-    auto const encoded = crispy::base64::encode("Hello");
+    auto const encoded = core::base64::encode("Hello");
     auto const raw = "i=b64test:e=1;" + encoded;
     auto const n = parseOSC99(raw);
     CHECK(n.identifier == "b64test");

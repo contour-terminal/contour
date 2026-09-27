@@ -12,12 +12,13 @@
 ///
 /// POSIX only: SCM_RIGHTS has no Windows equivalent.
 
+#include <core/async/Task.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/ISocket.hpp>
+
 #include <functional>
 #include <memory>
 
-#include <coro/Task.hpp>
-#include <net/EventLoop.hpp>
-#include <net/ISocket.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/SessionHost.hpp>
 
@@ -28,6 +29,6 @@ namespace vthost::tmux
 /// @param loop The event loop.
 /// @param host The session host (not owned; must outlive the daemon's serving).
 /// @return A handler suitable for ConnectionAcceptor's constructor.
-[[nodiscard]] ConnectionHandler makeTmuxImsgHandler(net::EventLoop& loop, SessionHost& host);
+[[nodiscard]] ConnectionHandler makeTmuxImsgHandler(core::net::EventLoop& loop, SessionHost& host);
 
 } // namespace vthost::tmux

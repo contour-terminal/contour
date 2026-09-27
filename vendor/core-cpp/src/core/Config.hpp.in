@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+/// @file
+/// The build configuration of core-cpp. CMake generates core/Config.hpp from
+/// src/core/Config.hpp.in when it configures core-cpp; do not edit the generated file.
+
+#define CORE_CPP_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define CORE_CPP_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define CORE_CPP_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define CORE_CPP_VERSION_STRING "@PROJECT_VERSION@"
+
+/// The exit status of a test binary whose every test case was skipped. ctest's
+/// SKIP_RETURN_CODE for every core-cpp test is this value.
+#define CORE_CPP_SKIP_EXIT_CODE @CORE_CPP_SKIP_EXIT_CODE@
+
+// The optional parts this build of core-cpp has, each 0 or 1.
+#cmakedefine01 CORE_CPP_WITH_TUI
+#cmakedefine01 CORE_CPP_WITH_IMAGES
+#cmakedefine01 CORE_CPP_WITH_TLS
+#cmakedefine01 CORE_CPP_WITH_TRACY

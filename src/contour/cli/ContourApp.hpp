@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/App.hpp>
+#include <core/cli/App.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -26,13 +26,13 @@ enum class DaemonServiceAction : std::uint8_t
 /// Contour CLI application base.
 ///
 /// TODO: provide special installable targets in debian packages (cmake and PPA)
-class ContourApp: public crispy::App
+class ContourApp: public core::cli::App
 {
   public:
     /// @param env The process environment every part of the application reads through.
-    explicit ContourApp(crispy::Environment const& env);
+    explicit ContourApp(core::Environment const& env);
 
-    [[nodiscard]] crispy::cli::Command parameterDefinition() const override;
+    [[nodiscard]] core::cli::Command parameterDefinition() const override;
 
   private:
     int captureAction();

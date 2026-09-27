@@ -4,7 +4,7 @@
 #include <text_shaper/MockFontLocator.hpp>
 #include <text_shaper/OpenShaper.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -421,7 +421,7 @@ TEST_CASE("OpenShaper.fallback.extends_the_chain_on_demand", "[OpenShaper][fallb
 TEST_CASE("OpenShaper.fallback.skips_a_font_that_will_not_load", "[OpenShaper][fallback]")
 {
     // Hand-rolled rather than built on FallbackEnv, because the broken entry is deliberately not a font.
-    auto const _ = crispy::Finally { [] { MockFontLocator::configure({}); } };
+    auto const _ = core::Finally { [] { MockFontLocator::configure({}); } };
 
     auto primary = BDFFont { "primary", Monospaced, { { U'A', 8 } } };
     auto broken = BrokenFont {};

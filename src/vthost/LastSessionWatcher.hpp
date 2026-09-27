@@ -4,10 +4,11 @@
 /// @file
 /// `LastSessionWatcher` — ends an auto-spawned daemon together with its last session.
 
+#include <core/net/EventLoop.hpp>
+
 #include <functional>
 #include <utility>
 
-#include <net/EventLoop.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vtworkspace/SessionModel.hpp>
 
@@ -48,7 +49,7 @@ class LastSessionWatcher final: public SessionStreamEvents
     /// @param host The host whose closes are observed; its session count is re-read live.
     /// @param loop The loop the deferred decision is posted onto.
     /// @param requestShutdown Invoked on the loop thread once no session remains.
-    LastSessionWatcher(SessionHost& host, net::EventLoop& loop, std::function<void()> requestShutdown):
+    LastSessionWatcher(SessionHost& host, core::net::EventLoop& loop, std::function<void()> requestShutdown):
         _host(host),
         _loop(loop),
         _requestShutdown(std::move(requestShutdown)),
@@ -72,7 +73,7 @@ class LastSessionWatcher final: public SessionStreamEvents
 
   private:
     SessionHost& _host;
-    net::EventLoop& _loop;
+    core::net::EventLoop& _loop;
     std::function<void()> _requestShutdown;
     /// Last member: registers `*this` only once every member above it is initialized. Spelled out
     /// rather than via makeScopedStreamSubscription, which every other call site uses: that factory

@@ -22,19 +22,22 @@
     #include <unistd.h>
 #endif
 
-#include <coro/Cancellation.hpp>
-#include <coro/WhenAll.hpp>
-#include <coro/WhenAny.hpp>
-#include <net/EventLoop.hpp>
-#include <net/ISocket.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/Sockets.hpp>
-#include <net/Tls.hpp>
-#include <net/WriteQueue.hpp>
-#include <net/testing/CoroTestSupport.hpp>
-#include <net/testing/InMemoryTransport.hpp>
+#include <core/async/Cancellation.hpp>
+#include <core/async/WhenAll.hpp>
+#include <core/async/WhenAny.hpp>
+#include <core/log/LogSink.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/ISocket.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/Sockets.hpp>
+#include <core/net/Tls.hpp>
+#include <core/net/WriteQueue.hpp>
+#include <core/net/testing/CoroTestSupport.hpp>
+#include <core/net/testing/InMemoryTransport.hpp>
+
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/Daemon.hpp>
+#include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/SessionHost.hpp>
@@ -44,7 +47,7 @@
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
 
-using coro::Task;
+using core::async::Task;
 using vthost::NativeSession;
 using vthost::SessionHost;
 using vthost::client::NativeClient;
@@ -68,17 +71,18 @@ proto::Delta snapshotPiece(proto::SnapshotPart part)
 
 struct EndToEndHarness
 {
-    net::PollEventSource source;
-    net::EventLoop loop { source };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
     SessionHost host { loop,
                        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                            return std::make_unique<vtpty::MockPty>(size);
                        },
                        vtbackend::Settings {},
-                       crispy::defaultEnvironment(),
+                       core::defaultEnvironment(),
                        /*startPumps=*/false };
-    net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
-    net::ISocket* serverConn = pair.first.get(); ///< Captured before the move, to simulate a daemon exit.
+    core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
+    core::net::ISocket* serverConn =
+        pair.first.get(); ///< Captured before the move, to simulate a daemon exit.
     std::unique_ptr<NativeSession> server = std::make_unique<NativeSession>(
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first));
     std::unique_ptr<NativeClient> client =
@@ -99,7 +103,7 @@ struct EndToEndHarness
 Task<void> scenario(EndToEndHarness* h, vtworkspace::SessionId sessionId)
 {
     // 1. Attach: the handshake answers and the snapshot mirrors the screen.
-    co_await net::testing::waitUntil(&h->loop, [&] { return !h->client->screens().empty(); });
+    co_await core::net::testing::waitUntil(&h->loop, [&] { return !h->client->screens().empty(); });
     REQUIRE(h->client->connected());
     REQUIRE(h->client->screens().contains(sessionId.value));
     {
@@ -112,7 +116,7 @@ Task<void> scenario(EndToEndHarness* h, vtworkspace::SessionId sessionId)
     // 2. Increment: new terminal output becomes a (debounced) delta.
     h->host.terminal(sessionId)->writeToScreen("\r\nsecond line");
     h->server->sessionScreenUpdated(sessionId); // what the daemon glue wires up
-    co_await net::testing::waitUntil(&h->loop, [&] {
+    co_await core::net::testing::waitUntil(&h->loop, [&] {
         return h->client->screens().at(sessionId.value).viewportText().contains("second line");
     });
     CHECK(h->client->screens().at(sessionId.value).viewportText().contains("second line"));
@@ -121,20 +125,20 @@ Task<void> scenario(EndToEndHarness* h, vtworkspace::SessionId sessionId)
     h->client->sendInput(sessionId.value, "ls\r");
     auto& tapped = dynamic_cast<vthost::TappingPty&>(h->host.terminal(sessionId)->device());
     auto& mock = dynamic_cast<vtpty::MockPty&>(tapped.inner());
-    co_await net::testing::waitUntil(&h->loop, [&] { return !mock.stdinBuffer().empty(); });
+    co_await core::net::testing::waitUntil(&h->loop, [&] { return !mock.stdinBuffer().empty(); });
     CHECK(mock.stdinBuffer() == "ls\r");
 
     // 4. A client-area proposal comes back as an authoritative snapshot.
     h->client->requestResize(100, 40);
-    co_await net::testing::waitUntil(&h->loop,
-                                     [&] { return h->client->screens().at(sessionId.value).columns == 100; });
+    co_await core::net::testing::waitUntil(
+        &h->loop, [&] { return h->client->screens().at(sessionId.value).columns == 100; });
     CHECK(h->client->screens().at(sessionId.value).lines == 40);
     CHECK(h->host.pageSize() == vtpty::PageSize { vtpty::LineCount(40), vtpty::ColumnCount(100) });
 
     // 5. A per-pane report sizes THAT pane's PTY, leaving the client area alone.
     h->client->resizePane(sessionId.value, 70, 40);
-    co_await net::testing::waitUntil(&h->loop,
-                                     [&] { return h->client->screens().at(sessionId.value).columns == 70; });
+    co_await core::net::testing::waitUntil(
+        &h->loop, [&] { return h->client->screens().at(sessionId.value).columns == 70; });
     CHECK(h->host.terminal(sessionId)->totalPageSize().columns.value == 70);
     CHECK(h->host.pageSize() == vtpty::PageSize { vtpty::LineCount(40), vtpty::ColumnCount(100) });
 
@@ -143,7 +147,7 @@ Task<void> scenario(EndToEndHarness* h, vtworkspace::SessionId sessionId)
 
 Task<void> driveEndToEnd(EndToEndHarness* h, vtworkspace::SessionId sessionId)
 {
-    co_await coro::whenAll(h->server->run(), h->client->run(), scenario(h, sessionId));
+    co_await core::async::whenAll(h->server->run(), h->client->run(), scenario(h, sessionId));
 }
 
 } // namespace
@@ -457,7 +461,7 @@ namespace
 {
 
 /// Encodes @p pdu with @p serial and enqueues it onto @p writer (test-only helper).
-void enqueuePdu(net::WriteQueue& writer, uint64_t serial, proto::DecodedPdu const& pdu)
+void enqueuePdu(core::net::WriteQueue& writer, uint64_t serial, proto::DecodedPdu const& pdu)
 {
     auto sink = proto::Writer {};
     proto::encodePdu(sink, serial, pdu);
@@ -469,9 +473,9 @@ void enqueuePdu(net::WriteQueue& writer, uint64_t serial, proto::DecodedPdu cons
 /// row carries an image cell (id 7), then serves the client's FetchImage with
 /// @p reply. Exercises the serial-correlated (session-less) image reply path
 /// without needing a real rasterized image.
-Task<void> fakeImageServer(net::EventLoop* loop, net::ISocket* socket, proto::ImageData reply)
+Task<void> fakeImageServer(core::net::EventLoop* loop, core::net::ISocket* socket, proto::ImageData reply)
 {
-    auto writer = net::WriteQueue { *loop, socket, std::size_t { 1 } * 1024 * 1024 };
+    auto writer = core::net::WriteQueue { *loop, socket, std::size_t { 1 } * 1024 * 1024 };
     co_await vthost::pumpPdus(socket, [&](proto::DecodedFrame const& frame) {
         if (std::holds_alternative<proto::ClientHello>(frame.pdu))
         {
@@ -502,9 +506,9 @@ Task<void> fakeImageServer(net::EventLoop* loop, net::ISocket* socket, proto::Im
 }
 
 /// Waits for image 7's pixels to reach the client's cache, then detaches.
-Task<void> awaitImageThenDetach(net::EventLoop* loop, NativeClient* client, bool* seen)
+Task<void> awaitImageThenDetach(core::net::EventLoop* loop, NativeClient* client, bool* seen)
 {
-    co_await net::testing::waitUntil(loop, [&] {
+    co_await core::net::testing::waitUntil(loop, [&] {
         auto const it = client->screens().find(1);
         return it != client->screens().end() && it->second.imageData(7) != nullptr;
     });
@@ -523,9 +527,9 @@ Task<void> awaitImageThenDetach(net::EventLoop* loop, NativeClient* client, bool
 
 TEST_CASE("attach fetches image pixels on demand and caches them", "[vthost][attach]")
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
-    auto pair = *net::testing::makeSocketPair(loop);
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
     auto* serverSock = pair.first.get();
     auto imageEvent = false;
     auto client = NativeClient { loop,
@@ -543,9 +547,9 @@ TEST_CASE("attach fetches image pixels on demand and caches them", "[vthost][att
     reply.data.resize(static_cast<std::size_t>(2 * 3 * 4), std::byte { 0x80 });
 
     auto seen = false;
-    loop.blockOn(net::testing::allOf(client.run(),
-                                     fakeImageServer(&loop, serverSock, reply),
-                                     awaitImageThenDetach(&loop, &client, &seen)));
+    loop.blockOn(core::net::testing::allOf(client.run(),
+                                           fakeImageServer(&loop, serverSock, reply),
+                                           awaitImageThenDetach(&loop, &client, &seen)));
 
     CHECK(seen);
     CHECK(imageEvent);
@@ -559,17 +563,17 @@ namespace
 /// (reject: the server answers the handshake then drops the connection).
 void tokenAttach(std::string serverToken, std::string clientToken, bool* gotSnapshot)
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab();
-    auto pair = *net::testing::makeSocketPair(loop);
+    auto pair = *core::net::testing::makeSocketPair(loop);
     auto server = NativeSession { loop,
                                   host,
                                   vthost::ConnectionId { .endpoint = "test", .index = 1 },
@@ -584,7 +588,7 @@ void tokenAttach(std::string serverToken, std::string clientToken, bool* gotSnap
                                  NativeClient::SessionEventHandler {},
                                  NativeClient::LayoutHandler {} };
 
-    auto scenario = [](net::EventLoop* loop, NativeClient* client, bool* got) -> Task<void> {
+    auto scenario = [](core::net::EventLoop* loop, NativeClient* client, bool* got) -> Task<void> {
         // On accept a snapshot arrives quickly; on reject the server drops us and
         // no snapshot ever comes. Bounded poll either way.
         for (auto i = 0; i < 300 && client->screens().empty(); ++i)
@@ -593,7 +597,7 @@ void tokenAttach(std::string serverToken, std::string clientToken, bool* gotSnap
         client->detach();
     }(&loop, &client, gotSnapshot);
 
-    loop.blockOn(net::testing::allOf(server.run(), client.run(), std::move(scenario)));
+    loop.blockOn(core::net::testing::allOf(server.run(), client.run(), std::move(scenario)));
 }
 
 } // namespace
@@ -647,12 +651,12 @@ namespace
 
 /// Connects over TCP, mirrors the snapshot, detaches, then closes the server so
 /// its accept loop unwinds. Records whether a snapshot arrived.
-Task<void> tcpAttachDriver(net::EventLoop* loop,
+Task<void> tcpAttachDriver(core::net::EventLoop* loop,
                            vthost::ConnectionAcceptor* server,
                            std::uint16_t port,
                            bool* saw)
 {
-    auto connected = co_await net::connect(loop, "127.0.0.1", port);
+    auto connected = co_await core::net::connect(loop, "127.0.0.1", port);
     if (connected)
     {
         auto client = NativeClient { *loop,
@@ -662,13 +666,13 @@ Task<void> tcpAttachDriver(net::EventLoop* loop,
                                      NativeClient::ImageHandler {},
                                      NativeClient::SessionEventHandler {},
                                      NativeClient::LayoutHandler {} };
-        auto scenario = [](net::EventLoop* loop, NativeClient* client, bool* saw) -> Task<void> {
+        auto scenario = [](core::net::EventLoop* loop, NativeClient* client, bool* saw) -> Task<void> {
             for (auto i = 0; i < 300 && client->screens().empty(); ++i)
                 co_await loop->delay(1ms);
             *saw = !client->screens().empty();
             client->detach();
         }(loop, &client, saw);
-        co_await coro::whenAll(client.run(), std::move(scenario));
+        co_await core::async::whenAll(client.run(), std::move(scenario));
     }
     server->close();
 }
@@ -677,27 +681,29 @@ Task<void> tcpAttachDriver(net::EventLoop* loop,
 
 TEST_CASE("attach mirrors over a real TCP transport with token auth", "[vthost][attach]")
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab();
+    // Declared after the host, so the connection flows the server spawns end while it exists.
+    auto const drain = vthost::LoopDrain { loop };
 
     // A native server on an ephemeral loopback TCP port, token-guarded.
-    auto listener = net::listen(loop, "127.0.0.1", 0);
+    auto listener = core::net::listen(loop, "127.0.0.1", 0);
     REQUIRE(listener.has_value());
-    auto const port = (*listener)->localPort();
+    auto const port = (*listener)->boundPort();
     auto server = vthost::ConnectionAcceptor {
         loop, "test", std::move(*listener), vthost::makeNativeHandler(loop, host, "tok")
     };
 
     auto saw = false;
-    loop.blockOn(net::testing::allOf(server.serve(), tcpAttachDriver(&loop, &server, port, &saw)));
+    loop.blockOn(core::net::testing::allOf(server.serve(), tcpAttachDriver(&loop, &server, port, &saw)));
     CHECK(saw);
 }
 
@@ -706,29 +712,29 @@ namespace
 
 /// Connects over TCP, wraps the connection in TLS (client role), mirrors the
 /// snapshot, detaches, then closes the server. Records whether a snapshot came.
-Task<void> tlsTcpAttachDriver(net::EventLoop* loop,
+Task<void> tlsTcpAttachDriver(core::net::EventLoop* loop,
                               vthost::ConnectionAcceptor* server,
-                              std::shared_ptr<net::ITlsContext> clientTls,
+                              std::shared_ptr<core::net::ITlsContext> clientTls,
                               std::uint16_t port,
                               bool* saw)
 {
-    auto connected = co_await net::connect(loop, "127.0.0.1", port);
+    auto connected = co_await core::net::connect(loop, "127.0.0.1", port);
     if (connected)
     {
         auto client = NativeClient { *loop,
-                                     clientTls->wrap(std::move(*connected)),
+                                     clientTls->wrap(std::move(*connected), *loop),
                                      NativeClient::HandshakeOptions { .token = "tok" },
                                      NativeClient::UpdateHandler {},
                                      NativeClient::ImageHandler {},
                                      NativeClient::SessionEventHandler {},
                                      NativeClient::LayoutHandler {} };
-        auto scenario = [](net::EventLoop* loop, NativeClient* client, bool* saw) -> Task<void> {
+        auto scenario = [](core::net::EventLoop* loop, NativeClient* client, bool* saw) -> Task<void> {
             for (auto i = 0; i < 500 && client->screens().empty(); ++i)
                 co_await loop->delay(1ms);
             *saw = !client->screens().empty();
             client->detach();
         }(loop, &client, saw);
-        co_await coro::whenAll(client.run(), std::move(scenario));
+        co_await core::async::whenAll(client.run(), std::move(scenario));
     }
     server->close();
 }
@@ -737,58 +743,116 @@ Task<void> tlsTcpAttachDriver(net::EventLoop* loop,
 
 TEST_CASE("attach mirrors over TLS-encrypted TCP with token auth", "[vthost][attach]")
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab();
+    // Declared after the host, so the connection flows the server spawns end while it exists.
+    auto const drain = vthost::LoopDrain { loop };
 
-    auto serverTls = net::makeSelfSignedServerContext();
+    auto serverTls = core::net::makeSelfSignedServerContext();
     REQUIRE(serverTls.has_value());
-    auto clientTls = net::makeTlsClientContext();
+    auto clientTls = core::net::makeTlsClientContext();
     REQUIRE(clientTls.has_value());
 
-    auto listener = net::listen(loop, "127.0.0.1", 0);
+    auto listener = core::net::listen(loop, "127.0.0.1", 0);
     REQUIRE(listener.has_value());
-    auto const port = (*listener)->localPort();
+    auto const port = (*listener)->boundPort();
 
     // A TLS-wrapping native handler: each accepted socket is encrypted (server
     // role) before the native protocol runs over it — the daemon's TCP path.
     auto nativeHandler = vthost::makeNativeHandler(loop, host, "tok");
     auto const& tlsContext = *serverTls;
-    auto handler = [tlsContext, nativeHandler](vthost::ConnectionId id,
-                                               std::unique_ptr<net::ISocket> socket) {
-        return nativeHandler(std::move(id), tlsContext->wrap(std::move(socket)));
+    auto handler = [tlsContext, nativeHandler, &loop](vthost::ConnectionId id,
+                                                      std::unique_ptr<core::net::ISocket> socket) {
+        return nativeHandler(std::move(id), tlsContext->wrap(std::move(socket), loop));
     };
     auto server = vthost::ConnectionAcceptor { loop, "test", std::move(*listener), handler };
 
     auto saw = false;
-    loop.blockOn(
-        net::testing::allOf(server.serve(), tlsTcpAttachDriver(&loop, &server, *clientTls, port, &saw)));
+    loop.blockOn(core::net::testing::allOf(server.serve(),
+                                           tlsTcpAttachDriver(&loop, &server, *clientTls, port, &saw)));
     CHECK(saw); // snapshot mirrored across TLS-over-TCP with a valid token
 }
 
-TEST_CASE("attach mirrors over TLS with a generated self-signed dev certificate", "[vthost][attach]")
+TEST_CASE("a clean TLS detach ends the connection as a disconnect rather than an error", "[vthost][attach]")
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    // TLS separates a peer that finished from one that was cut off by close_notify: a TCP FIN
+    // without it reads as truncation. So a client that detaches cleanly must say close_notify
+    // before it closes, or the daemon logs every ordinary detach as a failed read.
+    auto capture = core::log::ScopedCapture {};
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab();
+    // Declared after the host, so the connection flows the server spawns end while it exists.
+    auto const drain = vthost::LoopDrain { loop };
+
+    auto serverTls = core::net::makeSelfSignedServerContext();
+    REQUIRE(serverTls.has_value());
+    auto clientTls = core::net::makeTlsClientContext();
+    REQUIRE(clientTls.has_value());
+
+    auto listener = core::net::listen(loop, "127.0.0.1", 0);
+    REQUIRE(listener.has_value());
+    auto const port = (*listener)->boundPort();
+
+    auto nativeHandler = vthost::makeNativeHandler(loop, host, "tok");
+    auto const& tlsContext = *serverTls;
+    auto handler = [tlsContext, nativeHandler, &loop](vthost::ConnectionId id,
+                                                      std::unique_ptr<core::net::ISocket> socket) {
+        return nativeHandler(std::move(id), tlsContext->wrap(std::move(socket), loop));
+    };
+    auto server = vthost::ConnectionAcceptor { loop, "test", std::move(*listener), handler };
+
+    auto saw = false;
+    loop.blockOn(core::net::testing::allOf(server.serve(),
+                                           tlsTcpAttachDriver(&loop, &server, *clientTls, port, &saw)));
+    REQUIRE(saw);
+
+    // The daemon's side of the connection ends in its own spawned flow, a few turns after the
+    // client's; wait for it to say how, for at most two seconds.
+    auto polls = 0;
+    loop.blockOn(core::net::pollUntil(&loop, [&] {
+        return capture.contains("disconnected") || capture.contains("read failed") || ++polls > 2000;
+    }));
+    INFO(capture.text());
+    CHECK(capture.contains(": disconnected"));
+    CHECK_FALSE(capture.contains("read failed"));
+    CHECK_FALSE(capture.contains("close_notify"));
+}
+
+TEST_CASE("attach mirrors over TLS with a generated self-signed dev certificate", "[vthost][attach]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              /*startPumps=*/false };
+    host.createTab();
+    // Declared after the host, so the connection flows the server spawns end while it exists.
+    auto const drain = vthost::LoopDrain { loop };
 
     // Mint a dev certificate exactly as an operator would to feed --tls-cert/--tls-key.
     // Library-only (no `openssl` CLI), so this runs identically on Windows and UNIX.
-    auto material = net::generateSelfSignedCertificate("contour-daemon");
+    auto material = core::net::generateSelfSignedCertificate({ .commonName = "contour-daemon" });
     REQUIRE(material.has_value());
     CHECK(material->certPem.starts_with("-----BEGIN CERTIFICATE-----"));
     CHECK(material->keyPem.contains("PRIVATE KEY"));
@@ -796,26 +860,26 @@ TEST_CASE("attach mirrors over TLS with a generated self-signed dev certificate"
     // Server context from the PEM cert+key (the file-content path). The client PINS
     // that exact certificate as its trust anchor and VERIFIES the peer against it —
     // stronger than the TOFU path above (which does not verify at all).
-    auto serverTls = net::makeTlsServerContext(material->certPem, material->keyPem);
+    auto serverTls = core::net::makeTlsServerContext(material->certPem, material->keyPem);
     REQUIRE(serverTls.has_value());
-    auto clientTls = net::makeTlsClientContext(material->certPem);
+    auto clientTls = core::net::makeTlsClientContext(material->certPem);
     REQUIRE(clientTls.has_value());
 
-    auto listener = net::listen(loop, "127.0.0.1", 0);
+    auto listener = core::net::listen(loop, "127.0.0.1", 0);
     REQUIRE(listener.has_value());
-    auto const port = (*listener)->localPort();
+    auto const port = (*listener)->boundPort();
 
     auto nativeHandler = vthost::makeNativeHandler(loop, host, "tok");
     auto const& tlsContext = *serverTls;
-    auto handler = [tlsContext, nativeHandler](vthost::ConnectionId id,
-                                               std::unique_ptr<net::ISocket> socket) {
-        return nativeHandler(std::move(id), tlsContext->wrap(std::move(socket)));
+    auto handler = [tlsContext, nativeHandler, &loop](vthost::ConnectionId id,
+                                                      std::unique_ptr<core::net::ISocket> socket) {
+        return nativeHandler(std::move(id), tlsContext->wrap(std::move(socket), loop));
     };
     auto server = vthost::ConnectionAcceptor { loop, "test", std::move(*listener), handler };
 
     auto saw = false;
-    loop.blockOn(
-        net::testing::allOf(server.serve(), tlsTcpAttachDriver(&loop, &server, *clientTls, port, &saw)));
+    loop.blockOn(core::net::testing::allOf(server.serve(),
+                                           tlsTcpAttachDriver(&loop, &server, *clientTls, port, &saw)));
     CHECK(saw); // snapshot mirrored across TLS whose peer cert the client verified against the dev cert
 }
 
@@ -823,29 +887,31 @@ namespace
 {
 
 /// Waits for the daemon's layout to arrive on the client, then detaches.
-Task<void> awaitLayout(net::EventLoop* loop, NativeClient* client, std::optional<proto::LayoutState>* layout)
+Task<void> awaitLayout(core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::optional<proto::LayoutState>* layout)
 {
-    co_await net::testing::waitUntil(loop, [layout] { return layout->has_value(); });
+    co_await core::net::testing::waitUntil(loop, [layout] { return layout->has_value(); });
     client->detach();
 }
 
 /// Awaits the initial one-tab layout, authors a second tab, and waits for the
 /// daemon to honor it and re-push a two-tab layout before detaching.
-Task<void> driveCreateTab(net::EventLoop* loop, NativeClient* client, int const* mirroredTabs)
+Task<void> driveCreateTab(core::net::EventLoop* loop, NativeClient* client, int const* mirroredTabs)
 {
-    co_await net::testing::waitUntil(loop, [mirroredTabs] { return *mirroredTabs == 1; });
+    co_await core::net::testing::waitUntil(loop, [mirroredTabs] { return *mirroredTabs == 1; });
     client->createTab();
-    co_await net::testing::waitUntil(loop, [mirroredTabs] { return *mirroredTabs == 2; });
+    co_await core::net::testing::waitUntil(loop, [mirroredTabs] { return *mirroredTabs == 2; });
     client->detach();
 }
 
 /// Awaits the initial single-window layout, authors a new window, and waits for
 /// the daemon to push a layout for the SECOND window before detaching.
-Task<void> driveCreateWindow(net::EventLoop* loop, NativeClient* client, std::set<uint64_t>* windows)
+Task<void> driveCreateWindow(core::net::EventLoop* loop, NativeClient* client, std::set<uint64_t>* windows)
 {
-    co_await net::testing::waitUntil(loop, [windows] { return windows->size() == 1; });
+    co_await core::net::testing::waitUntil(loop, [windows] { return windows->size() == 1; });
     client->createWindow();
-    co_await net::testing::waitUntil(loop, [windows] { return windows->size() == 2; });
+    co_await core::net::testing::waitUntil(loop, [windows] { return windows->size() == 2; });
     client->detach();
 }
 
@@ -853,20 +919,20 @@ Task<void> driveCreateWindow(net::EventLoop* loop, NativeClient* client, std::se
 
 TEST_CASE("attach receives the daemon's tab and pane layout", "[vthost][attach]")
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
     auto* tab = host.createTab();
     // Split the tab into two panes (a vertical divider at 60/40).
     host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.6);
 
-    auto pair = *net::testing::makeSocketPair(loop);
+    auto pair = *core::net::testing::makeSocketPair(loop);
     auto server = NativeSession {
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first)
     };
@@ -880,7 +946,7 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[vthost][attach]"
                                  NativeClient::LayoutHandler {
                                      [&layout](proto::LayoutState const& received) { layout = received; } } };
 
-    loop.blockOn(net::testing::allOf(server.run(), client.run(), awaitLayout(&loop, &client, &layout)));
+    loop.blockOn(core::net::testing::allOf(server.run(), client.run(), awaitLayout(&loop, &client, &layout)));
 
     REQUIRE(layout.has_value());
     REQUIRE(layout->tabs.size() == 1);
@@ -898,18 +964,18 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[vthost][attach]"
 
 TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[vthost][attach]")
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab(); // the daemon starts with one tab
 
-    auto pair = *net::testing::makeSocketPair(loop);
+    auto pair = *core::net::testing::makeSocketPair(loop);
     auto server = NativeSession {
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first)
     };
@@ -931,7 +997,7 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[v
                        } } };
 
     loop.blockOn(
-        net::testing::allOf(server.run(), client.run(), driveCreateTab(&loop, &client, &mirroredTabs)));
+        core::net::testing::allOf(server.run(), client.run(), driveCreateTab(&loop, &client, &mirroredTabs)));
 
     CHECK(mirroredTabs == 2);                                     // the mirrored layout grew
     CHECK(host.model().window(host.windowId())->tabCount() == 2); // the daemon really created the tab
@@ -939,18 +1005,18 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[v
 
 TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost][attach]")
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
     auto host = SessionHost { loop,
                               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                                   return std::make_unique<vtpty::MockPty>(size);
                               },
                               vtbackend::Settings {},
-                              crispy::defaultEnvironment(),
+                              core::defaultEnvironment(),
                               /*startPumps=*/false };
     host.createTab(); // the daemon starts with one window (with one tab)
 
-    auto pair = *net::testing::makeSocketPair(loop);
+    auto pair = *core::net::testing::makeSocketPair(loop);
     auto server = NativeSession {
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first)
     };
@@ -970,7 +1036,7 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
                        } } };
 
     loop.blockOn(
-        net::testing::allOf(server.run(), client.run(), driveCreateWindow(&loop, &client, &windows)));
+        core::net::testing::allOf(server.run(), client.run(), driveCreateWindow(&loop, &client, &windows)));
 
     CHECK(windows.size() == 2);             // the client saw two distinct windows' layouts
     CHECK(host.model().windowCount() == 2); // the daemon really created a second window

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/graphics/SixelParser.hpp>
 
-#include <crispy/Times.hpp>
+#include <core/Times.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -417,8 +417,7 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
 
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(5) });
 
-    for (auto const [x, y]:
-         crispy::times(ib.size().width.as<int>()) * crispy::times(ib.size().height.as<int>()))
+    for (auto const [x, y]: core::times(ib.size().width.as<int>()) * core::times(ib.size().height.as<int>()))
     {
         auto const& expectedColor =
             x < 5 && y < 6 ? PinColors.at(static_cast<size_t>(x ? x : 4)) : OpaqueBlack;

@@ -3,7 +3,7 @@
 #include <contour/platform/BlurBehind.hpp>
 #include <contour/platform/XcbProperty.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <QtCore/QDebug>
 #include <QtGui/QGuiApplication>
@@ -45,7 +45,7 @@ namespace
 
 void setBlurBehind(QWindow* window, bool enable, QRegion const& region)
 {
-    crispy::ignoreUnused(region);
+    core::ignoreUnused(region);
 
 #if defined(CONTOUR_WAYLAND) && QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     if (QGuiApplication::platformName() == "wayland")
@@ -203,7 +203,7 @@ void setBlurBehind(QWindow* window, bool enable, QRegion const& region)
 #endif // }}}
 
     // Get me working on other platforms/compositors (such as OSX, Gnome, ...), please.
-    crispy::ignoreUnused(window, enable);
+    core::ignoreUnused(window, enable);
 }
 
 } // namespace contour::platform

@@ -5,7 +5,8 @@
 #include <vtpty/PageSize.hpp>
 
 #include <crispy/BufferObject.hpp>
-#include <crispy/LogStore.hpp>
+
+#include <core/log/LogStore.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -154,9 +155,9 @@ class Pty
 
 [[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);
 
-auto inline const ptyLog = logstore::Category("pty", "Logs general PTY information.");
-auto inline const ptyInLog = logstore::Category("pty.input", "Logs PTY raw input.");
-auto inline const ptyOutLog = logstore::Category("pty.output", "Logs PTY raw output.");
+auto inline const ptyLog = core::log::Category("pty", "Logs general PTY information.");
+auto inline const ptyInLog = core::log::Category("pty.input", "Logs PTY raw input.");
+auto inline const ptyOutLog = core::log::Category("pty.output", "Logs PTY raw output.");
 
 } // namespace vtpty
 

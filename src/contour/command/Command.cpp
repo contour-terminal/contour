@@ -4,8 +4,9 @@
 #include <vtbackend/core/Color.hpp>
 
 #include <crispy/ASCII.hpp>
-#include <crispy/Escape.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Escape.hpp>
+#include <core/Utils.hpp>
 
 #include <format>
 #include <ranges>
@@ -65,7 +66,7 @@ CommandArguments commandArguments(actions::Action const& action)
     // an argument would collapse two commands that do different things onto one row.
     using namespace actions;
     return std::visit(
-        crispy::Overloaded {
+        core::Overloaded {
             [](ChangeProfile const& a) -> CommandArguments {
                 return { .id = a.name, .title = std::format(": {}", a.name) };
             },
@@ -78,10 +79,10 @@ CommandArguments commandArguments(actions::Action const& action)
                          .title = std::format(": {} ({}, {})", a.patterns, a.hintAction, a.scope) };
             },
             [](SendChars const& a) -> CommandArguments {
-                return { .id = a.chars, .title = std::format(": {}", crispy::escape(a.chars)) };
+                return { .id = a.chars, .title = std::format(": {}", core::escape(a.chars)) };
             },
             [](WriteScreen const& a) -> CommandArguments {
-                return { .id = a.chars, .title = std::format(": {}", crispy::escape(a.chars)) };
+                return { .id = a.chars, .title = std::format(": {}", core::escape(a.chars)) };
             },
             [](MoveTabTo const& a) -> CommandArguments {
                 return { .id = std::format("{}", a.position), .title = std::format(" {}", a.position) };

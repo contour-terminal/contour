@@ -5,7 +5,7 @@
 #include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/shell/Folding.hpp>
 
-#include <crispy/LogStore.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <gsl/pointers>
 
@@ -19,7 +19,7 @@ namespace vtbackend
 class Viewport
 {
   public:
-    static auto inline const ViewportLog = logstore::Category("vt.viewport", "Logs viewport details.");
+    static auto inline const ViewportLog = core::log::Category("vt.viewport", "Logs viewport details.");
 
     using ModifyEvent = std::function<void()>;
 

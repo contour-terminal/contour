@@ -6,9 +6,10 @@
 #include <vtrasterizer/RenderTarget.hpp>
 #include <vtrasterizer/TextRenderer.hpp>
 
-#include <crispy/FNV.hpp>
 #include <crispy/Point.hpp>
 #include <crispy/Size.hpp>
+
+#include <core/FNV.hpp>
 
 #include <cstddef>
 #include <optional>

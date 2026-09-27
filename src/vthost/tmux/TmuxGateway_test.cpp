@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/MockPty.hpp>
 
+#include <core/async/WhenAll.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/testing/InMemoryTransport.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -12,10 +17,6 @@
 #include <tuple>
 #include <vector>
 
-#include <coro/WhenAll.hpp>
-#include <net/EventLoop.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/testing/InMemoryTransport.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/tmux/ControlSession.hpp>
@@ -24,7 +25,7 @@
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
 
-using coro::Task;
+using core::async::Task;
 using vthost::SessionHost;
 using vthost::tmux::ControlSession;
 using vthost::tmux::GatewayEvents;
@@ -53,16 +54,16 @@ struct RecordingEvents final: GatewayEvents
 /// verified against tmux 3.7b).
 struct LoopbackHarness
 {
-    net::PollEventSource source;
-    net::EventLoop loop { source };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
     SessionHost host { loop,
                        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                            return std::make_unique<vtpty::MockPty>(size);
                        },
                        vtbackend::Settings {},
-                       crispy::defaultEnvironment(),
+                       core::defaultEnvironment(),
                        /*startPumps=*/false };
-    net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
+    core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
     std::unique_ptr<ControlSession> server = std::make_unique<ControlSession>(
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first), [] {
             return std::int64_t { 1000 };
@@ -72,7 +73,7 @@ struct LoopbackHarness
         std::make_unique<TmuxGateway>(loop, std::move(pair.second), events);
 };
 
-Task<void> waitUntil(net::EventLoop* loop, std::function<bool()> ready, int iterations = 1000)
+Task<void> waitUntil(core::net::EventLoop* loop, std::function<bool()> ready, int iterations = 1000)
 {
     for (auto i = 0; i < iterations && !ready(); ++i)
         co_await loop->delay(1ms);
@@ -149,7 +150,7 @@ Task<void> scenario(LoopbackHarness* h)
 
 Task<void> driveLoopback(LoopbackHarness* h)
 {
-    co_await coro::whenAll(h->server->run(), h->gateway->run(), scenario(h));
+    co_await core::async::whenAll(h->server->run(), h->gateway->run(), scenario(h));
 }
 
 } // namespace
@@ -186,7 +187,7 @@ TEST_CASE("the gateway drives our control-mode server end to end", "[vthost][gat
 namespace
 {
 
-Task<void> writeAll(net::ISocket* socket, std::string_view text)
+Task<void> writeAll(core::net::ISocket* socket, std::string_view text)
 {
     auto const bytes =
         std::span<std::byte const> { reinterpret_cast<std::byte const*>(text.data()), text.size() };
@@ -195,8 +196,8 @@ Task<void> writeAll(net::ISocket* socket, std::string_view text)
 
 /// Hand-writes control-mode bytes so a guard body can carry a line that reads
 /// exactly like "%end" — the raw capture-pane hazard the number match guards.
-Task<void> embeddedEndScenario(net::EventLoop* loop,
-                               net::ISocket* server,
+Task<void> embeddedEndScenario(core::net::EventLoop* loop,
+                               core::net::ISocket* server,
                                TmuxGateway* gateway,
                                std::vector<std::string>* body,
                                bool* done)
@@ -223,22 +224,22 @@ Task<void> embeddedEndScenario(net::EventLoop* loop,
     server->close(); // EOF ends gateway->run()
 }
 
-Task<void> driveEmbeddedEnd(net::EventLoop* loop,
-                            net::ISocket* server,
+Task<void> driveEmbeddedEnd(core::net::EventLoop* loop,
+                            core::net::ISocket* server,
                             TmuxGateway* gateway,
                             std::vector<std::string>* body,
                             bool* done)
 {
-    co_await coro::whenAll(gateway->run(), embeddedEndScenario(loop, server, gateway, body, done));
+    co_await core::async::whenAll(gateway->run(), embeddedEndScenario(loop, server, gateway, body, done));
 }
 
 } // namespace
 
 TEST_CASE("a guard body line that looks like %end does not close the block early", "[vthost][gateway]")
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
-    auto pair = *net::testing::makeSocketPair(loop);
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
 
     auto events = RecordingEvents {};
     auto gateway = TmuxGateway { loop, std::move(pair.second), events };
@@ -267,8 +268,8 @@ struct DrainCountingEvents final: GatewayEvents
     void notificationsDrained() override { ++drains; }
 };
 
-Task<void> partialBurstScenario(net::EventLoop* loop,
-                                net::ISocket* server,
+Task<void> partialBurstScenario(core::net::EventLoop* loop,
+                                core::net::ISocket* server,
                                 TmuxGateway* gateway,
                                 DrainCountingEvents* events)
 {
@@ -296,21 +297,21 @@ Task<void> partialBurstScenario(net::EventLoop* loop,
     server->close(); // EOF ends gateway->run()
 }
 
-Task<void> drivePartialBurst(net::EventLoop* loop,
-                             net::ISocket* server,
+Task<void> drivePartialBurst(core::net::EventLoop* loop,
+                             core::net::ISocket* server,
                              TmuxGateway* gateway,
                              DrainCountingEvents* events)
 {
-    co_await coro::whenAll(gateway->run(), partialBurstScenario(loop, server, gateway, events));
+    co_await core::async::whenAll(gateway->run(), partialBurstScenario(loop, server, gateway, events));
 }
 
 } // namespace
 
 TEST_CASE("a partial trailing line does not trigger a premature notification drain", "[vthost][gateway]")
 {
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
-    auto pair = *net::testing::makeSocketPair(loop);
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
 
     auto events = DrainCountingEvents {};
     auto gateway = TmuxGateway { loop, std::move(pair.second), events };
@@ -339,9 +340,9 @@ TEST_CASE("a partial trailing line does not trigger a premature notification dra
     #else
         #include <pty.h>
     #endif
-    #include <unistd.h>
+    #include <core/net/Sockets.hpp>
 
-    #include <net/Sockets.hpp>
+    #include <unistd.h>
 
 namespace
 {
@@ -361,7 +362,7 @@ int runShell(std::string const& command)
 
 /// A real `tmux -C new-session` on its own PTY and private server socket.
 /// tmux's client insists on a terminal, so the child gets a fresh pty slave;
-/// the master fd becomes the gateway's transport via net::adoptFd.
+/// the master fd becomes the gateway's transport via core::net::adoptFd.
 struct RealTmux
 {
     pid_t pid = -1;
@@ -426,7 +427,7 @@ struct RealTmux
     }
 };
 
-Task<void> oracleScenario(net::EventLoop* loop, TmuxGateway* gateway, RecordingEvents* events)
+Task<void> oracleScenario(core::net::EventLoop* loop, TmuxGateway* gateway, RecordingEvents* events)
 {
     co_await waitUntil(loop, [&] { return gateway->initialised(); }, 15000);
     REQUIRE(gateway->initialised());
@@ -487,9 +488,9 @@ Task<void> oracleScenario(net::EventLoop* loop, TmuxGateway* gateway, RecordingE
     CHECK(events->sawExit);
 }
 
-Task<void> driveOracle(net::EventLoop* loop, TmuxGateway* gateway, RecordingEvents* events)
+Task<void> driveOracle(core::net::EventLoop* loop, TmuxGateway* gateway, RecordingEvents* events)
 {
-    co_await coro::whenAll(gateway->run(), oracleScenario(loop, gateway, events));
+    co_await core::async::whenAll(gateway->run(), oracleScenario(loop, gateway, events));
 }
 
 } // namespace
@@ -502,9 +503,9 @@ TEST_CASE("the gateway drives a real tmux -C client", "[vthost][gateway][oracle]
         SKIP("tmux not available");
     }
 
-    auto source = net::PollEventSource {};
-    auto loop = net::EventLoop { source };
-    auto transport = net::adoptFd(loop, tmux->takeMaster());
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto transport = core::net::adoptFd(loop, tmux->takeMaster());
     REQUIRE(transport.has_value());
 
     auto events = RecordingEvents {};

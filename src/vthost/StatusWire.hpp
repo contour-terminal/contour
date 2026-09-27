@@ -9,7 +9,7 @@
 /// Decoding is TOTAL, which is the whole reason this file exists. Both values arrive as raw bytes a
 /// peer chose, and both were being `static_cast` straight into their enum. A `StatusDisplayType` of
 /// 3 then reached `Terminal::statusLineHeight()`, whose switch covers the three real enumerators and
-/// then runs `crispy::unreachable()` — undefined behaviour in the attached client (a garbage line
+/// then runs `core::unreachable()` — undefined behaviour in the attached client (a garbage line
 /// count under an optimizing build, a UBSan abort on dev/CI). Every other enum-ish wire field in
 /// this protocol already validates; these two are now no exception.
 

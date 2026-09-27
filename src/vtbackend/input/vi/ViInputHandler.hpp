@@ -4,9 +4,10 @@
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/input/InputHandler.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/LogStore.hpp>
 #include <crispy/TrieMap.hpp>
+
+#include <core/Assert.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <gsl/pointers>
 
@@ -208,7 +209,7 @@ class ViInputHandler: public InputHandler
             case ViMode::VisualBlock:
             case ViMode::VisualLine: return true;
         }
-        crispy::unreachable();
+        core::unreachable();
     }
 
   private:

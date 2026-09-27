@@ -46,7 +46,7 @@ add_library(contour_cli STATIC
 )
 
 target_link_libraries(contour_cli
-    PUBLIC contour_config
+    PUBLIC contour_config core::cli
     PRIVATE vthost
 )
 

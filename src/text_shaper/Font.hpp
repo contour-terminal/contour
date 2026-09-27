@@ -8,9 +8,10 @@
 #endif
 
 #include <crispy/ASCII.hpp>
-#include <crispy/FNV.hpp>
-#include <crispy/LogStore.hpp>
 #include <crispy/Point.hpp>
+
+#include <core/FNV.hpp>
+#include <core/log/LogStore.hpp>
 
 #ifdef GLYPH_KEY_DEBUG
     #include <libunicode/convert.h>
@@ -32,7 +33,7 @@
 namespace text
 {
 
-auto inline const locatorLog = logstore::Category("font.locator", "Logs about font loads.");
+auto inline const locatorLog = core::log::Category("font.locator", "Logs about font loads.");
 
 namespace detail
 {
@@ -388,7 +389,7 @@ enum class RenderMode : uint8_t
 } // namespace text
 
 // {{{ std::numeric_limits<>
-// Bounds for crispy::eachElement<>, so code that must cover every value of one of these enums --
+// Bounds for core::eachElement<>, so code that must cover every value of one of these enums --
 // the parser/formatter round-trip test above all -- enumerates them instead of restating a list
 // that a newly added enumerator would silently fall out of.
 template <>
@@ -465,7 +466,7 @@ struct hash<text::FontDescription>
 {
     std::size_t operator()(text::FontDescription const& fd) const noexcept
     {
-        auto fnv = crispy::FNV<char>();
+        auto fnv = core::FNV<char>();
         auto h = fnv(fnv(fnv(fnv(fnv(fd.familyName), char(fd.weight)), char(fd.slant)), char(fd.spacing)),
                      char(fd.strictSpacing));
         // Include fontFallback variant index and content in the hash

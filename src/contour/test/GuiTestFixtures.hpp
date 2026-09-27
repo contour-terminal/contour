@@ -17,7 +17,7 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 
-#include <crispy/Environment.hpp>
+#include <core/Environment.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
@@ -296,8 +296,8 @@ class TestApp
 
     RecordingExternalLauncher* _launcher = nullptr;
     /// The process's own environment: what the fixture exercises is the GUI, not what any variable
-    /// reads as. A test that cares injects a crispy::testing::FakeEnvironment instead.
-    crispy::LiveEnvironment _environment;
+    /// reads as. A test that cares injects a core::testing::FakeEnvironment instead.
+    core::LiveEnvironment _environment;
     contour::ContourGuiApp _app;
 };
 

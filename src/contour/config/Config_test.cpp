@@ -18,8 +18,8 @@
 
 #include <text_shaper/Font.hpp>
 
-#include <crispy/LogSink.hpp>
-#include <crispy/LogStore.hpp>
+#include <core/log/LogSink.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <QtCore/QTemporaryDir>
 
@@ -1283,7 +1283,7 @@ TEST_CASE("Config: an unparsable font weight or slant is reported, not swallowed
     // FontSlant::Italic before the file is read, so a dropped value leaves the inherited Italic
     // rather than the default -- the user sees a slant they did not ask for and no diagnostic.
     QTemporaryDir dir;
-    auto capture = logstore::ScopedCapture { "error" };
+    auto capture = core::log::ScopedCapture { "error" };
 
     auto const config = loadFromYaml(dir, R"(
 default_profile: main
@@ -1314,7 +1314,7 @@ TEST_CASE("Config: the deprecated slant 'thin' still loads, and says so", "[conf
     // years. Removing it outright would silently flip an existing profile's italic face from
     // upright to slanted, so it is honoured and announced instead.
     QTemporaryDir dir;
-    auto capture = logstore::ScopedCapture { "error" };
+    auto capture = core::log::ScopedCapture { "error" };
 
     auto const config = loadFromYaml(dir, R"(
 default_profile: main
@@ -1352,7 +1352,7 @@ TEST_CASE("Config: the generated default config loads back into the defaults", "
     QTemporaryDir dir;
     REQUIRE(dir.isValid());
 
-    auto capture = logstore::ScopedCapture { "error" };
+    auto capture = core::log::ScopedCapture { "error" };
 
     auto const generated = contour::config::defaultConfigString();
     auto const reloaded = loadFromYaml(dir, generated);
@@ -1464,7 +1464,7 @@ TEST_CASE("Config: environment variables in values are expanded (defined and und
     // deterministic; use a clearly-undefined name for the other branch. qputenv/qunsetenv are Qt's
     // portable env wrappers (POSIX ::setenv is unavailable on MSVC) -- Qt is fine here because this
     // suite only ever builds with the GUI frontend, and writing through it is in fact the stronger
-    // assertion: the replacer reads a crispy::LiveEnvironment, so this also proves that reader sees
+    // assertion: the replacer reads a core::LiveEnvironment, so this also proves that reader sees
     // a variable written after the process started, which is the whole reason it is not the cached
     // one. (A test that needs to control what the replacer reads injects its own environment into
     // YAMLConfigReader instead; loadFromYaml goes through the production entry point on purpose.)
@@ -3901,7 +3901,7 @@ TEST_CASE("Config: a dropped input_mapping entry is reported", "[config][input-m
     // The silence was the whole reason issue #1987 was hard to diagnose: a row vanished and nothing
     // anywhere said so. These assertions stay deliberately weak -- that the offending row and field
     // are NAMED -- rather than pinning the sentence, which would break on any rewording.
-    auto capture = logstore::ScopedCapture { "error" };
+    auto capture = core::log::ScopedCapture { "error" };
 
     auto const config = loadFromYaml(dir, R"(
 default_profile: main
@@ -3939,7 +3939,7 @@ TEST_CASE("Config: an input_mapping that is not a list is reported, not silently
     // malformed section leaves the user with nothing bound at all -- the worst version of the silent
     // loss behind issue #1987, and now the most likely one, since the docs tell people the section
     // replaces the defaults.
-    auto capture = logstore::ScopedCapture { "error" };
+    auto capture = core::log::ScopedCapture { "error" };
 
     auto const config = loadFromYaml(dir, R"(
 default_profile: main

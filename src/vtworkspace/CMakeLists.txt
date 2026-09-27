@@ -13,7 +13,9 @@ add_library(vtworkspace STATIC
     Primitives.hpp
 )
 target_link_libraries(vtworkspace PUBLIC
+    boxed-cpp::boxed-cpp
     vtbackend
+    core::base
     crispy::core
 )
 target_include_directories(vtworkspace PUBLIC
@@ -32,7 +34,7 @@ if(VTWORKSPACE_TESTING)
         Tab_test.cpp
         SessionModel_test.cpp
     )
-    target_link_libraries(vtworkspace_test vtworkspace crispy::core Catch2::Catch2)
+    target_link_libraries(vtworkspace_test vtworkspace core::testing Catch2::Catch2)
     add_test(NAME vtworkspace_test COMMAND $<TARGET_FILE:vtworkspace_test>)
     set_tests_properties(vtworkspace_test PROPERTIES LABELS daemon)
 

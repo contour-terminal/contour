@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtrasterizer/RenderTarget.hpp>
 
+#include <core/log/Assert.hpp>
+
 using namespace crispy;
 using namespace std;
 using namespace vtrasterizer;

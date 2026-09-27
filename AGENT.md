@@ -226,16 +226,25 @@ inherited by every preset through `contour-common` (see `cmake/PedanticCompiler.
 
 ## Repository layout
 
+Beneath all of them sits [core-cpp](https://github.com/contour-terminal/core-cpp), the shared C++23
+foundation of the Contour Terminal projects, carried as a verbatim copy of a tagged release in
+`vendor/core-cpp` (namespace `core`, one namespace per directory):
+
+- `core::base`, `core::log`, `core::cli` — assertions, the generic string, escape and environment
+  utilities, logging (`core::log::LogStore`), and the CLI parser and `App` scaffolding.
+- `core::async` — the coroutine vocabulary: `Task`, `whenAll`, `whenAny`, `StopToken`.
+- `core::net` — the coroutine-native event loop and transport `vthost` is built on: `EventLoop`,
+  the `IoBackend` DI seam, sockets, and TLS behind `ITlsContext` (`core::net_tls`).
+- `core::platform`, `core::testing` — clocks and native handles; the test helpers.
+
+**Never edit `vendor/core-cpp`.** It is checked byte for byte against its `MANIFEST` (the
+`core-cpp-vendored-copy` test, label `lint`). A defect there is fixed in core-cpp, released, and
+re-vendored with one command; see [`vendor/README.md`](vendor/README.md). Every loop runs on
+`core::net::makeDefaultBackend()`: epoll, kqueue, or an I/O completion port.
+
 First-party modules under `src/`, roughly bottom-up (later depends on earlier):
 
-- `src/coro` — the C++23 coroutine vocabulary: `Task`, `WhenAll`, `WhenAny`, `Cancellation`,
-  `UniqueCoroHandle`. **No first-party dependencies** — its headers include nothing but the
-  standard library, and that is the invariant, not an accident.
-- `src/net` — the coroutine-native reactor and transport `vthost` is built on: `EventLoop`, the
-  `EventSource` DI seam with its poll/epoll/kqueue backends, sockets, and TLS behind
-  `ITlsContext`. Built on `coro` and **deliberately not on `crispy`**, which is why it declares
-  `Threads::Threads` itself.
-- `src/crispy` — foundational utilities (`result`, ranges/format helpers, app scaffolding)
+- `src/crispy` — the renderer's utilities: caches, rings, hashing, buffer objects
 - `src/text_shaper` — font shaping / glyph rasterization abstraction
 - `src/vtparser` — VT escape-sequence parser (state machine)
 - `src/vtpty` — pseudo-terminal (PTY) abstraction
@@ -249,14 +258,10 @@ First-party modules under `src/`, roughly bottom-up (later depends on earlier):
 Respect these boundaries: lower layers must not depend on higher ones, and the GUI must not
 reach around `vtbackend`/`vtworkspace` into rendering internals.
 
-`coro` and `net` originated in [Endo](https://github.com/contour-terminal/endo) and, before that,
-fastcached — but **this copy is now the source of truth for all three**, having since gained
-`UniqueCoroHandle`, the `EventLoop`/`EventSource` split, TLS, Unix sockets and fd passing. Changes
-flow *outward*: fix here, then propagate; never re-sync *from* Endo, whose copy is a strict subset.
-Consumers pull this code in at CMake configure time rather than vendoring it. See
-[`src/coro/README.md`](src/coro/README.md) and [`src/net/README.md`](src/net/README.md), which also
-carry the invariants worth not breaking (a failed fd registration fails the awaitable rather than
-parking forever; readiness is level-triggered; I/O errors are `std::expected`, not exceptions).
+The coroutine and networking layers, and crispy's generic half, lived here as `src/coro`,
+`src/net` and part of `src/crispy` until they moved to core-cpp, which merged them with endo's and
+fastcached's copies. core-cpp is their source of truth now: its documentation carries the
+invariants worth not breaking (<https://contour-terminal.github.io/core-cpp/>).
 
 `src/vtbackend/` is layered too, one directory per concern, lowest first. Unlike `src/contour/`
 the namespace stays flat — everything is `vtbackend`, so the directories are about *finding* code,
@@ -303,8 +308,9 @@ the `*Wire.hpp` encoders that turn `vtbackend` state into PDU payloads. Beneath 
 
 `vthost` links no Qt, and that is the point: the whole serving path never touches the GUI stack, so
 `contour daemon` and `contour client` are thin entry points over a module that tests headlessly.
-Its suite, along with those of `coro`, `net` and `vtworkspace`, carries the `daemon` CTest label —
-`ctest -L daemon` is everything daemon mode must pass to be trusted.
+Its suite, along with `vtworkspace`'s, carries the `daemon` CTest label — `ctest -L daemon` is
+everything daemon mode must pass to be trusted, beside the suites of `core::async` and `core::net`,
+which run in core-cpp's own CI.
 
 `src/contour/` is itself layered, one directory per concern, and **each directory names the
 namespace it holds** — `src/contour/config/` is `contour::config`, and so on for every one. Only

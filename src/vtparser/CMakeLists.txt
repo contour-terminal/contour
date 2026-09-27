@@ -12,6 +12,7 @@ target_link_libraries(vtparser PUBLIC
     contour::tracy
     unicode::unicode
 )
+target_link_libraries(vtparser PRIVATE core::base)
 target_include_directories(vtparser PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
@@ -24,7 +25,7 @@ if(VTPARSER_TESTING)
         test_main.cpp
         Parser_test.cpp
     )
-    target_link_libraries(vtparser_test vtparser crispy::core Catch2::Catch2)
+    target_link_libraries(vtparser_test vtparser core::testing Catch2::Catch2)
     add_test(NAME vtparser_test COMMAND $<TARGET_FILE:vtparser_test>)
 
     if(NOT WIN32)

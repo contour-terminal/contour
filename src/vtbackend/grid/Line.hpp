@@ -11,10 +11,11 @@
 #include <vtbackend/grid/LineSoA.hpp>
 #include <vtbackend/grid/SoAClusterWriter.hpp>
 
-#include <crispy/Assert.hpp>
 #include <crispy/BufferObject.hpp>
 #include <crispy/Comparison.hpp>
-#include <crispy/Flags.hpp>
+
+#include <core/Assert.hpp>
+#include <core/Flags.hpp>
 
 #include <libunicode/convert.h>
 

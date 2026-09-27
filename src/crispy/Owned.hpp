@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/Defines.hpp>
+#include <core/Defines.hpp>
 
 namespace crispy
 {
@@ -11,7 +11,7 @@ namespace crispy
  * used within packed structs.
  */
 template <typename T>
-struct CRISPY_PACKED owned
+struct CORE_PACKED owned
 {
   public:
     ~owned() { reset(); }

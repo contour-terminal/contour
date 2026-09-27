@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/MockPty.hpp>
 
+#include <core/async/WhenAll.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/testing/InMemoryTransport.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -12,17 +17,13 @@
 #include <string>
 #include <vector>
 
-#include <coro/WhenAll.hpp>
-#include <net/EventLoop.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/testing/InMemoryTransport.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/tmux/ControlSession.hpp>
 #include <vthost/tmux/TmuxClientModel.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
 
-using coro::Task;
+using core::async::Task;
 using vthost::SessionHost;
 using vthost::tmux::ControlSession;
 using vthost::tmux::TmuxClientModel;
@@ -32,7 +33,7 @@ using namespace std::chrono_literals;
 namespace
 {
 
-Task<void> waitFor(net::EventLoop* loop, std::function<bool()> ready)
+Task<void> waitFor(core::net::EventLoop* loop, std::function<bool()> ready)
 {
     for (auto i = 0; i < 2000 && !ready(); ++i)
         co_await loop->delay(1ms);
@@ -43,16 +44,16 @@ Task<void> waitFor(net::EventLoop* loop, std::function<bool()> ready)
 /// server-side session end to end.
 struct ModelHarness
 {
-    net::PollEventSource source;
-    net::EventLoop loop { source };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
     SessionHost host { loop,
                        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                            return std::make_unique<vtpty::MockPty>(size);
                        },
                        vtbackend::Settings {},
-                       crispy::defaultEnvironment(),
+                       core::defaultEnvironment(),
                        /*startPumps=*/false };
-    net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
+    core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
     std::unique_ptr<ControlSession> server = std::make_unique<ControlSession>(
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first), [] {
             return std::int64_t { 1000 };
@@ -91,7 +92,7 @@ Task<void> mirrorScenario(ModelHarness* h, vtworkspace::SessionId sessionId, std
 /// Task, so blockOn needs this wrapper.
 Task<void> drive(ModelHarness* h, Task<void> scenario)
 {
-    co_await coro::whenAll(h->server->run(), h->gateway->run(), std::move(scenario));
+    co_await core::async::whenAll(h->server->run(), h->gateway->run(), std::move(scenario));
 }
 
 } // namespace

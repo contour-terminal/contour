@@ -3,7 +3,7 @@
 
 #include <vtbackend/core/CellFlags.hpp>
 
-#include <crispy/Flags.hpp>
+#include <core/Flags.hpp>
 
 #include <algorithm>
 #include <array>
@@ -41,7 +41,7 @@ enum class ChecksumFlag : uint8_t
     RawCodepoint = 1 << 4,
 };
 
-using ChecksumFlags = crispy::Flags<ChecksumFlag>;
+using ChecksumFlags = core::Flags<ChecksumFlag>;
 
 /// One DEC video attribute, and the Contour cell flags that stand for it.
 ///

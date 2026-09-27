@@ -7,11 +7,12 @@
 
 #include <vtpty/MockViewPty.hpp>
 
-#include <crispy/App.hpp>
 #include <crispy/BufferObject.hpp>
-#include <crispy/CLI.hpp>
-#include <crispy/Environment.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Environment.hpp>
+#include <core/Utils.hpp>
+#include <core/cli/App.hpp>
+#include <core/cli/CLI.hpp>
 
 #include <chrono>
 #include <format>
@@ -139,7 +140,7 @@ static int benchSixelStream(std::string const& sixelData,
     vt.terminal.setImageCanvasCeiling(maxImageSize);
 
     auto const start = std::chrono::steady_clock::now();
-    for ([[maybe_unused]] auto const iteration: crispy::times(iterations))
+    for ([[maybe_unused]] auto const iteration: core::times(iterations))
     {
         vt.writeToScreen("\033[H");
         vt.writeToScreen(sixelData);
@@ -171,19 +172,19 @@ static int benchSixelStream(std::string const& sixelData,
     return EXIT_SUCCESS;
 }
 
-namespace CLI = crispy::cli;
+namespace CLI = core::cli;
 
 namespace
 {
-class ContourHeadlessBench: public crispy::App
+class ContourHeadlessBench: public core::cli::App
 {
   public:
     /// @param env The process environment every part of the benchmark reads through.
-    explicit ContourHeadlessBench(crispy::Environment const& env):
+    explicit ContourHeadlessBench(core::Environment const& env):
         App(env, "bench-headless", "Contour Headless Benchmark", CONTOUR_VERSION_STRING, "Apache-2.0")
     {
-        using Project = crispy::cli::about::Project;
-        crispy::cli::about::registerProjects(
+        using Project = core::cli::about::Project;
+        core::cli::about::registerProjects(
 #ifdef CONTOUR_BUILD_WITH_MIMALLOC
             Project { "mimalloc", "", "" },
 #endif
@@ -197,12 +198,12 @@ class ContourHeadlessBench: public crispy::App
 
         if (auto const logFilterString = env.get("LOG"))
         {
-            logstore::configure(*logFilterString);
-            crispy::App::customizeLogStoreOutput();
+            core::log::configure(*logFilterString);
+            core::cli::App::customizeLogStoreOutput();
         }
     }
 
-    [[nodiscard]] crispy::cli::Command parameterDefinition() const override
+    [[nodiscard]] core::cli::Command parameterDefinition() const override
     {
         auto const perfOptions = CLI::OptionList {
             CLI::Option { .name = "size",
@@ -410,7 +411,7 @@ class ContourHeadlessBench: public crispy::App
                 loopIterations++;
             }
         } };
-        auto cleanupReader = crispy::Finally { [&]() {
+        auto cleanupReader = core::Finally { [&]() {
             pty.close();
             ptyStdoutReaderThread.join();
         } };
@@ -443,15 +444,14 @@ class ContourHeadlessBench: public crispy::App
         std::cout << std::format("PTY read size          : {}\n", PtyReadSize);
         std::cout << std::format(
             "Test time              : {}.{:03} seconds\n", msecs.count() / 1000, msecs.count() % 1000);
-        std::cout << std::format("Data transferred       : {}\n",
-                                 crispy::humanReadableBytes(bytesTransferred));
+        std::cout << std::format("Data transferred       : {}\n", core::humanReadableBytes(bytesTransferred));
         std::cout << std::format("Reader loop iterations : {}\n", loopIterations);
         std::cout << std::format(
             "Average size per read  : {}\n",
-            crispy::humanReadableBytes(static_cast<uint64_t>(static_cast<long double>(bytesTransferred)
-                                                             / static_cast<long double>(loopIterations))));
+            core::humanReadableBytes(static_cast<uint64_t>(static_cast<long double>(bytesTransferred)
+                                                           / static_cast<long double>(loopIterations))));
         std::cout << std::format("Transfer speed         : {} per second\n",
-                                 crispy::humanReadableBytes(static_cast<uint64_t>(mbPerSecs)));
+                                 core::humanReadableBytes(static_cast<uint64_t>(mbPerSecs)));
 
         return EXIT_SUCCESS;
     }
@@ -473,6 +473,6 @@ class ContourHeadlessBench: public crispy::App
 
 int main(int argc, char const* argv[])
 {
-    ContourHeadlessBench app { crispy::defaultEnvironment() };
+    ContourHeadlessBench app { core::defaultEnvironment() };
     return app.run(argc, argv);
 }

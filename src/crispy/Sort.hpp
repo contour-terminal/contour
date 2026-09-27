@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/Times.hpp>
+#include <core/Times.hpp>
 
 #include <utility>
 
@@ -16,7 +16,7 @@ namespace detail
         auto i = low - 1;
         auto& pivot = container[high];
 
-        for (auto const j: crispy::times(low, static_cast<decltype(low)>(high - low)))
+        for (auto const j: core::times(low, static_cast<decltype(low)>(high - low)))
         {
             if (compare(container[j], pivot) <= 0)
             {

@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/MockPty.hpp>
 
-#include <crispy/LogSink.hpp>
+#include <core/async/WhenAll.hpp>
+#include <core/log/LogSink.hpp>
+#include <core/net/AsyncBufferedReader.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/ISocket.hpp>
+#include <core/net/IoBackend.hpp>
+#include <core/net/IoResult.hpp>
+#include <core/net/testing/InMemoryTransport.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -19,20 +26,13 @@
 #include <thread>
 #include <vector>
 
-#include <coro/WhenAll.hpp>
-#include <net/AsyncBufferedReader.hpp>
-#include <net/EventLoop.hpp>
-#include <net/ISocket.hpp>
-#include <net/IoResult.hpp>
-#include <net/PollEventSource.hpp>
-#include <net/testing/InMemoryTransport.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/tmux/ControlSession.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
 
-using coro::Task;
+using core::async::Task;
 using vthost::SessionHost;
 using vthost::tmux::ControlSession;
 using vthost::tmux::splitCommandLine;
@@ -54,7 +54,7 @@ namespace
     return { reinterpret_cast<std::byte const*>(text.data()), text.size() };
 }
 
-Task<void> feedCommands(net::ISocket* client, std::vector<std::string> const* commands)
+Task<void> feedCommands(core::net::ISocket* client, std::vector<std::string> const* commands)
 {
     for (auto const& command: *commands)
     {
@@ -65,9 +65,9 @@ Task<void> feedCommands(net::ISocket* client, std::vector<std::string> const* co
 }
 
 /// Collects every line the session emits until the peer closes.
-Task<void> collectLines(net::ISocket* client, std::vector<std::string>* out)
+Task<void> collectLines(core::net::ISocket* client, std::vector<std::string>* out)
 {
-    auto reader = net::AsyncBufferedReader { client };
+    auto reader = core::net::AsyncBufferedReader { client };
     while (true)
     {
         auto line = co_await reader.readLine();
@@ -82,7 +82,7 @@ Task<void> collectLines(net::ISocket* client, std::vector<std::string>* out)
 /// client and the notification must follow it, driven only by the drain
 /// continuation: the PTY stays silent after the single burst.
 Task<void> burstThenNotifyThenDetach(ControlSession* session,
-                                     net::ISocket* client,
+                                     core::net::ISocket* client,
                                      vtworkspace::SessionId sessionId,
                                      vtworkspace::TabId tabId,
                                      std::string const* burst)
@@ -94,17 +94,17 @@ Task<void> burstThenNotifyThenDetach(ControlSession* session,
 
 /// Runs the session concurrently with the feeder and the collector.
 Task<void> driveExchange(ControlSession* session,
-                         net::ISocket* client,
+                         core::net::ISocket* client,
                          std::vector<std::string> const* commands,
                          std::vector<std::string>* out)
 {
-    co_await coro::whenAll(session->run(), feedCommands(client, commands), collectLines(client, out));
+    co_await core::async::whenAll(session->run(), feedCommands(client, commands), collectLines(client, out));
 }
 
 /// Resizes a pane the way ANOTHER client would — through the host, which applies it and fans it
 /// out — then detaches, so the collector sees whatever the session announced.
 Task<void> resizeThenDetach(SessionHost* host,
-                            net::ISocket* client,
+                            core::net::ISocket* client,
                             vtworkspace::SessionId sessionId,
                             vtbackend::PageSize size)
 {
@@ -115,26 +115,26 @@ Task<void> resizeThenDetach(SessionHost* host,
 /// Runs the session concurrently with the foreign resize and the collector.
 Task<void> driveResize(ControlSession* session,
                        SessionHost* host,
-                       net::ISocket* client,
+                       core::net::ISocket* client,
                        vtworkspace::SessionId sessionId,
                        vtbackend::PageSize size,
                        std::vector<std::string>* out)
 {
-    co_await coro::whenAll(
+    co_await core::async::whenAll(
         session->run(), resizeThenDetach(host, client, sessionId, size), collectLines(client, out));
 }
 
 /// Runs the session concurrently with the burst producer and the collector.
 Task<void> driveBurst(ControlSession* session,
-                      net::ISocket* client,
+                      core::net::ISocket* client,
                       vtworkspace::SessionId sessionId,
                       vtworkspace::TabId tabId,
                       std::string const* burst,
                       std::vector<std::string>* out)
 {
-    co_await coro::whenAll(session->run(),
-                           burstThenNotifyThenDetach(session, client, sessionId, tabId, burst),
-                           collectLines(client, out));
+    co_await core::async::whenAll(session->run(),
+                                  burstThenNotifyThenDetach(session, client, sessionId, tabId, burst),
+                                  collectLines(client, out));
 }
 
 /// An ISocket whose every read fails with a chosen NetError.
@@ -142,26 +142,26 @@ Task<void> driveBurst(ControlSession* session,
 /// The transport-failure path has no other way in: a socket pair can only deliver a CLEAN
 /// close, which is the one case readLine reports as end-of-stream anyway. Writes are accepted
 /// and discarded — the session's preamble is not what these cases are about.
-class FailingReadSocket final: public net::ISocket
+class FailingReadSocket final: public core::net::ISocket
 {
   public:
-    explicit FailingReadSocket(net::NetError error) noexcept: _error(std::move(error)) {}
+    explicit FailingReadSocket(core::net::NetError error) noexcept: _error(std::move(error)) {}
 
-    [[nodiscard]] coro::Task<net::IoResult> read(std::span<std::byte> /*buffer*/) override
+    [[nodiscard]] core::net::IoAwaitable read(std::span<std::byte> /*buffer*/) override
     {
-        co_return std::unexpected(_error);
+        return core::net::IoAwaitable { core::net::IoResult { std::unexpected(_error) } };
     }
 
-    [[nodiscard]] coro::Task<net::IoResult> write(std::span<std::byte const> buffer) override
+    [[nodiscard]] core::net::IoAwaitable write(std::span<std::byte const> buffer) override
     {
-        co_return buffer.size();
+        return core::net::IoAwaitable { core::net::IoResult { buffer.size() } };
     }
 
     void close() noexcept override { _closed = true; }
     [[nodiscard]] bool isClosed() const noexcept override { return _closed; }
 
   private:
-    net::NetError _error;
+    core::net::NetError _error;
     bool _closed = false;
 };
 
@@ -170,10 +170,10 @@ class FailingReadSocket final: public net::ISocket
 /// session runs on the other end.
 struct ControlHarness
 {
-    net::PollEventSource source;
-    net::EventLoop loop { source };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
     SessionHost host;
-    net::testing::SocketPair pair = *net::testing::makeSocketPair(loop);
+    core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
     std::unique_ptr<ControlSession> session;
 
     /// @param options The session's options.
@@ -181,13 +181,13 @@ struct ControlHarness
     /// @param connection Transport for the session end; the socket pair's own end when null.
     explicit ControlHarness(ControlSession::Options options = {},
                             vtbackend::Settings settings = {},
-                            std::unique_ptr<net::ISocket> connection = nullptr):
+                            std::unique_ptr<core::net::ISocket> connection = nullptr):
         host { loop,
                [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                    return std::make_unique<vtpty::MockPty>(size);
                },
                std::move(settings),
-               crispy::defaultEnvironment(),
+               core::defaultEnvironment(),
                /*startPumps=*/false }
     {
         // A fixed clock so guard timestamps are deterministic.
@@ -245,12 +245,12 @@ TEST_CASE("a control session reports the transport error that ended it", "[vthos
     // Every readLine failure used to print "end of stream", so a reset or a bad handle was
     // indistinguishable from a peer hanging up cleanly — which is what made a daemon's log
     // unreadable when a second daemon's bind probe poked it.
-    auto capture = logstore::ScopedCapture { "vthost.tmux" };
+    auto capture = core::log::ScopedCapture { "vthost.tmux" };
 
     auto h = ControlHarness { {},
                               {},
-                              std::make_unique<FailingReadSocket>(
-                                  net::makeNetError(net::NetErrorCode::ConnReset, 10054, "recv")) };
+                              std::make_unique<FailingReadSocket>(core::net::makeNetError(
+                                  core::net::NetErrorCode::ConnReset, 10054, "recv")) };
     h.loop.blockOn(h.session->run());
 
     CHECK(capture.contains("connection reset"));
@@ -260,12 +260,12 @@ TEST_CASE("a control session reports the transport error that ended it", "[vthos
 
 TEST_CASE("the detach line counts the commands the client issued", "[vthost][control]")
 {
-    // Zero is a liveness probe's signature — net::listenUnix's bind probe connects and closes
+    // Zero is a liveness probe's signature — core::net::listenUnix's bind probe connects and closes
     // without speaking, and the daemon logged that identically to a client that attached and
     // quit. The count is what tells the two apart.
     SECTION("a peer that never speaks")
     {
-        auto capture = logstore::ScopedCapture { "vthost.tmux" };
+        auto capture = core::log::ScopedCapture { "vthost.tmux" };
         auto h = ControlHarness {};
         std::ignore = h.exchange({});
         CHECK(capture.contains("0 commands"));
@@ -273,7 +273,7 @@ TEST_CASE("the detach line counts the commands the client issued", "[vthost][con
 
     SECTION("a peer that issued commands")
     {
-        auto capture = logstore::ScopedCapture { "vthost.tmux" };
+        auto capture = core::log::ScopedCapture { "vthost.tmux" };
         auto h = ControlHarness {};
         std::ignore = h.exchange({ "new-window", "list-panes" });
         CHECK(capture.contains("2 commands"));

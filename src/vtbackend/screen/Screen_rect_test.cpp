@@ -8,8 +8,8 @@
 #include <vtbackend/testing/TestHelpers.hpp>
 #include <vtbackend/vt/Charset.hpp>
 
-#include <crispy/Escape.hpp>
-#include <crispy/Utils.hpp>
+#include <core/Escape.hpp>
+#include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -20,7 +20,7 @@
 #include <ranges>
 #include <set>
 #include <string_view>
-using crispy::escape;
+using core::escape;
 using namespace vtbackend;
 using namespace vtbackend::test;
 using namespace std;

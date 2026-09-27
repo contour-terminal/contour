@@ -9,7 +9,8 @@
 #include <text_shaper/OpenShaper.hpp>
 
 #include <crispy/StrongLRUHashtable.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Utils.hpp>
 
 #ifdef _WIN32
     #include <text_shaper/DirectWriteShaper.hpp>
@@ -804,7 +805,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             auto const renderHeight = renderSize.height.as<int>();
             auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
             _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
-            auto const scissorGuard = crispy::Finally([this] { _renderTarget->clearScissorRect(); });
+            auto const scissorGuard = core::Finally([this] { _renderTarget->clearScissorRect(); });
             _renderTarget->execute(now);
         }
 
@@ -863,7 +864,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             auto const renderHeight = renderSize.height.as<int>();
             auto const scissorY = renderHeight - (mainAreaTop + mainAreaHeight);
             _renderTarget->setScissorRect(0, scissorY, renderWidth, mainAreaHeight);
-            auto const scissorGuard = crispy::Finally([this] { _renderTarget->clearScissorRect(); });
+            auto const scissorGuard = core::Finally([this] { _renderTarget->clearScissorRect(); });
             _renderTarget->execute(now);
         }
     }

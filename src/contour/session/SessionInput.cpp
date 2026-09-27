@@ -12,7 +12,7 @@
 
 #include <vtrasterizer/Renderer.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <QtGui/QGuiApplication>
 
@@ -254,7 +254,7 @@ namespace
             // Scoped to this branch alone, and the result carried out rather than returned from
             // inside: the lock is not recursive and the line-based path below takes it again per
             // synthesized mouse event.
-            auto const consumed = crispy::locked(terminal, [&] {
+            auto const consumed = core::locked(terminal, [&] {
                 if (effectivePixelDelta != 0.0f)
                 {
                     // Mouse wheels carry no gesture phase; route their discrete notches through a
@@ -315,7 +315,7 @@ namespace
         // data race TSan would rightly flag, even though the worst it could do here is aim a
         // synthesized wheel "click" at a stale cell.
         auto const wheelClickPosition =
-            crispy::locked(terminal, [&] { return terminal.currentMousePosition(); });
+            core::locked(terminal, [&] { return terminal.currentMousePosition(); });
 
         for (int i = 0; i < std::abs(columnsScroll.as<int>()); ++i)
         {

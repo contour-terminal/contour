@@ -3,7 +3,7 @@
 
 #include <vtbackend/core/Color.hpp>
 
-#include <crispy/Overloaded.hpp>
+#include <core/Overloaded.hpp>
 
 #include <algorithm>
 #include <array>
@@ -379,7 +379,7 @@ RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target
             }
         }
     }
-    crispy::unreachable();
+    core::unreachable();
 }
 
 } // namespace vtbackend

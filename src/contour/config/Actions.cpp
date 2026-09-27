@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Actions.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -9,7 +9,7 @@
 
 using namespace std;
 
-using crispy::toLower;
+using core::toLower;
 
 namespace contour::actions
 {

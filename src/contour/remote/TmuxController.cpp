@@ -20,7 +20,7 @@ namespace
 {
     using vthost::tmux::BinaryLayout;
 
-    auto const tmuxLog = logstore::Category("gui.tmux", "GUI tmux -CC mirroring controller.");
+    auto const tmuxLog = core::log::Category("gui.tmux", "GUI tmux -CC mirroring controller.");
 
     /// @return True when @p node is a split (has both children) rather than a leaf.
     [[nodiscard]] bool isSplit(BinaryLayout const& node) noexcept
@@ -213,7 +213,7 @@ TmuxController::~TmuxController()
 // connectAndWait() and stop() are provided by RemoteController; this controller supplies runClient()
 // and the detach / binding-teardown / message hooks (see TmuxController.h).
 
-coro::Task<void> TmuxController::runClient(net::EventLoop* loop)
+core::async::Task<void> TmuxController::runClient(core::net::EventLoop* loop)
 {
     auto spawned = vthost::tmux::spawnControlMode(*loop, _tmuxSocket);
     if (!spawned)
@@ -240,7 +240,7 @@ coro::Task<void> TmuxController::runClient(net::EventLoop* loop)
     {
         co_await gateway.run();
     }
-    catch (coro::OperationCancelled const&)
+    catch (core::async::OperationCancelled const&)
     {
         tmuxLog()("tmux serve loop cancelled by stop().");
     }

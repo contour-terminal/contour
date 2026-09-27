@@ -7,9 +7,10 @@
 #include <vtbackend/grid/CellProxy.hpp>
 #include <vtbackend/grid/Line.hpp>
 
-#include <crispy/Assert.hpp>
-#include <crispy/Defines.hpp>
 #include <crispy/Ring.hpp>
+
+#include <core/Assert.hpp>
+#include <core/Defines.hpp>
 
 #include <libunicode/convert.h>
 

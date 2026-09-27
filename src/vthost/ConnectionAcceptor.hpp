@@ -11,17 +11,18 @@
 /// are handled CONCURRENTLY: each one runs as its own spawned flow, with the
 /// socket's ownership moved into that flow's frame.
 
+#include <core/async/Task.hpp>
+#include <core/net/EventLoop.hpp>
+#include <core/net/IListener.hpp>
+#include <core/net/ISocket.hpp>
+#include <core/net/IoResult.hpp>
+
 #include <algorithm>
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
 
-#include <coro/Task.hpp>
-#include <net/EventLoop.hpp>
-#include <net/IListener.hpp>
-#include <net/ISocket.hpp>
-#include <net/IoResult.hpp>
 #include <vthost/ConnectionId.hpp>
 
 namespace vthost
@@ -32,7 +33,7 @@ namespace vthost
 /// handler factories return copyable closures — only the SOCKET argument
 /// moves, and that moves through the call just fine.
 using ConnectionHandler =
-    std::function<coro::Task<void>(ConnectionId id, std::unique_ptr<net::ISocket> connection)>;
+    std::function<core::async::Task<void>(ConnectionId id, std::unique_ptr<core::net::ISocket> connection)>;
 
 /// Decides whether a repeated accept failure is worth a log line.
 ///
@@ -54,14 +55,14 @@ class AcceptFailureThrottle
     /// @param error The failure just observed.
     /// @return True for the first failure, for any change of (code, systemCode) — a NEW
     ///         problem is always news — and for every Nth repeat thereafter.
-    [[nodiscard]] bool shouldLog(net::NetError const& error) noexcept;
+    [[nodiscard]] bool shouldLog(core::net::NetError const& error) noexcept;
 
     /// @return How many consecutive failures have been seen, for the message.
     [[nodiscard]] std::size_t consecutive() const noexcept { return _consecutive; }
 
   private:
     std::size_t _everyNth;
-    net::NetErrorCode _lastCode = net::NetErrorCode::Ok;
+    core::net::NetErrorCode _lastCode = core::net::NetErrorCode::Ok;
     int _lastSystemCode = 0;
     std::size_t _consecutive = 0;
 };
@@ -80,9 +81,9 @@ class ConnectionAcceptor
     /// @param handler Invoked once per accepted connection to produce its flow.
     /// @param failureThrottle How often a persistently failing accept is reported. Injected
     ///        rather than fixed, so the policy is the caller's and a test can drive it.
-    ConnectionAcceptor(net::EventLoop& loop,
+    ConnectionAcceptor(core::net::EventLoop& loop,
                        std::string name,
-                       std::unique_ptr<net::IListener> listener,
+                       std::unique_ptr<core::net::IListener> listener,
                        ConnectionHandler handler,
                        AcceptFailureThrottle failureThrottle = AcceptFailureThrottle {});
 
@@ -94,7 +95,7 @@ class ConnectionAcceptor
 
     /// The accept loop: runs until the listener is closed or the loop stops.
     /// blockOn this (or spawn it) to serve.
-    [[nodiscard]] coro::Task<void> serve();
+    [[nodiscard]] core::async::Task<void> serve();
 
     /// Stops accepting; a parked accept resolves as cancelled.
     void close() noexcept { _listener->close(); }
@@ -103,9 +104,9 @@ class ConnectionAcceptor
     [[nodiscard]] std::size_t acceptedCount() const noexcept { return _acceptedCount; }
 
   private:
-    net::EventLoop& _loop;
+    core::net::EventLoop& _loop;
     std::string _name;
-    std::unique_ptr<net::IListener> _listener;
+    std::unique_ptr<core::net::IListener> _listener;
     ConnectionHandler _handler;
     std::size_t _acceptedCount = 0;
     AcceptFailureThrottle _failureThrottle;

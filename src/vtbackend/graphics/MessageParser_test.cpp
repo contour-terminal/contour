@@ -4,7 +4,7 @@
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserEvents.hpp>
 
-#include <crispy/Base64.hpp>
+#include <core/Base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -39,7 +39,7 @@ TEST_CASE("MessageParser.headers.one", "[MessageParser]")
 
 TEST_CASE("MessageParser.header.base64")
 {
-    auto const m = MessageParser::parse(std::format("name=!{}", crispy::base64::encode("\033\0\x07"sv)));
+    auto const m = MessageParser::parse(std::format("name=!{}", core::base64::encode("\033\0\x07"sv)));
     CHECK(m.header("name"));
     CHECK(*m.header("name") == "\033\0\x07"sv);
 }
@@ -179,7 +179,7 @@ TEST_CASE("MessageParser.VT_embedded")
     auto vtEvents = MessageParserTest {};
     auto vtParser = vtparser::Parser { vtEvents };
 
-    vtParser.parseFragment(std::format("\033Pxa=foo,b=bar;!{}\033\\", crispy::base64::encode("abc")));
+    vtParser.parseFragment(std::format("\033Pxa=foo,b=bar;!{}\033\\", core::base64::encode("abc")));
 
     REQUIRE(!!vtEvents.message.header("a"));
     REQUIRE(!!vtEvents.message.header("b"));

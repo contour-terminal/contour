@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtconformance/MarkerScanner.hpp>
 
-#include <crispy/Utils.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <ranges>
@@ -25,7 +25,7 @@ std::vector<MarkerScanner::Match> MarkerScanner::scan(std::string_view chunk)
     auto const tailSize = _tail.size();
     auto matches = std::vector<Match> {};
 
-    for (auto const& [index, marker]: crispy::views::enumerate(_markers))
+    for (auto const& [index, marker]: core::views::enumerate(_markers))
     {
         // An empty marker matches at every offset and would announce a prompt that is not there.
         if (marker.empty())

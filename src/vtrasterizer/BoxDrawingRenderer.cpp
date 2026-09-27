@@ -4,8 +4,9 @@
 #include <vtrasterizer/Pixmap.hpp>
 #include <vtrasterizer/Utils.hpp>
 
-#include <crispy/Environment.hpp>
-#include <crispy/LogStore.hpp>
+#include <core/Environment.hpp>
+#include <core/log/Assert.hpp>
+#include <core/log/LogStore.hpp>
 
 #include <array>
 #include <charconv>
@@ -34,10 +35,10 @@ namespace vtrasterizer
 
 namespace
 {
-    auto inline const boxDrawingLog = logstore::Category("renderer.boxdrawing",
-                                                         "Logs box drawing debugging.",
-                                                         logstore::Category::State::Disabled,
-                                                         logstore::Category::Visibility::Hidden);
+    auto inline const boxDrawingLog = core::log::Category("renderer.boxdrawing",
+                                                          "Logs box drawing debugging.",
+                                                          core::log::Category::State::Disabled,
+                                                          core::log::Category::Visibility::Hidden);
 
     // TODO: Do not depend on this function but rather construct the pixmaps using the correct Y-coordinates.
     atlas::Buffer invertY(atlas::Buffer const& image, ImageSize cellSize)
@@ -1973,7 +1974,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
         static auto const supersamplingFactor = []() {
             auto constexpr EnvName = "SSA_FACTOR";
             auto constexpr DefaultFactor = 4;
-            auto const envValue = crispy::defaultEnvironment().get(EnvName);
+            auto const envValue = core::defaultEnvironment().get(EnvName);
             if (!envValue)
                 return DefaultFactor;
 

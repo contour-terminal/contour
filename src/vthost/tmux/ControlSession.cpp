@@ -182,10 +182,10 @@ namespace
     }
 } // namespace
 
-ControlSession::ControlSession(net::EventLoop& loop,
+ControlSession::ControlSession(core::net::EventLoop& loop,
                                SessionHost& host,
                                ConnectionId id,
-                               std::unique_ptr<net::ISocket> connection,
+                               std::unique_ptr<core::net::ISocket> connection,
                                std::function<std::int64_t()> wallClock,
                                Options options):
     _loop(loop),
@@ -228,7 +228,7 @@ vtpty::PageSize ControlSession::pageSize() const noexcept
     return _host.pageSize();
 }
 
-coro::Task<void> ControlSession::run()
+core::async::Task<void> ControlSession::run()
 {
     // The implicit initial command's empty guard pair, then the session state —
     // the preamble iTerm2-style clients gate their notification handling on.
@@ -236,7 +236,7 @@ coro::Task<void> ControlSession::run()
     emitGuarded(HandlerResult { std::vector<std::string> {} }, _options.initialGuardFlag);
     _output.enqueueNotification("%session-changed $0 0");
 
-    auto reader = net::AsyncBufferedReader { _connection.get() };
+    auto reader = core::net::AsyncBufferedReader { _connection.get() };
     while (true)
     {
         auto line = co_await reader.readLine();
@@ -269,7 +269,7 @@ coro::Task<void> ControlSession::run()
     // notifications gated behind it) must fully reach the writer; a lost peer
     // skips that wait. Then let the write queue flush %exit and any trailing
     // replies before the connection dies.
-    co_await net::pollUntil(&_loop, [this] { return _peerLost || !_output.hasPending(); });
+    co_await core::net::pollUntil(&_loop, [this] { return _peerLost || !_output.hasPending(); });
     co_await _writer.flushThenClose();
     _connection->close();
 }
@@ -381,9 +381,10 @@ void ControlSession::handlePeerLost()
     _peerLost = true;
     // The client cannot keep up (or its transport failed): drop it the way a read
     // EOF would. Closing the queue and connection wakes run()'s parked reader with
-    // BadHandle, so it unwinds through the normal teardown epilogue.
+    // Cancelled, so it unwinds through the normal teardown epilogue.
+    // The queue closes _connection too. A close resumes a parked read at once, which can end
+    // the flow that owns this object, so it comes last and is not repeated.
     _writer.close();
-    _connection->close();
 }
 
 // ---------------------------------------------------------------------------
@@ -916,10 +917,10 @@ namespace
 {
     /// One control client's whole lifetime, as a free coroutine (a capturing
     /// lambda coroutine would dangle its closure; pointers live in the frame).
-    coro::Task<void> serveControlClient(net::EventLoop* loop,
-                                        SessionHost* host,
-                                        ConnectionId id,
-                                        std::unique_ptr<net::ISocket> connection)
+    core::async::Task<void> serveControlClient(core::net::EventLoop* loop,
+                                               SessionHost* host,
+                                               ConnectionId id,
+                                               std::unique_ptr<core::net::ISocket> connection)
     {
         auto session =
             std::make_unique<ControlSession>(*loop, *host, std::move(id), std::move(connection), [] {
@@ -935,11 +936,11 @@ namespace
     }
 } // namespace
 
-ConnectionHandler makeControlModeHandler(net::EventLoop& loop, SessionHost& host)
+ConnectionHandler makeControlModeHandler(core::net::EventLoop& loop, SessionHost& host)
 {
     // NOT a coroutine itself: it merely constructs the free coroutine's task,
     // so the captures never outlive an activation frame.
-    return [&loop, &host](ConnectionId id, std::unique_ptr<net::ISocket> connection) {
+    return [&loop, &host](ConnectionId id, std::unique_ptr<core::net::ISocket> connection) {
         return serveControlClient(&loop, &host, std::move(id), std::move(connection));
     };
 }

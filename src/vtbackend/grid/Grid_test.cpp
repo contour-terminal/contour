@@ -3,7 +3,8 @@
 #include <vtbackend/grid/Grid.hpp>
 
 #include <crispy/BufferObject.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -1111,6 +1112,38 @@ TEST_CASE("Grid.resizeColumnsWithLargeHistory.keepsBlank", "[grid][blank]")
     CHECK(blankCount == grid.maxHistoryLineCount().as<size_t>() + grid.pageSize().lines.as<size_t>());
 }
 
+TEST_CASE("Grid.growLinesAfterGrowColumnsWidensTheNewPageLines", "[grid]")
+{
+    // Growing the columns without anything to reflow widens only the used lines; the unused tail of
+    // the ring keeps its old width. Growing the page afterwards pulls exactly those tail lines into
+    // it, and each must then be as wide as the page -- the terminal writes to any page column
+    // without asking the line how wide it is. Contour's startup negotiates exactly this sequence.
+    auto const checkPageLinesAreFullWidth = [](Grid const& grid) {
+        for (auto const y: std::views::iota(0, grid.pageSize().lines.as<int>()))
+        {
+            INFO(std::format("page line {}", y));
+            CHECK(grid.lineAt(LineOffset(y)).size() == grid.pageSize().columns);
+        }
+    };
+
+    SECTION("tail lines never used")
+    {
+        auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, true, LineCount(20));
+        (void) grid.resize(PageSize { LineCount(3), ColumnCount(15) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(6), ColumnCount(15) }, CellLocation {}, false);
+        checkPageLinesAreFullWidth(grid);
+    }
+
+    SECTION("page lines cut off by a shrink and grown back")
+    {
+        auto grid = Grid(PageSize { LineCount(6), ColumnCount(10) }, true, LineCount(20));
+        (void) grid.resize(PageSize { LineCount(3), ColumnCount(10) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(3), ColumnCount(15) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(6), ColumnCount(15) }, CellLocation {}, false);
+        checkPageLinesAreFullWidth(grid);
+    }
+}
+
 TEST_CASE("Grid.shrinkColumnsWrapsLongLine", "[grid][blank]")
 {
     // A single 200-column line shrunk to 40 must produce 5 wrapped chunks with
@@ -2060,7 +2093,7 @@ TEST_CASE("Grid.historyEviction.evictsAWholeBlockRatherThanCuttingMidCommand", "
     // the block size dividing the capacity.
     auto const blocks = std::array { 2, 5, 3, 4, 2, 6 };
     auto const writeBlocks = [&](Grid& grid) {
-        for (auto const [block, length]: crispy::views::enumerate(blocks))
+        for (auto const [block, length]: core::views::enumerate(blocks))
         {
             appendLine(grid, std::format("P{}", block), BlockStart::Yes);
             for (auto const i: std::views::iota(0, length))

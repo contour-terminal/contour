@@ -24,9 +24,10 @@
 #include <vtpty/Pty.hpp>
 #include <vtpty/SshSession.hpp>
 
-#include <crispy/Assert.hpp>
 #include <crispy/StackTrace.hpp>
-#include <crispy/Utils.hpp>
+
+#include <core/Assert.hpp>
+#include <core/Utils.hpp>
 
 #include <QtCore/QDeadlineTimer>
 #include <QtCore/QDebug>
@@ -99,7 +100,7 @@ namespace
         auto value = std::string {};
         std::getline(file, value);
         // Trimmed, because trailing whitespace would make every comparison against a wire value fail.
-        return std::string { crispy::trimRight(value) };
+        return std::string { core::trimRight(value) };
     }
     string unhandledExceptionMessage(string_view const& where, exception const& e)
     {
@@ -174,9 +175,9 @@ namespace
         do
         {
             std::swap(input, output);
-            output = crispy::replace(input, "  ", " ");
-            output = crispy::replace(output, "\t", " ");
-            output = crispy::replace(output, "\n", " ");
+            output = core::replace(input, "  ", " ");
+            output = core::replace(output, "\t", " ");
+            output = core::replace(output, "\n", " ");
         } while (input != output);
 
         return output;
@@ -420,7 +421,7 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
     // until the next screen update, which for an idle shell may be never, leaving the freshly bound
     // scrollbar sized for a history it cannot see.
     announceScrollableLineCount(
-        crispy::locked(_terminal, [this] { return _terminal.viewport().scrollableLineCount(); }));
+        core::locked(_terminal, [this] { return _terminal.viewport().scrollableLineCount(); }));
 
     scheduleRedraw();
 }
@@ -591,7 +592,7 @@ void TerminalSession::bell()
             case vtbackend::BellVolume::High: return configured;
         }
 
-        crispy::unreachable();
+        core::unreachable();
     }(terminal().settings().warningBellVolume);
 
     emit onBell(volume);
@@ -1133,7 +1134,7 @@ void TerminalSession::focusTerminalWindow()
 void TerminalSession::onClosed()
 {
     auto const _ = std::scoped_lock { _onClosedMutex };
-    sessionLog()("Terminal device closed (thread {})", crispy::threadName());
+    sessionLog()("Terminal device closed (thread {})", core::threadName());
 
     if (!_terminal.device().isClosed())
         _terminal.device().close();
@@ -1198,7 +1199,7 @@ void TerminalSession::onClosed()
     auto isClosedAlready = _onClosedHandled.load();
     if (isClosedAlready || !_onClosedHandled.compare_exchange_weak(isClosedAlready, true))
     {
-        sessionLog()("onClosed called: thread {}, display {}", crispy::threadName(), _display ? "yes" : "no");
+        sessionLog()("onClosed called: thread {}, display {}", core::threadName(), _display ? "yes" : "no");
         if (_display)
             _display->closeDisplay();
         return;
@@ -1827,7 +1828,7 @@ QString TerminalSession::renderSearchCaseTooltip(vtbackend::SearchCaseSensitivit
         case vtbackend::SearchCaseSensitivity::Sensitive: return tr("Match case: on");
         case vtbackend::SearchCaseSensitivity::Insensitive: return tr("Match case: off");
     }
-    crispy::unreachable();
+    core::unreachable();
 }
 
 void TerminalSession::refreshSearchStatusLocked()
@@ -1955,7 +1956,7 @@ void TerminalSession::sendCharEvent(char32_t value,
     input::inputLog()("Character {} event received: {} '{}'",
                       eventType,
                       modifiers,
-                      crispy::escape(unicode::convert_to<char>(value)));
+                      core::escape(unicode::convert_to<char>(value)));
 
     // The early-exit-notice acknowledge must run whether or not a display is attached, exactly like
     // sendKeyEvent above: the notice can be showing on a background/display-less pane, and a
@@ -2022,7 +2023,7 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
 
     terminal().tick(steady_clock::now());
 
-    if (crispy::locked(_terminal, [&]() {
+    if (core::locked(_terminal, [&]() {
             return _terminal.sendMousePressEvent(modifiers, button, pos, pixelPosition, uiHandledHint);
         }))
         return;
@@ -2097,7 +2098,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     // afterwards. tryGetHoveringHyperlink() re-queries the screen and needs the same non-recursive
     // mutex, so a second acquisition here would be one more chance to deadlock, and a callback fired
     // from vtbackend's own hover-state update would run WITH the lock held and self-deadlock outright.
-    auto const hoveredUri = crispy::locked(_terminal, [&]() -> std::string {
+    auto const hoveredUri = core::locked(_terminal, [&]() -> std::string {
         _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
         auto const link = _terminal.tryGetHoveringHyperlink();
         return link ? link->uri : std::string {};
@@ -2140,7 +2141,7 @@ ConsumedByGutter TerminalSession::sendGutterHoverEvent(std::optional<vtbackend::
     }
 
     _gutterHovered = true;
-    auto const overFold = crispy::locked(_terminal, [&] {
+    auto const overFold = core::locked(_terminal, [&] {
         _terminal.setGutterHoverLine(gridLine);
         return _terminal.foldContaining(*gridLine).has_value();
     });
@@ -2220,7 +2221,7 @@ void TerminalSession::clearGutterHover()
     // stale rather than guess at it here -- the very next move then re-decides, hyperlink and all.
     _isPointerShapeStale = true;
 
-    crispy::locked(_terminal, [&] { _terminal.setGutterHoverLine(std::nullopt); });
+    core::locked(_terminal, [&] { _terminal.setGutterHoverLine(std::nullopt); });
 }
 
 void TerminalSession::announceScrollableLineCount(vtbackend::LineCount scrollable)
@@ -2256,7 +2257,7 @@ void TerminalSession::sendMouseReleaseEvent(Modifiers modifiers,
 {
     terminal().tick(steady_clock::now());
 
-    crispy::locked(_terminal, [&]() {
+    core::locked(_terminal, [&]() {
         auto const uiHandledHint = false;
         _terminal.sendMouseReleaseEvent(modifiers, button, pixelPosition, uiHandledHint);
     });
@@ -2266,7 +2267,7 @@ void TerminalSession::sendMouseReleaseEvent(Modifiers modifiers,
 void TerminalSession::performAutoScroll(int direction, vtbackend::LineCount lineCount)
 {
     terminal().tick(steady_clock::now());
-    crispy::locked(_terminal, [&]() { _terminal.performAutoScroll(direction, lineCount); });
+    core::locked(_terminal, [&]() { _terminal.performAutoScroll(direction, lineCount); });
 }
 
 void TerminalSession::sendFocusInEvent()
@@ -2374,19 +2375,19 @@ bool TerminalSession::operator()(actions::ClearHistoryAndReset)
     sessionLog()("Clearing history and perform terminal hard reset");
 
     // Locked, for the reason spelled out at operator()(SoftReset) below.
-    crispy::locked(_terminal, [&]() { terminal().hardReset(); });
+    core::locked(_terminal, [&]() { terminal().hardReset(); });
     return true;
 }
 
 bool TerminalSession::operator()(actions::CopyPreviousMarkRange)
 {
-    crispy::locked(_terminal, [&]() { copyToClipboard(terminal().extractLastMarkRange()); });
+    core::locked(_terminal, [&]() { copyToClipboard(terminal().extractLastMarkRange()); });
     return true;
 }
 
 bool TerminalSession::operator()(actions::SelectAll)
 {
-    crispy::locked(_terminal, [&]() { terminal().selectAll(); });
+    core::locked(_terminal, [&]() { terminal().selectAll(); });
     return true;
 }
 
@@ -2395,7 +2396,7 @@ bool TerminalSession::operator()(actions::OpenContextMenu)
     // Not while a left-drag selection is in flight. The popup takes the mouse grab, so the button-release
     // that would end that drag never reaches the display: the selection would go on extending with every
     // later hover, and the auto-scroll timer would go on firing, with no button held down at all.
-    if (crispy::locked(_terminal, [&]() { return terminal().leftMouseButtonPressed(); }))
+    if (core::locked(_terminal, [&]() { return terminal().leftMouseButtonPressed(); }))
         return false;
 
     _manager->openContextMenu(this);
@@ -2422,7 +2423,7 @@ command::ContextMenuState TerminalSession::contextMenuState()
     // One lock for the whole snapshot. The parser thread mutates the grid concurrently, so a menu that
     // asked the terminal a fresh question per row would be reading a moving target — and a QML binding
     // that reached into the terminal on its own schedule would be a plain data race.
-    return crispy::locked(_terminal, [&]() {
+    return core::locked(_terminal, [&]() {
         auto const block = terminal().lastCommandBlock();
         auto const hyperlink = terminal().tryGetHoveringHyperlink();
 
@@ -2450,7 +2451,7 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // cwd grays it out, and so does an OSC 3008 cwd behind a container boundary or from another
             // machine -- which would otherwise open the HOST's directory of the same name, a false
             // positive OSC 7 never had, because a context cwd carries no host authority to test.
-            // The LOCKED resolver: this whole lambda runs inside crispy::locked() above, and the
+            // The LOCKED resolver: this whole lambda runs inside core::locked() above, and the
             // terminal's mutex is not recursive.
             .hasLocalWorkingDirectory =
                 resolveWorkingDirectoryLocked(vtbackend::CwdPurpose::OpenLocally).has_value(),
@@ -2484,7 +2485,7 @@ bool TerminalSession::operator()(actions::SoftReset)
     // Taking the lock cannot deadlock: DECSTR (CSI ! p) already reaches Terminal::softReset() from the
     // parser thread, from inside writeToScreen()'s own _stateMutex hold, so every callback the reset makes
     // is exercised under this very lock every time an application asks for one. This path simply joins it.
-    crispy::locked(_terminal, [&]() { terminal().softReset(); });
+    core::locked(_terminal, [&]() { terminal().softReset(); });
     return true;
 }
 
@@ -2505,7 +2506,7 @@ bool TerminalSession::operator()(actions::CopyLastCommandBlock)
 
 bool TerminalSession::copyLastCommandBlock(vtbackend::CommandBlockPart part)
 {
-    auto const block = crispy::locked(_terminal, [&]() { return terminal().lastCommandBlock(); });
+    auto const block = core::locked(_terminal, [&]() { return terminal().lastCommandBlock(); });
     if (!block)
         return false;
 
@@ -2549,7 +2550,7 @@ bool TerminalSession::operator()(actions::CopySelection copySelection)
     {
         case actions::CopyFormat::Text:
             // Copy the selection in pure text, plus whitespaces and newline.
-            crispy::locked(_terminal, [&]() { copyToClipboard(terminal().extractSelectionText()); });
+            core::locked(_terminal, [&]() { copyToClipboard(terminal().extractSelectionText()); });
             break;
         case actions::CopyFormat::HTML:
             // TODO: This requires walking through each selected cell and construct HTML+CSS for it.
@@ -2717,7 +2718,7 @@ bool TerminalSession::operator()(actions::HintMode const& action)
     // Filter by requested pattern name(s) if specified.
     if (!action.patterns.empty() && action.patterns != "all")
     {
-        auto const requestedNames = crispy::split(std::string_view(action.patterns), '|');
+        auto const requestedNames = core::split(std::string_view(action.patterns), '|');
         auto const nameMatches = [&](auto const& p) {
             return std::ranges::find(requestedNames, std::string_view(p.name)) != requestedNames.end();
         };
@@ -2739,7 +2740,7 @@ bool TerminalSession::operator()(actions::HintMode const& action)
         .scope = action.scope,
         .scrollbackLimit = profile().hintScrollbackLines.value(),
     };
-    crispy::locked(terminal(), [&]() { terminal().activateHintMode(std::move(request)); });
+    core::locked(terminal(), [&]() { terminal().activateHintMode(std::move(request)); });
     return true;
 }
 
@@ -2831,7 +2832,7 @@ bool TerminalSession::operator()(actions::OpenFileManager)
 
 bool TerminalSession::operator()(actions::OpenSelection)
 {
-    crispy::locked(_terminal, [&]() {
+    core::locked(_terminal, [&]() {
         auto const selection = terminal().extractSelectionText();
         openExternally(QUrl(QString::fromStdString(selection)), "selection", selection);
     });
@@ -2912,7 +2913,7 @@ bool TerminalSession::operator()(actions::ScreenshotVT)
 bool TerminalSession::operator()(actions::SaveScreenshot)
 {
     auto savePath =
-        app().dumpStateAtExit().value_or(crispy::App::instance()->localStateDir())
+        app().dumpStateAtExit().value_or(core::cli::App::instance()->localStateDir())
         / fs::path(std::format("contour-screenshot-{:%Y-%m-%d-%H-%M-%S}.png", chrono::system_clock::now()));
 
     _display->setScreenshotOutput(savePath);
@@ -2993,7 +2994,7 @@ bool TerminalSession::withFolding(std::invocable<vtbackend::Terminal&> auto&& ac
     // Locked: the actions walk the grid's marks and mutate fold state the render pass reads. See
     // ScrollMarkDown.
     auto const [handled, scrollable] =
-        crispy::locked(_terminal, [&]() -> std::pair<bool, vtbackend::LineCount> {
+        core::locked(_terminal, [&]() -> std::pair<bool, vtbackend::LineCount> {
             // One gate for every folding action rather than one per handler: a seventh action then
             // cannot be live behind a disabled setting by forgetting to check.
             auto const ran =
@@ -4151,31 +4152,31 @@ QModelIndex TerminalSession::index(int row, int column, QModelIndex const& paren
     Require(column == 0);
     // NOTE: if at all, we could expose session attribs like session id, session type
     // (local process), ...?
-    crispy::ignoreUnused(parent);
+    core::ignoreUnused(parent);
     return createIndex(row, column, nullptr);
 }
 
 QModelIndex TerminalSession::parent(QModelIndex const& child) const
 {
-    crispy::ignoreUnused(child);
+    core::ignoreUnused(child);
     return {};
 }
 
 int TerminalSession::rowCount(QModelIndex const& parent) const
 {
-    crispy::ignoreUnused(parent);
+    core::ignoreUnused(parent);
     return 1;
 }
 
 int TerminalSession::columnCount(QModelIndex const& parent) const
 {
-    crispy::ignoreUnused(parent);
+    core::ignoreUnused(parent);
     return 1;
 }
 
 QVariant TerminalSession::data(QModelIndex const& index, int role) const
 {
-    crispy::ignoreUnused(index, role);
+    core::ignoreUnused(index, role);
     Require(index.row() == 0);
     Require(index.column() == 0);
 
@@ -4185,7 +4186,7 @@ QVariant TerminalSession::data(QModelIndex const& index, int role) const
 bool TerminalSession::setData(QModelIndex const& index, QVariant const& value, int role)
 {
     // NB: Session-Id is read-only.
-    crispy::ignoreUnused(index, value, role);
+    core::ignoreUnused(index, value, role);
     return false;
 }
 // }}}

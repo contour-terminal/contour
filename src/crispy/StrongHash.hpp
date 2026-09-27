@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <crispy/Assert.hpp>
+#include <core/Assert.hpp>
 
 #include <array>
 #include <cstring>
@@ -15,7 +15,7 @@
 #ifdef STRONGHASH_USE_INTRINSICS
     #include <crispy/Intrinsics.hpp>
 #else
-    #include <crispy/FNV.hpp>
+    #include <core/FNV.hpp>
 #endif
 
 namespace crispy
@@ -113,10 +113,10 @@ inline StrongHash operator*(StrongHash const& a, StrongHash const& b) noexcept
 
     return StrongHash { hashValue };
 #else
-    return StrongHash { FNV<uint32_t, uint32_t>()(a.value[0], b.value[0]),
-                        FNV<uint32_t, uint32_t>()(a.value[1], b.value[1]),
-                        FNV<uint32_t, uint32_t>()(a.value[2], b.value[2]),
-                        FNV<uint32_t, uint32_t>()(a.value[3], b.value[3]) };
+    return StrongHash { core::FNV<uint32_t, uint32_t>()(a.value[0], b.value[0]),
+                        core::FNV<uint32_t, uint32_t>()(a.value[1], b.value[1]),
+                        core::FNV<uint32_t, uint32_t>()(a.value[2], b.value[2]),
+                        core::FNV<uint32_t, uint32_t>()(a.value[3], b.value[3]) };
 #endif
 }
 
@@ -191,7 +191,7 @@ inline StrongHash StrongHash::compute(void const* data, size_t n) noexcept
 #else
     auto const* i = (uint8_t const*) data;
     auto const* e = i + n;
-    auto const result = FNV<uint8_t, uint64_t>()(i, e);
+    auto const result = core::FNV<uint8_t, uint64_t>()(i, e);
     auto constexpr A = 0;
     auto constexpr B = 0;
     auto const c = static_cast<uint32_t>((result >> 32) & 0xFFFFFFFFu);

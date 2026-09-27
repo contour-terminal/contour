@@ -3,7 +3,7 @@
 
 #include <vtbackend/core/ContextId.hpp>
 
-#include <crispy/Flags.hpp>
+#include <core/Flags.hpp>
 
 #include <array>
 #include <cstddef>
@@ -313,7 +313,7 @@ enum class ContextField : uint16_t
 #undef VTBACKEND_CONTEXT_FIELD_ENUMERATOR
 };
 
-using ContextFields = crispy::Flags<ContextField>;
+using ContextFields = core::Flags<ContextField>;
 
 /// Every ContextField, in declaration order, excluding None.
 inline constexpr auto ContextFieldList = std::array {

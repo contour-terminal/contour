@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <crispy/App.hpp>
-#include <crispy/CLI.hpp>
+#include <core/cli/App.hpp>
+#include <core/cli/CLI.hpp>
 
 #include <cstdlib>
 #include <filesystem>
@@ -14,7 +14,7 @@
 #include <vtconformance/Suite.hpp>
 
 namespace fs = std::filesystem;
-namespace CLI = crispy::cli;
+namespace CLI = core::cli;
 
 using namespace vtconformance;
 using namespace std::string_literals;
@@ -26,12 +26,12 @@ namespace
 ///
 /// It drives an external VT test program (vttest today) against Contour's own terminal engine over a
 /// real PTY, entirely headlessly, and reports what every oracle saw.
-class ConformanceApp: public crispy::App
+class ConformanceApp: public core::cli::App
 {
   public:
     /// @param env The process environment every part of the harness reads through.
-    explicit ConformanceApp(crispy::Environment const& env):
-        crispy::App(env, "vtconformance", "Contour VT conformance harness", "0.1.0", "Apache-2.0")
+    explicit ConformanceApp(core::Environment const& env):
+        core::cli::App(env, "vtconformance", "Contour VT conformance harness", "0.1.0", "Apache-2.0")
     {
         link("vtconformance.run", [this] { return runCommand(); });
     }
@@ -43,7 +43,7 @@ class ConformanceApp: public crispy::App
             "Runs a VT conformance suite against Contour's terminal engine and reports the result.",
             CLI::OptionList {},
             CLI::CommandList {
-                // crispy::App links help/version/license handlers in its constructor and looks every
+                // core::cli::App links help/version/license handlers in its constructor and looks every
                 // linked handler's key up when dispatching, so these must be declared here or the
                 // lookup throws before main() ever gets a say.
                 CLI::Command { "help", "Shows this help and exits." },
@@ -186,6 +186,6 @@ class ConformanceApp: public crispy::App
 
 int main(int argc, char const* argv[])
 {
-    auto app = ConformanceApp { crispy::defaultEnvironment() };
+    auto app = ConformanceApp { core::defaultEnvironment() };
     return app.run(argc, argv);
 }

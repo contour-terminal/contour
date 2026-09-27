@@ -6,7 +6,7 @@
 ///
 /// Names follow the tree's module-first convention (`vt.*` ← vtbackend, `pty.*` ← vtpty,
 /// `gui.*` ← contour), so `LOG=vthost.*` maps 1:1 onto this directory. Note that
-/// logstore::configure's `*` is a plain PREFIX match, so `vthost.*` sweeps in the trace
+/// core::log::configure's `*` is a plain PREFIX match, so `vthost.*` sweeps in the trace
 /// categories too — exactly as `vt.*` already sweeps in `vt.trace.sequence`. Select the trace
 /// tier alone with `vthost.trace.*`.
 ///
@@ -23,7 +23,7 @@
 /// handling logs from inside its posted continuation rather than the sigwait thread. That
 /// invariant is what keeps lines whole and lets the test capture fixture stay lock-free.
 
-#include <crispy/LogStore.hpp>
+#include <core/log/LogStore.hpp>
 
 namespace vthost
 {
@@ -32,31 +32,31 @@ namespace vthost
 /// feedback that the daemon came up and which sockets it bound. Keep this category
 /// BANNER-GRADE — anything chattier belongs in one of the disabled categories below, or it
 /// will spam a user who never asked for logging.
-auto inline const daemonLog = logstore::Category("vthost.daemon",
-                                                 "Daemon lifecycle: endpoints bound, listeners "
-                                                 "started, shutdown and what asked for it "
-                                                 "(a signal, or the last session closing).",
-                                                 logstore::Category::State::Enabled);
+auto inline const daemonLog = core::log::Category("vthost.daemon",
+                                                  "Daemon lifecycle: endpoints bound, listeners "
+                                                  "started, shutdown and what asked for it "
+                                                  "(a signal, or the last session closing).",
+                                                  core::log::Category::State::Enabled);
 
 auto inline const connectionLog =
-    logstore::Category("vthost.conn", "Client connections: accept, handshake, disconnect and why.");
+    core::log::Category("vthost.conn", "Client connections: accept, handshake, disconnect and why.");
 
-auto inline const sessionLog = logstore::Category("vthost.session",
-                                                  "Hosted session lifecycle: spawn, PTY-factory "
-                                                  "failure, model refusal, resize, exit.");
+auto inline const sessionLog = core::log::Category("vthost.session",
+                                                   "Hosted session lifecycle: spawn, PTY-factory "
+                                                   "failure, model refusal, resize, exit.");
 
-auto inline const tmuxLog = logstore::Category("vthost.tmux",
-                                               "tmux control-mode and imsg endpoints: attach, "
-                                               "rejection, failure.");
+auto inline const tmuxLog = core::log::Category("vthost.tmux",
+                                                "tmux control-mode and imsg endpoints: attach, "
+                                                "rejection, failure.");
 
-auto inline const clientLog = logstore::Category("vthost.client",
-                                                 "Native-protocol CLIENT engine: connect, "
-                                                 "handshake, disconnect, failures.");
+auto inline const clientLog = core::log::Category("vthost.client",
+                                                  "Native-protocol CLIENT engine: connect, "
+                                                  "handshake, disconnect, failures.");
 
 auto inline const protocolTraceLog =
-    logstore::Category("vthost.trace.proto", "Traces every native PDU sent and received.");
+    core::log::Category("vthost.trace.proto", "Traces every native PDU sent and received.");
 
 auto inline const tmuxTraceLog =
-    logstore::Category("vthost.trace.tmux", "Traces every tmux control-mode line, both directions.");
+    core::log::Category("vthost.trace.tmux", "Traces every tmux control-mode line, both directions.");
 
 } // namespace vthost

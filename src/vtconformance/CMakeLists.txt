@@ -29,6 +29,9 @@ add_library(vtconformance STATIC
 target_link_libraries(vtconformance PUBLIC
     vtbackend
     vtpty
+    core::base
+    core::cli
+    core::log
     crispy::core
 )
 target_include_directories(vtconformance PUBLIC
@@ -53,7 +56,7 @@ if(VTCONFORMANCE_TESTING)
         TerminalHarness_test.cpp
         VtTestLog_test.cpp
     )
-    target_link_libraries(vtconformance_test vtconformance Catch2::Catch2)
+    target_link_libraries(vtconformance_test vtconformance core::testing Catch2::Catch2)
     add_test(NAME vtconformance_test COMMAND $<TARGET_FILE:vtconformance_test>)
 
     if(NOT WIN32)

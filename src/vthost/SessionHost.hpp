@@ -20,7 +20,8 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 
-#include <crispy/Environment.hpp>
+#include <core/Environment.hpp>
+#include <core/net/EventLoop.hpp>
 
 #include <functional>
 #include <memory>
@@ -29,8 +30,6 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
-
-#include <net/EventLoop.hpp>
 // Part of this header's contract, not an implementation detail: the settings a host is constructed
 // with — and any a SessionSpawnRequest carries — are normalized through hostedSessionSettings.
 #include <vthost/ClientSizePolicy.hpp>
@@ -128,7 +127,7 @@ class HostedSession
     ///        pump loop ended (the host marshals it onto the loop).
     /// @param env The process environment the hosted terminal reads through.
     HostedSession(vtworkspace::SessionId id,
-                  crispy::Environment const& env,
+                  core::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
                   vtbackend::Settings settings,
                   std::function<void()> onScreenUpdated,
@@ -270,10 +269,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///        `profile` is not — the daemon has no `Config` object to resolve an arbitrary named
     ///        profile at startup, so a pane naming one is logged and otherwise ignored. Empty
     ///        `tabs` (the default) keeps today's behavior: the window starts with no tab at all.
-    SessionHost(net::EventLoop& loop,
+    SessionHost(core::net::EventLoop& loop,
                 PtyFactory ptyFactory,
                 vtbackend::Settings settings,
-                crispy::Environment const& env,
+                core::Environment const& env,
                 bool startPumps = true,
                 ClientSizePolicy sizePolicy = ClientSizePolicy::Latest,
                 vtworkspace::Layout const& startupLayout = {});
@@ -491,10 +490,10 @@ class SessionHost final: public vtworkspace::ModelEvents
         fanOut(method, args...);
     }
 
-    net::EventLoop& _loop;
+    core::net::EventLoop& _loop;
     PtyFactory _ptyFactory;
     vtbackend::Settings _settings;
-    crispy::Environment const& _environment;
+    core::Environment const& _environment;
     vtpty::PageSize _pageSize; ///< The RESOLVED authoritative client area (see pageSize()).
     bool _startPumps;
     ClientSizePolicy _sizePolicy;
