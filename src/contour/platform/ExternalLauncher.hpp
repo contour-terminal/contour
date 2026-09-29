@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <QtCore/QFileInfo>
+#include <QtCore/QStandardPaths>
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
 
@@ -73,6 +75,26 @@ enum class SpawnError : std::uint8_t
 [[nodiscard]] inline bool isOpenable(QUrl const& url)
 {
     return !url.isEmpty() && url.isValid();
+}
+
+/// Whether @p program names something this machine can actually run.
+///
+/// Stated once here for the same reason isOpenable() is: it is a property of the name, not of how
+/// the program is reached. Qt reports one FailedToStart for "there is no such program" and for "it
+/// is there and would not start", which are different things to tell a user: the first is a missing
+/// package, the second a permission or a loader problem. The CLI asks the same question of the
+/// program a `contour [terminal] PROGRAM ARGS...` invocation names.
+///
+/// @param program The executable path or bare program name.
+/// @return true when a file to execute was found.
+[[nodiscard]] inline bool isReachableProgram(QString const& program)
+{
+    // A path names the file directly; a bare name is searched for on $PATH (and, on Windows, with
+    // the suffixes from %PATHEXT%, which is why this is not a plain existence test).
+    if (program.contains(QLatin1Char('/')) || program.contains(QLatin1Char('\\')))
+        return QFileInfo(program).isExecutable();
+
+    return !QStandardPaths::findExecutable(program).isEmpty();
 }
 
 /// Launches external resources on behalf of a terminal session: opening URLs/documents in the
