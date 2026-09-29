@@ -4553,4 +4553,87 @@ TEST_CASE("DECSWBV: the volume is restored by RIS", "[screen]")
     CHECK(mock.terminal.settings().warningBellVolume == BellVolume::High);
 }
 
+TEST_CASE("DECSMBV: sets the margin bell volume", "[screen]")
+{
+    // Ps 0, 5-8 is high, 1 is off, 2-4 is low for the margin bell.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[1 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Off);
+
+    mock.writeToScreen("\033[3 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+
+    mock.writeToScreen("\033[8 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
+
+    mock.writeToScreen("\033[0 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
+}
+
+TEST_CASE("DECSMBV: default parameter selects high, not off", "[screen]")
+{
+    // Unlike DECSWBV, DECSMBV's omitted Ps maps to 0, which this sequence defines as high -- the
+    // inverse of the off-by-default shape a reader might expect from its sibling sequence.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[1 u");
+    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::Off);
+
+    mock.writeToScreen("\033[ u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
+}
+
+TEST_CASE("DECSMBV: the volume is restored by RIS", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[1 u");
+    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::Off);
+
+    mock.writeToScreen("\033c"); // RIS
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
+}
+
+TEST_CASE("DECSMBV: a Ps outside 0-8 is rejected", "[screen]")
+{
+    // Ps 9 falls past every defined value into the switch's default, which is Invalid; the volume
+    // must be left exactly as it was rather than snapping to some fallback level.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[3 u");
+    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+
+    mock.writeToScreen("\033[9 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+}
+
+TEST_CASE("DECSMBV: a hand-built two-parameter sequence is rejected", "[screen]")
+{
+    // DECSMBV is registered with maximumParameters = 1, so Functions::select() already refuses a
+    // two-parameter "CSI Ps ; Ps SP u" before Screen::apply() is ever called -- writeToScreen() can't
+    // reach the handler's own multi-parameter guard at all. This bypasses the parser and calls
+    // apply() directly, to pin down what the guard itself does if that dispatch-layer invariant is
+    // ever weakened, rather than relying on select() alone to keep bad input out.
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[3 u");
+    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+
+    auto seq = Sequence {};
+    seq.setCategory(FunctionCategory::CSI);
+    seq.intermediateCharacters() = " ";
+    seq.setFinalChar('u');
+    auto builder = SequenceParameterBuilder { seq.parameters() };
+    builder.set(1);
+    builder.nextParameter();
+    builder.set(2);
+    builder.fixiate();
+    REQUIRE(seq.parameterCount() == 2);
+
+    auto const result = mock.terminal.primaryScreen().apply(DECSMBV, seq);
+    CHECK(result == ApplyResult::Invalid);
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+}
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
