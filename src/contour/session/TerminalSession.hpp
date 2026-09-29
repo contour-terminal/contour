@@ -640,6 +640,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     //
     void requestCaptureBuffer(vtbackend::LineCount lines, bool logical) override;
     void bell() override;
+    void marginBell() override;
     void bufferChanged(vtbackend::ScreenType) override;
     void renderBufferUpdated() override;
     void screenUpdated() override;
