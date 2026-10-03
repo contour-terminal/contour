@@ -79,6 +79,7 @@ target_link_libraries(contour_platform PUBLIC
     Qt6::DBus
     Qt6::Gui
     Qt6::Multimedia
+    Qt6::Quick
 )
 
 target_include_directories(contour_platform PUBLIC
