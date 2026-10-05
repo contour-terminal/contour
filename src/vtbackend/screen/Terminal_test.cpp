@@ -2377,7 +2377,6 @@ TEST_CASE("Terminal.DECMode.numberMappingRoundTrips", "[terminal]")
 
     // A number with no row is simply unrecognised, in either query.
     CHECK(fromDECModeNum(38) == std::nullopt); // DECTEK, not implemented
-    CHECK(fromDECModeNum(44) == std::nullopt); // margin bell, not implemented
     CHECK_FALSE(isValidDECMode(38));
 }
 

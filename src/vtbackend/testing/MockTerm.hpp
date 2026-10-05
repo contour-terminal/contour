@@ -227,6 +227,13 @@ class MockTerm: public Terminal::NullEvents
         ++windowFrameColorChangeCount;
     }
 
+    /// Number of Terminal::marginBell() notifications received -- as opposed to
+    /// settings().marginBellVolume, which only says what volume it would ring at, this counts
+    /// whether the trigger itself actually fired.
+    int marginBellCount = 0;
+
+    void marginBell() override { ++marginBellCount; }
+
     /// Every desktop notification raised, as (title, body), in order. Recorded so a test can assert
     /// that a sequence did NOT raise one -- which is how the OSC 9;4 handler proves it no longer
     /// mistakes a progress sequence for a ConEmu notification.
