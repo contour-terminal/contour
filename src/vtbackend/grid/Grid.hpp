@@ -635,6 +635,15 @@ class Grid
     [[nodiscard]] PageSize pageSize() const noexcept { return _pageSize; }
 
     /// Resizes the main page area of the grid and adapts the scrollback area's width accordingly.
+    ///
+    /// @param newSize The new page size, at least one column wide.
+    /// @param currentCursorPos The cursor's position on the current page.
+    /// @param wrapPending Whether the cursor has a deferred wrap pending. Widening then moves the
+    ///                    cursor one column right, into the room the wrap was waiting for.
+    /// @return The cursor's position on the resized page. Narrowing keeps its column on the page,
+    ///         but a narrowing reflow can move the cursor's text onto another line, which the
+    ///         cursor does not follow yet. Nothing else is clamped: the caller keeps the result on
+    ///         the page.
     [[nodiscard]] CellLocation resize(PageSize newSize, CellLocation currentCursorPos, bool wrapPending);
     // }}}
 
