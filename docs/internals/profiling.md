@@ -137,6 +137,33 @@ The result is a lower bound on felt latency: it ends at the frame's *start*, so 
 frame's own CPU cost, GPU time, the swap and the compositor, and it begins at the PTY parse, so it
 excludes the keyboard leg entirely.
 
+### Measuring key press latency under output load
+
+That keyboard leg is what `bench-headless keypress` measures: how long a key press takes from
+`Terminal::sendCharEvent()` until its bytes are written to the PTY, while an application floods the
+terminal. It is the question to ask of any lock change on either side of input, because a key press
+and the parser compete for the terminal's locks. The application is a real process on a real PTY,
+reading the keys in raw mode.
+
+```bash
+out/clang-tracy/tracy-tools/bin/tracy-capture -o /tmp/keypress.tracy -f &
+TRACY_NO_EXIT=1 out/clang-tracy/src/vtbackend/bench-headless keypress seconds 10
+wait   # tracy-capture writes the file only once the client has gone
+out/clang-tracy/tracy-tools/bin/tracy-csvexport -u -f bench.keyPress /tmp/keypress.tracy
+```
+
+A key press's time includes whatever it writes along with its key, such as a reply the parser queued
+since the last write. A press that falls behind schedule is not made up for, so a stall shows as one
+long press rather than a burst of short ones after it.
+
+It prints its own percentiles, and those are the ones to quote: Tracy's per-sequence zones make every
+parse slower, and with it every lock the parser holds, so take the headline numbers from a build
+without Tracy and the explanation from one with it. There, each key press is the zone
+`bench.keyPress`. Beside it, `pty.readSome` shows how long each read holds the PTY's own lock, which a
+key press's write needs as well, and `parseFragment` how long each parse holds the state lock, which a
+key press would wait for if it took that lock. `bench-headless help` lists the options: the flood can
+be dropped, laced with queries that make the terminal reply, or read in larger or smaller pieces.
+
 ### Two rules worth stating outright
 
 - **Do not record on a busy machine**, and prefer a paired run — the same workload recorded on both
