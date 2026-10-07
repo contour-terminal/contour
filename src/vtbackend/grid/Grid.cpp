@@ -986,8 +986,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
         }
     };
 
-    auto const shrinkColumns =
-        [this](ColumnCount newColumnCount, LineCount /*newLineCount*/, CellLocation cursor) -> CellLocation {
+    auto const shrinkColumns = [this](ColumnCount newColumnCount) {
         if (!_reflowOnResize)
         {
             _pageSize.columns = newColumnCount;
@@ -995,23 +994,16 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                 if (newColumnCount < line.size())
                     line.resize(newColumnCount);
             verifyState();
-            return cursor + std::min(cursor.column, boxed_cast<ColumnOffset>(newColumnCount));
         }
         else
         {
-            // The mirror of the guard in growColumns, but stricter on purpose. Growing can skip
-            // reflow whenever nothing is wrapped, because widening loses nothing. Shrinking can
-            // cut content, so the cheap path is taken only when there is demonstrably none: no
-            // history, and every line in the page empty. That is exactly the startup case, where
-            // the window negotiates its width against a grid that holds nothing, and it avoids
-            // rebuilding a ring sized to the configured scrollback in order to narrow blank lines.
-            // Nothing would be rejoined and nothing would be cut: no line is a continuation, and no
-            // line holds content past the new width, so narrowing trims blank tail only.
-            //
-            // trimBlankRight rather than LineSoA::usedColumns, which is a hint and not an authority:
-            // resizeLineSoA *clamps* it to the new width, so a line whose content was cut still
-            // reports a width that fits. Trusting it here truncated content and failed 13 [grid]
-            // cases. Line::empty() recomputes for the same reason.
+            // The mirror of the guard in growColumns, but stricter on purpose: widening loses
+            // nothing, so growing needs only that nothing is wrapped, while narrowing can cut
+            // content, so it also needs nothing past the new width (see nothingToReflowOrCut).
+            // Startup passes, where the window negotiates its width against a grid that holds
+            // nothing, as does any narrowing whose used lines, scrollback included, are unwrapped
+            // and fit the new width -- and none of them rebuilds a ring sized to the configured
+            // scrollback.
             if (nothingToReflowOrCut(newColumnCount))
             {
                 // As in growColumns: the blank tail is left alone and re-widthed when recycled.
@@ -1020,7 +1012,7 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
                         _lines[i].resize(newColumnCount);
                 _pageSize.columns = newColumnCount;
                 verifyState();
-                return cursor + std::min(cursor.column, boxed_cast<ColumnOffset>(newColumnCount));
+                return;
             }
 
             Lines shrunkLines;
@@ -1130,8 +1122,9 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
             // growColumns has always gone through this primitive; the two paths now agree.
             rotateBuffersLeft(historyLineCount());
 
+            // TODO: follow the cursor's text, which this reflow can move onto another line. The
+            // cursor keeps its line, and the caller only keeps its column on the page.
             verifyState();
-            return cursor; // TODO
         }
     };
     // }}}
@@ -1152,7 +1145,10 @@ CellLocation Grid::resize(PageSize newSize, CellLocation currentCursorPos, bool 
         }
         case Comparison::Less: {
             ZoneScopedN("Grid::shrinkColumns");
-            cursor = shrinkColumns(newSize.columns, newSize.lines, cursor);
+            shrinkColumns(newSize.columns);
+            // A cursor that still fits stays where it is; one past the new width moves onto its last
+            // column.
+            cursor.column = std::min(cursor.column, boxed_cast<ColumnOffset>(newSize.columns) - 1);
             break;
         }
         case Comparison::Equal: break;

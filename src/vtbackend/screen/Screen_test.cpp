@@ -3676,6 +3676,36 @@ TEST_CASE("resize", "[screen]")
     // TODO: what do we want to do when re resize to {0, y}, {x, 0}, {0, 0}?
 }
 
+TEST_CASE("Screen.resize.narrowingStepByStepKeepsTheCursorColumn", "[screen]")
+{
+    // A window drag narrows the page one column per step. Each step used to add the cursor's column
+    // to itself, so within a few steps the cursor ran to the right edge and stayed pinned there.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto& screen = mock.terminal.primaryScreen();
+
+    auto const narrowStepByStep = [&]() {
+        mock.writeToScreen("\r\nABCD");
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(4) });
+        for (auto const columns: std::views::iota(12, 20) | std::views::reverse)
+        {
+            mock.terminal.resizeScreen({ LineCount(5), ColumnCount(columns) });
+            INFO(std::format("narrowed to {} columns", columns));
+            CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(4) });
+        }
+    };
+
+    SECTION("reflow enabled")
+    {
+        narrowStepByStep();
+    }
+
+    SECTION("reflow disabled")
+    {
+        screen.grid().setReflowOnResize(false);
+        narrowStepByStep();
+    }
+}
+
 TEST_CASE("Screen.tcap.string", "[screen, tcap]")
 {
     using namespace vtbackend;

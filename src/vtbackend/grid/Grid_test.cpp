@@ -9,6 +9,7 @@
 #include <libunicode/convert.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <cstddef>
@@ -407,6 +408,41 @@ TEST_CASE("resize_grow_lines_with_history_cursor_no_bottom", "[grid]")
     CHECK(grid.lineText(LineOffset(0)) == "GHI");
     CHECK(grid.lineText(LineOffset(1)) == "JKL");
     CHECK(grid.lineText(LineOffset(2)) == "   ");
+}
+
+TEST_CASE("Grid.resize.shrinkingColumnsKeepsTheCursorOnThePage", "[grid]")
+{
+    auto const narrowed = PageSize { LineCount(3), ColumnCount(8) };
+
+    SECTION("narrowed in place")
+    {
+        // A cursor that still fits must stay where it is, not have its column added to itself, and
+        // one past the new width must move onto the new last column.
+        auto const [cursorColumn, expectedColumn] = GENERATE(table<int, int>({
+            { 4, 4 }, // still fits
+            { 9, 7 }, // past the new width
+        }));
+        // With reflow enabled, "ABCD" leaves nothing to reflow or cut, so both narrow in place.
+        auto const reflow = GENERATE(true, false);
+        CAPTURE(cursorColumn, reflow);
+
+        auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, reflow, LineCount(10));
+        grid.setLineText(LineOffset(1), "ABCD");
+        auto const cursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(cursorColumn) };
+        CHECK(grid.resize(narrowed, cursor, false)
+              == CellLocation { .line = cursor.line, .column = ColumnOffset(expectedColumn) });
+    }
+
+    SECTION("reflowed")
+    {
+        // Content past the new width forces a rebuild, which can move the cursor's text onto
+        // another line. The cursor does not follow it yet, so this checks only that it stays on
+        // the page.
+        auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, true, LineCount(10));
+        grid.setLineText(LineOffset(1), "ABCDEFGHIJ");
+        auto const cursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(9) };
+        CHECK(grid.resize(narrowed, cursor, false).column < boxed_cast<ColumnOffset>(narrowed.columns));
+    }
 }
 
 TEST_CASE("resize_shrink_lines_with_history", "[grid]")
