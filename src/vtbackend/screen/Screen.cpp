@@ -3870,17 +3870,19 @@ namespace impl
         {
             if (seq.parameterCount() <= 1)
             {
+                // Per the VT510 manual, an omitted Ps, 0 and 1 all select off, which is also the
+                // default. xterm's ctlseqs lists 0 as high, which disagrees with DEC's own manual.
                 switch (seq.paramOr(0, Sequence::Parameter { 0 }))
                 {
                     case 0:
-                    case 5:
-                    case 6:
-                    case 7:
-                    case 8: terminal.setMarginBellVolume(BellVolume::High); break;
                     case 1: terminal.setMarginBellVolume(BellVolume::Off); break;
                     case 2:
                     case 3:
                     case 4: terminal.setMarginBellVolume(BellVolume::Low); break;
+                    case 5:
+                    case 6:
+                    case 7:
+                    case 8: terminal.setMarginBellVolume(BellVolume::High); break;
                     default: return ApplyResult::Invalid;
                 }
                 return ApplyResult::Ok;

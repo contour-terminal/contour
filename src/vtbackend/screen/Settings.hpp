@@ -78,7 +78,7 @@ struct Settings
     CursorDisplay cursorDisplay = CursorDisplay::Steady;
     CursorShape cursorShape = CursorShape::Block;
     BellVolume warningBellVolume = BellVolume::High;
-    BellVolume marginBellVolume = BellVolume::High;
+    BellVolume marginBellVolume = BellVolume::Off;
     BlinkStyle blinkStyle = BlinkStyle::Smooth;
     ScreenTransitionStyle screenTransitionStyle = ScreenTransitionStyle::Fade;
     std::chrono::milliseconds screenTransitionDuration { 250 };

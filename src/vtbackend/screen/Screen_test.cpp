@@ -4555,44 +4555,48 @@ TEST_CASE("DECSWBV: the volume is restored by RIS", "[screen]")
 
 TEST_CASE("DECSMBV: sets the margin bell volume", "[screen]")
 {
-    // Ps 0, 5-8 is high, 1 is off, 2-4 is low for the margin bell.
+    // Ps 0/1 is off, 2-4 is low, 5-8 is high for the margin bell (VT510 manual).
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
-
-    mock.writeToScreen("\033[1 u");
-    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Off);
-
-    mock.writeToScreen("\033[3 u");
-    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Low);
 
     mock.writeToScreen("\033[8 u");
     CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
 
-    mock.writeToScreen("\033[0 u");
-    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
-}
-
-TEST_CASE("DECSMBV: default parameter selects high, not off", "[screen]")
-{
-    // Unlike DECSWBV, DECSMBV's omitted Ps maps to 0, which this sequence defines as high -- the
-    // inverse of the off-by-default shape a reader might expect from its sibling sequence.
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+    mock.writeToScreen("\033[3 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Low);
 
     mock.writeToScreen("\033[1 u");
-    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::Off);
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Off);
+
+    mock.writeToScreen("\033[8 u");
+    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::High);
+
+    mock.writeToScreen("\033[0 u");
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Off);
+}
+
+TEST_CASE("DECSMBV: default parameter turns the margin bell off", "[screen]")
+{
+    // An omitted Ps maps to 0, which the VT510 manual defines as off -- the margin bell's default.
+    // (xterm's ctlseqs lists 0 as high here; DEC's own manual is followed instead.)
+    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+
+    mock.writeToScreen("\033[8 u");
+    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::High);
 
     mock.writeToScreen("\033[ u");
-    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Off);
 }
 
-TEST_CASE("DECSMBV: the volume is restored by RIS", "[screen]")
+TEST_CASE("DECSMBV: the margin bell starts off and RIS restores that", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
-
-    mock.writeToScreen("\033[1 u");
     REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::Off);
 
+    mock.writeToScreen("\033[8 u");
+    REQUIRE(mock.terminal.settings().marginBellVolume == BellVolume::High);
+
     mock.writeToScreen("\033c"); // RIS
-    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::High);
+    CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Off);
 }
 
 TEST_CASE("DECSMBV: a Ps outside 0-8 is rejected", "[screen]")
