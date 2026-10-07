@@ -1590,10 +1590,14 @@ void Terminal::sendRawInput(string_view text)
     flushInput();
 }
 
-bool Terminal::hasInput() const noexcept
+bool Terminal::hasInput() const
 {
-    auto const _ = std::scoped_lock { _inputMutex };
-    return !_inputGenerator.peek().empty();
+    return core::locked(_inputMutex, [&] { return !_inputGenerator.peek().empty(); });
+}
+
+std::string Terminal::peekInput() const
+{
+    return core::locked(_inputMutex, [&] { return std::string(_inputGenerator.peek()); });
 }
 
 void Terminal::flushInput()
@@ -3582,24 +3586,17 @@ std::string foldC1ControlsToEightBit(std::string_view sevenBit)
 
 void Terminal::reply(string_view text)
 {
-    // this is invoked from within the terminal thread.
-    // most likely that's not the main thread, which will however write
-    // the actual input events.
-    // The pending queue is shared with the GUI thread's flushes and key input; @see _inputMutex.
-
     // Under S8C1T the terminal transmits its C1 control introducers as single 8-bit bytes (CSI -> 0x9B,
     // DCS -> 0x90, ST -> 0x9C, ...). 8-bit C1 transmission is a VT200+ capability, so it applies only
     // while operating at VT level 2 or above: a terminal that has dropped back to VT100 level -- e.g.
     // after a VT52 round-trip, where setVT52Mode() resets the operating level -- replies in 7-bit even
     // if S8C1T was selected earlier. This is xterm's rule and is exactly what vttest's post-VT52 check
     // expects.
-    {
-        auto const _ = std::scoped_lock { _inputMutex };
-        if (_c1TransmissionMode == ControlTransmissionMode::S8C1T && conformanceLevelOf(_operatingLevel) >= 2)
-            _inputGenerator.generateRaw(foldC1ControlsToEightBit(text));
-        else
-            _inputGenerator.generateRaw(text);
-    }
+    auto const eightBit =
+        _c1TransmissionMode == ControlTransmissionMode::S8C1T && conformanceLevelOf(_operatingLevel) >= 2;
+    auto const folded = eightBit ? foldC1ControlsToEightBit(text) : std::string {};
+    auto const bytes = eightBit ? std::string_view(folded) : text;
+    core::locked(_inputMutex, [&] { _inputGenerator.generateRaw(bytes); });
 
     if (_syncPtyOutput)
         flushInput();

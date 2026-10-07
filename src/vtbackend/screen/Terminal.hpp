@@ -968,10 +968,11 @@ class Terminal
     bool applicationCursorKeys() const noexcept { return _inputGenerator.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return _inputGenerator.applicationKeypad(); }
 
-    bool hasInput() const noexcept;
+    bool hasInput() const;
     void flushInput();
 
-    std::string_view peekInput() const noexcept { return _inputGenerator.peek(); }
+    /// Returns a copy of the input queued but not yet flushed to the PTY.
+    [[nodiscard]] std::string peekInput() const;
     // }}}
 
     /// Writes a given VT-sequence to screen.
@@ -2408,14 +2409,16 @@ class Terminal
     // unaffected by the change of type.
     mutable TracyLockable(std::mutex, _stateMutex);
 
-    // Guards _inputGenerator's pending byte queue. Two threads flush it: the parser thread (a reply that
-    // cannot wait for the GUI -- reportInBandWindowResize(), sendLocatorReport(), CONTOUR_SYNC_PTY_OUTPUT)
-    // and the GUI thread (TerminalSession::flushInput() posted by screenUpdated(), and key/mouse input).
-    // _stateMutex cannot serve here: the parser thread already holds it when it flushes, and it is
-    // non-recursive. Unguarded, two flushes could both write the same bytes and both consume() them,
-    // leaving the consumed offset past the end of the emptied queue -- so the *next* reply lost its first
-    // bytes and its tail reached the application as keystrokes. Held only around queue access and the
-    // non-blocking PTY write, never across anything that can produce a reply (echoLocally()).
+    // Guards _inputGenerator's pending byte queue, and admits one flushInput() at a time from taking the
+    // queue's head through consuming what was written, so that no two flushes send the same bytes. The
+    // parser thread queues every reply and flushes some on the spot (DSR 996, the GIP replies, DECLRP, the
+    // in-band resize report, CONTOUR_SYNC_PTY_OUTPUT); the GUI thread queues and flushes key, mouse, focus
+    // and paste input. _stateMutex cannot serve here: the parser thread already holds it when it replies,
+    // and it is non-recursive.
+    //
+    // Held across the PTY write, which UnixPty::write() turns blocking once a write comes up short, so a
+    // reply queued meanwhile waits for that write -- as the parser thread's next read already does, on the
+    // PTY's own lock. Never held across echoLocally(), which parses and can therefore reply.
     mutable std::mutex _inputMutex;
 
     // terminal clock

@@ -3216,10 +3216,13 @@ TEST_CASE("Terminal.flushInput.concurrentFlushesDeliverEveryReplyExactlyOnce", "
     // offset past the emptied queue -- the next reply then lost its first bytes, and Neovim received the
     // tail of a DA1 reply as keystrokes. Run under `ctest --preset=clang-tsan` for the data race itself;
     // elsewhere this checks the observable contract: every reply arrives once, whole, in order.
-    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(10) }, LineCount(10) };
+    auto constexpr TermSize = PageSize { LineCount(4), ColumnCount(10) };
+    auto constexpr Queries = "\033[5n\033[?2048h\033[?2048l"sv;
+    auto constexpr Iterations = 2000;
+
+    auto mc = MockTerm { TermSize, LineCount(10) };
     auto& terminal = mc.terminal;
 
-    auto constexpr Iterations = 2000;
     auto stop = std::atomic<bool> { false };
     auto gui = std::thread { [&]() {
         while (!stop.load(std::memory_order_acquire))
@@ -3230,36 +3233,21 @@ TEST_CASE("Terminal.flushInput.concurrentFlushesDeliverEveryReplyExactlyOnce", "
     } };
 
     for ([[maybe_unused]] auto const i: std::views::iota(0, Iterations))
-        mc.writeToScreen("\033[5n\033[?2048h\033[?2048l");
+        mc.writeToScreen(Queries);
 
     stop.store(true, std::memory_order_release);
     gui.join();
     terminal.flushInput();
 
-    // Every byte on the wire must belong to a complete reply: DSR "CSI 0 n" or the in-band resize
-    // report "CSI 48 ; ... t". A duplicated flush shows up as an extra reply, a truncated one as
-    // leftover bytes.
-    auto const& wire = mc.replyData();
-    auto dsrCount = 0;
-    auto resizeCount = 0;
-    auto pos = size_t { 0 };
-    while (pos < wire.size())
-    {
-        if (wire.compare(pos, 4, "\033[0n") == 0)
-        {
-            ++dsrCount;
-            pos += 4;
-        }
-        else if (wire.compare(pos, 5, "\033[48;") == 0 && wire.find('t', pos) != std::string::npos)
-        {
-            ++resizeCount;
-            pos = wire.find('t', pos) + 1;
-        }
-        else
-        {
-            FAIL("unexpected bytes at offset " << pos << ": " << core::escape(wire.substr(pos, 40)));
-        }
-    }
-    CHECK(dsrCount == Iterations);
-    CHECK(resizeCount == Iterations);
+    // The queue is first in, first out, so however the flushes interleave, the wire must carry exactly
+    // what a single thread sends: each iteration's DSR reply and in-band resize report, whole and in
+    // order. A duplicated flush shows up as extra bytes, a truncated reply as missing ones.
+    auto reference = MockTerm { TermSize, LineCount(10) };
+    reference.writeToScreen(Queries);
+    reference.terminal.flushInput();
+    auto expected = std::string {};
+    for ([[maybe_unused]] auto const i: std::views::iota(0, Iterations))
+        expected += reference.replyData();
+
+    CHECK(core::escape(mc.replyData()) == core::escape(expected));
 }

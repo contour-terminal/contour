@@ -328,11 +328,11 @@ TEST_CASE("DECID identifies the terminal like DA1", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
 
     mock.writeToScreen("\033Z"); // DECID
-    auto const viaDecid = std::string { mock.terminal.peekInput() };
+    auto const viaDecid = mock.terminal.peekInput();
     mock.discardPendingReplies();
 
     mock.writeToScreen("\033[c"); // DA1
-    auto const viaDa1 = std::string { mock.terminal.peekInput() };
+    auto const viaDa1 = mock.terminal.peekInput();
 
     CHECK(viaDecid.starts_with("\033[?"));
     CHECK(viaDecid.ends_with("c"));

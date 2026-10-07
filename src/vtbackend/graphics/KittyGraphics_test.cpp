@@ -320,7 +320,7 @@ TEST_CASE("ITerm2.capabilities_are_reported", "[iterm2]")
     auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
     mock.writeToScreen("\033]1337;Capabilities\a"sv);
 
-    auto const reply = std::string(mock.terminal.peekInput());
+    auto const reply = mock.terminal.peekInput();
     REQUIRE(reply.starts_with("\033]1337;Capabilities="));
 
     // Every advertised capability must be one Contour actually has -- an application that believes

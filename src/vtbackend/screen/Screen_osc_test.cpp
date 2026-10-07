@@ -346,7 +346,7 @@ TEST_CASE("XTGETTCAP")
     auto const queryValue = [&](std::string_view name) -> std::optional<std::string> {
         mock.resetReplyData();
         mock.writeToScreen(std::format("\033P+q{}\033\\", core::toHexString(name)));
-        auto const reply = std::string(mock.terminal.peekInput());
+        auto const reply = mock.terminal.peekInput();
         INFO(std::format("Reply: {}", core::escape(reply)));
         if (!reply.starts_with("\033P1+r"))
             return std::nullopt;
@@ -379,7 +379,7 @@ TEST_CASE("XTGETTCAP")
         mock.resetReplyData();
         mock.writeToScreen(std::format("\033P+q{:02X}{:02X}\033\\", 'x', 'x'));
         // Note how 'xx' is not in the return reply, meaning "not found"
-        CHECK(std::string(mock.terminal.peekInput()) == "\033P0+r\033\\");
+        CHECK(mock.terminal.peekInput() == "\033P0+r\033\\");
     }
 }
 

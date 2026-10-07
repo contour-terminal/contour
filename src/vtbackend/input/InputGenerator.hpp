@@ -734,11 +734,13 @@ class InputGenerator
                  size_t(_pendingSequence.size() - size_t(_consumedBytes)) };
     }
 
+    /// Marks the first @p n bytes of peek() as sent, dropping them from the queue.
+    ///
+    /// @param n The number of bytes sent; at most peek().size(). More is clamped to it rather than
+    ///          trusted: an offset past the end of the queue would cut the head off the next sequence
+    ///          appended, or make peek()'s length wrap around.
     void consume(int n)
     {
-        // Never let the offset run past the queue. An over-consume used to leave _consumedBytes beyond an
-        // emptied queue, so the next sequence appended was sent with its first bytes cut off -- or, if it
-        // was shorter than the offset, peek() computed a wrapped-around length.
         _consumedBytes = std::min(_consumedBytes + n, static_cast<int>(_pendingSequence.size()));
         if (std::cmp_equal(_consumedBytes, _pendingSequence.size()))
         {

@@ -205,7 +205,7 @@ TEST_CASE("KittyClipboard.the_targets_probe_lists_the_available_types", "[kittyc
 
     mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", core::base64::encode("."sv)));
 
-    auto const reply = std::string(mock.terminal.peekInput());
+    auto const reply = mock.terminal.peekInput();
     CHECK(!reply.contains("status=ENOSYS"));
     // The answer names the type rather than carrying the data.
     CHECK(reply.contains(std::string(core::base64::encode("text/plain"sv))));
@@ -223,7 +223,7 @@ TEST_CASE("KittyClipboard.a_large_read_is_chunked", "[kittyclipboard]")
 
     mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", core::base64::encode("text/plain"sv)));
 
-    auto const reply = std::string(mock.terminal.peekInput());
+    auto const reply = mock.terminal.peekInput();
     auto dataPackets = size_t { 0 };
     for (auto pos = reply.find("status=DATA"); pos != std::string::npos;
          pos = reply.find("status=DATA", pos + 1))
@@ -264,7 +264,7 @@ TEST_CASE("KittyClipboard.a_read_is_answered_in_the_5522_protocol", "[kittyclipb
 
     mock.writeToScreen(std::format("\033]5522;type=read;{}\033\\", core::base64::encode("text/plain"sv)));
 
-    auto const reply = std::string(mock.terminal.peekInput());
+    auto const reply = mock.terminal.peekInput();
     CHECK(!reply.contains("\033]52;")); // never the OSC 52 shape
     CHECK(reply
           == std::format("\033]5522;type=read:status=OK\033\\"
