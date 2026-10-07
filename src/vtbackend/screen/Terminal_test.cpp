@@ -27,10 +27,14 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <future>
+#include <latch>
 #include <mutex>
 #include <ranges>
+#include <semaphore>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 using namespace std;
@@ -3250,4 +3254,93 @@ TEST_CASE("Terminal.flushInput.concurrentFlushesDeliverEveryReplyExactlyOnce", "
         expected += reference.replyData();
 
     CHECK(core::escape(mc.replyData()) == core::escape(expected));
+}
+
+namespace
+{
+
+/// A PTY whose first write() parks until the test releases it.
+///
+/// That holds one thread inside Terminal::flushInput() with the bytes it is sending already taken from
+/// the queue but not yet consumed -- the window UnixPty::write() opens for real whenever a short write
+/// falls back to a blocking one.
+class GatedPty final: public vtpty::MockPty
+{
+  public:
+    using vtpty::MockPty::MockPty;
+
+    int write(std::string_view data) override
+    {
+        if (!_gatePassed.exchange(true))
+        {
+            _entered.release();
+            _released.wait();
+        }
+        auto const _ = std::scoped_lock { _mutex };
+        return MockPty::write(data);
+    }
+
+    /// Waits for a thread to park inside the first write().
+    /// @param timeout How long to wait.
+    /// @return Whether one did within @p timeout.
+    [[nodiscard]] bool awaitFirstWrite(chrono::milliseconds timeout)
+    {
+        return _entered.try_acquire_for(timeout);
+    }
+
+    /// Lets the parked write() proceed.
+    void release() { _released.count_down(); }
+
+  private:
+    std::atomic<bool> _gatePassed = false;
+    std::binary_semaphore _entered { 0 };
+    std::latch _released { 1 };
+    std::mutex _mutex;
+};
+
+/// Presses the Up arrow key on one thread, the way the GUI thread does, and while its PTY write is parked,
+/// parses @p vt on another, the way the parser thread does. Then lets the write finish.
+///
+/// The parse is given a moment to run into the parked write rather than awaited: a terminal that
+/// serializes flushes keeps a reply's flush waiting on the key press's until the write is let go.
+void parseDuringKeyPressWrite(MockTerm<GatedPty>& mock, std::string_view vt)
+{
+    auto keyPress = std::async(std::launch::async, [&] {
+        mock.terminal.sendKeyEvent(vtbackend::Key::UpArrow,
+                                   vtbackend::KeyboardModifiers {},
+                                   vtbackend::KeyboardEventType::Press,
+                                   chrono::steady_clock::now());
+    });
+    if (!mock.mockPty().awaitFirstWrite(5s))
+    {
+        mock.mockPty().release();
+        FAIL("The key press never reached the PTY.");
+    }
+
+    auto parse = std::async(std::launch::async, [&] { mock.terminal.writeToScreen(vt); });
+    std::ignore = parse.wait_for(50ms);
+
+    mock.mockPty().release();
+    keyPress.get();
+    parse.get();
+}
+
+} // namespace
+
+TEST_CASE("Terminal.flushInput.overlappingFlushNeitherResendsNorOverconsumes", "[terminal][input][threading]")
+{
+    // The crash this guards against: a key press is flushed on the GUI thread, and DSR 996 replies and
+    // flushes on the parser thread. With the parser thread's flush inside the GUI thread's -- after the
+    // GUI thread took the key's bytes, before it consumed them -- the key went out twice and was consumed
+    // twice, leaving the consumed offset past the end of the emptied queue. peek() derives its length as
+    // size minus that offset, so the next, shorter key press made it wrap, and flushInput() threw
+    // std::length_error out of a Qt event handler, aborting the terminal.
+    //
+    // Unlike the test above, this places the overlap deterministically rather than hoping for it.
+    auto mock = MockTerm<GatedPty> { PageSize { LineCount(3), ColumnCount(10) } };
+    parseDuringKeyPressWrite(mock, "\033[?996n");
+
+    CHECK_NOTHROW(mock.sendCharEvent(U'x'));
+    CHECK_FALSE(mock.terminal.hasInput());
+    CHECK(mock.mockPty().stdinBuffer() == "\033[A\033[?997;1nx");
 }
