@@ -155,6 +155,19 @@ if(VTPTY_TESTING)
     target_link_libraries(vtpty_test vtpty core::testing Catch2::Catch2)
     add_test(NAME vtpty_test COMMAND $<TARGET_FILE:vtpty_test>)
 
+    if(CONTOUR_WITH_SYSTEMD)
+        # Needs a systemd user manager; SKIPs (77) without one. CI runs it under a lingering user
+        # session with CONTOUR_REQUIRE_SYSTEMD_TESTS=1, so a skip there is a failure.
+        add_executable(session_oom_driver test/session_oom_driver.cpp)
+        target_link_libraries(session_oom_driver vtpty)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        add_test(NAME vtpty_session_oom_isolation
+                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/session-oom-isolation.py
+                         $<TARGET_FILE:session_oom_driver>)
+        set_tests_properties(vtpty_session_oom_isolation PROPERTIES
+                             LABELS "systemd" SKIP_RETURN_CODE 77 TIMEOUT 400)
+    endif()
+
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(vtpty_test PRIVATE -Wno-c2y-extensions)

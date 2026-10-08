@@ -1294,6 +1294,21 @@ jobs:
               exit 1
             fi
           done
+      - name: "session OOM isolation under a real systemd user manager"
+        # The suite above SKIPs this test -- exit 77, which ctest counts as passing -- because a
+        # runner has no systemd user manager until a lingering user session starts one. Start one,
+        # and demand that the test runs: a skip here is a failure.
+        timeout-minutes: 10
+        run: |
+          sudo loginctl enable-linger "$USER"
+          uid=$(id -u)
+          export XDG_RUNTIME_DIR="/run/user/$uid"
+          for _ in $(seq 1 30); do
+            [ -S "$XDG_RUNTIME_DIR/bus" ] && break
+            sleep 1
+          done
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          CONTOUR_REQUIRE_SYSTEMD_TESTS=1 ctest --test-dir out/gcc-debug -L systemd --output-on-failure --no-tests=error
       - name: "install weston (headless compositor for display-gated GUI tests)"
         # Non-gating until proven on a GitHub runner: the local run is green (headless weston,
         # 32 cases), but this step has not yet been validated on ubuntu-24.04 CI, so it must not
