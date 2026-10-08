@@ -950,4 +950,30 @@ TEST_CASE("KittyGraphics.animation.a_frame_advance_keeps_the_cursor_out_of_it", 
     mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
     CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).hyperlink() == HyperlinkId(0));
 }
+
+TEST_CASE("KittyGraphics.animation.each_placement_keeps_its_geometry_across_a_frame_advance", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(10) } };
+    // The same image placed twice at different sizes: a 2x1 cell placement and a 6x2 one below it.
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1,c=2,r=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033[4;1H\033_Ga=p,i=7,c=6,r=2\033\\"sv);
+    mock.writeToScreen("\033_Ga=f,i=7,r=2,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv);
+
+    auto const spanAt = [&](int line) -> std::pair<int, int> {
+        auto const fragment =
+            mock.terminal.primaryScreen().at(LineOffset(line), ColumnOffset(0)).imageFragment();
+        if (!fragment)
+            return {};
+        auto const span = fragment->rasterizedImage().cellSpan();
+        return { unbox(span.lines), unbox(span.columns) };
+    };
+    REQUIRE(spanAt(0) == std::pair { 1, 2 });
+    REQUIRE(spanAt(3) == std::pair { 2, 6 });
+
+    // Building the new frame's raster once and sharing it would give the second placement the
+    // first one's span, so it would be drawn at the wrong size.
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(spanAt(0) == std::pair { 1, 2 });
+    CHECK(spanAt(3) == std::pair { 2, 6 });
+}
 // }}}

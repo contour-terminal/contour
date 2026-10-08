@@ -49,6 +49,7 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -5800,7 +5801,11 @@ void Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
     if (previous == next || !previous || !next)
         return;
 
-    auto replacement = std::shared_ptr<RasterizedImage> {};
+    // One replacement per placement, not per image: the same image placed twice at different sizes is
+    // two rasters, and sharing one would hand the second placement the first one's geometry. Keyed on
+    // owning pointers so that a raster freed mid-walk cannot have its address reused by a replacement.
+    auto replacements =
+        std::unordered_map<std::shared_ptr<RasterizedImage const>, std::shared_ptr<RasterizedImage>> {};
     for (auto const line: std::views::iota(0, *pageSize().lines))
     {
         for (auto const column: std::views::iota(0, *pageSize().columns))
@@ -5814,6 +5819,7 @@ void Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
             // alignment and gap colour the placement was made with -- rather than whatever the cursor
             // happens to carry now, which would repaint the letterbox in the current SGR background
             // and stamp the current hyperlink across every covered cell.
+            auto& replacement = replacements[fragment->rasterizedImage().shared_from_this()];
             if (!replacement)
             {
                 auto const& previousRaster = fragment->rasterizedImage();
