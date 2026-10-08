@@ -6,6 +6,8 @@
 #include <vtparser/ParserEvents.hpp>
 
 #include <vtpty/MockViewPty.hpp>
+#include <vtpty/Process.hpp>
+#include <vtpty/Pty.hpp>
 
 #include <crispy/BufferObject.hpp>
 
@@ -14,16 +16,29 @@
 #include <core/cli/App.hpp>
 #include <core/cli/CLI.hpp>
 
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
+#include <cmath>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
+#include <numeric>
 #include <optional>
 #include <random>
+#include <span>
+#include <system_error>
 #include <thread>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #include <libtermbench/termbench.h>
+#include <tracy/Tracy.hpp>
 
 using namespace std;
 using namespace std::string_literals;
@@ -172,6 +187,312 @@ static int benchSixelStream(std::string const& sixelData,
     return EXIT_SUCCESS;
 }
 
+namespace
+{
+
+/// What the application on the other end of the PTY does while key presses are measured.
+enum class ApplicationLoad : uint8_t
+{
+    Idle,  ///< Reads its input and nothing else, like an editor waiting for keys.
+    Flood, ///< Also floods the terminal with log-like output, like `tail -f` or a build.
+};
+
+/// An application a load stands for: the script that plays it, and how the report names it.
+struct Application
+{
+    std::string_view script {}; ///< Run by `/bin/sh -c`, with the log file as `$0`.
+    std::string_view description {};
+};
+
+/// @return The application that puts @p load on the terminal.
+///
+/// Either one puts its PTY into raw mode, so that keys reach it unbuffered and unechoed, and reads them
+/// as an editor would. Flooding, it reads them in the background while writing the log over and over,
+/// as fast as the terminal takes it. A non-interactive shell points a background job's stdin at
+/// /dev/null before applying the job's own redirections -- so `<&0` would not do, as dash shows -- hence
+/// the terminal is kept on descriptor 3 first. Each `cat` writes several copies, so that starting the
+/// next one rarely pauses the flood.
+constexpr Application applicationFor(ApplicationLoad load)
+{
+    switch (load)
+    {
+        case ApplicationLoad::Idle:
+            return { .script = "stty raw -echo; exec cat >/dev/null", .description = "idle" };
+        case ApplicationLoad::Flood:
+            return { .script =
+                         "stty raw -echo; exec 3<&0; cat <&3 >/dev/null & "
+                         "while :; do cat \"$0\" \"$0\" \"$0\" \"$0\" \"$0\" \"$0\" \"$0\" \"$0\"; done",
+                     .description = "floods log output" };
+    }
+    std::unreachable();
+}
+
+/// How the key press benchmark runs. Its defaults are the command line's.
+struct KeyPressBenchOptions
+{
+    ApplicationLoad load = ApplicationLoad::Flood;
+    std::chrono::seconds duration { 10 };
+    unsigned keyPressesPerSecond = 1000;
+    unsigned ptyReadSize = 16384; ///< What contour reads per PTY read by default.
+    unsigned queryEvery = 0;      ///< Lines between DA1 queries in the flood; 0 sends none.
+};
+
+/// The application's process, counting the bytes read from its PTY: the output the terminal parsed.
+class ByteCountingProcess final: public vtpty::Process
+{
+  public:
+    using vtpty::Process::Process;
+
+    /// @return How many bytes have been read so far.
+    [[nodiscard]] uint64_t bytesRead() const noexcept { return _bytesRead.load(std::memory_order_relaxed); }
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t size) override
+    {
+        auto result = Process::read(storage, timeout, size);
+        if (result)
+            _bytesRead.fetch_add(result->data.size(), std::memory_order_relaxed);
+        return result;
+    }
+
+  private:
+    std::atomic<uint64_t> _bytesRead = 0;
+};
+
+/// Creates log-like output: a dimmed timestamp, a coloured level and a message on every line.
+/// @param bytes      How much to create, at least.
+/// @param queryEvery Lines between DA1 queries, each of which makes the terminal reply; 0 adds none.
+/// @return The text, ending its lines in CRLF as an application on a raw-mode PTY has to.
+std::string createLogText(size_t bytes, unsigned queryEvery)
+{
+    static constexpr auto Levels = std::array {
+        "\033[32mINFO \033[m"sv, "\033[33mWARN \033[m"sv, "\033[1;31mERROR\033[m"sv, "\033[36mDEBUG\033[m"sv
+    };
+
+    auto text = std::string {};
+    auto line = 0u;
+    while (text.size() < bytes)
+    {
+        if (queryEvery != 0 && line % queryEvery == 0)
+            text += "\033[c";
+        text += std::format("\033[2m12:{:02}:{:02}.{:03}\033[m {} vtbackend: request {} served in {} us, "
+                            "queue depth {}, cache hit ratio 0.{:03}\r\n",
+                            (line / 60) % 60,
+                            line % 60,
+                            line % 1000,
+                            Levels.at(line % Levels.size()),
+                            line,
+                            (line * 7919) % 5000,
+                            line % 17,
+                            (line * 31) % 1000);
+        ++line;
+    }
+    return text;
+}
+
+/// @return The @p p quantile of @p sorted (ascending, not empty), by the nearest-rank method.
+std::chrono::nanoseconds quantile(std::span<std::chrono::nanoseconds const> sorted, double p)
+{
+    auto const rank = static_cast<size_t>(std::ceil(p * static_cast<double>(sorted.size())));
+    return sorted[std::clamp<size_t>(rank, 1, sorted.size()) - 1];
+}
+
+/// What a key press run measured.
+struct KeyPressResult
+{
+    std::vector<std::chrono::nanoseconds> latencies {}; ///< One per key press, in the order pressed.
+    std::chrono::duration<double> elapsed {};
+    uint64_t bytesParsed = 0;
+};
+
+/// Presses a key at a steady rate, timing each press from sendCharEvent() until its bytes reached the PTY.
+///
+/// The time is the press's own, as the GUI thread spends it, including whatever the press writes along
+/// with its key -- a reply the parser queued since the last write, say. A press that falls behind is not
+/// made up for: the schedule resumes from it, so that a stall shows as one long press rather than as a
+/// burst of short ones after it, and the load stays what was asked for.
+/// @param terminal The terminal to press keys into, with its read loop running on another thread.
+/// @param options  How many keys to press, and how fast.
+/// @return One latency per key press.
+std::vector<std::chrono::nanoseconds> pressKeys(vtbackend::Terminal& terminal,
+                                                KeyPressBenchOptions const& options)
+{
+    using std::chrono::steady_clock;
+
+    auto const interval = std::chrono::duration_cast<steady_clock::duration>(std::chrono::seconds(1))
+                          / options.keyPressesPerSecond;
+    auto const keyIdentity = vtbackend::KeyIdentity { .unshiftedKey = U'a', .nativeVirtualKey = 'a' };
+    auto latencies = std::vector<std::chrono::nanoseconds> {};
+    latencies.reserve(static_cast<size_t>(options.duration.count()) * options.keyPressesPerSecond);
+
+    auto const end = steady_clock::now() + options.duration;
+    auto next = steady_clock::now() + interval;
+    while (next < end)
+    {
+        std::this_thread::sleep_until(next);
+        auto const pressed = steady_clock::now();
+        {
+            ZoneScopedN("bench.keyPress");
+            std::ignore = terminal.sendCharEvent(U'a',
+                                                 keyIdentity,
+                                                 vtbackend::KeyboardModifiers {},
+                                                 vtbackend::KeyboardEventType::Press,
+                                                 pressed);
+        }
+        auto const written = steady_clock::now();
+        latencies.push_back(written - pressed);
+        next = std::max(next + interval, written);
+    }
+    return latencies;
+}
+
+/// Prints the latency distribution of a key press run, and the output parsed meanwhile.
+/// @param options     How the run was configured.
+/// @param application What the application did.
+/// @param result      What the run measured; its latencies are sorted in place.
+void printKeyPressReport(KeyPressBenchOptions const& options, Application application, KeyPressResult result)
+{
+    auto& latencies = result.latencies;
+    std::ranges::sort(latencies);
+    auto const micros = [](std::chrono::nanoseconds t) {
+        return std::chrono::duration<double, std::micro>(t).count();
+    };
+    auto const total = std::accumulate(latencies.begin(), latencies.end(), std::chrono::nanoseconds {});
+    auto const mebibytes = static_cast<double>(result.bytesParsed) / (1024.0 * 1024.0);
+
+    cout << std::format(
+        "Key press latency\n"
+        "-----------------\n"
+        "  application   : {}\n"
+        "  key presses   : {} at {} Hz over {:.1f} s\n"
+        "  PTY read size : {} bytes\n"
+        "  output parsed : {:.1f} MiB ({:.1f} MiB/s)\n"
+        "  latency (us)  : mean {:.1f}, p50 {:.1f}, p90 {:.1f}, p99 {:.1f}, p99.9 {:.1f}, "
+        "max {:.1f}\n",
+        application.description,
+        latencies.size(),
+        options.keyPressesPerSecond,
+        result.elapsed.count(),
+        core::nextPowerOfTwo(static_cast<size_t>(options.ptyReadSize)), // as Terminal rounds it
+        mebibytes,
+        mebibytes / result.elapsed.count(),
+        micros(total / latencies.size()),
+        micros(quantile(latencies, 0.50)),
+        micros(quantile(latencies, 0.90)),
+        micros(quantile(latencies, 0.99)),
+        micros(quantile(latencies, 0.999)),
+        micros(latencies.back()));
+}
+
+} // namespace
+
+/// Measures how long a key press takes to reach the PTY -- the GUI thread's part of typing -- while an
+/// application on a real PTY reads the keys and, unless idle, floods the terminal with output.
+///
+/// The terminal is driven the way contour drives it: one thread runs the PTY read loop, parsing each
+/// read under the terminal's state lock, while another presses keys. What a key press waits for on its
+/// way to the PTY -- a lock the parser holds, the write itself -- is what this measures. With Tracy
+/// built in, each key press is the zone `bench.keyPress`.
+///
+/// @param options What the application does, and how the keys are pressed.
+/// @param env     The environment the terminal reads.
+/// @return EXIT_SUCCESS, or EXIT_FAILURE when the application cannot be started or does not last.
+static int benchKeyPressLatency(KeyPressBenchOptions const& options, core::Environment const& env)
+{
+#ifdef _WIN32
+    (void) options;
+    (void) env;
+    cerr << "The keypress benchmark runs its application in a POSIX shell, which Windows lacks.\n";
+    return EXIT_FAILURE;
+#else
+    auto constexpr LogSize = size_t { 4 } * 1024 * 1024; // what the application writes over and over
+    auto const pageSize = vtbackend::PageSize { vtbackend::LineCount(40), vtbackend::ColumnCount(120) };
+    auto const application = applicationFor(options.load);
+
+    auto const logFile = std::filesystem::temp_directory_path()
+                         / std::format("contour-bench-keypress-{}.log", std::random_device {}());
+    auto removeLogFile = core::Finally { [&]() {
+        auto ignored = std::error_code {};
+        std::filesystem::remove(logFile, ignored);
+    } };
+    if (!(std::ofstream(logFile, std::ios::binary) << createLogText(LogSize, options.queryEvery)))
+    {
+        cerr << std::format("Cannot write the application's output to '{}'.\n", logFile.string());
+        return EXIT_FAILURE;
+    }
+
+    auto ownedProcess = std::make_unique<ByteCountingProcess>(
+        vtpty::Process::ExecInfo { .program = "/bin/sh",
+                                   .arguments = { "-c", std::string(application.script), logFile.string() },
+                                   .workingDirectory = std::filesystem::temp_directory_path(),
+                                   .env = {} },
+        vtpty::createPty(pageSize, std::nullopt),
+        /*escapeSandbox=*/false);
+    auto& process = *ownedProcess;
+
+    auto settings = vtbackend::Settings {};
+    settings.pageSize = pageSize;
+    settings.ptyReadBufferSize = options.ptyReadSize;
+    auto events = vtbackend::Terminal::NullEvents {};
+    auto terminal = vtbackend::Terminal {
+        events, env, std::move(ownedProcess), settings, std::chrono::steady_clock::now()
+    };
+
+    if (auto const started = terminal.device().start(); !started)
+    {
+        cerr << std::format("Cannot start the application: {}\n", started.error().detail);
+        return EXIT_FAILURE;
+    }
+
+    // Runs until the PTY reports the application gone, as contour's own read loop does.
+    auto parser = std::thread { [&]() {
+        while (terminal.processInputOnce())
+        {
+        }
+    } };
+
+    // Hang up, then keep reading until the application has gone: a process cannot finish exiting while
+    // output it wrote to the terminal is still waiting to be read, so stopping the reader first would
+    // leave it, and ~Process() waiting on it, stuck for good.
+    auto stopApplication = core::Finally { [&]() {
+        process.terminate(vtpty::Process::TerminationHint::Hangup);
+        parser.join();
+    } };
+
+    // Let the application settle into its steady state before measuring.
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    auto const bytesBefore = process.bytesRead();
+    auto const start = std::chrono::steady_clock::now();
+    auto latencies = pressKeys(terminal, options);
+    auto result = KeyPressResult { .latencies = std::move(latencies),
+                                   .elapsed = std::chrono::steady_clock::now() - start,
+                                   .bytesParsed = process.bytesRead() - bytesBefore };
+
+    // A key press that could not be written stays queued, and one written to an application that has
+    // gone is dropped; either would leave fast latencies standing for keys nobody read. Replies may
+    // still be queued too, so flush once more before asking.
+    terminal.flushInput();
+    auto const stillPending = terminal.hasInput();
+    auto const applicationLasted = process.alive();
+
+    stopApplication.run();
+
+    if (!applicationLasted)
+    {
+        cerr << "The application exited during the measurement, so its key presses went nowhere.\n";
+        return EXIT_FAILURE;
+    }
+
+    printKeyPressReport(options, application, std::move(result));
+    if (stillPending)
+        cout << "  note          : input was still pending when the measurement ended\n";
+
+    return EXIT_SUCCESS;
+#endif
+}
+
 namespace CLI = core::cli;
 
 namespace
@@ -194,6 +515,7 @@ class ContourHeadlessBench: public core::cli::App
         link("bench-headless.grid", bind(&ContourHeadlessBench::benchGrid, this));
         link("bench-headless.sixel", bind(&ContourHeadlessBench::benchSixel, this));
         link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY));
+        link("bench-headless.keypress", bind(&ContourHeadlessBench::benchKeyPress, this));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
 
         if (auto const logFilterString = env.get("LOG"))
@@ -205,6 +527,8 @@ class ContourHeadlessBench: public core::cli::App
 
     [[nodiscard]] core::cli::Command parameterDefinition() const override
     {
+        auto constexpr KeyPressDefaults = KeyPressBenchOptions {};
+
         auto const perfOptions = CLI::OptionList {
             CLI::Option { .name = "size",
                           .v = CLI::Value { 32u },
@@ -245,6 +569,36 @@ class ContourHeadlessBench: public core::cli::App
                     CLI::Command { .name = "pty",
                                    .helpText = "Performs performance tests utilizing the underlying "
                                                "operating system's PTY only." },
+                    CLI::Command {
+                        .name = "keypress",
+                        .helpText = "Measures how long a key press takes to reach the PTY while an "
+                                    "application on a real PTY reads the keys and floods the terminal with "
+                                    "output.",
+                        .options =
+                            CLI::OptionList {
+                                CLI::Option { .name = "seconds",
+                                              .v = CLI::Value { static_cast<unsigned>(
+                                                  KeyPressDefaults.duration.count()) },
+                                              .helpText = "How long to press keys for." },
+                                CLI::Option { .name = "rate",
+                                              .v = CLI::Value { KeyPressDefaults.keyPressesPerSecond },
+                                              .helpText = "Key presses per second." },
+                                CLI::Option { .name = "read-size",
+                                              .v = CLI::Value { KeyPressDefaults.ptyReadSize },
+                                              .helpText = "Bytes per PTY read, which is what the parser "
+                                                          "takes per lock; the default is contour's.",
+                                              .placeholder = "BYTES" },
+                                CLI::Option { .name = "query-every",
+                                              .v = CLI::Value { KeyPressDefaults.queryEvery },
+                                              .helpText = "Lines between DA1 queries in the flood, each of "
+                                                          "which makes the terminal reply; 0 sends none.",
+                                              .placeholder = "LINES" },
+                                CLI::Option {
+                                    .name = "idle",
+                                    .v = CLI::Value { KeyPressDefaults.load == ApplicationLoad::Idle },
+                                    .helpText = "The application only reads the keys and writes "
+                                                "no output." },
+                            } },
                     CLI::Command {
                         .name = "sixel",
                         .helpText = "Measures sixel decode throughput: VT parse, sixel decode and "
@@ -295,6 +649,27 @@ class ContourHeadlessBench: public core::cli::App
         opts.sgr = parameters().boolean(prefix + "sgr");
         opts.binary = parameters().boolean(prefix + "binary");
         return opts;
+    }
+
+    int benchKeyPress()
+    {
+        auto const options = KeyPressBenchOptions {
+            .load = parameters().boolean("bench-headless.keypress.idle") ? ApplicationLoad::Idle
+                                                                         : ApplicationLoad::Flood,
+            .duration = std::chrono::seconds(parameters().uint("bench-headless.keypress.seconds")),
+            .keyPressesPerSecond = parameters().uint("bench-headless.keypress.rate"),
+            .ptyReadSize = parameters().uint("bench-headless.keypress.read-size"),
+            .queryEvery = parameters().uint("bench-headless.keypress.query-every"),
+        };
+        // Bounded so that the interval between presses stays well above a key press's own cost, and a
+        // whole run's samples fit in memory (at most 60 million, 480 MB).
+        if (options.duration.count() < 1 || options.duration.count() > 600 || options.keyPressesPerSecond < 1
+            || options.keyPressesPerSecond > 100'000 || options.ptyReadSize < 1)
+        {
+            cerr << "seconds must be within 1..600, rate within 1..100000, and read-size at least 1.\n";
+            return EXIT_FAILURE;
+        }
+        return benchKeyPressLatency(options, processEnvironment());
     }
 
     int benchSixel()

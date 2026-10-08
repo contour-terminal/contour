@@ -109,6 +109,7 @@ if(VTPTY_TESTING)
         test_main.cpp
         ChannelPty_test.cpp
         ImageSize_test.cpp
+        Process_test.cpp
         SandboxInfo_test.cpp
         SpawnLadder_test.cpp
     )

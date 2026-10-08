@@ -88,16 +88,19 @@ class [[nodiscard]] Process: public Pty
     // Tests if the current process is running inside flatpak.
     static bool isFlatpak();
 
-    [[nodiscard]] bool alive() const noexcept
-    {
-        auto const status = checkStatus();
-        return !status.has_value()
-               || !(std::holds_alternative<NormalExit>(*status)
-                    || std::holds_alternative<SignalExit>(*status));
-    }
+    // A Process has a child only once start() has spawned one. Before that, and for good when start()
+    // failed before spawning, there is nothing to ask about, wait for or signal, and the calls below
+    // say so rather than reaching for whatever process an unset id would name.
 
+    /// @return Whether the child is running: false before start() spawned one, and after it exited.
+    [[nodiscard]] bool alive() const noexcept;
+
+    /// @return The child's exit status once it has exited; nullopt while it runs, or when there is none.
     [[nodiscard]] std::optional<ExitStatus> checkStatus() const;
-    [[nodiscard]] ExitStatus wait();
+
+    /// Waits for the child to exit.
+    /// @return Its exit status, or nullopt when start() never spawned a child to wait for.
+    [[nodiscard]] std::optional<ExitStatus> wait();
 
     [[nodiscard]] std::string workingDirectory() const;
 
@@ -106,6 +109,8 @@ class [[nodiscard]] Process: public Pty
         Normal,
         Hangup
     };
+    /// Asks the child to end, or does nothing when there is no child running.
+    /// @param terminationHint Whether to end it as a hangup would, or as an ordinary termination.
     void terminate(TerminationHint terminationHint);
 
     [[nodiscard]] Pty& pty() noexcept;

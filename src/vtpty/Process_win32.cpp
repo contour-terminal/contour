@@ -17,7 +17,6 @@
 #include <fstream>
 #include <mutex>
 #include <numeric>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -135,6 +134,11 @@ namespace
         else
         {
             hr = HRESULT_FROM_WIN32(GetLastError());
+
+            // Not left allocated but uninitialized: ~Process() takes a list it finds to be one that
+            // InitializeProcThreadAttributeList() set up, and deletes it as such.
+            free(startupInfoEx.lpAttributeList);
+            startupInfoEx.lpAttributeList = nullptr;
         }
         return hr;
     }
@@ -159,7 +163,6 @@ struct Process::Private
     Environment env;
     std::unique_ptr<Pty> pty {};
 
-    mutable HANDLE pid {};
     mutable std::mutex exitStatusMutex {};
     mutable std::optional<Process::ExitStatus> exitStatus {};
     std::optional<std::thread> exitWatcher;
@@ -260,8 +263,10 @@ StartResult Process::start()
         }
 
         _d->exitWatcher = std::thread([this]() {
-            (void) wait();
-            ptyLog()("Process terminated with exit code {}.", checkStatus().value());
+            if (auto const status = wait(); status.has_value())
+                ptyLog()("Process terminated with exit code {}.", *status);
+            else
+                ptyLog()("Process terminated without an exit status.");
             _d->pty->close();
         });
 
@@ -297,10 +302,14 @@ Process::~Process()
     if (_d->exitWatcher)
         _d->exitWatcher.value().join();
 
-    CloseHandle(_d->processInfo.hThread);
-    CloseHandle(_d->processInfo.hProcess);
+    // Only what start() got as far as creating: a Process that never spawned holds no handles.
+    if (_d->processInfo.hThread != nullptr)
+        CloseHandle(_d->processInfo.hThread);
+    if (_d->processInfo.hProcess != nullptr)
+        CloseHandle(_d->processInfo.hProcess);
 
-    DeleteProcThreadAttributeList(_d->startupInfo.lpAttributeList);
+    if (_d->startupInfo.lpAttributeList != nullptr)
+        DeleteProcThreadAttributeList(_d->startupInfo.lpAttributeList);
     free(_d->startupInfo.lpAttributeList);
 }
 
@@ -317,30 +326,51 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) co
             return exitStatus;
     }
 
-    if (waitForExit)
-        if (WaitForSingleObject(processInfo.hThread, INFINITE /*10 * 1000*/) != S_OK)
-            printf("WaitForSingleObject(hThread): %s\n", getLastErrorAsString().c_str());
+    // Without a child there is no status to ask for, and GetExitCodeProcess() would fail on the null
+    // handle.
+    if (processInfo.hProcess == nullptr)
+        return nullopt;
 
-    DWORD exitCode;
+    // The process's handle, not its primary thread's: a process can outlive its first thread.
+    if (waitForExit && WaitForSingleObject(processInfo.hProcess, INFINITE) != WAIT_OBJECT_0)
+        ptyLog()("WaitForSingleObject() failed: {}", getLastErrorAsString());
+
+    // Neither a failed query nor STILL_ACTIVE is an exit, so neither records one -- nor throws, which
+    // would leave alive() through its noexcept.
+    auto exitCode = DWORD {};
     if (!GetExitCodeProcess(processInfo.hProcess, &exitCode))
-        throw runtime_error { getLastErrorAsString() };
-    else if (exitCode == STILL_ACTIVE)
-        return exitStatus;
-    else
-        return exitStatus = ExitStatus { NormalExit { static_cast<int>(exitCode) } };
+    {
+        ptyLog()("GetExitCodeProcess() failed: {}", getLastErrorAsString());
+        return nullopt;
+    }
+    if (exitCode == STILL_ACTIVE)
+        return nullopt;
+
+    auto const _ = lock_guard { exitStatusMutex };
+    if (!exitStatus.has_value())
+        exitStatus = ExitStatus { NormalExit { static_cast<int>(exitCode) } };
+    return exitStatus;
+}
+
+bool Process::alive() const noexcept
+{
+    return _d->processInfo.hProcess != nullptr && !_d->checkStatus(false).has_value();
 }
 
 void Process::terminate(TerminationHint terminationHint)
 {
+    // Windows has no hangup to send: either way the process is ended outright.
+    core::ignoreUnused(terminationHint);
+
     if (!alive())
         return;
 
-    TerminateProcess(_d->pid, 1);
+    TerminateProcess(_d->processInfo.hProcess, 1);
 }
 
-Process::ExitStatus Process::wait()
+optional<Process::ExitStatus> Process::wait()
 {
-    return *_d->checkStatus(true);
+    return _d->checkStatus(true);
 }
 
 vector<string> Process::loginShell(bool escapeSandbox)
