@@ -5739,7 +5739,7 @@ void Screen::processKittyGraphics(std::string_view body)
         _kittyAnimations.erase(command.imageId);
         auto const replaced = _kittyImages.find(command.imageId);
         auto const replacedBytes = replaced != _kittyImages.end() ? replaced->second->data().size() : 0;
-        if (storedKittyBytes() - replacedBytes + image->data().size() > MaxStoredImageBytes)
+        if (storedKittyBytes() - replacedBytes + image->data().size() > _settings->kittyImageStorageQuota)
         {
             replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
             return;
@@ -6060,7 +6060,7 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     // bandwidth-efficient thing the protocol offers -- is not billed for both copies.
     auto const replaced = frameAt(target);
     auto const replacedBytes = replaced && replaced != stored->second ? replaced->data().size() : 0;
-    if (storedKittyBytes() - replacedBytes + frame->data().size() > MaxStoredImageBytes)
+    if (storedKittyBytes() - replacedBytes + frame->data().size() > _settings->kittyImageStorageQuota)
     {
         replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
         return;

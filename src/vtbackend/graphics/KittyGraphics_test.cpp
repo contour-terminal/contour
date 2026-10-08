@@ -574,6 +574,14 @@ namespace
     auto const& data = fragment->rasterizedImage().image().data();
     return { data.begin(), data.end() };
 }
+
+/// Sends @p sequence and returns the reply it alone produced.
+[[nodiscard]] std::string replyTo(MockTerm<vtpty::MockPty>& mock, std::string_view sequence)
+{
+    mock.discardPendingReplies();
+    mock.writeToScreen(sequence);
+    return mock.terminal.peekInput();
+}
 } // namespace
 
 TEST_CASE("KittyGraphics.animation.frame_transmit_is_accepted", "[kitty]")
@@ -975,5 +983,16 @@ TEST_CASE("KittyGraphics.animation.each_placement_keeps_its_geometry_across_a_fr
     mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
     CHECK(spanAt(0) == std::pair { 1, 2 });
     CHECK(spanAt(3) == std::pair { 2, 6 });
+}
+
+TEST_CASE("KittyGraphics.storage.the_quota_is_a_terminal_setting", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.terminal.settings().kittyImageStorageQuota = 6; // Room for exactly one 2x1 RGB image.
+
+    CHECK(replyTo(mock, "\033_Ga=t,f=24,i=1,s=2,v=1;/wAAAP8A\033\\"sv).contains("OK"));
+    CHECK(replyTo(mock, "\033_Ga=t,f=24,i=2,s=2,v=1;/wAAAP8A\033\\"sv).contains("ENOSPC"));
+    // Replacing the image under the same id is billed net of the bytes it frees.
+    CHECK(replyTo(mock, "\033_Ga=t,f=24,i=1,s=2,v=1;AP8A/wAA\033\\"sv).contains("OK"));
 }
 // }}}

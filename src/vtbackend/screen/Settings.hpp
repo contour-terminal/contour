@@ -52,6 +52,15 @@ struct Settings
     HistoryLimits historyLimits;
     ImageSize maxImageSize { Width(800), Height(600) };
     unsigned maxImageRegisterCount = 256;
+
+    /// Largest total size, in decoded bytes, of the kitty graphics images and animation frames a
+    /// screen holds for later display.
+    ///
+    /// Bounds an attack driven straight from the wire: image ids are 32-bit, so without a quota an
+    /// application can park 2^32 distinct images in the terminal. A transmission or frame that would
+    /// exceed it is refused with `ENOSPC` rather than silently evicting an image the application still
+    /// intends to place.
+    size_t kittyImageStorageQuota = static_cast<size_t>(128 * 1024 * 1024);
     bool goodImageProtocol = false;
 
     /// Whether an application may read the clipboard via OSC 52 (`OSC 52 ; Pc ; ? ST`). Disabled by
