@@ -19,7 +19,9 @@ set(vtpty_SOURCES
     ChannelPty.cpp
     MockPty.cpp
     MockViewPty.cpp
+    OwnedFd.cpp
     Process${PLATFORM_SUFFIX}.cpp
+    ProcessPlacement.cpp
     Pty.cpp
     SandboxInfo.cpp
     SpawnLadder.cpp
@@ -31,8 +33,10 @@ set(vtpty_HEADERS
     ImageSize.hpp
     MockPty.hpp
     MockViewPty.hpp
+    OwnedFd.hpp
     PageSize.hpp
     Process.hpp
+    ProcessPlacement.hpp
     Pty.hpp
     SandboxInfo.hpp
     SpawnLadder.hpp
@@ -116,6 +120,8 @@ if(VTPTY_TESTING)
     if(WIN32)
         # ConPty is the Windows-only PTY backend.
         target_sources(vtpty_test PRIVATE ConPty_test.cpp)
+    else()
+        target_sources(vtpty_test PRIVATE ProcessPlacement_test.cpp)
     endif()
     target_link_libraries(vtpty_test vtpty core::testing Catch2::Catch2)
     add_test(NAME vtpty_test COMMAND $<TARGET_FILE:vtpty_test>)
