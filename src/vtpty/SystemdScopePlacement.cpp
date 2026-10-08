@@ -23,10 +23,21 @@ SystemdScopePlacement::SystemdScopePlacement(SystemdScopeConfig config,
 {
 }
 
+SystemdScopePlacement::~SystemdScopePlacement()
+{
+    {
+        auto const _ = std::lock_guard { _mutex };
+        _workerState = WorkerState::Stopping;
+    }
+    _wakeup.notify_one();
+    if (_worker.joinable())
+        _worker.join();
+    // What the worker left queued is released as _queue is destroyed.
+}
+
 void SystemdScopePlacement::placeThenRelease(ParkedChild child)
 {
-    std::call_once(_workerStarted,
-                   [this] { _worker = std::jthread { [this](std::stop_token const& stop) { run(stop); } }; });
+    std::call_once(_workerStarted, [this] { _worker = std::thread { [this] { run(); } }; });
     {
         auto const _ = std::lock_guard { _mutex };
         _queue.push_back(std::move(child));
@@ -34,15 +45,15 @@ void SystemdScopePlacement::placeThenRelease(ParkedChild child)
     _wakeup.notify_one();
 }
 
-void SystemdScopePlacement::run(std::stop_token const& stop)
+void SystemdScopePlacement::run()
 {
     while (true)
     {
         auto child = std::optional<ParkedChild> {};
         {
             auto lock = std::unique_lock { _mutex };
-            _wakeup.wait(lock, stop, [this] { return !_queue.empty(); });
-            if (stop.stop_requested())
+            _wakeup.wait(lock, [this] { return _workerState == WorkerState::Stopping || !_queue.empty(); });
+            if (_workerState == WorkerState::Stopping)
                 return;
             child.emplace(std::move(_queue.front()));
             _queue.pop_front();

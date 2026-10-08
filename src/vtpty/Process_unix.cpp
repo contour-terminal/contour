@@ -166,11 +166,6 @@ namespace
     }
     // }}}
 
-    /// How much likelier than Contour a session's process is to be the kernel's out-of-memory
-    /// victim, and the ceiling the kernel accepts. @see childOomScoreAdjust().
-    constexpr auto ChildOomScoreAdjustIncrement = 100;
-    constexpr auto MaxOomScoreAdjust = 1000;
-
     /// @return The oom_score_adj the child writes for itself, as text; empty where there is none.
     ///         Raising one's own value takes no privilege, and in a global out-of-memory it makes the
     ///         kernel pick a session's process before Contour. Read once: Process::start() runs on
@@ -179,6 +174,10 @@ namespace
     {
         static auto const value = []() -> string {
 #ifdef __linux__
+            // How much likelier than Contour a session's process is to be the kernel's
+            // out-of-memory victim, and the ceiling the kernel accepts.
+            constexpr auto ChildOomScoreAdjustIncrement = 100;
+            constexpr auto MaxOomScoreAdjust = 1000;
             auto own = 0;
             if (auto in = std::ifstream { "/proc/self/oom_score_adj" }; !(in >> own))
                 return {};

@@ -14,7 +14,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <stop_token>
 #include <string>
 #include <thread>
 
@@ -56,10 +55,18 @@ class SystemdScopePlacement final: public ProcessPlacement
                           ScopeBusFactory connectBus,
                           core::platform::IClock const& clock);
 
+    /// Stops the worker -- after the request in flight, if any -- and releases every queued child.
+    ~SystemdScopePlacement() override;
+
+    SystemdScopePlacement(SystemdScopePlacement const&) = delete;
+    SystemdScopePlacement& operator=(SystemdScopePlacement const&) = delete;
+    SystemdScopePlacement(SystemdScopePlacement&&) = delete;
+    SystemdScopePlacement& operator=(SystemdScopePlacement&&) = delete;
+
     void placeThenRelease(ParkedChild child) override;
 
   private:
-    void run(std::stop_token const& stop);
+    void run();
     void place(ParkedChild const& child);
     [[nodiscard]] std::expected<void, ScopeError> request(ParkedChild const& child,
                                                           ProcessReference reference);
@@ -75,13 +82,21 @@ class SystemdScopePlacement final: public ProcessPlacement
     std::uint64_t _sequence = 0;
     bool _hasReportedFault = false; ///< Faults are told once where a user sees them, then quietly.
 
+    /// Whether the worker is to keep taking children off the queue.
+    enum class WorkerState : std::uint8_t
+    {
+        Running,
+        Stopping,
+    };
+
+    // A std::thread and a state rather than a std::jthread: libc++ before 20 offers std::jthread
+    // only behind -fexperimental-library, which Xcode's toolchains do not enable.
     std::mutex _mutex;
-    std::condition_variable_any _wakeup;
+    std::condition_variable _wakeup;
     std::deque<ParkedChild> _queue;
+    WorkerState _workerState = WorkerState::Running;
     std::once_flag _workerStarted;
-    /// Last, so its destructor -- request_stop(), then join() -- runs before the queue it reads is
-    /// destroyed; whatever it left queued is then released with the queue.
-    std::jthread _worker;
+    std::thread _worker;
 };
 
 } // namespace vtpty
