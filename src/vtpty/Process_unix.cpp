@@ -10,7 +10,6 @@
 #include <core/Utils.hpp>
 
 #include <array>
-#include <cassert>
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
@@ -19,7 +18,6 @@
 #include <format>
 #include <mutex>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -75,6 +73,9 @@ namespace
     constexpr auto StdoutFastPipeFd = 3;
     constexpr auto StdoutFastPipeFdStr = "3"sv;
     constexpr auto StdoutFastPipeEnvironmentName = "STDOUT_FASTPIPE"sv;
+
+    /// The id a Process holds while it has no child. @see Process::Private::pid.
+    constexpr pid_t NoChild = -1;
 
     string getLastErrorAsString()
     {
@@ -201,11 +202,22 @@ struct Process::Private
     bool escapeSandbox;
 
     unique_ptr<Pty> pty {};
-    mutable pid_t pid {};
+
+    // The child's id, or NoChild: before start() spawned one, when fork() failed, and once the child has
+    // been reaped. Never 0, which waitpid() and kill() read as the caller's whole process group, nor any
+    // other id they would read as more than one process. Written under exitStatusMutex.
+    mutable pid_t pid = NoChild;
     mutable std::mutex exitStatusMutex {};
     mutable std::optional<Process::ExitStatus> exitStatus {};
 
     [[nodiscard]] std::optional<ExitStatus> checkStatus(bool waitForExit) const;
+
+    /// @return The child's id, or NoChild when there is none to ask about, wait for or signal.
+    [[nodiscard]] pid_t child() const
+    {
+        auto const _ = lock_guard { exitStatusMutex };
+        return pid;
+    }
 };
 
 Process::Process(string const& path,
@@ -334,16 +346,17 @@ StartResult Process::start()
         loginShellArgv.push_back(nullptr);
     }
 
-    _d->pid = fork();
+    auto const forked = fork();
 
-    switch (_d->pid)
+    switch (forked)
     {
         default: // in parent
+            core::locked(_d->exitStatusMutex, [&] { _d->pid = forked; });
             _d->pty->slave().close();
             if (stdoutFastPipe)
                 stdoutFastPipe->closeWriter();
             break;
-        case -1: // fork error
+        case -1: // fork error: there is no child, and pid keeps saying so
             return std::unexpected(
                 StartFailure { .error = StartError::SpawnFailed, .detail = getLastErrorAsString() });
         case 0: // in child
@@ -410,8 +423,7 @@ StartResult Process::start()
 
 Process::~Process()
 {
-    if (_d->pid != -1)
-        (void) wait();
+    (void) wait();
 }
 
 Pty& Process::pty() noexcept
@@ -436,55 +448,84 @@ optional<Process::ExitStatus> Process::checkStatus() const
 
 optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) const
 {
+    auto childPid = NoChild;
     {
         auto const _ = lock_guard { exitStatusMutex };
         if (exitStatus.has_value())
             return exitStatus;
+        childPid = pid;
     }
 
-    assert(pid != -1);
-    int status = 0;
-    int const rv = waitpid(pid, &status, waitForExit ? 0 : WNOHANG);
-
-    if (rv < 0)
-    {
-        auto const waitPidErrorCode = errno;
-        auto const _ = lock_guard { exitStatusMutex };
-        if (exitStatus.has_value())
-            return exitStatus;
-        errorLog()("waitpid() failed: {}", std::generic_category().message(waitPidErrorCode));
-        return std::nullopt;
-    }
-    else if (rv == 0 && !waitForExit)
+    // Without a child there is no status to ask for, and asking waitpid() about NoChild would wait for
+    // any child of this process at all.
+    if (childPid == NoChild)
         return nullopt;
-    else
-    {
-        auto const _ = lock_guard { exitStatusMutex };
-        pid = -1;
 
-        if (WIFEXITED(status))
-            return exitStatus = ExitStatus { NormalExit { WEXITSTATUS(status) } };
-        else if (WIFSIGNALED(status))
-            return exitStatus = ExitStatus { SignalExit { WTERMSIG(status) } };
-        else if (WIFSTOPPED(status))
-            return exitStatus = ExitStatus { SignalExit { SIGSTOP } };
-        else
-            // TODO: handle the other WIF....(status) cases.
-            throw runtime_error { "Unknown waitpid() return value." };
+    auto status = 0;
+    while (true)
+    {
+        auto const rv = waitpid(childPid, &status, waitForExit ? 0 : WNOHANG);
+        auto const waitPidErrorCode = errno;
+
+        // A signal arriving is no reason to stop waiting.
+        if (rv < 0 && waitPidErrorCode == EINTR)
+            continue;
+
+        if (rv < 0)
+        {
+            auto const _ = lock_guard { exitStatusMutex };
+            if (exitStatus.has_value())
+                return exitStatus; // Reaped by a concurrent wait, which recorded it.
+            if (waitPidErrorCode == ECHILD)
+            {
+                // Not ours to wait for any more -- reaped elsewhere, or by the system with SIGCHLD
+                // ignored -- so there is no child, and no status to be had for it.
+                pid = NoChild;
+                return nullopt;
+            }
+            errorLog()("waitpid() failed: {}", std::generic_category().message(waitPidErrorCode));
+            return nullopt;
+        }
+
+        if (rv == 0) // WNOHANG, and the child still runs.
+            return nullopt;
+
+        if (WIFEXITED(status) || WIFSIGNALED(status))
+            break;
+
+        // Stopped, as a tracer is told: still running.
+        if (!waitForExit)
+            return nullopt;
     }
+
+    auto const _ = lock_guard { exitStatusMutex };
+    pid = NoChild;
+    exitStatus = WIFEXITED(status) ? ExitStatus { NormalExit { WEXITSTATUS(status) } }
+                                   : ExitStatus { SignalExit { WTERMSIG(status) } };
+    return exitStatus;
+}
+
+bool Process::alive() const noexcept
+{
+    return _d->child() != NoChild && !_d->checkStatus(false).has_value();
 }
 
 void Process::terminate(TerminationHint terminationHint)
 {
-    if (!alive())
+    // The id is taken once, and kill() is handed nothing else: it reads 0 and -1 as whole groups of
+    // processes, the terminal's own among them. A child that has already exited is not signalled, as its
+    // id may have gone to another process -- though one reaped concurrently, between this check and the
+    // kill(), still can be: closing that window takes a process descriptor, which POSIX does not have.
+    auto const childPid = _d->child();
+    if (childPid == NoChild || _d->checkStatus(false).has_value())
         return;
 
-    ::kill(_d->pid, terminationHint == TerminationHint::Hangup ? SIGHUP : SIGTERM);
+    ::kill(childPid, terminationHint == TerminationHint::Hangup ? SIGHUP : SIGTERM);
 }
 
-Process::ExitStatus Process::wait()
+optional<Process::ExitStatus> Process::wait()
 {
-    return *_d->checkStatus(true);
+    return _d->checkStatus(true);
 }
 
 namespace
@@ -566,9 +607,13 @@ fs::path Process::homeDirectory()
 string Process::workingDirectory() const
 {
 #ifdef __linux__
+    auto const childPid = _d->child();
+    if (childPid == NoChild)
+        return "."s;
+
     try
     {
-        auto const path = fs::path { std::format("/proc/{}/cwd", _d->pid) };
+        auto const path = fs::path { std::format("/proc/{}/cwd", childPid) };
         auto const cwd = fs::read_symlink(path);
         return cwd.string();
     }
@@ -580,8 +625,13 @@ string Process::workingDirectory() const
 #elifdef __APPLE__
     try
     {
+        // A Process may run on any Pty, so ask before taking it for a UnixPty.
+        auto const* const unixPty = dynamic_cast<UnixPty const*>(_d->pty.get());
+        if (unixPty == nullptr)
+            return "."s;
+
         auto vpi = proc_vnodepathinfo {};
-        auto const pid = tcgetpgrp(unbox<int>(static_cast<UnixPty const*>(_d->pty.get())->handle()));
+        auto const pid = tcgetpgrp(unbox<int>(unixPty->handle()));
 
         if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) <= 0)
             return "."s;
