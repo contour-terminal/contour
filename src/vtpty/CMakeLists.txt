@@ -18,14 +18,13 @@ if(NOT LINUX OR EXISTS "/.flatpak-info")
     set(CONTOUR_WITH_SYSTEMD OFF)
 endif()
 
-set(vtpty_LIBRARIES core::base core::log crispy::core Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
+set(vtpty_LIBRARIES core::base core::log core::platform crispy::core Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
 
 set(vtpty_SOURCES
     ChannelPty.cpp
     MockPty.cpp
     MockViewPty.cpp
     OwnedFd.cpp
-    PlacementBreaker.cpp
     Process${PLATFORM_SUFFIX}.cpp
     ProcessPlacement.cpp
     Pty.cpp

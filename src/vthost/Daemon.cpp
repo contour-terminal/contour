@@ -568,10 +568,8 @@ int runDaemon(DaemonConfig const& config)
     auto loop = core::net::EventLoop { *source };
 
     auto host = SessionHost { loop,
-                              makeShellPtyFactory(config.shell,
-                                                  config.escapeSandbox,
-                                                  config.socketPath,
-                                                  vtpty::makeDefaultProcessPlacement()),
+                              makeShellPtyFactory(
+                                  config.shell, config.escapeSandbox, config.socketPath, config.placement),
                               config.settings,
                               core::defaultEnvironment(),
                               /*startPumps=*/true,
@@ -760,10 +758,8 @@ int runDaemon(DaemonConfig const& config)
     auto loop = core::net::EventLoop { *source };
 
     auto host = SessionHost { loop,
-                              makeShellPtyFactory(config.shell,
-                                                  config.escapeSandbox,
-                                                  config.socketPath,
-                                                  vtpty::makeDefaultProcessPlacement()),
+                              makeShellPtyFactory(
+                                  config.shell, config.escapeSandbox, config.socketPath, config.placement),
                               config.settings,
                               core::defaultEnvironment(),
                               /*startPumps=*/true,

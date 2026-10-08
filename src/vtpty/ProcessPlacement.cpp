@@ -2,9 +2,7 @@
 #include <vtpty/ProcessPlacement.hpp>
 
 #ifdef VTPTY_SYSTEMD
-    #include <vtpty/Process.hpp>
     #include <vtpty/SdBusScopeBus.hpp>
-    #include <vtpty/SystemdScopePlacement.hpp>
 #endif
 
 #include <array>
@@ -20,6 +18,23 @@
 
 namespace vtpty
 {
+
+#ifndef _WIN32
+namespace
+{
+    #ifdef MSG_NOSIGNAL
+    constexpr auto NoSigPipeSendFlags = MSG_NOSIGNAL;
+    #else
+    constexpr auto NoSigPipeSendFlags = 0; // makeGate() set SO_NOSIGPIPE on the socket instead
+    #endif
+
+    #ifdef SOCK_CLOEXEC
+    constexpr auto CloseOnExecStreamSocket = SOCK_STREAM | SOCK_CLOEXEC;
+    #else
+    constexpr auto CloseOnExecStreamSocket = SOCK_STREAM; // made close-on-exec by makeGate()
+    #endif
+} // namespace
+#endif
 
 ParkedChild::ParkedChild(int pid, OwnedFd pidfd, OwnedFd gate) noexcept:
     _pid { pid }, _pidfd { std::move(pidfd) }, _gate { std::move(gate) }
@@ -39,13 +54,8 @@ void ParkedChild::release() noexcept
     // A byte rather than end-of-file: a child forked for another session while this one is parked
     // inherits this end too (close-on-exec acts only at exec), and end-of-file would wait for it.
     char const go = 'g';
-    #ifdef MSG_NOSIGNAL
-    while (::send(_gate.get(), &go, 1, MSG_NOSIGNAL) < 0 && errno == EINTR)
+    while (::send(_gate.get(), &go, 1, NoSigPipeSendFlags) < 0 && errno == EINTR)
         ;
-    #else
-    while (::write(_gate.get(), &go, 1) < 0 && errno == EINTR) // makeGate() set SO_NOSIGPIPE
-        ;
-    #endif
 #endif
     _gate.reset();
     _pidfd.reset();
@@ -55,17 +65,15 @@ void ParkedChild::release() noexcept
 std::expected<Gate, std::error_code> makeGate()
 {
     auto fds = std::array<int, 2> { -1, -1 };
-    #ifdef SOCK_CLOEXEC
-    if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds.data()) != 0)
+    if (::socketpair(AF_UNIX, CloseOnExecStreamSocket, 0, fds.data()) != 0)
         return std::unexpected(std::error_code { errno, std::generic_category() });
-    #else
-    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds.data()) != 0)
-        return std::unexpected(std::error_code { errno, std::generic_category() });
+    auto gate = Gate { .parentEnd = OwnedFd { fds[0] }, .childEnd = OwnedFd { fds[1] } };
+    #ifndef SOCK_CLOEXEC
     for (auto const fd: fds)
         ::fcntl(fd, F_SETFD, FD_CLOEXEC);
     #endif
-    auto gate = Gate { .parentEnd = OwnedFd { fds[0] }, .childEnd = OwnedFd { fds[1] } };
-    #if !defined(MSG_NOSIGNAL) && defined(SO_NOSIGPIPE)
+    #ifndef MSG_NOSIGNAL
+    // Where send() takes no MSG_NOSIGNAL (macOS), the socket itself is told not to raise SIGPIPE.
     auto const enabled = 1;
     (void) ::setsockopt(gate.parentEnd.get(), SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled));
     #endif
@@ -76,17 +84,10 @@ std::expected<Gate, std::error_code> makeGate()
 std::shared_ptr<ProcessPlacement> makeDefaultProcessPlacement()
 {
 #ifdef VTPTY_SYSTEMD
-    // Inside Flatpak the shells run on the host through flatpak-spawn, outside Contour's cgroup
-    // already, and the sandbox may not create units anyway.
-    if (!Process::isFlatpak())
-    {
-        auto config = SystemdScopeConfig {};
-        auto const timeout = config.deadline;
-        return std::make_shared<SystemdScopePlacement>(std::move(config),
-                                                       [timeout] { return SdBusScopeBus::connect(timeout); });
-    }
-#endif
+    return makeSystemdScopePlacement(SystemdScopeConfig {});
+#else
     return std::make_shared<NoPlacement>();
+#endif
 }
 
 } // namespace vtpty

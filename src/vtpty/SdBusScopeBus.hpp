@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtpty/ScopeBus.hpp>
+#include <vtpty/SystemdScopePlacement.hpp>
 
 #include <chrono>
 #include <expected>
@@ -53,5 +54,9 @@ class SdBusScopeBus final: public ScopeBus
     std::string _awaitedUnit;                  ///< The unit whose job startScope() waits for.
     std::optional<std::string> _awaitedResult; ///< Its job's result, once JobRemoved told it.
 };
+
+/// @param config How to place children.
+/// @return A SystemdScopePlacement talking to the user's systemd through sd-bus, on the steady clock.
+[[nodiscard]] std::shared_ptr<ProcessPlacement> makeSystemdScopePlacement(SystemdScopeConfig config);
 
 } // namespace vtpty

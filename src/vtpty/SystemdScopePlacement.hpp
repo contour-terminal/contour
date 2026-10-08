@@ -5,11 +5,12 @@
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/ScopeBus.hpp>
 
+#include <core/platform/Clock.hpp>
+
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -33,13 +34,10 @@ struct SystemdScopeConfig
     std::chrono::milliseconds deadline { 1000 };
 
     /// How long an unresponsive bus is left alone. @see PlacementBreaker.
-    PlacementBreaker::Clock::duration breakerCooldown = std::chrono::seconds { 30 };
+    core::platform::SteadyDuration breakerCooldown = std::chrono::seconds { 30 };
 
     /// A memory ceiling for every scope. Tests only: a user-facing limit is not a feature yet.
     std::optional<MemoryLimit> memoryLimit {};
-
-    /// The clock the breaker reads.
-    std::function<PlacementBreaker::Clock::time_point()> now = &PlacementBreaker::Clock::now;
 };
 
 /// Places every child in a transient systemd scope of its own, with OOMPolicy=continue, so that an
@@ -53,13 +51,10 @@ class SystemdScopePlacement final: public ProcessPlacement
   public:
     /// @param config     How to place children.
     /// @param connectBus Connects the bus; called on the worker, at first use and after it broke.
-    SystemdScopePlacement(SystemdScopeConfig config, ScopeBusFactory connectBus);
-    ~SystemdScopePlacement() override;
-
-    SystemdScopePlacement(SystemdScopePlacement const&) = delete;
-    SystemdScopePlacement& operator=(SystemdScopePlacement const&) = delete;
-    SystemdScopePlacement(SystemdScopePlacement&&) = delete;
-    SystemdScopePlacement& operator=(SystemdScopePlacement&&) = delete;
+    /// @param clock      The clock the breaker reads; must outlive this placement.
+    SystemdScopePlacement(SystemdScopeConfig config,
+                          ScopeBusFactory connectBus,
+                          core::platform::IClock const& clock);
 
     void placeThenRelease(ParkedChild child) override;
 
@@ -72,7 +67,10 @@ class SystemdScopePlacement final: public ProcessPlacement
 
     SystemdScopeConfig _config;
     ScopeBusFactory _connectBus;
+    core::platform::IClock const& _clock;
     std::unique_ptr<ScopeBus> _bus;
+    /// PidFd until systemd turns it down, then Pid for as long as this connection lasts.
+    ProcessReference _reference = ProcessReference::PidFd;
     PlacementBreaker _breaker;
     std::uint64_t _sequence = 0;
     bool _hasReportedFault = false; ///< Faults are told once where a user sees them, then quietly.
@@ -81,7 +79,9 @@ class SystemdScopePlacement final: public ProcessPlacement
     std::condition_variable_any _wakeup;
     std::deque<ParkedChild> _queue;
     std::once_flag _workerStarted;
-    std::jthread _worker; ///< Last: stopped and joined before the queue it reads is destroyed.
+    /// Last, so its destructor -- request_stop(), then join() -- runs before the queue it reads is
+    /// destroyed; whatever it left queued is then released with the queue.
+    std::jthread _worker;
 };
 
 } // namespace vtpty

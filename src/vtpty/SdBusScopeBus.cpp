@@ -64,10 +64,22 @@ namespace
         ReturnCodeMeaning { -ESHUTDOWN, ScopeError::Disconnected },
     };
 
-    /// The D-Bus errors systemd answers a property it does not know with: PropertyReadOnly ("Cannot
-    /// set property PIDFDs, or unknown property."), or InvalidArgs in some versions.
-    constexpr auto UnknownPropertyErrors =
-        std::array { SD_BUS_ERROR_PROPERTY_READ_ONLY, SD_BUS_ERROR_INVALID_ARGS };
+    /// A D-Bus error name a failed call answered with, and what it says about the scope.
+    struct ErrorNameMeaning
+    {
+        char const* name;
+        ScopeError error;
+    };
+
+    constexpr auto ErrorNameMeanings = std::array {
+        // Nobody owns org.freedesktop.systemd1 on this bus: there is no systemd user instance.
+        ErrorNameMeaning { SD_BUS_ERROR_SERVICE_UNKNOWN, ScopeError::Unavailable },
+        ErrorNameMeaning { SD_BUS_ERROR_NAME_HAS_NO_OWNER, ScopeError::Unavailable },
+        // How systemd answers a property it does not know: PropertyReadOnly ("Cannot set property
+        // PIDFDs, or unknown property."), or InvalidArgs in some versions.
+        ErrorNameMeaning { SD_BUS_ERROR_PROPERTY_READ_ONLY, ScopeError::UnknownProperty },
+        ErrorNameMeaning { SD_BUS_ERROR_INVALID_ARGS, ScopeError::UnknownProperty },
+    };
 
     /// @return Why a call that returned @p returnCode with @p error did not create the scope.
     [[nodiscard]] ScopeError classify(int returnCode, BusError const& error) noexcept
@@ -76,8 +88,11 @@ namespace
                 std::ranges::find(ReturnCodeMeanings, returnCode, &ReturnCodeMeaning::returnCode);
             known != ReturnCodeMeanings.end())
             return known->error;
-        if (std::ranges::any_of(UnknownPropertyErrors, [&](char const* name) { return error.hasName(name); }))
-            return ScopeError::UnknownProperty;
+        if (auto const known = std::ranges::find_if(
+                ErrorNameMeanings,
+                [&](ErrorNameMeaning const& meaning) { return error.hasName(meaning.name); });
+            known != ErrorNameMeanings.end())
+            return known->error;
         return ScopeError::Refused;
     }
 
@@ -120,14 +135,9 @@ std::expected<std::unique_ptr<ScopeBus>, ScopeError> SdBusScopeBus::connect(mill
     if (sd_bus_set_method_call_timeout(raw, microsecondsOf(timeout)) < 0)
         return std::unexpected(ScopeError::Unavailable);
 
-    // JobRemoved is how a request learns that its scope exists. Subscribing also proves that a
-    // systemd instance is on the bus: without one it fails here, not at the first session.
-    auto error = BusError {};
-    if (sd_bus_call_method(
-            raw, SystemdService, SystemdObject, ManagerInterface, "Subscribe", error.get(), nullptr, "")
-        < 0)
-        return std::unexpected(ScopeError::Unavailable);
-
+    // JobRemoved is how a request learns that its scope exists. systemd sends it to the client
+    // that queued the job without being asked to; Subscribe would add every other job and unit
+    // change of the session, queued up on this connection between spawns.
     auto bus = std::make_unique<SdBusScopeBus>(std::move(handle));
     if (sd_bus_match_signal(raw,
                             nullptr,
@@ -140,6 +150,15 @@ std::expected<std::unique_ptr<ScopeBus>, ScopeError> SdBusScopeBus::connect(mill
         < 0)
         return std::unexpected(ScopeError::Unavailable);
     return bus;
+}
+
+std::shared_ptr<ProcessPlacement> makeSystemdScopePlacement(SystemdScopeConfig config)
+{
+    auto const timeout = config.deadline;
+    return std::make_shared<SystemdScopePlacement>(
+        std::move(config),
+        [timeout] { return SdBusScopeBus::connect(timeout); },
+        core::platform::defaultSteadyClock());
 }
 
 std::expected<void, ScopeError> SdBusScopeBus::startScope(ScopeRequest const& request, milliseconds deadline)

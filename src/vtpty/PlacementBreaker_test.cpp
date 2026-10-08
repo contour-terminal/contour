@@ -9,7 +9,6 @@
 #include <string_view>
 
 using namespace std::chrono_literals;
-using vtpty::BreakerState;
 using vtpty::PlacementBreaker;
 using vtpty::ScopeError;
 
@@ -17,101 +16,70 @@ namespace
 {
 
 constexpr auto Cooldown = 30s;
-constexpr auto Start = PlacementBreaker::Clock::time_point {} + 1h;
+constexpr auto Start = core::platform::SteadyTimePoint {} + 1h;
 
 using Outcome = std::expected<void, ScopeError>;
-
-/// @return A breaker driven into @p state at Start.
-PlacementBreaker breakerIn(BreakerState state)
-{
-    auto breaker = PlacementBreaker { Cooldown };
-    if (state == BreakerState::Closed)
-        return breaker;
-    REQUIRE(breaker.shouldAttempt(Start));
-    breaker.record(std::unexpected(ScopeError::TimedOut), Start);
-    if (state == BreakerState::HalfOpen)
-        REQUIRE(breaker.shouldAttempt(Start + Cooldown));
-    REQUIRE(breaker.state() == state);
-    return breaker;
-}
 
 struct OutcomeRow
 {
     std::string_view name;
     Outcome outcome;
-    BreakerState after;
+    bool attemptsBeforeCooldown;
 };
 
-// Any answer from systemd, a refusal included, shows the bus is alive; only silence opens.
+// Any answer from systemd, a refusal included, shows the bus is alive; only silence holds off.
 auto const outcomeRows = std::array {
-    OutcomeRow { .name = "placed", .outcome = Outcome {}, .after = BreakerState::Closed },
+    OutcomeRow { .name = "placed", .outcome = Outcome {}, .attemptsBeforeCooldown = true },
     OutcomeRow {
-        .name = "refused", .outcome = std::unexpected(ScopeError::Refused), .after = BreakerState::Closed },
+        .name = "refused", .outcome = std::unexpected(ScopeError::Refused), .attemptsBeforeCooldown = true },
     OutcomeRow { .name = "unknown property",
                  .outcome = std::unexpected(ScopeError::UnknownProperty),
-                 .after = BreakerState::Closed },
-    OutcomeRow {
-        .name = "timed out", .outcome = std::unexpected(ScopeError::TimedOut), .after = BreakerState::Open },
+                 .attemptsBeforeCooldown = true },
+    OutcomeRow { .name = "timed out",
+                 .outcome = std::unexpected(ScopeError::TimedOut),
+                 .attemptsBeforeCooldown = false },
     OutcomeRow { .name = "disconnected",
                  .outcome = std::unexpected(ScopeError::Disconnected),
-                 .after = BreakerState::Open },
+                 .attemptsBeforeCooldown = false },
     OutcomeRow { .name = "unavailable",
                  .outcome = std::unexpected(ScopeError::Unavailable),
-                 .after = BreakerState::Open },
+                 .attemptsBeforeCooldown = false },
 };
 
 } // namespace
 
 TEST_CASE("PlacementBreaker.outcomes", "[placement][breaker]")
 {
-    for (auto const from: { BreakerState::Closed, BreakerState::HalfOpen })
+    for (auto const& row: outcomeRows)
     {
-        for (auto const& row: outcomeRows)
-        {
-            INFO("from " << static_cast<int>(from) << ", outcome " << row.name);
-            auto breaker = breakerIn(from);
-            breaker.record(row.outcome, Start + Cooldown);
-            CHECK(breaker.state() == row.after);
-        }
+        INFO("outcome " << row.name);
+        auto breaker = PlacementBreaker { Cooldown };
+        breaker.record(row.outcome, Start);
+        CHECK(breaker.shouldAttempt(Start + 1ms) == row.attemptsBeforeCooldown);
+        CHECK(breaker.shouldAttempt(Start + Cooldown));
     }
 }
 
-TEST_CASE("PlacementBreaker.cooldown", "[placement][breaker]")
+TEST_CASE("PlacementBreaker.attemptsUntilTheBusFallsSilent", "[placement][breaker]")
 {
-    auto breaker = breakerIn(BreakerState::Open);
-    CHECK_FALSE(breaker.shouldAttempt(Start + Cooldown - 1ms));
-    CHECK(breaker.state() == BreakerState::Open);
-    CHECK(breaker.shouldAttempt(Start + Cooldown));
-    CHECK(breaker.state() == BreakerState::HalfOpen);
+    auto const breaker = PlacementBreaker { Cooldown };
+    CHECK(breaker.shouldAttempt(Start));
 }
 
-TEST_CASE("PlacementBreaker.reopenRestartsTheCooldown", "[placement][breaker]")
+TEST_CASE("PlacementBreaker.aFailedTrialRestartsTheCooldown", "[placement][breaker]")
 {
-    auto breaker = breakerIn(BreakerState::HalfOpen);
+    auto breaker = PlacementBreaker { Cooldown };
+    breaker.record(std::unexpected(ScopeError::TimedOut), Start);
+    REQUIRE(breaker.shouldAttempt(Start + Cooldown));
     breaker.record(std::unexpected(ScopeError::TimedOut), Start + Cooldown);
     CHECK_FALSE(breaker.shouldAttempt(Start + Cooldown + Cooldown - 1ms));
     CHECK(breaker.shouldAttempt(Start + Cooldown + Cooldown));
 }
 
-TEST_CASE("PlacementBreaker.closedAlwaysAttempts", "[placement][breaker]")
+TEST_CASE("PlacementBreaker.aSuccessfulTrialResumes", "[placement][breaker]")
 {
     auto breaker = PlacementBreaker { Cooldown };
-    CHECK(breaker.shouldAttempt(Start));
-    breaker.record(std::unexpected(ScopeError::Refused), Start);
-    CHECK(breaker.shouldAttempt(Start));
-}
-
-TEST_CASE("ScopeError.traitsTableMatchesTheEnum", "[placement]")
-{
-    for (auto const error: { ScopeError::Unavailable,
-                             ScopeError::Disconnected,
-                             ScopeError::TimedOut,
-                             ScopeError::Refused,
-                             ScopeError::UnknownProperty })
-    {
-        CHECK(vtpty::traitsOf(error).error == error);
-        CHECK_FALSE(vtpty::traitsOf(error).description.empty());
-    }
-    CHECK(vtpty::traitsOf(ScopeError::Unavailable).severity == vtpty::ScopeErrorSeverity::Expected);
-    CHECK(vtpty::traitsOf(ScopeError::Refused).severity == vtpty::ScopeErrorSeverity::Fault);
+    breaker.record(std::unexpected(ScopeError::TimedOut), Start);
+    breaker.record(Outcome {}, Start + Cooldown);
+    CHECK(breaker.shouldAttempt(Start + Cooldown + 1ms));
 }

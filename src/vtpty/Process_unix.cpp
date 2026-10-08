@@ -173,18 +173,21 @@ namespace
 
     /// @return The oom_score_adj the child writes for itself, as text; empty where there is none.
     ///         Raising one's own value takes no privilege, and in a global out-of-memory it makes the
-    ///         kernel pick a session's process before Contour.
-    [[nodiscard]] string childOomScoreAdjust()
+    ///         kernel pick a session's process before Contour. Read once: Process::start() runs on
+    ///         the GUI thread, and Contour's own value does not change under it.
+    [[nodiscard]] string const& childOomScoreAdjust()
     {
+        static auto const value = []() -> string {
 #ifdef __linux__
-        // Read as a stream: /proc reports its files as empty, so a read sized by file_size() gets nothing.
-        auto own = 0;
-        if (auto in = std::ifstream { "/proc/self/oom_score_adj" }; !(in >> own))
-            return {};
-        return std::to_string(std::min(own + ChildOomScoreAdjustIncrement, MaxOomScoreAdjust));
+            auto own = 0;
+            if (auto in = std::ifstream { "/proc/self/oom_score_adj" }; !(in >> own))
+                return {};
+            return std::to_string(std::min(own + ChildOomScoreAdjustIncrement, MaxOomScoreAdjust));
 #else
-        return {};
+            return {};
 #endif
+        }();
+        return value;
     }
 
     /// @return A pidfd for @p pid, or an empty OwnedFd where the kernel has none (before Linux 5.3).
@@ -419,7 +422,7 @@ StartResult Process::start()
     if (!gate)
         return std::unexpected(
             StartFailure { .error = StartError::SpawnFailed, .detail = gate.error().message() });
-    auto const oomScoreAdjust = childOomScoreAdjust();
+    auto const& oomScoreAdjust = childOomScoreAdjust();
 
     auto const forked = fork();
 

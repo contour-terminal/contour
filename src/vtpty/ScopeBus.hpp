@@ -95,6 +95,16 @@ inline constexpr auto ScopeErrorTable = std::array {
                        ScopeErrorSeverity::Fault },
 };
 
+static_assert(
+    [] {
+        auto index = std::size_t { 0 };
+        for (auto const& row: ScopeErrorTable)
+            if (static_cast<std::size_t>(row.error) != index++ || row.description.empty())
+                return false;
+        return index == static_cast<std::size_t>(ScopeError::UnknownProperty) + 1;
+    }(),
+    "ScopeErrorTable holds one described row per ScopeError, in enumerator order");
+
 /// @return The row of ScopeErrorTable describing @p error.
 [[nodiscard]] constexpr ScopeErrorTraits const& traitsOf(ScopeError error) noexcept
 {

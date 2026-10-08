@@ -13,20 +13,14 @@
 namespace vtpty
 {
 
-SystemdScopePlacement::SystemdScopePlacement(SystemdScopeConfig config, ScopeBusFactory connectBus):
-    _config { std::move(config) }, _connectBus { std::move(connectBus) }, _breaker { _config.breakerCooldown }
+SystemdScopePlacement::SystemdScopePlacement(SystemdScopeConfig config,
+                                             ScopeBusFactory connectBus,
+                                             core::platform::IClock const& clock):
+    _config { std::move(config) },
+    _connectBus { std::move(connectBus) },
+    _clock { clock },
+    _breaker { _config.breakerCooldown }
 {
-}
-
-SystemdScopePlacement::~SystemdScopePlacement()
-{
-    // The worker stops first; whatever it leaves queued is destroyed with this object, and every
-    // ParkedChild releases its child on the way out.
-    if (_worker.joinable())
-    {
-        _worker.request_stop();
-        _worker.join();
-    }
 }
 
 void SystemdScopePlacement::placeThenRelease(ParkedChild child)
@@ -59,7 +53,7 @@ void SystemdScopePlacement::run(std::stop_token const& stop)
 
 void SystemdScopePlacement::place(ParkedChild const& child)
 {
-    if (!_breaker.shouldAttempt(_config.now()))
+    if (!_breaker.shouldAttempt(_clock.now()))
         return;
 
     auto const outcome = [&]() -> std::expected<void, ScopeError> {
@@ -69,18 +63,22 @@ void SystemdScopePlacement::place(ParkedChild const& child)
             if (!connected)
                 return std::unexpected(connected.error());
             _bus = std::move(*connected);
+            _reference = ProcessReference::PidFd; // a new connection may reach a newer systemd
         }
-        auto const preferred = child.pidfd() >= 0 ? ProcessReference::PidFd : ProcessReference::Pid;
+        auto const preferred = child.pidfd() >= 0 ? _reference : ProcessReference::Pid;
         auto result = request(child, preferred);
         // An older systemd knows no PIDFDs. The child is parked, so its pid cannot have been reused.
         if (!result && result.error() == ScopeError::UnknownProperty && preferred == ProcessReference::PidFd)
+        {
+            _reference = ProcessReference::Pid;
             result = request(child, ProcessReference::Pid);
+        }
         return result;
     }();
 
     if (!outcome && outcome.error() == ScopeError::Disconnected)
         _bus.reset(); // connect afresh on the next attempt
-    _breaker.record(outcome, _config.now());
+    _breaker.record(outcome, _clock.now());
     if (!outcome)
         report(child, outcome.error());
 }

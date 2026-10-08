@@ -10,8 +10,7 @@
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/SdBusScopeBus.hpp>
 #include <vtpty/SystemdScopePlacement.hpp>
-
-#include <crispy/BufferObject.hpp>
+#include <vtpty/test/PtyReading.hpp>
 
 #include <chrono>
 #include <csignal>
@@ -70,27 +69,16 @@ std::shared_ptr<vtpty::ProcessPlacement> placementNamed(std::string_view name)
         return nullptr;
     auto config = vtpty::SystemdScopeConfig {};
     config.memoryLimit = vtpty::MemoryLimit { .maxBytes = ScopeMemoryMax, .swapMaxBytes = 0 };
-    auto const timeout = config.deadline;
-    return std::make_shared<vtpty::SystemdScopePlacement>(
-        std::move(config), [timeout] { return vtpty::SdBusScopeBus::connect(timeout); });
+    return vtpty::makeSystemdScopePlacement(std::move(config));
 }
 
-/// @return What @p process wrote, up to the end of its first line that names a cgroup, read for at
-///         most about 30 seconds.
+/// @return What @p process wrote, up to the end of its first line naming a cgroup (at most ~30 s).
 std::string readCgroupLine(vtpty::Process& process)
 {
-    auto pool = crispy::BufferObjectPool<char> { 4096 };
-    auto collected = std::string {};
-    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 300))
-    {
-        if (auto const at = collected.find("0::");
-            at != std::string::npos && collected.find('\n', at) != std::string::npos)
-            break;
-        auto const storage = pool.allocateBufferObject();
-        if (auto const result = process.read(*storage, 100ms, 4096); result && !result->data.empty())
-            collected.append(result->data);
-    }
-    return collected;
+    return vtpty::testing::readUntil(process, [](std::string_view text) {
+        auto const at = text.find("0::");
+        return at != std::string_view::npos && text.find('\n', at) != std::string_view::npos;
+    });
 }
 
 /// Spawns the hog under @p placementName and checks how it ended.
@@ -126,11 +114,9 @@ int drive(std::string_view placementName)
         std::println(stderr, "the hog exited with {} instead of being killed", exited->exitCode);
         return exited->exitCode == ExitLimitNotEnforced ? ExitLimitNotEnforced : ExitFailed;
     }
-    if (std::get<vtpty::Process::SignalExit>(*status).signum != SIGKILL)
+    if (auto const signum = std::get<vtpty::Process::SignalExit>(*status).signum; signum != SIGKILL)
     {
-        std::println(stderr,
-                     "the hog died by signal {}, not SIGKILL",
-                     std::get<vtpty::Process::SignalExit>(*status).signum);
+        std::println(stderr, "the hog died by signal {}, not SIGKILL", signum);
         return ExitFailed;
     }
     if (placementName == "systemd" && !cgroup.contains("/contour-session-"))

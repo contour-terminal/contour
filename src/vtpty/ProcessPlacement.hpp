@@ -80,8 +80,8 @@ class NoPlacement final: public ProcessPlacement
 };
 
 /// @return The placement this build and platform support: systemd scopes on a Linux build with
-///         CONTOUR_WITH_SYSTEMD outside Flatpak, NoPlacement otherwise. Cheap: nothing connects
-///         until the first child is placed.
+///         CONTOUR_WITH_SYSTEMD (which a Flatpak build turns off), NoPlacement otherwise. Cheap: nothing
+///         connects until the first child is placed.
 [[nodiscard]] std::shared_ptr<ProcessPlacement> makeDefaultProcessPlacement();
 
 } // namespace vtpty

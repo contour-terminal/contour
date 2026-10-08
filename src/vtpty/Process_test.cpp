@@ -2,8 +2,7 @@
 #include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
-
-#include <crispy/BufferObject.hpp>
+#include <vtpty/test/PtyReading.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,6 +26,7 @@
 #endif
 
 using namespace std::chrono_literals;
+using vtpty::testing::printed;
 
 namespace
 {
@@ -99,21 +99,19 @@ std::unique_ptr<vtpty::Process> shellRunning(std::vector<std::string> arguments,
         std::move(placement));
 }
 
-/// Reads @p pty until @p needle shows up, for at most about 15 seconds.
-/// @return What was read.
-std::string drainUntil(vtpty::Pty& pty, std::string_view needle)
+/// Hangs up @p process and waits for it.
+/// @return How it ended.
+std::optional<vtpty::Process::ExitStatus> hangUp(vtpty::Process& process)
 {
-    auto pool = crispy::BufferObjectPool<char> { 4096 };
-    auto collected = std::string {};
-    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 300))
-    {
-        if (collected.contains(needle))
-            break;
-        auto const storage = pool.allocateBufferObject();
-        if (auto const result = pty.read(*storage, 50ms, 4096); result && !result->data.empty())
-            collected.append(result->data);
-    }
-    return collected;
+    process.terminate(vtpty::Process::TerminationHint::Hangup);
+    return process.wait();
+}
+
+/// @return Whether @p status says the child was ended by SIGHUP.
+bool endedByHangup(std::optional<vtpty::Process::ExitStatus> const& status)
+{
+    auto const* const signalled = status ? std::get_if<vtpty::Process::SignalExit>(&*status) : nullptr;
+    return signalled != nullptr && signalled->signum == SIGHUP;
 }
 
     #ifdef __linux__
@@ -178,23 +176,12 @@ TEST_CASE("Process.withChild", "[process]")
 {
     // The counterpart: once start() has spawned a child, it is that child -- and only that child -- which
     // is asked about, signalled and waited for.
-    auto process = std::make_unique<vtpty::Process>(
-        vtpty::Process::ExecInfo {
-            .program = "/bin/sh", .arguments = { "-c", "exec sleep 30" }, .workingDirectory = {}, .env = {} },
-        vtpty::createPty(PageSize, std::nullopt),
-        /*escapeSandbox=*/false,
-        std::make_shared<vtpty::NoPlacement>());
+    auto process = shellRunning({ "-c", "exec sleep 30" }, std::make_shared<vtpty::NoPlacement>());
     REQUIRE(process->start().has_value());
     CHECK(process->alive());
     CHECK_FALSE(process->checkStatus().has_value());
 
-    process->terminate(vtpty::Process::TerminationHint::Hangup);
-
-    auto const status = process->wait();
-    REQUIRE(status.has_value());
-    auto const* const signalled = std::get_if<vtpty::Process::SignalExit>(&*status);
-    REQUIRE(signalled != nullptr);
-    CHECK(signalled->signum == SIGHUP);
+    CHECK(endedByHangup(hangUp(*process)));
     CHECK_FALSE(process->alive());
 }
 TEST_CASE("Process.parkedUntilReleased", "[process][placement]")
@@ -210,15 +197,14 @@ TEST_CASE("Process.parkedUntilReleased", "[process][placement]")
     #endif
 
     placement->release(pid);
-    CHECK(drainUntil(*process, "ready").contains("ready"));
+    CHECK(printed(*process, "ready"));
     #ifdef __linux__
     CHECK(executableOf(pid) != executableOf(::getpid()));
     // The child raised its own oom_score_adj before parking, and exec() kept it.
     CHECK(oomScoreAdjustOf(pid) == std::min(oomScoreAdjustOf(::getpid()) + 100, 1000));
     #endif
 
-    process->terminate(vtpty::Process::TerminationHint::Hangup);
-    (void) process->wait();
+    (void) hangUp(*process);
 }
 
 TEST_CASE("Process.releasedWhenThePlacementDropsIt", "[process][placement]")
@@ -227,9 +213,8 @@ TEST_CASE("Process.releasedWhenThePlacementDropsIt", "[process][placement]")
     auto process = shellRunning({ "-c", "printf ready; exec sleep 30" }, placement);
     REQUIRE(process->start().has_value());
     placement->drop();
-    CHECK(drainUntil(*process, "ready").contains("ready"));
-    process->terminate(vtpty::Process::TerminationHint::Hangup);
-    (void) process->wait();
+    CHECK(printed(*process, "ready"));
+    (void) hangUp(*process);
 }
 
 TEST_CASE("Process.concurrentSpawnsDoNotWaitOnEachOther", "[process][placement]")
@@ -244,15 +229,14 @@ TEST_CASE("Process.concurrentSpawnsDoNotWaitOnEachOther", "[process][placement]"
     REQUIRE(placement->pids().size() == 2);
 
     placement->release(placement->pids()[0]);
-    CHECK(drainUntil(*first, "first").contains("first"));
+    CHECK(printed(*first, "first"));
 
     placement->release(placement->pids()[1]);
-    CHECK(drainUntil(*second, "second").contains("second"));
+    CHECK(printed(*second, "second"));
 
     for (auto* const process: { first.get(), second.get() })
     {
-        process->terminate(vtpty::Process::TerminationHint::Hangup);
-        (void) process->wait();
+        (void) hangUp(*process);
     }
 }
 
@@ -265,12 +249,7 @@ TEST_CASE("Process.terminateWhileParked", "[process][placement]")
     auto process = shellRunning({ "-c", "exec sleep 30" }, placement);
     REQUIRE(process->start().has_value());
 
-    process->terminate(vtpty::Process::TerminationHint::Hangup);
-    auto const status = process->wait();
-    REQUIRE(status.has_value());
-    auto const* const signalled = std::get_if<vtpty::Process::SignalExit>(&*status);
-    REQUIRE(signalled != nullptr);
-    CHECK(signalled->signum == SIGHUP);
+    CHECK(endedByHangup(hangUp(*process)));
 
     placement->drop();
     std::signal(SIGPIPE, previous);
