@@ -178,10 +178,12 @@ Process::Process(string const& path,
                  fs::path const& cwd,
                  Environment const& env,
                  bool escapeSandbox,
-                 std::unique_ptr<Pty> pty):
+                 std::unique_ptr<Pty> pty,
+                 std::shared_ptr<ProcessPlacement> placement):
     _d(new Private { path, args, cwd, env, std::move(pty) }, [](Private* p) { delete p; })
 {
     core::ignoreUnused(escapeSandbox);
+    core::ignoreUnused(placement); // a ConPTY child has no cgroup to leave
 }
 
 bool Process::isFlatpak()

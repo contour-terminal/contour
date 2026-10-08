@@ -82,9 +82,12 @@ namespace
     /// @param socketPath    The daemon's control socket, which every hosted shell is told about so
     ///                      it can reach back. Merged in here rather than by the caller, so that
     ///                      every entry into runDaemon() hosts shells that can find their own daemon.
+    /// @param placement     Moves each hosted shell into its own resource domain, so an
+    ///                      out-of-memory kill inside one cannot stop the daemon's unit.
     [[nodiscard]] PtyFactory makeShellPtyFactory(vtpty::Process::ExecInfo shell,
                                                  bool escapeSandbox,
-                                                 std::filesystem::path const& socketPath)
+                                                 std::filesystem::path const& socketPath,
+                                                 std::shared_ptr<vtpty::ProcessPlacement> placement)
     {
         // insert_or_assign, so the daemon wins over a profile that set the same name: a hosted
         // shell being told where a DIFFERENT daemon lives is never what was meant, and the shell has
@@ -92,20 +95,20 @@ namespace
         for (auto const& [name, value]: hostedShellEnvironment(socketPath))
             shell.env.insert_or_assign(name, value);
 
-        return [shell = std::move(shell),
-                escapeSandbox](vtbackend::PageSize pageSize,
-                               std::optional<vtpty::Process::ExecInfo> const& commandOverride)
-                   -> std::unique_ptr<vtpty::Pty> {
-            // Work on a local copy: `shell` is captured by the closure and reused for every
-            // session this factory spawns, so writing one session's override back into it would
-            // leak that pane's command/directory into every later session with no override of
-            // its own. Mirrors AppSessionFactory::createPty's identical local-copy comment for
-            // the same reason on the local-GUI path.
-            auto effective = shell;
-            vtpty::Process::applyCommandOverride(effective, commandOverride);
-            return std::make_unique<vtpty::Process>(
-                effective, vtpty::createPty(pageSize, std::nullopt), escapeSandbox);
-        };
+        return
+            [shell = std::move(shell), escapeSandbox, placement = std::move(placement)](
+                vtbackend::PageSize pageSize, std::optional<vtpty::Process::ExecInfo> const& commandOverride)
+                -> std::unique_ptr<vtpty::Pty> {
+                // Work on a local copy: `shell` is captured by the closure and reused for every
+                // session this factory spawns, so writing one session's override back into it would
+                // leak that pane's command/directory into every later session with no override of
+                // its own. Mirrors AppSessionFactory::createPty's identical local-copy comment for
+                // the same reason on the local-GUI path.
+                auto effective = shell;
+                vtpty::Process::applyCommandOverride(effective, commandOverride);
+                return std::make_unique<vtpty::Process>(
+                    effective, vtpty::createPty(pageSize, std::nullopt), escapeSandbox, placement);
+            };
     }
 
     /// Reads the whole file at @p path, or nullopt if it cannot be opened.
@@ -565,7 +568,10 @@ int runDaemon(DaemonConfig const& config)
     auto loop = core::net::EventLoop { *source };
 
     auto host = SessionHost { loop,
-                              makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath),
+                              makeShellPtyFactory(config.shell,
+                                                  config.escapeSandbox,
+                                                  config.socketPath,
+                                                  vtpty::makeDefaultProcessPlacement()),
                               config.settings,
                               core::defaultEnvironment(),
                               /*startPumps=*/true,
@@ -754,7 +760,10 @@ int runDaemon(DaemonConfig const& config)
     auto loop = core::net::EventLoop { *source };
 
     auto host = SessionHost { loop,
-                              makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath),
+                              makeShellPtyFactory(config.shell,
+                                                  config.escapeSandbox,
+                                                  config.socketPath,
+                                                  vtpty::makeDefaultProcessPlacement()),
                               config.settings,
                               core::defaultEnvironment(),
                               /*startPumps=*/true,

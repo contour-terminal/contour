@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/Pty.hpp>
 
 #include <crispy/BufferObject.hpp>
@@ -71,17 +72,31 @@ class [[nodiscard]] Process: public Pty
             shell.workingDirectory = commandOverride->workingDirectory;
     }
 
-    Process(ExecInfo const& exe, std::unique_ptr<Pty> pty, bool escapeSandbox):
-        Process(exe.program, exe.arguments, exe.workingDirectory, exe.env, escapeSandbox, std::move(pty))
+    /// @param placement Moves each spawned child into its own resource domain before it runs; never
+    ///                  null. @see ProcessPlacement.
+    Process(ExecInfo const& exe,
+            std::unique_ptr<Pty> pty,
+            bool escapeSandbox,
+            std::shared_ptr<ProcessPlacement> placement):
+        Process(exe.program,
+                exe.arguments,
+                exe.workingDirectory,
+                exe.env,
+                escapeSandbox,
+                std::move(pty),
+                std::move(placement))
     {
     }
 
+    /// @param placement Moves each spawned child into its own resource domain before it runs; never
+    ///                  null. @see ProcessPlacement.
     Process(std::string const& path,
             std::vector<std::string> const& args,
             std::filesystem::path const& cwd,
             Environment const& env,
             bool escapeSandbox,
-            std::unique_ptr<Pty> pty);
+            std::unique_ptr<Pty> pty,
+            std::shared_ptr<ProcessPlacement> placement);
 
     ~Process() override;
 

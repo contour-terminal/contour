@@ -65,7 +65,7 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     auto const initialSize = childPtyPageSize(pageSize.value_or(profile->terminalSize.value()),
                                               profile->statusLine.value().initialType);
     return make_unique<vtpty::Process>(
-        shell, vtpty::createPty(initialSize, nullopt), profile->escapeSandbox.value());
+        shell, vtpty::createPty(initialSize, nullopt), profile->escapeSandbox.value(), _placement);
 }
 
 #ifdef VTPTY_LIBSSH2

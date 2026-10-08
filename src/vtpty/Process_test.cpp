@@ -1,14 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
+#include <vtpty/ProcessPlacement.hpp>
+
+#include <crispy/BufferObject.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <csignal>
 #include <expected>
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <memory>
 #include <optional>
+#include <ranges>
+#include <string>
+#include <string_view>
 #include <variant>
+#include <vector>
+
+#ifndef _WIN32
+    #include <unistd.h>
+#endif
+
+using namespace std::chrono_literals;
 
 namespace
 {
@@ -32,10 +50,89 @@ std::unique_ptr<vtpty::Process> shellOn(std::unique_ptr<vtpty::Pty> pty)
     return std::make_unique<vtpty::Process>(
         vtpty::Process::ExecInfo { .program = "/bin/sh", .arguments = {}, .workingDirectory = {}, .env = {} },
         std::move(pty),
-        /*escapeSandbox=*/false);
+        /*escapeSandbox=*/false,
+        std::make_shared<vtpty::NoPlacement>());
 }
 
 auto constexpr PageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
+
+#ifndef _WIN32
+/// Holds every child it is handed, parked, until the test lets it go.
+class RecordingPlacement final: public vtpty::ProcessPlacement
+{
+  public:
+    void placeThenRelease(vtpty::ParkedChild child) override { _parked.push_back(std::move(child)); }
+
+    /// @return The pids of the children handed over so far, in spawn order.
+    [[nodiscard]] std::vector<int> pids() const
+    {
+        auto result = std::vector<int> {};
+        for (auto const& child: _parked)
+            result.push_back(child.pid());
+        return result;
+    }
+
+    /// Releases the child with @p pid, keeping it recorded.
+    void release(int pid)
+    {
+        for (auto& child: _parked)
+            if (child.pid() == pid)
+                child.release();
+    }
+
+    /// Destroys every recorded child without releasing it first: their destructors must do it.
+    void drop() { _parked.clear(); }
+
+  private:
+    std::vector<vtpty::ParkedChild> _parked;
+};
+
+/// @return A not yet started Process running `/bin/sh` with @p arguments, placed by @p placement.
+std::unique_ptr<vtpty::Process> shellRunning(std::vector<std::string> arguments,
+                                             std::shared_ptr<vtpty::ProcessPlacement> placement)
+{
+    return std::make_unique<vtpty::Process>(
+        vtpty::Process::ExecInfo {
+            .program = "/bin/sh", .arguments = std::move(arguments), .workingDirectory = {}, .env = {} },
+        vtpty::createPty(PageSize, std::nullopt),
+        /*escapeSandbox=*/false,
+        std::move(placement));
+}
+
+/// Reads @p pty until @p needle shows up, for at most about 15 seconds.
+/// @return What was read.
+std::string drainUntil(vtpty::Pty& pty, std::string_view needle)
+{
+    auto pool = crispy::BufferObjectPool<char> { 4096 };
+    auto collected = std::string {};
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 300))
+    {
+        if (collected.contains(needle))
+            break;
+        auto const storage = pool.allocateBufferObject();
+        if (auto const result = pty.read(*storage, 50ms, 4096); result && !result->data.empty())
+            collected.append(result->data);
+    }
+    return collected;
+}
+
+    #ifdef __linux__
+/// @return The oom_score_adj of process @p pid. Read as a stream: /proc reports its files as empty.
+int oomScoreAdjustOf(int pid)
+{
+    auto value = 0;
+    auto in = std::ifstream { std::format("/proc/{}/oom_score_adj", pid) };
+    REQUIRE(in >> value);
+    return value;
+}
+
+/// @return The executable process @p pid runs.
+std::filesystem::path executableOf(int pid)
+{
+    return std::filesystem::read_symlink(std::format("/proc/{}/exe", pid));
+}
+    #endif
+#endif
 
 } // namespace
 
@@ -85,7 +182,8 @@ TEST_CASE("Process.withChild", "[process]")
         vtpty::Process::ExecInfo {
             .program = "/bin/sh", .arguments = { "-c", "exec sleep 30" }, .workingDirectory = {}, .env = {} },
         vtpty::createPty(PageSize, std::nullopt),
-        /*escapeSandbox=*/false);
+        /*escapeSandbox=*/false,
+        std::make_shared<vtpty::NoPlacement>());
     REQUIRE(process->start().has_value());
     CHECK(process->alive());
     CHECK_FALSE(process->checkStatus().has_value());
@@ -98,5 +196,83 @@ TEST_CASE("Process.withChild", "[process]")
     REQUIRE(signalled != nullptr);
     CHECK(signalled->signum == SIGHUP);
     CHECK_FALSE(process->alive());
+}
+TEST_CASE("Process.parkedUntilReleased", "[process][placement]")
+{
+    auto placement = std::make_shared<RecordingPlacement>();
+    auto process = shellRunning({ "-c", "printf ready; exec sleep 30" }, placement);
+    REQUIRE(process->start().has_value());
+    REQUIRE(placement->pids().size() == 1);
+    auto const pid = placement->pids().front();
+    #ifdef __linux__
+    // Still the forked copy of this test binary: the child has not reached exec().
+    CHECK(executableOf(pid) == executableOf(::getpid()));
+    #endif
+
+    placement->release(pid);
+    CHECK(drainUntil(*process, "ready").contains("ready"));
+    #ifdef __linux__
+    CHECK(executableOf(pid) != executableOf(::getpid()));
+    // The child raised its own oom_score_adj before parking, and exec() kept it.
+    CHECK(oomScoreAdjustOf(pid) == std::min(oomScoreAdjustOf(::getpid()) + 100, 1000));
+    #endif
+
+    process->terminate(vtpty::Process::TerminationHint::Hangup);
+    (void) process->wait();
+}
+
+TEST_CASE("Process.releasedWhenThePlacementDropsIt", "[process][placement]")
+{
+    auto placement = std::make_shared<RecordingPlacement>();
+    auto process = shellRunning({ "-c", "printf ready; exec sleep 30" }, placement);
+    REQUIRE(process->start().has_value());
+    placement->drop();
+    CHECK(drainUntil(*process, "ready").contains("ready"));
+    process->terminate(vtpty::Process::TerminationHint::Hangup);
+    (void) process->wait();
+}
+
+TEST_CASE("Process.concurrentSpawnsDoNotWaitOnEachOther", "[process][placement]")
+{
+    // The second child is forked while the first is parked, and so inherits the parent's end of the
+    // first one's gate. Releasing the first must not depend on the second.
+    auto placement = std::make_shared<RecordingPlacement>();
+    auto first = shellRunning({ "-c", "printf first; exec sleep 30" }, placement);
+    auto second = shellRunning({ "-c", "printf second; exec sleep 30" }, placement);
+    REQUIRE(first->start().has_value());
+    REQUIRE(second->start().has_value());
+    REQUIRE(placement->pids().size() == 2);
+
+    placement->release(placement->pids()[0]);
+    CHECK(drainUntil(*first, "first").contains("first"));
+
+    placement->release(placement->pids()[1]);
+    CHECK(drainUntil(*second, "second").contains("second"));
+
+    for (auto* const process: { first.get(), second.get() })
+    {
+        process->terminate(vtpty::Process::TerminationHint::Hangup);
+        (void) process->wait();
+    }
+}
+
+TEST_CASE("Process.terminateWhileParked", "[process][placement]")
+{
+    // A tab closed before its shell was released: the parked child dies, wait() returns, and the
+    // later release of a child nobody is reading for must not raise SIGPIPE here.
+    auto* const previous = std::signal(SIGPIPE, SIG_DFL);
+    auto placement = std::make_shared<RecordingPlacement>();
+    auto process = shellRunning({ "-c", "exec sleep 30" }, placement);
+    REQUIRE(process->start().has_value());
+
+    process->terminate(vtpty::Process::TerminationHint::Hangup);
+    auto const status = process->wait();
+    REQUIRE(status.has_value());
+    auto const* const signalled = std::get_if<vtpty::Process::SignalExit>(&*status);
+    REQUIRE(signalled != nullptr);
+    CHECK(signalled->signum == SIGHUP);
+
+    placement->drop();
+    std::signal(SIGPIPE, previous);
 }
 #endif

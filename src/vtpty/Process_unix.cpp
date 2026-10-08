@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/Process.hpp>
+#include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/SandboxInfo.hpp>
 #include <vtpty/UnixPty.hpp>
 
+#include <core/Assert.hpp>
 #include <core/Environment.hpp>
 #include <core/Overloaded.hpp>
 #include <core/UserInfo.hpp>
 #include <core/Utils.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstddef>
@@ -16,6 +19,7 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <mutex>
 #include <span>
 #include <string>
@@ -33,6 +37,8 @@
 #endif
 
 #ifdef __linux__
+    #include <sys/syscall.h>
+
     #include <pty.h>
 #endif
 
@@ -41,6 +47,7 @@
 
 #include <csignal>
 
+#include <fcntl.h>
 #include <unistd.h>
 
 // POSIX requires no header to declare `environ`; each platform is left to differ, and all three we
@@ -133,7 +140,63 @@ namespace
                        // earlier call -- the child inherits the parent's errno -- would spin forever.
         }
     }
+
+    /// Writes @p value to this process's own oom_score_adj; a failure is ignored.
+    ///
+    /// @param value The text to write, prepared before fork(); nothing is written when empty.
+    void writeOwnOomScoreAdjust(string_view value) noexcept
+    {
+        if (value.empty())
+            return;
+        auto const fd = ::open("/proc/self/oom_score_adj", O_WRONLY | O_CLOEXEC);
+        if (fd < 0)
+            return;
+        writeAll(fd, value);
+        ::close(fd);
+    }
+
+    /// Blocks until the parent releases the gate: a byte, end-of-file, or any error but EINTR.
+    ///
+    /// @param fd The child's end of the gate.
+    void awaitGate(int fd) noexcept
+    {
+        auto byte = char {};
+        while (::read(fd, &byte, 1) < 0 && errno == EINTR)
+            ;
+    }
     // }}}
+
+    /// How much likelier than Contour a session's process is to be the kernel's out-of-memory
+    /// victim, and the ceiling the kernel accepts. @see childOomScoreAdjust().
+    constexpr auto ChildOomScoreAdjustIncrement = 100;
+    constexpr auto MaxOomScoreAdjust = 1000;
+
+    /// @return The oom_score_adj the child writes for itself, as text; empty where there is none.
+    ///         Raising one's own value takes no privilege, and in a global out-of-memory it makes the
+    ///         kernel pick a session's process before Contour.
+    [[nodiscard]] string childOomScoreAdjust()
+    {
+#ifdef __linux__
+        // Read as a stream: /proc reports its files as empty, so a read sized by file_size() gets nothing.
+        auto own = 0;
+        if (auto in = std::ifstream { "/proc/self/oom_score_adj" }; !(in >> own))
+            return {};
+        return std::to_string(std::min(own + ChildOomScoreAdjustIncrement, MaxOomScoreAdjust));
+#else
+        return {};
+#endif
+    }
+
+    /// @return A pidfd for @p pid, or an empty OwnedFd where the kernel has none (before Linux 5.3).
+    [[nodiscard]] OwnedFd openPidFd(pid_t pid) noexcept
+    {
+#if defined(__linux__) && defined(SYS_pidfd_open)
+        return OwnedFd { static_cast<int>(::syscall(SYS_pidfd_open, pid, 0)) };
+#else
+        core::ignoreUnused(pid);
+        return OwnedFd {};
+#endif
+    }
 
     /// Builds the child's environment as "NAME=VALUE" entries: the current environment, with
     /// @p overrides replacing same-named entries.
@@ -202,6 +265,7 @@ struct Process::Private
     bool escapeSandbox;
 
     unique_ptr<Pty> pty {};
+    shared_ptr<ProcessPlacement> placement {};
 
     // The child's id, or NoChild: before start() spawned one, when fork() failed, and once the child has
     // been reaped. Never 0, which waitpid() and kill() read as the caller's whole process group, nor any
@@ -225,15 +289,18 @@ Process::Process(string const& path,
                  fs::path const& cwd,
                  Environment const& env,
                  bool escapeSandbox,
-                 unique_ptr<Pty> pty):
+                 unique_ptr<Pty> pty,
+                 shared_ptr<ProcessPlacement> placement):
     _d(new Private { .path = path,
                      .args = args,
                      .cwd = cwd,
                      .env = env,
                      .escapeSandbox = escapeSandbox,
-                     .pty = std::move(pty) },
+                     .pty = std::move(pty),
+                     .placement = std::move(placement) },
        [](Private* p) { delete p; })
 {
+    Require(_d->placement != nullptr);
 }
 
 bool Process::isFlatpak()
@@ -346,21 +413,39 @@ StartResult Process::start()
         loginShellArgv.push_back(nullptr);
     }
 
+    // The gate parks the child between fork() and exec() until the placement has moved it into its
+    // own resource domain, so everything it forks from then on is born there too. @see ProcessPlacement.
+    auto gate = makeGate();
+    if (!gate)
+        return std::unexpected(
+            StartFailure { .error = StartError::SpawnFailed, .detail = gate.error().message() });
+    auto const oomScoreAdjust = childOomScoreAdjust();
+
     auto const forked = fork();
 
     switch (forked)
     {
         default: // in parent
             core::locked(_d->exitStatusMutex, [&] { _d->pid = forked; });
+            gate->childEnd.reset();
             _d->pty->slave().close();
             if (stdoutFastPipe)
                 stdoutFastPipe->closeWriter();
+            _d->placement->placeThenRelease(
+                ParkedChild { forked, openPidFd(forked), std::move(gate->parentEnd) });
             break;
         case -1: // fork error: there is no child, and pid keeps saying so
             return std::unexpected(
                 StartFailure { .error = StartError::SpawnFailed, .detail = getLastErrorAsString() });
         case 0: // in child
         {
+            // Parked first, before the setup below can dup2() over the gate's descriptors. Only
+            // async-signal-safe calls, on values prepared before the fork.
+            ::close(gate->parentEnd.get());
+            writeOwnOomScoreAdjust(oomScoreAdjust);
+            awaitGate(gate->childEnd.get());
+            ::close(gate->childEnd.get());
+
             (void) _d->pty->slave().login();
 
             auto const& cwd = _d->cwd.generic_string();
