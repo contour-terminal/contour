@@ -3654,6 +3654,11 @@ void Terminal::setWarningBellVolume(BellVolume volume)
     _settings.warningBellVolume = volume;
 }
 
+void Terminal::setMarginBellVolume(BellVolume volume)
+{
+    _settings.marginBellVolume = volume;
+}
+
 void Terminal::setGenerateFocusEvents(bool enabled)
 {
     _inputGenerator.setGenerateFocusEvents(enabled);
@@ -4396,6 +4401,7 @@ void Terminal::hardReset()
     _checksumExtension = _settings.checksumExtension;                       // XTCHECKSUM
     _userPreferredSupplementalSet = _settings.userPreferredSupplementalSet; // DECAUPSS
     _settings.warningBellVolume = _factorySettings.warningBellVolume;       // DECSWBV
+    _settings.marginBellVolume = _factorySettings.marginBellVolume;         // DECSMBV
 
     // RIS restores the title modes to their default (xterm resets title_modes only on a full reset, not
     // on DECSTR). @see resetTitleModes, TitleModeFeature.

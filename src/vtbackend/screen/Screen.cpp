@@ -3846,17 +3846,45 @@ namespace impl
         {
             if (seq.parameterCount() <= 1)
             {
+                // Per the VT510 manual, an omitted Ps and 0 select high, which is also the default.
+                // xterm's ctlseqs lists 0 as off, which disagrees with DEC's own manual.
                 switch (seq.paramOr(0, Sequence::Parameter { 0 }))
                 {
-                    case 0:
                     case 1: terminal.setWarningBellVolume(BellVolume::Off); break;
                     case 2:
                     case 3:
                     case 4: terminal.setWarningBellVolume(BellVolume::Low); break;
+                    case 0:
                     case 5:
                     case 6:
                     case 7:
                     case 8: terminal.setWarningBellVolume(BellVolume::High); break;
+                    default: return ApplyResult::Invalid;
+                }
+                return ApplyResult::Ok;
+            }
+            else
+                return ApplyResult::Invalid;
+        }
+
+        // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
+        ApplyResult DECSMBV(Sequence const& seq, Terminal& terminal)
+        {
+            if (seq.parameterCount() <= 1)
+            {
+                // Per the VT510 manual, an omitted Ps, 0 and 1 all select off, which is also the
+                // default. xterm's ctlseqs lists 0 as high, which disagrees with DEC's own manual.
+                switch (seq.paramOr(0, Sequence::Parameter { 0 }))
+                {
+                    case 0:
+                    case 1: terminal.setMarginBellVolume(BellVolume::Off); break;
+                    case 2:
+                    case 3:
+                    case 4: terminal.setMarginBellVolume(BellVolume::Low); break;
+                    case 5:
+                    case 6:
+                    case 7:
+                    case 8: terminal.setMarginBellVolume(BellVolume::High); break;
                     default: return ApplyResult::Invalid;
                 }
                 return ApplyResult::Ok;
@@ -6836,6 +6864,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return ApplyResult::Ok;
         }
         case DECSCUSR: return impl::DECSCUSR(seq, *_terminal);
+        case DECSMBV: return impl::DECSMBV(seq, *_terminal);
         case DECSCPP:
             if (auto const columnCount = seq.paramOr(0, 80); columnCount == 80 || columnCount == 132)
             {
