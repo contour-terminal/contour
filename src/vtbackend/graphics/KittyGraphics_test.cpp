@@ -1023,4 +1023,16 @@ TEST_CASE("KittyGraphics.storage.a_retransmission_is_not_billed_for_the_frames_i
     // counted against them.
     CHECK(replyTo(mock, "\033_Ga=t,f=24,i=1,s=4,v=1;AAAAAAAAAAAAAAAA\033\\"sv).contains("OK"));
 }
+
+TEST_CASE("KittyGraphics.storage.editing_the_root_frame_is_billed_once", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.terminal.settings().kittyImageStorageQuota = 6; // Exactly one 2x1 RGB image.
+    REQUIRE(replyTo(mock, "\033_Ga=t,f=24,i=1,s=2,v=1;/wAAAP8A\033\\"sv).contains("OK"));
+
+    // Editing frame 1 replaces the stored image rather than adding to it, so it must fit.
+    CHECK(replyTo(mock, "\033_Ga=f,i=1,r=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv).contains("OK"));
+    // A second frame, by contrast, really is a second copy.
+    CHECK(replyTo(mock, "\033_Ga=f,i=1,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv).contains("ENOSPC"));
+}
 // }}}

@@ -6070,16 +6070,16 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     // Frames are full copies of the image, so a frame count alone bounds nothing: 128 MiB of base
     // images at 128 frames each is 16 GiB of pixels. Charged against the same quota the stored images
     // are, discounting the frame this one replaces so that editing in place -- the most
-    // bandwidth-efficient thing the protocol offers -- is not billed for both copies.
-    auto const replaced = frameAt(target);
-    auto const replacedBytes = replaced && replaced != stored->second ? replaced->data().size() : 0;
-    if (storedKittyBytes() - replacedBytes + frame->data().size() > _settings->kittyImageStorageQuota)
+    // bandwidth-efficient thing the protocol offers -- is not billed for both copies. The root frame
+    // is no exception: editing it moves the stored image along (see below), freeing the old one.
+    auto const superseded = frameAt(target);
+    auto const supersededBytes = superseded ? superseded->data().size() : 0;
+    if (storedKittyBytes() - supersededBytes + frame->data().size() > _settings->kittyImageStorageQuota)
     {
         replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
         return;
     }
 
-    auto const superseded = frameAt(target);
     auto* animation = kittyAnimationFor(command.imageId);
     Require(animation != nullptr); // The image was found above.
     if (target > animation->frames.size())
