@@ -24,6 +24,8 @@ if(APPLE AND CONTOUR_FRONTEND_GUI)
     set(CONTOUR_MACOS_APP_BUNDLE ON)
 endif()
 
+option(CONTOUR_MACOS_DEPLOY "Run macdeployqt + prune/verify/sign on the macOS app bundle" ON)
+
 NumberToHex(${PROJECT_VERSION_MAJOR} HEX_MAJOR)
 NumberToHex(${PROJECT_VERSION_MINOR} HEX_MINOR)
 NumberToHex(${PROJECT_VERSION_PATCH} HEX_PATCH)
@@ -174,7 +176,7 @@ if(CONTOUR_FRONTEND_GUI)
     add_subdirectory(display)
 endif()
 
-if(CONTOUR_MACOS_APP_BUNDLE)
+if(CONTOUR_MACOS_APP_BUNDLE AND CONTOUR_MACOS_DEPLOY)
     #set(CMAKE_INSTALL_RPATH "@executable_path")
     set(CMAKE_INSTALL_RPATH "@executable_path/../Frameworks")
     # vcpkg gives its dylibs an `@rpath/libfoo.dylib` install name, and macdeployqt expands
@@ -959,7 +961,9 @@ if(CONTOUR_MACOS_APP_BUNDLE)
     # verifies, signs and notarizes the bundle, so without an interpreter there is no way
     # to produce a distributable artifact at all. Failing at configure time beats failing
     # halfway through an install.
-    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    if(CONTOUR_MACOS_DEPLOY)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    endif()
 endif()
 # }}}
 
@@ -968,7 +972,7 @@ if(NOT(CPACK_GENERATOR))
     # A disk image is a way to hand someone an app to drag into /Applications; without a bundle to
     # put in it there is nothing to drag, so a GUI-less macOS build falls through to CPack's own
     # default (a tarball) like any other Unix CLI tool.
-    if(CONTOUR_MACOS_APP_BUNDLE)
+    if(CONTOUR_MACOS_APP_BUNDLE AND CONTOUR_MACOS_DEPLOY)
         set(CPACK_GENERATOR DragNDrop)
     elseif(WIN32)
         set(CPACK_GENERATOR WIX ZIP)
@@ -1004,7 +1008,7 @@ if(WIN32)
     set(CPACK_WIX_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/packaging/wix_patch.xml")
     set(CPACK_WIX_PROPERTY_WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT "Launch Contour")
 endif()
-if(CONTOUR_MACOS_APP_BUNDLE)
+if(CONTOUR_MACOS_APP_BUNDLE AND CONTOUR_MACOS_DEPLOY)
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
     set(CPACK_DMG_VOLUME_NAME "Contour")
 
@@ -1083,24 +1087,25 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
         RUNTIME DESTINATION "${INSTALL_RUNTIME_DIR}" COMPONENT Runtime
     )
 
-    include(DeployQt)  # Just to get access to ${MACDEPLOYQT_EXECUTABLE}
-    get_filename_component(_macdeployqt_path "${MACDEPLOYQT_EXECUTABLE}" PATH)
-    message(STATUS "macdeployqt location: ${MACDEPLOYQT_EXECUTABLE}")
+    if(CONTOUR_MACOS_DEPLOY)
+        include(DeployQt)
+        get_filename_component(_macdeployqt_path "${MACDEPLOYQT_EXECUTABLE}" PATH)
+        message(STATUS "macdeployqt location: ${MACDEPLOYQT_EXECUTABLE}")
 
-    # Applied to contour.app only, never to nested code -- entitlements belong to the
-    # outermost signature. Both keys it contains relax hardened-runtime restrictions:
-    # allow-jit for the QML engine's V4 JIT (MAP_JIT), and disable-library-validation as
-    # insurance for Qt plugin loading. The file itself carries no comments explaining
-    # this, because the kernel's entitlements parser (AMFI) rejects XML comments outright;
-    # docs/internals/macos-code-signing.md has the reasoning.
-    set(_entitlements "${CMAKE_SOURCE_DIR}/support/macOS/entitlements.plist")
+        # Applied to contour.app only, never to nested code -- entitlements belong to the
+        # outermost signature. Both keys it contains relax hardened-runtime restrictions:
+        # allow-jit for the QML engine's V4 JIT (MAP_JIT), and disable-library-validation as
+        # insurance for Qt plugin loading. The file itself carries no comments explaining
+        # this, because the kernel's entitlements parser (AMFI) rejects XML comments outright;
+        # docs/internals/macos-code-signing.md has the reasoning.
+        set(_entitlements "${CMAKE_SOURCE_DIR}/support/macOS/entitlements.plist")
 
-    # Deploy, drop the plugins that cannot load, prove the result is self-contained,
-    # then sign it -- in that order, and with every step fatal on failure. macdeployqt
-    # reports unresolvable frameworks on stderr but still exits 0, so without the verify
-    # step a bundle missing half its Qt frameworks used to sail through the build and
-    # fail on the user's machine.
-    install(CODE "
+        # Deploy, drop the plugins that cannot load, prove the result is self-contained,
+        # then sign it -- in that order, and with every step fatal on failure. macdeployqt
+        # reports unresolvable frameworks on stderr but still exits 0, so without the verify
+        # step a bundle missing half its Qt frameworks used to sail through the build and
+        # fail on the user's machine.
+        install(CODE "
         set(_app \"\${CMAKE_INSTALL_PREFIX}/contour.app\")
 
         execute_process(
@@ -1159,6 +1164,7 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
             COMMAND_ERROR_IS_FATAL ANY
         )
     ")
+    endif()
 else()
     # Any other Unix -- and, since the branch above now takes only bundle builds, a GUI-less macOS
     # build too. That one produces a plain command-line binary, so it installs like any other Unix
