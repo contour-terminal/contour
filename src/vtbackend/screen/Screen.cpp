@@ -41,7 +41,6 @@
 #include <cstring>
 #include <iostream>
 #include <iterator>
-#include <numeric>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -5451,26 +5450,29 @@ std::optional<std::string_view> Screen::validateKittyTransmission(
     return std::nullopt;
 }
 
-void Screen::removeKittyPlacements(std::shared_ptr<Image const> const& image)
+void Screen::updateKittyFragments(std::predicate<ImageFragment const&> auto const& selects,
+                                  std::invocable<CellProxy&, ImageFragment const&> auto const& update)
 {
-    // Placements are not tracked separately: a placement IS the image fragments sitting in the cells
-    // it covers. Dropping one therefore means clearing those fragments, and only those -- the text
-    // sharing the cells is not the placement's to erase.
     for (auto const line: std::views::iota(0, *pageSize().lines))
     {
         for (auto const column: std::views::iota(0, *pageSize().columns))
         {
             auto cell = at(LineOffset(line), ColumnOffset(column));
             auto const fragment = cell.imageFragment();
-            if (!fragment)
+            if (!fragment || !selects(*fragment))
                 continue;
-            if (image && fragment->rasterizedImage().imagePointer() != image)
-                continue;
-            cell.clearImageFragment();
+            update(cell, *fragment);
             _terminal->markCellDirty(
                 CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) });
         }
     }
+}
+
+void Screen::removeAllKittyPlacements()
+{
+    // Only the fragments: the text sharing the cells is not the placement's to erase.
+    updateKittyFragments([](ImageFragment const&) { return true; },
+                         [](CellProxy& cell, ImageFragment const&) { cell.clearImageFragment(); });
 }
 
 std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics::Command const& command)
@@ -5485,7 +5487,7 @@ std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics
     switch (target)
     {
         case 'a':
-            removeKittyPlacements(nullptr);
+            removeAllKittyPlacements();
             if (freesData)
             {
                 // The frames go with the image they were composited from: they are full copies of
@@ -5520,10 +5522,10 @@ std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics
             // Frames only. The image and whatever is on screen survive -- this verb exists so a client
             // can reclaim frame memory while keeping the picture up, and clearing the cells would
             // force the re-transmission it is trying to avoid. What IS showing may be a frame rather
-            // than the base, so put the base back under it before the frames go.
+            // than the base -- the current one, since every advance replaces the frame before it --
+            // so put the base back under it before the frames go.
             if (auto const stored = _kittyImages.find(command.imageId); stored != _kittyImages.end())
-                for (auto const& frame: animation->second.frames)
-                    showKittyFrame(frame, stored->second);
+                showKittyFrame(animation->second.currentImage(), stored->second);
             _kittyAnimations.erase(animation);
             return {};
         }
@@ -5545,22 +5547,14 @@ void Screen::removeKittyPlacementsOf(uint32_t imageId)
         wanted.insert(image->second.get());
     if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
         for (auto const& frame: animation->second.frames)
-            if (frame)
-                wanted.insert(frame.get());
+            if (frame.image)
+                wanted.insert(frame.image.get());
 
-    for (auto const line: std::views::iota(0, *pageSize().lines))
-    {
-        for (auto const column: std::views::iota(0, *pageSize().columns))
-        {
-            auto cell = at(LineOffset(line), ColumnOffset(column));
-            auto const fragment = cell.imageFragment();
-            if (!fragment || !wanted.contains(fragment->rasterizedImage().imagePointer().get()))
-                continue;
-            cell.clearImageFragment();
-            _terminal->markCellDirty(
-                CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) });
-        }
-    }
+    updateKittyFragments(
+        [&](ImageFragment const& fragment) {
+            return wanted.contains(fragment.rasterizedImage().imagePointer().get());
+        },
+        [](CellProxy& cell, ImageFragment const&) { cell.clearImageFragment(); });
 }
 
 void Screen::resetKittyState() noexcept
@@ -5671,14 +5665,10 @@ void Screen::processKittyGraphics(std::string_view body)
             // The image's CURRENT frame, not its root: placing an animated image after advancing it
             // would otherwise show frame 1 while the terminal still records a later frame as current,
             // and a subsequent a=a for that same frame would be a no-op from the client's view.
-            auto const frame = [&] {
-                auto const animation = _kittyAnimations.find(command.imageId);
-                if (animation == _kittyAnimations.end() || animation->second.currentFrame == 0
-                    || animation->second.currentFrame > animation->second.frames.size())
-                    return it->second;
-                return animation->second.frames[animation->second.currentFrame - 1];
-            }();
-            renderKittyImage(command, frame);
+            auto const animation = _kittyAnimations.find(command.imageId);
+            auto const current =
+                animation != _kittyAnimations.end() ? animation->second.currentImage() : nullptr;
+            renderKittyImage(command, current ? current : it->second);
             replyKittyGraphics(command, "OK");
             return;
         }
@@ -5768,18 +5758,16 @@ size_t Screen::storedKittyBytes() const
 
 size_t Screen::storedKittyBytesOf(uint32_t imageId) const
 {
-    // Counted by distinct Image, not by vector slot: frame 1 aliases the stored image, so charging
-    // every slot would bill one image twice and refuse legitimate frames with ENOSPC.
-    auto seen = std::unordered_set<Image const*> {};
-    auto total = size_t { 0 };
-    auto const charge = [&](std::shared_ptr<Image const> const& image) {
-        if (image && seen.insert(image.get()).second)
-            total += image->data().size();
-    };
-    if (auto const image = _kittyImages.find(imageId); image != _kittyImages.end())
-        charge(image->second);
+    auto const stored = _kittyImages.find(imageId);
+    auto const image = stored != _kittyImages.end() ? stored->second : nullptr;
+    auto total = image ? image->data().size() : size_t { 0 };
+    // Frame 1 is the stored image itself, so charging it again would bill one image twice and refuse
+    // legitimate frames with ENOSPC. Every other frame is a copy of its own: a frame can only be
+    // created by compositing, and never by naming a number beyond the next.
     if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
-        std::ranges::for_each(animation->second.frames, charge);
+        for (auto const& frame: animation->second.frames)
+            if (frame.image && frame.image != image)
+                total += frame.image->data().size();
     return total;
 }
 
@@ -5795,11 +5783,25 @@ Screen::KittyAnimation* Screen::kittyAnimationFor(uint32_t imageId)
 
     auto& animation = _kittyAnimations[imageId];
     if (animation.frames.empty())
-    {
-        animation.frames.push_back(image->second);
-        animation.gapsMilliseconds.push_back(0);
-    }
+        animation.frames.push_back({ .image = image->second, .gapMilliseconds = 0 });
     return &animation;
+}
+
+uint32_t Screen::kittyFrameCount(uint32_t imageId) const
+{
+    if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
+        return static_cast<uint32_t>(animation->second.frames.size());
+    return _kittyImages.contains(imageId) ? 1 : 0;
+}
+
+std::shared_ptr<Image const> Screen::kittyFrameImage(uint32_t imageId, uint32_t number) const
+{
+    if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
+        return animation->second.frameImage(number);
+    // No animation yet: only the root frame exists, and it is the stored image.
+    if (auto const image = _kittyImages.find(imageId); number == 1 && image != _kittyImages.end())
+        return image->second;
+    return nullptr;
 }
 
 void Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
@@ -5819,23 +5821,16 @@ void Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
     // owning pointers so that a raster freed mid-walk cannot have its address reused by a replacement.
     auto replacements =
         std::unordered_map<std::shared_ptr<RasterizedImage const>, std::shared_ptr<RasterizedImage>> {};
-    for (auto const line: std::views::iota(0, *pageSize().lines))
-    {
-        for (auto const column: std::views::iota(0, *pageSize().columns))
-        {
-            auto cell = at(LineOffset(line), ColumnOffset(column));
-            auto const fragment = cell.imageFragment();
-            if (!fragment || fragment->rasterizedImage().imagePointer() != previous)
-                continue;
-
+    updateKittyFragments(
+        [&](ImageFragment const& fragment) { return fragment.rasterizedImage().imagePointer() == previous; },
+        [&](CellProxy& cell, ImageFragment const& fragment) {
             // Built from the fragment already on screen, so the new frame inherits the geometry,
             // alignment and gap colour the placement was made with -- rather than whatever the cursor
             // happens to carry now, which would repaint the letterbox in the current SGR background
             // and stamp the current hyperlink across every covered cell.
-            auto& replacement = replacements[fragment->rasterizedImage().shared_from_this()];
+            auto const& previousRaster = fragment.rasterizedImage();
+            auto& replacement = replacements[previousRaster.shared_from_this()];
             if (!replacement)
-            {
-                auto const& previousRaster = fragment->rasterizedImage();
                 replacement = std::make_shared<RasterizedImage>(next,
                                                                 previousRaster.alignmentPolicy(),
                                                                 previousRaster.resizePolicy(),
@@ -5845,12 +5840,8 @@ void Screen::showKittyFrame(std::shared_ptr<Image const> const& previous,
                                                                 previousRaster.layer(),
                                                                 previousRaster.imageOffset(),
                                                                 previousRaster.imageSubSize());
-            }
-            cell.setImageFragment(replacement, fragment->offset());
-            _terminal->markCellDirty(
-                CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) });
-        }
-    }
+            cell.setImageFragment(replacement, fragment.offset());
+        });
 }
 
 namespace
@@ -5985,19 +5976,12 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
         return;
     }
 
-    // Reads go through the existing entry, if any; the animation is created only once every check
-    // below has passed. Materialising it here would leave a rejected a=f having built one, which the
-    // delete verbs and controlKittyAnimation both take as proof that frames exist.
-    auto const existing = _kittyAnimations.find(command.imageId);
-    auto const frameCount =
-        existing != _kittyAnimations.end() ? static_cast<uint32_t>(existing->second.frames.size()) : 1u;
-    auto const frameAt = [&](uint32_t oneBased) -> std::shared_ptr<Image const> {
-        if (oneBased == 0)
-            return nullptr;
-        if (existing == _kittyAnimations.end())
-            // Only the root frame exists yet, and it is the stored image.
-            return oneBased == 1 ? stored->second : nullptr;
-        return oneBased <= existing->second.frames.size() ? existing->second.frames[oneBased - 1] : nullptr;
+    // Frames are read without creating the animation, which happens only once every check below has
+    // passed. Materialising it earlier would leave a rejected a=f having built one, which the delete
+    // verbs take as proof that frames exist.
+    auto const frameCount = kittyFrameCount(command.imageId);
+    auto const frameAt = [&](uint32_t number) {
+        return kittyFrameImage(command.imageId, number);
     };
 
     // `r=` names the frame being edited; absent, a new one is appended. Naming a frame beyond the
@@ -6025,9 +6009,10 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     // is being CREATED; when `r=` names one that already exists, that frame is the canvas. Preferring
     // `c=` there silently discards earlier blocks of a multi-rectangle frame, which is the natural
     // shape when every block comes from one template.
+    auto const superseded = frameAt(target);
     auto data = Image::Data {};
-    if (auto const edited = frameAt(target))
-        data = edited->data();
+    if (superseded)
+        data = superseded->data();
     else if (auto const from = command.baseFrame != 0 ? frameAt(command.baseFrame) : nullptr)
         data = from->data();
     else
@@ -6063,7 +6048,6 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     // are, discounting the frame this one replaces so that editing in place -- the most
     // bandwidth-efficient thing the protocol offers -- is not billed for both copies. The root frame
     // is no exception: editing it moves the stored image along (see below), freeing the old one.
-    auto const superseded = frameAt(target);
     auto const supersededBytes = superseded ? superseded->data().size() : 0;
     if (storedKittyBytes() - supersededBytes + frame->data().size() > _settings->kittyImageStorageQuota)
     {
@@ -6074,27 +6058,25 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     auto* animation = kittyAnimationFor(command.imageId);
     Require(animation != nullptr); // The image was found above.
     if (target > animation->frames.size())
-    {
-        animation->frames.push_back(std::move(frame));
-        animation->gapsMilliseconds.push_back(DefaultFrameGapMilliseconds);
-    }
+        animation->frames.push_back(
+            { .image = std::move(frame), .gapMilliseconds = DefaultFrameGapMilliseconds });
     else
-        animation->frames[target - 1] = std::move(frame);
+        animation->frames[target - 1].image = std::move(frame);
 
     // Editing the root frame must move the stored image with it, or _kittyImages keeps the pre-edit
     // copy alive: a full-size orphan that nothing can reach and no verb can free, billed against the
     // quota for as long as the image exists.
     if (target == 1)
-        _kittyImages[command.imageId] = animation->frames[0];
+        _kittyImages[command.imageId] = animation->frames[0].image;
 
     if (command.frameGapMilliseconds != 0)
-        animation->gapsMilliseconds[target - 1] = command.frameGapMilliseconds;
+        animation->frames[target - 1].gapMilliseconds = command.frameGapMilliseconds;
 
     // Editing the frame that is currently displayed must show, or the lowest-bandwidth loop the
     // protocol offers -- keep editing the current frame, never send a=a again -- freezes on screen
     // while every later delta is silently accepted.
     if (target == animation->currentFrame)
-        showKittyFrame(superseded, animation->frames[target - 1]);
+        showKittyFrame(superseded, animation->frames[target - 1].image);
 
     replyKittyGraphics(command, "OK");
 }
@@ -6107,40 +6089,36 @@ void Screen::controlKittyAnimation(kitty_graphics::Command const& command)
     // image already has a root frame, and the spec's own example sets ITS gap with a=a before any a=f.
     // Answering ENOENT there tells a client its image is gone and provokes a full re-transmission --
     // the bandwidth this feature exists to save.
-    auto* animation = kittyAnimationFor(command.imageId);
-    if (!animation)
+    auto const frameCount = kittyFrameCount(command.imageId);
+    if (frameCount == 0)
     {
         replyKittyGraphics(command, "ENOENT:no such image");
         return;
     }
 
-    if (command.currentFrame != 0 && command.currentFrame > animation->frames.size())
-    {
-        // Silently ignoring it and answering OK would leave the client believing that frame is shown.
-        replyKittyGraphics(command, "ENOENT:no such frame");
-        return;
-    }
-    if (command.targetFrame != 0 && command.targetFrame > animation->frames.size())
+    // Silently ignoring a frame that does not exist and answering OK would leave the client believing
+    // that frame is shown. Checked before the animation is materialised, like the frame path does.
+    if (command.currentFrame > frameCount || command.targetFrame > frameCount)
     {
         replyKittyGraphics(command, "ENOENT:no such frame");
         return;
     }
 
+    auto* animation = kittyAnimationFor(command.imageId);
+    Require(animation != nullptr); // The image was found above.
+
     if (command.loopCount != 0)
         animation->loopCount = command.loopCount;
     if (command.targetFrame != 0 && command.frameGapMilliseconds != 0)
-        animation->gapsMilliseconds[command.targetFrame - 1] = command.frameGapMilliseconds;
+        animation->frames[command.targetFrame - 1].gapMilliseconds = command.frameGapMilliseconds;
 
     // Applied BEFORE the playback answer below: the keys are independent, nothing stops a client
     // sending `a=a,c=2,s=3`, and refusing the half we cannot do must not discard the half we can.
     if (command.currentFrame != 0)
     {
-        auto const showing =
-            animation->currentFrame != 0 && animation->currentFrame <= animation->frames.size()
-                ? animation->frames[animation->currentFrame - 1]
-                : nullptr;
+        auto const showing = animation->currentImage();
         animation->currentFrame = command.currentFrame;
-        showKittyFrame(showing, animation->frames[command.currentFrame - 1]);
+        showKittyFrame(showing, animation->currentImage());
     }
 
     // Frames advance only when the application says so with `c=`. Nothing here drives them on a
