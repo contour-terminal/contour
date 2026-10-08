@@ -41,7 +41,8 @@ TEST_CASE("KittyGraphics.parse.defaults", "[kitty]")
     // Transmit, direct, RGBA are the protocol's defaults, not ours to invent.
     CHECK(command->action == Action::Transmit);
     CHECK(command->medium == Medium::Direct);
-    CHECK(command->format == Format::Rgba);
+    CHECK(command->transmissionFormat() == Format::Rgba);
+    CHECK_FALSE(command->format.has_value());
     CHECK(command->compression == Compression::None);
     CHECK(command->zIndex == 0);
     CHECK_FALSE(command->moreChunksFollow);

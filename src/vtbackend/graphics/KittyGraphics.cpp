@@ -64,7 +64,6 @@ namespace
                     case 100: command.format = Format::Png; break;
                     default: return std::unexpected(Error::InvalidFormat);
                 }
-                command.formatSpecified = true;
                 break;
             }
             case 't': {

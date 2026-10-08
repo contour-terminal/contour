@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -90,12 +91,12 @@ enum class AnimationState : uint8_t
 struct Command
 {
     Action action = Action::Transmit;
-    Format format = Format::Rgba;
 
-    /// Whether `f=` was actually present. The default above is the protocol's, but an animation frame
-    /// that omits `f=` means "the format this image already has", which is not always RGBA -- so the
-    /// frame path must be able to tell a default apart from a claim.
-    bool formatSpecified = false;
+    /// `f=`, or nullopt when absent. Kept rather than defaulted away: an absent `f=` means RGBA for a
+    /// transmission, but "the format this image already has" for an animation frame, which is not
+    /// always RGBA -- so the frame path must be able to tell a default apart from a claim.
+    std::optional<Format> format;
+
     Medium medium = Medium::Direct;
     Compression compression = Compression::None;
 
@@ -171,6 +172,9 @@ struct Command
 
     /// The payload, still base64-encoded exactly as it arrived.
     std::string payload;
+
+    /// @return the pixel format of a transmission: `f=` if given, else the protocol's RGBA default.
+    [[nodiscard]] Format transmissionFormat() const noexcept { return format.value_or(Format::Rgba); }
 };
 
 /// Why a command could not be decoded. The strings are the ones kitty puts on the wire, so that an

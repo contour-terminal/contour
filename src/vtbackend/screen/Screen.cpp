@@ -5437,7 +5437,7 @@ std::optional<std::string_view> Screen::validateKittyTransmission(
     // A raw pixel transmission has no header to carry its dimensions, so the control data must. PNG
     // is exempt: the file states its own size. Checked here rather than in the parser because a
     // continuation chunk legitimately carries no dimensions -- only the reassembled command has them.
-    if (command.format != Format::Png && (command.pixelWidth == 0 || command.pixelHeight == 0))
+    if (command.transmissionFormat() != Format::Png && (command.pixelWidth == 0 || command.pixelHeight == 0))
         return "EINVAL:missing image dimensions";
 
     if (command.medium != Medium::Direct)
@@ -5579,6 +5579,21 @@ void Screen::resetKittyState() noexcept
     _terminal->kittyClipboardWriteOpen() = false;
 }
 
+namespace
+{
+    /// The image format a kitty graphics `f=` value describes.
+    [[nodiscard]] constexpr ImageFormat toImageFormat(kitty_graphics::Format format) noexcept
+    {
+        switch (format)
+        {
+            case kitty_graphics::Format::Rgb: return ImageFormat::RGB;
+            case kitty_graphics::Format::Rgba: return ImageFormat::RGBA;
+            case kitty_graphics::Format::Png: return ImageFormat::PNG;
+        }
+        core::unreachable();
+    }
+} // namespace
+
 void Screen::processKittyGraphics(std::string_view body)
 {
     using namespace kitty_graphics;
@@ -5687,15 +5702,7 @@ void Screen::processKittyGraphics(std::string_view body)
     auto const decoded = core::base64::decode(command.payload);
     auto pixmap = Image::Data(decoded.begin(), decoded.end());
 
-    auto const format = [&] {
-        switch (command.format)
-        {
-            case Format::Png: return ImageFormat::PNG;
-            case Format::Rgb: return ImageFormat::RGB;
-            case Format::Rgba: break;
-        }
-        return ImageFormat::RGBA;
-    }();
+    auto const format = toImageFormat(command.transmissionFormat());
     auto const pixelSize =
         ImageSize { Width::cast_from(command.pixelWidth), Height::cast_from(command.pixelHeight) };
 
@@ -5703,8 +5710,8 @@ void Screen::processKittyGraphics(std::string_view body)
     {
         // The renderer reads width*height*bytesPerPixel from this buffer, so a payload that does not
         // match the declared size is a read past the end waiting to happen.
-        auto const expected =
-            static_cast<size_t>(command.pixelWidth) * command.pixelHeight * bytesPerPixel(command.format);
+        auto const expected = static_cast<size_t>(command.pixelWidth) * command.pixelHeight
+                              * bytesPerPixel(command.transmissionFormat());
         if (pixmap.size() != expected)
         {
             replyKittyGraphics(command, "EINVAL:payload size does not match dimensions");
@@ -5944,16 +5951,7 @@ void Screen::transmitKittyFrame(kitty_graphics::Command const& command)
     // `f=` is not merely unused here, it is a claim about the payload's layout. Silently reading
     // 3-byte pixels as 4-byte ones (or a PNG file's header as pixels) is exactly the reinterpretation
     // the medium and compression checks above exist to prevent.
-    auto const declared = [&]() -> std::optional<ImageFormat> {
-        switch (command.format)
-        {
-            case Format::Rgb: return ImageFormat::RGB;
-            case Format::Rgba: return ImageFormat::RGBA;
-            case Format::Png: return ImageFormat::PNG;
-        }
-        return std::nullopt;
-    }();
-    if (command.formatSpecified && declared != base.format())
+    if (command.format && toImageFormat(*command.format) != base.format())
     {
         replyKittyGraphics(command, "EINVAL:frame format does not match the image");
         return;
