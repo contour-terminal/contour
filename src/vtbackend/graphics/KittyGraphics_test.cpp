@@ -786,11 +786,12 @@ TEST_CASE("KittyGraphics.animation.an_unimplemented_delete_target_destroys_nothi
     mock.writeToScreen("\033_Ga=t,f=24,i=9,s=2,v=1;/wAAAP8A\033\\"sv);
     mock.terminal.flushInput();
 
-    // A positional target Contour does not implement must do nothing, not clear the terminal.
-    mock.writeToScreen("\033_Ga=d,d=Z\033\\"sv);
-    mock.terminal.flushInput();
-    mock.writeToScreen("\033_Ga=p,i=9\033\\"sv);
-    CHECK(mock.terminal.peekInput().contains("OK"));
+    // A positional target Contour does not implement must do nothing, not clear the terminal -- and
+    // say so, rather than answer OK for a delete that did not happen. But only to a command that
+    // identified itself: one naming no image reads no reply, and an unsolicited one is typed keys.
+    CHECK(replyTo(mock, "\033_Ga=d,d=Z\033\\"sv).empty());
+    CHECK(replyTo(mock, "\033_Ga=d,d=Z,i=9\033\\"sv).contains("ENOTSUP"));
+    CHECK(replyTo(mock, "\033_Ga=p,i=9\033\\"sv).contains("OK"));
 }
 
 TEST_CASE("KittyGraphics.animation.editing_the_live_frame_shows", "[kitty]")

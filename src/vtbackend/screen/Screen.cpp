@@ -5473,7 +5473,7 @@ void Screen::removeKittyPlacements(std::shared_ptr<Image const> const& image)
     }
 }
 
-void Screen::deleteKittyGraphics(kitty_graphics::Command const& command)
+std::expected<void, std::string_view> Screen::deleteKittyGraphics(kitty_graphics::Command const& command)
 {
     // The CASE of `d=` decides how far the delete reaches: lower case removes placements and leaves
     // the transmitted data resident, upper case additionally frees it. Ignoring the distinction broke
@@ -5482,71 +5482,58 @@ void Screen::deleteKittyGraphics(kitty_graphics::Command const& command)
     auto const freesData = static_cast<bool>(std::isupper(static_cast<unsigned char>(command.deleteTarget)));
     auto const target = static_cast<char>(std::tolower(static_cast<unsigned char>(command.deleteTarget)));
 
-    // `d=f`/`d=F` deletes an image's animation frames, leaving the image itself. It reached the
-    // catch-all below before frames existed, which then cleared every image in the terminal and still
-    // answered OK.
-    if (target == 'f')
+    switch (target)
     {
-        if (command.imageId == 0)
-            return;
-        auto const animation = _kittyAnimations.find(command.imageId);
-        if (animation == _kittyAnimations.end())
-            return;
-        // Frames only. The image and whatever is on screen survive -- this verb exists so a client can
-        // reclaim frame memory while keeping the picture up, and clearing the cells would force the
-        // re-transmission it is trying to avoid. What IS showing may be a frame rather than the base,
-        // so put the base back under it before the frames go.
-        if (auto const stored = _kittyImages.find(command.imageId); stored != _kittyImages.end())
-            for (auto const& frame: animation->second.frames)
-                showKittyFrame(frame, stored->second);
-        _kittyAnimations.erase(animation);
-        return;
-    }
-
-    // Only 'a' means "everything". The positional targets Contour does not implement ('n', 'p', 'c',
-    // 'z', 'r', ...) must do NOTHING rather than fall through to clearing the terminal: destroying
-    // every image because one delete verb is unimplemented is far worse than ignoring it.
-    if (target != 'i' && target != 'a')
-        return;
-
-    // `d=i` with no `i=` names id 0, which no image can have, so it deletes nothing. Falling through
-    // would reach the wholesale clear below and destroy every image in the terminal.
-    if (target == 'i' && command.imageId == 0)
-        return;
-
-    auto const image = [&]() -> std::shared_ptr<Image const> {
-        if (target != 'i' || command.imageId == 0)
+        case 'a':
+            removeKittyPlacements(nullptr);
+            if (freesData)
+            {
+                // The frames go with the image they were composited from: they are full copies of
+                // it, and far larger than the map holding them, so freeing the image without them
+                // reclaims almost nothing.
+                _kittyImages.clear();
+                _kittyAnimations.clear();
+            }
             return {};
-        auto const it = _kittyImages.find(command.imageId);
-        return it != _kittyImages.end() ? it->second : nullptr;
-    }();
 
-    if (target == 'i' && command.imageId != 0 && !image)
-        return; // Nothing transmitted under that id; nothing placed from it either.
+        case 'i':
+            // Nothing transmitted under that id, nothing placed from it either. This includes `d=i`
+            // with no `i=`, which names id 0 and so no image at all -- not every image.
+            if (!_kittyImages.contains(command.imageId))
+                return {};
+            // Once a frame has been made current the cells hold that frame, not the base image, so
+            // matching on the base alone leaves the placement on screen -- and, for an upper-case
+            // delete, leaves the frame alive in the grid where no quota can see it.
+            removeKittyPlacementsOf(command.imageId);
+            if (freesData)
+            {
+                _kittyImages.erase(command.imageId);
+                _kittyAnimations.erase(command.imageId);
+            }
+            return {};
 
-    // Once a frame has been made current the cells hold that frame, not the base image, so matching
-    // on the base alone leaves the placement on screen -- and, for an upper-case delete, leaves the
-    // frame alive in the grid where no quota can see it.
-    if (target == 'i' && command.imageId != 0)
-    {
-        removeKittyPlacementsOf(command.imageId);
-        if (freesData)
-        {
-            _kittyImages.erase(command.imageId);
-            _kittyAnimations.erase(command.imageId);
+        case 'f': {
+            // `d=f`/`d=F` deletes an image's animation frames, leaving the image itself.
+            auto const animation = _kittyAnimations.find(command.imageId);
+            if (animation == _kittyAnimations.end())
+                return {};
+            // Frames only. The image and whatever is on screen survive -- this verb exists so a client
+            // can reclaim frame memory while keeping the picture up, and clearing the cells would
+            // force the re-transmission it is trying to avoid. What IS showing may be a frame rather
+            // than the base, so put the base back under it before the frames go.
+            if (auto const stored = _kittyImages.find(command.imageId); stored != _kittyImages.end())
+                for (auto const& frame: animation->second.frames)
+                    showKittyFrame(frame, stored->second);
+            _kittyAnimations.erase(animation);
+            return {};
         }
-        return;
+
+        default:
+            // The positional targets ('n', 'p', 'c', 'q', 'r', 'x', 'y', 'z') are not implemented.
+            // Doing nothing is far better than the wholesale clear they once fell through to, but
+            // answering OK would tell the client its placement is gone while it is still on screen.
+            return std::unexpected { "ENOTSUP:delete target not supported" };
     }
-
-    removeKittyPlacements(image);
-
-    if (!freesData)
-        return;
-
-    // The frames go with the image they were composited from: they are full copies of it, and far
-    // larger than the map holding them, so freeing the image without them reclaims almost nothing.
-    _kittyImages.clear();
-    _kittyAnimations.clear();
 }
 
 void Screen::removeKittyPlacementsOf(uint32_t imageId)
@@ -5649,10 +5636,16 @@ void Screen::processKittyGraphics(std::string_view body)
             // the real transmission leaves it with nothing to fall back to.
             replyKittyGraphics(command, validateKittyTransmission(command).value_or("OK"));
             return;
-        case Action::Delete:
-            deleteKittyGraphics(command);
-            replyKittyGraphics(command, "OK");
+        case Action::Delete: {
+            auto const deleted = deleteKittyGraphics(command);
+            // The unimplemented deletes are the positional ones, which usually name no image -- and an
+            // application that named none reads no reply, so an unsolicited error would land in its
+            // input as typed keys. Only a command that identified itself hears about it.
+            if (!deleted && command.imageId == 0 && command.imageNumber == 0)
+                return;
+            replyKittyGraphics(command, deleted ? "OK"sv : deleted.error());
             return;
+        }
         case Action::Put: {
             auto const it = _kittyImages.find(command.imageId);
             if (it == _kittyImages.end())

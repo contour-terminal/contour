@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <atomic>
 #include <deque>
+#include <expected>
 #include <format>
 #include <functional>
 #include <memory>
@@ -284,7 +285,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Handles a kitty graphics `a=d`, honouring the case of its `d=` target: a lower-case target
     /// removes placements only, an upper-case one additionally frees the transmitted image data.
-    void deleteKittyGraphics(kitty_graphics::Command const& command);
+    /// @return nothing, or the wire status to answer with when the `d=` target is not implemented.
+    [[nodiscard]] std::expected<void, std::string_view> deleteKittyGraphics(
+        kitty_graphics::Command const& command);
 
     /// Removes the on-screen placements of @p image, or of every kitty image when it is null,
     /// leaving the text sharing those cells untouched.
