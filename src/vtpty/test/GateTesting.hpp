@@ -12,6 +12,11 @@
 #include <poll.h>
 #include <unistd.h>
 
+#ifdef __linux__
+    #include <sys/syscall.h>
+    #include <sys/wait.h>
+#endif
+
 namespace vtpty::testing
 {
 
@@ -58,5 +63,22 @@ inline FakeChild fakeChild(int pid, OwnedFd pidfd = OwnedFd {})
     return FakeChild { .parked = ParkedChild { pid, std::move(pidfd), std::move(gate->parentEnd) },
                        .waitingEnd = std::move(gate->childEnd) };
 }
+
+#ifdef __linux__
+/// @return A pidfd for a process that has exited and been reaped, as a parked child is once its tab
+///         closed before the placement got to it.
+inline OwnedFd exitedPidFd()
+{
+    auto const pid = ::fork();
+    REQUIRE(pid >= 0);
+    if (pid == 0)
+        ::_exit(0);
+    auto pidfd = OwnedFd { static_cast<int>(::syscall(SYS_pidfd_open, pid, 0)) };
+    auto status = 0;
+    REQUIRE(::waitpid(pid, &status, 0) == pid);
+    REQUIRE(pidfd.isOpen());
+    return pidfd;
+}
+#endif
 
 } // namespace vtpty::testing

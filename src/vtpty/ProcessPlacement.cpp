@@ -5,8 +5,10 @@
     #include <vtpty/SdBusScopeBus.hpp>
 #endif
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
+#include <fstream>
 #include <utility>
 
 #ifndef _WIN32
@@ -14,6 +16,10 @@
 
     #include <fcntl.h>
     #include <unistd.h>
+#endif
+
+#ifdef __linux__
+    #include <sys/syscall.h>
 #endif
 
 namespace vtpty
@@ -44,6 +50,18 @@ ParkedChild::ParkedChild(int pid, OwnedFd pidfd, OwnedFd gate) noexcept:
 ParkedChild::~ParkedChild()
 {
     release();
+}
+
+bool ParkedChild::hasExited() const noexcept
+{
+#if defined(__linux__) && defined(SYS_pidfd_send_signal)
+    // Signal 0 checks without sending; a pidfd answers ESRCH once its process has exited, reaped or
+    // not, and never for a process that merely reuses the pid.
+    return _pidfd.isOpen() && ::syscall(SYS_pidfd_send_signal, _pidfd.get(), 0, nullptr, 0) < 0
+           && errno == ESRCH;
+#else
+    return false;
+#endif
 }
 
 void ParkedChild::release() noexcept
@@ -81,12 +99,37 @@ std::expected<Gate, std::error_code> makeGate()
 }
 #endif
 
+namespace
+{
+    /// How much likelier than Contour a session's process is to be the kernel's out-of-memory
+    /// victim, and the ceiling the kernel accepts.
+    constexpr auto SessionOomScoreAdjustIncrement = 100;
+    constexpr auto MaxOomScoreAdjust = 1000;
+
+    /// @return The oom_score_adj for session processes: this process's own plus the increment, or
+    ///         nothing where the kernel has no such knob. Read as a stream: /proc reports its files
+    ///         as empty, so a read sized by the file's size gets nothing.
+    [[nodiscard]] std::optional<int> sessionOomScoreAdjust()
+    {
+#ifdef __linux__
+        auto own = 0;
+        if (auto in = std::ifstream { "/proc/self/oom_score_adj" }; in >> own)
+            return std::min(own + SessionOomScoreAdjustIncrement, MaxOomScoreAdjust);
+#endif
+        return std::nullopt;
+    }
+} // namespace
+
 std::shared_ptr<ProcessPlacement> makeDefaultProcessPlacement()
 {
+    // The composition root's one look at the process: everything below it is handed the value.
+    auto const childOomScoreAdjust = sessionOomScoreAdjust();
 #ifdef VTPTY_SYSTEMD
-    return makeSystemdScopePlacement(SystemdScopeConfig {});
+    auto config = SystemdScopeConfig {};
+    config.childOomScoreAdjust = childOomScoreAdjust;
+    return makeSystemdScopePlacement(std::move(config));
 #else
-    return std::make_shared<NoPlacement>();
+    return std::make_shared<NoPlacement>(childOomScoreAdjust);
 #endif
 }
 

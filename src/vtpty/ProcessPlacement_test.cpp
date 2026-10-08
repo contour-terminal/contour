@@ -10,6 +10,11 @@
 #include <utility>
 
 #include <fcntl.h>
+#include <unistd.h>
+
+#ifdef __linux__
+    #include <sys/syscall.h>
+#endif
 
 using namespace std::chrono_literals;
 using vtpty::testing::fakeChild;
@@ -77,3 +82,16 @@ TEST_CASE("NoPlacement releases at once", "[placement]")
     placement.placeThenRelease(std::move(child.parked));
     CHECK(observe(child.waitingEnd, 0ms) == GateState::Released);
 }
+
+#ifdef __linux__
+TEST_CASE("ParkedChild.hasExited", "[placement]")
+{
+    CHECK(fakeChild(4242, vtpty::testing::exitedPidFd()).parked.hasExited());
+    // A live process: this one.
+    auto const self = vtpty::OwnedFd { static_cast<int>(::syscall(SYS_pidfd_open, ::getpid(), 0)) };
+    REQUIRE(self.isOpen());
+    CHECK_FALSE(fakeChild(::getpid(), vtpty::OwnedFd { ::dup(self.get()) }).parked.hasExited());
+    // Without a pidfd there is no telling: it is taken to be alive.
+    CHECK_FALSE(fakeChild(4242).parked.hasExited());
+}
+#endif

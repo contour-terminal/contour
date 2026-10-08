@@ -32,8 +32,8 @@ auto const outcomeRows = std::array {
     OutcomeRow { .name = "placed", .outcome = Outcome {}, .attemptsBeforeCooldown = true },
     OutcomeRow {
         .name = "refused", .outcome = std::unexpected(ScopeError::Refused), .attemptsBeforeCooldown = true },
-    OutcomeRow { .name = "unknown property",
-                 .outcome = std::unexpected(ScopeError::UnknownProperty),
+    OutcomeRow { .name = "unsupported",
+                 .outcome = std::unexpected(ScopeError::Unsupported),
                  .attemptsBeforeCooldown = true },
     OutcomeRow { .name = "timed out",
                  .outcome = std::unexpected(ScopeError::TimedOut),

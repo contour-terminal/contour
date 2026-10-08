@@ -5,9 +5,12 @@
 
 #include <core/log/LogStore.hpp>
 
+#include <csignal>
+#include <exception>
 #include <format>
 #include <utility>
 
+#include <pthread.h>
 #include <unistd.h>
 
 namespace vtpty
@@ -35,18 +38,52 @@ SystemdScopePlacement::~SystemdScopePlacement()
     // What the worker left queued is released as _queue is destroyed.
 }
 
-void SystemdScopePlacement::placeThenRelease(ParkedChild child)
+void SystemdScopePlacement::placeThenRelease(ParkedChild child) noexcept
 {
-    std::call_once(_workerStarted, [this] { _worker = std::thread { [this] { run(); } }; });
+    try
     {
+        std::call_once(_workerStarted, [this] { startWorker(); });
         auto const _ = std::lock_guard { _mutex };
         _queue.push_back(std::move(child));
+    }
+    catch (std::exception const& e)
+    {
+        // No worker, or no room for one more child. It runs unplaced -- `child` releases it on the
+        // way out -- rather than fail the spawn; the next spawn tries to start the worker again.
+        errorLog()("Session process {} could not be queued for a systemd scope of its own: {}.",
+                   child.pid(),
+                   e.what());
+        return;
     }
     _wakeup.notify_one();
 }
 
+void SystemdScopePlacement::startWorker()
+{
+    // Started with every signal blocked, which it inherits. Signals meant for the process -- the
+    // daemon waits for SIGTERM and SIGINT with sigwait() on a thread of its own -- must not land
+    // here, where their default action would end the process.
+    auto all = sigset_t {};
+    auto previous = sigset_t {};
+    sigfillset(&all);
+    pthread_sigmask(SIG_SETMASK, &all, &previous);
+    try
+    {
+        _worker = std::thread { [this] { run(); } };
+    }
+    catch (...)
+    {
+        pthread_sigmask(SIG_SETMASK, &previous, nullptr);
+        throw;
+    }
+    pthread_sigmask(SIG_SETMASK, &previous, nullptr);
+}
+
 void SystemdScopePlacement::run()
 {
+#ifdef __linux__
+    pthread_setname_np(pthread_self(), WorkerThreadName); // what `ps -T` and debuggers show
+#endif
     while (true)
     {
         auto child = std::optional<ParkedChild> {};
@@ -64,6 +101,10 @@ void SystemdScopePlacement::run()
 
 void SystemdScopePlacement::place(ParkedChild const& child)
 {
+    // Its tab closed while it waited here: asking about its pid could move whatever reuses it now,
+    // and a refusal would be reported as a fault over a closed tab.
+    if (child.hasExited())
+        return;
     if (!_breaker.shouldAttempt(_clock.now()))
         return;
 
@@ -74,15 +115,15 @@ void SystemdScopePlacement::place(ParkedChild const& child)
             if (!connected)
                 return std::unexpected(connected.error());
             _bus = std::move(*connected);
-            _reference = ProcessReference::PidFd; // a new connection may reach a newer systemd
+            _protocol = ScopeProtocol::Current; // a new connection may reach a newer systemd
         }
-        auto const preferred = child.pidfd() >= 0 ? _reference : ProcessReference::Pid;
-        auto result = request(child, preferred);
-        // An older systemd knows no PIDFDs. The child is parked, so its pid cannot have been reused.
-        if (!result && result.error() == ScopeError::UnknownProperty && preferred == ProcessReference::PidFd)
+        auto result = request(child, _protocol);
+        // systemd before 253 knows neither PIDFDs nor OOMPolicy on scopes, and refuses the whole
+        // request over either. Speak what it knows from now on.
+        if (!result && result.error() == ScopeError::Unsupported && _protocol == ScopeProtocol::Current)
         {
-            _reference = ProcessReference::Pid;
-            result = request(child, ProcessReference::Pid);
+            _protocol = ScopeProtocol::Legacy;
+            result = request(child, _protocol);
         }
         return result;
     }();
@@ -95,7 +136,7 @@ void SystemdScopePlacement::place(ParkedChild const& child)
 }
 
 std::expected<void, ScopeError> SystemdScopePlacement::request(ParkedChild const& child,
-                                                               ProcessReference reference)
+                                                               ScopeProtocol protocol)
 {
     auto const ownPid = ::getpid();
     return _bus->startScope(
@@ -104,7 +145,7 @@ std::expected<void, ScopeError> SystemdScopePlacement::request(ParkedChild const
                 std::format("{}-{}-{}-{}.scope", _config.unitPrefix, ownPid, child.pid(), ++_sequence),
             .slice = _config.slice,
             .description = std::format("Contour session (contour pid {})", ownPid),
-            .reference = reference,
+            .protocol = protocol,
             .pid = child.pid(),
             .pidfd = child.pidfd(),
             .memoryLimit = _config.memoryLimit,

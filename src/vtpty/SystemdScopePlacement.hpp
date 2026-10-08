@@ -15,10 +15,14 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace vtpty
 {
+
+/// The name SystemdScopePlacement's worker thread carries, at most 15 characters as Linux allows.
+inline constexpr auto WorkerThreadName = "scope-placement";
 
 /// How SystemdScopePlacement places children.
 struct SystemdScopeConfig
@@ -37,6 +41,9 @@ struct SystemdScopeConfig
 
     /// A memory ceiling for every scope. Tests only: a user-facing limit is not a feature yet.
     std::optional<MemoryLimit> memoryLimit {};
+
+    /// The oom_score_adj each child sets for itself, if any. @see ProcessPlacement::childOomScoreAdjust.
+    std::optional<int> childOomScoreAdjust {};
 };
 
 /// Places every child in a transient systemd scope of its own, with OOMPolicy=continue, so that an
@@ -63,21 +70,26 @@ class SystemdScopePlacement final: public ProcessPlacement
     SystemdScopePlacement(SystemdScopePlacement&&) = delete;
     SystemdScopePlacement& operator=(SystemdScopePlacement&&) = delete;
 
-    void placeThenRelease(ParkedChild child) override;
+    void placeThenRelease(ParkedChild child) noexcept override;
+
+    [[nodiscard]] std::optional<int> childOomScoreAdjust() const noexcept override
+    {
+        return _config.childOomScoreAdjust;
+    }
 
   private:
+    void startWorker();
     void run();
     void place(ParkedChild const& child);
-    [[nodiscard]] std::expected<void, ScopeError> request(ParkedChild const& child,
-                                                          ProcessReference reference);
+    [[nodiscard]] std::expected<void, ScopeError> request(ParkedChild const& child, ScopeProtocol protocol);
     void report(ParkedChild const& child, ScopeError error);
 
     SystemdScopeConfig _config;
     ScopeBusFactory _connectBus;
     core::platform::IClock const& _clock;
     std::unique_ptr<ScopeBus> _bus;
-    /// PidFd until systemd turns it down, then Pid for as long as this connection lasts.
-    ProcessReference _reference = ProcessReference::PidFd;
+    /// Current until systemd turns it down, then Legacy for as long as this connection lasts.
+    ScopeProtocol _protocol = ScopeProtocol::Current;
     PlacementBreaker _breaker;
     std::uint64_t _sequence = 0;
     bool _hasReportedFault = false; ///< Faults are told once where a user sees them, then quietly.

@@ -61,7 +61,18 @@ auto constexpr PageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnC
 class RecordingPlacement final: public vtpty::ProcessPlacement
 {
   public:
-    void placeThenRelease(vtpty::ParkedChild child) override { _parked.push_back(std::move(child)); }
+    /// @param childOomScoreAdjust What each child is to set its oom_score_adj to, if anything.
+    explicit RecordingPlacement(std::optional<int> childOomScoreAdjust = std::nullopt):
+        _childOomScoreAdjust { childOomScoreAdjust }
+    {
+    }
+
+    void placeThenRelease(vtpty::ParkedChild child) noexcept override { _parked.push_back(std::move(child)); }
+
+    [[nodiscard]] std::optional<int> childOomScoreAdjust() const noexcept override
+    {
+        return _childOomScoreAdjust;
+    }
 
     /// @return The pids of the children handed over so far, in spawn order.
     [[nodiscard]] std::vector<int> pids() const
@@ -84,7 +95,25 @@ class RecordingPlacement final: public vtpty::ProcessPlacement
     void drop() { _parked.clear(); }
 
   private:
+    std::optional<int> _childOomScoreAdjust;
     std::vector<vtpty::ParkedChild> _parked;
+};
+
+/// Drops every child @p placement still holds when it goes out of scope. Declared after the
+/// Process, so it runs first: ~Process waits for its child, which a held gate would park forever --
+/// a failed REQUIRE would hang the suite instead of reporting.
+class DropOnExit
+{
+  public:
+    explicit DropOnExit(RecordingPlacement& placement): _placement { placement } {}
+    DropOnExit(DropOnExit const&) = delete;
+    DropOnExit& operator=(DropOnExit const&) = delete;
+    DropOnExit(DropOnExit&&) = delete;
+    DropOnExit& operator=(DropOnExit&&) = delete;
+    ~DropOnExit() { _placement.drop(); }
+
+  private:
+    RecordingPlacement& _placement;
 };
 
 /// @return A not yet started Process running `/bin/sh` with @p arguments, placed by @p placement.
@@ -186,8 +215,15 @@ TEST_CASE("Process.withChild", "[process]")
 }
 TEST_CASE("Process.parkedUntilReleased", "[process][placement]")
 {
+    #ifdef __linux__
+    // Raising one's own oom_score_adj takes no privilege; lowering it would.
+    auto const wanted = std::min(oomScoreAdjustOf(::getpid()) + 7, 1000);
+    auto placement = std::make_shared<RecordingPlacement>(wanted);
+    #else
     auto placement = std::make_shared<RecordingPlacement>();
+    #endif
     auto process = shellRunning({ "-c", "printf ready; exec sleep 30" }, placement);
+    auto const dropOnExit = DropOnExit { *placement };
     REQUIRE(process->start().has_value());
     REQUIRE(placement->pids().size() == 1);
     auto const pid = placement->pids().front();
@@ -200,8 +236,8 @@ TEST_CASE("Process.parkedUntilReleased", "[process][placement]")
     CHECK(printed(*process, "ready"));
     #ifdef __linux__
     CHECK(executableOf(pid) != executableOf(::getpid()));
-    // The child raised its own oom_score_adj before parking, and exec() kept it.
-    CHECK(oomScoreAdjustOf(pid) == std::min(oomScoreAdjustOf(::getpid()) + 100, 1000));
+    // The child set the oom_score_adj its placement asked for before parking, and exec() kept it.
+    CHECK(oomScoreAdjustOf(pid) == wanted);
     #endif
 
     (void) hangUp(*process);
@@ -224,6 +260,7 @@ TEST_CASE("Process.concurrentSpawnsDoNotWaitOnEachOther", "[process][placement]"
     auto placement = std::make_shared<RecordingPlacement>();
     auto first = shellRunning({ "-c", "printf first; exec sleep 30" }, placement);
     auto second = shellRunning({ "-c", "printf second; exec sleep 30" }, placement);
+    auto const dropOnExit = DropOnExit { *placement };
     REQUIRE(first->start().has_value());
     REQUIRE(second->start().has_value());
     REQUIRE(placement->pids().size() == 2);
@@ -247,6 +284,7 @@ TEST_CASE("Process.terminateWhileParked", "[process][placement]")
     auto* const previous = std::signal(SIGPIPE, SIG_DFL);
     auto placement = std::make_shared<RecordingPlacement>();
     auto process = shellRunning({ "-c", "exec sleep 30" }, placement);
+    auto const dropOnExit = DropOnExit { *placement };
     REQUIRE(process->start().has_value());
 
     CHECK(endedByHangup(hangUp(*process)));

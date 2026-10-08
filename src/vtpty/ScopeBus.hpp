@@ -15,11 +15,14 @@
 namespace vtpty
 {
 
-/// Which identifier a scope request names its process by.
-enum class ProcessReference : std::uint8_t
+/// Which generation of systemd's transient-scope interface a request speaks.
+enum class ScopeProtocol : std::uint8_t
 {
-    Pid,   ///< `PIDs=[pid]`, understood by every systemd.
-    PidFd, ///< `PIDFDs=[pidfd]`, immune to pid reuse; systemd 253 and later.
+    /// systemd before 253: `PIDs=[pid]`, and no `OOMPolicy=`, which scopes did not have -- nor need,
+    /// as they did not react to an out-of-memory kill at all.
+    Legacy,
+    /// systemd 253 and later: `PIDFDs=[pidfd]` where there is a pidfd, and `OOMPolicy=continue`.
+    Current,
 };
 
 /// A memory ceiling for a scope. Tests use it to provoke an out-of-memory kill inside the scope.
@@ -35,20 +38,20 @@ struct ScopeRequest
     std::string unitName;                   ///< `<name>.scope`, unique while the scope exists.
     std::string slice;                      ///< The slice the scope goes into.
     std::string description;                ///< What `systemctl --user status` shows for it.
-    ProcessReference reference;             ///< Which of the next two names the process.
+    ScopeProtocol protocol;                 ///< Which properties the request may use.
     int pid;                                ///< The process to move.
-    int pidfd;                              ///< A pidfd for it; meaningful only for ProcessReference::PidFd.
+    int pidfd;                              ///< A pidfd for it, or -1; used by ScopeProtocol::Current only.
     std::optional<MemoryLimit> memoryLimit; ///< A ceiling for the scope, if any.
 };
 
 /// Why a scope was not created.
 enum class ScopeError : std::uint8_t
 {
-    Unavailable,     ///< No user bus, or no systemd user instance on it.
-    Disconnected,    ///< The bus connection broke.
-    TimedOut,        ///< No answer before the deadline.
-    Refused,         ///< systemd answered with an error, or the job did not end as `done`.
-    UnknownProperty, ///< systemd does not know a property of the request (PIDFDs before 253).
+    Unavailable,  ///< No user bus, or no systemd user instance on it.
+    Disconnected, ///< The bus connection broke.
+    TimedOut,     ///< No answer before the deadline.
+    Refused,      ///< systemd answered with an error, or the job did not end as `done`.
+    Unsupported,  ///< systemd or the bus cannot take part of the request: speak ScopeProtocol::Legacy.
 };
 
 /// What an error says about the bus itself.
@@ -89,8 +92,8 @@ inline constexpr auto ScopeErrorTable = std::array {
                        ScopeErrorSeverity::Fault },
     ScopeErrorTraits {
         ScopeError::Refused, "systemd refused the scope", BusHealth::Responsive, ScopeErrorSeverity::Fault },
-    ScopeErrorTraits { ScopeError::UnknownProperty,
-                       "systemd does not know a requested property",
+    ScopeErrorTraits { ScopeError::Unsupported,
+                       "systemd or the bus cannot take part of the request",
                        BusHealth::Responsive,
                        ScopeErrorSeverity::Fault },
 };
@@ -101,7 +104,7 @@ static_assert(
         for (auto const& row: ScopeErrorTable)
             if (static_cast<std::size_t>(row.error) != index++ || row.description.empty())
                 return false;
-        return index == static_cast<std::size_t>(ScopeError::UnknownProperty) + 1;
+        return index == static_cast<std::size_t>(ScopeError::Unsupported) + 1;
     }(),
     "ScopeErrorTable holds one described row per ScopeError, in enumerator order");
 

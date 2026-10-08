@@ -4,6 +4,8 @@
 #include <vtpty/ScopeBus.hpp>
 #include <vtpty/SystemdScopePlacement.hpp>
 
+#include <core/platform/Clock.hpp>
+
 #include <chrono>
 #include <expected>
 #include <memory>
@@ -29,15 +31,16 @@ class SdBusScopeBus final: public ScopeBus
     };
     using BusHandle = std::unique_ptr<sd_bus, BusDeleter>;
 
-    /// Connects to the user bus, and asks systemd for job signals.
-    /// @param timeout How long each call on the connection may take, this first one included.
-    /// @return The bus, or Unavailable when there is no user bus or no systemd instance on it.
+    /// Connects to the user bus.
+    /// @param clock The clock request deadlines are measured on; must outlive the bus.
+    /// @return The bus, or Unavailable when there is no user bus.
     [[nodiscard]] static std::expected<std::unique_ptr<ScopeBus>, ScopeError> connect(
-        std::chrono::milliseconds timeout);
+        core::platform::IClock const& clock);
 
-    /// Takes over an open connection. Use connect(), which also subscribes it.
-    /// @param bus The connection.
-    explicit SdBusScopeBus(BusHandle bus) noexcept;
+    /// Takes over an open connection. Use connect().
+    /// @param bus   The connection.
+    /// @param clock The clock request deadlines are measured on; must outlive this.
+    SdBusScopeBus(BusHandle bus, core::platform::IClock const& clock) noexcept;
 
     [[nodiscard]] std::expected<void, ScopeError> startScope(ScopeRequest const& request,
                                                              std::chrono::milliseconds deadline) override;
@@ -48,9 +51,11 @@ class SdBusScopeBus final: public ScopeBus
     void jobRemoved(std::string_view unit, std::string_view result);
 
   private:
-    [[nodiscard]] std::expected<void, ScopeError> awaitJob(std::chrono::steady_clock::time_point until);
+    [[nodiscard]] std::expected<void, ScopeError> awaitJob(core::platform::SteadyTimePoint until);
+    void cancelJob(std::string const& jobPath) noexcept;
 
     BusHandle _bus;
+    core::platform::IClock const& _clock;
     std::string _awaitedUnit;                  ///< The unit whose job startScope() waits for.
     std::optional<std::string> _awaitedResult; ///< Its job's result, once JobRemoved told it.
 };

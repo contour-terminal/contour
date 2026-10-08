@@ -6,12 +6,18 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <deque>
 #include <expected>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -146,7 +152,7 @@ TEST_CASE("SystemdScopePlacement.request", "[placement]")
     CHECK(request.unitName.starts_with(std::format("contour-session-{}-4242-", ::getpid())));
     CHECK(request.unitName.ends_with(".scope"));
     CHECK(request.slice == "app.slice");
-    CHECK(request.reference == vtpty::ProcessReference::PidFd);
+    CHECK(request.protocol == vtpty::ScopeProtocol::Current);
     CHECK(request.pid == 4242);
     CHECK(request.pidfd >= 0);
     REQUIRE(request.memoryLimit.has_value());
@@ -164,10 +170,11 @@ TEST_CASE("SystemdScopePlacement.unitNamesAreUnique", "[placement]")
     CHECK(requests[0].unitName != requests[1].unitName);
 }
 
-TEST_CASE("SystemdScopePlacement.PIDFDs rejected: retried with PIDs, and not offered again", "[placement]")
+TEST_CASE("SystemdScopePlacement.systemd before 253: falls back to the legacy protocol, and stays there",
+          "[placement]")
 {
     auto const rig = Rig {};
-    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::UnknownProperty));
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::Unsupported));
     auto placement = rig.placement();
 
     CHECK(released(place(placement, fakeChild(1, somePidFd()))));
@@ -175,17 +182,82 @@ TEST_CASE("SystemdScopePlacement.PIDFDs rejected: retried with PIDs, and not off
 
     auto const requests = rig.script->requestsSoFar();
     REQUIRE(requests.size() == 3);
-    CHECK(requests[0].reference == vtpty::ProcessReference::PidFd);
-    CHECK(requests[1].reference == vtpty::ProcessReference::Pid);
+    CHECK(requests[0].protocol == vtpty::ScopeProtocol::Current);
+    CHECK(requests[1].protocol == vtpty::ScopeProtocol::Legacy);
     CHECK(requests[1].pid == 1);
-    CHECK(requests[2].reference == vtpty::ProcessReference::Pid); // one request per spawn from now on
+    CHECK(requests[2].protocol == vtpty::ScopeProtocol::Legacy); // one request per spawn from now on
+}
+
+TEST_CASE("SystemdScopePlacement.a refusal is not taken for an old systemd", "[placement]")
+{
+    auto const rig = Rig {};
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::Refused));
+    auto placement = rig.placement();
+
+    CHECK(released(place(placement, fakeChild(1, somePidFd()))));
+    CHECK(released(place(placement, fakeChild(2, somePidFd()))));
+
+    auto const requests = rig.script->requestsSoFar();
+    REQUIRE(requests.size() == 2);
+    CHECK(requests[1].protocol == vtpty::ScopeProtocol::Current);
+}
+
+#ifdef __linux__
+TEST_CASE("SystemdScopePlacement.a child that already exited is not asked about", "[placement]")
+{
+    // Its tab closed while it waited in the queue, and it was reaped: its pid may name another
+    // process by now. Asking systemd would move that one, or report a fault over a closed tab.
+    auto const rig = Rig {};
+    auto placement = rig.placement();
+    CHECK(released(place(placement, fakeChild(4242, vtpty::testing::exitedPidFd()))));
+    CHECK(rig.script->requestsSoFar().empty());
+}
+
+TEST_CASE("SystemdScopePlacement.the worker blocks process-directed signals", "[placement]")
+{
+    // The daemon waits for SIGTERM and SIGINT with sigwait() on a thread of its own. A worker that
+    // left them unblocked could take one, and its default action would end the daemon.
+    auto const rig = Rig {};
+    auto placement = rig.placement();
+    REQUIRE(released(place(placement, fakeChild(4242))));
+
+    auto const readLine = [](std::filesystem::path const& file, std::string_view prefix) {
+        auto in = std::ifstream { file };
+        auto line = std::string {};
+        while (std::getline(in, line))
+            if (line.starts_with(prefix))
+                return line.substr(prefix.size());
+        return std::string {};
+    };
+    // This worker, by name: other threads -- the sanitizers' among them -- block signals of their own.
+    auto const tasks = std::filesystem::directory_iterator { "/proc/self/task" };
+    auto const worker = std::ranges::find_if(tasks, [&](auto const& entry) {
+        return readLine(entry.path() / "comm", "") == vtpty::WorkerThreadName;
+    });
+    REQUIRE(worker != std::filesystem::directory_iterator {});
+
+    auto const mask = std::stoull(readLine(worker->path() / "status", "SigBlk:"), nullptr, 16);
+    auto const isBlocked = [mask](int signal) {
+        return ((mask >> (signal - 1)) & 1U) != 0;
+    };
+    CHECK(isBlocked(SIGTERM));
+    CHECK(isBlocked(SIGINT));
+}
+#endif
+
+TEST_CASE("SystemdScopePlacement.supplies the configured oom_score_adj", "[placement]")
+{
+    auto rig = Rig {};
+    CHECK_FALSE(rig.placement().childOomScoreAdjust().has_value());
+    rig.config.childOomScoreAdjust = 300;
+    CHECK(rig.placement().childOomScoreAdjust() == 300);
 }
 
 TEST_CASE("SystemdScopePlacement.everyOutcomeReleases", "[placement]")
 {
     for (auto const outcome: { Outcome {},
                                Outcome { std::unexpected(ScopeError::Refused) },
-                               Outcome { std::unexpected(ScopeError::UnknownProperty) },
+                               Outcome { std::unexpected(ScopeError::Unsupported) },
                                Outcome { std::unexpected(ScopeError::TimedOut) },
                                Outcome { std::unexpected(ScopeError::Disconnected) } })
     {

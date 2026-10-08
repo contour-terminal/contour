@@ -19,7 +19,6 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
-#include <fstream>
 #include <mutex>
 #include <span>
 #include <string>
@@ -165,29 +164,6 @@ namespace
             ;
     }
     // }}}
-
-    /// @return The oom_score_adj the child writes for itself, as text; empty where there is none.
-    ///         Raising one's own value takes no privilege, and in a global out-of-memory it makes the
-    ///         kernel pick a session's process before Contour. Read once: Process::start() runs on
-    ///         the GUI thread, and Contour's own value does not change under it.
-    [[nodiscard]] string const& childOomScoreAdjust()
-    {
-        static auto const value = []() -> string {
-#ifdef __linux__
-            // How much likelier than Contour a session's process is to be the kernel's
-            // out-of-memory victim, and the ceiling the kernel accepts.
-            constexpr auto ChildOomScoreAdjustIncrement = 100;
-            constexpr auto MaxOomScoreAdjust = 1000;
-            auto own = 0;
-            if (auto in = std::ifstream { "/proc/self/oom_score_adj" }; !(in >> own))
-                return {};
-            return std::to_string(std::min(own + ChildOomScoreAdjustIncrement, MaxOomScoreAdjust));
-#else
-            return {};
-#endif
-        }();
-        return value;
-    }
 
     /// @return A pidfd for @p pid, or an empty OwnedFd where the kernel has none (before Linux 5.3).
     [[nodiscard]] OwnedFd openPidFd(pid_t pid) noexcept
@@ -421,7 +397,10 @@ StartResult Process::start()
     if (!gate)
         return std::unexpected(
             StartFailure { .error = StartError::SpawnFailed, .detail = gate.error().message() });
-    auto const& oomScoreAdjust = childOomScoreAdjust();
+    // Formatted before the fork: the child may not allocate.
+    auto const oomScoreAdjust = _d->placement->childOomScoreAdjust()
+                                    .transform([](int value) { return std::to_string(value); })
+                                    .value_or(string {});
 
     auto const forked = fork();
 

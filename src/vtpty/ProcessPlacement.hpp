@@ -5,6 +5,7 @@
 
 #include <expected>
 #include <memory>
+#include <optional>
 #include <system_error>
 
 namespace vtpty
@@ -33,6 +34,10 @@ class ParkedChild
 
     /// @return A pidfd for the child, or -1 when there is none.
     [[nodiscard]] int pidfd() const noexcept { return _pidfd.get(); }
+
+    /// @return Whether the child has already exited -- killed while parked, say, and perhaps reaped,
+    ///         so that its pid may name another process by now. False where there is no pidfd to ask.
+    [[nodiscard]] bool hasExited() const noexcept;
 
     /// Lets the child go on to exec(). Idempotent, and never raises SIGPIPE, even when the child has
     /// already died.
@@ -67,8 +72,14 @@ class ProcessPlacement
     virtual ~ProcessPlacement() = default;
 
     /// Takes ownership of @p child, places it, and releases it -- also when placing failed.
-    /// Never blocks the caller: Process::start() runs on the GUI thread.
-    virtual void placeThenRelease(ParkedChild child) = 0;
+    /// Never blocks the caller, and never throws: Process::start() runs on the GUI thread, and
+    /// reports its failures as values.
+    virtual void placeThenRelease(ParkedChild child) noexcept = 0;
+
+    /// @return The oom_score_adj each child sets for itself before it runs, or nothing to leave it
+    ///         as inherited. A higher value than Contour's makes the kernel, in a global
+    ///         out-of-memory, pick a session's process before Contour.
+    [[nodiscard]] virtual std::optional<int> childOomScoreAdjust() const noexcept = 0;
 };
 
 /// Releases every child at once, placing none. Used off Linux, in Flatpak, in builds without systemd
@@ -76,7 +87,21 @@ class ProcessPlacement
 class NoPlacement final: public ProcessPlacement
 {
   public:
-    void placeThenRelease(ParkedChild child) override { child.release(); }
+    /// @param childOomScoreAdjust The oom_score_adj each child sets for itself, if any.
+    explicit NoPlacement(std::optional<int> childOomScoreAdjust = std::nullopt) noexcept:
+        _childOomScoreAdjust { childOomScoreAdjust }
+    {
+    }
+
+    void placeThenRelease(ParkedChild child) noexcept override { child.release(); }
+
+    [[nodiscard]] std::optional<int> childOomScoreAdjust() const noexcept override
+    {
+        return _childOomScoreAdjust;
+    }
+
+  private:
+    std::optional<int> _childOomScoreAdjust;
 };
 
 /// @return The placement this build and platform support: systemd scopes on a Linux build with

@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/SdBusScopeBus.hpp>
 
+#include <vtpty/ScopeRequestEncoding.hpp>
+
 #include <algorithm>
-#include <array>
-#include <cerrno>
 #include <cstdint>
-#include <ranges>
+#include <format>
 #include <string_view>
+#include <type_traits>
+#include <variant>
 
 #include <systemd/sd-bus.h>
 
@@ -20,6 +22,7 @@ namespace
     constexpr auto SystemdService = "org.freedesktop.systemd1";
     constexpr auto SystemdObject = "/org/freedesktop/systemd1";
     constexpr auto ManagerInterface = "org.freedesktop.systemd1.Manager";
+    constexpr auto JobInterface = "org.freedesktop.systemd1.Job";
 
     /// Owns a reference to an sd_bus_message.
     struct MessageDeleter
@@ -27,6 +30,13 @@ namespace
         void operator()(sd_bus_message* message) const noexcept { sd_bus_message_unref(message); }
     };
     using Message = std::unique_ptr<sd_bus_message, MessageDeleter>;
+
+    /// Owns an sd_bus_slot; releasing a match's slot removes the match.
+    struct SlotDeleter
+    {
+        void operator()(sd_bus_slot* slot) const noexcept { sd_bus_slot_unref(slot); }
+    };
+    using Slot = std::unique_ptr<sd_bus_slot, SlotDeleter>;
 
     /// Owns what an sd_bus_error points to.
     class BusError
@@ -40,60 +50,42 @@ namespace
         BusError& operator=(BusError&&) = delete;
 
         [[nodiscard]] sd_bus_error* get() noexcept { return &_error; }
-        [[nodiscard]] bool hasName(char const* name) const noexcept
+
+        /// @return The D-Bus error name, or empty when there is none.
+        [[nodiscard]] std::string_view name() const noexcept
         {
-            return sd_bus_error_has_name(&_error, name) != 0;
+            return _error.name != nullptr ? std::string_view { _error.name } : std::string_view {};
         }
 
       private:
         sd_bus_error _error {}; // == SD_BUS_ERROR_NULL, which is a C compound literal
     };
 
-    /// A return code of a failed call, and what it says about the scope.
-    struct ReturnCodeMeaning
+    /// @return @p duration in microseconds, as sd-bus counts timeouts; never negative.
+    [[nodiscard]] std::uint64_t microsecondsOf(steady_clock::duration duration) noexcept
     {
-        int returnCode;
-        ScopeError error;
-    };
+        return static_cast<std::uint64_t>(
+            std::max<std::int64_t>(0, duration_cast<microseconds>(duration).count()));
+    }
 
-    constexpr auto ReturnCodeMeanings = std::array {
-        ReturnCodeMeaning { -ETIMEDOUT, ScopeError::TimedOut },
-        ReturnCodeMeaning { -ECONNRESET, ScopeError::Disconnected },
-        ReturnCodeMeaning { -ENOTCONN, ScopeError::Disconnected },
-        ReturnCodeMeaning { -EPIPE, ScopeError::Disconnected },
-        ReturnCodeMeaning { -ESHUTDOWN, ScopeError::Disconnected },
-    };
-
-    /// A D-Bus error name a failed call answered with, and what it says about the scope.
-    struct ErrorNameMeaning
+    /// Appends @p property to @p message as one `(sv)`.
+    /// @return What sd-bus returned: negative on failure.
+    int appendProperty(sd_bus_message* message, ScopeProperty const& property)
     {
-        char const* name;
-        ScopeError error;
-    };
-
-    constexpr auto ErrorNameMeanings = std::array {
-        // Nobody owns org.freedesktop.systemd1 on this bus: there is no systemd user instance.
-        ErrorNameMeaning { SD_BUS_ERROR_SERVICE_UNKNOWN, ScopeError::Unavailable },
-        ErrorNameMeaning { SD_BUS_ERROR_NAME_HAS_NO_OWNER, ScopeError::Unavailable },
-        // How systemd answers a property it does not know: PropertyReadOnly ("Cannot set property
-        // PIDFDs, or unknown property."), or InvalidArgs in some versions.
-        ErrorNameMeaning { SD_BUS_ERROR_PROPERTY_READ_ONLY, ScopeError::UnknownProperty },
-        ErrorNameMeaning { SD_BUS_ERROR_INVALID_ARGS, ScopeError::UnknownProperty },
-    };
-
-    /// @return Why a call that returned @p returnCode with @p error did not create the scope.
-    [[nodiscard]] ScopeError classify(int returnCode, BusError const& error) noexcept
-    {
-        if (auto const known =
-                std::ranges::find(ReturnCodeMeanings, returnCode, &ReturnCodeMeaning::returnCode);
-            known != ReturnCodeMeanings.end())
-            return known->error;
-        if (auto const known = std::ranges::find_if(
-                ErrorNameMeanings,
-                [&](ErrorNameMeaning const& meaning) { return error.hasName(meaning.name); });
-            known != ErrorNameMeanings.end())
-            return known->error;
-        return ScopeError::Refused;
+        auto const name = std::string { property.name };
+        return std::visit(
+            [&](auto const& value) -> int {
+                using T = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<T, std::string>)
+                    return sd_bus_message_append(message, "(sv)", name.c_str(), "s", value.c_str());
+                else if constexpr (std::is_same_v<T, std::uint64_t>)
+                    return sd_bus_message_append(message, "(sv)", name.c_str(), "t", value);
+                else if constexpr (std::is_same_v<T, PidList>)
+                    return sd_bus_message_append(message, "(sv)", name.c_str(), "au", 1U, value.pid);
+                else
+                    return sd_bus_message_append(message, "(sv)", name.c_str(), "ah", 1U, value.pidfd);
+            },
+            property.value);
     }
 
     /// The JobRemoved signal handler: hands each removed job's unit and result to the SdBusScopeBus.
@@ -108,13 +100,6 @@ namespace
             static_cast<SdBusScopeBus*>(userdata)->jobRemoved(unit, result);
         return 0;
     }
-
-    /// @return @p duration in microseconds, as sd-bus counts timeouts; never negative.
-    [[nodiscard]] std::uint64_t microsecondsOf(steady_clock::duration duration) noexcept
-    {
-        return static_cast<std::uint64_t>(
-            std::max<std::int64_t>(0, duration_cast<microseconds>(duration).count()));
-    }
 } // namespace
 
 void SdBusScopeBus::BusDeleter::operator()(sd_bus* bus) const noexcept
@@ -122,54 +107,47 @@ void SdBusScopeBus::BusDeleter::operator()(sd_bus* bus) const noexcept
     sd_bus_flush_close_unref(bus);
 }
 
-SdBusScopeBus::SdBusScopeBus(BusHandle bus) noexcept: _bus { std::move(bus) }
+SdBusScopeBus::SdBusScopeBus(BusHandle bus, core::platform::IClock const& clock) noexcept:
+    _bus { std::move(bus) }, _clock { clock }
 {
 }
 
-std::expected<std::unique_ptr<ScopeBus>, ScopeError> SdBusScopeBus::connect(milliseconds timeout)
+std::expected<std::unique_ptr<ScopeBus>, ScopeError> SdBusScopeBus::connect(
+    core::platform::IClock const& clock)
 {
+    // Only whether there is a user bus at all. Whether systemd is on it is answered by the first
+    // request: ServiceUnknown is Unavailable there, and anything else is reported as what it is.
     sd_bus* raw = nullptr;
     if (sd_bus_open_user(&raw) < 0)
         return std::unexpected(ScopeError::Unavailable);
-    auto handle = BusHandle { raw };
-    if (sd_bus_set_method_call_timeout(raw, microsecondsOf(timeout)) < 0)
-        return std::unexpected(ScopeError::Unavailable);
-
-    // JobRemoved is how a request learns that its scope exists. systemd sends it to the client
-    // that queued the job without being asked to; Subscribe would add every other job and unit
-    // change of the session, queued up on this connection between spawns.
-    auto bus = std::make_unique<SdBusScopeBus>(std::move(handle));
-    if (sd_bus_match_signal(raw,
-                            nullptr,
-                            SystemdService,
-                            SystemdObject,
-                            ManagerInterface,
-                            "JobRemoved",
-                            &onJobRemoved,
-                            bus.get())
-        < 0)
-        return std::unexpected(ScopeError::Unavailable);
-    return bus;
-}
-
-std::shared_ptr<ProcessPlacement> makeSystemdScopePlacement(SystemdScopeConfig config)
-{
-    auto const timeout = config.deadline;
-    return std::make_shared<SystemdScopePlacement>(
-        std::move(config),
-        [timeout] { return SdBusScopeBus::connect(timeout); },
-        core::platform::defaultSteadyClock());
+    return std::make_unique<SdBusScopeBus>(BusHandle { raw }, clock);
 }
 
 std::expected<void, ScopeError> SdBusScopeBus::startScope(ScopeRequest const& request, milliseconds deadline)
 {
-    auto const until = steady_clock::now() + deadline;
+    auto const until = _clock.now() + deadline;
+
+    // Hear about this unit's job only, and only for as long as this request lasts. Unfiltered, every
+    // JobRemoved systemd broadcasts while some other client subscribes would queue up on this
+    // connection between spawns. Installed asynchronously: the bus handles it before the call below.
+    auto const rule =
+        std::format("type='signal',sender='{}',path='{}',interface='{}',member='JobRemoved',arg2='{}'",
+                    SystemdService,
+                    SystemdObject,
+                    ManagerInterface,
+                    request.unitName);
+    sd_bus_slot* rawSlot = nullptr;
+    if (auto const added =
+            sd_bus_add_match_async(_bus.get(), &rawSlot, rule.c_str(), &onJobRemoved, nullptr, this);
+        added < 0)
+        return std::unexpected(classifyScopeFailure(added, {}));
+    auto const match = Slot { rawSlot };
 
     sd_bus_message* rawMessage = nullptr;
-    if (sd_bus_message_new_method_call(
-            _bus.get(), &rawMessage, SystemdService, SystemdObject, ManagerInterface, "StartTransientUnit")
-        < 0)
-        return std::unexpected(ScopeError::Disconnected);
+    if (auto const created = sd_bus_message_new_method_call(
+            _bus.get(), &rawMessage, SystemdService, SystemdObject, ManagerInterface, "StartTransientUnit");
+        created < 0)
+        return std::unexpected(classifyScopeFailure(created, {}));
     auto const message = Message { rawMessage };
     auto* const m = message.get();
 
@@ -180,25 +158,8 @@ std::expected<void, ScopeError> SdBusScopeBus::startScope(ScopeRequest const& re
     };
     append(sd_bus_message_append(m, "ss", request.unitName.c_str(), "fail"));
     append(sd_bus_message_open_container(m, 'a', "(sv)"));
-    append(sd_bus_message_append(m, "(sv)", "Description", "s", request.description.c_str()));
-    append(sd_bus_message_append(m, "(sv)", "Slice", "s", request.slice.c_str()));
-    append(sd_bus_message_append(m, "(sv)", "OOMPolicy", "s", "continue"));
-    append(sd_bus_message_append(m, "(sv)", "CollectMode", "s", "inactive-or-failed"));
-    switch (request.reference)
-    {
-        case ProcessReference::Pid:
-            append(
-                sd_bus_message_append(m, "(sv)", "PIDs", "au", 1U, static_cast<std::uint32_t>(request.pid)));
-            break;
-        case ProcessReference::PidFd:
-            append(sd_bus_message_append(m, "(sv)", "PIDFDs", "ah", 1U, request.pidfd));
-            break;
-    }
-    if (request.memoryLimit)
-    {
-        append(sd_bus_message_append(m, "(sv)", "MemoryMax", "t", request.memoryLimit->maxBytes));
-        append(sd_bus_message_append(m, "(sv)", "MemorySwapMax", "t", request.memoryLimit->swapMaxBytes));
-    }
+    for (auto const& property: scopeProperties(request))
+        append(appendProperty(m, property));
     append(sd_bus_message_close_container(m));
     append(sd_bus_message_append(m, "a(sa(sv))", 0U));
     if (!appended)
@@ -209,15 +170,27 @@ std::expected<void, ScopeError> SdBusScopeBus::startScope(ScopeRequest const& re
 
     auto error = BusError {};
     sd_bus_message* rawReply = nullptr;
-    auto const returnCode =
-        sd_bus_call(_bus.get(), m, microsecondsOf(until - steady_clock::now()), error.get(), &rawReply);
+    auto const called =
+        sd_bus_call(_bus.get(), m, microsecondsOf(until - _clock.now()), error.get(), &rawReply);
     auto const reply = Message { rawReply };
-    if (returnCode < 0)
-        return std::unexpected(classify(returnCode, error));
-    return awaitJob(until);
+    // A call that times out before its reply leaves no job path to cancel: systemd may still start
+    // the scope, after the child was released. The deadline makes that rare, and the breaker then
+    // keeps the next spawns from adding to it.
+    if (called < 0)
+        return std::unexpected(classifyScopeFailure(called, error.name()));
+
+    char const* job = nullptr;
+    if (sd_bus_message_read(reply.get(), "o", &job) < 0 || job == nullptr)
+        return std::unexpected(ScopeError::Refused);
+    auto const jobPath = std::string { job };
+
+    auto awaited = awaitJob(until);
+    if (!awaited && awaited.error() == ScopeError::TimedOut)
+        cancelJob(jobPath);
+    return awaited;
 }
 
-std::expected<void, ScopeError> SdBusScopeBus::awaitJob(steady_clock::time_point until)
+std::expected<void, ScopeError> SdBusScopeBus::awaitJob(core::platform::SteadyTimePoint until)
 {
     while (!_awaitedResult)
     {
@@ -226,7 +199,7 @@ std::expected<void, ScopeError> SdBusScopeBus::awaitJob(steady_clock::time_point
             return std::unexpected(ScopeError::Disconnected);
         if (processed > 0)
             continue; // something was dispatched; it may have been our job
-        auto const now = steady_clock::now();
+        auto const now = _clock.now();
         if (now >= until)
             return std::unexpected(ScopeError::TimedOut);
         if (sd_bus_wait(_bus.get(), microsecondsOf(until - now)) < 0)
@@ -237,10 +210,27 @@ std::expected<void, ScopeError> SdBusScopeBus::awaitJob(steady_clock::time_point
     return {};
 }
 
+void SdBusScopeBus::cancelJob(std::string const& jobPath) noexcept
+{
+    // The child is released unplaced. Were the job to finish now, the scope would take the shell but
+    // not what it forked meanwhile, splitting the session across two cgroups. Fire and forget: the
+    // child goes either way, and a job that already finished simply refuses.
+    (void) sd_bus_call_method_async(
+        _bus.get(), nullptr, SystemdService, jobPath.c_str(), JobInterface, "Cancel", nullptr, nullptr, "");
+    (void) sd_bus_flush(_bus.get());
+}
+
 void SdBusScopeBus::jobRemoved(std::string_view unit, std::string_view result)
 {
     if (unit == _awaitedUnit)
         _awaitedResult = std::string { result };
+}
+
+std::shared_ptr<ProcessPlacement> makeSystemdScopePlacement(SystemdScopeConfig config)
+{
+    auto& clock = core::platform::defaultSteadyClock();
+    return std::make_shared<SystemdScopePlacement>(
+        std::move(config), [&clock] { return SdBusScopeBus::connect(clock); }, clock);
 }
 
 } // namespace vtpty
