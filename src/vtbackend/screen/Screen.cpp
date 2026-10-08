@@ -3846,13 +3846,15 @@ namespace impl
         {
             if (seq.parameterCount() <= 1)
             {
+                // Per the VT510 manual, an omitted Ps and 0 select high, which is also the default.
+                // xterm's ctlseqs lists 0 as off, which disagrees with DEC's own manual.
                 switch (seq.paramOr(0, Sequence::Parameter { 0 }))
                 {
-                    case 0:
                     case 1: terminal.setWarningBellVolume(BellVolume::Off); break;
                     case 2:
                     case 3:
                     case 4: terminal.setWarningBellVolume(BellVolume::Low); break;
+                    case 0:
                     case 5:
                     case 6:
                     case 7:

@@ -4470,7 +4470,7 @@ TEST_CASE("a prompt mark on a scrolled-out logical line reaches the change strea
 
 TEST_CASE("DECSWBV: sets the warning bell volume", "[screen]")
 {
-    // Ps 0/1 is off, 2-4 low, 5-8 high for warning bell
+    // Ps 1 is off, 2-4 low, 0/5-8 high for the warning bell (VT510 manual).
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
 
     mock.writeToScreen("\033[1 t");
@@ -4482,8 +4482,11 @@ TEST_CASE("DECSWBV: sets the warning bell volume", "[screen]")
     mock.writeToScreen("\033[8 t");
     CHECK(mock.terminal.settings().warningBellVolume == BellVolume::High);
 
+    mock.writeToScreen("\033[1 t");
+    REQUIRE(mock.terminal.settings().warningBellVolume == BellVolume::Off);
+
     mock.writeToScreen("\033[0 t");
-    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::Off);
+    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::High);
 }
 
 TEST_CASE("DECSWBV: a Ps outside 0-8 is rejected", "[screen]")
@@ -4527,16 +4530,17 @@ TEST_CASE("DECSWBV: a hand-built two-parameter sequence is rejected", "[screen]"
     CHECK(mock.terminal.settings().warningBellVolume == BellVolume::Low);
 }
 
-TEST_CASE("DECSWBV: default parameter turns the bell off", "[screen]")
+TEST_CASE("DECSWBV: default parameter selects high", "[screen]")
 {
-    // Omitted Ps maps to 0 which VT520 maps to off
+    // An omitted Ps maps to 0, which the VT510 manual defines as high -- the warning bell's default.
+    // (xterm's ctlseqs lists 0 as off here; DEC's own manual is followed instead.)
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
 
-    mock.writeToScreen("\033[8 t");
-    REQUIRE(mock.terminal.settings().warningBellVolume == BellVolume::High);
+    mock.writeToScreen("\033[1 t");
+    REQUIRE(mock.terminal.settings().warningBellVolume == BellVolume::Off);
 
     mock.writeToScreen("\033[ t");
-    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::Off);
+    CHECK(mock.terminal.settings().warningBellVolume == BellVolume::High);
 }
 
 TEST_CASE("DECSWBV: the volume is restored by RIS", "[screen]")
