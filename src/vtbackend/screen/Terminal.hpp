@@ -968,10 +968,11 @@ class Terminal
     bool applicationCursorKeys() const noexcept { return _inputGenerator.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return _inputGenerator.applicationKeypad(); }
 
-    bool hasInput() const noexcept;
+    bool hasInput() const;
     void flushInput();
 
-    std::string_view peekInput() const noexcept { return _inputGenerator.peek(); }
+    /// Returns a copy of the input queued but not yet flushed to the PTY.
+    [[nodiscard]] std::string peekInput() const;
     // }}}
 
     /// Writes a given VT-sequence to screen.
@@ -2407,6 +2408,18 @@ class Terminal
     // lock()/unlock(), so lock()/unlock() above and the std::lock_guard CTAD call sites are
     // unaffected by the change of type.
     mutable TracyLockable(std::mutex, _stateMutex);
+
+    // Guards _inputGenerator's pending byte queue, and admits one flushInput() at a time from taking the
+    // queue's head through consuming what was written, so that no two flushes send the same bytes. The
+    // parser thread queues every reply and flushes some on the spot (DSR 996, the GIP replies, DECLRP, the
+    // in-band resize report, CONTOUR_SYNC_PTY_OUTPUT); the GUI thread queues and flushes key, mouse, focus
+    // and paste input. _stateMutex cannot serve here: the parser thread already holds it when it replies,
+    // and it is non-recursive.
+    //
+    // Held across the PTY write, which UnixPty::write() turns blocking once a write comes up short, so a
+    // reply queued meanwhile waits for that write -- as the parser thread's next read already does, on the
+    // PTY's own lock. Never held across echoLocally(), which parses and can therefore reply.
+    mutable std::mutex _inputMutex;
 
     // terminal clock
     std::chrono::steady_clock::time_point _currentTime;
