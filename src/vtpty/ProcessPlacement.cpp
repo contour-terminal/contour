@@ -101,17 +101,16 @@ std::expected<Gate, std::error_code> makeGate()
 
 namespace
 {
-    /// How much likelier than Contour a session's process is to be the kernel's out-of-memory
-    /// victim, and the ceiling the kernel accepts.
-    constexpr auto SessionOomScoreAdjustIncrement = 100;
-    constexpr auto MaxOomScoreAdjust = 1000;
-
     /// @return The oom_score_adj for session processes: this process's own plus the increment, or
     ///         nothing where the kernel has no such knob. Read as a stream: /proc reports its files
     ///         as empty, so a read sized by the file's size gets nothing.
     [[nodiscard]] std::optional<int> sessionOomScoreAdjust()
     {
 #ifdef __linux__
+        // How much likelier than Contour a session's process is to be the kernel's out-of-memory
+        // victim, and the ceiling the kernel accepts.
+        constexpr auto SessionOomScoreAdjustIncrement = 100;
+        constexpr auto MaxOomScoreAdjust = 1000;
         auto own = 0;
         if (auto in = std::ifstream { "/proc/self/oom_score_adj" }; in >> own)
             return std::min(own + SessionOomScoreAdjustIncrement, MaxOomScoreAdjust);
