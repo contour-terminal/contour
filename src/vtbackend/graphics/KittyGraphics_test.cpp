@@ -995,4 +995,32 @@ TEST_CASE("KittyGraphics.storage.the_quota_is_a_terminal_setting", "[kitty]")
     // Replacing the image under the same id is billed net of the bytes it frees.
     CHECK(replyTo(mock, "\033_Ga=t,f=24,i=1,s=2,v=1;AP8A/wAA\033\\"sv).contains("OK"));
 }
+
+TEST_CASE("KittyGraphics.storage.a_refused_retransmission_keeps_the_frames", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    // Three 2x1 RGB images' worth: another image, image 1, and one frame of image 1.
+    mock.terminal.settings().kittyImageStorageQuota = 18;
+    REQUIRE(replyTo(mock, "\033_Ga=t,f=24,i=2,s=2,v=1;/wAAAP8A\033\\"sv).contains("OK"));
+    REQUIRE(replyTo(mock, "\033_Ga=t,f=24,i=1,s=2,v=1;/wAAAP8A\033\\"sv).contains("OK"));
+    REQUIRE(replyTo(mock, "\033_Ga=f,i=1,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv).contains("OK"));
+
+    // 15 bytes do not fit beside image 2's 6 even with image 1 and its frame discounted, so this is
+    // refused -- and a refusal must leave image 1 exactly as it was, frames included.
+    REQUIRE(replyTo(mock, "\033_Ga=t,f=24,i=1,s=5,v=1;AAAAAAAAAAAAAAAAAAAA\033\\"sv).contains("ENOSPC"));
+    CHECK(replyTo(mock, "\033_Ga=a,i=1,c=2\033\\"sv).contains("OK"));
+}
+
+TEST_CASE("KittyGraphics.storage.a_retransmission_is_not_billed_for_the_frames_it_replaces", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.terminal.settings().kittyImageStorageQuota = 18;
+    REQUIRE(replyTo(mock, "\033_Ga=t,f=24,i=2,s=2,v=1;/wAAAP8A\033\\"sv).contains("OK"));
+    REQUIRE(replyTo(mock, "\033_Ga=t,f=24,i=1,s=2,v=1;/wAAAP8A\033\\"sv).contains("OK"));
+    REQUIRE(replyTo(mock, "\033_Ga=f,i=1,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv).contains("OK"));
+
+    // 12 bytes fit beside image 2 once image 1 and its frame -- both about to be freed -- are not
+    // counted against them.
+    CHECK(replyTo(mock, "\033_Ga=t,f=24,i=1,s=4,v=1;AAAAAAAAAAAAAAAA\033\\"sv).contains("OK"));
+}
 // }}}

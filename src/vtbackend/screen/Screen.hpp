@@ -268,6 +268,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @return decoded bytes held by stored kitty images and their animation frames.
     [[nodiscard]] size_t storedKittyBytes() const;
 
+    /// @return decoded bytes held by the kitty image stored under @p imageId and its animation frames.
+    [[nodiscard]] size_t storedKittyBytesOf(uint32_t imageId) const;
+
     /// Clears the on-screen fragments of @p imageId, whichever of its frames the cells hold.
     void removeKittyPlacementsOf(uint32_t imageId);
 

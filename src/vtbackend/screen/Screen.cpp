@@ -5733,17 +5733,17 @@ void Screen::processKittyGraphics(std::string_view body)
         // that a later `a=p` can place it, and silently dropping one turns that into ENOENT.
         // The same accounting the frame path uses. Two independent sums, each blind to the other's
         // bytes, let resident memory reach roughly twice the documented cap.
-        // The frames go first: they were composited from the image being replaced and describe
-        // nothing once it is gone, so billing the new image against bytes that are about to be freed
-        // refuses a re-transmission that in fact fits.
-        _kittyAnimations.erase(command.imageId);
-        auto const replaced = _kittyImages.find(command.imageId);
-        auto const replacedBytes = replaced != _kittyImages.end() ? replaced->second->data().size() : 0;
-        if (storedKittyBytes() - replacedBytes + image->data().size() > _settings->kittyImageStorageQuota)
+        // The image being replaced and its frames are not billed against the replacement: the frames
+        // were composited from that image and go with it, so charging the new one for bytes that are
+        // about to be freed refuses a re-transmission that in fact fits. They are dropped only once
+        // the replacement is accepted -- a refused re-transmission leaves the image as it was.
+        if (storedKittyBytes() - storedKittyBytesOf(command.imageId) + image->data().size()
+            > _settings->kittyImageStorageQuota)
         {
             replyKittyGraphics(command, "ENOSPC:image storage quota exceeded");
             return;
         }
+        _kittyAnimations.erase(command.imageId);
         _kittyImages[command.imageId] = image;
     }
 
@@ -5755,18 +5755,31 @@ void Screen::processKittyGraphics(std::string_view body)
 
 size_t Screen::storedKittyBytes() const
 {
-    // Counted by distinct Image, not by vector slot: frame 1 aliases the stored image, and a gap in
-    // the frame numbering aliases frame 1, so charging every slot would bill one image many times and
-    // refuse legitimate frames with ENOSPC.
+    auto total = size_t { 0 };
+    for (auto const id: _kittyImages | std::views::keys)
+        total += storedKittyBytesOf(id);
+    // An animation outliving its image would be memory no quota sees; count it rather than trust that
+    // no path ever leaves one behind.
+    for (auto const id: _kittyAnimations | std::views::keys)
+        if (!_kittyImages.contains(id))
+            total += storedKittyBytesOf(id);
+    return total;
+}
+
+size_t Screen::storedKittyBytesOf(uint32_t imageId) const
+{
+    // Counted by distinct Image, not by vector slot: frame 1 aliases the stored image, so charging
+    // every slot would bill one image twice and refuse legitimate frames with ENOSPC.
     auto seen = std::unordered_set<Image const*> {};
     auto total = size_t { 0 };
-    for (auto const& [id, image]: _kittyImages)
+    auto const charge = [&](std::shared_ptr<Image const> const& image) {
         if (image && seen.insert(image.get()).second)
             total += image->data().size();
-    for (auto const& [id, animation]: _kittyAnimations)
-        for (auto const& frame: animation.frames)
-            if (frame && seen.insert(frame.get()).second)
-                total += frame->data().size();
+    };
+    if (auto const image = _kittyImages.find(imageId); image != _kittyImages.end())
+        charge(image->second);
+    if (auto const animation = _kittyAnimations.find(imageId); animation != _kittyAnimations.end())
+        std::ranges::for_each(animation->second.frames, charge);
     return total;
 }
 
