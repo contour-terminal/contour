@@ -1037,4 +1037,43 @@ TEST_CASE("KittyGraphics.storage.editing_the_root_frame_is_billed_once", "[kitty
     // A second frame, by contrast, really is a second copy.
     CHECK(replyTo(mock, "\033_Ga=f,i=1,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv).contains("ENOSPC"));
 }
+
+TEST_CASE("KittyGraphics.animation.the_frame_count_is_capped", "[kitty]")
+{
+    using kitty_graphics::MaxAnimationFrames;
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    REQUIRE(replyTo(mock, "\033_Ga=t,f=24,i=1,s=1,v=1;AAAA\033\\"sv).contains("OK"));
+
+    // Frame 1 is the image itself, so MaxAnimationFrames - 1 frames can be appended to it.
+    for ([[maybe_unused]] auto const frame: std::views::iota(1u, MaxAnimationFrames))
+        REQUIRE(replyTo(mock, "\033_Ga=f,i=1,s=1,v=1;AAAA\033\\"sv).contains("OK"));
+    CHECK(replyTo(mock, "\033_Ga=f,i=1,s=1,v=1;AAAA\033\\"sv).contains("ENOSPC"));
+}
+
+TEST_CASE("KittyGraphics.animation.a_new_frame_without_c_starts_from_the_background", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033_Ga=T,f=32,i=7,s=2,v=1;/wAA/wD/AP8=\033\\"sv);
+
+    // No `c=`, so the canvas is `Y=`, an RGBA literal: 65535 is opaque blue. Only the first pixel is
+    // transmitted (opaque red); the second must be the background, not the base image's green.
+    mock.writeToScreen("\033_Ga=f,i=7,Y=65535,X=1,x=0,y=0,s=1,v=1;/wAA/w==\033\\"sv);
+    mock.writeToScreen("\033_Ga=a,i=7,c=2\033\\"sv);
+    CHECK(placedPixels(mock) == std::vector<uint8_t> { 255, 0, 0, 255, 0, 0, 255, 255 });
+}
+
+TEST_CASE("KittyGraphics.storage.freeing_an_image_frees_its_frames", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.terminal.settings().kittyImageStorageQuota = 12; // Two 2x1 RGB images' worth.
+    REQUIRE(replyTo(mock, "\033_Ga=t,f=24,i=1,s=2,v=1;/wAAAP8A\033\\"sv).contains("OK"));
+    REQUIRE(replyTo(mock, "\033_Ga=f,i=1,c=1,X=1,x=1,y=0,s=1,v=1;AAD/\033\\"sv).contains("OK"));
+    REQUIRE(replyTo(mock, "\033_Ga=t,f=24,i=2,s=2,v=1;/wAAAP8A\033\\"sv).contains("ENOSPC"));
+
+    // `d=I` frees the image's data, and its frames are copies of it: leaving them behind would keep
+    // the quota full with memory no verb can reach any more.
+    mock.writeToScreen("\033_Ga=d,d=I,i=1\033\\"sv);
+    CHECK(replyTo(mock, "\033_Ga=t,f=24,i=2,s=2,v=1;/wAAAP8A\033\\"sv).contains("OK"));
+    CHECK(replyTo(mock, "\033_Ga=t,f=24,i=3,s=2,v=1;/wAAAP8A\033\\"sv).contains("OK"));
+}
 // }}}
