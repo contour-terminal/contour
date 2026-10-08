@@ -23,9 +23,12 @@ act on the unit as a whole:
   sd-bus, for a transient `contour-session-<contour pid>-<child pid>-<n>.scope` in `app.slice` with
   `OOMPolicy=continue`, waits for the job, and releases the child. Everything the child forks from
   then on is born in that scope.
+  systemd before 253 knows neither `PIDFDs` nor `OOMPolicy=` on scopes and refuses a request
+  carrying either, so the first such refusal switches the connection to `PIDs=` and no
+  `OOMPolicy=`. Its scopes do not react to an out-of-memory kill at all, which is what we want.
 - `NoPlacement` (other platforms, Flatpak, builds without systemd) releases at once.
 
-Before parking, the child also raises its own `oom_score_adj` by 100, so in a *global*
+Before parking, the child also sets the `oom_score_adj` its placement supplies -- Contour's own plus 100 -- so in a *global*
 out-of-memory the kernel picks a session's process before Contour.
 
 ## Invariants worth not breaking
@@ -36,8 +39,13 @@ out-of-memory the kernel picks a session's process before Contour.
   killed while parked must not take Contour with it. A byte, not end-of-file, because a sibling
   forked meanwhile inherits the gate's parent end.
 - **The child waits on the gate before anything else**, using async-signal-safe calls only.
-- **`placeThenRelease` never blocks**: `Process::start()` runs on the GUI thread. One worker thread
-  owns the sd-bus connection, and starts with the first session.
+- **`placeThenRelease` never blocks and never throws**: `Process::start()` runs on the GUI thread
+  and reports failures as values. One worker thread owns the sd-bus connection, and starts with the
+  first session, with every signal blocked: the daemon waits for `SIGTERM` with `sigwait()`.
+- **A child that exited while queued is not asked about.** Its pid may name another process by
+  then; the pidfd says whether it is gone.
+- **Each request listens for its own unit's `JobRemoved` only**, through a match filtered on the
+  unit and removed afterwards; nothing queues up on the connection between spawns.
 - **A wedged bus costs one deadline (1 s), not one per tab**: the breaker skips requests for 30 s,
   then lets one trial request decide.
 

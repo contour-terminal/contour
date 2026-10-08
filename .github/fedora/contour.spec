@@ -23,6 +23,7 @@ BuildRequires:  harfbuzz-devel
 BuildRequires:  libssh2-devel
 BuildRequires:  ninja-build
 BuildRequires:  pkgconf
+BuildRequires:  systemd-devel
 BuildRequires:  qt6-qtbase-devel
 BuildRequires:  qt6-qtbase-gui
 BuildRequires:  qt6-qtdeclarative-devel
