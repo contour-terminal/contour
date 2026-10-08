@@ -20,6 +20,7 @@ set(vtpty_SOURCES
     MockPty.cpp
     MockViewPty.cpp
     OwnedFd.cpp
+    PlacementBreaker.cpp
     Process${PLATFORM_SUFFIX}.cpp
     ProcessPlacement.cpp
     Pty.cpp
@@ -35,10 +36,12 @@ set(vtpty_HEADERS
     MockViewPty.hpp
     OwnedFd.hpp
     PageSize.hpp
+    PlacementBreaker.hpp
     Process.hpp
     ProcessPlacement.hpp
     Pty.hpp
     SandboxInfo.hpp
+    ScopeBus.hpp
     SpawnLadder.hpp
     SshFailureMessage.hpp
 )
@@ -113,6 +116,7 @@ if(VTPTY_TESTING)
         test_main.cpp
         ChannelPty_test.cpp
         ImageSize_test.cpp
+        PlacementBreaker_test.cpp
         Process_test.cpp
         SandboxInfo_test.cpp
         SpawnLadder_test.cpp
