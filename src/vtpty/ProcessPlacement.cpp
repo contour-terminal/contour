@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ProcessPlacement.hpp>
 
+#ifdef VTPTY_SYSTEMD
+    #include <vtpty/Process.hpp>
+    #include <vtpty/SdBusScopeBus.hpp>
+    #include <vtpty/SystemdScopePlacement.hpp>
+#endif
+
 #include <array>
 #include <cerrno>
 #include <utility>
@@ -69,6 +75,17 @@ std::expected<Gate, std::error_code> makeGate()
 
 std::shared_ptr<ProcessPlacement> makeDefaultProcessPlacement()
 {
+#ifdef VTPTY_SYSTEMD
+    // Inside Flatpak the shells run on the host through flatpak-spawn, outside Contour's cgroup
+    // already, and the sandbox may not create units anyway.
+    if (!Process::isFlatpak())
+    {
+        auto config = SystemdScopeConfig {};
+        auto const timeout = config.deadline;
+        return std::make_shared<SystemdScopePlacement>(std::move(config),
+                                                       [timeout] { return SdBusScopeBus::connect(timeout); });
+    }
+#endif
     return std::make_shared<NoPlacement>();
 }
 

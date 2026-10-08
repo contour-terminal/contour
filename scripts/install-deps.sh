@@ -202,6 +202,7 @@ install_deps_popos() {
         libqt5x11extras5-dev
         libssh2-1-dev
         libssl-dev
+        libsystemd-dev
         libutempter-dev
         libx11-xcb-dev
         libyaml-cpp-dev
@@ -243,6 +244,7 @@ install_deps_ubuntu() {
         libharfbuzz-dev
         libssh2-1-dev
         libssl-dev
+        libsystemd-dev
         libutempter-dev
         libx11-xcb-dev
         libyaml-cpp-dev
@@ -403,6 +405,7 @@ install_deps_arch() {
         ninja \
         openssl \
         pkg-config \
+        systemd-libs \
         libutempter \
         yaml-cpp \
     "
@@ -450,6 +453,7 @@ install_deps_suse() {
         libopenssl-devel
         libssh2-devel
         ncurses-devel
+        systemd-devel
         ninja
         pkgconf
         yaml-cpp-devel
@@ -503,6 +507,7 @@ install_deps_fedora() {
         ninja-build
         openssl-devel
         pkgconf
+        systemd-devel
         libutempter-devel
         yaml-cpp-devel
     "

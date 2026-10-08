@@ -55,6 +55,7 @@ AppDir:
     - qt6-qpa-plugins:amd64
     - libyaml-cpp0.8:amd64
     - libutempter-dev:amd64
+    - libsystemd-dev:amd64
     - libssh2-1:amd64
     - libx11-xcb1:amd64
     - libxcb1

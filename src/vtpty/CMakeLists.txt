@@ -13,6 +13,11 @@ if(EXISTS "/.flatpak-info")
     set(CONTOUR_WITH_UTEMPTER OFF)
 endif()
 
+if(NOT LINUX OR EXISTS "/.flatpak-info")
+    # Only Linux has systemd, and inside Flatpak the sandbox may not create units.
+    set(CONTOUR_WITH_SYSTEMD OFF)
+endif()
+
 set(vtpty_LIBRARIES core::base core::log crispy::core Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
 
 set(vtpty_SOURCES
@@ -66,6 +71,21 @@ else()
     message(STATUS "[vtpty] Builtin-SSH support disabled")
 endif()
 
+if(CONTOUR_WITH_SYSTEMD)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBSYSTEMD libsystemd)
+    if(NOT LIBSYSTEMD_FOUND)
+        message(FATAL_ERROR "[vtpty] CONTOUR_WITH_SYSTEMD is ON, but libsystemd was not found. "
+                            "Install its development package (libsystemd-dev, systemd-devel), "
+                            "or configure with -DCONTOUR_WITH_SYSTEMD=OFF.")
+    endif()
+    list(APPEND vtpty_SOURCES SdBusScopeBus.cpp)
+    list(APPEND vtpty_HEADERS SdBusScopeBus.hpp)
+    message(STATUS "[vtpty] systemd session scopes enabled")
+else()
+    message(STATUS "[vtpty] systemd session scopes disabled")
+endif()
+
 if(LINUX)
     if(CONTOUR_WITH_UTEMPTER)
         set(vtpty_LIBRARIES ${vtpty_LIBRARIES} utempter)
@@ -91,6 +111,11 @@ if(CONTOUR_WITH_UTEMPTER)
 endif()
 if(HAVE_CLOSE_RANGE)
     target_compile_definitions(vtpty PRIVATE HAVE_CLOSE_RANGE)
+endif()
+if(CONTOUR_WITH_SYSTEMD)
+    target_compile_definitions(vtpty PRIVATE VTPTY_SYSTEMD=1)
+    target_include_directories(vtpty PRIVATE ${LIBSYSTEMD_INCLUDE_DIRS})
+    target_link_libraries(vtpty PRIVATE ${LIBSYSTEMD_LINK_LIBRARIES})
 endif()
 if(_include_SshSession_module)
     target_compile_definitions(vtpty PUBLIC VTPTY_LIBSSH2=1)
