@@ -32,6 +32,8 @@
 #include <unordered_map>
 #include <vector>
 
+class QQuickWindow;
+
 namespace contour
 {
 
@@ -43,6 +45,7 @@ namespace config
 namespace display
 {
     class ForcedFontDpiProvider;
+    class GraphicsDeviceSelector;
     class IGpuInventory;
 } // namespace display
 
@@ -208,6 +211,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     {
         return _selfOnlyEnvironment;
     }
+
+    /// Hands a not-yet-exposed window the chosen GPU (Vulkan/Direct3D); no-op for OpenGL.
+    /// @param window The window, before it is first exposed.
+    void applyGraphicsDevice(QQuickWindow& window);
 
     [[nodiscard]] std::string profileName() const;
 
@@ -420,6 +427,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// What the window controls are and where they go, handed to QML as the `windowControls` context
     /// property. Declared before the engine for the same borrowed-pointer reason as above.
     std::unique_ptr<window::WindowControlStyleProvider> _windowControlStyleProvider;
+
+    /// Chooses the GPU for Vulkan/Direct3D windows; null for OpenGL. Absent without Qt 6.10. Declared before
+    /// _qmlEngine: the windows go first, then the Vulkan instance they borrowed.
+#if defined(CONTOUR_WITH_GPU_SELECTION)
+    std::unique_ptr<display::GraphicsDeviceSelector> _graphicsDeviceSelector;
+#endif
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
 };

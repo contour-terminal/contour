@@ -111,6 +111,18 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 # }}}
 
+# {{{ GPU selection for Vulkan/Direct3D (renderer.gpu): QRhi::enumerateAdapters + fromRhiAdapter
+# QQuickGraphicsDevice::fromRhiAdapter "was introduced in Qt 6.10". OpenGL selection (DRI_PRIME) does
+# not need it and is built regardless.
+if(CONTOUR_FRONTEND_GUI)
+    if(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
+        set(CONTOUR_WITH_GPU_SELECTION ON)
+    else()
+        contour_note_excluded_feature("GPU selection for Vulkan and Direct3D" "requires Qt 6.10")
+    endif()
+endif()
+# }}}
+
 # {{{ Optional: Qt's WaylandClient, for blur-behind and the window shadow
 # Looked up here rather than in platform/, which is the only directory that consumes it, because
 # imported targets are directory scoped: a find_package() down there leaves Qt6::WaylandClient
@@ -284,6 +296,11 @@ if(CONTOUR_FRONTEND_GUI)
         remote/RemoteLayout.cpp
         remote/TmuxController.cpp
     )
+endif()
+
+if(CONTOUR_WITH_GPU_SELECTION)
+    list(APPEND _core_source_files display/GraphicsDeviceSelector.cpp)
+    list(APPEND _header_files display/GraphicsDeviceSelector.hpp)
 endif()
 
 if(WIN32)
@@ -463,6 +480,9 @@ if(CONTOUR_FRONTEND_GUI)
     set_target_properties(contour_core contour PROPERTIES AUTOMOC ON AUTORCC ON)
     # Disable all deprecated Qt functions prior to Qt 6.0.
     target_compile_definitions(contour_core PUBLIC QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
+    if(CONTOUR_WITH_GPU_SELECTION)
+        target_compile_definitions(contour_core PUBLIC CONTOUR_WITH_GPU_SELECTION)
+    endif()
 endif()
 
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
@@ -668,6 +688,9 @@ if(CONTOUR_FRONTEND_GUI)
             window/WindowSizing_test.cpp
         )
         set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
+        if(CONTOUR_WITH_GPU_SELECTION)
+            target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)
+        endif()
         target_link_libraries(contour_gui_test
             PRIVATE
             contour_core

@@ -910,6 +910,9 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
 
     _osWindow = osWindow;
 
+    // Still unexposed, so the scene graph has not chosen a graphics device yet.
+    _manager.app().applyGraphicsDevice(*osWindow);
+
     // Assign the pre-show target screen — the DPR predictor for the headless cell metrics. Order:
     // the spawning window's screen (staged by ContourGuiApp::newWindow), else the screen under the
     // cursor (where WMs place new windows; not globally meaningful on Wayland), else Qt's default

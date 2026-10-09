@@ -4,6 +4,9 @@
 #include <contour/config/Config.hpp>
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/GpuInventory.hpp>
+#if defined(CONTOUR_WITH_GPU_SELECTION)
+    #include <contour/display/GraphicsDeviceSelector.hpp>
+#endif
 #include <contour/display/Logging.hpp>
 #include <contour/display/OpenGlGpuEnvironment.hpp>
 #include <contour/display/RenderingBackendSelection.hpp>
@@ -196,6 +199,16 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
 }
 
 ContourGuiApp::~ContourGuiApp() = default;
+
+void ContourGuiApp::applyGraphicsDevice(QQuickWindow& window)
+{
+#if defined(CONTOUR_WITH_GPU_SELECTION)
+    if (_graphicsDeviceSelector)
+        _graphicsDeviceSelector->applyTo(window);
+#else
+    (void) window;
+#endif
+}
 
 void ContourGuiApp::applyOpenGlGpuSelection()
 {
@@ -1171,6 +1184,12 @@ int ContourGuiApp::terminalGuiAction()
     if (auto const api = graphicsApiFor(requestedBackend))
         QQuickWindow::setGraphicsApi(*api);
 
+#if defined(CONTOUR_WITH_GPU_SELECTION)
+    if (auto const implementation = display::adapterImplementationFor(requestedBackend))
+        _graphicsDeviceSelector = std::make_unique<display::GraphicsDeviceSelector>(
+            display::makeQtAdapterLister(*implementation), _config.renderer.value().gpu);
+#endif
+
     QGuiApplication::setWindowIcon(QIcon(":/contour/logo-256.png"));
 
     QSurfaceFormat::setDefaultFormat(display::createSurfaceFormat());
@@ -1326,6 +1345,9 @@ int ContourGuiApp::terminalGuiAction()
 
     // Explicitly destroy QML engine here to ensure it's being destructed before QGuiApplication.
     _qmlEngine.reset();
+#if defined(CONTOUR_WITH_GPU_SELECTION)
+    _graphicsDeviceSelector.reset(); // its windows are gone; still before QGuiApplication
+#endif
 
     // printf("\r%s", TBC);
     return rv;
