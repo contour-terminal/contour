@@ -246,14 +246,15 @@ void ContourGuiApp::watchFirstFrame(QQuickWindow& window, std::function<void(QQu
 
 void ContourGuiApp::logGpuInUse(QQuickWindow& window)
 {
-    // The first window names the GPU its scene graph really runs on, for every backend -- `auto` chooses
-    // nothing itself, so this is the only place it shows. A fallback starts a new scene graph, and the GPU
-    // it lands on is logged again. Runs on the render thread, the one that just created the QRhi.
+    // The first window names the GPU its first frame was really drawn on, for every backend -- `auto`
+    // chooses nothing itself, so this is the only place it shows. The first frame, not
+    // sceneGraphInitialized: Qt emits that once per window even when it re-creates a lost device over and
+    // over, so it would name a GPU that never drew. Runs on the render thread, which owns the QRhi.
     if (_gpuInUseLog)
         return;
     _gpuInUseLog = connect(
         &window,
-        &QQuickWindow::sceneGraphInitialized,
+        &QQuickWindow::frameSwapped,
         &window,
         [&window, requested = _config.renderer.value().gpu] {
             auto const* const rhi = window.rhi();
@@ -270,7 +271,7 @@ void ContourGuiApp::logGpuInUse(QQuickWindow& window)
                 "{}",
                 display::gpuInUseLine(info.deviceName.toStdString(), id, rhi->backendName(), requested));
         },
-        Qt::DirectConnection);
+        static_cast<Qt::ConnectionType>(Qt::DirectConnection | Qt::SingleShotConnection));
 }
 
 #if defined(CONTOUR_WITH_GPU_SELECTION)

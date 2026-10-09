@@ -406,7 +406,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// Applies `renderer.gpu` to OpenGL through the driver's environment (Linux only).
     void applyOpenGlGpuSelection();
 
-    /// Logs the GPU the first window's scene graph runs on, each time it starts.
+    /// Logs the GPU the first window's first frame was drawn on.
     /// @param window The window, before it is first exposed.
     void logGpuInUse(QQuickWindow& window);
 
