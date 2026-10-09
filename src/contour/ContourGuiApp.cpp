@@ -57,6 +57,7 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QStyleHints>
 #include <QtGui/QSurfaceFormat>
+#include <QtGui/rhi/qrhi.h>
 #include <QtMultimedia/QMediaDevices>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
@@ -209,6 +210,7 @@ ContourGuiApp::~ContourGuiApp() = default;
 
 void ContourGuiApp::applyGraphicsDevice(QQuickWindow& window)
 {
+    logGpuInUse(window);
 #if defined(CONTOUR_WITH_GPU_SELECTION)
     if (_graphicsDeviceSelector)
     {
@@ -222,9 +224,36 @@ void ContourGuiApp::applyGraphicsDevice(QQuickWindow& window)
                         onGpuFailure(*guarded);
                 });
     }
-#else
-    (void) window;
 #endif
+}
+
+void ContourGuiApp::logGpuInUse(QQuickWindow& window)
+{
+    // The first window names the GPU its scene graph really runs on, for every backend -- `auto` chooses
+    // nothing itself, so this is the only place it shows. A fallback starts a new scene graph, and the GPU
+    // it lands on is logged again. Runs on the render thread, the one that just created the QRhi.
+    if (_gpuInUseLog)
+        return;
+    _gpuInUseLog = connect(
+        &window,
+        &QQuickWindow::sceneGraphInitialized,
+        &window,
+        [&window, requested = _config.renderer.value().gpu] {
+            auto const* const rhi = window.rhi();
+            if (!rhi)
+                return;
+            auto const info = rhi->driverInfo();
+            // Vulkan and Direct3D report the PCI ids; OpenGL reports none, and a software device's
+            // Khronos vendor id (0x10005 for Mesa) is no PCI id either.
+            auto const isPciId = info.vendorId <= 0xFFFF && info.deviceId <= 0xFFFF;
+            auto const id = isPciId ? config::PciId { .vendor = static_cast<std::uint16_t>(info.vendorId),
+                                                      .device = static_cast<std::uint16_t>(info.deviceId) }
+                                    : config::PciId {};
+            startupLog()(
+                "{}",
+                display::gpuInUseLine(info.deviceName.toStdString(), id, rhi->backendName(), requested));
+        },
+        Qt::DirectConnection);
 }
 
 #if defined(CONTOUR_WITH_GPU_SELECTION)
@@ -267,6 +296,8 @@ void ContourGuiApp::applyOpenGlGpuSelection()
     qunsetenv(display::SelfSetEnvironmentMarker.data());
 
     auto const& renderer = _config.renderer.value();
+    if (renderer.gpu.preference == config::GpuPreference::Auto)
+        return; // `auto` does not intervene: the driver stack's default GPU, as without renderer.gpu
     if (renderer.renderingBackend != config::RenderingBackend::OpenGL
         && renderer.renderingBackend != config::RenderingBackend::Auto)
         return; // Vulkan/D3D choose through Qt's adapter API instead; Software has no GPU
@@ -277,6 +308,8 @@ void ContourGuiApp::applyOpenGlGpuSelection()
     auto const& chosen = gpus[choice->index];
     if (choice->outcome == display::RequestOutcome::FellBack)
         errorLog()("renderer.gpu: no GPU {} is present; using {}.", renderer.gpu, chosen.title);
+    // Nothing is set when the chosen GPU already drives the display, or when the user exported the
+    // variables themselves; then the driver decides, and only the scene graph's report names the GPU.
     auto const assignments = display::openGlSelectionEnvironment(
         chosen, [](std::string_view name) { return qEnvironmentVariableIsSet(std::string(name).c_str()); });
     for (auto const& assignment: assignments)
@@ -286,11 +319,11 @@ void ContourGuiApp::applyOpenGlGpuSelection()
     }
     if (!assignments.empty())
     {
-        qputenv(display::SelfSetEnvironmentMarker.data(),
-                QByteArray::fromStdString(display::selfSetMarkerValue(assignments)));
+        auto const names = display::selfSetMarkerValue(assignments);
+        qputenv(display::SelfSetEnvironmentMarker.data(), QByteArray::fromStdString(names));
         _selfOnlyEnvironment.emplace_back(display::SelfSetEnvironmentMarker);
+        display::displayLog()("renderer.gpu: set {} so that OpenGL renders on '{}'.", names, chosen.title);
     }
-    startupLog()("GPU: '{}' {} via OpenGL (requested: {})", chosen.title, chosen.id, renderer.gpu);
 #else
     // Spec 4.3: no supported way to choose an OpenGL GPU here.
     auto const& renderer = _config.renderer.value();
@@ -1231,7 +1264,9 @@ int ContourGuiApp::terminalGuiAction()
         QQuickWindow::setGraphicsApi(*api);
 
 #if defined(CONTOUR_WITH_GPU_SELECTION)
-    if (auto const implementation = display::adapterImplementationFor(requestedBackend))
+    // `auto` does not intervene, so it needs no selector: Qt lists and creates the devices as it always did.
+    if (auto const implementation = display::adapterImplementationFor(requestedBackend);
+        implementation && _config.renderer.value().gpu.preference != config::GpuPreference::Auto)
         _graphicsDeviceSelector = std::make_unique<display::GraphicsDeviceSelector>(
             display::makeQtAdapterLister(*implementation), _config.renderer.value().gpu);
 #endif

@@ -55,17 +55,27 @@ class GraphicsDeviceSelector
     [[nodiscard]] std::optional<AdapterEntry> const& choose();
 
     /// Hands the instance and the chosen adapter to @p window. Must run before it is first exposed.
+    /// Does nothing for `auto`, which leaves the device to Qt.
     void applyTo(QQuickWindow& window);
 
-    /// Chooses again as `auto`, after the chosen GPU failed to render.
-    /// @return The new choice.
+    /// Chooses again by `auto`'s ranking among the other adapters, after the chosen GPU failed to render.
+    /// @return The new choice; nullopt when no other adapter exists.
     std::optional<AdapterEntry> const& fallBackToAuto();
+
+    /// @return Whether applyTo() hands windows a device: true once a GPU was chosen explicitly, also after
+    /// a fallback to `auto`'s ranking; false for `auto` from the start, which leaves the device to Qt.
+    [[nodiscard]] bool appliesDevice() const noexcept
+    {
+        return _adapters.has_value() || _selector.preference != config::GpuPreference::Auto;
+    }
 
     /// @return The selector currently in effect.
     [[nodiscard]] config::GpuSelector const& selector() const noexcept { return _selector; }
 
   private:
-    void recompute();
+    /// Chooses among the listed adapters by the current selector.
+    /// @param excluded An adapter id that must not be chosen (one that failed to render).
+    void recompute(std::optional<config::PciId> excluded);
 
     std::unique_ptr<IAdapterLister> _lister;
     config::GpuSelector _selector;

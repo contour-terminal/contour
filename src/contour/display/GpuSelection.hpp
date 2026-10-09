@@ -7,10 +7,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace contour::display
 {
@@ -59,6 +61,8 @@ struct GpuChoice
 namespace detail
 {
     /// Order in which kinds are tried, per preference. The CPU rasterizer is everyone's last resort.
+    /// `auto` leaves the GPU to the system; its row ranks the GPU to fall back to when an explicitly
+    /// chosen one cannot render, and the one to use when a configured id is absent.
     struct KindRanking
     {
         config::GpuPreference preference;
@@ -113,6 +117,22 @@ namespace detail
         return candidate.kind;
     auto const match = std::ranges::find(inventory, candidate.id, &GpuCandidate::id);
     return match != inventory.end() ? match->kind : GpuKind::Other;
+}
+
+/// The startup log line naming the GPU a window's scene graph actually runs on.
+/// @param deviceName What the graphics API calls the device (QRhiDriverInfo::deviceName).
+/// @param id Its PCI vendor:device; all zero when the API does not say (OpenGL).
+/// @param backend The graphics API's name, e.g. "Vulkan".
+/// @param requested What `renderer.gpu` asked for.
+/// @return `GPU: '<name>' <vvvv:dddd> via <backend> (requested: <value>)`, without the id when unknown.
+[[nodiscard]] inline std::string gpuInUseLine(std::string_view deviceName,
+                                              config::PciId id,
+                                              std::string_view backend,
+                                              config::GpuSelector const& requested)
+{
+    if (id == config::PciId {})
+        return std::format("GPU: '{}' via {} (requested: {})", deviceName, backend, requested);
+    return std::format("GPU: '{}' {} via {} (requested: {})", deviceName, id, backend, requested);
 }
 
 /// Chooses the GPU to render with.

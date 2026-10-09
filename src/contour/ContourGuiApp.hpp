@@ -404,6 +404,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// Applies `renderer.gpu` to OpenGL through the driver's environment (Linux only).
     void applyOpenGlGpuSelection();
 
+    /// Logs the GPU the first window's scene graph runs on, each time it starts.
+    /// @param window The window, before it is first exposed.
+    void logGpuInUse(QQuickWindow& window);
+
 #if defined(CONTOUR_WITH_GPU_SELECTION)
     /// Moves @p window to the automatically chosen GPU, after the configured one failed to render on it.
     /// @param window The window that never showed a frame.
@@ -417,6 +421,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     std::shared_ptr<display::IGpuInventory const> _gpuInventory;
     std::vector<std::string> _selfOnlyEnvironment;
+    QMetaObject::Connection _gpuInUseLog; ///< Set once the first window's GPU report is wired.
 
     int _argc = 0;
     char const** _argv = nullptr;

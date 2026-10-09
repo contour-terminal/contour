@@ -30,7 +30,7 @@ as "Rendering GPU".
 
 | Value | Meaning |
 |-------|---------|
-| `auto` | **Default.** Prefer the power-saving GPU: integrated, then discrete. |
+| `auto` | **Default.** Use the system's default GPU (Contour does not intervene). On most laptops this is the power-saving integrated GPU. |
 | `integrated` | The integrated GPU, if present. |
 | `discrete` | The discrete GPU, if present; otherwise the integrated one. |
 | `vvvv:dddd` | A specific GPU by PCI vendor:device id, e.g. `10de:2820`. If it is absent, `auto` is used. |

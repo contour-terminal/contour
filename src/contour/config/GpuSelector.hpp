@@ -22,7 +22,7 @@ struct PciId
 /// How `renderer.gpu` asks for a GPU.
 enum class GpuPreference : std::uint8_t
 {
-    Auto,       ///< Power first: integrated, then discrete.
+    Auto,       ///< Do not intervene: the system's default GPU.
     Integrated, ///< Integrated if present.
     Discrete,   ///< Discrete if present, else integrated.
     Specific,   ///< The GPU named by GpuSelector::id.

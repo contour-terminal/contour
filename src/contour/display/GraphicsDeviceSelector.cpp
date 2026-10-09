@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Logging.hpp>
 #include <contour/display/GraphicsDeviceSelector.hpp>
+#include <contour/display/Logging.hpp>
 #if defined(_WIN32)
     #include <contour/display/GpuInventory.hpp>
 #endif
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <ranges>
 
 // Qt declares its Vulkan API (QVulkanInstance, QRhiVulkanInitParams, QWindow::setVulkanInstance) only for
 // a Qt built with Vulkan, and only where the Vulkan headers are installed; Direct3D needs neither.
@@ -171,34 +173,46 @@ std::optional<AdapterEntry> const& GraphicsDeviceSelector::choose()
     if (!_adapters)
     {
         _adapters = _lister->list();
-        recompute();
+        recompute(std::nullopt);
     }
     return _chosen;
 }
 
-void GraphicsDeviceSelector::recompute()
+void GraphicsDeviceSelector::recompute(std::optional<config::PciId> excluded)
 {
+    // The candidates that may be chosen, and where each sits in the adapter list.
     auto candidates = std::vector<GpuCandidate> {};
-    for (auto const& entry: *_adapters)
-        candidates.push_back(entry.candidate);
+    auto positions = std::vector<std::size_t> {};
+    for (auto const index: std::views::iota(std::size_t { 0 }, _adapters->size()))
+    {
+        if (excluded && (*_adapters)[index].candidate.id == *excluded)
+            continue;
+        candidates.push_back((*_adapters)[index].candidate);
+        positions.push_back(index);
+    }
     auto const choice = chooseGpu(candidates, _selector);
     if (!choice)
     {
         _chosen.reset();
         return;
     }
-    _chosen = (*_adapters)[choice->index];
+    _chosen = (*_adapters)[positions[choice->index]];
     if (choice->outcome == RequestOutcome::FellBack)
         errorLog()("renderer.gpu: no GPU {} is present; using {}.", _selector, _chosen->candidate.title);
-    startupLog()("GPU: '{}' {} via {} (requested: {})",
+    // Only what was asked of the graphics API; the GPU it really runs on is logged once the scene graph is
+    // up (see ContourGuiApp::applyGraphicsDevice).
+    displayLog()("renderer.gpu: asking {} for '{}' {} (requested: {})",
+                 _lister->backendName(),
                  _chosen->candidate.title,
                  _chosen->candidate.id,
-                 _lister->backendName(),
                  _selector);
 }
 
 void GraphicsDeviceSelector::applyTo(QQuickWindow& window)
 {
+    // `auto` does not intervene: no adapter listing, no instance of our own, Qt's default device.
+    if (!appliesDevice())
+        return;
     auto const& chosen = choose();
 #if defined(CONTOUR_GPU_SELECTION_VULKAN)
     if (auto* const instance = _lister->vulkanInstance())
@@ -210,10 +224,10 @@ void GraphicsDeviceSelector::applyTo(QQuickWindow& window)
 
 std::optional<AdapterEntry> const& GraphicsDeviceSelector::fallBackToAuto()
 {
+    auto const failed = choose();
     _selector = config::GpuSelector {};
-    if (_adapters)
-        recompute();
-    return choose();
+    recompute(failed ? std::optional { failed->candidate.id } : std::nullopt);
+    return _chosen;
 }
 
 std::optional<QRhi::Implementation> adapterImplementationFor(config::RenderingBackend backend)

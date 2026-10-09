@@ -85,3 +85,14 @@ TEST_CASE("inventoryKindOf: an adapter of unknown kind takes the inventory's kin
     warp.kind = GpuKind::Cpu;
     CHECK(inventoryKindOf(warp, Hybrid) == GpuKind::Cpu);
 }
+
+TEST_CASE("gpuInUseLine: names the GPU the scene graph runs on", "[gpu]")
+{
+    auto const discrete = selector(config::GpuPreference::Discrete);
+    CHECK(gpuInUseLine("NVIDIA GeForce RTX 4070 Laptop GPU", { 0x10de, 0x2820 }, "Vulkan", discrete)
+          == "GPU: 'NVIDIA GeForce RTX 4070 Laptop GPU' 10de:2820 via Vulkan (requested: discrete)");
+    // OpenGL reports no PCI id; a 0000:0000 would only mislead.
+    CHECK(gpuInUseLine(
+              "Intel Mesa Intel(R) Graphics (RPL-S)", {}, "OpenGL", selector(config::GpuPreference::Auto))
+          == "GPU: 'Intel Mesa Intel(R) Graphics (RPL-S)' via OpenGL (requested: auto)");
+}

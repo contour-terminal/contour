@@ -850,7 +850,7 @@ TEST_CASE("SettingsController: the GPU row shows titles and stores ids", "[setti
     CHECK(row.value("options").toStringList()
           == QStringList { "auto", "integrated", "discrete", "8086:a788", "10de:2820" });
     CHECK(row.value("optionLabels").toStringList()
-          == QStringList { "Automatic (power saving)",
+          == QStringList { "Automatic (system default)",
                            "Integrated GPU",
                            "Discrete GPU",
                            "Intel integrated GPU",

@@ -933,7 +933,7 @@ namespace
     [[nodiscard]] std::vector<EnumOption> gpuOptions(OptionContext const& context)
     {
         auto options = std::vector<EnumOption> {
-            { .value = "auto", .label = "Automatic (power saving)" },
+            { .value = "auto", .label = "Automatic (system default)" },
             { .value = "integrated", .label = "Integrated GPU" },
             { .value = "discrete", .label = "Discrete GPU" },
         };

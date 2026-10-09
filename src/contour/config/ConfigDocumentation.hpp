@@ -794,7 +794,7 @@ constexpr StringLiteral RendererConfig {
     "    backend: {}\n"
     "\n"
     "    {comment} Which GPU renders the terminal. Takes effect at the next start.\n"
-    "    {comment} - auto        Prefer the power-saving GPU (integrated, then discrete).\n"
+    "    {comment} - auto        The system's default GPU (Contour does not intervene).\n"
     "    {comment} - integrated  The integrated GPU, if present.\n"
     "    {comment} - discrete    The discrete GPU, if present; otherwise the integrated one.\n"
     "    {comment} - vvvv:dddd   A specific GPU by PCI vendor:device id, e.g. 10de:2820.\n"

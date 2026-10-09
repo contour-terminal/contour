@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/display/GraphicsDeviceSelector.hpp>
 
+#include <QtQuick/QQuickWindow>
+
 #include <catch2/catch_test_macros.hpp>
 
 using namespace contour;
@@ -63,6 +65,44 @@ TEST_CASE("GraphicsDeviceSelector: fallBackToAuto re-chooses the power-saving GP
     CHECK(fallback->candidate.id == config::PciId { 0x8086, 0xa788 });
     CHECK(selector.selector().preference == config::GpuPreference::Auto);
     CHECK(listings == 1);
+}
+
+TEST_CASE("GraphicsDeviceSelector: auto leaves the window to Qt and lists nothing", "[gpu]")
+{
+    auto listings = 0;
+    auto selector =
+        GraphicsDeviceSelector(std::make_unique<FakeAdapterLister>(listings), config::GpuSelector {});
+    auto window = QQuickWindow {};
+    selector.applyTo(window);
+    CHECK(listings == 0);
+}
+
+TEST_CASE("GraphicsDeviceSelector: after a fallback, later windows still get the fallback GPU", "[gpu]")
+{
+    auto listings = 0;
+    auto selector = GraphicsDeviceSelector(
+        std::make_unique<FakeAdapterLister>(listings),
+        config::GpuSelector { .preference = config::GpuPreference::Discrete, .id = std::nullopt });
+    CHECK(selector.appliesDevice());
+    (void) selector.fallBackToAuto();
+    CHECK(selector.appliesDevice()); // the selector now reads auto, but the windows are on its choice
+
+    auto untouched =
+        GraphicsDeviceSelector(std::make_unique<FakeAdapterLister>(listings), config::GpuSelector {});
+    CHECK_FALSE(untouched.appliesDevice());
+}
+
+TEST_CASE("GraphicsDeviceSelector: fallBackToAuto never re-chooses the GPU that failed", "[gpu]")
+{
+    // `integrated` failed on the Intel GPU; auto's ranking would pick it again.
+    auto listings = 0;
+    auto selector = GraphicsDeviceSelector(
+        std::make_unique<FakeAdapterLister>(listings),
+        config::GpuSelector { .preference = config::GpuPreference::Integrated, .id = std::nullopt });
+    REQUIRE(selector.choose()->candidate.id == config::PciId { 0x8086, 0xa788 });
+    auto const& fallback = selector.fallBackToAuto();
+    REQUIRE(fallback.has_value());
+    CHECK(fallback->candidate.id == config::PciId { 0x10de, 0x2820 });
 }
 
 TEST_CASE("adapterImplementationFor: only adapter-capable backends", "[gpu]")
