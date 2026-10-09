@@ -8,6 +8,7 @@
 
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/GpuSelector.hpp>
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/config/ModifierNames.hpp>
 #include <contour/platform/GuiTheme.hpp>
@@ -89,6 +90,33 @@ profiles:
     CHECK(config.live.value() == true);
     CHECK(config.reflowOnResize.value() == false);
     CHECK(config.notificationCloseTimeout.value() == std::chrono::milliseconds { 2500 });
+}
+
+TEST_CASE("Config: renderer.gpu loads, and a bad value falls back to auto", "[config][gpu]")
+{
+    QTemporaryDir dir;
+    auto const cfg = loadFromYaml(dir, R"(
+renderer:
+    gpu: 10de:2820
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(cfg.renderer.value().gpu
+          == contour::config::GpuSelector {
+              .preference = contour::config::GpuPreference::Specific,
+              .id = contour::config::PciId { .vendor = 0x10de, .device = 0x2820 } });
+
+    QTemporaryDir badDir;
+    auto const bad =
+        loadFromYaml(badDir, "renderer:\n    gpu: banana\nprofiles:\n    main:\n        shell: /bin/sh\n"sv);
+    CHECK(bad.renderer.value().gpu == contour::config::GpuSelector {});
+}
+
+TEST_CASE("Config: the generated config documents renderer.gpu with a value", "[config][gpu]")
+{
+    // A comment-only template is never serialized; the value line proves it round-trips.
+    CHECK(contour::config::defaultConfigString().find("    gpu: auto\n") != std::string::npos);
 }
 
 TEST_CASE("Config: the desktop-notification close timeout defaults to ten seconds", "[config]")

@@ -1034,6 +1034,22 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     }
 }
 
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, GpuSelector& where)
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+    auto const rawValue = child.as<std::string>();
+    if (auto const parsed = parseGpuSelector(rawValue))
+        where = *parsed;
+    else
+    {
+        where = GpuSelector {};
+        errorLog()("Invalid renderer.gpu value '{}'; using {}.", rawValue, where);
+    }
+    logger()("Loading entry: {}, value {}", entry, where);
+}
+
 void YAMLConfigReader::load(Config& c)
 {
     try
@@ -2148,6 +2164,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "tile_hashtable_slots", where.textureAtlasHashtableSlots);
         loadFromEntry(child, "tile_cache_count", where.textureAtlasTileCount);
         loadFromEntry(child, "backend", where.renderingBackend);
+        loadFromEntry(child, "gpu", where.gpu);
     }
 }
 

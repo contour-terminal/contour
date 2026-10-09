@@ -3,6 +3,7 @@
 
 #include <contour/config/Actions.hpp>
 #include <contour/config/ConfigDocumentation.hpp>
+#include <contour/config/GpuSelector.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
@@ -536,6 +537,7 @@ enum class RenderingBackend : uint8_t
 struct RendererConfig
 {
     RenderingBackend renderingBackend { RenderingBackend::Auto };
+    GpuSelector gpu {}; ///< Which GPU renders (`renderer.gpu`); applied at the next start.
     crispy::LRUCapacity textureAtlasTileCount { 4000u };
     crispy::StrongHashtableSize textureAtlasHashtableSlots { 4096u };
     bool textureAtlasDirectMapping { false };
@@ -1547,6 +1549,7 @@ struct YAMLConfigReader
     // clang-format off
     void loadFromEntry(YAML::Node const& node, std::string const& entry, std::filesystem::path& where) const;
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RenderingBackend& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, GpuSelector& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::StrongHashtableSize& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::MaxHistoryLineCount& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, crispy::LRUCapacity& where);
@@ -1912,6 +1915,7 @@ struct Writer
     {
         return format(doc,
                       v.renderingBackend,
+                      v.gpu,
                       v.textureAtlasDirectMapping,
                       v.textureAtlasHashtableSlots,
                       v.textureAtlasTileCount);

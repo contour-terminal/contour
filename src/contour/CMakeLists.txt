@@ -604,6 +604,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/BenignQtMessages_test.cpp
             window/CommandPaletteModel_test.cpp
             config/Config_test.cpp
+            config/GpuSelector_test.cpp
             window/SettingsController_test.cpp
             test/SettingsPageQml_test.cpp
             test/Accessibility_qml_test.cpp
