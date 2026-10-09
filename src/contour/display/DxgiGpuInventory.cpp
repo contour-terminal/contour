@@ -23,7 +23,7 @@ std::vector<GpuCandidate> DxgiGpuInventory::list() const
     for (auto const index: std::views::iota(UINT { 0 }))
     {
         auto adapter = Microsoft::WRL::ComPtr<IDXGIAdapter1> {};
-        if (factory->EnumAdapters1(index, &adapter) == DXGI_ERROR_NOT_FOUND)
+        if (FAILED(factory->EnumAdapters1(index, &adapter))) // DXGI_ERROR_NOT_FOUND past the last one
             break;
         auto description = DXGI_ADAPTER_DESC1 {};
         if (FAILED(adapter->GetDesc1(&description)) || (description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
