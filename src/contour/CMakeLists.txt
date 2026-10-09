@@ -243,6 +243,7 @@ if(CONTOUR_FRONTEND_GUI)
         Logging.hpp
         display/RenderState.hpp
         display/RenderingBackendSelection.hpp
+        display/GpuSelection.hpp
         geometry/CellRectangle.hpp
         geometry/WindowGeometry.hpp
         remote/NativeController.hpp
@@ -638,6 +639,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/WindowShadowTiles_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
             display/RenderingBackendSelection_test.cpp
+            display/GpuSelection_test.cpp
             display/ScissorRect_test.cpp
             display/RhiVertexLayout_test.cpp
             display/ScreenshotReadback_test.cpp
