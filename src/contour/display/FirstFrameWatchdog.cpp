@@ -16,10 +16,7 @@ FirstFrameWatchdog::FirstFrameWatchdog(QQuickWindow& window,
 {
     _timer.setSingleShot(true);
     connect(&_timer, &QTimer::timeout, this, &FirstFrameWatchdog::fail);
-    connect(&window, &QQuickWindow::frameSwapped, this, [this] {
-        _timer.stop();
-        _onFailure = nullptr;
-    });
+    connect(&window, &QQuickWindow::frameSwapped, this, &FirstFrameWatchdog::settle);
     connect(&window, &QQuickWindow::sceneGraphError, this, &FirstFrameWatchdog::fail);
     if (window.isExposed())
         startBudget();
@@ -43,11 +40,22 @@ void FirstFrameWatchdog::startBudget()
         _timer.start(_budget);
 }
 
-void FirstFrameWatchdog::fail()
+void FirstFrameWatchdog::settle()
 {
     _timer.stop();
+    _onFailure = nullptr;
+    // Hand scene-graph errors back to Qt: while this is connected, Qt assumes they are handled.
+    disconnect(_window, nullptr, this, nullptr);
+    _window->removeEventFilter(this);
+}
+
+void FirstFrameWatchdog::fail()
+{
     if (auto onFailure = std::exchange(_onFailure, nullptr))
+    {
+        settle();
         onFailure();
+    }
 }
 
 } // namespace contour::display

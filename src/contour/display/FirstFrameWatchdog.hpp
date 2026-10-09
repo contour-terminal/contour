@@ -14,7 +14,8 @@ namespace contour::display
 
 /// Reports a window whose GPU cannot render: no first frame within a budget of its exposure, or a
 /// scene-graph error. A window that is not exposed (minimized, on another workspace, occluded) is not
-/// expected to draw, so its budget starts only when it is first exposed.
+/// expected to draw, so its budget starts only when it is first exposed. Once settled -- by a frame or a
+/// failure -- it stops listening, so later scene-graph errors get Qt's own handling again.
 class FirstFrameWatchdog: public QObject
 {
     Q_OBJECT
@@ -34,6 +35,8 @@ class FirstFrameWatchdog: public QObject
 
   private:
     void startBudget();
+    /// Stops the budget and every connection to the window; reports nothing.
+    void settle();
     void fail();
 
     QQuickWindow* _window;
