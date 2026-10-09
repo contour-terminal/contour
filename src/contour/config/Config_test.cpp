@@ -3630,6 +3630,28 @@ profiles:
 )"sv);
     CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Discrete);
     CHECK(cfg.renderer.value().renderingBackend == contour::config::RenderingBackend::Vulkan);
+    CHECK(cfg.theme.value() == contour::config::GuiTheme::Dark);
+}
+
+TEST_CASE("Config: a scalar renderer in settings.yml is ignored, not fatal", "[config][gui][gpu]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "renderer: foo\ntheme: dark\n");
+    auto const yaml = "renderer:\n    gpu: integrated\nprofiles:\n    main:\n        shell: /bin/sh\n"sv;
+    REQUIRE_NOTHROW(loadFromYaml(dir, yaml));
+    auto const cfg = loadFromYaml(dir, yaml);
+    CHECK(cfg.theme.value() == contour::config::GuiTheme::Dark);
+    CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Integrated);
+}
+
+TEST_CASE("Config: a non-scalar key in settings.yml is skipped, its siblings still apply",
+          "[config][gui][gpu]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "? [a]\n: 2\nrenderer:\n    ? [a]\n    : 1\n    gpu: discrete\n");
+    REQUIRE_NOTHROW(loadFromYaml(dir, "profiles:\n    main:\n        shell: /bin/sh\n"sv));
+    auto const cfg = loadFromYaml(dir, "profiles:\n    main:\n        shell: /bin/sh\n"sv);
+    CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Discrete);
 }
 
 TEST_CASE("Config: a flat settings.yml written by an older Contour still loads", "[config][gui]")

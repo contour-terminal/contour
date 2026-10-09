@@ -862,8 +862,12 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             overrides.loadFromEntry("ui_font_family", config.uiFontFamily);
             overrides.loadFromEntry("ui_font_size", config.uiFontSize);
             overrides.loadFromEntry("early_exit_threshold", config.earlyExitThreshold);
-            // Nested sections: the section loader touches only the keys settings.yml actually has.
-            overrides.loadFromEntry("renderer", config.renderer);
+            // Nested sections: the section loader touches only the keys settings.yml actually has. It runs
+            // only when the nested form is present, so a hand-edited scalar `renderer: foo` is ignored
+            // instead of being subscripted (which would throw and abort startup).
+            if (std::ranges::any_of(loaded->globalOverrides | std::views::keys,
+                                    [](std::string const& key) { return key.starts_with("renderer."); }))
+                overrides.loadFromEntry("renderer", config.renderer);
         }
     }
     else
@@ -4160,6 +4164,8 @@ std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesyst
     if (doc.IsMap())
         for (auto const& entry: doc)
         {
+            if (!entry.first.IsScalar())
+                continue; // a complex YAML key cannot name a setting
             auto const key = entry.first.as<std::string>();
             if (key == "default_profile")
                 continue;
@@ -4167,7 +4173,7 @@ std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesyst
                 settings.globalOverrides[key] = entry.second.as<std::string>();
             else if (entry.second.IsMap())
                 for (auto const& child: entry.second)
-                    if (child.second.IsScalar())
+                    if (child.first.IsScalar() && child.second.IsScalar())
                         settings.globalOverrides[key + '.' + child.first.as<std::string>()] =
                             child.second.as<std::string>();
         }
