@@ -5,6 +5,7 @@
 #include <contour/command/CommandHistoryStore.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/LayoutStore.hpp>
+#include <contour/display/GpuSelection.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
@@ -430,7 +431,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return `renderer.gpu`, or `auto` when this process is the restart after a failed GPU.
     [[nodiscard]] config::GpuSelector effectiveGpuSelector() const;
 
-    /// Reports the restart after a failed GPU once @p window shows its first frame.
+    /// Reports a pending fallback from a failed GPU once @p window shows its first frame.
     /// @param window The window.
     void reportGpuFallbackOnceUp(QQuickWindow& window);
 
@@ -446,8 +447,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::optional<std::string> _openGlGpuTitle;
     /// The GPU that could not render, when this process is Contour's restart without it.
     std::optional<std::string> _gpuFallbackFrom;
-    /// Like _gpuFallbackFrom, until the fallback has been reported.
-    std::optional<std::string> _gpuFallbackUnreported;
+    /// A fallback to another GPU, until it has been reported.
+    std::optional<display::GpuFallback> _pendingGpuFallback;
     /// Watches the first window's first frame when `renderer.gpu` names a GPU explicitly.
     std::unique_ptr<display::FirstFrameWatchdog> _firstFrameWatchdog;
     /// Raises the "could not render" notification; created on first use.

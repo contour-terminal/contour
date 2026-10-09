@@ -5,6 +5,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <optional>
+
 using namespace contour;
 using namespace contour::display;
 
@@ -13,7 +15,15 @@ namespace
 class FakeAdapterLister final: public IAdapterLister
 {
   public:
-    explicit FakeAdapterLister(int& listings): _listings { listings } {}
+    /// @param listings Counts list() calls.
+    /// @param failing The adapter whose probe fails, if any.
+    /// @param probes Counts probe() calls, if given.
+    explicit FakeAdapterLister(int& listings,
+                               std::optional<config::PciId> failing = std::nullopt,
+                               int* probes = nullptr):
+        _listings { listings }, _failing { failing }, _probes { probes }
+    {
+    }
 
     [[nodiscard]] std::vector<AdapterEntry> list() override
     {
@@ -33,11 +43,19 @@ class FakeAdapterLister final: public IAdapterLister
               .adapter = nullptr },
         };
     }
+    [[nodiscard]] AdapterProbe probe(AdapterEntry const& entry) override
+    {
+        if (_probes)
+            ++*_probes;
+        return entry.candidate.id == _failing ? AdapterProbe::Failed : AdapterProbe::Rendered;
+    }
     [[nodiscard]] QVulkanInstance* vulkanInstance() noexcept override { return nullptr; }
     [[nodiscard]] std::string_view backendName() const noexcept override { return "Fake"; }
 
   private:
     int& _listings;
+    std::optional<config::PciId> _failing;
+    int* _probes;
 };
 } // namespace
 
@@ -103,6 +121,40 @@ TEST_CASE("GraphicsDeviceSelector: fallBackToAuto never re-chooses the GPU that 
     auto const& fallback = selector.fallBackToAuto();
     REQUIRE(fallback.has_value());
     CHECK(fallback->candidate.id == config::PciId { 0x10de, 0x2820 });
+}
+
+TEST_CASE("GraphicsDeviceSelector: an explicit GPU that cannot render a probe frame is never handed out",
+          "[gpu]")
+{
+    // The RTX under NVK loses its device on the first frame. Found before any window uses it, it never
+    // reaches one: Qt leaks the window's surface lock when a frame fails (see the probe's comment).
+    auto listings = 0;
+    auto probes = 0;
+    auto selector = GraphicsDeviceSelector(
+        std::make_unique<FakeAdapterLister>(listings, config::PciId { 0x10de, 0x2820 }, &probes),
+        config::GpuSelector { .preference = config::GpuPreference::Discrete, .id = std::nullopt });
+    REQUIRE(selector.choose().has_value());
+    CHECK(selector.choose()->candidate.id == config::PciId { 0x8086, 0xa788 });
+    CHECK(selector.selector().preference == config::GpuPreference::Auto);
+    CHECK(probes == 1);
+    auto const fallback = selector.takeProbeFallback();
+    REQUIRE(fallback.has_value());
+    CHECK(fallback->failed == "NVIDIA GeForce RTX 4070 Laptop GPU");
+    CHECK(fallback->used == "Intel(R) Graphics (RPL-S)");
+    CHECK_FALSE(selector.takeProbeFallback().has_value()); // reported once
+}
+
+TEST_CASE("GraphicsDeviceSelector: an explicit GPU that renders its probe frame is kept", "[gpu]")
+{
+    auto listings = 0;
+    auto probes = 0;
+    auto selector = GraphicsDeviceSelector(
+        std::make_unique<FakeAdapterLister>(listings, std::nullopt, &probes),
+        config::GpuSelector { .preference = config::GpuPreference::Discrete, .id = std::nullopt });
+    CHECK(selector.choose()->candidate.id == config::PciId { 0x10de, 0x2820 });
+    (void) selector.choose();
+    CHECK(probes == 1);
+    CHECK_FALSE(selector.takeProbeFallback().has_value());
 }
 
 TEST_CASE("adapterImplementationFor: only adapter-capable backends", "[gpu]")

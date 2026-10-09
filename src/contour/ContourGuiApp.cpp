@@ -213,16 +213,19 @@ ContourGuiApp::~ContourGuiApp() = default;
 void ContourGuiApp::applyGraphicsDevice(QQuickWindow& window)
 {
     logGpuInUse(window);
-    reportGpuFallbackOnceUp(window);
 #if defined(CONTOUR_WITH_GPU_SELECTION)
     if (_graphicsDeviceSelector)
     {
         _graphicsDeviceSelector->applyTo(window);
+        if (auto fallback = _graphicsDeviceSelector->takeProbeFallback())
+            _pendingGpuFallback = std::move(fallback);
+        reportGpuFallbackOnceUp(window);
         if (_graphicsDeviceSelector->selector().preference != config::GpuPreference::Auto)
             watchFirstFrame(window, [this](QQuickWindow& failed) { onGpuFailure(failed); });
         return;
     }
 #endif
+    reportGpuFallbackOnceUp(window);
     if (_openGlGpuTitle)
         watchFirstFrame(window, [this](QQuickWindow& /*failed*/) { relaunchOnAutomaticGpu(); });
 }
@@ -335,7 +338,9 @@ void ContourGuiApp::takeGpuFallbackRequest()
     if (!qEnvironmentVariableIsSet(name))
         return;
     _gpuFallbackFrom = qEnvironmentVariable(name).toStdString();
-    _gpuFallbackUnreported = _gpuFallbackFrom;
+    // Contour no longer intervenes, so the GPU now rendering is the system's default one.
+    _pendingGpuFallback = display::GpuFallback { .failed = *_gpuFallbackFrom,
+                                                 .used = display::displayGpuTitle(_gpuInventory->list()) };
     qunsetenv(name); // neither the shells nor a later restart may see it
 }
 
@@ -346,15 +351,15 @@ config::GpuSelector ContourGuiApp::effectiveGpuSelector() const
 
 void ContourGuiApp::reportGpuFallbackOnceUp(QQuickWindow& window)
 {
-    if (!_gpuFallbackUnreported)
+    if (!_pendingGpuFallback)
         return;
     connect(
         &window,
         &QQuickWindow::frameSwapped,
         this,
         [this] {
-            if (auto const failed = std::exchange(_gpuFallbackUnreported, std::nullopt))
-                reportGpuFallback(*failed, display::displayGpuTitle(_gpuInventory->list()));
+            if (auto const fallback = std::exchange(_pendingGpuFallback, std::nullopt))
+                reportGpuFallback(fallback->failed, fallback->used);
         },
         Qt::SingleShotConnection);
 }

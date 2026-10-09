@@ -51,6 +51,13 @@ enum class RequestOutcome : std::uint8_t
     FellBack,  ///< A specific GPU was asked for but is absent; the Auto choice was taken instead.
 };
 
+/// A GPU that could not render, and the one used instead for this run.
+struct GpuFallback
+{
+    std::string failed; ///< Title of the GPU that could not render.
+    std::string used;   ///< Title of the GPU used instead.
+};
+
 /// The result of chooseGpu().
 struct GpuChoice
 {

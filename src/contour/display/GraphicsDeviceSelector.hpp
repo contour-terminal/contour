@@ -7,9 +7,11 @@
 
 #include <QtGui/rhi/qrhi.h>
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 class QQuickWindow;
@@ -25,6 +27,13 @@ struct AdapterEntry
     QRhiAdapter* adapter = nullptr; ///< Owned by the IAdapterLister that listed it.
 };
 
+/// Whether an adapter rendered a probe frame.
+enum class AdapterProbe : std::uint8_t
+{
+    Failed,   ///< The device was lost, or the frame did not produce the expected pixel.
+    Rendered, ///< It rendered.
+};
+
 /// Lists a backend's adapters; injected so the choice is testable without a GPU.
 class IAdapterLister
 {
@@ -34,6 +43,10 @@ class IAdapterLister
     /// Lists the adapters afresh, releasing those of the previous call.
     /// @return The adapters; their pointers stay valid until the next list() call, or the lister's end.
     [[nodiscard]] virtual std::vector<AdapterEntry> list() = 0;
+    /// Renders one offscreen frame on @p entry's adapter, through a device of its own.
+    /// @param entry An adapter from the latest list().
+    /// @return Whether the frame rendered.
+    [[nodiscard]] virtual AdapterProbe probe(AdapterEntry const& entry) = 0;
     /// @return The Vulkan instance every window must use, or nullptr for other backends.
     [[nodiscard]] virtual QVulkanInstance* vulkanInstance() noexcept = 0;
     /// @return The human-readable name of the backend whose adapters this lists, for the startup log.
@@ -51,7 +64,8 @@ class GraphicsDeviceSelector
     /// @param selector What `renderer.gpu` asks for.
     GraphicsDeviceSelector(std::unique_ptr<IAdapterLister> lister, config::GpuSelector selector);
 
-    /// Lists the adapters on first use and chooses one.
+    /// Lists the adapters on first use and chooses one. An explicitly chosen adapter must first render a
+    /// probe frame; if it cannot, `auto`'s ranking chooses among the others (see takeProbeFallback()).
     /// @return The chosen adapter, or nullopt when the backend offers none.
     [[nodiscard]] std::optional<AdapterEntry> const& choose();
 
@@ -70,6 +84,13 @@ class GraphicsDeviceSelector
         return _adapters.has_value() || _selector.preference != config::GpuPreference::Auto;
     }
 
+    /// @return The fallback choose() made because the requested GPU failed its probe frame, once; then
+    /// nullopt.
+    [[nodiscard]] std::optional<GpuFallback> takeProbeFallback() noexcept
+    {
+        return std::exchange(_probeFallback, {});
+    }
+
     /// @return The selector currently in effect.
     [[nodiscard]] config::GpuSelector const& selector() const noexcept { return _selector; }
 
@@ -78,10 +99,14 @@ class GraphicsDeviceSelector
     /// @param excluded An adapter id that must not be chosen (one that failed to render).
     void recompute(std::optional<config::PciId> excluded);
 
+    /// Falls back to `auto`'s ranking when the explicitly chosen adapter cannot render a probe frame.
+    void probeExplicitChoice();
+
     std::unique_ptr<IAdapterLister> _lister;
     config::GpuSelector _selector;
     std::optional<std::vector<AdapterEntry>> _adapters; ///< nullopt until listed.
     std::optional<AdapterEntry> _chosen;
+    std::optional<GpuFallback> _probeFallback;
 };
 
 /// @return The QRhi implementation whose adapters `renderer.gpu` chooses for @p backend, if any.

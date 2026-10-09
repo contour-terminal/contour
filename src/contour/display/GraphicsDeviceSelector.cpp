@@ -11,7 +11,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
+#include <memory>
+#include <optional>
 #include <ranges>
+#include <type_traits>
 
 // Qt declares its Vulkan API (QVulkanInstance, QRhiVulkanInitParams, QWindow::setVulkanInstance) only for
 // a Qt built with Vulkan, and only where the Vulkan headers are installed; Direct3D needs neither.
@@ -50,6 +54,61 @@ namespace
         BackendName { .implementation = QRhi::D3D11, .name = "Direct3D 11" },
         BackendName { .implementation = QRhi::D3D12, .name = "Direct3D 12" },
     };
+
+    /// Clears a one-pixel texture on @p rhi's device and reads it back.
+    ///
+    /// Done offscreen, on a device of its own, before any window sees the adapter: a window's first frame
+    /// is the wrong place to find out. When a frame fails there, QRhiVulkan::beginFrame() has already
+    /// taken the window's platform frame lock (QPlatformVulkanInstance::beginFrame, Wayland's surface lock)
+    /// and returns without releasing it, so the window can never be destroyed again (qrhivulkan.cpp,
+    /// Qt 6.10: beginFrame() returns on waitCommandCompletion()'s device loss before endFrame()'s
+    /// cleanup is armed). An offscreen frame takes no window lock.
+    [[nodiscard]] AdapterProbe renderProbeFrame(QRhi& rhi)
+    {
+        auto const texture = std::unique_ptr<QRhiTexture>(
+            rhi.newTexture(QRhiTexture::RGBA8,
+                           QSize(1, 1),
+                           1,
+                           QRhiTexture::RenderTarget | QRhiTexture::UsedAsTransferSource));
+        if (!texture->create())
+            return AdapterProbe::Failed;
+        auto const target =
+            std::unique_ptr<QRhiTextureRenderTarget>(rhi.newTextureRenderTarget({ texture.get() }));
+        auto const pass =
+            std::unique_ptr<QRhiRenderPassDescriptor>(target->newCompatibleRenderPassDescriptor());
+        target->setRenderPassDescriptor(pass.get());
+        if (!target->create())
+            return AdapterProbe::Failed;
+
+        QRhiCommandBuffer* commands = nullptr;
+        if (rhi.beginOffscreenFrame(&commands) != QRhi::FrameOpSuccess)
+            return AdapterProbe::Failed;
+        auto readback = QRhiReadbackResult {};
+        auto* const updates = rhi.nextResourceUpdateBatch();
+        commands->beginPass(target.get(), QColor::fromRgbF(1.0f, 0.5f, 0.25f, 1.0f), { 1.0f, 0 });
+        updates->readBackTexture(QRhiReadbackDescription { texture.get() }, &readback);
+        commands->endPass(updates);
+        if (rhi.endOffscreenFrame() != QRhi::FrameOpSuccess || rhi.isDeviceLost())
+            return AdapterProbe::Failed;
+
+        // A lost device can also just leave the pixel unwritten.
+        constexpr auto Expected = std::array<int, 4> { 255, 128, 64, 255 };
+        if (readback.data.size() < 4)
+            return AdapterProbe::Failed;
+        for (auto const channel: std::views::iota(0, 4))
+            if (std::abs(static_cast<unsigned char>(readback.data[channel])
+                         - Expected[static_cast<std::size_t>(channel)])
+                > 2)
+                return AdapterProbe::Failed;
+        return AdapterProbe::Rendered;
+    }
+
+    /// What QtAdapterLister::withInitParams() returns for a @p Use returning R: R itself when it is a
+    /// pointer (null meaning "no backend"), else std::optional<R>.
+    template <typename Use>
+    using InitParamsResult = std::conditional_t<std::is_pointer_v<std::invoke_result_t<Use, QRhiInitParams*>>,
+                                                std::invoke_result_t<Use, QRhiInitParams*>,
+                                                std::optional<std::invoke_result_t<Use, QRhiInitParams*>>>;
 
     class QtAdapterLister final: public IAdapterLister
     {
@@ -112,6 +171,14 @@ namespace
             return entries;
         }
 
+        [[nodiscard]] AdapterProbe probe(AdapterEntry const& entry) override
+        {
+            auto const rhi = std::unique_ptr<QRhi>(withInitParams([&](QRhiInitParams* params) {
+                return QRhi::create(_implementation, params, {}, nullptr, entry.adapter);
+            }));
+            return rhi ? renderProbeFrame(*rhi) : AdapterProbe::Failed;
+        }
+
         [[nodiscard]] QVulkanInstance* vulkanInstance() noexcept override
         {
 #if defined(CONTOUR_GPU_SELECTION_VULKAN)
@@ -129,28 +196,39 @@ namespace
       private:
         [[nodiscard]] QRhi::AdapterList listAdapters()
         {
+            auto adapters = withInitParams(
+                [&](QRhiInitParams* params) { return QRhi::enumerateAdapters(_implementation, params); });
+            return adapters.value_or(QRhi::AdapterList {});
+        }
+
+        /// Calls @p use with the init parameters every QRhi of this backend is made with.
+        /// @return What @p use returned; nullopt (or nullptr) when the backend cannot be initialized here.
+        template <typename Use>
+        [[nodiscard]] InitParamsResult<Use> withInitParams([[maybe_unused]] Use&& use)
+        {
+            using Optional = InitParamsResult<Use>;
             switch (_implementation)
             {
 #if defined(CONTOUR_GPU_SELECTION_VULKAN)
                 case QRhi::Vulkan: {
                     if (!_vulkan)
-                        return {};
+                        return Optional {};
                     auto params = QRhiVulkanInitParams {};
                     params.inst = _vulkan.get();
-                    return QRhi::enumerateAdapters(_implementation, &params);
+                    return Optional { use(&params) };
                 }
 #endif
 #if defined(_WIN32)
                 case QRhi::D3D11: {
                     auto params = QRhiD3D11InitParams {};
-                    return QRhi::enumerateAdapters(_implementation, &params);
+                    return Optional { use(&params) };
                 }
                 case QRhi::D3D12: {
                     auto params = QRhiD3D12InitParams {};
-                    return QRhi::enumerateAdapters(_implementation, &params);
+                    return Optional { use(&params) };
                 }
 #endif
-                default: return {};
+                default: return Optional {};
             }
         }
 
@@ -174,8 +252,25 @@ std::optional<AdapterEntry> const& GraphicsDeviceSelector::choose()
     {
         _adapters = _lister->list();
         recompute(std::nullopt);
+        probeExplicitChoice();
     }
     return _chosen;
+}
+
+void GraphicsDeviceSelector::probeExplicitChoice()
+{
+    // `auto` is what Qt would choose anyway; only a GPU the user asked for is put to the test.
+    if (_selector.preference == config::GpuPreference::Auto || !_chosen
+        || _lister->probe(*_chosen) == AdapterProbe::Rendered)
+        return;
+    auto failed = _chosen->candidate.title;
+    (void) fallBackToAuto();
+    if (!_chosen)
+    {
+        errorLog()("{} could not render, and there is no other GPU to fall back to.", failed);
+        return;
+    }
+    _probeFallback = GpuFallback { .failed = std::move(failed), .used = _chosen->candidate.title };
 }
 
 void GraphicsDeviceSelector::recompute(std::optional<config::PciId> excluded)
