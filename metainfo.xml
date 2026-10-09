@@ -167,6 +167,7 @@
           <li>Fixes the "Shell terminated too quickly." notice appearing twice for a command that exits before the first frame is drawn. Such an exit reaches the session from two directions — its exit watcher, and the display finding the device already closed — and only the paths below the notice were guarded against being run twice (#2102)</li>
           <li>Implements DECSWBV (CSI Ps SP t), the VT520 sequence for setting the warning-bell volume: Ps 1 silences the bell, 2 to 4 halves it, 0, an omitted Ps or 5 to 8 keeps it at the profile's configured volume. An application can only mute or halve that volume, never raise it, and RIS restores the default (#732)</li>
           <li>Implements DECSMBV (CSI Ps SP u), the VT520 sequence for setting the margin-bell volume: Ps 0, 1 or an omitted Ps silences it (the default, per the VT510 manual), 2 to 4 halves it, 5 to 8 sets it to high, and RIS restores the default. Contour does not yet ring the margin bell itself — DEC private mode 44 remains unimplemented — so for now this only stores the value for when it does (#733)</li>
+          <li>Adds `renderer.gpu` and a "Rendering GPU" settings entry to choose which GPU renders the terminal (Linux and Windows).</li>
         </ul>
       </description>
     </release>
