@@ -178,10 +178,12 @@ namespace
 #endif
     }
 
-    /// @return The current process environment's entries.
+    /// @return The current process environment's entries; none when it has been cleared.
     [[nodiscard]] vector<string_view> inheritedEnvironment()
     {
         auto entries = vector<string_view> {};
+        if (environ == nullptr) // clearenv() leaves no array at all
+            return entries;
         for (auto const index: std::views::iota(std::size_t { 0 })
                                    | std::views::take_while([](auto i) { return environ[i] != nullptr; }))
             entries.emplace_back(environ[index]);
