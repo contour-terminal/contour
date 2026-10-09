@@ -708,6 +708,7 @@ int ContourApp::daemonAction()
     config.settings = resolved->settings;
     config.shell = resolved->shell;
     config.escapeSandbox = resolved->escapeSandbox;
+    config.placement = vtpty::makeDefaultProcessPlacement();
     config.startupLayout = resolved->startupLayout;
 
     if (auto label = parameters().get<string>("contour.daemon.tmux-compat-socket"); !label.empty())

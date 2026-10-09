@@ -13,13 +13,20 @@ if(EXISTS "/.flatpak-info")
     set(CONTOUR_WITH_UTEMPTER OFF)
 endif()
 
-set(vtpty_LIBRARIES core::base core::log crispy::core Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
+if(NOT LINUX OR EXISTS "/.flatpak-info")
+    # Only Linux has systemd, and inside Flatpak the sandbox may not create units.
+    set(CONTOUR_WITH_SYSTEMD OFF)
+endif()
+
+set(vtpty_LIBRARIES core::base core::log core::platform crispy::core Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
 
 set(vtpty_SOURCES
     ChannelPty.cpp
     MockPty.cpp
     MockViewPty.cpp
+    OwnedFd.cpp
     Process${PLATFORM_SUFFIX}.cpp
+    ProcessPlacement.cpp
     Pty.cpp
     SandboxInfo.cpp
     SpawnLadder.cpp
@@ -31,10 +38,14 @@ set(vtpty_HEADERS
     ImageSize.hpp
     MockPty.hpp
     MockViewPty.hpp
+    OwnedFd.hpp
     PageSize.hpp
+    PlacementBreaker.hpp
     Process.hpp
+    ProcessPlacement.hpp
     Pty.hpp
     SandboxInfo.hpp
+    ScopeBus.hpp
     SpawnLadder.hpp
     SshFailureMessage.hpp
 )
@@ -59,6 +70,21 @@ else()
     message(STATUS "[vtpty] Builtin-SSH support disabled")
 endif()
 
+if(CONTOUR_WITH_SYSTEMD)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBSYSTEMD libsystemd)
+    if(NOT LIBSYSTEMD_FOUND)
+        message(FATAL_ERROR "[vtpty] CONTOUR_WITH_SYSTEMD is ON, but libsystemd was not found. "
+                            "Install its development package (libsystemd-dev, systemd-devel), "
+                            "or configure with -DCONTOUR_WITH_SYSTEMD=OFF.")
+    endif()
+    list(APPEND vtpty_SOURCES SdBusScopeBus.cpp)
+    list(APPEND vtpty_HEADERS SdBusScopeBus.hpp)
+    message(STATUS "[vtpty] systemd session scopes enabled")
+else()
+    message(STATUS "[vtpty] systemd session scopes disabled")
+endif()
+
 if(LINUX)
     if(CONTOUR_WITH_UTEMPTER)
         set(vtpty_LIBRARIES ${vtpty_LIBRARIES} utempter)
@@ -70,8 +96,8 @@ if(UNIX)
     check_function_exists(close_range HAVE_CLOSE_RANGE)
 
     list(APPEND vtpty_LIBRARIES util)
-    list(APPEND vtpty_SOURCES UnixPty.cpp UnixUtils.cpp)
-    list(APPEND vtpty_SOURCES UnixPty.hpp UnixUtils.hpp)
+    list(APPEND vtpty_SOURCES ScopeRequestEncoding.cpp SystemdScopePlacement.cpp UnixPty.cpp UnixUtils.cpp)
+    list(APPEND vtpty_SOURCES ScopeRequestEncoding.hpp SystemdScopePlacement.hpp UnixPty.hpp UnixUtils.hpp)
 else()
     list(APPEND vtpty_SOURCES ConPty.cpp)
     list(APPEND vtpty_HEADERS ConPty.hpp)
@@ -84,6 +110,11 @@ if(CONTOUR_WITH_UTEMPTER)
 endif()
 if(HAVE_CLOSE_RANGE)
     target_compile_definitions(vtpty PRIVATE HAVE_CLOSE_RANGE)
+endif()
+if(CONTOUR_WITH_SYSTEMD)
+    target_compile_definitions(vtpty PRIVATE VTPTY_SYSTEMD=1)
+    target_include_directories(vtpty PRIVATE ${LIBSYSTEMD_INCLUDE_DIRS})
+    target_link_libraries(vtpty PRIVATE ${LIBSYSTEMD_LINK_LIBRARIES})
 endif()
 if(_include_SshSession_module)
     target_compile_definitions(vtpty PUBLIC VTPTY_LIBSSH2=1)
@@ -109,6 +140,7 @@ if(VTPTY_TESTING)
         test_main.cpp
         ChannelPty_test.cpp
         ImageSize_test.cpp
+        PlacementBreaker_test.cpp
         Process_test.cpp
         SandboxInfo_test.cpp
         SpawnLadder_test.cpp
@@ -116,9 +148,24 @@ if(VTPTY_TESTING)
     if(WIN32)
         # ConPty is the Windows-only PTY backend.
         target_sources(vtpty_test PRIVATE ConPty_test.cpp)
+    else()
+        target_sources(vtpty_test PRIVATE ProcessPlacement_test.cpp ScopeRequestEncoding_test.cpp SystemdScopePlacement_test.cpp)
     endif()
     target_link_libraries(vtpty_test vtpty core::testing Catch2::Catch2)
     add_test(NAME vtpty_test COMMAND $<TARGET_FILE:vtpty_test>)
+
+    if(CONTOUR_WITH_SYSTEMD)
+        # Needs a systemd user manager; SKIPs (77) without one. CI runs it under a lingering user
+        # session with CONTOUR_REQUIRE_SYSTEMD_TESTS=1, so a skip there is a failure.
+        add_executable(session_oom_driver test/session_oom_driver.cpp)
+        target_link_libraries(session_oom_driver vtpty)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        add_test(NAME vtpty_session_oom_isolation
+                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/session-oom-isolation.py
+                         $<TARGET_FILE:session_oom_driver>)
+        set_tests_properties(vtpty_session_oom_isolation PROPERTIES
+                             LABELS "systemd" SKIP_RETURN_CODE 77 TIMEOUT 400)
+    endif()
 
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.

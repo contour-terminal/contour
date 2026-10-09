@@ -175,7 +175,9 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer):
     ContourApp { env },
     _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
-        sessionFactory ? std::move(sessionFactory) : std::make_unique<session::AppSessionFactory>(*this))),
+        sessionFactory
+            ? std::move(sessionFactory)
+            : std::make_unique<session::AppSessionFactory>(*this, vtpty::makeDefaultProcessPlacement()))),
     _routingFactory(static_cast<remote::RoutingSessionFactory*>(_sessionFactory.get())),
     _externalLauncher(externalLauncher ? std::move(externalLauncher) : platform::makeExternalLauncher()),
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<config::FileLayoutStore>()),

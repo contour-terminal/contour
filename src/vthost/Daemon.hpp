@@ -86,6 +86,10 @@ struct DaemonConfig
     /// session's profile default (`escape_sandbox: true`); `contour daemon` overwrites it from the
     /// resolved profile, same as `settings` and `shell` above.
     bool escapeSandbox = true;
+    /// Moves each hosted shell into its own resource domain, so an out-of-memory kill inside one
+    /// cannot stop the daemon's unit. NoPlacement by default, so a bare `DaemonConfig{}` -- a test --
+    /// creates no systemd units; `contour daemon` sets the platform's default.
+    std::shared_ptr<vtpty::ProcessPlacement> placement = std::make_shared<vtpty::NoPlacement>();
     /// The profile's configured startup layout (`default_layout` + `layouts:`), realized by
     /// `SessionHost` before any client attaches. Empty `tabs` (the default) means no layout is
     /// configured — `contour daemon` overwrites it from the resolved profile, same as `settings`,

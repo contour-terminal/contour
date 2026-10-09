@@ -428,7 +428,9 @@ static int benchKeyPressLatency(KeyPressBenchOptions const& options, core::Envir
                                    .workingDirectory = std::filesystem::temp_directory_path(),
                                    .env = {} },
         vtpty::createPty(pageSize, std::nullopt),
-        /*escapeSandbox=*/false);
+        /*escapeSandbox=*/false,
+        // a benchmark measures the terminal, not systemd: no scope, and no placement latency
+        std::make_shared<vtpty::NoPlacement>());
     auto& process = *ownedProcess;
 
     auto settings = vtbackend::Settings {};

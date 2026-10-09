@@ -158,6 +158,8 @@ class Pty
 auto inline const ptyLog = core::log::Category("pty", "Logs general PTY information.");
 auto inline const ptyInLog = core::log::Category("pty.input", "Logs PTY raw input.");
 auto inline const ptyOutLog = core::log::Category("pty.output", "Logs PTY raw output.");
+auto inline const ptyPlacementLog =
+    core::log::Category("pty.placement", "Logs moving session processes into their own systemd scopes.");
 
 } // namespace vtpty
 

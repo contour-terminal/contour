@@ -166,8 +166,12 @@ class SessionFactory
 class AppSessionFactory final: public SessionFactory
 {
   public:
-    /// @param app The application, for profile lookup (and SSH host-key verification routing).
-    explicit AppSessionFactory(ContourGuiApp& app): _app { app } {}
+    /// @param app       The application, for profile lookup (and SSH host-key verification routing).
+    /// @param placement Moves each spawned shell into its own resource domain. @see vtpty::ProcessPlacement.
+    AppSessionFactory(ContourGuiApp& app, std::shared_ptr<vtpty::ProcessPlacement> placement):
+        _app { app }, _placement { std::move(placement) }
+    {
+    }
 
     [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
         std::optional<std::string> cwd,
@@ -182,6 +186,7 @@ class AppSessionFactory final: public SessionFactory
 #endif
 
     ContourGuiApp& _app;
+    std::shared_ptr<vtpty::ProcessPlacement> _placement;
 };
 
 } // namespace contour::session
