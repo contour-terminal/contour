@@ -6,6 +6,8 @@
 
 #include <contour/input/KeyMapping.hpp>
 
+#include <algorithm>
+
 namespace contour::input
 {
 
@@ -34,9 +36,24 @@ quint32 nativeModifiersWithLockState([[maybe_unused]] quint32 qtNativeModifiers)
 #endif
 }
 
+CtrlAltRole ctrlAltRoleOf(Qt::KeyboardModifiers qtModifiers, QString const& text) noexcept
+{
+    if (!qtModifiers.testFlags(Qt::ControlModifier | Qt::AltModifier))
+        return CtrlAltRole::Chord;
+
+    // A control character -- Ctrl+Alt+Esc yields 0x1B -- is a chord's product, not a layout's. A
+    // layout may yield several characters (a ligature, or a dead key that did not combine), and a
+    // surrogate is half of one beyond the BMP, which QChar alone cannot classify.
+    auto const isGraphical = [](QChar ch) {
+        return ch.isSurrogate() || (ch.isPrint() && ch != u' ');
+    };
+    return !text.isEmpty() && std::ranges::all_of(text, isGraphical) ? CtrlAltRole::AltGr
+                                                                     : CtrlAltRole::Chord;
+}
+
 vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
                                            quint32 nativeModifiers,
-                                           [[maybe_unused]] bool stripAltGr)
+                                           [[maybe_unused]] CtrlAltRole ctrlAltRole)
 {
     using vtbackend::LockKey;
     using vtbackend::Modifier;
@@ -57,10 +74,9 @@ vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
     vtbackend::LockKeys locks {};
 
 #ifdef _WIN32
-    // Windows: Handle AltGr (Ctrl+Alt combination).
-    // In Win32 Input Mode, we keep the raw modifier state so ConPTY receives
-    // the correct dwControlKeyState flags.
-    if (stripAltGr)
+    // Windows: Handle AltGr (Ctrl+Alt combination). When it selected the character, Ctrl and Alt
+    // must not reach the encoders as modifiers -- they would Ctrl-map an AltGr '[' into ESC.
+    if (ctrlAltRole == CtrlAltRole::AltGr)
     {
         auto constexpr AltGrEquivalent = Modifiers { Modifier::Alt, Modifier::Control };
         if (chord.contains(AltGrEquivalent))

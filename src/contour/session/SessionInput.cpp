@@ -502,10 +502,9 @@ bool sendKeyEvent(QKeyEvent* event,
         // clang-format on
     }; // }}}
 
-    auto const isWin32Mode = session.terminal().isModeEnabled(vtbackend::DECMode::Win32InputMode);
     auto const modifiers = input::makeModifiers(event->modifiers(),
                                                 input::nativeModifiersWithLockState(event->nativeModifiers()),
-                                                /*stripAltGr=*/!isWin32Mode);
+                                                input::ctrlAltRoleOf(event->modifiers(), event->text()));
     auto const key = event->key();
 
     if (event->modifiers().testFlag(Qt::KeypadModifier))

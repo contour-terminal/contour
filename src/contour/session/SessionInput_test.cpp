@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <memory>
 #include <ranges>
 
@@ -49,11 +50,11 @@ TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[sessio
     CHECK(makeModifiers(Qt::AltModifier) == vtbackend::Modifiers { vtbackend::Modifier::Alt });
     CHECK(makeModifiers(Qt::MetaModifier) == vtbackend::Modifiers { vtbackend::Modifier::Super });
 
-    // stripAltGr=false so the raw Qt->Modifier mapping is asserted: with the default (true), Win32
+    // CtrlAltRole::Chord so the raw Qt->Modifier mapping is asserted: with the default (AltGr), Win32
     // treats a Ctrl+Alt combination as AltGr and strips both, which is correct platform behavior but
     // not what this basic-mapping case is checking.
-    auto const combined =
-        makeModifiers(Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier, 0, /*stripAltGr=*/false);
+    auto const combined = makeModifiers(
+        Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier, 0, contour::input::CtrlAltRole::Chord);
     CHECK(combined.chord.contains(vtbackend::Modifier::Shift));
     CHECK(combined.chord.contains(vtbackend::Modifier::Control));
     CHECK(combined.chord.contains(vtbackend::Modifier::Alt));
@@ -61,6 +62,38 @@ TEST_CASE("makeModifiers maps Qt keyboard modifiers onto VT modifiers", "[sessio
 
     // Qt's modifier mask never yields a lock key; those come from the native mask only.
     CHECK(combined.locks.none());
+}
+
+TEST_CASE("ctrlAltRoleOf tells AltGr from a Ctrl+Alt chord by the text produced", "[session][input]")
+{
+    using contour::input::CtrlAltRole;
+    using contour::input::ctrlAltRoleOf;
+
+    auto const ctrlAlt = Qt::ControlModifier | Qt::AltModifier;
+
+    // The AltGr level of a layout yields a graphical character -- ASCII or not.
+    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("[")) == CtrlAltRole::AltGr);
+    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("@")) == CtrlAltRole::AltGr);
+    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("\\")) == CtrlAltRole::AltGr);
+    CHECK(ctrlAltRoleOf(ctrlAlt, QString(QChar(0x20AC))) == CtrlAltRole::AltGr); // €
+    CHECK(ctrlAltRoleOf(ctrlAlt | Qt::ShiftModifier, QStringLiteral("{")) == CtrlAltRole::AltGr);
+    CHECK(ctrlAltRoleOf(ctrlAlt, QString::fromUcs4(U"\U0001F600", 1)) == CtrlAltRole::AltGr); // 😀
+    // A ligature entry, or a dead key that did not combine with the next character.
+    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("ab")) == CtrlAltRole::AltGr);
+    CHECK(ctrlAltRoleOf(ctrlAlt, QString::fromUcs4(U"´e", 2)) == CtrlAltRole::AltGr); // ´e
+
+    // A genuine chord yields nothing, or a control character (Ctrl+Alt+Esc is 0x1B).
+    CHECK(ctrlAltRoleOf(ctrlAlt, QString {}) == CtrlAltRole::Chord);
+    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("\x1b")) == CtrlAltRole::Chord);
+    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("\x7f")) == CtrlAltRole::Chord);
+    CHECK(ctrlAltRoleOf(ctrlAlt, QString(QChar(0x9B))) == CtrlAltRole::Chord); // C1 CSI
+    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral(" ")) == CtrlAltRole::Chord);
+    CHECK(ctrlAltRoleOf(ctrlAlt, QStringLiteral("a\x1b")) == CtrlAltRole::Chord);
+
+    // Without both modifiers there is no AltGr to recognize.
+    CHECK(ctrlAltRoleOf(Qt::ControlModifier, QStringLiteral("[")) == CtrlAltRole::Chord);
+    CHECK(ctrlAltRoleOf(Qt::AltModifier, QStringLiteral("[")) == CtrlAltRole::Chord);
+    CHECK(ctrlAltRoleOf(Qt::NoModifier, QStringLiteral("[")) == CtrlAltRole::Chord);
 }
 
 TEST_CASE("unshiftedCodepoint inverts the US-ASCII shift level", "[session][input]")
@@ -139,6 +172,27 @@ namespace
 }
 
 using contour::test::mockPtyOf;
+
+#ifdef _WIN32
+/// Presses a key with Ctrl+Alt held, as Qt's Windows plugin reports both a genuine Ctrl+Alt chord
+/// and the AltGr key, and returns what reached the PTY.
+/// @param session The session to deliver the event to.
+/// @param key The Qt key code.
+/// @param virtualKey The Win32 VK code of the key.
+/// @param text The text the platform produced for the event.
+/// @return The bytes the event wrote to the PTY.
+[[nodiscard]] std::string pressWithCtrlAlt(contour::session::TerminalSession& session,
+                                           Qt::Key key,
+                                           quint32 virtualKey,
+                                           QString const& text)
+{
+    auto& pty = mockPtyOf(session);
+    auto ev = QKeyEvent(QEvent::KeyPress, key, Qt::ControlModifier | Qt::AltModifier, 0, virtualKey, 0, text);
+    pty.stdinBuffer().clear();
+    contour::session::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, session, passthroughLayout());
+    return pty.stdinBuffer();
+}
+#endif
 } // namespace
 
 TEST_CASE("sendKeyEvent maps Qt key events onto the terminal's PTY encoding", "[session][input]")
@@ -265,6 +319,85 @@ TEST_CASE("Ctrl+U reaches the application as Ctrl+U under the Kitty keyboard pro
     contour::session::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, macUsAnsiLayout());
     CHECK(pty.stdinBuffer() == "\033[117;5u");
 }
+
+#ifdef _WIN32
+TEST_CASE("AltGr characters reach ConPTY verbatim under Win32 input mode (issue #2127)", "[session][input]")
+{
+    // Windows reports AltGr to Qt as Ctrl+Alt. ConPTY enables win32-input-mode on startup, and the
+    // encoder Ctrl-maps the character of a Ctrl chord the way ToUnicodeEx does -- so a Swedish
+    // AltGr+8 used to leave as ESC (UC=27) instead of '['. What tells the two apart is the text the
+    // OS produced: AltGr yields a graphical character, a genuine Ctrl+Alt chord does not.
+    contour::test::TestApp app;
+    auto session = makeSession(app.app());
+    session->terminal().writeToScreen("\033[?9001h");
+
+    // sendKeyEvent reads the live CapsLock/NumLock toggles, which ConPTY's dwControlKeyState
+    // reports; take them from the same source so the expectation does not depend on the machine.
+    auto const locks = makeModifiers(Qt::NoModifier, contour::input::nativeModifiersWithLockState(0)).locks;
+    using vtbackend::Win32ControlKeyFlag;
+    using vtbackend::Win32ControlKeyState;
+    auto lockState = Win32ControlKeyState {};
+    if (locks.contains(vtbackend::LockKey::CapsLock))
+        lockState.enable(Win32ControlKeyFlag::CapsLockOn);
+    if (locks.contains(vtbackend::LockKey::NumLock))
+        lockState.enable(Win32ControlKeyFlag::NumLockOn);
+    auto const win32Key =
+        [&](unsigned virtualKey, unsigned unicodeChar, Win32ControlKeyState controlKeyState) {
+            return std::format(
+                "\033[{};0;{};1;{};1_", virtualKey, unicodeChar, controlKeyState.with(lockState).value());
+        };
+
+    // Swedish layout: AltGr+8 is '[', AltGr+2 is '@'. Ctrl and Alt are the AltGr layer, not a chord.
+    CHECK(pressWithCtrlAlt(*session, Qt::Key_BracketLeft, 0x38, QStringLiteral("["))
+          == win32Key(0x38, '[', {}));
+    CHECK(pressWithCtrlAlt(*session, Qt::Key_At, 0x32, QStringLiteral("@")) == win32Key(0x32, '@', {}));
+
+    // A genuine Ctrl+Alt+A produces no text and keeps its chord: UC=^A, CS=LeftAlt|LeftCtrl.
+    auto const leftCtrlAlt = Win32ControlKeyState { Win32ControlKeyFlag::LeftAltPressed }.with(
+        Win32ControlKeyFlag::LeftCtrlPressed);
+    CHECK(pressWithCtrlAlt(*session, Qt::Key_A, 0x41, QString {}) == win32Key(0x41, 0x01, leftCtrlAlt));
+}
+
+TEST_CASE("a genuine Ctrl+Alt chord keeps its modifiers outside Win32 input mode", "[session][input]")
+{
+    // Windows reports AltGr as Ctrl+Alt, and every encoding but win32-input-mode used to strip that
+    // pair unconditionally -- so a real Ctrl+Alt+A typed a bare 'A', and a binding on it never
+    // fired. Only a Ctrl+Alt that produced graphical text is AltGr.
+    contour::test::TestApp app;
+    app.app().config().inputMappings = contour::test::loadConfigFromYaml(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Alt], key: 'p', action: OpenCommandPalette }
+)")
+                                           .inputMappings;
+    auto session = makeSession(app.app());
+
+    SECTION("legacy encoding")
+    {
+        // Qt may report the chord with no text or with the control character; either way ESC ^A.
+        CHECK(pressWithCtrlAlt(*session, Qt::Key_A, 0x41, QString {}) == "\033\x01");
+        CHECK(pressWithCtrlAlt(*session, Qt::Key_A, 0x41, QStringLiteral("\x01")) == "\033\x01");
+
+        // A Swedish AltGr+8 is still the character it typed.
+        CHECK(pressWithCtrlAlt(*session, Qt::Key_BracketLeft, 0x38, QStringLiteral("[")) == "[");
+    }
+
+    SECTION("kitty keyboard protocol")
+    {
+        session->terminal().writeToScreen("\033[>1u");
+        CHECK(pressWithCtrlAlt(*session, Qt::Key_A, 0x41, QString {}) == "\033[97;7u");
+        CHECK(pressWithCtrlAlt(*session, Qt::Key_BracketLeft, 0x38, QStringLiteral("[")) == "[");
+    }
+
+    SECTION("a Ctrl+Alt binding fires")
+    {
+        CHECK(pressWithCtrlAlt(*session, Qt::Key_P, 0x50, QString {}).empty());
+    }
+}
+#endif
 
 TEST_CASE("the browser tab-switch chords are claimed before the terminal encodes them", "[session][input]")
 {

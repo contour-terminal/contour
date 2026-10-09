@@ -2916,8 +2916,8 @@ TEST_CASE("TerminalSession: a Ctrl-spelled chord fires its binding (issue #1987)
     // modifier equality in apply, the mode gate, and the codepoint the input routes deliver.
     //
     // NB: this drives sendCharEvent directly rather than a QKeyEvent, so it is independent of
-    // makeModifiers and runs identically on every platform. (On Windows the real Qt path additionally
-    // strips Ctrl+Alt as AltGr, which is a separate pre-existing limitation.)
+    // makeModifiers and runs identically on every platform. (On Windows the real Qt path tells a
+    // Ctrl+Alt chord from AltGr by the event's text; SessionInput_test covers that.)
     TestApp testApp;
     testApp.app().config().inputMappings = contour::test::loadConfigFromYaml(R"(
 default_profile: main
