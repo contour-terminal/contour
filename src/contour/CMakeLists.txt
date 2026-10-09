@@ -244,6 +244,9 @@ if(CONTOUR_FRONTEND_GUI)
         display/RenderState.hpp
         display/RenderingBackendSelection.hpp
         display/GpuSelection.hpp
+        display/GpuInventory.hpp
+        display/PciIds.hpp
+        display/SysfsGpuInventory.hpp
         geometry/CellRectangle.hpp
         geometry/WindowGeometry.hpp
         remote/NativeController.hpp
@@ -264,6 +267,9 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsController.cpp
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
+        display/GpuInventory.cpp
+        display/PciIds.cpp
+        display/SysfsGpuInventory.cpp
         session/TerminalSessionManager.cpp
         window/PopupShadowImageProvider.cpp
         window/UiStyleProvider.cpp
@@ -640,6 +646,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/QmlDiagnosticPredicate_test.cpp
             display/RenderingBackendSelection_test.cpp
             display/GpuSelection_test.cpp
+            display/GpuInventory_test.cpp
             display/ScissorRect_test.cpp
             display/RhiVertexLayout_test.cpp
             display/ScreenshotReadback_test.cpp
