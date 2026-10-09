@@ -3,10 +3,12 @@
 
 #include <vtbackend/input/InputGenerator.hpp>
 
+#include <QtCore/QString>
 #include <QtCore/Qt>
 #include <QtCore/QtTypes>
 
 #include <cctype>
+#include <cstdint>
 
 namespace contour::input
 {
@@ -54,18 +56,35 @@ namespace contour::input
 /// @return The native modifier mask to pass to makeModifiers().
 [[nodiscard]] quint32 nativeModifiersWithLockState(quint32 qtNativeModifiers) noexcept;
 
+/// What a Ctrl+Alt combination means for one event. Windows reports the AltGr key to Qt as
+/// Ctrl+Alt, so the same two modifiers are either a chord the user pressed or a keyboard-layout
+/// level that selected the character. AltGr is zero because it is makeModifiers' default.
+enum class CtrlAltRole : uint8_t
+{
+    AltGr, ///< Ctrl and Alt selected the AltGr level; they are not modifiers of the result.
+    Chord, ///< Ctrl and Alt are modifiers, reported as such.
+};
+
+/// Classifies a key event's Ctrl+Alt the way Windows itself does: the AltGr level yields
+/// graphical characters, while a genuine Ctrl+Alt chord yields none (or a control character).
+/// This is Windows Terminal's heuristic for the same ambiguity.
+/// @param qtModifiers The event's Qt modifiers.
+/// @param text The text the platform produced for the event (QKeyEvent::text()).
+/// @return AltGr when Ctrl and Alt are both held and @p text is non-empty and wholly graphical,
+///         else Chord.
+[[nodiscard]] CtrlAltRole ctrlAltRoleOf(Qt::KeyboardModifiers qtModifiers, QString const& text) noexcept;
+
 /// Creates the VT keyboard modifier state from Qt modifiers and native platform modifiers.
 /// The chord is taken from the Qt modifiers, the CapsLock and NumLock state from the
 /// platform-specific native modifiers.
 /// @param qtModifiers Standard Qt keyboard modifiers
 /// @param nativeModifiers Platform-specific value from QKeyEvent::nativeModifiers()
-/// @param stripAltGr When true (default), removes the Ctrl+Alt combination on Windows
-///                   that represents AltGr. Set to false for Win32 Input Mode which
-///                   needs the raw modifier state.
+/// @param ctrlAltRole AltGr (the default) strips a held Ctrl+Alt from the chord on Windows; Chord
+///                    keeps it. Ignored elsewhere, where AltGr is a key of its own.
 /// @return The chord being held, plus the latched lock keys.
 [[nodiscard]] vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
                                                          quint32 nativeModifiers = 0,
-                                                         bool stripAltGr = true);
+                                                         CtrlAltRole ctrlAltRole = CtrlAltRole::AltGr);
 
 /// Maps a US-ASCII "shifted" character back to the base character its physical key produces without
 /// Shift (e.g. '<' -> ',', '?' -> '/', '_' -> '-', '@' -> '2'). Returns @p ch unchanged when it is not
