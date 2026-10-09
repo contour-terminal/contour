@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/Logging.hpp>
 #include <contour/display/GraphicsDeviceSelector.hpp>
+#if defined(_WIN32)
+    #include <contour/display/GpuInventory.hpp>
+#endif
 
 #include <QtQuick/QQuickGraphicsDevice>
 #include <QtQuick/QQuickWindow>
@@ -93,6 +96,17 @@ namespace
                             .driver = {} },
                     .adapter = adapter });
             }
+#if defined(_WIN32)
+            // Qt's Direct3D backends report every hardware adapter as UnknownDevice (QRhiD3D::fillDriverInfo
+            // knows only "software or not"), so integrated/discrete could never match. DXGI's own listing
+            // classifies them; match it by vendor:device.
+            if (_implementation == QRhi::D3D11 || _implementation == QRhi::D3D12)
+            {
+                auto const inventory = makePlatformGpuInventory()->list();
+                for (auto& entry: entries)
+                    entry.candidate.kind = inventoryKindOf(entry.candidate, inventory);
+            }
+#endif
             return entries;
         }
 

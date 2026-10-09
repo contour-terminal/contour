@@ -100,6 +100,21 @@ namespace detail
     }
 } // namespace detail
 
+/// The kind of @p candidate, completed from an inventory: some graphics APIs cannot tell what an adapter
+/// is (Qt's Direct3D backends report every hardware adapter as of unknown type), the inventory can.
+/// @param candidate The adapter as the graphics API listed it.
+/// @param inventory The machine's GPUs, as the platform inventory lists them.
+/// @return The candidate's own kind when it knows one; else the kind the inventory gives the same
+///         vendor:device; else GpuKind::Other.
+[[nodiscard]] inline GpuKind inventoryKindOf(GpuCandidate const& candidate,
+                                             std::span<GpuCandidate const> inventory)
+{
+    if (candidate.kind != GpuKind::Other)
+        return candidate.kind;
+    auto const match = std::ranges::find(inventory, candidate.id, &GpuCandidate::id);
+    return match != inventory.end() ? match->kind : GpuKind::Other;
+}
+
 /// Chooses the GPU to render with.
 /// @param candidates The GPUs, in the order they were listed.
 /// @param selector What the configuration asks for.

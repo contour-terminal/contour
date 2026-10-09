@@ -196,3 +196,12 @@ TEST_CASE("DXGI kind heuristic: shared-memory adapters are integrated", "[gpu]")
     CHECK(kindFromDedicatedVideoMemory(128ull * 1024 * 1024) == GpuKind::Integrated);
     CHECK(kindFromDedicatedVideoMemory(8ull * 1024 * 1024 * 1024) == GpuKind::Discrete);
 }
+
+TEST_CASE("DXGI kind heuristic: an AMD APU's carve-out of up to 2 GiB is still integrated", "[gpu]")
+{
+    constexpr auto TwoGiB = 2ull * 1024 * 1024 * 1024;
+    CHECK(kindFromDedicatedVideoMemory(0) == GpuKind::Integrated);
+    CHECK(kindFromDedicatedVideoMemory(512ull * 1024 * 1024) == GpuKind::Integrated);
+    CHECK(kindFromDedicatedVideoMemory(TwoGiB - 1) == GpuKind::Integrated);
+    CHECK(kindFromDedicatedVideoMemory(TwoGiB) == GpuKind::Discrete);
+}

@@ -67,3 +67,21 @@ TEST_CASE("chooseGpu: no candidates means no choice", "[gpu]")
 {
     CHECK_FALSE(chooseGpu({}, selector(config::GpuPreference::Auto)).has_value());
 }
+
+TEST_CASE("inventoryKindOf: an adapter of unknown kind takes the inventory's kind for its id", "[gpu]")
+{
+    // Qt's Direct3D adapters report every hardware adapter as UnknownDevice.
+    auto const unknown = [](config::PciId id) {
+        return GpuCandidate {
+            .title = "x", .id = id, .kind = GpuKind::Other, .output = GpuOutput::Offscreen, .driver = {}
+        };
+    };
+    CHECK(inventoryKindOf(unknown({ 0x8086, 0xa788 }), Hybrid) == GpuKind::Integrated);
+    CHECK(inventoryKindOf(unknown({ 0x10de, 0x2820 }), Hybrid) == GpuKind::Discrete);
+    CHECK(inventoryKindOf(unknown({ 0x1002, 0x7340 }), Hybrid) == GpuKind::Other); // not in the inventory
+
+    // A kind the adapter does report is kept: the API knows better than a heuristic.
+    auto warp = unknown({ 0x1414, 0x008c });
+    warp.kind = GpuKind::Cpu;
+    CHECK(inventoryKindOf(warp, Hybrid) == GpuKind::Cpu);
+}
