@@ -2,6 +2,8 @@
 #include <contour/display/GpuInventory.hpp>
 #ifdef __linux__
     #include <contour/display/SysfsGpuInventory.hpp>
+#elif defined(_WIN32)
+    #include <contour/display/DxgiGpuInventory.hpp>
 #endif
 
 #include <fstream>
@@ -44,11 +46,13 @@ namespace
         }
     };
 
+#if !defined(__linux__) && !defined(_WIN32)
     class EmptyGpuInventory final: public IGpuInventory
     {
       public:
         [[nodiscard]] std::vector<GpuCandidate> list() const override { return {}; }
     };
+#endif
 } // namespace
 
 std::shared_ptr<ITextFileReader const> makeFileSystemTextReader()
@@ -63,6 +67,8 @@ std::shared_ptr<IGpuInventory const> makePlatformGpuInventory()
         makeFileSystemTextReader(),
         "/sys/class/drm",
         std::vector<std::filesystem::path> { "/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids" });
+#elif defined(_WIN32)
+    return std::make_shared<DxgiGpuInventory>();
 #else
     return std::make_shared<EmptyGpuInventory>();
 #endif

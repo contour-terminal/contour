@@ -257,6 +257,7 @@ if(CONTOUR_FRONTEND_GUI)
         display/RenderingBackendSelection.hpp
         display/GpuSelection.hpp
         display/GpuInventory.hpp
+        display/DxgiGpuInventory.hpp
         display/OpenGlGpuEnvironment.hpp
         display/PciIds.hpp
         display/SysfsGpuInventory.hpp
@@ -296,6 +297,9 @@ if(CONTOUR_FRONTEND_GUI)
         remote/RemoteLayout.cpp
         remote/TmuxController.cpp
     )
+    if(WIN32)
+        list(APPEND _core_source_files display/DxgiGpuInventory.cpp)
+    endif()
 endif()
 
 if(CONTOUR_WITH_GPU_SELECTION)
@@ -459,6 +463,10 @@ target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt
 # Both the binary dir (for generated headers) and the parent src dir (so "#include <contour/...>"
 # resolves) must be PUBLIC so consumers of the object library inherit them.
 target_include_directories(contour_core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# DXGI enumerates the GPUs for the settings page (display/DxgiGpuInventory.cpp).
+if(WIN32)
+    target_link_libraries(contour_core PUBLIC dxgi)
+endif()
 # }}}
 
 # qt_add_executable() is a Qt command, and it does Qt things -- QML plugin importing, the Android and

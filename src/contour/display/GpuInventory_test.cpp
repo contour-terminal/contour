@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/display/DxgiGpuInventory.hpp>
 #include <contour/display/GpuInventory.hpp>
 #include <contour/display/PciIds.hpp>
 #include <contour/display/SysfsGpuInventory.hpp>
@@ -149,4 +150,10 @@ TEST_CASE("SysfsGpuInventory: an unreadable card does not hide a readable duplic
     REQUIRE(gpus.size() == 2);
     CHECK(gpus[0].id == config::PciId { 0x8086, 0xa788 });
     CHECK(gpus[1].id == config::PciId { 0x10de, 0x2820 }); // found through card2
+}
+
+TEST_CASE("DXGI kind heuristic: shared-memory adapters are integrated", "[gpu]")
+{
+    CHECK(kindFromDedicatedVideoMemory(128ull * 1024 * 1024) == GpuKind::Integrated);
+    CHECK(kindFromDedicatedVideoMemory(8ull * 1024 * 1024 * 1024) == GpuKind::Discrete);
 }
