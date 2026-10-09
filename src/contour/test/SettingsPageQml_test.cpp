@@ -8,6 +8,7 @@
 
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiConfigStore.hpp>
+#include <contour/display/GpuInventory.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/window/SettingsController.hpp>
@@ -17,6 +18,7 @@
 #include <QtQml/QQmlEngine>
 #include <QtQml/QQmlIncubator>
 #include <QtQuick/QQuickItem>
+#include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -25,6 +27,8 @@
 #include <fstream>
 #include <memory>
 #include <string_view>
+
+#include <QtTest/QTest>
 
 using namespace contour;
 
@@ -460,6 +464,119 @@ TEST_CASE("SettingsPage's indicator editor is inert on a read-only profile", "[c
     QMetaObject::invokeMethod(left, "rawCommitted", Q_ARG(QString, QStringLiteral("{Clock}")));
     fx.settle();
     CHECK(fx.controller->indicatorSegment(0) == before);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+
+/// A GPU inventory listing a hybrid laptop's two GPUs, the discrete one under its long pci.ids title.
+class FakeGpuInventory final: public display::IGpuInventory
+{
+  public:
+    [[nodiscard]] std::vector<display::GpuCandidate> list() const override
+    {
+        return {
+            { .title = "Intel integrated GPU",
+              .id = { 0x8086, 0xa788 },
+              .kind = display::GpuKind::Integrated,
+              .output = display::GpuOutput::DrivesDisplay,
+              .driver = "i915" },
+            { .title = "NVIDIA GeForce RTX 4070 Max-Q / Mobile",
+              .id = { 0x10de, 0x2820 },
+              .kind = display::GpuKind::Discrete,
+              .output = display::GpuOutput::Offscreen,
+              .driver = "nouveau" },
+        };
+    }
+};
+
+/// The global row @p key of @p controller, as the settings page's Repeater hands it to a SettingRow.
+[[nodiscard]] QVariantMap globalRow(contour::window::SettingsController const& controller, QString const& key)
+{
+    for (auto const& raw: controller.globalFields())
+        if (raw.toMap().value("key").toString() == key)
+            return raw.toMap();
+    return {};
+}
+
+} // namespace
+
+TEST_CASE("SettingRow shows the GPU titles in full, and an absent GPU as the current entry",
+          "[contour][gui][qml][settings][gpu]")
+{
+    // The page's own rows come from a Repeater, which creates no delegates in this harness (see
+    // IncubationDriver), so the row is built here exactly as that delegate builds it.
+    contour::test::QmlMessageCapture const warnings;
+
+    QTemporaryDir const dir;
+    auto const configDir = std::filesystem::path(dir.path().toStdString());
+    auto const configPath = configDir / "contour.yml";
+    {
+        auto out = std::ofstream(configPath);
+        out << "default_profile: main\nrenderer:\n    gpu: 1002:7340\n"
+               "profiles:\n    main:\n        show_title_bar: true\n";
+    }
+    config::Config cfg;
+    config::loadConfigFromFile(cfg, configPath);
+    auto const controller =
+        contour::window::SettingsController([&]() -> config::Config const& { return cfg; },
+                                            std::make_shared<config::FileGuiConfigStore>(configDir),
+                                            [&]() {},
+                                            std::make_shared<FakeGpuInventory>());
+    auto const row = globalRow(controller, "renderer.gpu");
+    REQUIRE(!row.isEmpty());
+
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingRow.qml")));
+    REQUIRE(component.isReady());
+    auto initial = QVariantMap {};
+    for (auto const* const name: { "label", "help", "type", "value", "options", "optionLabels" })
+        initial.insert(QString::fromLatin1(name), row.value(QString::fromLatin1(name)));
+    initial.insert("fieldKey", row.value("key"));
+    initial.insert("width", 900); // a settings page at a normal window width
+    std::unique_ptr<QObject> const object(component.createWithInitialProperties(initial));
+    auto* const settingRow = qobject_cast<QQuickItem*>(object.get());
+    REQUIRE(settingRow != nullptr);
+
+    // Laid out for real: the editor's width is the point.
+    auto window = QQuickWindow {};
+    window.resize(900, 200);
+    settingRow->setParentItem(window.contentItem());
+    window.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&window));
+
+    QQuickItem* combo = nullptr;
+    for (auto* const descendant: settingRow->findChildren<QQuickItem*>())
+        if (descendant->inherits("QQuickComboBox"))
+            combo = descendant;
+    REQUIRE(combo != nullptr);
+
+    // Titles, never ids, and the configured-but-absent GPU stays the current entry.
+    auto const labels = row.value("optionLabels").toStringList();
+    CHECK(labels.contains("NVIDIA GeForce RTX 4070 Max-Q / Mobile"));
+    CHECK(combo->property("count").toInt() == labels.size());
+    CHECK(combo->property("currentIndex").toInt() == labels.size() - 1);
+    CHECK(combo->property("currentText").toString() == "Unavailable GPU (1002:7340)");
+    CHECK(combo->property("displayText").toString() == "Unavailable GPU (1002:7340)");
+
+    // Wide enough for the longest title, so neither the box nor its popup cuts it off. The width
+    // follows a layout polish, which is a render-loop pass rather than an event, so this waits for the
+    // geometry: a fixed delay is a guess at when the next frame lands, and a loaded runner misses it.
+    // 240 is the fixed editor column the box grew past, which cut the RTX title off.
+    CHECK(QTest::qWaitFor([&] { return combo->width() > 240; }, 2000));
+    CHECK(combo->width() >= combo->implicitWidth());
+    INFO("combo width " << combo->width() << ", implicit width " << combo->implicitWidth());
+
+    // A row too narrow for the cap: the box elides the long title rather than cutting it off.
+    settingRow->setProperty("value", QStringLiteral("10de:2820"));
+    settingRow->setWidth(300);
+    CHECK(QTest::qWaitFor([&] { return combo->width() <= 240; }, 2000)); // back to the column's floor
+    INFO("narrow combo width " << combo->width());
+    CHECK(combo->property("currentText").toString() == "NVIDIA GeForce RTX 4070 Max-Q / Mobile");
+    CHECK(combo->property("displayText").toString().endsWith(QChar(0x2026)));
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
