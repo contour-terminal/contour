@@ -5,6 +5,7 @@
 #include <core/Utils.hpp>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <set>
 
@@ -39,6 +40,34 @@ namespace
             return std::nullopt;
         return number;
     }
+
+    /// Vendors that build GPUs into their CPUs. Only their display GPU can be integrated off bus 0.
+    constexpr auto IntegratedGpuVendors = std::array<std::uint16_t, 2> {
+        0x8086, // Intel
+        0x1002, // AMD
+    };
+
+    /// One GPU as sysfs describes it, before it is classified.
+    struct SysfsGpu
+    {
+        std::string address;
+        config::PciId id;
+        GpuOutput output = GpuOutput::Offscreen;
+        std::string driver;
+    };
+
+    /// Integrated GPUs usually sit on the root bus and discrete ones behind a PCIe bridge. AMD APUs are
+    /// the exception: their iGPU sits behind an internal bridge too. On a machine with more than one GPU,
+    /// the one an Intel or AMD CPU drives the display with is taken to be that CPU's iGPU.
+    [[nodiscard]] GpuKind kindOf(SysfsGpu const& gpu, std::size_t gpuCount)
+    {
+        if (gpu.address.substr(5, 2) == "00")
+            return GpuKind::Integrated;
+        if (gpuCount >= 2 && gpu.output == GpuOutput::DrivesDisplay
+            && std::ranges::find(IntegratedGpuVendors, gpu.id.vendor) != IntegratedGpuVendors.end())
+            return GpuKind::Integrated;
+        return GpuKind::Discrete;
+    }
 } // namespace
 
 SysfsGpuInventory::SysfsGpuInventory(std::shared_ptr<ITextFileReader const> reader,
@@ -62,7 +91,7 @@ std::vector<GpuCandidate> SysfsGpuInventory::list() const
     std::ranges::sort(names); // directory order is unspecified; the dropdown order must not be
 
     auto seenAddresses = std::set<std::string> {};
-    auto gpus = std::vector<GpuCandidate> {};
+    auto found = std::vector<SysfsGpu> {};
     for (auto const& name: names)
     {
         if (!isCardNode(name))
@@ -71,7 +100,7 @@ std::vector<GpuCandidate> SysfsGpuInventory::list() const
         auto const link = _reader->readLink(device);
         if (!link)
             continue;
-        auto const address = link->filename().string();
+        auto address = link->filename().string();
         if (!isPciAddress(address) || seenAddresses.contains(address))
             continue;
         auto const vendor = sysfsHex(_reader->read(device / "vendor"));
@@ -80,18 +109,28 @@ std::vector<GpuCandidate> SysfsGpuInventory::list() const
             continue;
         seenAddresses.insert(address); // only a readable card claims its address
 
-        auto const id = config::PciId { .vendor = *vendor, .device = *deviceId };
-        // Integrated GPUs sit on the root bus; discrete ones behind a PCIe bridge.
-        auto const kind = address.substr(5, 2) == "00" ? GpuKind::Integrated : GpuKind::Discrete;
         auto const bootVga = _reader->read(device / "boot_vga");
         auto const driverLink = _reader->readLink(device / "driver");
-        gpus.push_back(GpuCandidate {
-            .title = gpuTitle(id, kind, database ? lookupPciNames(*database, id) : std::nullopt),
-            .id = id,
-            .kind = kind,
+        found.push_back(SysfsGpu {
+            .address = std::move(address),
+            .id = config::PciId { .vendor = *vendor, .device = *deviceId },
             .output =
                 bootVga && core::trim(*bootVga) == "1" ? GpuOutput::DrivesDisplay : GpuOutput::Offscreen,
             .driver = driverLink ? driverLink->filename().string() : std::string {},
+        });
+    }
+
+    // Classified only once all are known: whether a GPU is integrated depends on whether it is alone.
+    auto gpus = std::vector<GpuCandidate> {};
+    for (auto& gpu: found)
+    {
+        auto const kind = kindOf(gpu, found.size());
+        gpus.push_back(GpuCandidate {
+            .title = gpuTitle(gpu.id, kind, database ? lookupPciNames(*database, gpu.id) : std::nullopt),
+            .id = gpu.id,
+            .kind = kind,
+            .output = gpu.output,
+            .driver = std::move(gpu.driver),
         });
     }
     return gpus;

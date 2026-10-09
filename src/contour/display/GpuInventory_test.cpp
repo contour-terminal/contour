@@ -152,6 +152,45 @@ TEST_CASE("SysfsGpuInventory: an unreadable card does not hide a readable duplic
     CHECK(gpus[1].id == config::PciId { 0x10de, 0x2820 }); // found through card2
 }
 
+TEST_CASE("SysfsGpuInventory: an AMD APU behind an internal bridge is integrated", "[gpu]")
+{
+    // AMD APUs put their iGPU behind an internal bridge, so it is not on bus 0 like Intel's.
+    auto reader = std::make_shared<FakeTextFileReader>();
+    reader->directories["/sys/class/drm"] = { "card0", "card1" };
+    reader->addCard("card0", "0000:01:00.0", "0x10de", "0x2820", "0", "nvidia");
+    reader->addCard("card1", "0000:05:00.0", "0x1002", "0x15bf", "1", "amdgpu");
+    auto const gpus = inventoryOver(reader).list();
+    REQUIRE(gpus.size() == 2);
+    CHECK(gpus[0].id == config::PciId { 0x10de, 0x2820 });
+    CHECK(gpus[0].kind == GpuKind::Discrete);
+    CHECK(gpus[1].id == config::PciId { 0x1002, 0x15bf });
+    CHECK(gpus[1].kind == GpuKind::Integrated);
+    CHECK(gpus[1].title == "AMD integrated GPU");
+}
+
+TEST_CASE("SysfsGpuInventory: a lone GPU behind a bridge that drives the display is discrete", "[gpu]")
+{
+    auto reader = std::make_shared<FakeTextFileReader>();
+    reader->directories["/sys/class/drm"] = { "card0" };
+    reader->addCard("card0", "0000:03:00.0", "0x1002", "0x73bf", "1", "amdgpu");
+    auto const gpus = inventoryOver(reader).list();
+    REQUIRE(gpus.size() == 1);
+    CHECK(gpus[0].kind == GpuKind::Discrete);
+}
+
+TEST_CASE("SysfsGpuInventory: an NVIDIA GPU driving the display is never integrated", "[gpu]")
+{
+    // A desktop whose monitors hang off the dGPU while the CPU's iGPU stays enabled.
+    auto reader = std::make_shared<FakeTextFileReader>();
+    reader->directories["/sys/class/drm"] = { "card0", "card1" };
+    reader->addCard("card0", "0000:01:00.0", "0x10de", "0x2820", "1", "nvidia");
+    reader->addCard("card1", "0000:00:02.0", "0x8086", "0xa788", "0", "i915");
+    auto const gpus = inventoryOver(reader).list();
+    REQUIRE(gpus.size() == 2);
+    CHECK(gpus[0].kind == GpuKind::Discrete);
+    CHECK(gpus[1].kind == GpuKind::Integrated);
+}
+
 TEST_CASE("DXGI kind heuristic: shared-memory adapters are integrated", "[gpu]")
 {
     CHECK(kindFromDedicatedVideoMemory(128ull * 1024 * 1024) == GpuKind::Integrated);
