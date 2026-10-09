@@ -31,7 +31,8 @@ class IAdapterLister
   public:
     virtual ~IAdapterLister() = default;
 
-    /// @return The adapters; their pointers stay valid for the lister's lifetime.
+    /// Lists the adapters afresh, releasing those of the previous call.
+    /// @return The adapters; their pointers stay valid until the next list() call, or the lister's end.
     [[nodiscard]] virtual std::vector<AdapterEntry> list() = 0;
     /// @return The Vulkan instance every window must use, or nullptr for other backends.
     [[nodiscard]] virtual QVulkanInstance* vulkanInstance() noexcept = 0;

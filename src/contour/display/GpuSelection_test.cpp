@@ -48,6 +48,15 @@ TEST_CASE("chooseGpu: integrated falls back to discrete, never to the CPU raster
     CHECK(chooseGpu(dgpuOnly, selector(config::GpuPreference::Integrated))->index == 1);
 }
 
+TEST_CASE("chooseGpu: discrete without a discrete GPU takes the integrated one", "[gpu]")
+{
+    auto const igpuOnly = std::vector<GpuCandidate> { Hybrid[1], Hybrid[2] }; // llvmpipe, Intel
+    auto const choice = chooseGpu(igpuOnly, selector(config::GpuPreference::Discrete));
+    REQUIRE(choice.has_value());
+    CHECK(choice->index == 1);
+    CHECK(choice->outcome == RequestOutcome::Satisfied);
+}
+
 TEST_CASE("chooseGpu: a specific id is honoured; a missing one falls back to auto and says so", "[gpu]")
 {
     auto const hit = chooseGpu(

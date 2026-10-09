@@ -90,6 +90,10 @@ namespace detail
                                  GpuKind::Cpu } },
     };
 
+    /// The first candidate of the best-ranked kind @p preference accepts.
+    /// @param candidates The GPUs, in the order they were listed; ties go to the earlier one.
+    /// @param preference The ranking row to follow; Specific has none.
+    /// @return The candidate's index, or nullopt when there is no row or no candidate of a ranked kind.
     [[nodiscard]] inline std::optional<std::size_t> firstByRanking(std::span<GpuCandidate const> candidates,
                                                                    config::GpuPreference preference)
     {
