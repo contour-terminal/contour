@@ -113,9 +113,12 @@ endif()
 
 # {{{ GPU selection for Vulkan/Direct3D (renderer.gpu): QRhi::enumerateAdapters + fromRhiAdapter
 # QQuickGraphicsDevice::fromRhiAdapter "was introduced in Qt 6.10". OpenGL selection (DRI_PRIME) does
-# not need it and is built regardless.
+# not need it and is built regardless. Linux and Windows only: macOS renders through Metal, which has
+# no GPU choice to make here.
 if(CONTOUR_FRONTEND_GUI)
-    if(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
+    if(NOT (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+        contour_note_excluded_feature("GPU selection for Vulkan and Direct3D" "Linux and Windows only")
+    elseif(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
         set(CONTOUR_WITH_GPU_SELECTION ON)
     else()
         contour_note_excluded_feature("GPU selection for Vulkan and Direct3D" "requires Qt 6.10")
