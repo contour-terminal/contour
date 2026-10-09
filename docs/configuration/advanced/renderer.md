@@ -16,6 +16,7 @@ Selects which Qt RHI graphics API drives the terminal display. Supported values:
 
 A backend that the running platform cannot provide (e.g. `metal` on Windows) falls back to `auto`
 with a warning. `OpenGL` remains the safe fallback if a native backend misbehaves on your hardware.
+
 `default` is accepted as a legacy alias of `auto`.
 
 ```yml
