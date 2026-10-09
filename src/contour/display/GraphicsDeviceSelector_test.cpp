@@ -32,6 +32,7 @@ class FakeAdapterLister final: public IAdapterLister
         };
     }
     [[nodiscard]] QVulkanInstance* vulkanInstance() noexcept override { return nullptr; }
+    [[nodiscard]] std::string_view backendName() const noexcept override { return "Fake"; }
 
   private:
     int& _listings;
@@ -67,6 +68,21 @@ TEST_CASE("GraphicsDeviceSelector: fallBackToAuto re-chooses the power-saving GP
 TEST_CASE("adapterImplementationFor: only adapter-capable backends", "[gpu]")
 {
     CHECK(adapterImplementationFor(config::RenderingBackend::Vulkan) == QRhi::Vulkan);
+    CHECK(adapterImplementationFor(config::RenderingBackend::Direct3D11) == QRhi::D3D11);
+    CHECK(adapterImplementationFor(config::RenderingBackend::Direct3D12) == QRhi::D3D12);
+#if defined(_WIN32)
+    CHECK(adapterImplementationFor(config::RenderingBackend::Auto) == QRhi::D3D11);
+#else
+    CHECK_FALSE(adapterImplementationFor(config::RenderingBackend::Auto).has_value());
+#endif
     CHECK_FALSE(adapterImplementationFor(config::RenderingBackend::OpenGL).has_value());
     CHECK_FALSE(adapterImplementationFor(config::RenderingBackend::Software).has_value());
+}
+
+TEST_CASE("backendNameOf: names the adapter-capable backends for the startup log", "[gpu]")
+{
+    CHECK(backendNameOf(QRhi::Vulkan) == "Vulkan");
+    CHECK(backendNameOf(QRhi::D3D11) == "Direct3D 11");
+    CHECK(backendNameOf(QRhi::D3D12) == "Direct3D 12");
+    CHECK(backendNameOf(QRhi::OpenGLES2) == "unknown");
 }

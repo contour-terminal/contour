@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 class QQuickWindow;
@@ -34,6 +35,8 @@ class IAdapterLister
     [[nodiscard]] virtual std::vector<AdapterEntry> list() = 0;
     /// @return The Vulkan instance every window must use, or nullptr for other backends.
     [[nodiscard]] virtual QVulkanInstance* vulkanInstance() noexcept = 0;
+    /// @return The human-readable name of the backend whose adapters this lists, for the startup log.
+    [[nodiscard]] virtual std::string_view backendName() const noexcept = 0;
 };
 
 /// Applies `renderer.gpu` to Vulkan and Direct3D windows through Qt's adapter API.
@@ -72,6 +75,10 @@ class GraphicsDeviceSelector
 
 /// @return The QRhi implementation whose adapters `renderer.gpu` chooses for @p backend, if any.
 [[nodiscard]] std::optional<QRhi::Implementation> adapterImplementationFor(config::RenderingBackend backend);
+
+/// @return The human-readable name of @p implementation as shown in the startup log, e.g. "Vulkan";
+/// "unknown" for a backend this selector does not handle.
+[[nodiscard]] std::string_view backendNameOf(QRhi::Implementation implementation) noexcept;
 
 /// @return The lister over QRhi::enumerateAdapters; for Vulkan it creates and owns the instance.
 [[nodiscard]] std::unique_ptr<IAdapterLister> makeQtAdapterLister(QRhi::Implementation implementation);

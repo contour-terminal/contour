@@ -6,6 +6,9 @@
 #include <QtQuick/QQuickGraphicsDevice>
 #include <QtQuick/QQuickWindow>
 
+#include <algorithm>
+#include <array>
+
 namespace contour::display
 {
 
@@ -24,6 +27,18 @@ namespace
         }
         return GpuKind::Other;
     }
+
+    struct BackendName
+    {
+        QRhi::Implementation implementation;
+        std::string_view name;
+    };
+
+    constexpr auto BackendNames = std::array {
+        BackendName { .implementation = QRhi::Vulkan, .name = "Vulkan" },
+        BackendName { .implementation = QRhi::D3D11, .name = "Direct3D 11" },
+        BackendName { .implementation = QRhi::D3D12, .name = "Direct3D 12" },
+    };
 
     class QtAdapterLister final: public IAdapterLister
     {
@@ -74,6 +89,11 @@ namespace
         }
 
         [[nodiscard]] QVulkanInstance* vulkanInstance() noexcept override { return _vulkan.get(); }
+
+        [[nodiscard]] std::string_view backendName() const noexcept override
+        {
+            return backendNameOf(_implementation);
+        }
 
       private:
         [[nodiscard]] QRhi::AdapterList listAdapters()
@@ -137,7 +157,11 @@ void GraphicsDeviceSelector::recompute()
     _chosen = (*_adapters)[choice->index];
     if (choice->outcome == RequestOutcome::FellBack)
         errorLog()("renderer.gpu: no GPU {} is present; using {}.", _selector, _chosen->candidate.title);
-    startupLog()("GPU: '{}' {} (requested: {})", _chosen->candidate.title, _chosen->candidate.id, _selector);
+    startupLog()("GPU: '{}' {} via {} (requested: {})",
+                 _chosen->candidate.title,
+                 _chosen->candidate.id,
+                 _lister->backendName(),
+                 _selector);
 }
 
 void GraphicsDeviceSelector::applyTo(QQuickWindow& window)
@@ -169,6 +193,12 @@ std::optional<QRhi::Implementation> adapterImplementationFor(config::RenderingBa
 #endif
         default: return std::nullopt;
     }
+}
+
+std::string_view backendNameOf(QRhi::Implementation implementation) noexcept
+{
+    auto const it = std::ranges::find(BackendNames, implementation, &BackendName::implementation);
+    return it != BackendNames.end() ? it->name : std::string_view { "unknown" };
 }
 
 std::unique_ptr<IAdapterLister> makeQtAdapterLister(QRhi::Implementation implementation)
