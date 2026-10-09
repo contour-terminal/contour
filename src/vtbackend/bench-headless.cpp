@@ -426,7 +426,8 @@ static int benchKeyPressLatency(KeyPressBenchOptions const& options, core::Envir
         vtpty::Process::ExecInfo { .program = "/bin/sh",
                                    .arguments = { "-c", std::string(application.script), logFile.string() },
                                    .workingDirectory = std::filesystem::temp_directory_path(),
-                                   .env = {} },
+                                   .env = {},
+                                   .removedEnvironment = {} },
         vtpty::createPty(pageSize, std::nullopt),
         /*escapeSandbox=*/false,
         // a benchmark measures the terminal, not systemd: no scope, and no placement latency

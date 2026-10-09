@@ -93,7 +93,8 @@ int drive(std::string_view placementName)
         vtpty::Process::ExecInfo { .program = std::filesystem::read_symlink("/proc/self/exe").string(),
                                    .arguments = { "--hog" },
                                    .workingDirectory = {},
-                                   .env = {} },
+                                   .env = {},
+                                   .removedEnvironment = {} },
         vtpty::createPty(vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) }, std::nullopt),
         /*escapeSandbox=*/false,
         placement

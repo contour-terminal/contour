@@ -47,11 +47,14 @@ class UnstartablePty final: public vtpty::MockPty
 /// @return A Process for a shell on @p pty, not yet started.
 std::unique_ptr<vtpty::Process> shellOn(std::unique_ptr<vtpty::Pty> pty)
 {
-    return std::make_unique<vtpty::Process>(
-        vtpty::Process::ExecInfo { .program = "/bin/sh", .arguments = {}, .workingDirectory = {}, .env = {} },
-        std::move(pty),
-        /*escapeSandbox=*/false,
-        std::make_shared<vtpty::NoPlacement>());
+    return std::make_unique<vtpty::Process>(vtpty::Process::ExecInfo { .program = "/bin/sh",
+                                                                       .arguments = {},
+                                                                       .workingDirectory = {},
+                                                                       .env = {},
+                                                                       .removedEnvironment = {} },
+                                            std::move(pty),
+                                            /*escapeSandbox=*/false,
+                                            std::make_shared<vtpty::NoPlacement>());
 }
 
 auto constexpr PageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) };
@@ -120,12 +123,14 @@ class DropOnExit
 std::unique_ptr<vtpty::Process> shellRunning(std::vector<std::string> arguments,
                                              std::shared_ptr<vtpty::ProcessPlacement> placement)
 {
-    return std::make_unique<vtpty::Process>(
-        vtpty::Process::ExecInfo {
-            .program = "/bin/sh", .arguments = std::move(arguments), .workingDirectory = {}, .env = {} },
-        vtpty::createPty(PageSize, std::nullopt),
-        /*escapeSandbox=*/false,
-        std::move(placement));
+    return std::make_unique<vtpty::Process>(vtpty::Process::ExecInfo { .program = "/bin/sh",
+                                                                       .arguments = std::move(arguments),
+                                                                       .workingDirectory = {},
+                                                                       .env = {},
+                                                                       .removedEnvironment = {} },
+                                            vtpty::createPty(PageSize, std::nullopt),
+                                            /*escapeSandbox=*/false,
+                                            std::move(placement));
 }
 
 /// Hangs up @p process and waits for it.

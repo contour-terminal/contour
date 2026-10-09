@@ -34,6 +34,7 @@ namespace
         .arguments = { "-c", std::move(script) },
         .workingDirectory = ".",
         .env = { { "TERM", "xterm-256color" }, { "LC_ALL", "C" } },
+        .removedEnvironment = {},
     };
 }
 

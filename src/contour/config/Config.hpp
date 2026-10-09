@@ -703,6 +703,7 @@ struct TerminalProfile
         .arguments = {},
         .workingDirectory = "",
         .env = {},
+        .removedEnvironment = {},
     } }; // namespace contour::config
     ConfigEntry<vtpty::SshHostConfig, documentation::SshHostConfig> ssh {};
     ConfigEntry<bool, documentation::EscapeSandbox> escapeSandbox { true };

@@ -22,6 +22,7 @@ set(vtpty_LIBRARIES core::base core::log core::platform crispy::core Microsoft.G
 
 set(vtpty_SOURCES
     ChannelPty.cpp
+    EnvironmentBlock.cpp
     MockPty.cpp
     MockViewPty.cpp
     OwnedFd.cpp
@@ -35,6 +36,7 @@ set(vtpty_SOURCES
 
 set(vtpty_HEADERS
     ChannelPty.hpp
+    EnvironmentBlock.hpp
     ImageSize.hpp
     MockPty.hpp
     MockViewPty.hpp
@@ -139,6 +141,7 @@ if(VTPTY_TESTING)
     add_executable(vtpty_test
         test_main.cpp
         ChannelPty_test.cpp
+        EnvironmentBlock_test.cpp
         ImageSize_test.cpp
         PlacementBreaker_test.cpp
         Process_test.cpp
