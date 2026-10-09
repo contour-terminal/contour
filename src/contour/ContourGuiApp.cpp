@@ -3,7 +3,9 @@
 #include <contour/Logging.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/display/ContentScale.hpp>
+#include <contour/display/GpuInventory.hpp>
 #include <contour/display/Logging.hpp>
+#include <contour/display/OpenGlGpuEnvironment.hpp>
 #include <contour/display/RenderingBackendSelection.hpp>
 #include <contour/display/ShaderConfig.hpp> // createSurfaceFormat
 #include <contour/display/TerminalAccessible.hpp>
@@ -184,7 +186,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
                                              : std::make_unique<command::FileCommandHistoryStore>()),
     _speechSynthesizer(speechSynthesizer ? std::move(speechSynthesizer) : platform::makeSpeechSynthesizer()),
-    _sessionManager(*this, *_sessionFactory, *_layoutStore, *_commandHistoryStore)
+    _sessionManager(*this, *_sessionFactory, *_layoutStore, *_commandHistoryStore),
+    _gpuInventory { display::makePlatformGpuInventory() }
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
@@ -193,6 +196,37 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
 }
 
 ContourGuiApp::~ContourGuiApp() = default;
+
+void ContourGuiApp::applyOpenGlGpuSelection()
+{
+#if defined(__linux__)
+    auto const& renderer = _config.renderer.value();
+    if (renderer.renderingBackend != config::RenderingBackend::OpenGL
+        && renderer.renderingBackend != config::RenderingBackend::Auto)
+        return; // Vulkan/D3D choose through Qt's adapter API instead; Software has no GPU
+    auto const gpus = _gpuInventory->list();
+    auto const choice = display::chooseGpu(gpus, renderer.gpu);
+    if (!choice)
+        return;
+    auto const& chosen = gpus[choice->index];
+    if (choice->outcome == display::RequestOutcome::FellBack)
+        errorLog()("renderer.gpu: no GPU {} is present; using {}.", renderer.gpu, chosen.title);
+    auto const assignments = display::openGlSelectionEnvironment(
+        chosen, [](std::string_view name) { return qEnvironmentVariableIsSet(std::string(name).c_str()); });
+    for (auto const& assignment: assignments)
+    {
+        qputenv(assignment.name.c_str(), QByteArray::fromStdString(assignment.value));
+        _selfOnlyEnvironment.push_back(assignment.name);
+    }
+    startupLog()("GPU: '{}' {} via OpenGL (requested: {})", chosen.title, chosen.id, renderer.gpu);
+#else
+    // Spec 4.3: no supported way to choose an OpenGL GPU here.
+    auto const& renderer = _config.renderer.value();
+    if (renderer.renderingBackend == config::RenderingBackend::OpenGL
+        && renderer.gpu.preference != config::GpuPreference::Auto)
+        errorLog()("renderer.gpu needs Direct3D or Vulkan on this platform; OpenGL uses the default GPU.");
+#endif
+}
 
 int ContourGuiApp::clientAction()
 {
@@ -1020,6 +1054,9 @@ int ContourGuiApp::terminalGuiAction()
 #endif
 
     auto qtArgsCount = static_cast<int>(qtArgsPtr.size());
+
+    // The driver stack reads its GPU-selection variables when the display connection opens.
+    applyOpenGlGpuSelection();
 
     // NB: We use QApplication over QGuiApplication because we want to use SystemTrayIcon.
     // NOTE: Cannot use ScopedTimer here because QApplication must live until end of function.

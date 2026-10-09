@@ -26,6 +26,8 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -41,7 +43,8 @@ namespace config
 namespace display
 {
     class ForcedFontDpiProvider;
-}
+    class IGpuInventory;
+} // namespace display
 
 namespace remote
 {
@@ -192,6 +195,19 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// to it, so one instance is shared rather than one per pane.
     /// @return The layout; never nullptr.
     [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const noexcept { return *_keyboardLayout; }
+
+    /// @return The machine's GPUs, listed without waking any; never null.
+    [[nodiscard]] std::shared_ptr<display::IGpuInventory const> const& gpuInventory() const noexcept
+    {
+        return _gpuInventory;
+    }
+
+    /// @return Environment variables Contour set for its own rendering, which spawned shells must not
+    /// inherit.
+    [[nodiscard]] std::span<std::string const> selfOnlyEnvironment() const noexcept
+    {
+        return _selfOnlyEnvironment;
+    }
 
     [[nodiscard]] std::string profileName() const;
 
@@ -371,6 +387,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // Spawn context: the screen the next window should open on (QPointer: screens can be unplugged
     // between staging and consumption).
     QPointer<QScreen> _pendingSpawnScreen;
+
+    /// Applies `renderer.gpu` to OpenGL through the driver's environment (Linux only).
+    void applyOpenGlGpuSelection();
+
+    std::shared_ptr<display::IGpuInventory const> _gpuInventory;
+    std::vector<std::string> _selfOnlyEnvironment;
 
     int _argc = 0;
     char const** _argv = nullptr;

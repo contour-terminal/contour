@@ -245,6 +245,7 @@ if(CONTOUR_FRONTEND_GUI)
         display/RenderingBackendSelection.hpp
         display/GpuSelection.hpp
         display/GpuInventory.hpp
+        display/OpenGlGpuEnvironment.hpp
         display/PciIds.hpp
         display/SysfsGpuInventory.hpp
         geometry/CellRectangle.hpp
@@ -647,6 +648,7 @@ if(CONTOUR_FRONTEND_GUI)
             display/RenderingBackendSelection_test.cpp
             display/GpuSelection_test.cpp
             display/GpuInventory_test.cpp
+            display/OpenGlGpuEnvironment_test.cpp
             display/ScissorRect_test.cpp
             display/RhiVertexLayout_test.cpp
             display/ScreenshotReadback_test.cpp
