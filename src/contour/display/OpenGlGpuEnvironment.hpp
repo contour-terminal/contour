@@ -3,6 +3,8 @@
 
 #include <contour/display/GpuSelection.hpp>
 
+#include <core/Utils.hpp>
+
 #include <algorithm>
 #include <array>
 #include <format>
@@ -77,16 +79,9 @@ inline constexpr std::string_view SelfSetEnvironmentMarker = "CONTOUR_SELF_SET_E
 [[nodiscard]] inline std::vector<std::string> selfSetNamesFrom(std::string_view markerValue)
 {
     auto names = std::vector<std::string> {};
-    for (auto const part: std::views::split(markerValue, ','))
-    {
-        auto name = std::string_view(part.begin(), part.end());
-        constexpr auto Blanks = std::string_view(" \t\r\n");
-        auto const first = name.find_first_not_of(Blanks);
-        if (first == std::string_view::npos)
-            continue;
-        name = name.substr(first, name.find_last_not_of(Blanks) - first + 1);
-        names.emplace_back(name);
-    }
+    for (auto const part: core::split(markerValue, ','))
+        if (auto const name = core::trim(part); !name.empty())
+            names.emplace_back(name);
     return names;
 }
 

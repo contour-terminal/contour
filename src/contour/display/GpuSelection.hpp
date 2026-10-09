@@ -112,9 +112,13 @@ namespace detail
 
     if (selector.preference == config::GpuPreference::Specific)
     {
-        for (auto const index: std::views::iota(std::size_t { 0 }, candidates.size()))
-            if (selector.id && candidates[index].id == *selector.id)
-                return GpuChoice { .index = index, .outcome = RequestOutcome::Satisfied };
+        if (selector.id)
+        {
+            auto const match = std::ranges::find(candidates, *selector.id, &GpuCandidate::id);
+            if (match != candidates.end())
+                return GpuChoice { .index = static_cast<std::size_t>(match - candidates.begin()),
+                                   .outcome = RequestOutcome::Satisfied };
+        }
         auto const fallback = detail::firstByRanking(candidates, config::GpuPreference::Auto);
         return GpuChoice { .index = fallback.value_or(0), .outcome = RequestOutcome::FellBack };
     }

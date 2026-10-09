@@ -2,6 +2,8 @@
 #include <contour/display/PciIds.hpp>
 #include <contour/display/SysfsGpuInventory.hpp>
 
+#include <core/Utils.hpp>
+
 #include <algorithm>
 #include <charconv>
 #include <set>
@@ -11,15 +13,6 @@ namespace contour::display
 
 namespace
 {
-    [[nodiscard]] std::string_view trimmed(std::string_view text) noexcept
-    {
-        constexpr auto Blanks = std::string_view { " \t\r\n" };
-        auto const first = text.find_first_not_of(Blanks);
-        if (first == std::string_view::npos)
-            return {};
-        return text.substr(first, text.find_last_not_of(Blanks) - first + 1);
-    }
-
     /// "card" followed by digits only; "card1-eDP-1" is a connector, not a GPU.
     [[nodiscard]] bool isCardNode(std::string_view name) noexcept
     {
@@ -37,7 +30,7 @@ namespace
     {
         if (!text)
             return std::nullopt;
-        auto value = trimmed(*text);
+        auto value = core::trim(*text);
         if (value.starts_with("0x"))
             value.remove_prefix(2);
         auto number = std::uint16_t {};
@@ -96,7 +89,8 @@ std::vector<GpuCandidate> SysfsGpuInventory::list() const
             .title = gpuTitle(id, kind, database ? lookupPciNames(*database, id) : std::nullopt),
             .id = id,
             .kind = kind,
-            .output = bootVga && trimmed(*bootVga) == "1" ? GpuOutput::DrivesDisplay : GpuOutput::Offscreen,
+            .output =
+                bootVga && core::trim(*bootVga) == "1" ? GpuOutput::DrivesDisplay : GpuOutput::Offscreen,
             .driver = driverLink ? driverLink->filename().string() : std::string {},
         });
     }

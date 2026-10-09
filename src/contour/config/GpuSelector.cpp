@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/GpuSelector.hpp>
 
+#include <core/Utils.hpp>
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -33,15 +35,6 @@ namespace
         return std::ranges::equal(a, b, {}, toLower, toLower);
     }
 
-    [[nodiscard]] std::string_view trimmed(std::string_view text) noexcept
-    {
-        constexpr auto Blanks = std::string_view { " \t\r\n" };
-        auto const first = text.find_first_not_of(Blanks);
-        if (first == std::string_view::npos)
-            return {};
-        return text.substr(first, text.find_last_not_of(Blanks) - first + 1);
-    }
-
     [[nodiscard]] std::optional<std::uint16_t> parseHex16(std::string_view text) noexcept
     {
         if (text.empty() || text.size() > 4)
@@ -69,7 +62,7 @@ std::optional<PciId> parsePciId(std::string_view text) noexcept
 
 std::expected<GpuSelector, GpuSelectorError> parseGpuSelector(std::string_view text)
 {
-    auto const value = trimmed(text);
+    auto const value = core::trim(text);
     if (value.empty())
         return GpuSelector {};
     for (auto const& keyword: Keywords)
