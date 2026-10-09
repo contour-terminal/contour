@@ -8,6 +8,7 @@
 
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiConfigStore.hpp>
+#include <contour/display/GpuInventory.hpp>
 #include <contour/window/SettingsController.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -22,6 +23,8 @@
 #include <fstream>
 #include <memory>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 using namespace contour;
 using namespace contour::window;
@@ -38,6 +41,31 @@ namespace
     return path;
 }
 
+/// A GPU inventory that lists whatever the test put in it.
+class FakeGpuInventory final: public display::IGpuInventory
+{
+  public:
+    std::vector<display::GpuCandidate> gpus;
+    [[nodiscard]] std::vector<display::GpuCandidate> list() const override { return gpus; }
+};
+
+/// A hybrid laptop: an integrated and a discrete GPU.
+[[nodiscard]] std::shared_ptr<FakeGpuInventory> hybridGpus()
+{
+    auto inventory = std::make_shared<FakeGpuInventory>();
+    inventory->gpus = {
+        { .title = "Intel integrated GPU",
+          .id = { 0x8086, 0xa788 },
+          .kind = display::GpuKind::Integrated,
+          .driver = "i915" },
+        { .title = "NVIDIA GeForce RTX 4070 Max-Q / Mobile",
+          .id = { 0x10de, 0x2820 },
+          .kind = display::GpuKind::Discrete,
+          .driver = "nvidia" },
+    };
+    return inventory;
+}
+
 /// Owns a controller wired exactly like production: a live Config, a file-backed side-file store rooted
 /// at the config directory, and an apply callback that reloads the Config from disk. The whole
 /// create/edit/save/delete workflow runs against real files under a temp directory.
@@ -49,7 +77,7 @@ struct Fixture
     std::shared_ptr<config::FileGuiConfigStore> store;
     std::unique_ptr<SettingsController> controller;
 
-    explicit Fixture(std::string_view yaml)
+    explicit Fixture(std::string_view yaml, std::shared_ptr<display::IGpuInventory const> gpus = nullptr)
     {
         configPath = writeConfig(dir, yaml);
         config::loadConfigFromFile(cfg, configPath);
@@ -59,7 +87,8 @@ struct Fixture
                                                           [this]() {
                                                               cfg = config::Config {};
                                                               config::loadConfigFromFile(cfg, configPath);
-                                                          });
+                                                          },
+                                                          std::move(gpus));
     }
 };
 
@@ -812,3 +841,46 @@ TEST_CASE("SettingsController: indicator segment indices are bounds-checked", "[
 }
 
 // }}}
+
+TEST_CASE("SettingsController: the GPU row shows titles and stores ids", "[settings][gpu]")
+{
+    auto fx = Fixture(BasicConfig, hybridGpus());
+    auto const row = rowWithKey(fx.controller->globalFields(), "renderer.gpu");
+    CHECK(row.value("value").toString() == "auto");
+    CHECK(row.value("options").toStringList()
+          == QStringList { "auto", "integrated", "discrete", "8086:a788", "10de:2820" });
+    CHECK(row.value("optionLabels").toStringList()
+          == QStringList { "Automatic (power saving)",
+                           "Integrated GPU",
+                           "Discrete GPU",
+                           "Intel integrated GPU",
+                           "NVIDIA GeForce RTX 4070 Max-Q / Mobile" });
+
+    REQUIRE(fx.controller->setGlobalField("renderer.gpu", "10de:2820"));
+    CHECK(fx.cfg.renderer.value().gpu.id == config::PciId { 0x10de, 0x2820 });
+    CHECK(rowWithKey(fx.controller->globalFields(), "renderer.gpu").value("overridden").toBool());
+}
+
+TEST_CASE("SettingsController: a configured GPU that is gone stays visible and selected", "[settings][gpu]")
+{
+    auto fx = Fixture(R"(
+default_profile: main
+renderer:
+    gpu: 1002:7340
+profiles:
+    main:
+        show_title_bar: true
+)",
+                      hybridGpus());
+    auto const row = rowWithKey(fx.controller->globalFields(), "renderer.gpu");
+    CHECK(row.value("value").toString() == "1002:7340");
+    CHECK(row.value("options").toStringList().last() == "1002:7340");
+    CHECK(row.value("optionLabels").toStringList().last() == "Unavailable GPU (1002:7340)");
+}
+
+TEST_CASE("SettingsController: plain enum rows label each option with its value", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    auto const row = rowWithKey(fx.controller->globalFields(), "theme");
+    CHECK(row.value("optionLabels").toStringList() == row.value("options").toStringList());
+}

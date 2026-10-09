@@ -3,6 +3,7 @@
 
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiConfigStore.hpp>
+#include <contour/display/GpuInventory.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QVariantList>
@@ -12,6 +13,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace contour::window
 {
@@ -95,10 +97,12 @@ class SettingsController: public QObject
     /// @param config Accessor for the live configuration (read-only; edits go through @p store).
     /// @param store  Where side files are written/removed (injected for testability).
     /// @param apply  Invoked after a successful save/delete so the change takes effect immediately.
+    /// @param gpuInventory The machine's GPUs for the "Rendering GPU" row; null lists none.
     /// @param parent Optional QObject parent.
     SettingsController(ConfigAccessor config,
                        std::shared_ptr<config::GuiConfigStore> store,
                        ApplyCallback apply,
+                       std::shared_ptr<display::IGpuInventory const> gpuInventory,
                        QObject* parent = nullptr);
 
     [[nodiscard]] bool locked() const noexcept { return _locked; }
@@ -238,6 +242,8 @@ class SettingsController: public QObject
     ConfigAccessor _config;
     std::shared_ptr<config::GuiConfigStore> _store;
     ApplyCallback _apply;
+    std::shared_ptr<display::IGpuInventory const> _gpuInventory;
+    std::vector<display::GpuCandidate> _gpus; ///< Listed by refresh(), not on every property read.
 
     bool _locked = false;
     QVariantList _profiles;

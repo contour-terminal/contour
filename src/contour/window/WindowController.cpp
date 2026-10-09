@@ -78,6 +78,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager, vtw
             // moment it says so. Application-wide, so every open window follows.
             _manager.app().applyWindowControlStyle(_manager.app().config().windowControlStyle.value());
         },
+        _manager.app().gpuInventory(),
         this);
 }
 

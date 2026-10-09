@@ -24,6 +24,8 @@ Item {
     property string type: "string"
     property var value: null
     property var options: []
+    // Shown in an "enum" combo instead of the stored values; same length as options. Empty = show options.
+    property var optionLabels: []
     property bool editable: true
 
     /// Drop the card and draw a hover wash only; for rows inside a SettingsSection.
@@ -120,9 +122,9 @@ Item {
             Accessible.description: root.help
             Layout.fillWidth: true
             enabled: root.editable
-            model: root.options
+            model: root.optionLabels.length > 0 ? root.optionLabels : root.options
             currentIndex: Math.max(0, root.options.indexOf(root.value))
-            onActivated: root.edited(root.fieldKey, currentText)
+            onActivated: root.edited(root.fieldKey, root.options[currentIndex])
         }
     }
 

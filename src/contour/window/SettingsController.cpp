@@ -14,9 +14,12 @@
 #include <cstddef>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <set>
+#include <span>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace contour::window
 {
@@ -911,6 +914,41 @@ namespace
         return descriptors;
     }
 
+    /// One combo-box entry: what is stored, and what is shown.
+    struct EnumOption
+    {
+        QString value;
+        QString label;
+    };
+
+    /// What a runtime options provider may consult.
+    struct OptionContext
+    {
+        config::Config const& config;
+        std::span<display::GpuCandidate const> gpus;
+    };
+
+    /// The "Rendering GPU" entries: the three keywords, every present GPU by title, and the configured
+    /// GPU when it is gone, so the current value stays representable.
+    [[nodiscard]] std::vector<EnumOption> gpuOptions(OptionContext const& context)
+    {
+        auto options = std::vector<EnumOption> {
+            { .value = "auto", .label = "Automatic (power saving)" },
+            { .value = "integrated", .label = "Integrated GPU" },
+            { .value = "discrete", .label = "Discrete GPU" },
+        };
+        for (auto const& gpu: context.gpus)
+            options.push_back({ .value = QString::fromStdString(std::format("{}", gpu.id)),
+                                .label = QString::fromStdString(gpu.title) });
+        auto const& selector = context.config.renderer.value().gpu;
+        if (selector.preference == config::GpuPreference::Specific && selector.id
+            && std::ranges::none_of(context.gpus, [&](auto const& gpu) { return gpu.id == *selector.id; }))
+            options.push_back(
+                { .value = QString::fromStdString(std::format("{}", *selector.id)),
+                  .label = QString::fromStdString(std::format("Unavailable GPU ({})", *selector.id)) });
+        return options;
+    }
+
     /// A data-driven descriptor for one editable global (application-scope) setting. `toYaml` turns the
     /// edited value into the YAML scalar written to settings.yml; the load-time merge re-applies it
     /// through the typed per-key loader, so this side needs no parsing.
@@ -923,6 +961,8 @@ namespace
         std::function<QVariant(config::Config const&)> get;
         std::function<std::string(QVariant const&)> toYaml;
         QStringList options {}; //!< For "enum": the allowed values (the combo model + accepted set).
+        /// For "enum" rows whose options are only known at runtime; overrides `options` when set.
+        std::function<std::vector<EnumOption>(OptionContext const&)> optionsProvider {};
     };
 
     QString boolToYaml(QVariant const& v)
@@ -1021,6 +1061,19 @@ namespace
               },
               [](QVariant const& v) { return v.toString().toStdString(); },
               configEnumTokens<config::UiStyle>() },
+            // Takes effect after restart for the same reason as ui_style: the GPU is fixed before the
+            // first window exists (see ContourGuiApp::applyGraphicsDevice / applyOpenGlGpuSelection).
+            { "renderer.gpu",
+              "Rendering GPU",
+              "Which GPU draws the terminal. Automatic prefers the power-saving GPU. Takes effect after "
+              "restart.",
+              "enum",
+              [](config::Config const& c) {
+                  return QVariant(QString::fromStdString(std::format("{}", c.renderer.value().gpu)));
+              },
+              [](QVariant const& v) { return v.toString().toStdString(); },
+              {},
+              gpuOptions },
             // No restart note, unlike the three ui_* rows around it: this one IS applied live (see
             // ContourGuiApp::applyWindowControlStyle), because nothing about it is pinned before the
             // first control exists -- it only decides what the title bar draws and where.
@@ -1142,11 +1195,13 @@ namespace
 SettingsController::SettingsController(ConfigAccessor config,
                                        std::shared_ptr<config::GuiConfigStore> store,
                                        ApplyCallback apply,
+                                       std::shared_ptr<display::IGpuInventory const> gpuInventory,
                                        QObject* parent):
     QObject { parent },
     _config { std::move(config) },
     _store { std::move(store) },
-    _apply { std::move(apply) }
+    _apply { std::move(apply) },
+    _gpuInventory { std::move(gpuInventory) }
 {
     refresh();
 }
@@ -1185,6 +1240,7 @@ bool SettingsController::fail(std::string const& error)
 void SettingsController::refresh()
 {
     auto const& cfg = _config();
+    _gpus = _gpuInventory ? _gpuInventory->list() : std::vector<display::GpuCandidate> {};
     _locked = cfg.guiConfigLocked.value();
     _defaultProfile = QString::fromStdString(cfg.defaultProfileName.value());
 
@@ -1529,7 +1585,24 @@ QVariantList SettingsController::globalFields() const
         row[QStringLiteral("help")] = descriptor.help;
         row[QStringLiteral("type")] = descriptor.type;
         row[QStringLiteral("value")] = descriptor.get(cfg);
-        row[QStringLiteral("options")] = descriptor.options;
+        if (descriptor.optionsProvider)
+        {
+            auto values = QStringList {};
+            auto labels = QStringList {};
+            for (auto const& option:
+                 descriptor.optionsProvider(OptionContext { .config = cfg, .gpus = _gpus }))
+            {
+                values.push_back(option.value);
+                labels.push_back(option.label);
+            }
+            row[QStringLiteral("options")] = values;
+            row[QStringLiteral("optionLabels")] = labels;
+        }
+        else
+        {
+            row[QStringLiteral("options")] = descriptor.options;
+            row[QStringLiteral("optionLabels")] = descriptor.options;
+        }
         row[QStringLiteral("overridden")] = overrides.contains(descriptor.key.toStdString());
         fields.push_back(row);
     }

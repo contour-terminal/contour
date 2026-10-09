@@ -56,8 +56,8 @@ TEST_CASE("SettingsPage opens on the global settings pane", "[contour][gui][qml]
     config::Config cfg;
     config::loadConfigFromFile(cfg, configPath);
     auto store = std::make_shared<config::FileGuiConfigStore>(configDir);
-    auto controller =
-        contour::window::SettingsController([&]() -> config::Config const& { return cfg; }, store, [&]() {});
+    auto controller = contour::window::SettingsController(
+        [&]() -> config::Config const& { return cfg; }, store, [&]() {}, nullptr);
 
     QQmlEngine engine;
     contour::test::installChromeStyle(engine);
@@ -111,7 +111,8 @@ TEST_CASE("SettingsPage creates a profile through the QML and it lands on disk (
                                                           [&]() {
                                                               cfg = config::Config {};
                                                               config::loadConfigFromFile(cfg, configPath);
-                                                          });
+                                                          },
+                                                          nullptr);
 
     QQmlEngine engine;
     contour::test::installChromeStyle(engine);
@@ -206,7 +207,8 @@ struct PageFixture
             [this]() {
                 cfg = config::Config {};
                 config::loadConfigFromFile(cfg, configPath);
-            });
+            },
+            nullptr);
 
         contour::test::installChromeStyle(engine);
         engine.setIncubationController(&incubation);
