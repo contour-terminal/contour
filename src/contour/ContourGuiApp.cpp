@@ -1515,8 +1515,12 @@ int ContourGuiApp::terminalGuiAction()
 
     // Explicitly destroy QML engine here to ensure it's being destructed before QGuiApplication.
     _qmlEngine.reset();
+    // The GPU-selection helpers hold Qt objects (a timer, a D-Bus notifier, a Vulkan instance), so they too
+    // go before QApplication; the windows they served are gone with the engine.
+    _firstFrameWatchdog.reset();
+    _gpuNotifier.reset();
 #if defined(CONTOUR_WITH_GPU_SELECTION)
-    _graphicsDeviceSelector.reset(); // its windows are gone; still before QGuiApplication
+    _graphicsDeviceSelector.reset();
 #endif
 
     // printf("\r%s", TBC);
