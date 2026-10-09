@@ -3654,6 +3654,36 @@ TEST_CASE("Config: a non-scalar key in settings.yml is skipped, its siblings sti
     CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Discrete);
 }
 
+TEST_CASE("Config: a non-scalar renderer.gpu falls back to auto", "[config][gpu]")
+{
+    QTemporaryDir dir;
+    auto const yaml = "renderer:\n    gpu: [x]\nprofiles:\n    main:\n        shell: /bin/sh\n"sv;
+    REQUIRE_NOTHROW(loadFromYaml(dir, yaml));
+    CHECK(loadFromYaml(dir, yaml).renderer.value().gpu == contour::config::GpuSelector {});
+}
+
+TEST_CASE("Config: a non-scalar renderer.gpu in settings.yml never aborts the load", "[config][gui][gpu]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "renderer:\n    gpu: [x]\n");
+    auto const yaml = "profiles:\n    main:\n        shell: /bin/sh\n"sv;
+    REQUIRE_NOTHROW(loadFromYaml(dir, yaml));
+    CHECK(loadFromYaml(dir, yaml).renderer.value().gpu.preference == contour::config::GpuPreference::Auto);
+}
+
+TEST_CASE("Config: a malformed renderer section in settings.yml is skipped, its siblings still apply",
+          "[config][gui][gpu]")
+{
+    // A scalar renderer key makes the section loader run; the other keys are junk it would choke on.
+    QTemporaryDir dir;
+    writeSideFile(dir,
+                  "settings.yml",
+                  "renderer:\n    gpu: [x]\n    backend: [y]\n    tile_hashtable_slots: 8192\ntheme: dark\n");
+    auto const yaml = "profiles:\n    main:\n        shell: /bin/sh\n"sv;
+    REQUIRE_NOTHROW(loadFromYaml(dir, yaml));
+    CHECK(loadFromYaml(dir, yaml).theme.value() == contour::config::GuiTheme::Dark);
+}
+
 TEST_CASE("Config: a flat settings.yml written by an older Contour still loads", "[config][gui]")
 {
     QTemporaryDir dir;

@@ -865,9 +865,20 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             // Nested sections: the section loader touches only the keys settings.yml actually has. It runs
             // only when the nested form is present, so a hand-edited scalar `renderer: foo` is ignored
             // instead of being subscripted (which would throw and abort startup).
+            // The renderer loaders expect the shapes contour.yml documents; settings.yml is hand-editable,
+            // and a malformed entry there must cost that section, never startup.
             if (std::ranges::any_of(loaded->globalOverrides | std::views::keys,
                                     [](std::string const& key) { return key.starts_with("renderer."); }))
-                overrides.loadFromEntry("renderer", config.renderer);
+            {
+                try
+                {
+                    overrides.loadFromEntry("renderer", config.renderer);
+                }
+                catch (std::exception const& e)
+                {
+                    errorLog()("settings.yml: ignoring the malformed renderer section: {}", e.what());
+                }
+            }
         }
     }
     else
@@ -1045,6 +1056,12 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     auto const child = node[entry];
     if (!child)
         return;
+    if (!child.IsScalar())
+    {
+        where = GpuSelector {};
+        errorLog()("Invalid renderer.gpu value (not a single value); using {}.", where);
+        return;
+    }
     auto const rawValue = child.as<std::string>();
     if (auto const parsed = parseGpuSelector(rawValue))
         where = *parsed;
