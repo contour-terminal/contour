@@ -3,12 +3,15 @@
 
 #include <contour/display/GpuSelection.hpp>
 
+#include <vtpty/EnvironmentBlock.hpp>
+
 #include <core/Utils.hpp>
 
 #include <algorithm>
 #include <array>
 #include <format>
 #include <functional>
+#include <map>
 #include <ranges>
 #include <span>
 #include <string>
@@ -98,6 +101,39 @@ inline constexpr std::string_view SelfSetEnvironmentMarker = "CONTOUR_SELF_SET_E
         value += assignment.name;
     }
     return value;
+}
+
+/// Name of the variable through which a Contour whose OpenGL GPU could not render restarts itself on
+/// the automatic GPU. Its value is the failed GPU's title; the restarted Contour reports the fallback,
+/// uses `auto` for that run and removes the variable, so it is never inherited further.
+inline constexpr std::string_view GpuFallbackEnvironmentName = "CONTOUR_GPU_FALLBACK";
+
+/// The environment for restarting Contour on the automatic GPU, after the OpenGL GPU chosen through the
+/// driver's variables could not render.
+/// @param inherited This process's environment, as "NAME=VALUE" entries.
+/// @param selfSet The variables this Contour set to choose its GPU, the marker included.
+/// @param failedTitle The title of the GPU that could not render.
+/// @return @p inherited without @p selfSet, plus #GpuFallbackEnvironmentName naming @p failedTitle.
+[[nodiscard]] inline std::vector<std::string> gpuFallbackRelaunchEnvironment(
+    std::span<std::string_view const> inherited,
+    std::span<std::string const> selfSet,
+    std::string_view failedTitle)
+{
+    return vtpty::buildEnvironmentBlock(
+        inherited,
+        std::map<std::string, std::string> {
+            { std::string(GpuFallbackEnvironmentName), std::string(failedTitle) } },
+        selfSet);
+}
+
+/// The title of the GPU the system renders on when Contour does not intervene: the one driving the
+/// display.
+/// @param gpus The machine's GPUs.
+/// @return That GPU's title, or a generic phrase when no GPU says it drives the display.
+[[nodiscard]] inline std::string displayGpuTitle(std::span<GpuCandidate const> gpus)
+{
+    auto const display = std::ranges::find(gpus, GpuOutput::DrivesDisplay, &GpuCandidate::output);
+    return display != gpus.end() ? display->title : std::string { "the system's default GPU" };
 }
 
 } // namespace contour::display

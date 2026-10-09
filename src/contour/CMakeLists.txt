@@ -258,6 +258,7 @@ if(CONTOUR_FRONTEND_GUI)
         Logging.hpp
         display/RenderState.hpp
         display/RenderingBackendSelection.hpp
+        display/FirstFrameWatchdog.hpp
         display/GpuSelection.hpp
         display/GpuInventory.hpp
         display/DxgiGpuInventory.hpp
@@ -284,6 +285,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsController.cpp
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
+        display/FirstFrameWatchdog.cpp
         display/GpuInventory.cpp
         display/PciIds.cpp
         display/SysfsGpuInventory.cpp
@@ -306,8 +308,8 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 
 if(CONTOUR_WITH_GPU_SELECTION)
-    list(APPEND _core_source_files display/FirstFrameWatchdog.cpp display/GraphicsDeviceSelector.cpp)
-    list(APPEND _header_files display/FirstFrameWatchdog.hpp display/GraphicsDeviceSelector.hpp)
+    list(APPEND _core_source_files display/GraphicsDeviceSelector.cpp)
+    list(APPEND _header_files display/GraphicsDeviceSelector.hpp)
 endif()
 
 if(WIN32)
@@ -677,6 +679,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/WindowShadowTiles_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
             display/RenderingBackendSelection_test.cpp
+            display/FirstFrameWatchdog_test.cpp
             display/GpuSelection_test.cpp
             display/GpuInventory_test.cpp
             display/OpenGlGpuEnvironment_test.cpp
@@ -700,8 +703,7 @@ if(CONTOUR_FRONTEND_GUI)
         )
         set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
         if(CONTOUR_WITH_GPU_SELECTION)
-            target_sources(contour_gui_test PRIVATE display/FirstFrameWatchdog_test.cpp
-                                                    display/GraphicsDeviceSelector_test.cpp)
+            target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)
         endif()
         target_link_libraries(contour_gui_test
             PRIVATE

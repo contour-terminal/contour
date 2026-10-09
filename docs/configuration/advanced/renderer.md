@@ -38,7 +38,8 @@ as "Rendering GPU".
 Vulkan and Direct3D honour this on Linux and Windows (Qt 6.10 or newer). OpenGL honours it on Linux
 only, through the driver's own variables (`DRI_PRIME`, or NVIDIA's PRIME offload variables); programs
 started inside the terminal do not inherit them. If the chosen GPU cannot render, Contour warns and uses
-`auto` for that session.
+`auto` for that session. Under OpenGL the driver fixes the GPU when Contour starts, so Contour restarts
+itself once on the `auto` GPU to do so; the setting itself is not changed.
 
 ```yml
 renderer:

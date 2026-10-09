@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -77,4 +78,31 @@ TEST_CASE("OpenGL GPU environment: stray commas and blanks in the marker are ign
 {
     CHECK(selfSetNamesFrom(",, DRI_PRIME ,,\t,X,") == std::vector<std::string> { "DRI_PRIME", "X" });
     CHECK(selfSetNamesFrom(" , ").empty());
+}
+
+TEST_CASE("OpenGL GPU fallback: the relaunched Contour gets the user's environment back", "[gpu]")
+{
+    auto const inherited = std::vector<std::string_view> {
+        "PATH=/usr/bin", "DRI_PRIME=10de:2820", "CONTOUR_SELF_SET_ENVIRONMENT=DRI_PRIME", "HOME=/home/u"
+    };
+    auto const selfSet = std::vector<std::string> { "DRI_PRIME", "CONTOUR_SELF_SET_ENVIRONMENT" };
+    auto entries = gpuFallbackRelaunchEnvironment(inherited, selfSet, "NVIDIA GeForce RTX 4070");
+    std::ranges::sort(entries);
+    CHECK(entries
+          == std::vector<std::string> {
+              "CONTOUR_GPU_FALLBACK=NVIDIA GeForce RTX 4070", "HOME=/home/u", "PATH=/usr/bin" });
+}
+
+TEST_CASE("OpenGL GPU fallback: the GPU now in use is the one driving the display", "[gpu]")
+{
+    auto const gpus = std::vector<GpuCandidate> {
+        gpu({ 0x10de, 0x2820 }, GpuOutput::Offscreen, "nouveau"),
+        GpuCandidate { .title = "Intel integrated GPU",
+                       .id = { 0x8086, 0xa788 },
+                       .kind = GpuKind::Integrated,
+                       .output = GpuOutput::DrivesDisplay,
+                       .driver = "i915" },
+    };
+    CHECK(displayGpuTitle(gpus) == "Intel integrated GPU");
+    CHECK(displayGpuTitle({}) == "the system's default GPU");
 }
