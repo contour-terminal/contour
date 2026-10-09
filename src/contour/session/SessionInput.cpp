@@ -502,14 +502,9 @@ bool sendKeyEvent(QKeyEvent* event,
         // clang-format on
     }; // }}}
 
-    // Win32 input mode reports a genuine Ctrl+Alt chord to ConPTY, so there it matters whether
-    // Ctrl+Alt was AltGr. The other encodings still treat every Ctrl+Alt as AltGr on Windows, which
-    // loses genuine chords -- a known limitation, kept out of the #2127 fix.
-    auto const isWin32Mode = session.terminal().isModeEnabled(vtbackend::DECMode::Win32InputMode);
-    auto const ctrlAltRole =
-        isWin32Mode ? input::ctrlAltRoleOf(event->modifiers(), event->text()) : input::CtrlAltRole::AltGr;
-    auto const modifiers = input::makeModifiers(
-        event->modifiers(), input::nativeModifiersWithLockState(event->nativeModifiers()), ctrlAltRole);
+    auto const modifiers = input::makeModifiers(event->modifiers(),
+                                                input::nativeModifiersWithLockState(event->nativeModifiers()),
+                                                input::ctrlAltRoleOf(event->modifiers(), event->text()));
     auto const key = event->key();
 
     if (event->modifiers().testFlag(Qt::KeypadModifier))

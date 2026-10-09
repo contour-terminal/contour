@@ -80,7 +80,8 @@ enum class CtrlAltRole : uint8_t
 /// @param qtModifiers Standard Qt keyboard modifiers
 /// @param nativeModifiers Platform-specific value from QKeyEvent::nativeModifiers()
 /// @param ctrlAltRole AltGr (the default) strips a held Ctrl+Alt from the chord on Windows; Chord
-///                    keeps it. Ignored elsewhere, where AltGr is a key of its own.
+///                    keeps it. Ignored elsewhere, where AltGr is a key of its own. Key events pass
+///                    ctrlAltRoleOf(); only mouse events still take the default.
 /// @return The chord being held, plus the latched lock keys.
 [[nodiscard]] vtbackend::KeyboardModifiers makeModifiers(Qt::KeyboardModifiers qtModifiers,
                                                          quint32 nativeModifiers = 0,
