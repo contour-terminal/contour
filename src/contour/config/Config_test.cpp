@@ -3594,6 +3594,52 @@ TEST_CASE("Config: GUI settings round-trip through emitGuiSettingsYaml / loadGui
     CHECK_FALSE(missing->defaultProfile.has_value());
 }
 
+TEST_CASE("Config: GUI settings round-trip dotted keys as nested YAML", "[config][gui][gpu]")
+{
+    QTemporaryDir const dir;
+    auto const path = std::filesystem::path(dir.path().toStdString()) / "settings.yml";
+    auto const yaml = contour::config::emitGuiSettingsYaml(
+        { .defaultProfile = std::nullopt,
+          .globalOverrides = { { "renderer.gpu", "10de:2820" }, { "theme", "dark" } } });
+    CHECK(yaml.find("renderer:") != std::string::npos);
+    CHECK(yaml.find("renderer.gpu") == std::string::npos);
+    {
+        auto out = std::ofstream(path);
+        out << yaml;
+    }
+
+    auto const loaded = contour::config::loadGuiSettingsFile(path);
+    REQUIRE(loaded.has_value());
+    CHECK(loaded->globalOverrides.at("renderer.gpu") == "10de:2820");
+    CHECK(loaded->globalOverrides.at("theme") == "dark");
+}
+
+TEST_CASE("Config: settings.yml renderer.gpu overrides contour.yml; junk nesting is ignored",
+          "[config][gui][gpu]")
+{
+    QTemporaryDir dir;
+    writeSideFile(
+        dir, "settings.yml", "renderer:\n    gpu: discrete\n    nested:\n        deeper: 1\ntheme: dark\n");
+    auto const cfg = loadFromYaml(dir, R"(
+renderer:
+    backend: Vulkan
+    gpu: integrated
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Discrete);
+    CHECK(cfg.renderer.value().renderingBackend == contour::config::RenderingBackend::Vulkan);
+}
+
+TEST_CASE("Config: a flat settings.yml written by an older Contour still loads", "[config][gui]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "reflow_on_resize: false\n");
+    auto const cfg = loadFromYaml(dir, "profiles:\n    main:\n        shell: /bin/sh\n"sv);
+    CHECK(cfg.reflowOnResize.value() == false);
+}
+
 TEST_CASE("Config: FileGuiConfigStore writes and removes side files the loader picks up", "[config][gui]")
 {
     QTemporaryDir dir;

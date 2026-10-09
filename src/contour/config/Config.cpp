@@ -862,6 +862,8 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             overrides.loadFromEntry("ui_font_family", config.uiFontFamily);
             overrides.loadFromEntry("ui_font_size", config.uiFontSize);
             overrides.loadFromEntry("early_exit_threshold", config.earlyExitThreshold);
+            // Nested sections: the section loader touches only the keys settings.yml actually has.
+            overrides.loadFromEntry("renderer", config.renderer);
         }
     }
     else
@@ -4084,8 +4086,23 @@ std::string emitGuiSettingsYaml(GuiManagedSettings const& settings)
     out << YAML::BeginMap;
     if (settings.defaultProfile)
         out << YAML::Key << "default_profile" << YAML::Value << *settings.defaultProfile;
+    // A dotted key ("renderer.gpu") is a nested setting: each section is written once, as a map, so
+    // settings.yml reads exactly like the contour.yml it overrides.
+    auto nested = std::map<std::string, std::map<std::string, std::string>> {};
     for (auto const& [key, value]: settings.globalOverrides)
-        out << YAML::Key << key << YAML::Value << value;
+    {
+        if (auto const dot = key.find('.'); dot != std::string::npos)
+            nested[key.substr(0, dot)][key.substr(dot + 1)] = value;
+        else
+            out << YAML::Key << key << YAML::Value << value;
+    }
+    for (auto const& [section, entries]: nested)
+    {
+        out << YAML::Key << section << YAML::Value << YAML::BeginMap;
+        for (auto const& [name, value]: entries)
+            out << YAML::Key << name << YAML::Value << value;
+        out << YAML::EndMap;
+    }
     out << YAML::EndMap;
     return std::string { out.c_str() } + '\n';
 }
@@ -4144,8 +4161,15 @@ std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesyst
         for (auto const& entry: doc)
         {
             auto const key = entry.first.as<std::string>();
-            if (key != "default_profile" && entry.second.IsScalar())
+            if (key == "default_profile")
+                continue;
+            if (entry.second.IsScalar())
                 settings.globalOverrides[key] = entry.second.as<std::string>();
+            else if (entry.second.IsMap())
+                for (auto const& child: entry.second)
+                    if (child.second.IsScalar())
+                        settings.globalOverrides[key + '.' + child.first.as<std::string>()] =
+                            child.second.as<std::string>();
         }
 
     return settings;
