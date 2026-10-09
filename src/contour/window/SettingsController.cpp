@@ -1063,10 +1063,12 @@ namespace
               configEnumTokens<config::UiStyle>() },
             // Takes effect after restart for the same reason as ui_style: the GPU is fixed before the
             // first window exists (see ContourGuiApp::applyGraphicsDevice / applyOpenGlGpuSelection).
+            // Shown on macOS too, where it does nothing, and the help says so: one row table for every
+            // platform beats a platform-gated row whose tests would need the same gate.
             { "renderer.gpu",
               "Rendering GPU",
-              "Which GPU draws the terminal. Automatic prefers the power-saving GPU. Takes effect after "
-              "restart.",
+              "Which GPU draws the terminal. Takes effect after restart. OpenGL honours this on Linux only. "
+              "Has no effect on macOS.",
               "enum",
               [](config::Config const& c) {
                   return QVariant(QString::fromStdString(std::format("{}", c.renderer.value().gpu)));
