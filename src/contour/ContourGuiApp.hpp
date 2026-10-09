@@ -44,10 +44,16 @@ namespace config
 
 namespace display
 {
+    class FirstFrameWatchdog;
     class ForcedFontDpiProvider;
     class GraphicsDeviceSelector;
     class IGpuInventory;
 } // namespace display
+
+namespace platform
+{
+    class Notifier;
+} // namespace platform
 
 namespace remote
 {
@@ -398,6 +404,17 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// Applies `renderer.gpu` to OpenGL through the driver's environment (Linux only).
     void applyOpenGlGpuSelection();
 
+#if defined(CONTOUR_WITH_GPU_SELECTION)
+    /// Moves @p window to the automatically chosen GPU, after the configured one failed to render on it.
+    /// @param window The window that never showed a frame.
+    void onGpuFailure(QQuickWindow& window);
+
+    /// Logs and notifies that @p failed could not render and @p used took over, for this session only.
+    /// @param failed Title of the GPU that failed.
+    /// @param used Title of the GPU now in use.
+    void reportGpuFallback(std::string_view failed, std::string_view used);
+#endif
+
     std::shared_ptr<display::IGpuInventory const> _gpuInventory;
     std::vector<std::string> _selfOnlyEnvironment;
 
@@ -432,6 +449,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// _qmlEngine: the windows go first, then the Vulkan instance they borrowed.
 #if defined(CONTOUR_WITH_GPU_SELECTION)
     std::unique_ptr<display::GraphicsDeviceSelector> _graphicsDeviceSelector;
+    /// Watches the first window's first frame when `renderer.gpu` names a GPU explicitly.
+    std::unique_ptr<display::FirstFrameWatchdog> _firstFrameWatchdog;
+    /// Raises the "could not render" notification; created on first use.
+    std::unique_ptr<platform::Notifier> _gpuNotifier;
 #endif
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;

@@ -5,7 +5,11 @@
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/GpuInventory.hpp>
 #if defined(CONTOUR_WITH_GPU_SELECTION)
+    #include <contour/display/FirstFrameWatchdog.hpp>
     #include <contour/display/GraphicsDeviceSelector.hpp>
+    #include <contour/platform/Notifier.hpp>
+
+    #include <vtbackend/vt/DesktopNotification.hpp>
 #endif
 #include <contour/display/Logging.hpp>
 #include <contour/display/OpenGlGpuEnvironment.hpp>
@@ -56,13 +60,16 @@
 #include <QtMultimedia/QMediaDevices>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
+#include <QtQuick/QQuickGraphicsDevice>
 #include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGRendererInterface>
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <filesystem>
+#include <format>
 #include <iostream>
 #include <optional>
 #include <system_error>
@@ -204,11 +211,50 @@ void ContourGuiApp::applyGraphicsDevice(QQuickWindow& window)
 {
 #if defined(CONTOUR_WITH_GPU_SELECTION)
     if (_graphicsDeviceSelector)
+    {
         _graphicsDeviceSelector->applyTo(window);
+        using namespace std::chrono_literals;
+        if (!_firstFrameWatchdog
+            && _graphicsDeviceSelector->selector().preference != config::GpuPreference::Auto)
+            _firstFrameWatchdog = std::make_unique<display::FirstFrameWatchdog>(
+                window, 10s, [this, guarded = QPointer<QQuickWindow>(&window)] {
+                    if (guarded) // the window may have been closed before it ever drew
+                        onGpuFailure(*guarded);
+                });
+    }
 #else
     (void) window;
 #endif
 }
+
+#if defined(CONTOUR_WITH_GPU_SELECTION)
+void ContourGuiApp::onGpuFailure(QQuickWindow& window)
+{
+    auto const failed = _graphicsDeviceSelector->choose();
+    auto const& fallback = _graphicsDeviceSelector->fallBackToAuto();
+    if (!failed || !fallback || !fallback->adapter || fallback->candidate.id == failed->candidate.id)
+    {
+        errorLog()("The configured GPU could not render, and there is no other GPU to fall back to.");
+        return;
+    }
+    window.setGraphicsDevice(QQuickGraphicsDevice::fromRhiAdapter(fallback->adapter));
+    window.releaseResources();
+    window.update();
+    reportGpuFallback(failed->candidate.title, fallback->candidate.title);
+}
+
+void ContourGuiApp::reportGpuFallback(std::string_view failed, std::string_view used)
+{
+    auto const message = std::format("{} could not render; using {} for this session.", failed, used);
+    errorLog()("{}", message);
+    if (!_gpuNotifier)
+        _gpuNotifier = platform::makeDesktopNotifier(std::chrono::seconds(10));
+    auto notification = vtbackend::DesktopNotification {};
+    notification.title = "Contour";
+    notification.body = message;
+    _gpuNotifier->notify(notification);
+}
+#endif
 
 void ContourGuiApp::applyOpenGlGpuSelection()
 {
