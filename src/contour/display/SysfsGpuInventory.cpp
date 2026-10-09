@@ -79,12 +79,13 @@ std::vector<GpuCandidate> SysfsGpuInventory::list() const
         if (!link)
             continue;
         auto const address = link->filename().string();
-        if (!isPciAddress(address) || !seenAddresses.insert(address).second)
+        if (!isPciAddress(address) || seenAddresses.contains(address))
             continue;
         auto const vendor = sysfsHex(_reader->read(device / "vendor"));
         auto const deviceId = sysfsHex(_reader->read(device / "device"));
         if (!vendor || !deviceId)
             continue;
+        seenAddresses.insert(address); // only a readable card claims its address
 
         auto const id = config::PciId { .vendor = *vendor, .device = *deviceId };
         // Integrated GPUs sit on the root bus; discrete ones behind a PCIe bridge.

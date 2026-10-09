@@ -72,6 +72,9 @@ class FakeTextFileReader final: public ITextFileReader
                                               "version",    "card2",       "card3" };
     reader->addCard("card0", "0000:01:00.0", "0x10de", "0x2820", "0", "nouveau");
     reader->addCard("card1", "0000:00:02.0", "0x8086", "0xa788", "1", "i915");
+    // Connector and render nodes that would pass every other check if the name filter were missing.
+    reader->addCard("card1-DP-1", "0000:02:00.0", "0x1002", "0x73bf", "0", "amdgpu");
+    reader->addCard("renderD129", "0000:03:00.0", "0x1002", "0x73ff", "0", "amdgpu");
     reader->addCard("card2", "0000:01:00.0", "0x10de", "0x2820", "0", "nouveau"); // same GPU, second node
     reader->links["/sys/class/drm/card3/device"] = "../../../platform-simple-framebuffer.0"; // not PCI
     reader->files["/usr/share/hwdata/pci.ids"] = std::string(PciIdsText);
@@ -136,4 +139,14 @@ TEST_CASE("SysfsGpuInventory: without pci.ids, titles still avoid raw ids", "[gp
     REQUIRE(gpus.size() == 2);
     CHECK(gpus[0].title == "NVIDIA discrete GPU");
     CHECK(gpus[1].title == "Intel integrated GPU");
+}
+
+TEST_CASE("SysfsGpuInventory: an unreadable card does not hide a readable duplicate", "[gpu]")
+{
+    auto reader = hybridLaptop();
+    reader->files.erase("/sys/class/drm/card0/device/vendor"); // card0 and card2 share 0000:01:00.0
+    auto const gpus = inventoryOver(reader).list();
+    REQUIRE(gpus.size() == 2);
+    CHECK(gpus[0].id == config::PciId { 0x8086, 0xa788 });
+    CHECK(gpus[1].id == config::PciId { 0x10de, 0x2820 }); // found through card2
 }
