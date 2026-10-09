@@ -7,6 +7,8 @@
 #include <array>
 #include <format>
 #include <functional>
+#include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -63,6 +65,44 @@ namespace detail
     if (std::ranges::any_of(assignments, [&](auto const& a) { return isAlreadySet(a.name); }))
         return {};
     return assignments;
+}
+
+/// Name of the variable that tells a Contour started by another Contour which variables its parent set
+/// to choose a GPU (as opposed to ones the user exported). Its value is a comma-separated list of names.
+inline constexpr std::string_view SelfSetEnvironmentMarker = "CONTOUR_SELF_SET_ENVIRONMENT";
+
+/// Parses the value of #SelfSetEnvironmentMarker.
+/// @param markerValue Comma-separated variable names.
+/// @return The names, in order, with surrounding whitespace removed and empty entries dropped.
+[[nodiscard]] inline std::vector<std::string> selfSetNamesFrom(std::string_view markerValue)
+{
+    auto names = std::vector<std::string> {};
+    for (auto const part: std::views::split(markerValue, ','))
+    {
+        auto name = std::string_view(part.begin(), part.end());
+        constexpr auto Blanks = std::string_view(" \t\r\n");
+        auto const first = name.find_first_not_of(Blanks);
+        if (first == std::string_view::npos)
+            continue;
+        name = name.substr(first, name.find_last_not_of(Blanks) - first + 1);
+        names.emplace_back(name);
+    }
+    return names;
+}
+
+/// Builds the value of #SelfSetEnvironmentMarker.
+/// @param assignments The variables Contour set to choose its GPU.
+/// @return Their names, comma-separated; empty when there are none.
+[[nodiscard]] inline std::string selfSetMarkerValue(std::span<EnvironmentAssignment const> assignments)
+{
+    auto value = std::string {};
+    for (auto const& assignment: assignments)
+    {
+        if (!value.empty())
+            value += ',';
+        value += assignment.name;
+    }
+    return value;
 }
 
 } // namespace contour::display

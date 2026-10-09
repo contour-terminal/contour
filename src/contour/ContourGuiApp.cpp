@@ -200,6 +200,13 @@ ContourGuiApp::~ContourGuiApp() = default;
 void ContourGuiApp::applyOpenGlGpuSelection()
 {
 #if defined(__linux__)
+    // A Contour started by another Contour inherits the GPU variables its parent set. Drop them first, so
+    // this process decides afresh from the user's real environment (and never mistakes them for the user's).
+    for (auto const& name: display::selfSetNamesFrom(
+             qEnvironmentVariable(display::SelfSetEnvironmentMarker.data()).toStdString()))
+        qunsetenv(name.c_str());
+    qunsetenv(display::SelfSetEnvironmentMarker.data());
+
     auto const& renderer = _config.renderer.value();
     if (renderer.renderingBackend != config::RenderingBackend::OpenGL
         && renderer.renderingBackend != config::RenderingBackend::Auto)
@@ -218,13 +225,20 @@ void ContourGuiApp::applyOpenGlGpuSelection()
         qputenv(assignment.name.c_str(), QByteArray::fromStdString(assignment.value));
         _selfOnlyEnvironment.push_back(assignment.name);
     }
+    if (!assignments.empty())
+    {
+        qputenv(display::SelfSetEnvironmentMarker.data(),
+                QByteArray::fromStdString(display::selfSetMarkerValue(assignments)));
+        _selfOnlyEnvironment.emplace_back(display::SelfSetEnvironmentMarker);
+    }
     startupLog()("GPU: '{}' {} via OpenGL (requested: {})", chosen.title, chosen.id, renderer.gpu);
 #else
     // Spec 4.3: no supported way to choose an OpenGL GPU here.
     auto const& renderer = _config.renderer.value();
     if (renderer.renderingBackend == config::RenderingBackend::OpenGL
         && renderer.gpu.preference != config::GpuPreference::Auto)
-        errorLog()("renderer.gpu needs Direct3D or Vulkan on this platform; OpenGL uses the default GPU.");
+        errorLog()(
+            "renderer.gpu is ignored for OpenGL on this platform; use Direct3D or Vulkan where available.");
 #endif
 }
 

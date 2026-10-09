@@ -55,3 +55,26 @@ TEST_CASE("OpenGL GPU environment: a variable the user already set wins", "[gpu]
         openGlSelectionEnvironment(gpu({ 0x10de, 0x2820 }, GpuOutput::Offscreen, "nouveau"), userSetDriPrime)
             .empty());
 }
+
+TEST_CASE("OpenGL GPU environment: the marker value round-trips", "[gpu]")
+{
+    auto const assignments =
+        std::vector<EnvironmentAssignment> { { .name = "__NV_PRIME_RENDER_OFFLOAD", .value = "1" },
+                                             { .name = "__GLX_VENDOR_LIBRARY_NAME", .value = "nvidia" } };
+    auto const value = selfSetMarkerValue(assignments);
+    CHECK(value == "__NV_PRIME_RENDER_OFFLOAD,__GLX_VENDOR_LIBRARY_NAME");
+    CHECK(selfSetNamesFrom(value)
+          == std::vector<std::string> { "__NV_PRIME_RENDER_OFFLOAD", "__GLX_VENDOR_LIBRARY_NAME" });
+}
+
+TEST_CASE("OpenGL GPU environment: no assignments give an empty marker", "[gpu]")
+{
+    CHECK(selfSetMarkerValue({}).empty());
+    CHECK(selfSetNamesFrom("").empty());
+}
+
+TEST_CASE("OpenGL GPU environment: stray commas and blanks in the marker are ignored", "[gpu]")
+{
+    CHECK(selfSetNamesFrom(",, DRI_PRIME ,,\t,X,") == std::vector<std::string> { "DRI_PRIME", "X" });
+    CHECK(selfSetNamesFrom(" , ").empty());
+}
