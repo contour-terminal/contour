@@ -116,7 +116,7 @@ profiles:
 TEST_CASE("Config: the generated config documents renderer.gpu with a value", "[config][gpu]")
 {
     // A comment-only template is never serialized; the value line proves it round-trips.
-    CHECK(contour::config::defaultConfigString().find("    gpu: auto\n") != std::string::npos);
+    CHECK(contour::config::defaultConfigString().contains("    gpu: auto\n"));
 }
 
 TEST_CASE("Config: the desktop-notification close timeout defaults to ten seconds", "[config]")
@@ -3601,8 +3601,8 @@ TEST_CASE("Config: GUI settings round-trip dotted keys as nested YAML", "[config
     auto const yaml = contour::config::emitGuiSettingsYaml(
         { .defaultProfile = std::nullopt,
           .globalOverrides = { { "renderer.gpu", "10de:2820" }, { "theme", "dark" } } });
-    CHECK(yaml.find("renderer:") != std::string::npos);
-    CHECK(yaml.find("renderer.gpu") == std::string::npos);
+    CHECK(yaml.contains("renderer:"));
+    CHECK_FALSE(yaml.contains("renderer.gpu"));
     {
         auto out = std::ofstream(path);
         out << yaml;

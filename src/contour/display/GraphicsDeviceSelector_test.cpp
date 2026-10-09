@@ -162,7 +162,7 @@ TEST_CASE("adapterImplementationFor: only adapter-capable backends", "[gpu]")
     CHECK(adapterImplementationFor(config::RenderingBackend::Vulkan) == QRhi::Vulkan);
     CHECK(adapterImplementationFor(config::RenderingBackend::Direct3D11) == QRhi::D3D11);
     CHECK(adapterImplementationFor(config::RenderingBackend::Direct3D12) == QRhi::D3D12);
-#if defined(_WIN32)
+#ifdef _WIN32
     CHECK(adapterImplementationFor(config::RenderingBackend::Auto) == QRhi::D3D11);
 #else
     CHECK_FALSE(adapterImplementationFor(config::RenderingBackend::Auto).has_value());

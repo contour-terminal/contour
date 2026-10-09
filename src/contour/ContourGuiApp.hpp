@@ -415,7 +415,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @param onFailure Called with the window when it shows no frame in time or its scene graph fails.
     void watchFirstFrame(QQuickWindow& window, std::function<void(QQuickWindow&)> onFailure);
 
-#if defined(CONTOUR_WITH_GPU_SELECTION)
+#ifdef CONTOUR_WITH_GPU_SELECTION
     /// Moves @p window to the automatically chosen GPU, after the configured one failed to render on it.
     /// @param window The window that never showed a frame.
     void onGpuFailure(QQuickWindow& window);
@@ -483,7 +483,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// Chooses the GPU for Vulkan/Direct3D windows; null for OpenGL. Absent without Qt 6.10. Declared before
     /// _qmlEngine: the windows go first, then the Vulkan instance they borrowed.
-#if defined(CONTOUR_WITH_GPU_SELECTION)
+#ifdef CONTOUR_WITH_GPU_SELECTION
     std::unique_ptr<display::GraphicsDeviceSelector> _graphicsDeviceSelector;
 #endif
 

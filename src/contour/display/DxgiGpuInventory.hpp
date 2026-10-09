@@ -19,7 +19,7 @@ namespace contour::display
     return bytes >= DiscreteThreshold ? GpuKind::Discrete : GpuKind::Integrated;
 }
 
-#if defined(_WIN32)
+#ifdef _WIN32
 /// Lists GPUs through DXGI; titles are the adapters' own descriptions.
 class DxgiGpuInventory final: public IGpuInventory
 {

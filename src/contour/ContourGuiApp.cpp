@@ -5,7 +5,7 @@
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/FirstFrameWatchdog.hpp>
 #include <contour/display/GpuInventory.hpp>
-#if defined(CONTOUR_WITH_GPU_SELECTION)
+#ifdef CONTOUR_WITH_GPU_SELECTION
     #include <contour/display/GraphicsDeviceSelector.hpp>
 #endif
 #include <contour/display/Logging.hpp>
@@ -213,7 +213,7 @@ ContourGuiApp::~ContourGuiApp() = default;
 void ContourGuiApp::applyGraphicsDevice(QQuickWindow& window)
 {
     logGpuInUse(window);
-#if defined(CONTOUR_WITH_GPU_SELECTION)
+#ifdef CONTOUR_WITH_GPU_SELECTION
     if (_graphicsDeviceSelector)
     {
         _graphicsDeviceSelector->applyTo(window);
@@ -274,7 +274,7 @@ void ContourGuiApp::logGpuInUse(QQuickWindow& window)
         static_cast<Qt::ConnectionType>(Qt::DirectConnection | Qt::SingleShotConnection));
 }
 
-#if defined(CONTOUR_WITH_GPU_SELECTION)
+#ifdef CONTOUR_WITH_GPU_SELECTION
 void ContourGuiApp::onGpuFailure(QQuickWindow& window)
 {
     auto const failed = _graphicsDeviceSelector->choose();
@@ -335,7 +335,8 @@ void ContourGuiApp::relaunchOnAutomaticGpu()
 
 void ContourGuiApp::takeGpuFallbackRequest()
 {
-    auto const name = display::GpuFallbackEnvironmentName.data();
+    auto const nameStore = std::string(display::GpuFallbackEnvironmentName);
+    auto const* const name = nameStore.c_str();
     if (!qEnvironmentVariableIsSet(name))
         return;
     _gpuFallbackFrom = qEnvironmentVariable(name).toStdString();
@@ -379,13 +380,13 @@ void ContourGuiApp::reportGpuFallback(std::string_view failed, std::string_view 
 
 void ContourGuiApp::applyOpenGlGpuSelection()
 {
-#if defined(__linux__)
+#ifdef __linux__
     // A Contour started by another Contour inherits the GPU variables its parent set. Drop them first, so
     // this process decides afresh from the user's real environment (and never mistakes them for the user's).
     for (auto const& name: display::selfSetNamesFrom(
-             qEnvironmentVariable(display::SelfSetEnvironmentMarker.data()).toStdString()))
+             qEnvironmentVariable(std::string(display::SelfSetEnvironmentMarker).c_str()).toStdString()))
         qunsetenv(name.c_str());
-    qunsetenv(display::SelfSetEnvironmentMarker.data());
+    qunsetenv(std::string(display::SelfSetEnvironmentMarker).c_str());
 
     auto const& renderer = _config.renderer.value();
     auto const selector = effectiveGpuSelector();
@@ -414,7 +415,7 @@ void ContourGuiApp::applyOpenGlGpuSelection()
     if (!assignments.empty())
     {
         auto const names = display::selfSetMarkerValue(assignments);
-        qputenv(display::SelfSetEnvironmentMarker.data(), QByteArray::fromStdString(names));
+        qputenv(std::string(display::SelfSetEnvironmentMarker).c_str(), QByteArray::fromStdString(names));
         _selfOnlyEnvironment.emplace_back(display::SelfSetEnvironmentMarker);
         display::displayLog()("renderer.gpu: set {} so that OpenGL renders on '{}'.", names, chosen.title);
     }
@@ -847,7 +848,7 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                               CLI::Value { ""s },
                               "Sets the sessioni ID used for resuming a prior session.",
                               "SESSION_ID" },
-#if defined(__linux__)
+#ifdef __linux__
                 CLI::Option {
                     "display", CLI::Value { ""s }, "Sets the X11 display to connect to.", "DISPLAY_ID" },
 #endif
@@ -1358,7 +1359,7 @@ int ContourGuiApp::terminalGuiAction()
     if (auto const api = graphicsApiFor(requestedBackend))
         QQuickWindow::setGraphicsApi(*api);
 
-#if defined(CONTOUR_WITH_GPU_SELECTION)
+#ifdef CONTOUR_WITH_GPU_SELECTION
     // `auto` does not intervene, so it needs no selector: Qt lists and creates the devices as it always did.
     if (auto const implementation = display::adapterImplementationFor(requestedBackend);
         implementation && effectiveGpuSelector().preference != config::GpuPreference::Auto)
@@ -1525,7 +1526,7 @@ int ContourGuiApp::terminalGuiAction()
     // go before QApplication; the windows they served are gone with the engine.
     _firstFrameWatchdog.reset();
     _gpuNotifier.reset();
-#if defined(CONTOUR_WITH_GPU_SELECTION)
+#ifdef CONTOUR_WITH_GPU_SELECTION
     _graphicsDeviceSelector.reset();
 #endif
 

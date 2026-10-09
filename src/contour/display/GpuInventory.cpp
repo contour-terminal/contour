@@ -2,7 +2,7 @@
 #include <contour/display/GpuInventory.hpp>
 #ifdef __linux__
     #include <contour/display/SysfsGpuInventory.hpp>
-#elif defined(_WIN32)
+#elifdef _WIN32
     #include <contour/display/DxgiGpuInventory.hpp>
 #endif
 
@@ -67,7 +67,7 @@ std::shared_ptr<IGpuInventory const> makePlatformGpuInventory()
         makeFileSystemTextReader(),
         "/sys/class/drm",
         std::vector<std::filesystem::path> { "/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids" });
-#elif defined(_WIN32)
+#elifdef _WIN32
     return std::make_shared<DxgiGpuInventory>();
 #else
     return std::make_shared<EmptyGpuInventory>();

@@ -2,7 +2,7 @@
 #include <contour/Logging.hpp>
 #include <contour/display/GraphicsDeviceSelector.hpp>
 #include <contour/display/Logging.hpp>
-#if defined(_WIN32)
+#ifdef _WIN32
     #include <contour/display/GpuInventory.hpp>
 #endif
 
@@ -115,7 +115,7 @@ namespace
       public:
         explicit QtAdapterLister(QRhi::Implementation implementation): _implementation { implementation }
         {
-#if defined(CONTOUR_GPU_SELECTION_VULKAN)
+#ifdef CONTOUR_GPU_SELECTION_VULKAN
             if (implementation != QRhi::Vulkan)
                 return;
             // What Qt Quick's default instance asks for, so adopting this one changes nothing else.
@@ -157,7 +157,7 @@ namespace
                             .driver = {} },
                     .adapter = adapter });
             }
-#if defined(_WIN32)
+#ifdef _WIN32
             // Qt's Direct3D backends report every hardware adapter as UnknownDevice (QRhiD3D::fillDriverInfo
             // knows only "software or not"), so integrated/discrete could never match. DXGI's own listing
             // classifies them; match it by vendor:device.
@@ -181,7 +181,7 @@ namespace
 
         [[nodiscard]] QVulkanInstance* vulkanInstance() noexcept override
         {
-#if defined(CONTOUR_GPU_SELECTION_VULKAN)
+#ifdef CONTOUR_GPU_SELECTION_VULKAN
             return _vulkan.get();
 #else
             return nullptr;
@@ -209,7 +209,7 @@ namespace
             using Optional = InitParamsResult<Use>;
             switch (_implementation)
             {
-#if defined(CONTOUR_GPU_SELECTION_VULKAN)
+#ifdef CONTOUR_GPU_SELECTION_VULKAN
                 case QRhi::Vulkan: {
                     if (!_vulkan)
                         return Optional {};
@@ -218,7 +218,7 @@ namespace
                     return Optional { use(&params) };
                 }
 #endif
-#if defined(_WIN32)
+#ifdef _WIN32
                 case QRhi::D3D11: {
                     auto params = QRhiD3D11InitParams {};
                     return Optional { use(&params) };
@@ -233,7 +233,7 @@ namespace
         }
 
         QRhi::Implementation _implementation;
-#if defined(CONTOUR_GPU_SELECTION_VULKAN)
+#ifdef CONTOUR_GPU_SELECTION_VULKAN
         std::unique_ptr<QVulkanInstance> _vulkan;
 #endif
         QRhi::AdapterList _owned;
@@ -309,7 +309,7 @@ void GraphicsDeviceSelector::applyTo(QQuickWindow& window)
     if (!appliesDevice())
         return;
     auto const& chosen = choose();
-#if defined(CONTOUR_GPU_SELECTION_VULKAN)
+#ifdef CONTOUR_GPU_SELECTION_VULKAN
     if (auto* const instance = _lister->vulkanInstance())
         window.setVulkanInstance(instance);
 #endif
@@ -332,7 +332,7 @@ std::optional<QRhi::Implementation> adapterImplementationFor(config::RenderingBa
         case config::RenderingBackend::Vulkan: return QRhi::Vulkan;
         case config::RenderingBackend::Direct3D11: return QRhi::D3D11;
         case config::RenderingBackend::Direct3D12: return QRhi::D3D12;
-#if defined(_WIN32)
+#ifdef _WIN32
         case config::RenderingBackend::Auto: return QRhi::D3D11; // Qt's default on Windows
 #endif
         default: return std::nullopt;

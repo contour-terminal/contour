@@ -40,9 +40,8 @@ namespace
         if (text.empty() || text.size() > 4)
             return std::nullopt;
         auto value = std::uint16_t {};
-        auto const* const end = text.data() + text.size();
-        auto const [last, error] = std::from_chars(text.data(), end, value, 16);
-        if (error != std::errc {} || last != end)
+        auto const [last, error] = std::from_chars(text.data(), text.data() + text.size(), value, 16);
+        if (error != std::errc {} || last != text.data() + text.size())
             return std::nullopt;
         return value;
     }

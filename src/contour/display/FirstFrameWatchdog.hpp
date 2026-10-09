@@ -29,7 +29,6 @@ class FirstFrameWatchdog: public QObject
                        std::chrono::milliseconds budget,
                        std::function<void()> onFailure);
 
-  protected:
     /// Starts the budget when @p watched receives its first Expose event while exposed.
     bool eventFilter(QObject* watched, QEvent* event) override;
 
