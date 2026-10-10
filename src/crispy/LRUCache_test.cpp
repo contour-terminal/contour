@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <format>
 #include <functional>
 #include <iostream>
@@ -153,5 +154,30 @@ TEST_CASE("LRUCache.tryEmplace", "[lrucache]")
     CHECK(join(cache.keys()) == "2 3");
     CHECK(cache.at(2) == 4);
     CHECK(cache.at(3) == 6);
+}
+
+TEST_CASE("LRUCache.erase", "[lrucache]")
+{
+    // Erasing by iterator read the item's key after its node had been freed: a use-after-free that a debug
+    // build's checked iterators turn into an abort.
+    auto cache = crispy::LRUCache<int, int>(4);
+    cache[1] = 10;
+    cache[2] = 20;
+    cache[3] = 30;
+
+    SECTION("by iterator")
+    {
+        cache.erase(std::ranges::find(cache, 2, &crispy::LRUCache<int, int>::Item::key));
+    }
+    SECTION("by key")
+    {
+        cache.erase(2);
+    }
+
+    CHECK(cache.size() == 2);
+    CHECK_FALSE(cache.contains(2));
+    CHECK(join(cache.keys()) == "3 1");
+    CHECK(cache.at(1) == 10);
+    CHECK(cache.at(3) == 30);
 }
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

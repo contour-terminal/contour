@@ -144,8 +144,9 @@ class LRUCache
 
     void erase(iterator iter)
     {
-        _items.erase(iter);
+        // The mapping first: its key lives in the node that erasing the item frees.
         _itemByKeyMapping.erase(iter->key);
+        _items.erase(iter);
     }
 
     void erase(Key const& key)
