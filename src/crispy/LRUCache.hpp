@@ -172,7 +172,7 @@ class LRUCache
         return newItemIterator;
     }
 
-    [[nodiscard]] iterator moveItemToFront(iterator i)
+    [[nodiscard]] iterator moveItemToFront(iterator const& i)
     {
         _items.emplace_front(std::move(*i));
         _items.erase(i);
