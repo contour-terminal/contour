@@ -536,7 +536,15 @@ class Terminal
 
     // {{{ Text Macros (DECDMAC / DECINVM)
     static constexpr int MaxMacroCount = 64;
-    static constexpr int MaxMacroRecursionDepth = 16;
+
+    /// How many macros the macro bodies run in one batch may invoke between them.
+    ///
+    /// An invocation is queued rather than run on the spot (the parser cannot be re-entered), so a body runs
+    /// after the one that invoked it has returned, and a nesting depth would be back at zero by then. A
+    /// budget per batch holds across that, and bounds a body that invokes several macros as well as one that
+    /// invokes itself. It suffices for a macro to invoke every macro there is. The stream's own invocations
+    /// are not counted: each one costs the host the bytes that ask for it.
+    static constexpr int MaxNestedMacroInvocationsPerBatch = MaxMacroCount;
 
     /// Defines a macro with the given ID and body.
     void defineMacro(int id, bool deleteAll, std::string body);
@@ -2767,7 +2775,10 @@ class Terminal
 
     std::unordered_map<int, std::string> _macros;
     std::queue<std::string> _pendingMacroInvocations;
-    int _macroRecursionDepth = 0;
+
+    /// What is left of MaxNestedMacroInvocationsPerBatch while processPendingMacros() runs the queued bodies;
+    /// nullopt outside it, where an invocation is the stream's own.
+    std::optional<int> _nestedMacroInvocationsLeft;
 
     /// Local echo (SRM, reset) that was produced while the parser was running, and so could not be
     /// parsed on the spot. Written and drained only under _stateMutex. @see echoLocally().

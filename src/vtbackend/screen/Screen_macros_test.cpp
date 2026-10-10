@@ -14,11 +14,15 @@
 #include <libunicode/convert.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <cstddef>
+#include <format>
 #include <ranges>
 #include <set>
+#include <string>
 #include <string_view>
 using namespace vtbackend;
 using namespace vtbackend::test;
@@ -337,6 +341,61 @@ TEST_CASE("DECINVM: a macro invoked through Terminal::writeToScreen runs within 
     mock.terminal.writeToScreen("\033P0;0;0!zHello\033\\"); // DECDMAC 0 = "Hello"
     mock.terminal.writeToScreen("\033[0*z");                // DECINVM 0
     CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 5) == "Hello");
+}
+
+TEST_CASE("DECINVM: macros invoking macros stop within one batch", "[screen]")
+{
+    // An invocation is queued rather than run on the spot (the parser cannot be re-entered), so each body
+    // runs after the one that invoked it has returned: a bound kept as a nesting depth is back at zero by
+    // then, and a self-invoking macro ran forever under the terminal lock. The bodies are hex-encoded (Pen=1)
+    // because a plain body cannot hold an ESC -- it would end the DCS.
+    //
+    // "x", then DECINVM 0: once (the macro invokes itself) or twice (every run invokes two more).
+    auto const body =
+        GENERATE(std::string_view { "781B5B302A7A" }, std::string_view { "781B5B302A7A1B5B302A7A" });
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(80) } };
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    mock.terminal.writeToScreen(std::format("\033P0;0;1!z{}\033\\", body));
+
+    SECTION("through the pty")
+    {
+        mock.writeToScreen("\033[0*z");
+    }
+    SECTION("through writeToScreen")
+    {
+        mock.terminal.writeToScreen("\033[0*z");
+    }
+
+    // The invocation the stream made, plus every one the macros made between them.
+    CHECK(std::ranges::count(grid.lineText(LineOffset(0)), 'x')
+          == 1 + Terminal::MaxNestedMacroInvocationsPerBatch);
+
+    // Refused, not put off: the next batch runs none of them.
+    mock.writeToScreen("\r\n");
+    CHECK(grid.lineText(LineOffset(1)).find('x') == std::string::npos);
+}
+
+TEST_CASE("DECINVM: a macro body larger than the pty buffer's free space is run whole", "[screen]")
+{
+    // A body is parsed out of the pty buffer, like every other byte the parser reads. One that did not fit
+    // the room left in that buffer was copied past its end.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto const bufferSize = mock.terminal.currentPtyBuffer()->capacity();
+    auto const filler = std::string(bufferSize + 1024, '\r');
+    mock.terminal.writeToScreen("\033P0;0;0!z" + filler + "END\033\\");
+    REQUIRE(mock.terminal.macroBody(0).has_value());
+    REQUIRE(mock.terminal.macroBody(0)->size() > bufferSize);
+
+    SECTION("through the pty")
+    {
+        mock.writeToScreen("\033[0*z");
+    }
+    SECTION("through writeToScreen")
+    {
+        mock.terminal.writeToScreen("\033[0*z");
+    }
+
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 3) == "END");
 }
 
 TEST_CASE("DECDMAC: define macro with VT sequences", "[screen]")

@@ -4930,8 +4930,13 @@ void Terminal::invokeMacro(int id)
     if (it == _macros.end())
         return;
 
-    if (_macroRecursionDepth >= MaxMacroRecursionDepth)
-        return; // Guard against infinite recursion
+    // Invoked by a running body: one more step of nesting or fan-out, paid from the batch's budget.
+    if (_nestedMacroInvocationsLeft)
+    {
+        if (*_nestedMacroInvocationsLeft == 0)
+            return;
+        --*_nestedMacroInvocationsLeft;
+    }
 
     // Queue the macro body for deferred execution.
     // We cannot call parseFragment() re-entrantly during an active parse,
@@ -4941,25 +4946,21 @@ void Terminal::invokeMacro(int id)
 
 void Terminal::processPendingMacros()
 {
+    if (_pendingMacroInvocations.empty())
+        return;
+
+    _nestedMacroInvocationsLeft = MaxNestedMacroInvocationsPerBatch;
     while (!_pendingMacroInvocations.empty())
     {
-        auto body = std::move(_pendingMacroInvocations.front());
+        auto const body = std::move(_pendingMacroInvocations.front());
         _pendingMacroInvocations.pop();
 
-        ++_macroRecursionDepth;
-
-        // Write the macro body into the pty buffer so that parseFragment
-        // can reference it through the buffer management system.
-        auto const chunk = _currentPtyBuffer->writeAtEnd(std::string_view { body });
-        _parsingBuffer = _currentPtyBuffer;
-        {
-            auto const parseGuard = ParseDepthGuard {};
-            _parser.parseFragment(chunk);
-        }
-        _parsingBuffer = nullptr;
-
-        --_macroRecursionDepth;
+        // Through the pty buffer, so that parseFragment can reference the body through the buffer
+        // management system -- and chunked, as every other parse is: a body larger than the room left in
+        // that buffer takes a fresh one rather than running past its end.
+        parseFragmentChunked(body);
     }
+    _nestedMacroInvocationsLeft.reset();
 }
 
 std::shared_ptr<RasterizedImage> Terminal::createDRCSImage(DRCSGlyph const& glyph, RGBColor foregroundColor)
