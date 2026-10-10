@@ -29,7 +29,9 @@
 #include <expected>
 #include <fstream>
 #include <mutex>
+#include <optional>
 #include <ranges>
+#include <utility>
 
 #include <libssh2.h>
 #include <libssh2_publickey.h>
@@ -86,6 +88,28 @@ static auto inline sshLog = core::log::Category("ssh", "SSH I/O logger", core::l
 namespace
 {
     constexpr auto MaxPasswordTries = 3;
+
+#ifdef _WIN32
+    /// The address length Winsock's connect() takes.
+    using SocketLength = int;
+#else
+    /// The address length connect() takes.
+    using SocketLength = socklen_t;
+#endif
+
+    /// The length of @p entry's address, in the type the platform's connect() takes.
+    /// @return It, or nullopt when that type cannot hold it: Windows' addrinfo carries a size_t where its
+    ///         connect() takes an int, and a length cut short would describe a different address.
+    [[nodiscard]] std::optional<SocketLength> addressLengthOf(addrinfo const& entry) noexcept
+    {
+#ifdef _WIN32
+        if (!std::in_range<SocketLength>(entry.ai_addrlen))
+            return std::nullopt;
+        return static_cast<SocketLength>(entry.ai_addrlen);
+#else
+        return entry.ai_addrlen;
+#endif
+    }
 
     template <typename T>
     constexpr std::string_view libssl2ErrorString(T rc) noexcept
@@ -1294,10 +1318,14 @@ bool SshSession::connect(std::string_view host, int port)
                     break;
             }
 
+            auto const addressLength = addressLengthOf(*addrEntry);
+            if (!addressLength)
+                continue; // longer than any address is: nothing connect() could be handed whole
+
             _p->sshSocket = SocketHandle::fromNative(
                 socket(addrEntry->ai_family, addrEntry->ai_socktype, addrEntry->ai_protocol));
 
-            if (::connect(_p->sshSocket, addrEntry->ai_addr, addrEntry->ai_addrlen) == 0)
+            if (::connect(_p->sshSocket, addrEntry->ai_addr, *addressLength) == 0)
             {
                 auto const addrAndPort =
                     port == 22 ? std::string(addrStr) : std::format("{}:{}", addrStr, port);
