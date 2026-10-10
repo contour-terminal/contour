@@ -1807,6 +1807,10 @@ void Terminal::writeToScreen(string_view vtStream)
         auto const l = std::lock_guard { *this };
         parseFragmentChunked(vtStream);
 
+        // Run any macro DECINVM queued during the parse now, inside this batch, exactly as
+        // processInputOnce() does: no PTY batch follows a direct write to drain the queue.
+        processPendingMacros();
+
         // Any local echo the parse deferred (a sequence that replied) is safe to parse now.
         processPendingLocalEcho();
 

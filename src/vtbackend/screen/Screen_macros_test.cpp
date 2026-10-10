@@ -329,6 +329,16 @@ TEST_CASE("DECDMAC: define and invoke simple text macro", "[screen]")
     CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 5) == "Hello");
 }
 
+TEST_CASE("DECINVM: a macro invoked through Terminal::writeToScreen runs within that call", "[screen]")
+{
+    // Terminal::writeToScreen() bypasses the PTY, so no PTY batch follows it to drain the macro
+    // queue: the macro body must be on screen as soon as the write returns.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mock.terminal.writeToScreen("\033P0;0;0!zHello\033\\"); // DECDMAC 0 = "Hello"
+    mock.terminal.writeToScreen("\033[0*z");                // DECINVM 0
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 5) == "Hello");
+}
+
 TEST_CASE("DECDMAC: define macro with VT sequences", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
