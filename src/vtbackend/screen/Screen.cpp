@@ -1563,10 +1563,7 @@ void Screen::selectiveEraseToEndOfLine(CellFlag protectedFlag)
 
 void Screen::selectiveEraseToBeginOfLine(CellFlag protectedFlag)
 {
-    if (isFullHorizontalMargins() && _cursor.position.column.value == pageSize().columns.value)
-        selectiveEraseLine(_cursor.position.line, protectedFlag);
-    else
-        selectiveErase(_cursor.position.line, ColumnOffset(0), _cursor.position.column + 1, protectedFlag);
+    selectiveErase(_cursor.position.line, ColumnOffset(0), _cursor.position.column + 1, protectedFlag);
 }
 
 void Screen::selectiveEraseLine(LineOffset line, CellFlag protectedFlag)

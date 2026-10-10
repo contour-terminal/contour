@@ -146,6 +146,20 @@ TEST_CASE("DECSEL-1", "[screen]")
     REQUIRE(" BCD F" == screen.grid().lineText(LineOffset(0)));
 }
 
+TEST_CASE("DECSEL-1 from the last column", "[screen]")
+{
+    // With the cursor in the last column the erase covers the whole line, and must still spare the
+    // DECSCA-protected cells.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen(std::format("A{}BCD{}EF", "\033[1\"q", "\033[2\"q"));
+    REQUIRE("ABCDEF" == screen.grid().lineText(LineOffset(0)));
+
+    mock.writeToScreen("\033[1;6H");
+    mock.writeToScreen("\033[?1K");
+    CHECK(" BCD  " == screen.grid().lineText(LineOffset(0)));
+}
+
 TEST_CASE("DECSEL-2", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
