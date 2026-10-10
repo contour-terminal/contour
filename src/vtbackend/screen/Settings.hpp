@@ -194,7 +194,7 @@ struct Settings
     // Size in bytes per PTY Buffer Object.
     //
     // Defaults to 1 MB, that's roughly 10k lines when column count is 100.
-    size_t ptyBufferObjectSize = 1024lu * 1024lu;
+    size_t ptyBufferObjectSize = 1024zu * 1024zu;
     // The most bytes taken from the PTY in one read, and so the most parsed in one hold of the terminal's
     // lock. The terminal rounds it up to a power of two.
     size_t ptyReadBufferSize = DefaultPtyReadBufferSize;

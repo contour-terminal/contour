@@ -26,9 +26,9 @@ class Message
 
     Message() = default;
     Message(Message const&) = default;
-    Message(Message&&) = default;
+    Message(Message&&) noexcept = default;
     Message& operator=(Message const&) = default;
-    Message& operator=(Message&&) = default;
+    Message& operator=(Message&&) noexcept = default;
 
     Message(HeaderMap headers, Data body): _headers { std::move(headers) }, _body { std::move(body) } {}
 
