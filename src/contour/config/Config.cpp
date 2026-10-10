@@ -206,6 +206,7 @@ namespace
         return instance;
     }
 
+#ifndef _WIN32
     /// Reads an environment variable, treating "unset" and "empty" alike.
     ///
     /// @param name Name of the variable to read.
@@ -215,6 +216,7 @@ namespace
     {
         return env.get(name).value_or("");
     }
+#endif
 
     /// Parses a resize/direction keyword ("Left"/"Right"/"Up"/"Down", case-insensitive) into the
     /// action-layer Direction enum.
@@ -319,6 +321,7 @@ namespace
                     "Could not create directory {}. {}", path.parent_path().string(), ec.message()) };
     }
 
+#ifndef _WIN32
     std::vector<fs::path> getTermInfoDirs(optional<fs::path> const& appTerminfoDir)
     {
         auto locations = std::vector<fs::path>();
@@ -341,8 +344,10 @@ namespace
 
         return locations;
     }
+#endif
 
-    string getDefaultTERM(optional<fs::path> const& appTerminfoDir)
+    // Windows has no terminfo database to search, so the directory goes unread there.
+    string getDefaultTERM([[maybe_unused]] optional<fs::path> const& appTerminfoDir)
     {
 #ifdef _WIN32
         return "contour";
@@ -386,13 +391,13 @@ fs::path configHome(string const& programName)
 #endif
 
 #ifdef _WIN32
-    DWORD size = GetEnvironmentVariableA("LOCALAPPDATA", nullptr, 0);
+    DWORD const size = GetEnvironmentVariableA("LOCALAPPDATA", nullptr, 0);
     if (size)
     {
         std::vector<char> buf;
         buf.resize(size);
-        GetEnvironmentVariableA("LOCALAPPDATA", &buf[0], size);
-        return fs::path { &buf[0] } / programName;
+        GetEnvironmentVariableA("LOCALAPPDATA", buf.data(), size);
+        return fs::path { buf.data() } / programName;
     }
     throw runtime_error { "Could not find config home folder." };
 #endif

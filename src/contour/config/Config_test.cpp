@@ -3539,7 +3539,7 @@ TEST_CASE("Config: a profile round-trips through emitProfileYaml and the side-fi
     auto const source = loadFromYaml(dir, "default_profile: main\n");
     auto profile = *source.findProfile("main");
     profile.showTitleBar = false;
-    profile.dimUnfocused = true;
+    profile.dimUnfocused = 1.0;
 
     writeSideFile(dir, "profiles/roundtrip.yml", contour::config::emitProfileYaml(profile));
 
@@ -3547,7 +3547,7 @@ TEST_CASE("Config: a profile round-trips through emitProfileYaml and the side-fi
     auto const* rt = reloaded.findProfile("roundtrip");
     REQUIRE(rt != nullptr);
     CHECK(rt->showTitleBar.value() == false);
-    CHECK(rt->dimUnfocused.value() == true);
+    CHECK(rt->dimUnfocused.value() == 1.0);
 }
 
 TEST_CASE("Config: a colorschemes/<name>.yml written via emitColorSchemeYaml is resolved by a profile",
