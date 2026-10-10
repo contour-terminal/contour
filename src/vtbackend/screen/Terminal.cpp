@@ -4727,10 +4727,13 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
             pageAt(_cursorPage).applyPageSizeToMainDisplay(mainDisplayPageSize);
             break;
     }
-
-    (void) _hostWritableStatusLineScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, CellLocation {}, false);
-    (void) _indicatorStatusScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, CellLocation {}, false);
     // clang-format on
+
+    // Through the screens, as every page above: resizing a grid behind its screen's back left that screen's
+    // cursor past a narrowed right margin and its cached cursor line un-re-pointed.
+    auto const statusLinePageSize = PageSize { LineCount(1), _settings.pageSize.columns };
+    _hostWritableStatusLineScreen.applyPageSizeToMainDisplay(statusLinePageSize);
+    _indicatorStatusScreen.applyPageSizeToMainDisplay(statusLinePageSize);
 
     // adjust margins for statuslines as well
     auto const statuslineMargin =

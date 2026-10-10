@@ -1700,6 +1700,27 @@ TEST_CASE("Terminal.resizeScreen.minimal_one_by_one.with_status_line", "[termina
     CHECK(terminal.pageSize().lines == LineCount { 9 }); // 10 total - 1 status line
 }
 
+TEST_CASE("Terminal.resizeScreen.narrowing_keeps_the_status_line_cursor_on_its_row", "[terminal]")
+{
+    // The status lines' grids were resized behind their screens' backs, so a status-line cursor beyond the
+    // new right margin stayed there, and the screen's cached cursor line was never re-pointed.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    auto const& statusLine = terminal.hostWritableStatusLineDisplay();
+    mc.writeToScreen("\033[2$~");   // DECSSDT: show the host-writable status line
+    mc.writeToScreen("\033[1$}");   // DECSASD: write to it
+    mc.writeToScreen("\033[16GAB"); // CHA 16, then two cells: the cursor ends at column 17
+    mc.writeToScreen("\033[0$}");   // back to the main display
+
+    terminal.resizeScreen(PageSize { LineCount { 5 }, ColumnCount { 10 } });
+
+    CHECK(statusLine.cursor().position.column < ColumnOffset { 10 });
+    CHECK(&statusLine.currentLine() == &statusLine.grid().lineAt(statusLine.cursor().position.line));
+
+    mc.writeToScreen("\033[1$}X\033[0$}"); // lands on the status line, within it
+    CHECK(statusLine.grid().lineText(LineOffset { 0 }).find('X') != std::string::npos);
+}
+
 TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
 {
     // Reproducer for #1839: On a fresh terminal with no selection,
