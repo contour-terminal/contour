@@ -42,7 +42,7 @@ useful, so that #1010 is closed by one pull request.
 | Per-block working directory used for clickable relative paths | §7.4 |
 | Line numbers in the gutter: absolute, relative, hybrid | §5.3 |
 | Fold markers (exist) — plus a collapsed-size label and vi `z` keys | §5.2, §5.5 |
-| Oldest block evicted: keep its command with an "output evicted" placeholder | §6.3 |
+| A block whose prompt was evicted: keep its command with an "output evicted" placeholder (at the very top always, elsewhere wherever the header shows) | §6.3 |
 | Line-mark indicator in the gutter | §5.2 |
 | Per-line timestamps in the gutter | §5.4 |
 | Exit-status colouring of blocks (gutter) | §5.2 |
@@ -252,8 +252,10 @@ The strip left of the grid becomes an ordered list of **segments**, described by
   window geometry, the hit-test (`isInGutter`), the renderer and `Terminal::fillGutter` all read it,
   so the reserved width and what is drawn can never disagree.
 - The block column is reserved when fold markers, exit status or user marks are enabled — all three
-  default to on, and fold markers already reserve one column today, so **no user's column count
-  changes on upgrade**.
+  default to on in the configuration, and fold markers already reserve one column today, so **no
+  user's column count changes on upgrade**. The engine's own `vtbackend::GutterSettings` defaults
+  every switch to off, so an embedder or test that constructs default `Settings` reserves no gutter,
+  as before; the configuration supplies the user-facing defaults.
 - The width is constant for a given configuration. It never grows with content: a changing gutter
   would resize the page and reflow mid-session.
 - `RenderGutterCell` gains `ColumnOffset column` (negative: `-total .. -1`); `Renderer::renderGutter`
@@ -327,7 +329,8 @@ the record of the hovered row.
   line that is never written to, such as a blank line in a command's output.
 - The clock is read **once per PTY read batch**: `Terminal` samples the injected wall clock when a
   batch starts and the parser stamps from that value. No clock read per line.
-- Display: `gutter.timestamp_format` (default `%H:%M:%S`, a `std::format` chrono spec, local time),
+- Display: `gutter.timestamp_format` (default `%H:%M:%S`, a `std::format` chrono spec, local time
+  — the time-zone conversion is injected through `TerminalClocks` so tests are zone-independent),
   validated at load by formatting a sample (invalid → logged, default kept). A row shows its time
   only when it differs from the row above, so long outputs do not repeat the same second.
 
@@ -363,6 +366,10 @@ the record of the hovered row.
 - Clicking a tick scrolls the viewport so that block's head is at the top (expanding it if folded).
 - Config (profile): `scrollbar.marks: [failures, commands, user_marks]` (default all; `[]` disables).
   Hidden with the scrollbar in the alternate screen, as today.
+- **The scrollbar is shown by default** (owner decision): `scrollbar.position` defaults to `right`
+  instead of `hidden`, so the marks are visible out of the box. `position: hidden` (or the settings
+  page) turns it off; the release notes say so, because every user's window gains a scrollbar on
+  upgrade.
 
 ### 6.2 Sticky command header
 
@@ -373,21 +380,26 @@ the record of the hovered row.
     while the viewport is scrolled back into history; `always` also while following live output
     (e.g. `make` stays visible above its own output).
 - **What**: the block's input row — the logical line carrying `PromptEnd`, else the head — copied
-  from the grid with its real colours, truncated to the page width, plus a right-aligned dim chip
+  from the grid with its real colours, truncated to the page width, plus a right-aligned chip in the block's status colour
   (render-only): `✓`/`✗ 2` and the duration, or `running 12s`.
 - **How**: `RenderBuffer` gains `std::optional<RenderStickyHeader>` (cells, chip, block id, kind).
   The renderer draws it over screen row 0 with the scheme's `sticky_header.background` and a
   one-pixel separator in `sticky_header.separator`. The decision is the pure
   `stickyHeaderFor(topRowBlock, headVisible, state, mode, scrolledIntoHistory, screenType)`.
 - **Input**: a press on row 0 while the header is shown is consumed (no selection starts there) and
-  scrolls the viewport to the block's head, expanding a collapsed fold.
+  scrolls the viewport to the block's head, expanding a collapsed fold. Exception (Task 8.6a): while
+  the scrollbar is shown, a press inside its strip reaches the QML ScrollBar, not the header.
 - Not exposed to the accessibility bridge (it duplicates a row that exists).
 
 ### 6.3 Evicted-output placeholder
 
-- When the viewport is at the very top and the oldest remaining row belongs to a block whose head
-  was evicted (the record survives, its `headStableId` is below the grid's stable floor), the same
-  overlay shows `⋯ <command> — earlier output evicted`.
+- When the top visible row belongs to a block whose head was evicted (the record survives, its
+  `headStableId` is below the grid's stable floor), the same overlay shows
+  `⋯ <command> — earlier output evicted` instead of the input row it can no longer copy (owner
+  decision: the header must not vanish just because the prompt left the scrollback):
+  - at the very top of the scrollback, always (independent of `sticky_header.mode`);
+  - anywhere else, wherever the mode would show a header for that viewport position (`scrolled`:
+    while scrolled into history; `always`: always; `never`: not at all).
 - The command is known even without `cmdline_url`, because the store recovers it from the grid at
   `C`, while the text still exists (§4.3).
 - `sticky_header.show_evicted: true` (profile), independent of `mode` — `never` does not hide it.
@@ -417,7 +429,10 @@ the record of the hovered row.
 - `CopySelection { format, fallback: none | last_command_output }` — **off by default**, so an
   accidental copy on an empty selection never replaces the clipboard with a huge build log.
 - Context menu rows for the block under the pointer: *Select output*, *Copy output*,
-  *Copy command*, *Open output in pager* — next to the existing *Toggle Output Fold*.
+  *Copy command*, *Open output in pager* — next to the existing *Toggle Output Fold*. The block
+  actions (`SelectCommandBlock`, `OpenCommandOutput`, and the new `CopyCommandBlock` /
+  `CopyCommandLine`) carry an optional block id, so a menu row acts on the block that was
+  right-clicked even if the pointer moves before the row is chosen.
 
 ### 7.2 Opening output elsewhere
 
@@ -430,8 +445,11 @@ the record of the hovered row.
   `TerminalSessionManager::createBackingSession`'s existing command override. The file is deleted
   when that pane's session closes; the per-process directory is removed at exit.
 - `detached`: plain text piped into the program's stdin with no pane (`wl-copy`, a notes script) —
-  through a new `ExternalLauncher::runWithStdin(program, bytes) -> std::expected<void, LaunchError>`
-  behind the existing DI interface (the Qt adapter owns its `QProcess` until it finishes).
+  through a new `ExternalLauncher::runWithStdin(program, arguments, input) ->
+  std::expected<void, SpawnError>` behind the existing DI interface (the error enum every other
+  program-launching method already uses; the Qt adapter owns its `QProcess` until it finishes).
+- Split and tab placements are refused in a daemon-attached session (the pager would run on the
+  client while the output lives on the host); `detached` works there.
 - Default binding: `Ctrl+Shift+G` → last output in the pager (kitty's binding), if the plan confirms it
   is free.
 
@@ -472,8 +490,12 @@ exactly as OSC 3008 already does. No record for the row → today's behaviour.
 
   **On by default** (`unfocused`, 10 s): the case it serves — a build in a background tab — is when
   nobody thinks to turn it on; the 10 s floor keeps ordinary commands quiet.
-- **Delivery** through today's paths (`Notifier` on Linux — FreeDesktop or portal — the tray message
-  elsewhere). Title: `✓ make finished` / `✗ make failed (exit 2)` / `✗ make killed (SIGSEGV)`; body:
+- **Delivery** through `Notifier` on Linux (FreeDesktop or portal) and the tray message elsewhere —
+  routed through the **window**, not the pane: only the active tab's `SessionChrome` listens to a
+  session's notification and bell signals today, so a background tab's notification (the case this
+  feature exists for) would otherwise be dropped on Windows and macOS. Clicking a notification
+  focuses its tab on Linux; a tray message does not say which message was clicked, so elsewhere the
+  click only raises the window. Title: `✓ make finished` / `✗ make failed (exit 2)` / `✗ make killed (SIGSEGV)`; body:
   `took 3m 12s · ~/src/contour · <tab name>`. One notification id per session (a newer finish
   replaces the older one); clicking focuses the tab where the platform supports activation;
   `clear_on: focus` withdraws it via `discardDesktopNotification`. `bell` reuses the profile's `bell:`
@@ -496,7 +518,7 @@ exactly as OSC 3008 already does. No record for the row → today's behaviour.
   "on accept" callback) so it has two modes: actions (today) and recent commands. A row shows the
   command, an ✓/✗ dot, the shortened directory (`~/src/contour`), age (`3m ago`) and, for other
   sessions, the tab name. Opened by a new `OpenRecentCommands` action (default `Ctrl+Alt+R`, VS Code's,
-  if free) and a *Recent commands…* palette entry.
+  if free) and an *Open Recent Commands* palette entry.
 - **Accept**: Enter **inserts** at the prompt; Shift+Enter inserts and runs (a `\r` after the paste).
   Insertion goes through the paste path, so shells with bracketed paste do not run a multi-line command
   early. Before insertion the text is stripped of ESC and other control characters (§10.4).
@@ -524,13 +546,22 @@ kitty's `133;C;cmdline_url=<percent-encoded>`, which Contour already parses:
 
 ### 10.3 Native integrations and PowerShell
 
-- fish ≥ 4.1 emits OSC 133 itself: the script detects the version and adds only what fish leaves
-  out, never a second `A`/`C`/`D`. Nushell (≥ 0.111) integrates natively: documented, no script.
-- **PowerShell** (new; `contour shell-integration pwsh`): wraps `prompt` — reports `$?` /
+- fish integrates natively: it marks prompts (`A`, `C`, `D`) from 4.0.0, sends the command line
+  from 4.0.1 and `B` from 4.3.0 (`no-mark-prompt` turns it off). The script detects the version and
+  adds only what that fish leaves out, never a second `A`/`C`/`D`.
+- Nushell (≥ 0.111) integrates natively: documented, no script. It never sends `cmdline_url` (the
+  store recovers the command from the grid), and it emits `133;A;k=s` before every continuation
+  line. Contour therefore parses the prompt kind: an `A` with `k=s`, `k=c` or `k=r` (secondary,
+  continuation, right prompt) does **not** start a block.
+- **PowerShell** (new; installed like the others with
+  `contour generate integration shell pwsh to <FILE>`): wraps `prompt` — reports `$?` /
   `$LASTEXITCODE` as `D`, emits OSC 7 when the location is a filesystem path, then `A`, the original
-  prompt, `B`; a PSReadLine Enter handler emits `C;cmdline_url=` before `AcceptLine` (the approach
-  Windows Terminal documents). One more row in the embedded-script table.
-- **Risk**: OSC 133 must survive ConPTY to reach Contour on Windows; verified first (§16).
+  prompt, `B` — and wraps `PSConsoleHostReadLine` to emit `C;cmdline_url=` once the line is accepted
+  (VS Code's `shellIntegration.ps1` approach; a key handler on Enter would emit `C` before the
+  newline). One more row in the embedded-script table.
+- **Risk**: OSC 133 must survive ConPTY to reach Contour on Windows. Contour ships its own
+  `conpty.dll`/OpenConsole, which passes VT through since Windows Terminal 1.22; verified first by an
+  automated probe (§16), and the PowerShell script is held back if it fails.
 
 ### 10.4 Command lines are untrusted
 
@@ -560,6 +591,7 @@ A command line arrives from whatever wrote to the pty. `sanitizeCommandLine(text
 | global | `folding.enabled` / `show_markers` / `auto_collapse_on_new_command` | bool | existing | checkboxes |
 | global | `folding.on_jump_into_fold` | `expand \| skip` | existing | dropdown |
 | profile | `scrollbar.marks` | list of `failures`, `commands`, `user_marks` | all | three checkboxes |
+| profile | `scrollbar.position` (existing key) | `hidden \| left \| right` | **`right`** (was `hidden`) | dropdown (exists) |
 | profile | `sticky_header.mode` | `never \| scrolled \| always` | `scrolled` | dropdown |
 | profile | `sticky_header.show_evicted` | bool | `true` | checkbox |
 | profile | `notify_on_command_finish.when` | `never \| unfocused \| hidden \| always` | `unfocused` | dropdown |
@@ -607,9 +639,14 @@ vtbackend settings happens where `folding` is mapped today.
 - `Delta` gains the block records changed since the connection last saw them, using the
   per-connection, revision-gated pattern the OSC 3008 contexts use (`FollowState`,
   `collectContextState`).
-- `ScreenMirror` adopts them into the client terminal's store: `AdoptMode::Snapshot` for the attach
-  snapshot (no events), `AdoptMode::Live` for deltas (a transition to `Finished` raises
-  `commandBlockFinished`). Host ids are used as-is: the client store only holds mirrored records.
+- `ScreenMirror` adopts them into the client terminal's store: `AdoptMode::Snapshot` for the first
+  replay after attaching (no events), `AdoptMode::Live` afterwards (a record the mirror never held
+  that is older than the newest it holds is history, adopted as `Snapshot`) — including a resync snapshot
+  after a resize, so a command that finished during the resize still notifies. Host ids are used
+  as-is: the client store only holds mirrored records.
+- Head positions are host stable ids and never cross the wire; the mirror records its own from the
+  `Marked` rows it writes. The host's session epoch rides `SessionState`, so per-line birth times
+  name the same instant on both ends.
 - Consequently an attached client has the gutter, scrollbar marks, sticky header, picker entries and
   finish notifications — and reattaching never replays notifications for blocks that finished while
   detached.
@@ -704,9 +741,12 @@ passing its tests before the next starts, each followed by `/simplify` and an xh
 
 ### 16.1 To verify during implementation (before relying on them)
 
-- Does the ConPTY Contour uses pass OSC 133 through? If not, the PowerShell script is held back and
-  the limitation raised, rather than shipped silently broken.
-- Exactly what fish ≥ 4.1 and Nushell emit natively (marks, `cmdline_url`), against real versions.
+- Does the ConPTY Contour uses pass OSC 133 through? Likely (Contour ships its own `conpty.dll`,
+  which passes VT through since Windows Terminal 1.22), but measured by an automated probe first; if
+  it fails, the PowerShell script is held back and the limitation raised, rather than shipped
+  silently broken.
+- What fish and Nushell emit natively was answered during planning from their sources and release
+  notes (§10.3); the fish ≥ 4 path is still checked by hand, because CI ships fish 3.7.
 - `Ctrl+Shift+G` and `Ctrl+Alt+R` are free in the default bindings on every platform.
 - Every place rows leave the grid advances `_evictedRowCount` (line-wise eviction, block trims, ED 3,
   `ClearToPrompt`, reflow overflow).
