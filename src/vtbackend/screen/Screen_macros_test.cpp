@@ -400,14 +400,21 @@ TEST_CASE("DECINVM: a macro body larger than the pty buffer's free space is run 
 
 TEST_CASE("DECDMAC: define macro with VT sequences", "[screen]")
 {
+    // Hex-encoded (Pen=1): in a plain body the ESC of the SGR would end the DCS, defining a macro of nothing
+    // and printing "Bold" on the spot.
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define macro 1 with SGR bold + text "Bold"
-    mock.writeToScreen("\033P1;0;0!z\033[1mBold\033\\");
-    mock.terminal.flushInput();
-    // Invoke macro 1
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen(macroDefinition(1, "\033[1mBold"));
+    REQUIRE(mock.terminal.macroBody(1) == std::optional { std::string_view { "\033[1mBold" } });
+    CHECK(screen.grid().lineText(LineOffset(0)).starts_with("    ")); // defining shows nothing
+
     mock.writeToScreen("\033[1*z");
-    mock.terminal.flushInput();
-    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 4) == "Bold");
+    mock.writeToScreen("!");
+
+    CHECK(screen.grid().lineText(LineOffset(0)).substr(0, 5) == "Bold!");
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlag::Bold));
+    // DEC STD 070: "The current state of the machine is not saved or restored when macros are invoked."
+    CHECK(screen.at(LineOffset(0), ColumnOffset(4)).isFlagEnabled(CellFlag::Bold));
 }
 
 TEST_CASE("DECDMAC: hex-encoded macro (Pen=1)", "[screen]")
