@@ -4,11 +4,7 @@
 #include <format>
 #include <system_error>
 
-#ifdef _WIN32
-    #include <string>
-
-    #include <Windows.h>
-#else
+#ifndef _WIN32
     #include <unistd.h>
 #endif
 
@@ -20,13 +16,7 @@ struct CloseNativeHandle
 {
 };
 
-#ifdef _WIN32
-template <>
-struct CloseNativeHandle<HANDLE>
-{
-    void operator()(HANDLE value) { CloseHandle(value); }
-};
-#else
+#ifndef _WIN32
 template <>
 struct CloseNativeHandle<int>
 {
@@ -110,26 +100,17 @@ class NativeHandle
     native_handle_type _fd = InvalidNativeHandle;
 };
 
-#ifdef _WIN32
-using FileDescriptor = NativeHandle<HANDLE, INVALID_HANDLE_VALUE>;
-#else
+#ifndef _WIN32
+/// A POSIX file descriptor, closed with its owner.
+///
+/// There is no Windows counterpart: nothing there needs one, and a HANDLE could not be one anyway, because
+/// INVALID_HANDLE_VALUE is a cast, which no template argument may be.
 using FileDescriptor = NativeHandle<int, -1>;
 #endif
 
 } // end namespace crispy
 
-#ifdef _WIN32
-template <>
-struct std::formatter<HANDLE>: std::formatter<std::string>
-{
-    auto format(HANDLE value, auto& ctx) const
-    {
-        auto str = std::format("0x{:X}", (unsigned long long) (value));
-        return std::formatter<std::string>::format(str, ctx);
-    }
-};
-#endif
-
+#ifndef _WIN32
 template <>
 struct std::formatter<crispy::FileDescriptor>: std::formatter<crispy::FileDescriptor::native_handle_type>
 {
@@ -138,3 +119,4 @@ struct std::formatter<crispy::FileDescriptor>: std::formatter<crispy::FileDescri
         return std::formatter<crispy::FileDescriptor::native_handle_type>::format(fd.get(), ctx);
     }
 };
+#endif

@@ -66,8 +66,6 @@
 // It would be nice to move to NB IO mode, but I didn't have the time to debug it.
 // #define SSH_SESSION_NB_IO /* BUGGY EZ */
 
-using crispy::FileDescriptor;
-
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
