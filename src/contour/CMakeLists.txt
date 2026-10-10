@@ -111,6 +111,21 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 # }}}
 
+# {{{ GPU selection for Vulkan/Direct3D (renderer.gpu): QRhi::enumerateAdapters + fromRhiAdapter
+# QQuickGraphicsDevice::fromRhiAdapter "was introduced in Qt 6.10". OpenGL selection (DRI_PRIME) does
+# not need it and is built regardless. Linux and Windows only: macOS renders through Metal, which has
+# no GPU choice to make here.
+if(CONTOUR_FRONTEND_GUI)
+    if(NOT (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+        contour_note_excluded_feature("GPU selection for Vulkan and Direct3D" "Linux and Windows only")
+    elseif(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
+        set(CONTOUR_WITH_GPU_SELECTION ON)
+    else()
+        contour_note_excluded_feature("GPU selection for Vulkan and Direct3D" "requires Qt 6.10")
+    endif()
+endif()
+# }}}
+
 # {{{ Optional: Qt's WaylandClient, for blur-behind and the window shadow
 # Looked up here rather than in platform/, which is the only directory that consumes it, because
 # imported targets are directory scoped: a find_package() down there leaves Qt6::WaylandClient
@@ -243,6 +258,13 @@ if(CONTOUR_FRONTEND_GUI)
         Logging.hpp
         display/RenderState.hpp
         display/RenderingBackendSelection.hpp
+        display/FirstFrameWatchdog.hpp
+        display/GpuSelection.hpp
+        display/GpuInventory.hpp
+        display/DxgiGpuInventory.hpp
+        display/OpenGlGpuEnvironment.hpp
+        display/PciIds.hpp
+        display/SysfsGpuInventory.hpp
         geometry/CellRectangle.hpp
         geometry/WindowGeometry.hpp
         remote/NativeController.hpp
@@ -263,6 +285,10 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsController.cpp
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
+        display/FirstFrameWatchdog.cpp
+        display/GpuInventory.cpp
+        display/PciIds.cpp
+        display/SysfsGpuInventory.cpp
         session/TerminalSessionManager.cpp
         window/PopupShadowImageProvider.cpp
         window/UiStyleProvider.cpp
@@ -276,6 +302,14 @@ if(CONTOUR_FRONTEND_GUI)
         remote/RemoteLayout.cpp
         remote/TmuxController.cpp
     )
+    if(WIN32)
+        list(APPEND _core_source_files display/DxgiGpuInventory.cpp)
+    endif()
+endif()
+
+if(CONTOUR_WITH_GPU_SELECTION)
+    list(APPEND _core_source_files display/GraphicsDeviceSelector.cpp)
+    list(APPEND _header_files display/GraphicsDeviceSelector.hpp)
 endif()
 
 if(WIN32)
@@ -434,6 +468,10 @@ target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt
 # Both the binary dir (for generated headers) and the parent src dir (so "#include <contour/...>"
 # resolves) must be PUBLIC so consumers of the object library inherit them.
 target_include_directories(contour_core PUBLIC "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# DXGI enumerates the GPUs for the settings page (display/DxgiGpuInventory.cpp).
+if(WIN32)
+    target_link_libraries(contour_core PUBLIC dxgi)
+endif()
 # }}}
 
 # qt_add_executable() is a Qt command, and it does Qt things -- QML plugin importing, the Android and
@@ -455,6 +493,9 @@ if(CONTOUR_FRONTEND_GUI)
     set_target_properties(contour_core contour PROPERTIES AUTOMOC ON AUTORCC ON)
     # Disable all deprecated Qt functions prior to Qt 6.0.
     target_compile_definitions(contour_core PUBLIC QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
+    if(CONTOUR_WITH_GPU_SELECTION)
+        target_compile_definitions(contour_core PUBLIC CONTOUR_WITH_GPU_SELECTION)
+    endif()
 endif()
 
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
@@ -604,6 +645,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/BenignQtMessages_test.cpp
             window/CommandPaletteModel_test.cpp
             config/Config_test.cpp
+            config/GpuSelector_test.cpp
             window/SettingsController_test.cpp
             test/SettingsPageQml_test.cpp
             test/Accessibility_qml_test.cpp
@@ -637,6 +679,10 @@ if(CONTOUR_FRONTEND_GUI)
             platform/WindowShadowTiles_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
             display/RenderingBackendSelection_test.cpp
+            display/FirstFrameWatchdog_test.cpp
+            display/GpuSelection_test.cpp
+            display/GpuInventory_test.cpp
+            display/OpenGlGpuEnvironment_test.cpp
             display/ScissorRect_test.cpp
             display/RhiVertexLayout_test.cpp
             display/ScreenshotReadback_test.cpp
@@ -656,6 +702,9 @@ if(CONTOUR_FRONTEND_GUI)
             window/WindowSizing_test.cpp
         )
         set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
+        if(CONTOUR_WITH_GPU_SELECTION)
+            target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)
+        endif()
         target_link_libraries(contour_gui_test
             PRIVATE
             contour_core

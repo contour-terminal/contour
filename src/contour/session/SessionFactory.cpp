@@ -7,8 +7,10 @@
     #include <vtpty/SshSession.hpp>
 #endif
 
+#include <algorithm>
 #include <filesystem>
 #include <functional>
+#include <iterator>
 
 using std::make_unique;
 using std::nullopt;
@@ -55,6 +57,8 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     // override session-local.
     auto shell = profile->shell.value();
     vtpty::Process::applyCommandOverride(shell, commandOverride);
+    // Variables Contour set to choose its own GPU must not steer the programs run inside it.
+    std::ranges::copy(_app.selfOnlyEnvironment(), std::back_inserter(shell.removedEnvironment));
     if (cwd)
         shell.workingDirectory = std::filesystem::path(cwd.value());
     // Spawn the child at the caller's requested grid size when given (a new tab/split inherits the live

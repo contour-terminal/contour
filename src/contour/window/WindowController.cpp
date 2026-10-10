@@ -78,6 +78,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager, vtw
             // moment it says so. Application-wide, so every open window follows.
             _manager.app().applyWindowControlStyle(_manager.app().config().windowControlStyle.value());
         },
+        _manager.app().gpuInventory(),
         this);
 }
 
@@ -909,6 +910,9 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
         return;
 
     _osWindow = osWindow;
+
+    // Still unexposed, so the scene graph has not chosen a graphics device yet.
+    _manager.app().applyGraphicsDevice(*osWindow);
 
     // Assign the pre-show target screen — the DPR predictor for the headless cell metrics. Order:
     // the spawning window's screen (staged by ContourGuiApp::newWindow), else the screen under the

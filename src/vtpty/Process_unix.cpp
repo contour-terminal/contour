@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/EnvironmentBlock.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/Pty.hpp>
@@ -20,6 +21,7 @@
 #include <filesystem>
 #include <format>
 #include <mutex>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -176,24 +178,15 @@ namespace
 #endif
     }
 
-    /// Builds the child's environment as "NAME=VALUE" entries: the current environment, with
-    /// @p overrides replacing same-named entries.
-    ///
-    /// @param overrides Variables to add to, or replace in, the inherited environment.
-    /// @return The entries, in no particular order.
-    [[nodiscard]] vector<string> createEnvironmentBlock(Process::Environment const& overrides)
+    /// @return The current process environment's entries; none when it has been cleared.
+    [[nodiscard]] vector<string_view> inheritedEnvironment()
     {
-        auto entries = vector<string> {};
-        for (char** entry = environ; entry != nullptr && *entry != nullptr; ++entry)
-        {
-            auto const line = string_view { *entry };
-            auto const separator = line.find('=');
-            auto const name = separator != string_view::npos ? line.substr(0, separator) : line;
-            if (!overrides.contains(string { name }))
-                entries.emplace_back(line);
-        }
-        for (auto const& [name, value]: overrides)
-            entries.emplace_back(std::format("{}={}", name, value));
+        auto entries = vector<string_view> {};
+        if (environ == nullptr) // clearenv() leaves no array at all
+            return entries;
+        for (auto const index: std::views::iota(std::size_t { 0 })
+                                   | std::views::take_while([](auto i) { return environ[i] != nullptr; }))
+            entries.emplace_back(environ[index]);
         return entries;
     }
 
@@ -240,6 +233,7 @@ struct Process::Private
     vector<string> args;
     fs::path cwd;
     Environment env;
+    vector<string> removedEnvironment;
     bool escapeSandbox;
 
     unique_ptr<Pty> pty {};
@@ -266,6 +260,7 @@ Process::Process(string const& path,
                  vector<string> const& args,
                  fs::path const& cwd,
                  Environment const& env,
+                 vector<string> removedEnvironment,
                  bool escapeSandbox,
                  unique_ptr<Pty> pty,
                  shared_ptr<ProcessPlacement> placement):
@@ -273,6 +268,7 @@ Process::Process(string const& path,
                      .args = args,
                      .cwd = cwd,
                      .env = env,
+                     .removedEnvironment = std::move(removedEnvironment),
                      .escapeSandbox = escapeSandbox,
                      .pty = std::move(pty),
                      .placement = std::move(placement) },
@@ -316,7 +312,7 @@ StartResult Process::start()
             overrides[name] = value;
         if (stdoutFastPipe)
             overrides[string { StdoutFastPipeEnvironmentName }] = string { StdoutFastPipeFdStr };
-        return createEnvironmentBlock(overrides);
+        return buildEnvironmentBlock(inheritedEnvironment(), overrides, _d->removedEnvironment);
     }();
 
     // `environ` layout: pointers to each entry, terminated by a null pointer. Both vectors outlive

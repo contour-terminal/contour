@@ -8,6 +8,7 @@
 
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/GpuSelector.hpp>
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/config/ModifierNames.hpp>
 #include <contour/platform/GuiTheme.hpp>
@@ -89,6 +90,33 @@ profiles:
     CHECK(config.live.value() == true);
     CHECK(config.reflowOnResize.value() == false);
     CHECK(config.notificationCloseTimeout.value() == std::chrono::milliseconds { 2500 });
+}
+
+TEST_CASE("Config: renderer.gpu loads, and a bad value falls back to auto", "[config][gpu]")
+{
+    QTemporaryDir dir;
+    auto const cfg = loadFromYaml(dir, R"(
+renderer:
+    gpu: 10de:2820
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(cfg.renderer.value().gpu
+          == contour::config::GpuSelector {
+              .preference = contour::config::GpuPreference::Specific,
+              .id = contour::config::PciId { .vendor = 0x10de, .device = 0x2820 } });
+
+    QTemporaryDir badDir;
+    auto const bad =
+        loadFromYaml(badDir, "renderer:\n    gpu: banana\nprofiles:\n    main:\n        shell: /bin/sh\n"sv);
+    CHECK(bad.renderer.value().gpu == contour::config::GpuSelector {});
+}
+
+TEST_CASE("Config: the generated config documents renderer.gpu with a value", "[config][gpu]")
+{
+    // A comment-only template is never serialized; the value line proves it round-trips.
+    CHECK(contour::config::defaultConfigString().contains("    gpu: auto\n"));
 }
 
 TEST_CASE("Config: the desktop-notification close timeout defaults to ten seconds", "[config]")
@@ -3564,6 +3592,104 @@ TEST_CASE("Config: GUI settings round-trip through emitGuiSettingsYaml / loadGui
                                                               / "does-not-exist.yml");
     REQUIRE(missing.has_value());
     CHECK_FALSE(missing->defaultProfile.has_value());
+}
+
+TEST_CASE("Config: GUI settings round-trip dotted keys as nested YAML", "[config][gui][gpu]")
+{
+    QTemporaryDir const dir;
+    auto const path = std::filesystem::path(dir.path().toStdString()) / "settings.yml";
+    auto const yaml = contour::config::emitGuiSettingsYaml(
+        { .defaultProfile = std::nullopt,
+          .globalOverrides = { { "renderer.gpu", "10de:2820" }, { "theme", "dark" } } });
+    CHECK(yaml.contains("renderer:"));
+    CHECK_FALSE(yaml.contains("renderer.gpu"));
+    {
+        auto out = std::ofstream(path);
+        out << yaml;
+    }
+
+    auto const loaded = contour::config::loadGuiSettingsFile(path);
+    REQUIRE(loaded.has_value());
+    CHECK(loaded->globalOverrides.at("renderer.gpu") == "10de:2820");
+    CHECK(loaded->globalOverrides.at("theme") == "dark");
+}
+
+TEST_CASE("Config: settings.yml renderer.gpu overrides contour.yml; junk nesting is ignored",
+          "[config][gui][gpu]")
+{
+    QTemporaryDir dir;
+    writeSideFile(
+        dir, "settings.yml", "renderer:\n    gpu: discrete\n    nested:\n        deeper: 1\ntheme: dark\n");
+    auto const cfg = loadFromYaml(dir, R"(
+renderer:
+    backend: Vulkan
+    gpu: integrated
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Discrete);
+    CHECK(cfg.renderer.value().renderingBackend == contour::config::RenderingBackend::Vulkan);
+    CHECK(cfg.theme.value() == contour::config::GuiTheme::Dark);
+}
+
+TEST_CASE("Config: a scalar renderer in settings.yml is ignored, not fatal", "[config][gui][gpu]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "renderer: foo\ntheme: dark\n");
+    auto const yaml = "renderer:\n    gpu: integrated\nprofiles:\n    main:\n        shell: /bin/sh\n"sv;
+    REQUIRE_NOTHROW(loadFromYaml(dir, yaml));
+    auto const cfg = loadFromYaml(dir, yaml);
+    CHECK(cfg.theme.value() == contour::config::GuiTheme::Dark);
+    CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Integrated);
+}
+
+TEST_CASE("Config: a non-scalar key in settings.yml is skipped, its siblings still apply",
+          "[config][gui][gpu]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "? [a]\n: 2\nrenderer:\n    ? [a]\n    : 1\n    gpu: discrete\n");
+    REQUIRE_NOTHROW(loadFromYaml(dir, "profiles:\n    main:\n        shell: /bin/sh\n"sv));
+    auto const cfg = loadFromYaml(dir, "profiles:\n    main:\n        shell: /bin/sh\n"sv);
+    CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Discrete);
+}
+
+TEST_CASE("Config: a non-scalar renderer.gpu falls back to auto", "[config][gpu]")
+{
+    QTemporaryDir dir;
+    auto const yaml = "renderer:\n    gpu: [x]\nprofiles:\n    main:\n        shell: /bin/sh\n"sv;
+    REQUIRE_NOTHROW(loadFromYaml(dir, yaml));
+    CHECK(loadFromYaml(dir, yaml).renderer.value().gpu == contour::config::GpuSelector {});
+}
+
+TEST_CASE("Config: a non-scalar renderer.gpu in settings.yml never aborts the load", "[config][gui][gpu]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "renderer:\n    gpu: [x]\n");
+    auto const yaml = "profiles:\n    main:\n        shell: /bin/sh\n"sv;
+    REQUIRE_NOTHROW(loadFromYaml(dir, yaml));
+    CHECK(loadFromYaml(dir, yaml).renderer.value().gpu.preference == contour::config::GpuPreference::Auto);
+}
+
+TEST_CASE("Config: a malformed renderer section in settings.yml is skipped, its siblings still apply",
+          "[config][gui][gpu]")
+{
+    // A scalar renderer key makes the section loader run; the other keys are junk it would choke on.
+    QTemporaryDir dir;
+    writeSideFile(dir,
+                  "settings.yml",
+                  "renderer:\n    gpu: [x]\n    backend: [y]\n    tile_hashtable_slots: 8192\ntheme: dark\n");
+    auto const yaml = "profiles:\n    main:\n        shell: /bin/sh\n"sv;
+    REQUIRE_NOTHROW(loadFromYaml(dir, yaml));
+    CHECK(loadFromYaml(dir, yaml).theme.value() == contour::config::GuiTheme::Dark);
+}
+
+TEST_CASE("Config: a flat settings.yml written by an older Contour still loads", "[config][gui]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "reflow_on_resize: false\n");
+    auto const cfg = loadFromYaml(dir, "profiles:\n    main:\n        shell: /bin/sh\n"sv);
+    CHECK(cfg.reflowOnResize.value() == false);
 }
 
 TEST_CASE("Config: FileGuiConfigStore writes and removes side files the loader picks up", "[config][gui]")

@@ -5,6 +5,7 @@
 #include <contour/command/CommandHistoryStore.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/LayoutStore.hpp>
+#include <contour/display/GpuSelection.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
@@ -24,11 +25,16 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+class QQuickWindow;
 
 namespace contour
 {
@@ -40,8 +46,16 @@ namespace config
 
 namespace display
 {
+    class FirstFrameWatchdog;
     class ForcedFontDpiProvider;
-}
+    class GraphicsDeviceSelector;
+    class IGpuInventory;
+} // namespace display
+
+namespace platform
+{
+    class Notifier;
+} // namespace platform
 
 namespace remote
 {
@@ -192,6 +206,23 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// to it, so one instance is shared rather than one per pane.
     /// @return The layout; never nullptr.
     [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const noexcept { return *_keyboardLayout; }
+
+    /// @return The machine's GPUs, listed without waking any; never null.
+    [[nodiscard]] std::shared_ptr<display::IGpuInventory const> const& gpuInventory() const noexcept
+    {
+        return _gpuInventory;
+    }
+
+    /// @return Environment variables Contour set for its own rendering, which spawned shells must not
+    /// inherit.
+    [[nodiscard]] std::span<std::string const> selfOnlyEnvironment() const noexcept
+    {
+        return _selfOnlyEnvironment;
+    }
+
+    /// Hands a not-yet-exposed window the chosen GPU (Vulkan/Direct3D); no-op for OpenGL.
+    /// @param window The window, before it is first exposed.
+    void applyGraphicsDevice(QQuickWindow& window);
 
     [[nodiscard]] std::string profileName() const;
 
@@ -372,6 +403,57 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // between staging and consumption).
     QPointer<QScreen> _pendingSpawnScreen;
 
+    /// Applies `renderer.gpu` to OpenGL through the driver's environment (Linux only).
+    void applyOpenGlGpuSelection();
+
+    /// Logs the GPU the first window's first frame was drawn on.
+    /// @param window The window, before it is first exposed.
+    void logGpuInUse(QQuickWindow& window);
+
+    /// Watches @p window's first frame, unless a window is already watched.
+    /// @param window The window, before it is first exposed.
+    /// @param onFailure Called with the window when it shows no frame in time or its scene graph fails.
+    void watchFirstFrame(QQuickWindow& window, std::function<void(QQuickWindow&)> onFailure);
+
+#ifdef CONTOUR_WITH_GPU_SELECTION
+    /// Moves @p window to the automatically chosen GPU, after the configured one failed to render on it.
+    /// @param window The window that never showed a frame.
+    void onGpuFailure(QQuickWindow& window);
+#endif
+
+    /// Restarts Contour once on the automatic GPU, after the OpenGL GPU chosen through the driver's
+    /// variables failed to render, and quits this process.
+    void relaunchOnAutomaticGpu();
+
+    /// Reads (and removes) the restart request relaunchOnAutomaticGpu() leaves in the environment.
+    void takeGpuFallbackRequest();
+
+    /// @return `renderer.gpu`, or `auto` when this process is the restart after a failed GPU.
+    [[nodiscard]] config::GpuSelector effectiveGpuSelector() const;
+
+    /// Reports a pending fallback from a failed GPU once @p window shows its first frame.
+    /// @param window The window.
+    void reportGpuFallbackOnceUp(QQuickWindow& window);
+
+    /// Logs and notifies that @p failed could not render and @p used took over, for this session only.
+    /// @param failed Title of the GPU that failed.
+    /// @param used Title of the GPU now in use.
+    void reportGpuFallback(std::string_view failed, std::string_view used);
+
+    std::shared_ptr<display::IGpuInventory const> _gpuInventory;
+    std::vector<std::string> _selfOnlyEnvironment;
+    QMetaObject::Connection _gpuInUseLog; ///< Set once the first window's GPU report is wired.
+    /// The OpenGL GPU renderer.gpu chose explicitly (Linux); unset when the driver decides.
+    std::optional<std::string> _openGlGpuTitle;
+    /// The GPU that could not render, when this process is Contour's restart without it.
+    std::optional<std::string> _gpuFallbackFrom;
+    /// A fallback to another GPU, until it has been reported.
+    std::optional<display::GpuFallback> _pendingGpuFallback;
+    /// Watches the first window's first frame when `renderer.gpu` names a GPU explicitly.
+    std::unique_ptr<display::FirstFrameWatchdog> _firstFrameWatchdog;
+    /// Raises the "could not render" notification; created on first use.
+    std::unique_ptr<platform::Notifier> _gpuNotifier;
+
     int _argc = 0;
     char const** _argv = nullptr;
     ExitStatus _exitStatus;
@@ -398,6 +480,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// What the window controls are and where they go, handed to QML as the `windowControls` context
     /// property. Declared before the engine for the same borrowed-pointer reason as above.
     std::unique_ptr<window::WindowControlStyleProvider> _windowControlStyleProvider;
+
+    /// Chooses the GPU for Vulkan/Direct3D windows; null for OpenGL. Absent without Qt 6.10. Declared before
+    /// _qmlEngine: the windows go first, then the Vulkan instance they borrowed.
+#ifdef CONTOUR_WITH_GPU_SELECTION
+    std::unique_ptr<display::GraphicsDeviceSelector> _graphicsDeviceSelector;
+#endif
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
 };

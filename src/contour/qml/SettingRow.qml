@@ -24,6 +24,8 @@ Item {
     property string type: "string"
     property var value: null
     property var options: []
+    // Shown in an "enum" combo instead of the stored values; same length as options. Empty = show options.
+    property var optionLabels: []
     property bool editable: true
 
     /// Drop the card and draw a hover wash only; for rows inside a SettingsSection.
@@ -98,8 +100,14 @@ Item {
 
         Loader {
             id: editorLoader
-            // A bool is a compact Switch hugged to the right; every other editor claims a fixed column.
-            Layout.preferredWidth: root.type === "bool" ? -1 : 240
+            // A bool is a compact Switch hugged to the right; every other editor claims a fixed column. An
+            // enum's entries can be long names (GPU titles), so its column grows to the widest one, up to
+            // 60% of the row; the label column beside it wraps.
+            Layout.preferredWidth: root.type === "bool" ? -1
+                                 : root.type === "enum"
+                                   ? Math.max(240, Math.min(editorLoader.item ? editorLoader.item.implicitWidth : 240,
+                                                            rowLayout.width * 0.6))
+                                 : 240
             Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
             sourceComponent: root.type === "bool" ? boolEditor
                            : root.type === "double" ? doubleEditor
@@ -116,13 +124,30 @@ Item {
     Component {
         id: enumEditor
         ComboBox {
+            id: enumCombo
             Accessible.name: root.label
             Accessible.description: root.help
             Layout.fillWidth: true
             enabled: root.editable
-            model: root.options
+            model: root.optionLabels.length > 0 ? root.optionLabels : root.options
             currentIndex: Math.max(0, root.options.indexOf(root.value))
-            onActivated: root.edited(root.fieldKey, currentText)
+            onActivated: root.edited(root.fieldKey, root.options[currentIndex])
+            // Sized to the widest entry, not the current one; the popup follows the box's width.
+            implicitContentWidthPolicy: ComboBox.WidestText
+            // Elided only where the 60% cap above bites, with the full text on hover.
+            displayText: currentTextMetrics.elidedText
+            ToolTip.visible: hovered && currentTextMetrics.elidedText !== currentText
+            ToolTip.text: currentText
+            TextMetrics {
+                id: currentTextMetrics
+                font: enumCombo.font
+                text: enumCombo.currentText
+                elide: Text.ElideRight
+                elideWidth: enumCombo.contentItem
+                            ? enumCombo.contentItem.width - (enumCombo.contentItem.leftPadding || 0)
+                              - (enumCombo.contentItem.rightPadding || 0)
+                            : enumCombo.availableWidth
+            }
         }
     }
 

@@ -3,12 +3,19 @@
 #include <contour/Logging.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/display/ContentScale.hpp>
+#include <contour/display/FirstFrameWatchdog.hpp>
+#include <contour/display/GpuInventory.hpp>
+#ifdef CONTOUR_WITH_GPU_SELECTION
+    #include <contour/display/GraphicsDeviceSelector.hpp>
+#endif
 #include <contour/display/Logging.hpp>
+#include <contour/display/OpenGlGpuEnvironment.hpp>
 #include <contour/display/RenderingBackendSelection.hpp>
 #include <contour/display/ShaderConfig.hpp> // createSurfaceFormat
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/GuiTheme.hpp>
+#include <contour/platform/Notifier.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
@@ -21,6 +28,8 @@
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/WindowController.hpp>
 
+#include <vtbackend/vt/DesktopNotification.hpp>
+
 #include <vtpty/Process.hpp>
 
 #include <text_shaper/FontLocator.hpp>
@@ -32,6 +41,7 @@
 #include <core/log/LogSink.hpp>
 #include <core/log/LogStore.hpp>
 
+#include <QtCore/QDir>
 #include <QtCore/QEventLoop>
 #include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
@@ -48,18 +58,23 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QStyleHints>
 #include <QtGui/QSurfaceFormat>
+#include <QtGui/rhi/qrhi.h>
 #include <QtMultimedia/QMediaDevices>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
+#include <QtQuick/QQuickGraphicsDevice>
 #include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGRendererInterface>
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <filesystem>
+#include <format>
 #include <iostream>
 #include <optional>
+#include <ranges>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -184,7 +199,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
                                              : std::make_unique<command::FileCommandHistoryStore>()),
     _speechSynthesizer(speechSynthesizer ? std::move(speechSynthesizer) : platform::makeSpeechSynthesizer()),
-    _sessionManager(*this, *_sessionFactory, *_layoutStore, *_commandHistoryStore)
+    _sessionManager(*this, *_sessionFactory, *_layoutStore, *_commandHistoryStore),
+    _gpuInventory { display::makePlatformGpuInventory() }
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
@@ -193,6 +209,225 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
 }
 
 ContourGuiApp::~ContourGuiApp() = default;
+
+void ContourGuiApp::applyGraphicsDevice(QQuickWindow& window)
+{
+    logGpuInUse(window);
+#ifdef CONTOUR_WITH_GPU_SELECTION
+    if (_graphicsDeviceSelector)
+    {
+        _graphicsDeviceSelector->applyTo(window);
+        if (auto fallback = _graphicsDeviceSelector->takeProbeFallback())
+            _pendingGpuFallback = std::move(fallback);
+        reportGpuFallbackOnceUp(window);
+        if (_graphicsDeviceSelector->selector().preference != config::GpuPreference::Auto)
+            watchFirstFrame(window, [this](QQuickWindow& failed) { onGpuFailure(failed); });
+        return;
+    }
+#endif
+    reportGpuFallbackOnceUp(window);
+    if (_openGlGpuTitle)
+        watchFirstFrame(window, [this](QQuickWindow& /*failed*/) { relaunchOnAutomaticGpu(); });
+}
+
+void ContourGuiApp::watchFirstFrame(QQuickWindow& window, std::function<void(QQuickWindow&)> onFailure)
+{
+    // Only the first window is watched: later ones render on the same GPU (Vulkan and Direct3D reuse the
+    // first window's choice, OpenGL's is process-wide), so its first frame answers for all of them.
+    if (_firstFrameWatchdog)
+        return;
+    using namespace std::chrono_literals;
+    _firstFrameWatchdog = std::make_unique<display::FirstFrameWatchdog>(
+        window, 10s, [onFailure = std::move(onFailure), guarded = QPointer<QQuickWindow>(&window)] {
+            if (guarded) // the window may have been closed before it ever drew
+                onFailure(*guarded);
+        });
+}
+
+void ContourGuiApp::logGpuInUse(QQuickWindow& window)
+{
+    // The first window names the GPU its first frame was really drawn on, for every backend -- `auto`
+    // chooses nothing itself, so this is the only place it shows. The first frame, not
+    // sceneGraphInitialized: Qt emits that once per window even when it re-creates a lost device over and
+    // over, so it would name a GPU that never drew. Runs on the render thread, which owns the QRhi.
+    if (_gpuInUseLog)
+        return;
+    _gpuInUseLog = connect(
+        &window,
+        &QQuickWindow::frameSwapped,
+        &window,
+        [&window, requested = _config.renderer.value().gpu] {
+            auto const* const rhi = window.rhi();
+            if (!rhi)
+                return;
+            auto const info = rhi->driverInfo();
+            // Vulkan and Direct3D report the PCI ids; OpenGL reports none, and a software device's
+            // Khronos vendor id (0x10005 for Mesa) is no PCI id either.
+            auto const isPciId = info.vendorId <= 0xFFFF && info.deviceId <= 0xFFFF;
+            auto const id = isPciId ? config::PciId { .vendor = static_cast<std::uint16_t>(info.vendorId),
+                                                      .device = static_cast<std::uint16_t>(info.deviceId) }
+                                    : config::PciId {};
+            startupLog()(
+                "{}",
+                display::gpuInUseLine(info.deviceName.toStdString(), id, rhi->backendName(), requested));
+        },
+        static_cast<Qt::ConnectionType>(Qt::DirectConnection | Qt::SingleShotConnection));
+}
+
+#ifdef CONTOUR_WITH_GPU_SELECTION
+void ContourGuiApp::onGpuFailure(QQuickWindow& window)
+{
+    auto const failed = _graphicsDeviceSelector->choose();
+    auto const& fallback = _graphicsDeviceSelector->fallBackToAuto();
+    if (!failed || !fallback || !fallback->adapter || fallback->candidate.id == failed->candidate.id)
+    {
+        errorLog()("The configured GPU could not render, and there is no other GPU to fall back to.");
+        return;
+    }
+    window.setGraphicsDevice(QQuickGraphicsDevice::fromRhiAdapter(fallback->adapter));
+    window.releaseResources();
+    window.update();
+    reportGpuFallback(failed->candidate.title, fallback->candidate.title);
+}
+#endif
+
+void ContourGuiApp::relaunchOnAutomaticGpu()
+{
+    // OpenGL's GPU is chosen by the driver stack when the display connection opens, once per process, so
+    // the only way onto another GPU is a new process: this one, restarted once without the variables it
+    // set. The restarted one runs `auto` and has no watchdog, so it cannot restart again.
+    auto const failed = _openGlGpuTitle.value_or("The configured GPU");
+    if (_selfOnlyEnvironment.empty())
+    {
+        errorLog()("{} could not render. Contour set nothing to select it, so there is nothing to undo.",
+                   failed);
+        return;
+    }
+
+    auto const inheritedEntries = QProcessEnvironment::systemEnvironment().toStringList();
+    auto inheritedStore = std::vector<std::string> {};
+    for (auto const& entry: inheritedEntries)
+        inheritedStore.push_back(entry.toStdString());
+    auto const inherited = std::vector<std::string_view>(inheritedStore.begin(), inheritedStore.end());
+    auto environment = QStringList {};
+    for (auto const& entry: display::gpuFallbackRelaunchEnvironment(inherited, _selfOnlyEnvironment, failed))
+        environment.push_back(QString::fromStdString(entry));
+
+    auto arguments = QStringList {};
+    for (auto const index: std::views::iota(1, _argc))
+        arguments.push_back(QString::fromLocal8Bit(_argv[index]));
+
+    auto process = QProcess {};
+    process.setProgram(QCoreApplication::applicationFilePath());
+    process.setArguments(arguments);
+    process.setEnvironment(environment);
+    process.setWorkingDirectory(QDir::currentPath());
+    if (!process.startDetached())
+    {
+        errorLog()("{} could not render, and restarting Contour on the automatic GPU failed: {}",
+                   failed,
+                   process.errorString().toStdString());
+        return;
+    }
+    errorLog()("{} could not render; restarting Contour on the automatic GPU.", failed);
+    QCoreApplication::exit(EXIT_SUCCESS);
+}
+
+void ContourGuiApp::takeGpuFallbackRequest()
+{
+    auto const nameStore = std::string(display::GpuFallbackEnvironmentName);
+    auto const* const name = nameStore.c_str();
+    if (!qEnvironmentVariableIsSet(name))
+        return;
+    _gpuFallbackFrom = qEnvironmentVariable(name).toStdString();
+    // Contour no longer intervenes, so the GPU now rendering is the system's default one.
+    _pendingGpuFallback = display::GpuFallback { .failed = *_gpuFallbackFrom,
+                                                 .used = display::displayGpuTitle(_gpuInventory->list()) };
+    qunsetenv(name); // neither the shells nor a later restart may see it
+}
+
+config::GpuSelector ContourGuiApp::effectiveGpuSelector() const
+{
+    return _gpuFallbackFrom ? config::GpuSelector {} : _config.renderer.value().gpu;
+}
+
+void ContourGuiApp::reportGpuFallbackOnceUp(QQuickWindow& window)
+{
+    if (!_pendingGpuFallback)
+        return;
+    connect(
+        &window,
+        &QQuickWindow::frameSwapped,
+        this,
+        [this] {
+            if (auto const fallback = std::exchange(_pendingGpuFallback, std::nullopt))
+                reportGpuFallback(fallback->failed, fallback->used);
+        },
+        Qt::SingleShotConnection);
+}
+
+void ContourGuiApp::reportGpuFallback(std::string_view failed, std::string_view used)
+{
+    auto const message = std::format("{} could not render; using {} for this session.", failed, used);
+    errorLog()("{}", message);
+    if (!_gpuNotifier)
+        _gpuNotifier = platform::makeDesktopNotifier(std::chrono::seconds(10));
+    auto notification = vtbackend::DesktopNotification {};
+    notification.title = "Contour";
+    notification.body = message;
+    _gpuNotifier->notify(notification);
+}
+
+void ContourGuiApp::applyOpenGlGpuSelection()
+{
+#ifdef __linux__
+    // A Contour started by another Contour inherits the GPU variables its parent set. Drop them first, so
+    // this process decides afresh from the user's real environment (and never mistakes them for the user's).
+    for (auto const& name: display::selfSetNamesFrom(
+             qEnvironmentVariable(std::string(display::SelfSetEnvironmentMarker).c_str()).toStdString()))
+        qunsetenv(name.c_str());
+    qunsetenv(std::string(display::SelfSetEnvironmentMarker).c_str());
+
+    auto const& renderer = _config.renderer.value();
+    auto const selector = effectiveGpuSelector();
+    if (selector.preference == config::GpuPreference::Auto)
+        return; // `auto` does not intervene: the driver stack's default GPU, as without renderer.gpu
+    if (renderer.renderingBackend != config::RenderingBackend::OpenGL
+        && renderer.renderingBackend != config::RenderingBackend::Auto)
+        return; // Vulkan/D3D choose through Qt's adapter API instead; Software has no GPU
+    auto const gpus = _gpuInventory->list();
+    auto const choice = display::chooseGpu(gpus, selector);
+    if (!choice)
+        return;
+    auto const& chosen = gpus[choice->index];
+    if (choice->outcome == display::RequestOutcome::FellBack)
+        errorLog()("renderer.gpu: no GPU {} is present; using {}.", selector, chosen.title);
+    _openGlGpuTitle = chosen.title;
+    // Nothing is set when the chosen GPU already drives the display, or when the user exported the
+    // variables themselves; then the driver decides, and only the scene graph's report names the GPU.
+    auto const assignments = display::openGlSelectionEnvironment(
+        chosen, [](std::string_view name) { return qEnvironmentVariableIsSet(std::string(name).c_str()); });
+    for (auto const& assignment: assignments)
+    {
+        qputenv(assignment.name.c_str(), QByteArray::fromStdString(assignment.value));
+        _selfOnlyEnvironment.push_back(assignment.name);
+    }
+    if (!assignments.empty())
+    {
+        auto const names = display::selfSetMarkerValue(assignments);
+        qputenv(std::string(display::SelfSetEnvironmentMarker).c_str(), QByteArray::fromStdString(names));
+        _selfOnlyEnvironment.emplace_back(display::SelfSetEnvironmentMarker);
+        display::displayLog()("renderer.gpu: set {} so that OpenGL renders on '{}'.", names, chosen.title);
+    }
+#else
+    // Spec 4.3: no supported way to choose an OpenGL GPU here.
+    auto const& renderer = _config.renderer.value();
+    if (renderer.renderingBackend == config::RenderingBackend::OpenGL
+        && renderer.gpu.preference != config::GpuPreference::Auto)
+        errorLog()(
+            "renderer.gpu is ignored for OpenGL on this platform; use Direct3D or Vulkan where available.");
+#endif
+}
 
 int ContourGuiApp::clientAction()
 {
@@ -613,7 +848,7 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                               CLI::Value { ""s },
                               "Sets the sessioni ID used for resuming a prior session.",
                               "SESSION_ID" },
-#if defined(__linux__)
+#ifdef __linux__
                 CLI::Option {
                     "display", CLI::Value { ""s }, "Sets the X11 display to connect to.", "DISPLAY_ID" },
 #endif
@@ -1021,6 +1256,10 @@ int ContourGuiApp::terminalGuiAction()
 
     auto qtArgsCount = static_cast<int>(qtArgsPtr.size());
 
+    // The driver stack reads its GPU-selection variables when the display connection opens.
+    takeGpuFallbackRequest();
+    applyOpenGlGpuSelection();
+
     // NB: We use QApplication over QGuiApplication because we want to use SystemTrayIcon.
     // NOTE: Cannot use ScopedTimer here because QApplication must live until end of function.
     auto const qtInitStart = std::chrono::steady_clock::now();
@@ -1119,6 +1358,14 @@ int ContourGuiApp::terminalGuiAction()
 
     if (auto const api = graphicsApiFor(requestedBackend))
         QQuickWindow::setGraphicsApi(*api);
+
+#ifdef CONTOUR_WITH_GPU_SELECTION
+    // `auto` does not intervene, so it needs no selector: Qt lists and creates the devices as it always did.
+    if (auto const implementation = display::adapterImplementationFor(requestedBackend);
+        implementation && effectiveGpuSelector().preference != config::GpuPreference::Auto)
+        _graphicsDeviceSelector = std::make_unique<display::GraphicsDeviceSelector>(
+            display::makeQtAdapterLister(*implementation), effectiveGpuSelector());
+#endif
 
     QGuiApplication::setWindowIcon(QIcon(":/contour/logo-256.png"));
 
@@ -1275,6 +1522,13 @@ int ContourGuiApp::terminalGuiAction()
 
     // Explicitly destroy QML engine here to ensure it's being destructed before QGuiApplication.
     _qmlEngine.reset();
+    // The GPU-selection helpers hold Qt objects (a timer, a D-Bus notifier, a Vulkan instance), so they too
+    // go before QApplication; the windows they served are gone with the engine.
+    _firstFrameWatchdog.reset();
+    _gpuNotifier.reset();
+#ifdef CONTOUR_WITH_GPU_SELECTION
+    _graphicsDeviceSelector.reset();
+#endif
 
     // printf("\r%s", TBC);
     return rv;

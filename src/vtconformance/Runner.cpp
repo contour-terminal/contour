@@ -357,6 +357,7 @@ namespace
             // vttest inspects the locale to decide whether to switch the terminal out of UTF-8.
             // Pinning it keeps the byte stream — and therefore the goldens — reproducible.
             .env = { { "TERM", "xterm-256color" }, { "LC_ALL", "C" } },
+            .removedEnvironment = {},
         };
 
         auto harness = TerminalHarness { exec, harnessOptions };

@@ -10,6 +10,7 @@ add_library(contour_config STATIC
     Config.cpp Config.hpp
     ConfigDocumentation.hpp
     ConfigEnum.hpp
+    GpuSelector.cpp GpuSelector.hpp
     GuiConfigStore.cpp GuiConfigStore.hpp
     LayoutBuilder.cpp LayoutBuilder.hpp
     LayoutStore.cpp LayoutStore.hpp

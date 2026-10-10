@@ -777,6 +777,7 @@ Rectangle {
                                             type: modelData.type
                                             value: modelData.value
                                             options: modelData.options
+                                            optionLabels: modelData.optionLabels || []
                                             editable: root.controller && !root.controller.locked
                                             onEdited: (key, value) => root.controller.setGlobalField(key, value)
                                         }

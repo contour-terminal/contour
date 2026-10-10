@@ -161,6 +161,7 @@ struct Process::Private
     vector<string> args;
     fs::path cwd;
     Environment env;
+    vector<string> removedEnvironment;
     std::unique_ptr<Pty> pty {};
 
     mutable std::mutex exitStatusMutex {};
@@ -177,10 +178,12 @@ Process::Process(string const& path,
                  vector<string> const& args,
                  fs::path const& cwd,
                  Environment const& env,
+                 vector<string> removedEnvironment,
                  bool escapeSandbox,
                  std::unique_ptr<Pty> pty,
                  std::shared_ptr<ProcessPlacement> placement):
-    _d(new Private { path, args, cwd, env, std::move(pty) }, [](Private* p) { delete p; })
+    _d(new Private { path, args, cwd, env, std::move(removedEnvironment), std::move(pty) },
+       [](Private* p) { delete p; })
 {
     core::ignoreUnused(escapeSandbox);
     core::ignoreUnused(placement); // a ConPTY child has no cgroup to leave
@@ -212,6 +215,9 @@ StartResult Process::start()
 
     // In case of PATH environment variable, extend it rather then overwriting it.
     auto env = _d->env;
+    // An empty value unsets the variable for the child (see InheritingEnvBlock).
+    for (auto const& name: _d->removedEnvironment)
+        env.try_emplace(name, std::string {});
     for (auto const& [name, value]: _d->env)
     {
         if (core::toUpper(name) == "PATH")

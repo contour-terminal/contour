@@ -17,9 +17,34 @@ Selects which Qt RHI graphics API drives the terminal display. Supported values:
 A backend that the running platform cannot provide (e.g. `metal` on Windows) falls back to `auto`
 with a warning. `OpenGL` remains the safe fallback if a native backend misbehaves on your hardware.
 
+`default` is accepted as a legacy alias of `auto`.
+
 ```yml
 renderer:
     backend: auto
+```
+
+### `renderer.gpu`
+
+Which GPU renders the terminal. Takes effect at the next start. Also available in the settings page
+as "Rendering GPU".
+
+| Value | Meaning |
+|-------|---------|
+| `auto` | **Default.** Use the system's default GPU (Contour does not intervene). On most laptops this is the power-saving integrated GPU. |
+| `integrated` | The integrated GPU, if present. |
+| `discrete` | The discrete GPU, if present; otherwise the integrated one. |
+| `vvvv:dddd` | A specific GPU by PCI vendor:device id, e.g. `10de:2820`. If it is absent, `auto` is used. |
+
+Vulkan and Direct3D honour this on Linux and Windows (Qt 6.10 or newer). OpenGL honours it on Linux
+only, through the driver's own variables (`DRI_PRIME`, or NVIDIA's PRIME offload variables); programs
+started inside the terminal do not inherit them. If the chosen GPU cannot render, Contour warns and uses
+`auto` for that session. Under OpenGL the driver fixes the GPU when Contour starts, so Contour restarts
+itself once on the `auto` GPU to do so; the setting itself is not changed.
+
+```yml
+renderer:
+    gpu: auto
 ```
 
 ### `renderer.tile_hashtable_slots`

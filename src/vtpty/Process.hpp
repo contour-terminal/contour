@@ -40,6 +40,8 @@ class [[nodiscard]] Process: public Pty
         std::vector<std::string> arguments;
         std::filesystem::path workingDirectory;
         Environment env;
+        /// Variables dropped from the inherited environment (an `env` entry of the same name still applies).
+        std::vector<std::string> removedEnvironment;
     };
 
     //! Returns login shell of current user.
@@ -82,18 +84,21 @@ class [[nodiscard]] Process: public Pty
                 exe.arguments,
                 exe.workingDirectory,
                 exe.env,
+                exe.removedEnvironment,
                 escapeSandbox,
                 std::move(pty),
                 std::move(placement))
     {
     }
 
+    /// @param removedEnvironment Variables the child must not inherit.
     /// @param placement Moves each spawned child into its own resource domain before it runs; never
     ///                  null. @see ProcessPlacement.
     Process(std::string const& path,
             std::vector<std::string> const& args,
             std::filesystem::path const& cwd,
             Environment const& env,
+            std::vector<std::string> removedEnvironment,
             bool escapeSandbox,
             std::unique_ptr<Pty> pty,
             std::shared_ptr<ProcessPlacement> placement);

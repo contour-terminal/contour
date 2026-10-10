@@ -862,6 +862,23 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             overrides.loadFromEntry("ui_font_family", config.uiFontFamily);
             overrides.loadFromEntry("ui_font_size", config.uiFontSize);
             overrides.loadFromEntry("early_exit_threshold", config.earlyExitThreshold);
+            // Nested sections: the section loader touches only the keys settings.yml actually has. It runs
+            // only when the nested form is present, so a hand-edited scalar `renderer: foo` is ignored
+            // instead of being subscripted (which would throw and abort startup).
+            // The renderer loaders expect the shapes contour.yml documents; settings.yml is hand-editable,
+            // and a malformed entry there must cost that section, never startup.
+            if (std::ranges::any_of(loaded->globalOverrides | std::views::keys,
+                                    [](std::string const& key) { return key.starts_with("renderer."); }))
+            {
+                try
+                {
+                    overrides.loadFromEntry("renderer", config.renderer);
+                }
+                catch (std::exception const& e)
+                {
+                    errorLog()("settings.yml: ignoring the malformed renderer section: {}", e.what());
+                }
+            }
         }
     }
     else
@@ -1032,6 +1049,28 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
         logger()("Loading entry: {}, value {}", entry, where);
     }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, GpuSelector& where)
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+    if (!child.IsScalar())
+    {
+        where = GpuSelector {};
+        errorLog()("Invalid renderer.gpu value (not a single value); using {}.", where);
+        return;
+    }
+    auto const rawValue = child.as<std::string>();
+    if (auto const parsed = parseGpuSelector(rawValue))
+        where = *parsed;
+    else
+    {
+        where = GpuSelector {};
+        errorLog()("Invalid renderer.gpu value '{}'; using {}.", rawValue, where);
+    }
+    logger()("Loading entry: {}, value {}", entry, where);
 }
 
 void YAMLConfigReader::load(Config& c)
@@ -2148,6 +2187,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "tile_hashtable_slots", where.textureAtlasHashtableSlots);
         loadFromEntry(child, "tile_cache_count", where.textureAtlasTileCount);
         loadFromEntry(child, "backend", where.renderingBackend);
+        loadFromEntry(child, "gpu", where.gpu);
     }
 }
 
@@ -4067,8 +4107,23 @@ std::string emitGuiSettingsYaml(GuiManagedSettings const& settings)
     out << YAML::BeginMap;
     if (settings.defaultProfile)
         out << YAML::Key << "default_profile" << YAML::Value << *settings.defaultProfile;
+    // A dotted key ("renderer.gpu") is a nested setting: each section is written once, as a map, so
+    // settings.yml reads exactly like the contour.yml it overrides.
+    auto nested = std::map<std::string, std::map<std::string, std::string>> {};
     for (auto const& [key, value]: settings.globalOverrides)
-        out << YAML::Key << key << YAML::Value << value;
+    {
+        if (auto const dot = key.find('.'); dot != std::string::npos)
+            nested[key.substr(0, dot)][key.substr(dot + 1)] = value;
+        else
+            out << YAML::Key << key << YAML::Value << value;
+    }
+    for (auto const& [section, entries]: nested)
+    {
+        out << YAML::Key << section << YAML::Value << YAML::BeginMap;
+        for (auto const& [name, value]: entries)
+            out << YAML::Key << name << YAML::Value << value;
+        out << YAML::EndMap;
+    }
     out << YAML::EndMap;
     return std::string { out.c_str() } + '\n';
 }
@@ -4126,9 +4181,18 @@ std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesyst
     if (doc.IsMap())
         for (auto const& entry: doc)
         {
+            if (!entry.first.IsScalar())
+                continue; // a complex YAML key cannot name a setting
             auto const key = entry.first.as<std::string>();
-            if (key != "default_profile" && entry.second.IsScalar())
+            if (key == "default_profile")
+                continue;
+            if (entry.second.IsScalar())
                 settings.globalOverrides[key] = entry.second.as<std::string>();
+            else if (entry.second.IsMap())
+                for (auto const& child: entry.second)
+                    if (child.first.IsScalar() && child.second.IsScalar())
+                        settings.globalOverrides[key + '.' + child.first.as<std::string>()] =
+                            child.second.as<std::string>();
         }
 
     return settings;
