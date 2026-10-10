@@ -127,7 +127,7 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
         terminal.sendKeyEvent(vtbackend::Key::LeftShift,
                               vtbackend::Modifiers { vtbackend::Modifier::Shift },
                               vtbackend::KeyboardEventType::Press,
-                              std::chrono::steady_clock::now());
+                              mc.steadyClock.now());
 
         // Viewport should remain scrolled
         CHECK(terminal.viewport().scrolled());
@@ -142,7 +142,7 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
         terminal.sendKeyEvent(vtbackend::Key::Enter,
                               vtbackend::Modifiers { vtbackend::Modifier::None },
                               vtbackend::KeyboardEventType::Press,
-                              std::chrono::steady_clock::now());
+                              mc.steadyClock.now());
 
         // Viewport should scroll to bottom
         CHECK(!terminal.viewport().scrolled());
@@ -170,7 +170,7 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
             terminal.sendKeyEvent(modKey,
                                   vtbackend::Modifiers { vtbackend::Modifier::None },
                                   vtbackend::KeyboardEventType::Press,
-                                  std::chrono::steady_clock::now());
+                                  mc.steadyClock.now());
 
             CHECK(terminal.viewport().scrolled());
         }
@@ -304,10 +304,8 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
 
-        terminal.sendKeyEvent(vtbackend::Key::Enter,
-                              anyModifiers,
-                              vtbackend::KeyboardEventType::Press,
-                              std::chrono::steady_clock::now());
+        terminal.sendKeyEvent(
+            vtbackend::Key::Enter, anyModifiers, vtbackend::KeyboardEventType::Press, mc.steadyClock.now());
 
         CHECK(!terminal.viewport().scrolled());
     }
@@ -318,10 +316,8 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
 
-        terminal.sendKeyEvent(vtbackend::Key::Enter,
-                              anyModifiers,
-                              vtbackend::KeyboardEventType::Press,
-                              std::chrono::steady_clock::now());
+        terminal.sendKeyEvent(
+            vtbackend::Key::Enter, anyModifiers, vtbackend::KeyboardEventType::Press, mc.steadyClock.now());
 
         CHECK(!terminal.viewport().scrolled());
     }
@@ -337,7 +333,7 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
                                vtbackend::KeyIdentity { .unshiftedKey = U'a' },
                                anyModifiers,
                                vtbackend::KeyboardEventType::Press,
-                               std::chrono::steady_clock::now());
+                               mc.steadyClock.now());
 
         CHECK(!terminal.viewport().scrolled());
     }
@@ -352,7 +348,7 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
                                vtbackend::KeyIdentity { .unshiftedKey = U'a' },
                                anyModifiers,
                                vtbackend::KeyboardEventType::Press,
-                               std::chrono::steady_clock::now());
+                               mc.steadyClock.now());
 
         CHECK(!terminal.viewport().scrolled());
     }
@@ -372,10 +368,8 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         // the release assertion below is not vacuous.
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
-        terminal.sendKeyEvent(vtbackend::Key::UpArrow,
-                              anyModifiers,
-                              vtbackend::KeyboardEventType::Press,
-                              std::chrono::steady_clock::now());
+        terminal.sendKeyEvent(
+            vtbackend::Key::UpArrow, anyModifiers, vtbackend::KeyboardEventType::Press, mc.steadyClock.now());
         REQUIRE(!terminal.viewport().scrolled());
 
         // The release generates input too, but must leave the viewport parked where the user put it.
@@ -386,7 +380,7 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         terminal.sendKeyEvent(vtbackend::Key::UpArrow,
                               anyModifiers,
                               vtbackend::KeyboardEventType::Release,
-                              std::chrono::steady_clock::now());
+                              mc.steadyClock.now());
 
         CHECK(terminal.viewport().scrolled());
         CHECK(terminal.viewport().scrollOffset() == offsetBefore);
@@ -404,7 +398,7 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
                                vtbackend::KeyIdentity { .unshiftedKey = U'a' },
                                anyModifiers,
                                vtbackend::KeyboardEventType::Release,
-                               std::chrono::steady_clock::now());
+                               mc.steadyClock.now());
 
         CHECK(terminal.viewport().scrolled());
         CHECK(terminal.viewport().scrollOffset() == offsetBefore);
@@ -834,8 +828,9 @@ TEST_CASE("Terminal.SynchronizedOutputTimesOut", "[terminal]")
     // still report it enabled, because that is what the application asked for.
     constexpr auto BatchOn = "\033[?2026h"sv;
 
-    auto const now = chrono::steady_clock::now();
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    mc.steadyClock.advance(1s); // a second into the session: past the render throttle's interval
+    auto const now = mc.steadyClock.now();
 
     mc.writeToScreen(BatchOn);
     mc.writeToScreen("Hello");
@@ -861,8 +856,9 @@ TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
     constexpr auto BatchOn = "\033[?2026h"sv;
     constexpr auto BatchOff = "\033[?2026l"sv;
 
-    auto const now = chrono::steady_clock::now();
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    mc.steadyClock.advance(1s); // a second into the session: past the render throttle's interval
+    auto const now = mc.steadyClock.now();
 
     mc.writeToScreen(BatchOn);
     mc.writeToScreen("Hello ");
@@ -1443,8 +1439,9 @@ TEST_CASE("Terminal.UnderlineStyleClearing", "[terminal]")
 {
     // Each subsequent underline style should clear the former if present.
 
-    auto const now = chrono::steady_clock::now();
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    mc.steadyClock.advance(1s); // a second into the session: past the render throttle's interval
+    auto const now = mc.steadyClock.now();
 
     mc.writeToScreen("\033[4:1mAB\033[21mCD\033[4:3mEF\033[24mGH\033[4:2mIJ\033[mKL");
     mc.terminal.tick(now);
@@ -1531,8 +1528,9 @@ TEST_CASE("Terminal.a_one_column_selection_still_breaks_lines", "[terminal]")
 
 TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
 {
-    auto const now = chrono::steady_clock::now();
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    mc.steadyClock.advance(1s); // a second into the session: past the render throttle's interval
+    auto const now = mc.steadyClock.now();
 
     mc.writeToScreen("\033[4:3mAB\033[mCD");
     mc.terminal.tick(now);
@@ -3575,7 +3573,7 @@ void parseDuringKeyPressWrite(MockTerm<GatedPty>& mock, std::string_view vt)
         mock.terminal.sendKeyEvent(vtbackend::Key::UpArrow,
                                    vtbackend::KeyboardModifiers {},
                                    vtbackend::KeyboardEventType::Press,
-                                   chrono::steady_clock::now());
+                                   mock.steadyClock.now());
     });
     if (!mock.mockPty().awaitFirstWrite(5s))
     {

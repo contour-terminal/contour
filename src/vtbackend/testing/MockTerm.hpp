@@ -68,9 +68,15 @@ class MockTerm: public Terminal::NullEvents
 
     void writeToStdin(std::string_view text) { mockPty().stdinBuffer() += text; }
 
-    bool sendCharEvent(char32_t ch,
-                       KeyboardModifiers modifiers = KeyboardModifiers {},
-                       Terminal::Timestamp now = std::chrono::steady_clock::now())
+    /// Sends a full press/release pair for @p ch with @p modifiers held, at the time steadyClock reads.
+    /// @return whether the press event was handled by the terminal.
+    bool sendCharEvent(char32_t ch, KeyboardModifiers modifiers = KeyboardModifiers {})
+    {
+        return sendCharEvent(ch, modifiers, steadyClock.now());
+    }
+
+    /// The same, at @p now rather than at the time steadyClock reads.
+    bool sendCharEvent(char32_t ch, KeyboardModifiers modifiers, Terminal::Timestamp now)
     {
         // Synthesize the key identity here, as we don't have a real keyboard to ask.
         auto const keyIdentity =
@@ -82,11 +88,15 @@ class MockTerm: public Terminal::NullEvents
         return true;
     }
 
-    /// Sends a full press/release pair for @p key with @p modifiers held.
+    /// Sends a full press/release pair for @p key with @p modifiers held, at the time steadyClock reads.
     /// @return whether the press event was handled by the terminal.
-    bool sendKeyEvent(Key key,
-                      KeyboardModifiers modifiers = KeyboardModifiers {},
-                      Terminal::Timestamp now = std::chrono::steady_clock::now())
+    bool sendKeyEvent(Key key, KeyboardModifiers modifiers = KeyboardModifiers {})
+    {
+        return sendKeyEvent(key, modifiers, steadyClock.now());
+    }
+
+    /// The same, at @p now rather than at the time steadyClock reads.
+    bool sendKeyEvent(Key key, KeyboardModifiers modifiers, Terminal::Timestamp now)
     {
         if (!terminal.sendKeyEvent(key, modifiers, KeyboardEventType::Press, now))
             return false;
@@ -94,10 +104,14 @@ class MockTerm: public Terminal::NullEvents
         return true;
     }
 
-    // Convenience method to type into stdin a sequence of characters.
-    void sendCharSequence(std::string_view sequence,
-                          KeyboardModifiers modifiers = KeyboardModifiers {},
-                          Terminal::Timestamp now = std::chrono::steady_clock::now())
+    /// Types @p sequence into stdin, one character event per codepoint, at the time steadyClock reads.
+    void sendCharSequence(std::string_view sequence, KeyboardModifiers modifiers = KeyboardModifiers {})
+    {
+        sendCharSequence(sequence, modifiers, steadyClock.now());
+    }
+
+    /// The same, at @p now rather than at the time steadyClock reads.
+    void sendCharSequence(std::string_view sequence, KeyboardModifiers modifiers, Terminal::Timestamp now)
     {
         auto const codepoints = unicode::convert_to<char32_t>(sequence);
         for (auto const codepoint: codepoints)

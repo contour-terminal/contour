@@ -322,7 +322,7 @@ TEST_CASE("Terminal.kitty_keyboard_protocol_reports_lock_modifiers", "[terminal]
                                 vtbackend::KeyIdentity { .unshiftedKey = U'a' },
                                 CapsLockOnly,
                                 vtbackend::KeyboardEventType::Press,
-                                std::chrono::steady_clock::now());
+                                mock.steadyClock.now());
 
     CHECK(e(mock.replyData()) == e("\033[97;65u"));
 }
@@ -335,7 +335,7 @@ TEST_CASE("Terminal.win32_input_mode_reports_unicode_for_escape_and_numpad", "[t
     mock.writeToScreen("\033[?9001h");
     mock.terminal.flushInput();
 
-    auto const now = std::chrono::steady_clock::now();
+    auto const now = mock.steadyClock.now();
 
     SECTION("Escape carries its Unicode char 0x1B")
     {
