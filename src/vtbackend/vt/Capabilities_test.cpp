@@ -115,3 +115,43 @@ TEST_CASE("Capabilities.removed_caps_return_empty_from_api", "[issue-1861]")
     CHECK(tcap.stringCapability("khlp").empty());
     CHECK(tcap.stringCapability("kund").empty());
 }
+
+namespace
+{
+/// The static capabilities, but with `kcuu1` (termcap `ku`) as a terminal in 8-bit controls sends it: a
+/// single-byte CSI, 0x9B, which is past ASCII.
+class EightBitControlsDatabase final: public vtbackend::capabilities::StaticDatabase
+{
+  public:
+    static constexpr auto CursorUp = "\x9b"
+                                     "A"sv;
+
+    [[nodiscard]] std::string_view stringCapability(vtbackend::capabilities::Code code) const override
+    {
+        return code == "ku"sv ? CursorUp : StaticDatabase::stringCapability(code);
+    }
+
+    [[nodiscard]] std::string_view stringCapability(std::string_view name) const override
+    {
+        return name == "kcuu1" ? CursorUp : StaticDatabase::stringCapability(name);
+    }
+};
+} // namespace
+
+TEST_CASE("Capabilities.capabilityReply spells each byte as two hex digits", "[capabilities]")
+{
+    // xterm hex-encodes every byte of a value as two upper-case digits (ctlseqs.txt, XTGETTCAP); measured on
+    // xterm 407 in 8-bit controls, kcuu1 answers DCS 1+r6B63757531=9B41 ST. A byte past ASCII is no
+    // exception.
+    auto const database = EightBitControlsDatabase {};
+    using vtbackend::capabilities::capabilityReply;
+    using vtbackend::capabilities::Code;
+
+    CHECK(capabilityReply(database, "kcuu1") == "\033P1+r6B63757531=9B41\033\\");
+    CHECK(capabilityReply(database, Code { "ku" }) == "\033P1+r6B75=9B41\033\\");
+
+    // The reply's other forms, which a value past ASCII does not touch.
+    CHECK(capabilityReply(database, "colors") == "\033P1+r636F6C6F7273=323536\033\\");
+    CHECK(capabilityReply(database, "am") == "\033P1+r616D\033\\");
+    CHECK(capabilityReply(database, "xx") == "\033P0+r\033\\");
+}

@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <array>
 #include <compare>
+#include <format>
 #include <sstream>
+#include <string>
 #include <vector>
 
 using std::nullopt;
@@ -468,6 +470,42 @@ string StaticDatabase::terminfo() const
                    << ",\n";
 
     return output.str();
+}
+
+namespace
+{
+    /// @return Each byte of @p bytes as two upper-case hexadecimal digits.
+    std::string hexEncoded(std::string_view bytes)
+    {
+        auto output = std::string {};
+        output.reserve(bytes.size() * 2);
+        for (auto const byte: bytes)
+            output += std::format("{:02X}", static_cast<unsigned char>(byte));
+        return output;
+    }
+
+    /// The reply for the capability @p key names, echoing it as @p hexKey.
+    template <typename Key>
+    std::string capabilityReplyFor(Database const& database, Key key, std::string_view hexKey)
+    {
+        if (database.booleanCapability(key))
+            return std::format("\033P1+r{}\033\\", hexKey);
+        if (auto const value = database.numericCapability(key); value != Database::Npos)
+            return std::format("\033P1+r{}={}\033\\", hexKey, hexEncoded(std::to_string(value)));
+        if (auto const value = database.stringCapability(key); !value.empty())
+            return std::format("\033P1+r{}={}\033\\", hexKey, hexEncoded(value));
+        return "\033P0+r\033\\";
+    }
+} // namespace
+
+std::string capabilityReply(Database const& database, std::string_view name)
+{
+    return capabilityReplyFor(database, name, hexEncoded(name));
+}
+
+std::string capabilityReply(Database const& database, Code code)
+{
+    return capabilityReplyFor(database, code, code.hex());
 }
 
 } // namespace vtbackend::capabilities

@@ -67,7 +67,6 @@ using namespace std::string_view_literals;
 
 using core::escape;
 using core::times;
-using core::toHexString;
 
 using std::array;
 using std::clamp;
@@ -3147,39 +3146,14 @@ void Screen::requestTabStops()
     reply(dcs.str());
 }
 
-namespace
-{
-    std::string asHex(std::string_view value)
-    {
-        std::string output;
-        for (char const ch: value)
-            output += std::format("{:02X}", unsigned(ch));
-        return output;
-    }
-} // namespace
-
 void Screen::requestCapability(std::string_view name)
 {
-    if (booleanCapability(name))
-        reply("\033P1+r{}\033\\", toHexString(name));
-    else if (auto const value = numericCapability(name); value != Database::Npos)
-        reply("\033P1+r{}={}\033\\", toHexString(name), asHex(std::to_string(value)));
-    else if (auto const value = stringCapability(name); !value.empty())
-        reply("\033P1+r{}={}\033\\", toHexString(name), asHex(value));
-    else
-        reply("\033P0+r\033\\");
+    reply(capabilities::capabilityReply(*this, name));
 }
 
 void Screen::requestCapability(capabilities::Code code)
 {
-    if (booleanCapability(code))
-        reply("\033P1+r{}\033\\", code.hex());
-    else if (auto const value = numericCapability(code); value != Database::Npos)
-        reply("\033P1+r{}={}\033\\", code.hex(), asHex(std::to_string(value)));
-    else if (auto const value = stringCapability(code); !value.empty())
-        reply("\033P1+r{}={}\033\\", code.hex(), asHex(value));
-    else
-        reply("\033P0+r\033\\");
+    reply(capabilities::capabilityReply(*this, code));
 }
 
 void Screen::resetDynamicColor(DynamicColorName name)
