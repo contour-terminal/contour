@@ -3481,8 +3481,8 @@ TEST_CASE("Screen.screenshot.replaysWideCharactersInPlace", "[screen]")
     auto const& screen = mock.terminal.primaryScreen();
     REQUIRE(screen.grid().lineAt(LineOffset(1)).storage().sgr[4].flags.contains(CellFlag::WrapPadding));
 
-    // One row more than the page: each row of the screenshot ends in a line break, the last one too.
-    auto replay = MockTerm { PageSize { pageSize.lines + 1, pageSize.columns } };
+    // The same height: a line break between rows, and none after the last, which would scroll the page.
+    auto replay = MockTerm { pageSize };
     replay.writeToScreen(screen.screenshot());
     auto const& replayed = replay.terminal.primaryScreen();
 
@@ -3512,7 +3512,7 @@ TEST_CASE("Screen.screenshot.keepsTheColumnsOfATextSizingBlock", "[screen]")
     auto const& screen = mock.terminal.primaryScreen();
     REQUIRE(screen.grid().lineAt(LineOffset(0)).toUtf8ColumnAligned() == "X  z  ");
 
-    auto replay = MockTerm { PageSize { pageSize.lines + 1, pageSize.columns } };
+    auto replay = MockTerm { pageSize };
     replay.writeToScreen(screen.screenshot());
     CHECK(replay.terminal.primaryScreen().grid().lineAt(LineOffset(0)).toUtf8ColumnAligned() == "X  z  ");
 }

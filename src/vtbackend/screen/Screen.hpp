@@ -418,8 +418,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///
     /// @note Only the screenshot of the current buffer is taken, not both (main and alternate).
     ///
-    /// @returns necessary commands needed to draw the current screen state,
-    ///          including initial clear screen, and initial cursor hide.
+    /// @returns The page's rows as text and renditions, separated by CRLF and with none after the last, so
+    ///          that replaying it from the top-left cell of a page of the same size draws the page again
+    ///          without scrolling it.
     [[nodiscard]] std::string screenshot(std::function<std::string(LineOffset)> const& postLine = {}) const;
 
     void crlf() { linefeed(margin().horizontal.from); }

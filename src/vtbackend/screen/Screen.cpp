@@ -1012,10 +1012,12 @@ std::string Screen::screenshot(function<string(LineOffset)> const& postLine) con
 
     for (int const line: iota(0, *pageSize().lines))
     {
+        // A line break between rows only: one after the last would scroll the replayed page by a row.
+        if (line > 0)
+            writer.crlf();
         writer.write(_grid.lineAt(LineOffset(line)));
         if (postLine)
             writer.write(postLine(LineOffset(line)));
-        writer.crlf();
     }
 
     return result.str();
