@@ -156,6 +156,14 @@ if(VTPTY_TESTING)
     if(WIN32)
         # ConPty is the Windows-only PTY backend.
         target_sources(vtpty_test PRIVATE ConPty_test.cpp)
+
+        # The child half of the ConPty tests that run a program: a console program writing OSC 133 marks
+        # the way a shell integration does, then a sentinel, so a test can see what survives the
+        # pseudoconsole.
+        add_executable(conpty_osc133_probe test/conpty_osc133_probe.cpp)
+        add_dependencies(vtpty_test conpty_osc133_probe)
+        target_compile_definitions(vtpty_test PRIVATE
+            VTPTY_CONPTY_OSC133_PROBE="$<TARGET_FILE:conpty_osc133_probe>")
     else()
         target_sources(vtpty_test PRIVATE ProcessPlacement_test.cpp ScopeRequestEncoding_test.cpp SystemdScopePlacement_test.cpp UnixPty_test.cpp)
     endif()

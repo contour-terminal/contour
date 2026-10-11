@@ -1,15 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ConPty.hpp>
+#include <vtpty/Process.hpp>
+#include <vtpty/ProcessPlacement.hpp>
+#include <vtpty/test/PtyReading.hpp>
 
 #include <crispy/BufferObject.hpp>
 
+#include <core/Escape.hpp>
+
+#include <gsl/util>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
+#include <filesystem>
 #include <future>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
+#include <stop_token>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+#include <Windows.h>
 
 using vtpty::ColumnCount;
 using vtpty::ConPty;
@@ -22,6 +44,68 @@ namespace
 constexpr PageSize pageSize(int columns, int lines) noexcept
 {
     return PageSize { .lines = LineCount(lines), .columns = ColumnCount(columns) };
+}
+
+/// What a terminal answers to the two queries a pseudoconsole may send it at startup: primary
+/// device attributes and the cursor position. An unanswered one can hold ConPTY's output back.
+constexpr auto TerminalAnswers = std::array {
+    std::pair { std::string_view { "\x1b[c" }, std::string_view { "\x1b[?61;4c" } },
+    std::pair { std::string_view { "\x1b[6n" }, std::string_view { "\x1b[1;1R" } },
+};
+
+/// The line the probe prints last, after every mark.
+constexpr auto ProbeSentinel = std::string_view { "contour-probe-done" };
+
+/// @return The probe: a console program that writes OSC 133 marks, then ProbeSentinel.
+std::filesystem::path probeProgram()
+{
+    auto probe = std::filesystem::path { VTPTY_CONPTY_OSC133_PROBE };
+    probe.make_preferred();
+    return probe;
+}
+
+/// Runs the probe on a pseudoconsole and reads what a terminal would see of it until the probe's
+/// sentinel, answering the pseudoconsole's queries along the way as a terminal would.
+/// @return Everything the pseudoconsole wrote.
+std::string runProbe()
+{
+    auto process = vtpty::Process { vtpty::Process::ExecInfo { .program = probeProgram().string(),
+                                                               .arguments = {},
+                                                               .workingDirectory = {},
+                                                               .env = {},
+                                                               .removedEnvironment = {} },
+                                    vtpty::createPty(pageSize(80, 24), std::nullopt),
+                                    /*escapeSandbox=*/false,
+                                    std::make_shared<vtpty::NoPlacement>() };
+    auto const started = process.start();
+
+    // A read on ConPTY blocks until the pseudoconsole has something to say. Ending the child is what
+    // makes it return, should the probe never print its sentinel; ending it on the way out as well
+    // means no failed assertion can leave ~Process waiting on a child that is still running.
+    auto const watchdog = std::jthread { [&process](std::stop_token const& stop) {
+        auto mutex = std::mutex {};
+        auto lock = std::unique_lock { mutex };
+        auto wakeup = std::condition_variable_any {};
+        std::ignore = wakeup.wait_for(lock, stop, std::chrono::seconds { 30 }, [] { return false; });
+        process.terminate(vtpty::Process::TerminationHint::Normal);
+    } };
+
+    REQUIRE(started.has_value());
+    // The probe itself, not the login shell a failed spawn falls back to.
+    REQUIRE(started->diagnostic.empty());
+
+    auto answered = std::vector<std::string_view> {};
+    return vtpty::testing::readUntil(process, [&](std::string_view text) {
+        for (auto const& [query, answer]: TerminalAnswers)
+        {
+            if (text.contains(query) && !std::ranges::contains(answered, query))
+            {
+                answered.push_back(query);
+                std::ignore = process.write(answer);
+            }
+        }
+        return text.contains(ProbeSentinel);
+    });
 }
 
 } // namespace
@@ -149,4 +233,31 @@ TEST_CASE("ConPty.read.aFailedReadSaysTheDeviceIsGone", "[vtpty][conpty]")
     CHECK_FALSE(result.has_value());
     CHECK(error != EAGAIN);
     CHECK(error != EINTR);
+}
+
+// A child writes to its pseudoconsole even while this process's own standard output is redirected,
+// as it is under ctest, or for a daemon logging to a file. Unless told which standard handles to use,
+// CreateProcess hands a console child its parent's redirected ones, and everything the child prints
+// then bypasses the terminal for the parent's output.
+TEST_CASE("ConPty.childWritesToPseudoconsoleWhileOutputIsRedirected", "[vtpty][conpty]")
+{
+    // Inheritable, as the pipe a test runner reads this process's output from is.
+    auto inheritable = SECURITY_ATTRIBUTES { .nLength = sizeof(SECURITY_ATTRIBUTES),
+                                             .lpSecurityDescriptor = nullptr,
+                                             .bInheritHandle = TRUE };
+    auto readEnd = HANDLE {};
+    auto writeEnd = HANDLE {};
+    REQUIRE(CreatePipe(&readEnd, &writeEnd, &inheritable, 0));
+    auto* const originalOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetStdHandle(STD_OUTPUT_HANDLE, writeEnd);
+    auto const restoreOutput = gsl::finally([&] {
+        SetStdHandle(STD_OUTPUT_HANDLE, originalOutput);
+        CloseHandle(writeEnd);
+        CloseHandle(readEnd);
+    });
+
+    auto const output = runProbe();
+    INFO("pseudoconsole output: " << core::escape(output));
+
+    CHECK(output.contains(ProbeSentinel));
 }

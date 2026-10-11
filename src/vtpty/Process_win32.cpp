@@ -110,6 +110,12 @@ namespace
 
         startupInfoEx.StartupInfo.cb = sizeof(STARTUPINFOEX);
 
+        // Standard handles left null, and named as the ones to use, so that the child takes the
+        // pseudoconsole's. Without the flag a console child is handed ours whenever they are
+        // redirected -- Contour run under ctest, from a script, or as a daemon logging to a file --
+        // and writes there, past the terminal. Windows Terminal, alacritty and wezterm do the same.
+        startupInfoEx.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+
         // Get the size of the thread attribute list.
         InitializeProcThreadAttributeList(NULL, 1, 0, &attrListSize);
 
