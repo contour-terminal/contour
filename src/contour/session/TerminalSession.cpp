@@ -159,10 +159,11 @@ namespace
     }
 #endif
 
-    string normalizeCrlf(QString text)
+    string normalizeCrlf(QString const& text)
     {
 #ifndef _WIN32
-        return text.replace("\r\n", "\n").replace("\r", "\n").toUtf8().toStdString();
+        // A copy shares the text's buffer until replace() writes to it.
+        return QString { text }.replace("\r\n", "\n").replace("\r", "\n").toUtf8().toStdString();
 #else
         return text.toUtf8().toStdString();
 #endif
