@@ -108,12 +108,14 @@ namespace
         return std::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
     }
 
-    void setThreadName(char const* name)
+    /// Names the calling thread `Terminal.Loop`, as `ps -T` and debuggers show it, where POSIX threads
+    /// can be named; Windows names no thread here.
+    void nameMainLoopThread()
     {
 #ifdef __APPLE__
-        pthread_setname_np(name);
+        pthread_setname_np("Terminal.Loop");
 #elifndef _WIN32
-        pthread_setname_np(pthread_self(), name);
+        pthread_setname_np(pthread_self(), "Terminal.Loop");
 #endif
     }
 
@@ -521,7 +523,7 @@ void TerminalSession::reportDeviceStartFailure(vtpty::StartFailure const& failur
 
 void TerminalSession::mainLoop()
 {
-    setThreadName("Terminal.Loop");
+    nameMainLoopThread();
 
     _mainLoopThreadID = this_thread::get_id();
 
