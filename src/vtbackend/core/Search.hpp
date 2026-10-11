@@ -10,9 +10,7 @@ namespace vtbackend
 
 // What a search IS -- its case policy, where its pattern came from, and how its matches are counted
 // and painted. Deliberately free of core/Primitives.hpp, so that grid/, screen/, input/vi/ and the
-// GUI can all name this vocabulary without dragging the whole primitive set behind it. The one
-// search type that stays behind is SearchResult, whose ColumnOffset member would require exactly
-// that include.
+// GUI can all name this vocabulary without dragging the whole primitive set behind it.
 
 /// Whether a search compares letters by their case.
 ///

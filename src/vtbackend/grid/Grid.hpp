@@ -147,214 +147,6 @@ struct LogicalLine
             output += line.get().toUtf8();
         return output;
     }
-
-    // Searches from left to right, taking into account line wrapping
-    [[nodiscard]] std::optional<vtbackend::CellLocation> search(std::u32string_view searchText,
-                                                                ColumnOffset startPosition,
-                                                                bool isCaseSensitive) const
-    {
-        auto const lineLength = unbox<size_t>(lines.front().get().size());
-        auto i = top;
-        if (searchText.size() > lineLength)
-        {
-            for (auto line = lines.begin(); line != lines.end(); ++line)
-            {
-                auto const textOnThisLine = searchText.substr(0, lineLength - unbox<size_t>(startPosition));
-                // Find how much of searchText is on this line
-                auto const result = searchPartialMatch(textOnThisLine, line->get(), isCaseSensitive);
-                if (result != 0)
-                {
-                    // Match the remaining text
-                    std::u32string_view const remainingTextToMatch(searchText.data() + result,
-                                                                   searchText.size() - result);
-                    if (matchTextAt(remainingTextToMatch, ColumnOffset(0), line + 1, isCaseSensitive))
-                        return CellLocation { .line = i,
-                                              .column = ColumnOffset(static_cast<int>(lineLength - result)) };
-                }
-                startPosition = ColumnOffset(0);
-                ++i;
-            }
-            return std::nullopt;
-        }
-        for (auto line = lines.begin(); line != lines.end(); ++line)
-        {
-            auto result = line->get().search(searchText, startPosition, isCaseSensitive);
-            if (result.has_value())
-            {
-                if (result->partialMatchLength == 0)
-                    return CellLocation { .line = i, .column = result->column };
-                auto remainingText = searchText;
-                remainingText.remove_prefix(result->partialMatchLength);
-                if (line + 1 != lines.end()
-                    && (line + 1)->get().matchTextAtWithSensitivityMode(
-                        remainingText, ColumnOffset(0), isCaseSensitive))
-                    return CellLocation { .line = i,
-                                          .column = ColumnOffset::cast_from(
-                                              static_cast<int>(unbox<size_t>(line->get().size())
-                                                               - result->partialMatchLength)) };
-            }
-            startPosition = ColumnOffset(0);
-            ++i;
-        }
-        return std::nullopt;
-    }
-
-    // Searches from right to left, taking into account line wrapping
-    [[nodiscard]] std::optional<vtbackend::CellLocation> searchReverse(std::u32string_view searchText,
-                                                                       ColumnOffset startPosition,
-                                                                       bool isCaseSensitive) const
-    {
-        auto i = bottom;
-        auto const lineLength = unbox<size_t>(lines.front().get().size());
-        if (searchText.size() > lineLength)
-        {
-            for (auto line = lines.rbegin(); line != lines.rend(); ++line)
-            {
-                std::u32string_view const textOnThisLine(searchText.data() + searchText.size()
-                                                             - unbox<size_t>(startPosition),
-                                                         unbox<size_t>(startPosition));
-                auto const result = searchPartialMatchReverse(textOnThisLine, line->get(), isCaseSensitive);
-                if (result != 0)
-                {
-                    std::u32string_view remainingText(searchText.data(), searchText.size() - result);
-                    // Check if the searchText can even fit in the available lines
-                    auto const willFit = [&] {
-                        auto const count = static_cast<size_t>(
-                            std::max(long { 0 }, static_cast<long>(std::distance(line + 1, lines.rend()))));
-                        auto const total = count * lineLength;
-                        return total >= remainingText.size();
-                    }();
-                    if (!willFit)
-                        return std::nullopt;
-
-                    // Column where the remaining text should start at
-                    auto const startCol = ColumnOffset::cast_from(
-                        (lineLength - (remainingText.size() % lineLength)) % lineLength);
-
-                    // Line where the remaining text should start at
-                    long const startLine = static_cast<long>(std::ceil(
-                        static_cast<double>(remainingText.size()) / static_cast<double>(lineLength)));
-
-                    if (matchTextAtReverse(remainingText, startCol, line + startLine, isCaseSensitive))
-                        return CellLocation { .line = LineOffset::cast_from(i.value - startLine),
-                                              .column = startCol };
-                }
-                startPosition = ColumnOffset::cast_from(lineLength - 1);
-                --i;
-            }
-            return std::nullopt;
-        }
-        auto const lastColumn = ColumnOffset::cast_from(lineLength);
-        for (auto line = lines.rbegin(); line != lines.rend(); ++line)
-        {
-            auto result = line->get().searchReverse(searchText, startPosition, isCaseSensitive);
-            if (result.has_value())
-            {
-                if (result->partialMatchLength == 0)
-                    return CellLocation { .line = i, .column = result->column };
-                auto remainingText = searchText;
-                remainingText.remove_suffix(result->partialMatchLength);
-                if (line + 1 != lines.rend()
-                    && (line + 1)->get().matchTextAtWithSensitivityMode(
-                        remainingText, lastColumn - static_cast<int>(remainingText.size()), isCaseSensitive))
-                    return CellLocation { .line = i - 1,
-                                          .column = lastColumn - static_cast<int>(remainingText.size()) };
-            }
-            startPosition = lastColumn - 1;
-            --i;
-        }
-        return std::nullopt;
-    }
-
-  private:
-    // Finds the maximum number of characters of searchText that can be matched from right end of line
-    [[nodiscard]] size_t searchPartialMatch(std::u32string_view searchText,
-                                            Line const& line,
-                                            bool isCaseSensitive) const noexcept
-    {
-        auto const lineLength = unbox<size_t>(line.size());
-        while (!searchText.empty())
-        {
-            if (line.matchTextAtWithSensitivityMode(
-                    searchText,
-                    ColumnOffset(static_cast<int>(lineLength - searchText.size())),
-                    isCaseSensitive))
-                return searchText.size();
-            searchText.remove_suffix(1);
-        }
-        return 0;
-    }
-
-    // Finds the maximum number of characters of searchText that can be matched from left end of line
-    [[nodiscard]] size_t searchPartialMatchReverse(std::u32string_view searchText,
-                                                   Line const& line,
-                                                   bool isCaseSensitive) const noexcept
-    {
-        while (!searchText.empty())
-        {
-            if (line.matchTextAtWithSensitivityMode(searchText, ColumnOffset(0), isCaseSensitive))
-                return searchText.size();
-            searchText.remove_prefix(1);
-        }
-        return 0;
-    }
-
-    [[nodiscard]] auto segmentSearchText(std::u32string_view searchText, ColumnOffset startCol) const noexcept
-    {
-        std::vector<std::u32string_view> segments;
-        auto const lineLength = unbox<size_t>(lines.front().get().size());
-        if (startCol > ColumnOffset(0))
-        {
-            segments.emplace_back(searchText.data(), lineLength - unbox<size_t>(startCol));
-            searchText.remove_prefix(lineLength - unbox<size_t>(startCol));
-        }
-        while (!searchText.empty())
-        {
-            if (searchText.size() < lineLength)
-            {
-                segments.emplace_back(searchText);
-                break;
-            }
-            segments.emplace_back(searchText.data(), lineLength);
-            searchText.remove_prefix(lineLength);
-        }
-        return segments;
-    }
-
-    // Match searchText right to left starting at startCol in line startLine
-    template <typename Itr>
-    [[nodiscard]] bool matchTextAt(std::u32string_view searchText,
-                                   ColumnOffset startCol,
-                                   Itr startLine,
-                                   bool isCaseSensitive) const noexcept
-    {
-        auto segments = segmentSearchText(searchText, startCol);
-        for (auto segment: segments)
-        {
-            if (!startLine->get().matchTextAtWithSensitivityMode(segment, startCol, isCaseSensitive))
-                return false;
-            ++startLine;
-        }
-        return true;
-    }
-
-    // Match searchText right to left starting at startCol in line startLine
-    template <typename Itr>
-    [[nodiscard]] bool matchTextAtReverse(std::u32string_view searchText,
-                                          ColumnOffset startCol,
-                                          Itr startLine,
-                                          bool isCaseSensitive) const noexcept
-    {
-        auto segments = segmentSearchText(searchText, startCol);
-        for (auto i: segments)
-        {
-            if (!startLine->get().matchTextAtWithSensitivityMode(i, startCol, isCaseSensitive))
-                return false;
-            startCol = ColumnOffset::cast_from(0);
-            --startLine;
-        }
-        return true;
-    }
 };
 
 inline bool operator==(LogicalLine const& a, LogicalLine const& b) noexcept
@@ -972,6 +764,17 @@ class Grid
                                                 std::u32string_view delimiters) const noexcept;
 
     [[nodiscard]] std::u32string extractText(CellLocationRange range) const noexcept;
+
+    /// Whether @p text is what the grid reads from @p start on, the way text is taken from it: a cell holds
+    /// its whole grapheme cluster, a cell with no text of its own (NoTextCellFlags) is stepped over, and the
+    /// text runs on into the next row where that row continues this one after a soft wrap.
+    /// @param text       The needle; non-empty.
+    /// @param start      The cell the match begins at. One with no text of its own begins none.
+    /// @param comparison Whether letters must match case.
+    /// @return Whether the whole of @p text matches there.
+    [[nodiscard]] bool textMatchesAt(std::u32string_view text,
+                                     CellLocation start,
+                                     CaseComparison comparison) const noexcept;
 
     [[nodiscard]] CellLocation stretchedColumn(CellLocation coord) const noexcept
     {

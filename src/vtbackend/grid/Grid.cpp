@@ -1442,4 +1442,48 @@ u32string Grid::extractText(CellLocationRange range) const noexcept
     return output;
 }
 
+bool Grid::textMatchesAt(u32string_view text, CellLocation start, CaseComparison comparison) const noexcept
+{
+    auto const isCaseSensitive = comparison == CaseComparison::Exact;
+    auto const lastLine = boxed_cast<LineOffset>(_pageSize.lines) - 1;
+
+    auto position = start;
+    auto isFirstCell = true;
+    while (!text.empty())
+    {
+        auto const& line = lineAt(position.line);
+        if (position.column >= boxed_cast<ColumnOffset>(line.size()))
+        {
+            // Only a soft wrap carries the text on; the row after a hard break begins text of its own.
+            if (position.line >= lastLine || !isLineWrapped(position.line + 1))
+                return false;
+            ++position.line;
+            position.column = ColumnOffset(0);
+            continue;
+        }
+
+        // A blank row holds no text to match.
+        if (line.isBlank())
+            return false;
+
+        auto const column = unbox<size_t>(position.column);
+        auto const& storage = line.storage();
+        if (storage.sgr[column].flags.any(NoTextCellFlags))
+        {
+            if (isFirstCell)
+                return false;
+            ++position.column;
+            continue;
+        }
+
+        auto const cell = ConstCellProxy(storage, column);
+        if (!CellUtil::beginsWith(text, cell, isCaseSensitive))
+            return false;
+        text.remove_prefix(cell.codepointCount());
+        position.column += ColumnOffset::cast_from(max(cell.width(), uint8_t { 1 }));
+        isFirstCell = false;
+    }
+    return true;
+}
+
 } // end namespace vtbackend

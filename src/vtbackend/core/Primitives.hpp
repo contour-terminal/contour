@@ -1499,17 +1499,6 @@ constexpr unsigned setDynamicColorCommand(DynamicColorName name) noexcept
                                      std::ranges::find(DynamicColorCommands, std::optional { name })));
 }
 
-/// Where one match starts within a line, and how much of it spilled past the line's end.
-///
-/// The rest of the search vocabulary -- the case policy, the pattern's origin, the match tally and
-/// HighlightSearchMatches -- lives in core/Search.hpp. This one type stays here because its
-/// ColumnOffset member is exactly the primitive that header is built to do without.
-struct SearchResult
-{
-    ColumnOffset column;           // column at the start of match
-    size_t partialMatchLength = 0; // length of partial match that happens at either end
-};
-
 } // namespace vtbackend
 
 namespace std

@@ -205,18 +205,6 @@ TEST_CASE("Line.blank.toUtf8ReturnsSpaces", "[Line][blank]")
     CHECK(line.toUtf8Trimmed().empty());
 }
 
-TEST_CASE("Line.blank.searchOnlyMatchesEmpty", "[Line][blank]")
-{
-    auto line = Line(ColumnCount(20), LineFlag::None, GraphicsAttributes {});
-
-    REQUIRE(line.isBlank());
-    CHECK(line.search(U"hello", ColumnOffset(0), true) == std::nullopt);
-    CHECK(line.searchReverse(U"hello", ColumnOffset(19), true) == std::nullopt);
-    auto const empty = line.search(U"", ColumnOffset(0), true);
-    REQUIRE(empty.has_value());
-    CHECK(empty->column == ColumnOffset(0));
-}
-
 TEST_CASE("Line.blank.materializeOnUseCellAt", "[Line][blank]")
 {
     auto line = Line(ColumnCount(10), LineFlag::None, GraphicsAttributes {});

@@ -3339,6 +3339,74 @@ TEST_CASE("search.smartCaseIsCodepointAware", "[screen]")
     }
 }
 
+TEST_CASE("search.walksTextCellsAcrossWideCharactersAndPadding", "[screen]")
+{
+    // A needle is matched against the text a reader sees: a wide character is one character, and neither
+    // its second half nor the padding a wide character leaves at the end of a row is any. foot's search
+    // steps over its spacers the same way (search.c:377).
+    using vtbackend::SearchCaseSensitivity;
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) }, LineCount(10) };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("ABCD\xE4\xB8\xAD"
+                       "E"); // U+4E2D, two columns
+    auto const top = CellLocation { LineOffset(0), ColumnOffset(0) };
+    auto const end = CellLocation { LineOffset(3), ColumnOffset(9) };
+
+    auto const find = [&](std::u32string_view needle) {
+        return screen.search(needle, top, SearchCaseSensitivity::Smart);
+    };
+    auto const findBackwards = [&](std::u32string_view needle, CellLocation from) {
+        return screen.searchReverse(needle, from, SearchCaseSensitivity::Smart);
+    };
+
+    SECTION("on one row")
+    {
+        CHECK(find(U"D中") == CellLocation { LineOffset(0), ColumnOffset(3) });
+        CHECK(find(U"中E") == CellLocation { LineOffset(0), ColumnOffset(4) });
+        CHECK(findBackwards(U"D中", end) == CellLocation { LineOffset(0), ColumnOffset(3) });
+        CHECK(findBackwards(U"中E", end) == CellLocation { LineOffset(0), ColumnOffset(4) });
+        // The second half begins no match, and holds no space either.
+        CHECK_FALSE(find(U"中 E").has_value());
+    }
+
+    SECTION("across the padding a narrowing leaves")
+    {
+        // "ABCD" and padding, then "中E" on the row that continues it.
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(5) });
+        auto const narrowEnd = CellLocation { LineOffset(3), ColumnOffset(4) };
+        REQUIRE(screen.grid().lineAt(LineOffset(0)).storage().sgr[4].flags.contains(CellFlag::WrapPadding));
+
+        CHECK(find(U"D中") == CellLocation { LineOffset(0), ColumnOffset(3) });
+        CHECK(find(U"CD中E") == CellLocation { LineOffset(0), ColumnOffset(2) });
+        CHECK(find(U"中E") == CellLocation { LineOffset(1), ColumnOffset(0) });
+        CHECK(findBackwards(U"D中", narrowEnd) == CellLocation { LineOffset(0), ColumnOffset(3) });
+        CHECK(findBackwards(U"中E", narrowEnd) == CellLocation { LineOffset(1), ColumnOffset(0) });
+        // The padding is no space.
+        CHECK_FALSE(find(U"D 中").has_value());
+    }
+
+    SECTION("across a soft wrap that leaves no padding")
+    {
+        // "ab中" fills its row, so "cd" goes on to the next.
+        mock.writeToScreen("\033[2J");
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(4) });
+        mock.writeToScreen("\033[Hab\xE4\xB8\xAD"
+                           "cd");
+        REQUIRE(screen.grid().lineAt(LineOffset(1)).isFlagEnabled(LineFlag::Wrapped));
+
+        CHECK(find(U"中c") == CellLocation { LineOffset(0), ColumnOffset(2) });
+        CHECK(findBackwards(U"中cd", CellLocation { LineOffset(3), ColumnOffset(3) })
+              == CellLocation { LineOffset(0), ColumnOffset(2) });
+    }
+
+    SECTION("not across a hard line break")
+    {
+        // A full row, and a row of its own after it.
+        mock.writeToScreen("\r\n0123456789\r\nFG");
+        CHECK_FALSE(find(U"9F").has_value());
+    }
+}
+
 TEST_CASE("tallyMatches", "[screen]")
 {
     using vtbackend::SearchCaseSensitivity;

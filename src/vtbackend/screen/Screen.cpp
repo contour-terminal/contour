@@ -8175,27 +8175,28 @@ optional<CellLocation> Screen::searchFrom(std::u32string_view searchText,
                                           CellLocation startPosition,
                                           CaseComparison comparison)
 {
-    // The grid's matchers still take a bool; converting here keeps the boundary in one place.
-    auto const isCaseSensitive = comparison == CaseComparison::Exact;
-
-    // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
-
     if (searchText.empty())
         return nullopt;
 
-    // First try match at start location.
-    if (_grid.lineAt(startPosition.line)
-            .matchTextAtWithSensitivityMode(searchText, startPosition.column, isCaseSensitive))
-        return startPosition;
-
-    // Search reverse until found or exhausted.
-    auto const lines = _grid.logicalLinesFrom(startPosition.line);
-    for (auto const& line: lines)
+    // A start past the end of its row begins at the next one; the find bar steps there from a match on
+    // the last column.
+    auto const columns = unbox<int>(pageSize().columns);
+    if (unbox(startPosition.column) >= columns)
     {
-        auto const result = line.search(searchText, startPosition.column, isCaseSensitive);
-        if (result.has_value())
-            return result; // new match found
+        ++startPosition.line;
         startPosition.column = ColumnOffset(0);
+    }
+
+    auto const firstLine = std::max(unbox(startPosition.line), -unbox<int>(historyLineCount()));
+    for (auto const line: std::views::iota(firstLine, unbox<int>(pageSize().lines)))
+    {
+        auto const firstColumn = line == unbox(startPosition.line) ? unbox(startPosition.column) : 0;
+        for (auto const column: std::views::iota(firstColumn, columns))
+        {
+            auto const candidate = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
+            if (_grid.textMatchesAt(searchText, candidate, comparison))
+                return candidate;
+        }
     }
     return nullopt;
 }
@@ -8211,25 +8212,23 @@ optional<CellLocation> Screen::searchReverseFrom(std::u32string_view searchText,
                                                  CellLocation startPosition,
                                                  CaseComparison comparison)
 {
-    // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
-    auto const isCaseSensitive = comparison == CaseComparison::Exact;
-
     if (searchText.empty())
         return nullopt;
 
-    // First try match at start location.
-    if (_grid.lineAt(startPosition.line)
-            .matchTextAtWithSensitivityMode(searchText, startPosition.column, isCaseSensitive))
-        return startPosition;
-
-    // Search reverse until found or exhausted.
-    auto const lines = _grid.logicalLinesReverseFrom(startPosition.line);
-    for (auto const& line: lines)
+    auto const columns = unbox<int>(pageSize().columns);
+    auto const lastLine = std::min(unbox(startPosition.line), unbox<int>(pageSize().lines) - 1);
+    auto const firstLine = -unbox<int>(historyLineCount());
+    for (auto const line: std::views::iota(firstLine, lastLine + 1) | std::views::reverse)
     {
-        auto const result = line.searchReverse(searchText, startPosition.column, isCaseSensitive);
-        if (result.has_value())
-            return result; // new match found
-        startPosition.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+        auto const lastColumn = line == unbox(startPosition.line)
+                                    ? std::min(unbox(startPosition.column), columns - 1)
+                                    : columns - 1;
+        for (auto const column: std::views::iota(0, lastColumn + 1) | std::views::reverse)
+        {
+            auto const candidate = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
+            if (_grid.textMatchesAt(searchText, candidate, comparison))
+                return candidate;
+        }
     }
     return nullopt;
 }
