@@ -19,11 +19,11 @@
 #include <format>
 #include <functional>
 #include <iterator>
-#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -122,6 +122,37 @@ bool isIncrement(proto::DecodedFrame const& frame)
 {
     auto const* delta = std::get_if<proto::Delta>(&frame.pdu);
     return delta != nullptr && delta->snapshot == 0;
+}
+
+/// One session's snapshot run as the client received it.
+struct ReceivedRun
+{
+    std::vector<proto::WireLine> rows;     ///< Every row of the run, in arrival order.
+    std::vector<std::size_t> rowsPerPiece; ///< How many of them each piece carried.
+};
+
+/// @return @p session's snapshot run out of @p frames.
+ReceivedRun receivedRun(std::vector<proto::DecodedFrame> const& frames, vtworkspace::SessionId session)
+{
+    auto run = ReceivedRun {};
+    for (auto const& frame: frames)
+    {
+        auto const* delta = std::get_if<proto::Delta>(&frame.pdu);
+        if (delta == nullptr || delta->snapshot == 0 || delta->session != session.value)
+            continue;
+        run.rows.insert(run.rows.end(), delta->lines.begin(), delta->lines.end());
+        run.rowsPerPiece.push_back(delta->lines.size());
+    }
+    return run;
+}
+
+/// @return How many rows each piece holds when @p rows are partitioned at @p budget.
+std::vector<std::size_t> rowsPerPiece(std::span<proto::WireLine const> rows, std::size_t budget)
+{
+    auto counts = std::vector<std::size_t> {};
+    for (auto const& piece: proto::partitionSnapshotRows(rows, budget))
+        counts.push_back(piece.count);
+    return counts;
 }
 
 /// Collects a whole snapshot run, plus @p extra PDUs after it, read at @p pacing.
@@ -306,6 +337,47 @@ void fillRows(NativeHarness& h, vtworkspace::SessionId session, int rows, std::s
     for (auto const row: std::views::iota(0, rows))
         lines += std::format("{}-{}{}\r\n", tag, row, std::string(60, 'x'));
     h.host.terminal(session)->writeToScreen(lines);
+}
+
+/// Once the client holds @p id's SessionState -- so the run's pieces are being written behind it --
+/// rings the bell in @p id and posts a notification from it: frames neither the debounce nor a
+/// snapshot holds back.
+/// @param received What the client has decoded so far; only read.
+Task<void> ringWhileStreaming(NativeHarness* h,
+                              vtworkspace::SessionId id,
+                              std::vector<proto::DecodedFrame> const* received)
+{
+    auto const streaming = co_await core::net::testing::waitUntil(&h->loop, [received] {
+        return std::ranges::any_of(*received, [](proto::DecodedFrame const& frame) {
+            return std::holds_alternative<proto::SessionState>(frame.pdu);
+        });
+    });
+    CHECK(streaming);
+    h->session->sessionBell(id);
+    h->session->sessionNotify(id, "build", "finished");
+}
+
+/// Writes @p bursts bursts of four rows into each of @p sessions, @p interval apart, kicking the
+/// flush after each, then one row tagged "end" into each.
+Task<void> writeBursts(NativeHarness* h,
+                       std::vector<vtworkspace::SessionId> const* sessions,
+                       int bursts,
+                       std::chrono::milliseconds interval)
+{
+    for (auto const burst: std::views::iota(0, bursts))
+    {
+        co_await h->loop.delay(interval);
+        for (auto const id: *sessions)
+        {
+            fillRows(*h, id, 4, std::format("burst{}", burst));
+            h->session->sessionScreenUpdated(id);
+        }
+    }
+    for (auto const id: *sessions)
+    {
+        fillRows(*h, id, 1, "end");
+        h->session->sessionScreenUpdated(id);
+    }
 }
 
 /// Once the attach snapshot has landed: repositions ONLY the cursor (writing no
@@ -1003,7 +1075,7 @@ TEST_CASE("attaching to several scrollback-heavy panes is not refused", "[vthost
 
     // A bound far smaller than the snapshots it must carry, which is the shape of the report:
     // 4 MiB against two panes of ~1.8 MB each. The point is that the SUM exceeding the bound must
-    // no longer matter, because no two pieces are ever in the queue at the same time.
+    // no longer matter, because a run never has more than two pieces in the queue.
     auto h = NativeHarness { { .writeQueueBytes = std::size_t { 64 } * 1024,
                                .history = vtbackend::LineCount(30) } };
 
@@ -1016,26 +1088,30 @@ TEST_CASE("attaching to several scrollback-heavy panes is not refused", "[vthost
         fillRows(h, id, 50, std::format("tab{}-row", tab));
     }
 
-    // ServerHello, LayoutState, then SessionState + one snapshot Delta per pane.
-    auto const received = h.exchange({ proto::ClientHello {} }, 8);
-    REQUIRE(received.size() == 8);
+    // ServerHello, LayoutState, then per pane a SessionState and a run of however many pieces its
+    // rows partition into under this bound. The runs go out in tab order, so the last pane's run
+    // ending is the attach ending.
+    auto const lastRunEnded = [last = sessions.back()](std::vector<proto::DecodedFrame> const& got) {
+        return std::ranges::any_of(got, [last](proto::DecodedFrame const& frame) {
+            return endsSnapshotRun(frame) && std::get<proto::Delta>(frame.pdu).session == last.value;
+        });
+    };
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(core::net::testing::allOf(h.session->run(),
+                                             feedBytes(h.pair.second.get(), &bytes),
+                                             collectUntil(h.pair.second.get(), lastRunEnded, &received)));
     CHECK_FALSE(capture.contains("send queue overflow"));
 
     // Every pane arrived, and arrived whole: a snapshot that is not superseded and not truncated.
-    auto snapshots = std::map<uint64_t, proto::Delta> {};
     for (auto const& frame: received)
         if (auto const* delta = std::get_if<proto::Delta>(&frame.pdu))
-        {
             CHECK(delta->snapshot == 1);
-            snapshots.emplace(delta->session, *delta);
-        }
-    REQUIRE(snapshots.size() == sessions.size());
     for (auto const tab: std::views::iota(0, 3))
     {
-        auto const found = snapshots.find(sessions[static_cast<std::size_t>(tab)].value);
-        REQUIRE(found != snapshots.end());
+        auto const run = receivedRun(received, sessions[static_cast<std::size_t>(tab)]);
         auto const carries = [&](std::string_view row) {
-            return std::ranges::any_of(found->second.lines,
+            return std::ranges::any_of(run.rows,
                                        [row](auto const& line) { return textOf(line).starts_with(row); });
         };
         // The oldest row is scrollback that predates the attach; the newest is on the page.
@@ -1090,6 +1166,10 @@ TEST_CASE("a snapshot larger than one frame travels as a marked run", "[vthost][
     // Every addressable row travelled exactly once: the 4000 rows written, plus the empty row the
     // cursor sits on after the last CRLF. None is dropped at a piece boundary and none is repeated.
     CHECK(total == 4001);
+
+    // The production bound cuts at SnapshotChunkBytes: a quarter of it is more than that.
+    auto const run = receivedRun(received, sessionId);
+    CHECK(run.rowsPerPiece == rowsPerPiece(run.rows, NativeSession::SnapshotChunkBytes));
 }
 
 TEST_CASE("an increment is held back until the snapshot it would interleave with finishes",
@@ -1108,7 +1188,8 @@ TEST_CASE("an increment is held back until the snapshot it would interleave with
     fillRows(h, sessionId, 4000, "row");
 
     // Output arriving while the attach run is still streaming: the debounce fires 20ms later,
-    // well inside a run that pauses for the write queue to drain between each of its ~25 pieces.
+    // well inside a run that pauses for the write queue to drain between each of its several hundred
+    // pieces.
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
     h.loop.blockOn(core::net::testing::allOf(
@@ -1138,21 +1219,21 @@ TEST_CASE("an increment is held back until the snapshot it would interleave with
     CHECK(increments == 1);
 }
 
-TEST_CASE("a held increment is released only once the snapshot's last piece has left the send queue",
+TEST_CASE("a session's held increment follows its snapshot run without costing the connection",
           "[vthost][native]")
 {
-    // Under a send-queue bound too small for two pieces, the streamer enqueues a run's last piece
-    // while the piece before it is still being written, so the last one waits in the backlog --
-    // already over the bound on its own. Letting the session go at that moment releases the
-    // increment flushSoon held back, the queue refuses it, and the connection is dropped with the
-    // waiting piece discarded: the client never sees the run complete. A client that pauses before
-    // every read keeps the piece before the last in flight across several debounce windows, which
-    // turns that ordering from a race the scheduler sometimes wins into a certainty.
+    // The increment held back for a whole run is released as the run ends, while a slow client
+    // still has the run's tail in the send queue, and it must land beside that tail. It once did
+    // not, twice over: a piece cut at a fixed size waited in the backlog already over a small
+    // bound, and the session was let go the moment its last piece was enqueued rather than once
+    // the backlog was back under a piece. Either way the queue refused the increment and the
+    // connection went, with the run's last piece. A client that pauses before every read keeps the
+    // run's tail in the queue across several debounce windows, so the release always meets it.
     auto capture = core::log::ScopedCapture {};
     auto h = NativeHarness { smallQueueOptions() };
     h.host.createTab();
     auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
-    fillRows(h, sessionId, 250, "row"); // between one and two pieces' worth
+    fillRows(h, sessionId, 250, "row");
 
     auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
     auto received = std::vector<proto::DecodedFrame> {};
@@ -1161,24 +1242,22 @@ TEST_CASE("a held increment is released only once the snapshot's last piece has 
         appendThenUpdate(&h, sessionId)));
 
     CHECK_FALSE(capture.contains("send queue overflow"));
+    // A run of several pieces, so the increment was held across one rather than beside a lone piece...
+    CHECK(receivedRun(received, sessionId).rowsPerPiece.size() > 1);
     auto const last = std::ranges::find_if(received, endsSnapshotRun);
     REQUIRE(last != received.end());
-    // The scenario is the one described: the run's last piece alone exceeds the bound...
-    auto encoded = proto::Writer {};
-    proto::encodePdu(encoded, 0, last->pdu);
-    CHECK(encoded.size() > SmallQueueBytes);
     // ...and the increment released behind it arrived instead of costing the connection.
     CHECK(std::ranges::count_if(std::next(last), received.end(), isIncrement) == 1);
 }
 
-TEST_CASE("another session's increment waits out a run whose pieces outgrow the send queue",
+TEST_CASE("another session's increment during a snapshot run does not cost the connection",
           "[vthost][native]")
 {
-    // The same backlogged piece, met by a DIFFERENT session's increment: one whose own run is over,
-    // writing output while the next session's run is still streaming. Its increment is not held for
-    // that run's sake -- the run says nothing about it -- yet enqueued behind the piece it is refused
-    // all the same, and the connection goes with it. The slow reader keeps the second session's
-    // first piece in flight, and its last one in the backlog, across several debounce windows.
+    // A DIFFERENT session's increment meets the run's backlog: one whose own run is over, writing
+    // output while the next session's run is still streaming. Nothing holds it back -- the run
+    // says nothing about it -- so it is enqueued beside whatever part of the run is waiting, and
+    // that part must leave it room. The slow reader keeps the second session's pieces queued across
+    // several debounce windows.
     auto capture = core::log::ScopedCapture {};
     auto h = NativeHarness { smallQueueOptions() };
     // The attach streams tabs in order, so the quiet session's run is over before the large one's
@@ -1187,7 +1266,7 @@ TEST_CASE("another session's increment waits out a run whose pieces outgrow the 
     auto const quiet = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
     h.host.createTab();
     auto const large = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
-    fillRows(h, large, 250, "row"); // between one and two pieces' worth
+    fillRows(h, large, 250, "row");
 
     auto const endsLargeRun = [large](proto::DecodedFrame const& frame) {
         return endsSnapshotRun(frame) && std::get<proto::Delta>(frame.pdu).session == large.value;
@@ -1207,14 +1286,126 @@ TEST_CASE("another session's increment waits out a run whose pieces outgrow the 
         appendThenUpdate(&h, quiet)));
 
     CHECK_FALSE(capture.contains("send queue overflow"));
-    // The large run arrived whole, its last piece over the bound on its own...
-    auto const last = std::ranges::find_if(received, endsLargeRun);
-    REQUIRE(last != received.end());
-    auto encoded = proto::Writer {};
-    proto::encodePdu(encoded, 0, last->pdu);
-    CHECK(encoded.size() > SmallQueueBytes);
+    // The large run arrived whole, as several pieces...
+    CHECK(std::ranges::any_of(received, endsLargeRun));
+    CHECK(receivedRun(received, large).rowsPerPiece.size() > 1);
     // ...and the quiet session's output still reached the client.
     CHECK(std::ranges::count_if(received, isQuietIncrement) == 1);
+}
+
+TEST_CASE("snapshotPieceBytes is a quarter of the send-queue bound up to SnapshotChunkBytes",
+          "[vthost][native]")
+{
+    // The production bound keeps the cap, so its snapshots are cut exactly where they always were.
+    STATIC_CHECK(NativeSession::snapshotPieceBytes(NativeSession::DefaultWriteQueueBytes)
+                 == NativeSession::SnapshotChunkBytes);
+    CHECK(NativeSession::snapshotPieceBytes(NativeSession::SnapshotChunkBytes * 8)
+          == NativeSession::SnapshotChunkBytes);
+    CHECK(NativeSession::snapshotPieceBytes(SmallQueueBytes) == SmallQueueBytes / 4);
+    CHECK(NativeSession::snapshotPieceBytes(8) == 2);
+    // Never zero: it is also the streamer's watermark, and a backlog never gets below zero bytes.
+    CHECK(NativeSession::snapshotPieceBytes(0) == 1);
+}
+
+TEST_CASE("under a small send-queue bound a snapshot is cut into quarter-bound pieces", "[vthost][native]")
+{
+    // A piece cut at SnapshotChunkBytes under a bound a quarter of that size waits in the backlog
+    // already over the bound, and refuses whatever is enqueued behind it. Cut at a quarter of the
+    // bound, a run never leaves more than half the bound behind it.
+    auto h = NativeHarness { smallQueueOptions() };
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    fillRows(h, sessionId, 250, "row");
+
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(driveSnapshotRun(h.session.get(), h.pair.second.get(), &bytes, &received));
+
+    auto const run = receivedRun(received, sessionId);
+    CHECK(run.rowsPerPiece == rowsPerPiece(run.rows, SmallQueueBytes / 4));
+}
+
+TEST_CASE("a session event sent during a snapshot run does not cost the connection", "[vthost][native]")
+{
+    // A bell or a notification cannot pace itself and is not held back: it is enqueued the moment
+    // it happens, beside whatever part of a run is waiting in the backlog. That part has to leave
+    // it room, or the event is refused and the connection goes with it.
+    auto capture = core::log::ScopedCapture {};
+    auto h = NativeHarness { smallQueueOptions() };
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    fillRows(h, sessionId, 250, "row");
+
+    auto const isBell = [](proto::DecodedFrame const& frame) {
+        return std::holds_alternative<proto::SessionBell>(frame.pdu);
+    };
+    auto const isNotify = [](proto::DecodedFrame const& frame) {
+        return std::holds_alternative<proto::SessionNotify>(frame.pdu);
+    };
+    auto const runAndEvents = [&](std::vector<proto::DecodedFrame> const& got) {
+        return std::ranges::any_of(got, endsSnapshotRun) && std::ranges::any_of(got, isBell)
+               && std::ranges::any_of(got, isNotify);
+    };
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(core::net::testing::allOf(
+        h.session->run(),
+        feedBytes(h.pair.second.get(), &bytes),
+        collectUntil(h.pair.second.get(), runAndEvents, &received, slowReader(h.loop)),
+        ringWhileStreaming(&h, sessionId, &received)));
+
+    CHECK_FALSE(capture.contains("send queue overflow"));
+    CHECK(std::ranges::any_of(received, endsSnapshotRun));
+    CHECK(std::ranges::any_of(received, isBell));
+    CHECK(std::ranges::any_of(received, isNotify));
+}
+
+TEST_CASE("other panes' output during a long snapshot run does not pile up into an overflow",
+          "[vthost][native]")
+{
+    // Two panes keep writing while a third pane's run streams. Their increments must go out as
+    // they are made, a debounce window at a time, each landing beside at most two pieces of
+    // backlog. Held back until the run is over instead, a whole run's worth of two panes' output
+    // is released at once -- and together it is more than the bound.
+    auto capture = core::log::ScopedCapture {};
+    auto h = NativeHarness { smallQueueOptions() };
+    // The attach streams tabs in order: the two quiet panes first, then the large one.
+    h.host.createTab();
+    auto const quietOne = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.host.createTab();
+    auto const quietTwo = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    auto const quiet = std::vector { quietOne, quietTwo };
+    h.host.createTab();
+    auto const large = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    fillRows(h, large, 600, "row");
+
+    auto const endsLargeRun = [large](proto::DecodedFrame const& frame) {
+        return endsSnapshotRun(frame) && std::get<proto::Delta>(frame.pdu).session == large.value;
+    };
+    // Whether the row each quiet pane writes last has reached the client.
+    auto const sawEnd = [](std::vector<proto::DecodedFrame> const& got, vtworkspace::SessionId id) {
+        return std::ranges::any_of(got, [id](proto::DecodedFrame const& frame) {
+            auto const* delta = std::get_if<proto::Delta>(&frame.pdu);
+            return delta != nullptr && delta->snapshot == 0 && delta->session == id.value
+                   && std::ranges::any_of(delta->lines,
+                                          [](auto const& line) { return textOf(line).starts_with("end-0"); });
+        });
+    };
+    auto const done = [&](std::vector<proto::DecodedFrame> const& got) {
+        return std::ranges::any_of(got, endsLargeRun) && sawEnd(got, quietOne) && sawEnd(got, quietTwo);
+    };
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(
+        core::net::testing::allOf(h.session->run(),
+                                  feedBytes(h.pair.second.get(), &bytes),
+                                  collectUntil(h.pair.second.get(), done, &received, slowReader(h.loop)),
+                                  writeBursts(&h, &quiet, 12, 30ms)));
+
+    CHECK_FALSE(capture.contains("send queue overflow"));
+    CHECK(std::ranges::any_of(received, endsLargeRun));
+    CHECK(sawEnd(received, quietOne));
+    CHECK(sawEnd(received, quietTwo));
 }
 
 // ---------------------------------------------------------------------------

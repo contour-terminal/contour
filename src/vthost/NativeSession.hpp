@@ -13,7 +13,7 @@
 /// small by construction — the rows that changed in one 20ms window. A snapshot is the whole
 /// grid INCLUDING all scrollback, which is legitimately megabytes and has no smaller form. So
 /// snapshots are queued per session and emitted by a single streamer coroutine that waits for
-/// room in the send queue before each piece and splits anything over `SnapshotChunkBytes`.
+/// room in the send queue before each piece and splits anything over `snapshotPieceBytes`.
 /// Emitting them inline instead is what made a daemon with a couple of scrollback-heavy panes
 /// permanently unattachable: the burst never yielded, so the drain never ran, so the whole attach
 /// payload had to fit the send-queue bound at once — and past two panes it did not.
@@ -28,6 +28,7 @@
 #include <core/net/ISocket.hpp>
 #include <core/net/WriteQueue.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -62,8 +63,25 @@ class NativeSession final: public SessionStreamEvents
     /// send-queue bound, so the streamer can always wait for room for a whole piece — and a piece
     /// that lands on a drained backlog is never refused, whatever its size. And it sits orders of
     /// magnitude below @ref proto::MaxFrameSize, so no scrollback depth can build a frame the
-    /// peer's own decoder rejects as FrameTooLarge.
+    /// peer's own decoder rejects as FrameTooLarge. A bound too small for that cuts finer:
+    /// @see snapshotPieceBytes
     static constexpr std::size_t SnapshotChunkBytes = std::size_t { 256 } * 1024;
+
+    /// The snapshot piece size under a send-queue bound of @p maxWriteQueueBytes — which is also
+    /// the backlog the streamer waits to get under before each piece.
+    ///
+    /// A quarter of the bound, capped at @ref SnapshotChunkBytes. A run then keeps under two pieces —
+    /// about half the bound, the cut being by estimated size — in the backlog, so every frame sent
+    /// beside it that cannot pace itself (an increment, a bell, a LayoutState, a FetchImage answer)
+    /// has the other half. A piece of a fixed size does not: under a bound smaller than itself it
+    /// waits in the backlog already over the bound, and the queue refuses everything enqueued behind
+    /// it. The default bound is sixteen chunks, so it keeps the cap.
+    /// @param maxWriteQueueBytes The connection's send-queue bound.
+    /// @return The budget, in estimated encoded bytes; never zero, which a watermark cannot get under.
+    [[nodiscard]] static constexpr std::size_t snapshotPieceBytes(std::size_t maxWriteQueueBytes) noexcept
+    {
+        return std::max(std::size_t { 1 }, std::min(SnapshotChunkBytes, maxWriteQueueBytes / 4));
+    }
 
     /// @param loop The event loop everything runs on.
     /// @param host The session host (not owned; outlives this).
@@ -327,26 +345,6 @@ class NativeSession final: public SessionStreamEvents
     ///         repaint a grid it has only half received.
     [[nodiscard]] bool snapshotPending(vtworkspace::SessionId session) const noexcept;
 
-    /// How the snapshot streamer paces itself against the send-queue bound; fixed at construction,
-    /// since the bound is.
-    enum class SnapshotPacing : uint8_t
-    {
-        /// The bound holds two pieces. The streamer keeps about one piece queued, and every other
-        /// producer has the rest of the bound as headroom.
-        Headroom = 0,
-        /// The bound cannot hold two pieces (what a test sets), so one piece may outgrow it alone.
-        /// The streamer waits for a fully drained backlog before each piece and relies on the
-        /// queue's never-refuse-a-lone-frame rule — and any frame enqueued behind a backlogged piece
-        /// is refused.
-        DrainFully = 1,
-    };
-
-    /// @return Whether an increment for @p session must stay pending rather than go out now: while
-    ///         its own snapshot is pending (@ref snapshotPending), and under
-    ///         SnapshotPacing::DrainFully while ANY session's run is streaming, whose pieces can sit
-    ///         in the backlog already over the bound on their own.
-    [[nodiscard]] bool incrementHeldBack(vtworkspace::SessionId session) const noexcept;
-
     /// Parks until the send queue has room for a snapshot piece.
     /// @return False when the connection is going away and the caller should stop.
     [[nodiscard]] core::async::Task<bool> awaitSendRoom();
@@ -359,7 +357,7 @@ class NativeSession final: public SessionStreamEvents
     /// snapshot, so two runs for the same session can never interleave on the wire.
     [[nodiscard]] core::async::Task<void> streamSnapshots();
 
-    /// Emits @p delta as one PDU, or as a run of @ref SnapshotChunkBytes-sized ones when its rows
+    /// Emits @p delta as one PDU, or as a run of @ref _snapshotPieceBytes-sized ones when its rows
     /// exceed that, waiting for room before each.
     /// @param delta The snapshot to send (consumed).
     /// @param session The session it describes; also the supersede tag its pieces carry.
@@ -406,16 +404,12 @@ class NativeSession final: public SessionStreamEvents
     SessionHost& _host;
     std::unique_ptr<core::net::ISocket> _connection;
     core::net::WriteQueue _writer;
-    /// Derived from the connection's own bound; read by @ref _snapshotWatermark's initializer and by
-    /// @ref incrementHeldBack, so the two cannot disagree about which regime they are in.
-    SnapshotPacing _snapshotPacing;
-    /// The backlog a snapshot piece waits to get under before it is enqueued.
+    /// What a snapshot is cut into, and the backlog each piece waits to get under before it is
+    /// enqueued: @ref snapshotPieceBytes of this connection's bound.
     ///
-    /// Derived from the connection's own bound rather than fixed: waiting for room for a WHOLE
-    /// piece is what makes the enqueue that follows unrefusable, and SnapshotPacing::DrainFully
-    /// degrades this to "wait until fully drained", where the queue's never-refuse-a-lone-frame
-    /// rule takes over.
-    std::size_t _snapshotWatermark;
+    /// One number for both, because the watermark is one piece: a piece then lands on less than a
+    /// piece of backlog, and the run never holds more than two of them.
+    std::size_t _snapshotPieceBytes;
     ConnectionId _id;           ///< Prefixes this connection's every log line.
     std::string _expectedToken; ///< Required ClientHello token; empty accepts any.
     /// The emulation settings this client asked the sessions IT creates to have, layered onto the
@@ -434,8 +428,8 @@ class NativeSession final: public SessionStreamEvents
     /// coroutine is live, which is also how @ref run knows it may let `this` go.
     ///
     /// Distinct from the queue because a session is popped before its pieces go out, and an
-    /// increment for it must stay held back for the whole run — until its last piece has left the
-    /// send queue's backlog — not just while it waits its turn.
+    /// increment for it must stay held back for the whole run — until the send queue's backlog
+    /// behind its last piece is back under one piece — not just while it waits its turn.
     std::optional<uint64_t> _streamingSession;
     bool _flushScheduled = false;
     bool _handshaken = false;

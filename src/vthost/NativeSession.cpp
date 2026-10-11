@@ -144,8 +144,6 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
     _host(host),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), maxWriteQueueBytes),
-    _snapshotPacing(maxWriteQueueBytes >= 2 * SnapshotChunkBytes ? SnapshotPacing::Headroom
-                                                                 : SnapshotPacing::DrainFully),
     // A LOW-water mark — one piece's worth — not "the bound minus a piece".
     //
     // Both make the enqueue that follows succeed, but the high one does it by riding the backlog
@@ -153,16 +151,15 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
     // producer on this queue: a LayoutState, another session's page delta, a FetchImage answer.
     // None of those can pace itself, and any of them arriving then is refused — the connection
     // dropped by the very mechanism added to stop dropping it. Pacing to one piece instead keeps
-    // the backlog near one piece and leaves the bound's headroom for traffic that has no choice.
-    // It also stops the size ESTIMATE being load-bearing: overshooting the budget several times
-    // over still lands far below the bound.
+    // the backlog under two pieces and leaves the rest of the bound to traffic that has no choice.
+    // It also stops the size ESTIMATE being load-bearing: a piece overshooting its budget twice over
+    // still lands under the bound.
     //
-    // A bound too small to hold two pieces leaves 1 — "wait until fully drained" — handing that
-    // regime to the queue's never-refuse-a-lone-frame rule. That arm is NOT a test accommodation
-    // and does not collapse into the other: a proportional watermark (bound/2, say) would park at
-    // 32 KiB under a 64 KiB bound and then have the very next piece refused for the backlog it
-    // had just permitted.
-    _snapshotWatermark(_snapshotPacing == SnapshotPacing::Headroom ? SnapshotChunkBytes : std::size_t { 1 }),
+    // The piece itself is sized to the bound (snapshotPieceBytes), which is what lets one low-water
+    // mark serve every bound. A piece of a fixed size under a bound smaller than itself had to wait
+    // for a fully drained backlog instead, and then sat in it over the bound on its own, refusing
+    // every increment, bell or LayoutState enqueued behind it.
+    _snapshotPieceBytes(snapshotPieceBytes(maxWriteQueueBytes)),
     _id(std::move(id)),
     _expectedToken(std::move(expectedToken))
 {
@@ -289,11 +286,13 @@ core::async::Task<void> NativeSession::flushSoon()
     _flushScheduled = false;
     if (_closed)
         co_return;
-    // An increment held back (incrementHeldBack says when) is put back rather than dropped — rows
-    // changed after a snapshot was captured are still news. The reinsert targets the member, which
-    // `exchange` just emptied, not the range being walked.
+    // A session whose whole grid is about to be (or is being) re-described gets no increment: the
+    // snapshot says everything this would, and one landing BETWEEN a snapshot's pieces would have
+    // the mirror apply and repaint a grid it has only half received. Put it back rather than drop
+    // it — rows changed after the snapshot was captured are still news. The reinsert targets the
+    // member, which `exchange` just emptied, not the range being walked.
     for (auto const session: std::exchange(_pendingSessions, {}))
-        if (incrementHeldBack(SessionId { session }))
+        if (snapshotPending(SessionId { session }))
             _pendingSessions.insert(session);
         else
             pushDelta(SessionId { session });
@@ -766,19 +765,6 @@ bool NativeSession::snapshotPending(SessionId session) const noexcept
     return _streamingSession == session.value || std::ranges::contains(_snapshotQueue, session.value);
 }
 
-bool NativeSession::incrementHeldBack(SessionId session) const noexcept
-{
-    // Its own snapshot says everything this increment would, and one landing BETWEEN that
-    // snapshot's pieces would have the mirror apply and repaint a grid it has only half received.
-    if (snapshotPending(session))
-        return true;
-    // Any other session's run matters only where a piece can outgrow the bound: there an increment
-    // enqueued behind a backlogged piece is refused, and the connection dropped, for a frame the
-    // queue would take as soon as the run is over. Under Headroom the bound leaves room beside a
-    // piece, and holding every pane's output for a whole attach would only make it late.
-    return _snapshotPacing == SnapshotPacing::DrainFully && _streamingSession.has_value();
-}
-
 void NativeSession::requestSnapshot(SessionId session)
 {
     if (!_handshaken || _closed)
@@ -803,7 +789,7 @@ void NativeSession::requestSnapshot(SessionId session)
 
 core::async::Task<bool> NativeSession::awaitSendRoom()
 {
-    co_await _writer.waitUntilBacklogBelow(_snapshotWatermark, [this] { return _closed; });
+    co_await _writer.waitUntilBacklogBelow(_snapshotPieceBytes, [this] { return _closed; });
     co_return !_closed;
 }
 
@@ -834,10 +820,10 @@ core::async::Task<void> NativeSession::streamSnapshots()
             send(0, proto::DecodedPdu { *std::move(built->state) }, session.value);
         co_await sendSnapshotPieces(std::move(built->delta), session);
 
-        // The session is let go once its last piece has LEFT the backlog, not once it joined it.
-        // Letting go releases the increment flushSoon held back, and under a bound too small for two
-        // pieces that increment, enqueued behind a backlogged piece already over the bound, is
-        // refused: the connection dropped, and the run's final piece discarded with the queue.
+        // The session is let go once the backlog is back under a piece, not the moment its last
+        // piece joined it. Letting go releases the increment flushSoon held back for the whole run —
+        // the one increment that is not small by construction — and it should meet at most one
+        // piece of backlog, not two.
         if (!co_await awaitSendRoom())
             co_return;
     }
@@ -873,7 +859,7 @@ core::async::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, Se
     for (auto const& entry: std::exchange(delta.imageCells, {}))
         imagesByRow[entry.stableId].push_back(entry);
 
-    for (auto const& part: proto::partitionSnapshotRows(lines, SnapshotChunkBytes))
+    for (auto const& part: proto::partitionSnapshotRows(lines, _snapshotPieceBytes))
     {
         // The scalar state rides on every piece. Repeating it costs a few dozen bytes and buys
         // the receiver statelessness: each piece stands on its own, and applying the same title

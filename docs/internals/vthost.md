@@ -285,11 +285,15 @@ at all.
   That is what made a daemon with two scrollback-heavy panes permanently unattachable: the attach
   walked every pane pushing a whole grid each, and the second one did not fit. Snapshots
   therefore go through `NativeSession`'s streamer, which `waitUntilBacklogBelow`s a piece's worth
-  before each PDU and splits anything past `SnapshotChunkBytes` into a `proto::SnapshotPart` run.
+  before each PDU and splits anything past a piece into a `proto::SnapshotPart` run.
   The watermark is deliberately a *low*-water mark. Pacing to `bound − piece` delivers the
   snapshot just as well, but does it by riding the backlog just under the bound for the whole
   run — leaving a single piece of headroom for every producer that *cannot* pace itself, and
-  refusing the first one that needs more.
+  refusing the first one that needs more. The piece is sized to the bound —
+  `snapshotPieceBytes`, a quarter of it capped at `SnapshotChunkBytes`, which the 4 MiB default
+  keeps — so a run holds about half the bound at most. A piece of a fixed size under a smaller
+  bound sat in the backlog already over it, and an increment or a bell enqueued behind it cost
+  the connection.
 
 The same rule has a second shape in-tree, for a producer that *cannot* suspend: `ControlOutput::pump`
 reads `queuedBytes()` and spends a headroom-derived per-pane credit, re-arming a timer while work
