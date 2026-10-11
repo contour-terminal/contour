@@ -411,7 +411,8 @@ class NativeSession final: public SessionStreamEvents
     /// coroutine is live, which is also how @ref run knows it may let `this` go.
     ///
     /// Distinct from the queue because a session is popped before its pieces go out, and an
-    /// increment for it must stay held back for the whole run, not just while it waits its turn.
+    /// increment for it must stay held back for the whole run — until its last piece has left the
+    /// send queue's backlog — not just while it waits its turn.
     std::optional<uint64_t> _streamingSession;
     bool _flushScheduled = false;
     bool _handshaken = false;

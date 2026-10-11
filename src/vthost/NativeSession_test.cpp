@@ -8,17 +8,20 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
 #include <core/net/testing/CoroTestSupport.hpp>
+#include <core/net/testing/InMemorySocket.hpp>
 #include <core/net/testing/InMemoryTransport.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <array>
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <format>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <string>
@@ -50,6 +53,18 @@ Task<void> feedBytes(core::net::ISocket* client, std::vector<std::byte> const* b
     std::ignore = co_await client->write(std::span<std::byte const> { bytes->data(), bytes->size() });
 }
 
+/// How a test client reads: as fast as the transport delivers, unless it is told to pause.
+///
+/// A client that pauses before every read keeps a frame larger than a bounded transport in flight
+/// across that many pauses — the way to hold a server's send queue in a given state for longer
+/// than a timer of its own takes to fire.
+struct ReadPacing
+{
+    core::net::EventLoop* loop = nullptr; ///< What to pause on; null reads without pausing.
+    std::chrono::milliseconds pause {};   ///< How long each pause lasts.
+    std::size_t chunk = 4096;             ///< The most one read takes.
+};
+
 /// Decodes server PDUs until @p done says to stop (or the stream ends), then closes the client
 /// end — the session's read loop sees EOF and finishes.
 ///
@@ -58,12 +73,14 @@ Task<void> feedBytes(core::net::ISocket* client, std::vector<std::byte> const* b
 /// snapshot run takes depends on how its rows happen to partition, which is exactly what a test
 /// of the partitioning must not hardcode.
 /// @param done Consulted after each decoded frame; the collector stops when it returns true.
+/// @param pacing How fast the client reads.
 Task<void> collectUntil(core::net::ISocket* client,
                         std::function<bool(std::vector<proto::DecodedFrame> const&)> done,
-                        std::vector<proto::DecodedFrame>* out)
+                        std::vector<proto::DecodedFrame>* out,
+                        ReadPacing pacing = {})
 {
     auto buffer = std::vector<std::byte> {};
-    auto scratch = std::array<std::byte, 4096> {};
+    auto scratch = std::vector<std::byte>(pacing.chunk);
     while (!done(*out))
     {
         auto decoded = proto::decodePdu(buffer);
@@ -75,6 +92,8 @@ Task<void> collectUntil(core::net::ISocket* client,
         }
         if (decoded.error() != proto::DecodeError::NeedMoreData)
             break;
+        if (pacing.loop != nullptr)
+            co_await pacing.loop->delay(pacing.pause);
         auto const n = co_await client->read(scratch);
         if (!n.has_value() || *n == 0)
             break;
@@ -98,10 +117,18 @@ bool endsSnapshotRun(proto::DecodedFrame const& frame)
     return delta != nullptr && delta->snapshot != 0 && delta->completesSnapshot();
 }
 
-/// Collects a whole snapshot run, plus @p extra PDUs after it.
+/// @return Whether @p frame is an increment: a Delta that belongs to no snapshot run.
+bool isIncrement(proto::DecodedFrame const& frame)
+{
+    auto const* delta = std::get_if<proto::Delta>(&frame.pdu);
+    return delta != nullptr && delta->snapshot == 0;
+}
+
+/// Collects a whole snapshot run, plus @p extra PDUs after it, read at @p pacing.
 Task<void> collectSnapshotRun(core::net::ISocket* client,
                               std::vector<proto::DecodedFrame>* out,
-                              std::size_t extra = 0)
+                              std::size_t extra = 0,
+                              ReadPacing pacing = {})
 {
     co_await collectUntil(
         client,
@@ -109,7 +136,8 @@ Task<void> collectSnapshotRun(core::net::ISocket* client,
             auto const end = std::ranges::find_if(got, endsSnapshotRun);
             return end != got.end() && std::cmp_greater(std::distance(end, got.end()), extra);
         },
-        out);
+        out,
+        pacing);
 }
 
 /// driveExchange, but bounded by a snapshot run's completion instead of a PDU count.
@@ -117,10 +145,11 @@ Task<void> driveSnapshotRun(NativeSession* session,
                             core::net::ISocket* client,
                             std::vector<std::byte> const* request,
                             std::vector<proto::DecodedFrame>* out,
-                            std::size_t extra = 0)
+                            std::size_t extra = 0,
+                            ReadPacing pacing = {})
 {
     co_await core::async::whenAll(
-        session->run(), feedBytes(client, request), collectSnapshotRun(client, out, extra));
+        session->run(), feedBytes(client, request), collectSnapshotRun(client, out, extra, pacing));
 }
 
 Task<void> driveExchange(NativeSession* session,
@@ -171,9 +200,44 @@ struct HarnessOptions
     std::size_t writeQueueBytes = NativeSession::DefaultWriteQueueBytes;
     vtbackend::LineCount history { 0 };   ///< The hosted terminals' scrollback depth.
     vtworkspace::Layout startupLayout {}; ///< Realized into the host BEFORE any handshake.
+    /// Set: the connection is an in-memory pair holding at most this many bytes per direction,
+    /// whose writes park until the client reads. Unset: a real socket pair, whose kernel buffers
+    /// absorb a platform-dependent amount first.
+    std::optional<std::size_t> pipeBytes = std::nullopt;
 };
 
-/// Drives a NativeSession over an in-memory socket pair.
+/// @param loop The loop a real pair is driven by.
+/// @param pipeBytes HarnessOptions::pipeBytes.
+/// @return The connection: `first` the server's end, `second` the client's.
+core::net::testing::SocketPair makeConnection(core::net::EventLoop& loop,
+                                              std::optional<std::size_t> pipeBytes)
+{
+    if (!pipeBytes)
+        return *core::net::testing::makeSocketPair(loop);
+    auto pipe = core::net::testing::InMemorySocketPair::create(*pipeBytes);
+    return { .first = std::move(pipe.server), .second = std::move(pipe.client) };
+}
+
+/// A send-queue bound too small to hold two snapshot pieces, so that one piece can outgrow it alone.
+constexpr auto SmallQueueBytes = std::size_t { 64 } * 1024;
+
+/// @return A connection bounded by SmallQueueBytes, over an in-memory pipe holding as much, whose
+///         hosted terminals keep enough scrollback for a two-piece snapshot.
+HarnessOptions smallQueueOptions()
+{
+    return { .writeQueueBytes = SmallQueueBytes,
+             .history = vtbackend::LineCount(1000),
+             .pipeBytes = SmallQueueBytes };
+}
+
+/// @return A client that reads at most SmallQueueBytes every 25ms. That is slower than the flush
+///         debounce, so a piece larger than the pipe stays in flight across several flushes.
+ReadPacing slowReader(core::net::EventLoop& loop)
+{
+    return ReadPacing { .loop = &loop, .pause = 25ms, .chunk = SmallQueueBytes };
+}
+
+/// Drives a NativeSession over an in-process connection (HarnessOptions::pipeBytes says which kind).
 struct NativeHarness
 {
     explicit NativeHarness(HarnessOptions opts = {}): options { std::move(opts) } {}
@@ -190,7 +254,7 @@ struct NativeHarness
                        /*startPumps=*/false,
                        vthost::ClientSizePolicy::Latest,
                        options.startupLayout };
-    core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
+    core::net::testing::SocketPair pair = makeConnection(loop, options.pipeBytes);
     std::unique_ptr<NativeSession> session =
         std::make_unique<NativeSession>(loop,
                                         host,
@@ -1072,6 +1136,39 @@ TEST_CASE("an increment is held back until the snapshot it would interleave with
     CHECK(sawRunEnd);
     // And the increment was held, not dropped: the rows written mid-run still arrive.
     CHECK(increments == 1);
+}
+
+TEST_CASE("a held increment is released only once the snapshot's last piece has left the send queue",
+          "[vthost][native]")
+{
+    // Under a send-queue bound too small for two pieces, the streamer enqueues a run's last piece
+    // while the piece before it is still being written, so the last one waits in the backlog --
+    // already over the bound on its own. Letting the session go at that moment releases the
+    // increment flushSoon held back, the queue refuses it, and the connection is dropped with the
+    // waiting piece discarded: the client never sees the run complete. A client that pauses before
+    // every read keeps the piece before the last in flight across several debounce windows, which
+    // turns that ordering from a race the scheduler sometimes wins into a certainty.
+    auto capture = core::log::ScopedCapture {};
+    auto h = NativeHarness { smallQueueOptions() };
+    h.host.createTab();
+    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    fillRows(h, sessionId, 250, "row"); // between one and two pieces' worth
+
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(core::net::testing::allOf(
+        driveSnapshotRun(h.session.get(), h.pair.second.get(), &bytes, &received, 1, slowReader(h.loop)),
+        appendThenUpdate(&h, sessionId)));
+
+    CHECK_FALSE(capture.contains("send queue overflow"));
+    auto const last = std::ranges::find_if(received, endsSnapshotRun);
+    REQUIRE(last != received.end());
+    // The scenario is the one described: the run's last piece alone exceeds the bound...
+    auto encoded = proto::Writer {};
+    proto::encodePdu(encoded, 0, last->pdu);
+    CHECK(encoded.size() > SmallQueueBytes);
+    // ...and the increment released behind it arrived instead of costing the connection.
+    CHECK(std::ranges::count_if(std::next(last), received.end(), isIncrement) == 1);
 }
 
 // ---------------------------------------------------------------------------

@@ -820,6 +820,13 @@ core::async::Task<void> NativeSession::streamSnapshots()
         if (built->state)
             send(0, proto::DecodedPdu { *std::move(built->state) }, session.value);
         co_await sendSnapshotPieces(std::move(built->delta), session);
+
+        // The session is let go once its last piece has LEFT the backlog, not once it joined it.
+        // Letting go releases the increment flushSoon held back, and under a bound too small for two
+        // pieces that increment, enqueued behind a backlogged piece already over the bound, is
+        // refused: the connection dropped, and the run's final piece discarded with the queue.
+        if (!co_await awaitSendRoom())
+            co_return;
     }
 }
 
