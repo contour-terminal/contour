@@ -29,14 +29,6 @@ using vthost::SessionHost;
 namespace
 {
 
-/// A connection handler that completes immediately. Kept a separate coroutine so the handler lambda
-/// itself is not one: a coroutine may not take reference parameters, while an unused by-value
-/// ConnectionId parameter is a needless copy — only this split satisfies both.
-core::async::Task<void> noopConnection()
-{
-    co_return;
-}
-
 /// A host over MockPty sessions with pump threads disabled, plus the watcher under test and a
 /// counter standing in for the daemon's shutdown action.
 struct WatcherHarness
@@ -145,6 +137,17 @@ TEST_CASE("the shutdown is requested once across several exits", "[vthost][lifec
 }
 
 #ifndef _WIN32
+namespace
+{
+/// A connection handler that completes immediately. Kept a separate coroutine so the handler lambda
+/// itself is not one: a coroutine may not take reference parameters, while an unused by-value
+/// ConnectionId parameter is a needless copy — only this split satisfies both.
+core::async::Task<void> noopConnection()
+{
+    co_return;
+}
+} // namespace
+
 TEST_CASE("the last session's exit unwinds the daemon's accept loop", "[vthost][lifecycle]")
 {
     // The composition the unit cases above cannot reach: a REAL bound listener served by a REAL
