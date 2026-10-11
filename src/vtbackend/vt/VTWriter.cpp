@@ -3,7 +3,11 @@
 
 #include <vtbackend/grid/CellProxy.hpp>
 
+#include <libunicode/width.h>
+
+#include <algorithm>
 #include <numeric>
+#include <ranges>
 
 using std::string;
 using std::string_view;
@@ -209,9 +213,20 @@ void VTWriter::write(Line const& line)
         return;
     }
 
-    for (size_t i = 0; i < cols; ++i)
+    // How many cells after the character just written its replay covers by itself: a wide character's
+    // second half, which a space would push the rest of the row one column to the right past. A
+    // text-sizing block wider than its text's own width replays as that text, so blanks fill the rest.
+    auto covered = 0U;
+    for (auto const i: std::views::iota(size_t { 0 }, cols))
     {
         auto const cell = ConstCellProxy(line.storage(), i);
+        if (covered > 0 && cell.isFlagEnabled(CellFlag::WideCharContinuation))
+        {
+            --covered;
+            continue;
+        }
+        covered = 0;
+
         if (cell.flags() & CellFlag::Bold)
             sgrAdd(GraphicsRendition::Bold);
         else
@@ -224,7 +239,11 @@ void VTWriter::write(Line const& line)
         if (!cell.codepointCount())
             write(' ');
         else
+        {
             write(cell.toUtf8());
+            auto const ownWidth = std::max(1U, unicode::grapheme_cluster_width(cell.codepoints()));
+            covered = std::min(unsigned { cell.width() }, ownWidth) - 1;
+        }
     }
 
     sgrAdd(GraphicsRendition::Reset);

@@ -3407,6 +3407,56 @@ TEST_CASE("search.walksTextCellsAcrossWideCharactersAndPadding", "[screen]")
     }
 }
 
+TEST_CASE("Screen.screenshot.replaysWideCharactersInPlace", "[screen]")
+{
+    // A screenshot is the VT stream that redraws the screen. Replaying it must put every character back in
+    // its column: a wide character's second half is covered by the character itself, so a space written
+    // for it pushes the rest of the row one column to the right.
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(5) };
+    auto mock = MockTerm { pageSize };
+    // "中E" on its own row; "ABCD" and the padding a wide character leaves where it does not fit, then
+    // "中" on the row after.
+    mock.writeToScreen("\xE4\xB8\xAD"
+                       "E\r\nABCD\xE4\xB8\xAD");
+    auto const& screen = mock.terminal.primaryScreen();
+    REQUIRE(screen.grid().lineAt(LineOffset(1)).storage().sgr[4].flags.contains(CellFlag::WrapPadding));
+
+    // One row more than the page: each row of the screenshot ends in a line break, the last one too.
+    auto replay = MockTerm { PageSize { pageSize.lines + 1, pageSize.columns } };
+    replay.writeToScreen(screen.screenshot());
+    auto const& replayed = replay.terminal.primaryScreen();
+
+    for (auto const line: std::views::iota(0, unbox(pageSize.lines)))
+    {
+        INFO(std::format("line {}", line));
+        CHECK(replayed.grid().lineAt(LineOffset(line)).toUtf8ColumnAligned()
+              == screen.grid().lineAt(LineOffset(line)).toUtf8ColumnAligned());
+        for (auto const column: std::views::iota(0, unbox(pageSize.columns)))
+        {
+            INFO(std::format("column {}", column));
+            auto const at = CellLocation { LineOffset(line), ColumnOffset(column) };
+            CHECK(replayed.at(at).isFlagEnabled(CellFlag::WideCharContinuation)
+                  == screen.at(at).isFlagEnabled(CellFlag::WideCharContinuation));
+            CHECK(replayed.at(at).width() == screen.at(at).width());
+        }
+    }
+}
+
+TEST_CASE("Screen.screenshot.keepsTheColumnsOfATextSizingBlock", "[screen]")
+{
+    // A screenshot writes no OSC 66, so a block three columns wide replays as its one-column text. Blanks
+    // fill the columns the text does not cover, so what follows the block stays in its column.
+    auto const pageSize = PageSize { LineCount(1), ColumnCount(6) };
+    auto mock = MockTerm { pageSize };
+    mock.writeToScreen("\033]66;w=3;X\az");
+    auto const& screen = mock.terminal.primaryScreen();
+    REQUIRE(screen.grid().lineAt(LineOffset(0)).toUtf8ColumnAligned() == "X  z  ");
+
+    auto replay = MockTerm { PageSize { pageSize.lines + 1, pageSize.columns } };
+    replay.writeToScreen(screen.screenshot());
+    CHECK(replay.terminal.primaryScreen().grid().lineAt(LineOffset(0)).toUtf8ColumnAligned() == "X  z  ");
+}
+
 TEST_CASE("tallyMatches", "[screen]")
 {
     using vtbackend::SearchCaseSensitivity;
