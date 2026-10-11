@@ -510,11 +510,11 @@ struct GuiManagedSettings
 {
     std::optional<std::string> defaultProfile; //!< Overrides contour.yml's `default_profile` when set.
 
-    /// GUI-set global overrides, keyed by the contour.yml top-level key, valued as the YAML scalar to
-    /// write (e.g. "reflow_on_resize" -> "false"). Present here == overridden by the GUI; the on-load
-    /// merge re-applies each through the same per-key loader contour.yml uses, so the value is typed
-    /// correctly. Absent keys defer to contour.yml. A dotted key ("renderer.gpu") names a nested setting;
-    /// settings.yml stores it nested.
+    /// GUI-set global overrides, keyed by the setting's contour.yml path, valued as the YAML scalar to
+    /// write. A top-level setting is keyed by its name ("reflow_on_resize" -> "false"); a setting inside
+    /// a section by `section.key` ("renderer.gpu" -> "discrete"), which settings.yml stores nested under
+    /// the section. Present here == overridden by the GUI; the on-load merge re-applies each through the
+    /// same loader contour.yml uses, so the value is typed correctly. Absent keys defer to contour.yml.
     std::map<std::string, std::string> globalOverrides;
 };
 

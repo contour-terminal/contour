@@ -3644,6 +3644,25 @@ TEST_CASE("Config: a scalar renderer in settings.yml is ignored, not fatal", "[c
     CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Integrated);
 }
 
+TEST_CASE("Config: a GPU set over a scalar renderer in settings.yml replaces it and applies",
+          "[config][gui][gpu]")
+{
+    // The settings page re-saves what it loaded plus its edit, so a hand-edited `renderer: foo` comes back
+    // as a flat override beside the new nested renderer.gpu. Written as two `renderer` keys, the scalar
+    // would shadow the section on the next load and the GPU would never apply.
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "renderer: foo\ntheme: dark\n");
+    auto const yaml = "profiles:\n    main:\n        shell: /bin/sh\n"sv;
+    auto settings = loadFromYaml(dir, yaml).guiManagedSettings;
+    settings.globalOverrides["renderer.gpu"] = "discrete";
+    writeSideFile(dir, "settings.yml", contour::config::emitGuiSettingsYaml(settings));
+
+    auto const cfg = loadFromYaml(dir, yaml);
+    CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Discrete);
+    CHECK(cfg.theme.value() == contour::config::GuiTheme::Dark);
+    CHECK_FALSE(cfg.guiManagedSettings.globalOverrides.contains("renderer"));
+}
+
 TEST_CASE("Config: a non-scalar key in settings.yml is skipped, its siblings still apply",
           "[config][gui][gpu]")
 {

@@ -4116,12 +4116,14 @@ std::string emitGuiSettingsYaml(GuiManagedSettings const& settings)
     // settings.yml reads exactly like the contour.yml it overrides.
     auto nested = std::map<std::string, std::map<std::string, std::string>> {};
     for (auto const& [key, value]: settings.globalOverrides)
-    {
         if (auto const dot = key.find('.'); dot != std::string::npos)
             nested[key.substr(0, dot)][key.substr(dot + 1)] = value;
-        else
+    // A flat key that also names a section is a hand-edited scalar (`renderer: foo`) the page has since set
+    // a key under. The section wins: it is what the page just set, and the scalar written beside it would
+    // be the key a load finds first.
+    for (auto const& [key, value]: settings.globalOverrides)
+        if (!key.contains('.') && !nested.contains(key))
             out << YAML::Key << key << YAML::Value << value;
-    }
     for (auto const& [section, entries]: nested)
     {
         out << YAML::Key << section << YAML::Value << YAML::BeginMap;
