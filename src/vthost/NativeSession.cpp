@@ -144,6 +144,8 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
     _host(host),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), maxWriteQueueBytes),
+    _snapshotPacing(maxWriteQueueBytes >= 2 * SnapshotChunkBytes ? SnapshotPacing::Headroom
+                                                                 : SnapshotPacing::DrainFully),
     // A LOW-water mark — one piece's worth — not "the bound minus a piece".
     //
     // Both make the enqueue that follows succeed, but the high one does it by riding the backlog
@@ -160,7 +162,7 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
     // and does not collapse into the other: a proportional watermark (bound/2, say) would park at
     // 32 KiB under a 64 KiB bound and then have the very next piece refused for the backlog it
     // had just permitted.
-    _snapshotWatermark(maxWriteQueueBytes >= 2 * SnapshotChunkBytes ? SnapshotChunkBytes : std::size_t { 1 }),
+    _snapshotWatermark(_snapshotPacing == SnapshotPacing::Headroom ? SnapshotChunkBytes : std::size_t { 1 }),
     _id(std::move(id)),
     _expectedToken(std::move(expectedToken))
 {
@@ -287,13 +289,11 @@ core::async::Task<void> NativeSession::flushSoon()
     _flushScheduled = false;
     if (_closed)
         co_return;
-    // A session whose whole grid is about to be (or is being) re-described gets no increment: the
-    // snapshot says everything this would, and one landing BETWEEN a snapshot's pieces would have
-    // the mirror apply and repaint a grid it has only half received. Put it back rather than drop
-    // it — rows changed after the snapshot was captured are still news. The reinsert targets the
-    // member, which `exchange` just emptied, not the range being walked.
+    // An increment held back (incrementHeldBack says when) is put back rather than dropped — rows
+    // changed after a snapshot was captured are still news. The reinsert targets the member, which
+    // `exchange` just emptied, not the range being walked.
     for (auto const session: std::exchange(_pendingSessions, {}))
-        if (snapshotPending(SessionId { session }))
+        if (incrementHeldBack(SessionId { session }))
             _pendingSessions.insert(session);
         else
             pushDelta(SessionId { session });
@@ -764,6 +764,19 @@ void NativeSession::pushDelta(SessionId session)
 bool NativeSession::snapshotPending(SessionId session) const noexcept
 {
     return _streamingSession == session.value || std::ranges::contains(_snapshotQueue, session.value);
+}
+
+bool NativeSession::incrementHeldBack(SessionId session) const noexcept
+{
+    // Its own snapshot says everything this increment would, and one landing BETWEEN that
+    // snapshot's pieces would have the mirror apply and repaint a grid it has only half received.
+    if (snapshotPending(session))
+        return true;
+    // Any other session's run matters only where a piece can outgrow the bound: there an increment
+    // enqueued behind a backlogged piece is refused, and the connection dropped, for a frame the
+    // queue would take as soon as the run is over. Under Headroom the bound leaves room beside a
+    // piece, and holding every pane's output for a whole attach would only make it late.
+    return _snapshotPacing == SnapshotPacing::DrainFully && _streamingSession.has_value();
 }
 
 void NativeSession::requestSnapshot(SessionId session)

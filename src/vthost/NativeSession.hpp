@@ -327,6 +327,26 @@ class NativeSession final: public SessionStreamEvents
     ///         repaint a grid it has only half received.
     [[nodiscard]] bool snapshotPending(vtworkspace::SessionId session) const noexcept;
 
+    /// How the snapshot streamer paces itself against the send-queue bound; fixed at construction,
+    /// since the bound is.
+    enum class SnapshotPacing : uint8_t
+    {
+        /// The bound holds two pieces. The streamer keeps about one piece queued, and every other
+        /// producer has the rest of the bound as headroom.
+        Headroom = 0,
+        /// The bound cannot hold two pieces (what a test sets), so one piece may outgrow it alone.
+        /// The streamer waits for a fully drained backlog before each piece and relies on the
+        /// queue's never-refuse-a-lone-frame rule — and any frame enqueued behind a backlogged piece
+        /// is refused.
+        DrainFully = 1,
+    };
+
+    /// @return Whether an increment for @p session must stay pending rather than go out now: while
+    ///         its own snapshot is pending (@ref snapshotPending), and under
+    ///         SnapshotPacing::DrainFully while ANY session's run is streaming, whose pieces can sit
+    ///         in the backlog already over the bound on their own.
+    [[nodiscard]] bool incrementHeldBack(vtworkspace::SessionId session) const noexcept;
+
     /// Parks until the send queue has room for a snapshot piece.
     /// @return False when the connection is going away and the caller should stop.
     [[nodiscard]] core::async::Task<bool> awaitSendRoom();
@@ -386,12 +406,15 @@ class NativeSession final: public SessionStreamEvents
     SessionHost& _host;
     std::unique_ptr<core::net::ISocket> _connection;
     core::net::WriteQueue _writer;
+    /// Derived from the connection's own bound; read by @ref _snapshotWatermark's initializer and by
+    /// @ref incrementHeldBack, so the two cannot disagree about which regime they are in.
+    SnapshotPacing _snapshotPacing;
     /// The backlog a snapshot piece waits to get under before it is enqueued.
     ///
     /// Derived from the connection's own bound rather than fixed: waiting for room for a WHOLE
-    /// piece is what makes the enqueue that follows unrefusable, and a bound smaller than a piece
-    /// (what a test sets) degrades this to "wait until fully drained", where the queue's
-    /// never-refuse-a-lone-frame rule takes over.
+    /// piece is what makes the enqueue that follows unrefusable, and SnapshotPacing::DrainFully
+    /// degrades this to "wait until fully drained", where the queue's never-refuse-a-lone-frame
+    /// rule takes over.
     std::size_t _snapshotWatermark;
     ConnectionId _id;           ///< Prefixes this connection's every log line.
     std::string _expectedToken; ///< Required ClientHello token; empty accepts any.

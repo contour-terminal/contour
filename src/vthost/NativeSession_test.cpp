@@ -1171,6 +1171,52 @@ TEST_CASE("a held increment is released only once the snapshot's last piece has 
     CHECK(std::ranges::count_if(std::next(last), received.end(), isIncrement) == 1);
 }
 
+TEST_CASE("another session's increment waits out a run whose pieces outgrow the send queue",
+          "[vthost][native]")
+{
+    // The same backlogged piece, met by a DIFFERENT session's increment: one whose own run is over,
+    // writing output while the next session's run is still streaming. Its increment is not held for
+    // that run's sake -- the run says nothing about it -- yet enqueued behind the piece it is refused
+    // all the same, and the connection goes with it. The slow reader keeps the second session's
+    // first piece in flight, and its last one in the backlog, across several debounce windows.
+    auto capture = core::log::ScopedCapture {};
+    auto h = NativeHarness { smallQueueOptions() };
+    // The attach streams tabs in order, so the quiet session's run is over before the large one's
+    // begins.
+    h.host.createTab();
+    auto const quiet = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    h.host.createTab();
+    auto const large = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    fillRows(h, large, 250, "row"); // between one and two pieces' worth
+
+    auto const endsLargeRun = [large](proto::DecodedFrame const& frame) {
+        return endsSnapshotRun(frame) && std::get<proto::Delta>(frame.pdu).session == large.value;
+    };
+    auto const isQuietIncrement = [quiet](proto::DecodedFrame const& frame) {
+        return isIncrement(frame) && std::get<proto::Delta>(frame.pdu).session == quiet.value;
+    };
+    auto const bytes = encodeRequest({ proto::DecodedPdu { proto::ClientHello {} } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    auto const largeRunAndQuietIncrement = [&](std::vector<proto::DecodedFrame> const& got) {
+        return std::ranges::any_of(got, endsLargeRun) && std::ranges::any_of(got, isQuietIncrement);
+    };
+    h.loop.blockOn(core::net::testing::allOf(
+        h.session->run(),
+        feedBytes(h.pair.second.get(), &bytes),
+        collectUntil(h.pair.second.get(), largeRunAndQuietIncrement, &received, slowReader(h.loop)),
+        appendThenUpdate(&h, quiet)));
+
+    CHECK_FALSE(capture.contains("send queue overflow"));
+    // The large run arrived whole, its last piece over the bound on its own...
+    auto const last = std::ranges::find_if(received, endsLargeRun);
+    REQUIRE(last != received.end());
+    auto encoded = proto::Writer {};
+    proto::encodePdu(encoded, 0, last->pdu);
+    CHECK(encoded.size() > SmallQueueBytes);
+    // ...and the quiet session's output still reached the client.
+    CHECK(std::ranges::count_if(received, isQuietIncrement) == 1);
+}
+
 // ---------------------------------------------------------------------------
 // Diagnostics. Every failure below was completely SILENT before the logging
 // pass: the daemon dropped the connection and said nothing, which is precisely
