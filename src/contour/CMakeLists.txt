@@ -245,6 +245,7 @@ if(CONTOUR_FRONTEND_GUI)
         config/LayoutBuilder.hpp
         config/LayoutStore.hpp
         session/PaneProxy.hpp
+        session/ScreenshotFile.hpp
         session/SessionFactory.hpp
         window/SettingsController.hpp
         session/TerminalSession.hpp
@@ -869,9 +870,11 @@ if(CONTOUR_TESTING)
         cli/ShellIntegration_test.cpp
         display/RedrawCoalescer_test.cpp
         session/SearchStatus_test.cpp
+        session/ScreenshotFile_test.cpp
     )
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally, and
-    # testing it HERE rather than in contour_gui_test is what proves it needs no Qt to reach.
+    # ScreenshotFile one over its Screen; testing them HERE rather than in contour_gui_test is what proves
+    # they need no Qt to reach.
     target_link_libraries(contour_test PRIVATE contour_command contour_cli vtbackend core::testing Catch2::Catch2)
     target_include_directories(contour_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
     if(NOT WIN32)

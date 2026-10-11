@@ -11,6 +11,7 @@
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/session/Logging.hpp>
+#include <contour/session/ScreenshotFile.hpp>
 #include <contour/session/SpawnCommand.hpp>
 #include <contour/session/TerminalSession.hpp>
 
@@ -2928,8 +2929,10 @@ bool TerminalSession::operator()(actions::ResetFontSize)
 bool TerminalSession::operator()(actions::ScreenshotVT)
 {
     auto l = lock_guard { terminal() };
-    auto const screenshot = terminal().isPrimaryScreen() ? terminal().primaryScreen().screenshot()
-                                                         : terminal().alternateScreen().screenshot();
+    // A file, replayed on its own: standaloneScreenshot() puts the replaying terminal in the state to draw
+    // it.
+    auto const screenshot = standaloneScreenshot(terminal().isPrimaryScreen() ? terminal().primaryScreen()
+                                                                              : terminal().alternateScreen());
     ofstream ofs { "screenshot.vt", ios::trunc | ios::binary };
     ofs << screenshot;
     return true;
