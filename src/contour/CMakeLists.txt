@@ -868,6 +868,7 @@ if(CONTOUR_TESTING)
         cli/CaptureScreen_test.cpp
         cli/CatImageArgs_test.cpp
         cli/ShellIntegration_test.cpp
+        cli/ShellIntegrationShells_test.cpp
         display/RedrawCoalescer_test.cpp
         session/SearchStatus_test.cpp
         session/ScreenshotFile_test.cpp
@@ -875,7 +876,8 @@ if(CONTOUR_TESTING)
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally, and
     # ScreenshotFile one over its Screen; testing them HERE rather than in contour_gui_test is what proves
     # they need no Qt to reach.
-    target_link_libraries(contour_test PRIVATE contour_command contour_cli vtbackend core::testing Catch2::Catch2)
+    # vthost for resolveExecutablePath(), the PATH walk the shell-integration tests find their shells with.
+    target_link_libraries(contour_test PRIVATE contour_command contour_cli vtbackend vthost core::testing Catch2::Catch2)
     target_include_directories(contour_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.

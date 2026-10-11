@@ -1,3 +1,102 @@
+# Contour shell integration for bash.
+#
+# Source it from ~/.bashrc. It carries its own copy of bash-preexec
+# (https://github.com/rcaloras/bash-preexec), vendored verbatim at the end of this file, for the
+# preexec/precmd hooks that bash itself does not have.
+#
+# Contour's hooks come FIRST and bash-preexec last. bash-preexec's duplicate-inclusion guard returns
+# from the whole sourced file, so with the hooks after it, a bash-preexec loaded earlier by something
+# else (atuin, starship and others bring their own) -- or this file sourced a second time -- left
+# Contour's hooks silently uninstalled.
+#
+# shellcheck shell=bash
+
+# Not bash: nothing below parses anywhere else. (POSIX syntax for exactly that reason.)
+if [ -z "${BASH_VERSION-}" ]; then
+    return 1
+fi
+
+# The longest command line sent as cmdline_url=, in bytes: a little more than the terminal keeps
+# (vtbackend::MaxRecordedCommandLineBytes, 4096), so that it still sees a longer one was cut.
+__contour_cmdline_max_bytes=4100
+
+# OSC 133;B as it sits at the end of PS1: \[ \] tell readline it takes no room on the line.
+__contour_prompt_end_mark='\[\e]133;B\e\\\]'
+
+# Prints $1 percent-encoded byte by byte, as kitty's cmdline_url= wants it: every byte but
+# A-Z a-z 0-9 / . _ ~ - (what fish's own encoder leaves alone, too) becomes %XX. That keeps ';', which
+# separates OSC 133's parameters, and the ESC and BEL that would end the sequence out of it.
+# Call it in a subshell: it switches the locale.
+__contour_percent_encode() {
+    # Bytes, not characters: in the C locale ${#text} and ${text:i:1} count bytes, so a multibyte
+    # character becomes one %XX per UTF-8 byte.
+    LC_ALL=C
+    local text=${1:0:__contour_cmdline_max_bytes} byte code i
+    for (( i = 0; i < ${#text}; i++ )); do
+        byte=${text:i:1}
+        case $byte in
+            [A-Za-z0-9/._~-]) printf '%s' "$byte" ;;
+            *)
+                # "'x" is the byte's code in the C locale -- or, in musl's, 0xDF00 plus the byte for one
+                # above 0x7F. Its low eight bits are the byte either way.
+                printf -v code '%d' "'$byte"
+                printf '%%%02X' $(( code & 255 ))
+                ;;
+        esac
+    done
+}
+
+__contour_preexec() {
+    # Text reflow back on for the command's output.
+    printf '\e[?2028h'
+
+    # OSC 133;C -- the command's output begins on the line the cursor is on now -- with the command
+    # line, which bash-preexec hands over as $1, exactly as history recorded it.
+    printf '\e]133;C;cmdline_url=%s\e\\' "$(__contour_percent_encode "$1")"
+
+    __contour_command_running=1
+}
+
+__contour_precmd() {
+    # Must be the very first line: anything else would clobber the exit status we are about to report.
+    local exit_status=$?
+
+    # OSC 133;D -- the command that just ran has finished. Only once a command actually HAS run: an
+    # unconditional D would put a CommandEnd on the very first prompt and invent a command block that
+    # never existed.
+    if [[ -n "${__contour_command_running:-}" ]]; then
+        printf '\e]133;D;%s\e\\' "$exit_status"
+        unset __contour_command_running
+    fi
+
+    # Text reflow off for the prompt; the working directory (OSC 7); OSC 133;A -- a new prompt starts
+    # on this line.
+    printf '\e[?2028l\e]7;%s\e\\\e]133;A\e\\' "$PWD"
+
+    # Keep the prompt-end mark the LAST precmd hook, so that a prompt framework which registered a
+    # PS1-building hook of its own after this file was sourced (starship, oh-my-bash) cannot build over
+    # it. bash-preexec expanded the list before running it, so this counts from the next prompt on.
+    local hook hooks=()
+    for hook in "${precmd_functions[@]}"; do
+        [[ $hook == __contour_mark_prompt_end ]] || hooks+=("$hook")
+    done
+    precmd_functions=("${hooks[@]}" __contour_mark_prompt_end)
+}
+
+# Appends the prompt-end mark to PS1 -- exactly once. PS1 outlives each prompt, and prompt frameworks
+# rebuild it from scratch or around its old value, so any copy already in it is taken out first and the
+# mark put back at the very end. A framework that rebuilds PS1 from PROMPT_COMMAND rather than from a
+# precmd hook still runs after this and drops the mark: that prompt then has no prompt-end column,
+# which costs nothing else -- the command line travels with ;C.
+__contour_mark_prompt_end() {
+    PS1=${PS1//"$__contour_prompt_end_mark"/}$__contour_prompt_end_mark
+}
+
+# Registered by name, and once: sourcing this file again must not run every hook twice.
+[[ " ${preexec_functions[*]-} " == *" __contour_preexec "* ]] || preexec_functions+=(__contour_preexec)
+[[ " ${precmd_functions[*]-} " == *" __contour_precmd "* ]] || precmd_functions+=(__contour_precmd)
+[[ " ${precmd_functions[*]-} " == *" __contour_mark_prompt_end "* ]] || precmd_functions+=(__contour_mark_prompt_end)
+
 # bash-preexec.sh -- Bash support for ZSH-like 'preexec' and 'precmd' functions.
 # https://github.com/rcaloras/bash-preexec
 #
@@ -378,32 +477,3 @@ __bp_install_after_session_init() {
 if [[ -z "${__bp_delay_install:-}" ]]; then
     __bp_install_after_session_init
 fi;
-
-# Actual customized code (for Contour) starts here:
-
-preexec() {
-    printf "\\e[?2028h";
-
-    # OSC 133;C -- the command's output begins on the line the cursor is on now.
-    printf "\\e]133;C\\e\\\\";
-
-    _contour_command_running=1
-}
-precmd() {
-    # Must be the very first line: anything else would clobber the exit status we are about to report.
-    local exit_status=$?
-
-    # OSC 133;D -- the command that just ran has finished. Only emitted once a command actually HAS run:
-    # an unconditional D would put a CommandEnd on the very first prompt and invent a command block that
-    # never existed.
-    if [[ -n "${_contour_command_running:-}" ]]; then
-        printf "\\e]133;D;%s\\e\\\\" "${exit_status}";
-        unset _contour_command_running
-    fi
-
-    printf "\\e[?2028l\\e]7;$PWD\\e\\\\";
-
-    # OSC 133;A -- a new prompt starts on this line. Together with ;C above this is what lets the terminal
-    # tell a prompt apart from a command's output, which is what "copy last command output" reads.
-    printf "\\e]133;A\\e\\\\";
-}
