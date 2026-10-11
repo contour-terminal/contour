@@ -933,11 +933,14 @@ if(CONTOUR_TESTING)
 
     # Registered outside the guard for the same reason: `generate integration` is a verb the GUI-less
     # build keeps, and its scripts are embedded by EmbedShellIntegration.cmake for both configurations.
+    # The shells travel comma-separated: a ';' would split the list into arguments of its own on the
+    # way through ARGS and add_test, leaving SHELLS the first shell alone.
+    string(REPLACE ";" "," _shell_integration_shells "${CONTOUR_SHELL_INTEGRATION_SHELLS}")
     contour_add_e2e_cmake_test(
         NAME contour_e2e_shell_integration
         SCRIPT ShellIntegration.cmake
         MARKER "shell-integration: OK"
-        ARGS -D "SHELLS=${CONTOUR_SHELL_INTEGRATION_SHELLS}"
+        ARGS -D "SHELLS=${_shell_integration_shells}"
              -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/cli"
              -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}")
 endif()

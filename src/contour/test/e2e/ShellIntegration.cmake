@@ -3,7 +3,7 @@
 # src/contour/cli/shell-integration/.
 #
 # Run by ctest as
-#   cmake -D CONTOUR_BINARY=... -D SHELLS=... -D SOURCE_DIR=... -D WORK_DIR=... -P ShellIntegration.cmake
+#   cmake -D CONTOUR_BINARY=... -D SHELLS=bash,fish,... -D SOURCE_DIR=... -D WORK_DIR=... -P ShellIntegration.cmake
 # WORK_DIR is passed explicitly rather than derived from the working directory, so running this by
 # hand cannot scatter output into whatever directory it was started from.
 # A CMake script for the same reasons CliVerbs.cmake is one: it has to run on Windows, where `sh` is
@@ -25,6 +25,8 @@ endif()
 if(NOT SHELLS)
     message(FATAL_ERROR "SHELLS must name at least one shell")
 endif()
+# Comma-separated on the command line, where a ';' would have split it into arguments of its own.
+string(REPLACE "," ";" SHELLS "${SHELLS}")
 if(NOT IS_DIRECTORY "${SOURCE_DIR}/shell-integration")
     message(FATAL_ERROR "SOURCE_DIR does not hold a shell-integration directory: '${SOURCE_DIR}'")
 endif()
