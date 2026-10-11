@@ -3407,6 +3407,66 @@ TEST_CASE("search.walksTextCellsAcrossWideCharactersAndPadding", "[screen]")
     }
 }
 
+namespace
+{
+/// The cells on the page the renderer paints as a search match of @p needle, as (row, column) pairs.
+std::set<std::pair<int, int>> highlightedCells(MockTerm<>& mock, std::u32string needle)
+{
+    // Both match colours made one recognisable colour, so a painted cell says nothing but "matched".
+    auto constexpr Matched = RGBColor { 0xAB, 0xCD, 0xEF };
+    auto const paint = CellRGBColorAndAlphaPair { .foreground = RGBColor { 0, 0, 0 },
+                                                  .foregroundAlpha = 1.0f,
+                                                  .background = Matched,
+                                                  .backgroundAlpha = 1.0f };
+    mock.terminal.colorPalette().searchHighlight = paint;
+    mock.terminal.colorPalette().searchHighlightFocused = paint;
+    (void) mock.terminal.setNewSearchTerm(std::move(needle), SearchOrigin::Typed);
+    mock.terminal.refreshRenderBuffer(true);
+
+    auto cells = std::set<std::pair<int, int>> {};
+    for (auto const& cell: mock.terminal.renderBuffer().get().cells)
+        if (cell.attributes.backgroundColor == Matched)
+            cells.emplace(unbox(cell.position.line), unbox(cell.position.column));
+    return cells;
+}
+} // namespace
+
+TEST_CASE("search.highlightPaintsExactlyTheCellsTheSearchMatches", "[screen]")
+{
+    // The highlight asks the matcher the search asks, so a match the search jumps to is painted, on the
+    // cells it covers and no others: a wide character's two columns, and not the padding it left behind.
+    using Cells = std::set<std::pair<int, int>>;
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10) };
+    mock.writeToScreen("ABCD\xE4\xB8\xAD"
+                       "E"); // U+4E2D, two columns
+
+    SECTION("on one row")
+    {
+        CHECK(highlightedCells(mock, U"D中") == Cells { { 0, 3 }, { 0, 4 }, { 0, 5 } });
+        CHECK(highlightedCells(mock, U"中E") == Cells { { 0, 4 }, { 0, 5 }, { 0, 6 } });
+    }
+
+    SECTION("across the padding a narrowing leaves")
+    {
+        // "ABCD" and padding, then "中E" on the row that continues it.
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(5) });
+        CHECK(highlightedCells(mock, U"D中") == Cells { { 0, 3 }, { 1, 0 }, { 1, 1 } });
+        CHECK(highlightedCells(mock, U"中E") == Cells { { 1, 0 }, { 1, 1 }, { 1, 2 } });
+        CHECK(highlightedCells(mock, U"CD中E") == Cells { { 0, 2 }, { 0, 3 }, { 1, 0 }, { 1, 1 }, { 1, 2 } });
+    }
+
+    SECTION("across the page's top edge")
+    {
+        // The row holding "ABCD" scrolls into the history; the match it begins goes on onto the page.
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(5) });
+        mock.writeToScreen("\r\n\r\n");
+        REQUIRE(mock.terminal.primaryScreen().grid().lineText(LineOffset(-1)).starts_with("ABCD"));
+        CHECK(highlightedCells(mock, U"D中") == Cells { { 0, 0 }, { 0, 1 } });
+        CHECK(highlightedCells(mock, U"中E") == Cells { { 0, 0 }, { 0, 1 }, { 0, 2 } });
+        CHECK(highlightedCells(mock, U"CD中E") == Cells { { 0, 0 }, { 0, 1 }, { 0, 2 } });
+    }
+}
+
 TEST_CASE("Screen.screenshot.replaysWideCharactersInPlace", "[screen]")
 {
     // A screenshot is the VT stream that redraws the screen. Replaying it must put every character back in

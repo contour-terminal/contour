@@ -1444,11 +1444,18 @@ u32string Grid::extractText(CellLocationRange range) const noexcept
 
 bool Grid::textMatchesAt(u32string_view text, CellLocation start, CaseComparison comparison) const noexcept
 {
+    return matchedTextEnd(text, start, comparison).has_value();
+}
+
+std::optional<CellLocation> Grid::matchedTextEnd(u32string_view text,
+                                                 CellLocation start,
+                                                 CaseComparison comparison) const noexcept
+{
     auto const isCaseSensitive = comparison == CaseComparison::Exact;
     auto const lastLine = boxed_cast<LineOffset>(_pageSize.lines) - 1;
 
     auto position = start;
-    auto isFirstCell = true;
+    auto end = std::optional<CellLocation> {};
     while (!text.empty())
     {
         auto const& line = lineAt(position.line);
@@ -1456,7 +1463,7 @@ bool Grid::textMatchesAt(u32string_view text, CellLocation start, CaseComparison
         {
             // Only a soft wrap carries the text on; the row after a hard break begins text of its own.
             if (position.line >= lastLine || !isLineWrapped(position.line + 1))
-                return false;
+                return std::nullopt;
             ++position.line;
             position.column = ColumnOffset(0);
             continue;
@@ -1464,26 +1471,29 @@ bool Grid::textMatchesAt(u32string_view text, CellLocation start, CaseComparison
 
         // A blank row holds no text to match.
         if (line.isBlank())
-            return false;
+            return std::nullopt;
 
         auto const column = unbox<size_t>(position.column);
         auto const& storage = line.storage();
         if (storage.sgr[column].flags.any(NoTextCellFlags))
         {
-            if (isFirstCell)
-                return false;
+            if (!end)
+                return std::nullopt;
             ++position.column;
             continue;
         }
 
         auto const cell = ConstCellProxy(storage, column);
         if (!CellUtil::beginsWith(text, cell, isCaseSensitive))
-            return false;
+            return std::nullopt;
         text.remove_prefix(cell.codepointCount());
-        position.column += ColumnOffset::cast_from(max(cell.width(), uint8_t { 1 }));
-        isFirstCell = false;
+        auto const width = ColumnOffset::cast_from(max(cell.width(), uint8_t { 1 }));
+        end = CellLocation { .line = position.line,
+                             .column =
+                                 min(position.column + width, boxed_cast<ColumnOffset>(line.size())) - 1 };
+        position.column += width;
     }
-    return true;
+    return end;
 }
 
 } // end namespace vtbackend

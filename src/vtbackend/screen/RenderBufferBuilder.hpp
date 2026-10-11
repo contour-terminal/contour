@@ -10,6 +10,7 @@
 #include <gsl/pointers>
 
 #include <optional>
+#include <vector>
 
 namespace vtbackend
 {
@@ -159,8 +160,33 @@ class RenderBufferBuilder
         return _currentLineFlags.test(LineFlag::DoubleWidth) ? column * 2 : column;
     }
 
-    template <typename T>
-    void matchSearchPattern(T const& cellText);
+    /// How a cell is painted for the search.
+    enum class SearchHighlight : uint8_t
+    {
+        None = 0,     //!< No match covers the cell.
+        Match,        //!< A match covers it.
+        FocusedMatch, //!< The match the cursor stands on covers it.
+    };
+
+    /// One match of the search pattern within reach of the rows being rendered.
+    struct SearchMatch
+    {
+        CellLocation first {};                             //!< The cell the match begins at.
+        CellLocation last {};                              //!< The last column it covers.
+        SearchHighlight highlight = SearchHighlight::None; //!< How its cells are painted.
+    };
+
+    /// Works out which cells of grid row @p gridLine the search highlights, into _rowSearchHighlights.
+    ///
+    /// The matches are the search's own (Grid::matchedTextEnd), found only among the rows a match reaching
+    /// this one can begin on: the rows rendered before it, and those above it in its logical line. Rows
+    /// arrive top to bottom, so each candidate start is tried once per pass.
+    /// @param gridLine The grid row about to be rendered cell by cell.
+    void prepareSearchHighlights(LineOffset gridLine);
+
+    /// Paints the cell just emitted for @p column as a search match, where one covers it.
+    /// @param column The column of the cell, on the row prepareSearchHighlights() last prepared.
+    void paintSearchHighlight(ColumnOffset column);
 
     /// Tests if the given screen line offset does contain a cursor (either ANSI cursor or vi cursor, if
     /// shown) and returns false otherwise, which guarantees that no cursor is to be rendered
@@ -204,8 +230,14 @@ class RenderBufferBuilder
     /// line is the better channel for it, being already immune to an application's own colours.
     bool _contextTintingPossible = false;
 
-    // Offset into the search pattern that has been already matched.
-    size_t _searchPatternOffset = 0;
+    /// The search matches found so far this pass that may still reach the row being rendered.
+    std::vector<SearchMatch> _searchMatches;
+
+    /// The last grid row whose cells have all been tried as the start of a match this pass.
+    std::optional<LineOffset> _searchScannedThrough;
+
+    /// How each cell of the row being rendered is painted for the search, by column; empty for none.
+    std::vector<SearchHighlight> _rowSearchHighlights;
 
     // Current line flags being rendered.
     LineFlags _currentLineFlags = LineFlag::None;

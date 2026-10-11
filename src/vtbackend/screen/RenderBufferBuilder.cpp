@@ -12,6 +12,10 @@
 #include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/width.h>
 
+#include <algorithm>
+#include <ranges>
+#include <vector>
+
 using namespace std;
 
 namespace vtbackend
@@ -508,7 +512,6 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     // it goes to the emitter that respects that -- re-deriving the boundaries here is what let the
     // renderer and the grid disagree in GitHub #1752. An empty line has no text and only wants the
     // fill loop below.
-    _searchPatternOffset = 0;
     renderGridText(CellLocation { .line = lineOffset, .column = ColumnOffset(0) },
                    lineBuffer.textAttributes,
                    textOverride);
@@ -538,9 +541,9 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     _output->cells[backIndex].groupEnd = true;
 }
 
-template <typename T>
-void RenderBufferBuilder::matchSearchPattern(T const& cellText)
+void RenderBufferBuilder::prepareSearchHighlights(LineOffset gridLine)
 {
+    _rowSearchHighlights.clear();
     if (_highlightSearchMatches == HighlightSearchMatches::No)
         return;
 
@@ -548,77 +551,85 @@ void RenderBufferBuilder::matchSearchPattern(T const& cellText)
     if (search.pattern.empty())
         return;
 
-    auto const searchText = u32string_view(search.pattern.data() + _searchPatternOffset,
-                                           search.pattern.size() - _searchPatternOffset);
+    auto const& grid = _screen->grid();
+    auto const pattern = u32string_view(search.pattern);
+    auto const columns = unbox(grid.pageSize().columns);
 
-    // The cached answer for the WHOLE pattern, not one re-derived from `searchText` -- which is only
-    // the part still unmatched. The policy is a property of the search, so deriving it from a suffix
-    // made it drift mid-match: with "Foo", the suffix left after 'F' carries no uppercase, and the
-    // tail matched case-insensitively. Screen::search reads the same field, so highlighting and
-    // matching cannot disagree (they did, for every non-ASCII needle: std::isupper is undefined above
-    // 0xFF). Read rather than recomputed because this runs once per RENDERED CELL. @see Search.
-    auto const isCaseSensitive = search.comparison == CaseComparison::Exact;
+    // A match that reaches this row may begin on a row above it in the same logical line. Each row it
+    // crosses gives it at least one codepoint of the needle, so it begins no further up than the needle
+    // is long.
+    auto const top = -boxed_cast<LineOffset>(grid.historyLineCount());
+    auto const reach = LineOffset::cast_from(pattern.size());
+    auto firstRow = gridLine;
+    while (firstRow > top && firstRow > gridLine - reach && grid.isLineWrapped(firstRow))
+        --firstRow;
+    if (_searchScannedThrough)
+        firstRow = max(firstRow, *_searchScannedThrough + 1);
 
-    auto const isFullMatch = [&]() -> bool {
-        return !CellUtil::beginsWith(searchText, cellText, isCaseSensitive);
-    }();
-
-    if (isFullMatch)
+    auto const cursor = _terminal->normalModeCursorPosition();
+    for (auto const row: std::views::iota(unbox(firstRow), unbox(gridLine) + 1))
     {
-        // match fail
-        _searchPatternOffset = 0;
+        for (auto const column: std::views::iota(0, columns))
+        {
+            auto const first = CellLocation { .line = LineOffset(row), .column = ColumnOffset(column) };
+            if (auto const last = grid.matchedTextEnd(pattern, first, search.comparison))
+                _searchMatches.push_back(SearchMatch {
+                    .first = first,
+                    .last = *last,
+                    .highlight = CellLocationRange { .first = first, .second = *last }.contains(cursor)
+                                     ? SearchHighlight::FocusedMatch
+                                     : SearchHighlight::Match,
+                });
+        }
+    }
+    _searchScannedThrough = max(_searchScannedThrough.value_or(gridLine), gridLine);
+
+    // A match that ends above this row reaches no row still to come.
+    std::erase_if(_searchMatches,
+                  [gridLine](SearchMatch const& match) { return match.last.line < gridLine; });
+
+    _rowSearchHighlights.assign(static_cast<size_t>(columns), SearchHighlight::None);
+    auto const& line = grid.lineAt(gridLine);
+    for (auto const& match: _searchMatches)
+    {
+        if (match.first.line > gridLine)
+            continue;
+        auto const from = match.first.line == gridLine ? unbox(match.first.column) : 0;
+        auto const to = match.last.line == gridLine ? unbox(match.last.column) : columns - 1;
+        for (auto const column: std::views::iota(from, to + 1))
+        {
+            // Padding and a tall block's lower part are no cells of the match: it stepped over them.
+            if (!line.isBlank()
+                && line.storage().sgr[static_cast<size_t>(column)].flags.any(
+                    CellFlags { CellFlag::WrapPadding } | CellFlag::MulticellContinuation))
+                continue;
+            auto& highlight = _rowSearchHighlights[static_cast<size_t>(column)];
+            highlight = max(highlight, match.highlight);
+        }
+    }
+}
+
+void RenderBufferBuilder::paintSearchHighlight(ColumnOffset column)
+{
+    auto const index = unbox<size_t>(column);
+    if (index >= _rowSearchHighlights.size() || _rowSearchHighlights[index] == SearchHighlight::None)
         return;
-    }
 
-    if constexpr (std::is_same_v<Cell, T> || std::is_same_v<CellProxy, T>)
-        _searchPatternOffset += cellText.codepointCount();
-    else
-        _searchPatternOffset += cellText.size();
-
-    if (_searchPatternOffset < search.pattern.size())
-        return; // match incomplete
-
-    // match complete
-
-    auto const offsetIntoFront = _output->cells.size() - _searchPatternOffset;
-
-    auto const isFocusedMatch =
-        CellLocationRange {
-            .first = _output->cells[offsetIntoFront].position,
-            .second = _output->cells.back().position,
-        }
-            .contains(
-                _terminal->viewport().translateGridToScreenCoordinate(_terminal->normalModeCursorPosition()));
-
-    auto highlightColors = [&]() -> CellRGBColorAndAlphaPair {
-        // Oh yeah, this can be optimized :)
-        if (isFocusedMatch)
-        {
-            if (_terminal->search().origin == SearchOrigin::DoubleClick)
-                return _terminal->colorPalette().wordHighlightCurrent;
-            else
-                return _terminal->colorPalette().searchHighlightFocused;
-        }
-        else
-        {
-            if (_terminal->search().origin == SearchOrigin::DoubleClick)
-                return _terminal->colorPalette().wordHighlight;
-            else
-                return _terminal->colorPalette().searchHighlight;
-        }
+    auto const isFocusedMatch = _rowSearchHighlights[index] == SearchHighlight::FocusedMatch;
+    auto const isDoubleClick = _terminal->search().origin == SearchOrigin::DoubleClick;
+    auto const& palette = _terminal->colorPalette();
+    auto const& highlightColors = [&]() -> CellRGBColorAndAlphaPair const& {
+        if (isDoubleClick)
+            return isFocusedMatch ? palette.wordHighlightCurrent : palette.wordHighlight;
+        return isFocusedMatch ? palette.searchHighlightFocused : palette.searchHighlight;
     }();
 
-    for (size_t i = offsetIntoFront; i < _output->cells.size(); ++i)
-    {
-        auto& cellAttributes = _output->cells[i].attributes;
-        auto const actualColors = RGBColorPair { .foreground = cellAttributes.foregroundColor,
-                                                 .background = cellAttributes.backgroundColor };
-        auto const searchMatchColors = makeRGBColorPair(actualColors, highlightColors);
-
-        cellAttributes.backgroundColor = searchMatchColors.background;
-        cellAttributes.foregroundColor = searchMatchColors.foreground;
-    }
-    _searchPatternOffset = 0;
+    auto& cellAttributes = _output->cells.back().attributes;
+    auto const actualColors = RGBColorPair { .foreground = cellAttributes.foregroundColor,
+                                             .background = cellAttributes.backgroundColor };
+    auto const searchMatchColors = makeRGBColorPair(actualColors, highlightColors);
+    cellAttributes.backgroundColor = searchMatchColors.background;
+    cellAttributes.foregroundColor = searchMatchColors.foreground;
 }
 
 void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags, ContextId contextId)
@@ -630,6 +641,11 @@ void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags, ContextId 
 
     _useCursorlineColoring = isCursorLine(line);
     _currentContextTint = tintFor(contextId);
+
+    prepareSearchHighlights(
+        _terminal->viewport()
+            .translateScreenToGridCoordinate(CellLocation { .line = line, .column = ColumnOffset(0) })
+            .line);
 }
 
 bool RenderBufferBuilder::isCursorLine(LineOffset line) const
@@ -869,7 +885,7 @@ void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line,
         _output->cells.back().groupEnd = true;
     }
 
-    matchSearchPattern(screenCell);
+    paintSearchHighlight(column);
 }
 
 } // namespace vtbackend

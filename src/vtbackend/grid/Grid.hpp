@@ -776,6 +776,16 @@ class Grid
                                      CellLocation start,
                                      CaseComparison comparison) const noexcept;
 
+    /// Where the match textMatchesAt() finds at @p start ends, so that its cells can be named.
+    /// @param text       The needle; non-empty.
+    /// @param start      The cell the match begins at.
+    /// @param comparison Whether letters must match case.
+    /// @return The last column the match covers -- a wide character's second half where it ends on one --
+    ///         or nothing where @p text does not match there.
+    [[nodiscard]] std::optional<CellLocation> matchedTextEnd(std::u32string_view text,
+                                                             CellLocation start,
+                                                             CaseComparison comparison) const noexcept;
+
     [[nodiscard]] CellLocation stretchedColumn(CellLocation coord) const noexcept
     {
         CellLocation stretched = coord;
