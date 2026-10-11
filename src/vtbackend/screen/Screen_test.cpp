@@ -3467,21 +3467,12 @@ TEST_CASE("search.highlightPaintsExactlyTheCellsTheSearchMatches", "[screen]")
     }
 }
 
-TEST_CASE("Screen.screenshot.replaysWideCharactersInPlace", "[screen]")
+namespace
 {
-    // A screenshot is the VT stream that redraws the screen. Replaying it must put every character back in
-    // its column: a wide character's second half is covered by the character itself, so a space written
-    // for it pushes the rest of the row one column to the right.
-    auto const pageSize = PageSize { LineCount(3), ColumnCount(5) };
-    auto mock = MockTerm { pageSize };
-    // "中E" on its own row; "ABCD" and the padding a wide character leaves where it does not fit, then
-    // "中" on the row after.
-    mock.writeToScreen("\xE4\xB8\xAD"
-                       "E\r\nABCD\xE4\xB8\xAD");
-    auto const& screen = mock.terminal.primaryScreen();
-    REQUIRE(screen.grid().lineAt(LineOffset(1)).storage().sgr[4].flags.contains(CellFlag::WrapPadding));
-
-    // The same height: a line break between rows, and none after the last, which would scroll the page.
+/// Replays @p screen's screenshot into a fresh terminal of the same size and checks that every cell came
+/// back: its text (one codepoint per column), its width, its text sizing, and what it continues.
+void checkScreenshotReplaysCellForCell(Screen const& screen, PageSize pageSize)
+{
     auto replay = MockTerm { pageSize };
     replay.writeToScreen(screen.screenshot());
     auto const& replayed = replay.terminal.primaryScreen();
@@ -3495,26 +3486,53 @@ TEST_CASE("Screen.screenshot.replaysWideCharactersInPlace", "[screen]")
         {
             INFO(std::format("column {}", column));
             auto const at = CellLocation { LineOffset(line), ColumnOffset(column) };
+            CHECK(replayed.at(at).width() == screen.at(at).width());
+            CHECK(replayed.at(at).textScale() == screen.at(at).textScale());
             CHECK(replayed.at(at).isFlagEnabled(CellFlag::WideCharContinuation)
                   == screen.at(at).isFlagEnabled(CellFlag::WideCharContinuation));
-            CHECK(replayed.at(at).width() == screen.at(at).width());
+            CHECK(replayed.at(at).isFlagEnabled(CellFlag::MulticellContinuation)
+                  == screen.at(at).isFlagEnabled(CellFlag::MulticellContinuation));
         }
     }
 }
+} // namespace
 
-TEST_CASE("Screen.screenshot.keepsTheColumnsOfATextSizingBlock", "[screen]")
+TEST_CASE("Screen.screenshot.replaysWideCharactersInPlace", "[screen]")
 {
-    // A screenshot writes no OSC 66, so a block three columns wide replays as its one-column text. Blanks
-    // fill the columns the text does not cover, so what follows the block stays in its column.
-    auto const pageSize = PageSize { LineCount(1), ColumnCount(6) };
+    // A screenshot is the VT stream that redraws the screen. Replaying it must put every character back in
+    // its column: a wide character's second half is covered by the character itself, so a space written
+    // for it pushes the rest of the row one column to the right. Replayed at the page's own height: a line
+    // break between rows, and none after the last, which would scroll the page.
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(5) };
     auto mock = MockTerm { pageSize };
-    mock.writeToScreen("\033]66;w=3;X\az");
+    // "中E" on its own row; "ABCD" and the padding a wide character leaves where it does not fit, then
+    // "中" on the row after.
+    mock.writeToScreen("\xE4\xB8\xAD"
+                       "E\r\nABCD\xE4\xB8\xAD");
     auto const& screen = mock.terminal.primaryScreen();
-    REQUIRE(screen.grid().lineAt(LineOffset(0)).toUtf8ColumnAligned() == "X  z  ");
+    REQUIRE(screen.grid().lineAt(LineOffset(1)).storage().sgr[4].flags.contains(CellFlag::WrapPadding));
 
-    auto replay = MockTerm { pageSize };
-    replay.writeToScreen(screen.screenshot());
-    CHECK(replay.terminal.primaryScreen().grid().lineAt(LineOffset(0)).toUtf8ColumnAligned() == "X  z  ");
+    checkScreenshotReplaysCellForCell(screen, pageSize);
+}
+
+TEST_CASE("Screen.screenshot.replaysTextSizingBlocks", "[screen]")
+{
+    // A text-sizing block replays as the OSC 66 that made it, as kitty's own ANSI dump of a line writes
+    // one for each multicell character (line.c:60, write_multicell_ansi_prefix): its explicit width, its
+    // scale, its fraction and alignment. The rows a tall block reaches down into are stepped over, not
+    // written: writing there would destroy the block the row above just made.
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(10) };
+    auto mock = MockTerm { pageSize };
+    mock.writeToScreen("\033]66;w=3;X\az\r\n"            // one row, three columns
+                       "\033]66;s=2;Y\aq"                // two rows and two columns, its own width
+                       "\033]66;s=2:n=1:d=2:v=2:h=1;F\a" // drawn at half its scale, aligned
+                       "\033[3;6Hr");                    // beside the blocks' lower part
+    auto const& screen = mock.terminal.primaryScreen();
+    REQUIRE(screen.at(CellLocation { LineOffset(1), ColumnOffset(0) }).scale() == 2);
+    REQUIRE(screen.at(CellLocation { LineOffset(2), ColumnOffset(3) })
+                .isFlagEnabled(CellFlag::MulticellContinuation));
+
+    checkScreenshotReplaysCellForCell(screen, pageSize);
 }
 
 TEST_CASE("tallyMatches", "[screen]")
