@@ -290,6 +290,8 @@ if(LIBTERMINAL_TESTING)
         set_tests_properties(bench_headless_throughput_rejects_unknown_kind PROPERTIES WILL_FAIL TRUE)
         set_tests_properties(bench_headless_throughput_smoke bench_headless_throughput_rejects_unknown_kind
                              PROPERTIES LABELS bench)
+        add_test(NAME bench_headless_snapshot_smoke COMMAND bench-headless snapshot frames 10 runs 1)
+        set_tests_properties(bench_headless_snapshot_smoke PROPERTIES LABELS bench)
         if(NOT WIN32)
             add_test(NAME bench_headless_pty_smoke COMMAND bench-headless pty seconds 1)
             set_tests_properties(bench_headless_pty_smoke PROPERTIES LABELS bench)

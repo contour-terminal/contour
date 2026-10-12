@@ -628,6 +628,87 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
     return EXIT_SUCCESS;
 }
 
+/// A status line the snapshot benchmark renders with.
+struct SnapshotStatusLine
+{
+    vtbackend::StatusDisplayType type; ///< What the terminal shows.
+    std::string_view label;            ///< How the report names it.
+};
+
+/// Every status line a snapshot run measures, in the order the report shows them.
+constexpr auto SnapshotStatusLines = std::array {
+    SnapshotStatusLine { .type = vtbackend::StatusDisplayType::None, .label = "no status line" },
+    SnapshotStatusLine { .type = vtbackend::StatusDisplayType::Indicator, .label = "indicator" },
+};
+
+/// How much of a workload fills the terminal before frames are timed: the page and the scrollback, many
+/// times over.
+constexpr auto SnapshotFillBytes = size_t { 1 } * 1024 * 1024;
+
+/// How the snapshot benchmark runs. Its defaults are the command line's.
+struct SnapshotOptions
+{
+    unsigned frames = 2000; ///< Frames per run; the report shows their mean.
+    unsigned runs = 3;      ///< Runs per workload, screen and status line; the fastest counts.
+};
+
+/// Renders @p frames frames the way the render thread does each one: refreshRenderBuffer(), which builds the
+/// render buffer while it holds the terminal's state lock.
+///
+/// Out of line so that callgrind can count exactly this, with `--toggle-collect='*runSnapshotFrames*'`.
+/// @return How long all the frames took.
+[[gnu::noinline]] std::chrono::nanoseconds runSnapshotFrames(vtbackend::Terminal& terminal, unsigned frames)
+{
+    auto const start = std::chrono::steady_clock::now();
+    for ([[maybe_unused]] auto const frame: std::views::iota(0u, frames))
+        std::ignore = terminal.refreshRenderBuffer();
+    return std::chrono::steady_clock::now() - start;
+}
+
+/// @return The mean time of one frame, once @p fill has been written on @p screen with @p statusLine shown.
+std::chrono::duration<double, std::micro> measureSnapshot(std::string_view fill,
+                                                          BenchScreen const& screen,
+                                                          vtbackend::StatusDisplayType statusLine,
+                                                          unsigned frames)
+{
+    auto vt = vtbackend::MockTerm<vtpty::MockViewPty>(BenchPageSize, BenchHistory, ContourPtyReadSize);
+    vt.terminal.setMode(vtbackend::DECMode::AutoWrap, true);
+    vt.terminal.setStatusDisplay(statusLine);
+    feed(vt, screen.entrySequence);
+    feed(vt, fill);
+    return std::chrono::duration<double, std::micro>(runSnapshotFrames(vt.terminal, frames)) / frames;
+}
+
+/// Measures every picked workload on every picked screen with every status line, and prints the fastest run
+/// of each.
+int runSnapshotBenchmark(std::span<vtbackend::test::Workload const> workloads,
+                         std::span<BenchScreen const> screens,
+                         SnapshotOptions const& options)
+{
+    cout << std::format(
+        "Render snapshot: refreshRenderBuffer() per frame, mean of {} frames, fastest of {} runs\n",
+        options.frames,
+        options.runs);
+    for (auto const& workload: workloads)
+    {
+        auto const fill = vtbackend::test::makeWorkload(workload, SnapshotFillBytes);
+        for (auto const& screen: screens)
+        {
+            auto line = std::format("{:<8} {:<9}", workload.name, screen.name);
+            for (auto const& statusLine: SnapshotStatusLines)
+            {
+                auto fastest = std::chrono::duration<double, std::micro>::max();
+                for ([[maybe_unused]] auto const run: std::views::iota(0u, options.runs))
+                    fastest =
+                        std::min(fastest, measureSnapshot(fill, screen, statusLine.type, options.frames));
+                line += std::format(" {:9.1f} us/frame ({})", fastest.count(), statusLine.label);
+            }
+            cout << line << '\n';
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
 } // namespace
 
 namespace CLI = core::cli;
@@ -654,6 +735,7 @@ class ContourHeadlessBench: public core::cli::App
         link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY, this));
         link("bench-headless.keypress", bind(&ContourHeadlessBench::benchKeyPress, this));
         link("bench-headless.throughput", bind(&ContourHeadlessBench::benchThroughput, this));
+        link("bench-headless.snapshot", bind(&ContourHeadlessBench::benchSnapshot, this));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
 
         if (auto const logFilterString = env.get("LOG"))
@@ -667,6 +749,7 @@ class ContourHeadlessBench: public core::cli::App
     {
         auto constexpr KeyPressDefaults = KeyPressBenchOptions {};
         auto constexpr ThroughputDefaults = ThroughputOptions {};
+        auto constexpr SnapshotDefaults = SnapshotOptions {};
 
         auto const perfOptions = CLI::OptionList {
             CLI::Option { .name = "size",
@@ -710,6 +793,25 @@ class ContourHeadlessBench: public core::cli::App
                           .placeholder = "BYTES" },
         };
 
+        auto const snapshotOptions = CLI::OptionList {
+            CLI::Option { .name = "frames",
+                          .v = CLI::Value { SnapshotDefaults.frames },
+                          .helpText = "Frames per run; the report shows their mean." },
+            CLI::Option { .name = "runs",
+                          .v = CLI::Value { SnapshotDefaults.runs },
+                          .helpText = "Runs per workload, screen and status line; the fastest counts." },
+            CLI::Option { .name = "kinds",
+                          .v = CLI::Value { ""s },
+                          .helpText = "Comma-separated workloads to fill with, all when empty; an unknown "
+                                      "name lists the known ones.",
+                          .placeholder = "LIST" },
+            CLI::Option { .name = "screens",
+                          .v = CLI::Value { ""s },
+                          .helpText = "Comma-separated screens to fill (primary, alternate), both when "
+                                      "empty.",
+                          .placeholder = "LIST" },
+        };
+
         return CLI::Command {
             .name = "bench-headless",
             .helpText = "Contour Terminal Emulator " CONTOUR_VERSION_STRING
@@ -746,6 +848,13 @@ class ContourHeadlessBench: public core::cli::App
                                     "parse and grid, as contour's PTY thread runs them -- for each workload "
                                     "on each screen.",
                         .options = throughputOptions },
+                    CLI::Command {
+                        .name = "snapshot",
+                        .helpText =
+                            "Measures what the render thread does every frame while it holds the "
+                            "terminal's state lock -- refreshRenderBuffer() -- once each workload has "
+                            "filled the page, with no status line and with the indicator.",
+                        .options = snapshotOptions },
                     CLI::Command {
                         .name = "keypress",
                         .helpText = "Measures how long a key press takes to reach the PTY while an "
@@ -876,6 +985,34 @@ class ContourHeadlessBench: public core::cli::App
             return EXIT_FAILURE;
         }
         return runThroughputBenchmark(*workloads, *screens, options);
+    }
+
+    int benchSnapshot()
+    {
+        auto const workloads = pickByName<vtbackend::test::Workload>(
+            vtbackend::test::Workloads, parameters().str("bench-headless.snapshot.kinds"), "workload");
+        if (!workloads)
+        {
+            cerr << workloads.error() << '\n';
+            return EXIT_FAILURE;
+        }
+        auto const screens = pickByName<BenchScreen>(
+            BenchScreens, parameters().str("bench-headless.snapshot.screens"), "screen");
+        if (!screens)
+        {
+            cerr << screens.error() << '\n';
+            return EXIT_FAILURE;
+        }
+        auto const options = SnapshotOptions {
+            .frames = parameters().uint("bench-headless.snapshot.frames"),
+            .runs = parameters().uint("bench-headless.snapshot.runs"),
+        };
+        if (options.frames == 0 || options.runs == 0)
+        {
+            cerr << "frames and runs must each be at least 1.\n";
+            return EXIT_FAILURE;
+        }
+        return runSnapshotBenchmark(*workloads, *screens, options);
     }
 
     int benchSixel()
