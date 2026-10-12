@@ -10,6 +10,7 @@
 #include <vtbackend/graphics/regis/ReGISTextRasterizer.hpp>
 #include <vtbackend/grid/SoAClusterWriter.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
+#include <vtbackend/screen/AsciiText.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
@@ -463,9 +464,7 @@ void Screen::writeText(string_view text, size_t cellCount)
     // Fast path: bulk-write ASCII directly into SoA arrays.
     // Only for pure ASCII content — non-ASCII needs the per-codepoint grapheme segmenter
     // to handle multi-codepoint clusters (emoji + VS16, ZWJ sequences, etc.).
-    auto const isPureAscii =
-        std::ranges::all_of(text, [](char ch) { return static_cast<unsigned char>(ch) < 0x80; });
-    if (isPureAscii && !_terminal->isModeEnabled(AnsiMode::Insert) && isFullHorizontalMargins()
+    if (isAsciiOnly(text) && !_terminal->isModeEnabled(AnsiMode::Insert) && isFullHorizontalMargins()
         && _cursor.charsets.isSelected(CharsetId::USASCII) && !_cursor.charsets.activeDRCSFont().has_value())
     {
         crlfIfWrapPending();

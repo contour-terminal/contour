@@ -12,6 +12,7 @@ option(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE "Updates the render buffer withi
 option(LIBTERMINAL_BUILD_BENCH_HEADLESS "Builds bench-headless CLI tool to benchmark libvtbackend [default: OFF]" OFF)
 
 set(vtbackend_HEADERS
+    screen/AsciiText.hpp
     vt/Capabilities.hpp
     core/CellFlags.hpp
     grid/CellProxy.hpp
@@ -227,6 +228,7 @@ if(LIBTERMINAL_TESTING)
         vt/TextSizing_test.cpp
         screen/ScreenTestFixtures.cpp
         screen/TerminalTestFixtures.cpp
+        screen/AsciiText_test.cpp
         screen/Screen_test.cpp
         screen/Screen_charset_test.cpp
         screen/Screen_rect_test.cpp
