@@ -1765,24 +1765,26 @@ string_view Terminal::lockedWriteToPtyBuffer(string_view data)
 
 size_t Terminal::maxBulkTextSequenceWidth() const noexcept
 {
-    if (!isPrimaryScreen())
+    // Measured on the display the text lands on. A status line selected with DECSASD has margins and a
+    // line of its own: sizing the run from the main page's margin let it overflow that line, and asking
+    // page 0's line let it write into a status line that spans.
+    auto const& display = activeDisplay();
+
+    // A line holding a cell that reaches past its own column or row -- a wide character's or a scaled
+    // block's continuation, a scaled block's head -- or an image is written cell by cell: only the
+    // per-codepoint path erases the rest of a cell it overwrites part of. Any other line takes the
+    // bulk path, whatever its renditions and on whichever screen. @see LineShape
+    if (!display.currentLine().isBulkWritable())
         return 0;
 
-    // Only use bulk write path when current line has uniform attributes.
-    // This matches the baseline behavior (isTrivialBuffer check) and avoids
-    // a timing-sensitive race in screenUpdated() where TrySwapBuffers state
-    // causes _screenDirty to not be set, leaving the display stale.
-    //
-    // NOTE: isTrivialBuffer() answers a RENDER question -- "can this line be emitted as one batched
-    // RenderLine" -- which is stricter than the uniform-SGR question asked here. A wide character,
-    // an image fragment or a grapheme cluster anywhere in the line therefore also costs the rest of
-    // that line its bulk write, even though none of them makes an ASCII bulk write unsafe.
-    // Measured worst case: about 45% on a line whose first cell holds a combining mark and whose
-    // remaining 480 columns are ASCII. @see LineSoA::shape for what else degrades it.
-    if (!primaryScreen().currentLine().isTrivialBuffer())
+    // Right of the right margin -- DECLRMM lets CUP put the cursor there -- the margin no longer bounds
+    // the run, and `margin - cursor` would go negative.
+    auto const column = display.cursor().position.column;
+    auto const rightMargin = display.margin().horizontal.to;
+    if (column > rightMargin)
         return 0;
 
-    return unbox<size_t>(currentPageMargin().horizontal.to - _currentScreen->cursor().position.column);
+    return unbox<size_t>(rightMargin - column);
 }
 
 // {{{ SimpleSequenceHandler

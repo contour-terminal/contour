@@ -476,3 +476,16 @@ TEST_CASE("Line.toUtf8WithSgr.carriesTheUnderlineColour", "[Line][sgr]")
     // The default underline colour is already implied by the leading reset and stays unspoken.
     CHECK_FALSE(capture(defaultColor()).contains("58"));
 }
+
+TEST_CASE("Line.isBulkWritable.refusesOnlySpanningLines", "[Line]")
+{
+    auto line = Line(ColumnCount(4));
+    CHECK(line.isBulkWritable()); // blank
+
+    auto& soa = line.materializedStorage();
+    CHECK(line.isBulkWritable()); // Uniform
+    degradeShape(soa, LineShape::Mixed);
+    CHECK(line.isBulkWritable());
+    degradeShape(soa, LineShape::Spanning);
+    CHECK_FALSE(line.isBulkWritable());
+}

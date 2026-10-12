@@ -482,6 +482,13 @@ class Line
         return isBlank() || _storage.shape == LineShape::Uniform;
     }
 
+    /// Tests whether the parser may bulk-write ASCII into this line: blank, or any shape short of
+    /// LineShape::Spanning. O(1). @see Terminal::maxBulkTextSequenceWidth
+    [[nodiscard]] bool isBulkWritable() const noexcept
+    {
+        return isBlank() || _storage.shape != LineShape::Spanning;
+    }
+
     /// Build a TrivialLineBuffer for the render fast path.
     /// Only valid when isTrivialBuffer() returns true.
     ///

@@ -1418,6 +1418,13 @@ class Terminal
 
     [[nodiscard]] Screen& activeDisplay() noexcept
     {
+        return const_cast<Screen&>(std::as_const(*this).activeDisplay());
+    }
+
+    /// The display text and sequences are written to: the current page, or the status line DECSASD
+    /// selected.
+    [[nodiscard]] Screen const& activeDisplay() const noexcept
+    {
         switch (_activeStatusDisplay)
         {
             case ActiveStatusDisplay::Main: return *_currentScreen;

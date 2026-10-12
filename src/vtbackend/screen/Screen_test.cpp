@@ -21,8 +21,10 @@
 #include <format>
 #include <ranges>
 #include <set>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 using namespace vtbackend;
 using namespace vtbackend::test;
 using namespace std;
@@ -4822,6 +4824,133 @@ TEST_CASE("LineShape.anImageFragmentSpans", "[screen][LineShape]")
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
     mock.writeToScreen(ChessBoard);
     CHECK(mock.terminal.primaryScreen().grid().lineAt(LineOffset(0)).storage().shape == LineShape::Spanning);
+}
+
+namespace
+{
+/// What a page shows: every line's text with its renditions (as `capture-pane -e` renders it, with
+/// ESC escaped) and the width of each cell, then the cursor.
+std::vector<std::string> pageSnapshotOf(Screen const& screen)
+{
+    auto const columns = screen.pageSize().columns;
+    auto snapshot = std::vector<std::string> {};
+    for (auto const lineNo: std::views::iota(0, *screen.pageSize().lines))
+    {
+        auto const& line = screen.grid().lineAt(LineOffset(lineNo));
+        auto widths = std::string {};
+        for (auto const column: std::views::iota(0, *columns))
+            widths += static_cast<char>('0' + line.cellWidthAt(ColumnOffset(column)));
+        snapshot.push_back(
+            std::format("{} [{}]",
+                        core::escape(line.toUtf8WithSgr(ColumnOffset(0), boxed_cast<ColumnOffset>(columns))),
+                        widths));
+    }
+    auto const& cursor = screen.cursor();
+    snapshot.push_back(std::format("cursor {}:{}{}",
+                                   *cursor.position.line,
+                                   *cursor.position.column,
+                                   cursor.wrapPending ? " (wrap pending)" : ""));
+    return snapshot;
+}
+} // namespace
+
+TEST_CASE("BulkText.theGateFollowsTheLineShapeOnEveryScreen", "[screen][LineShape]")
+{
+    // The bulk write used to be refused on the alternate screen outright, and on any line that had left
+    // the batched render path. Only a line holding a spanning cell needs refusing.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("\033[?1049h"sv);
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 9);
+
+    mock.writeToScreen("\033[31mab\033[mc"sv); // a Mixed line
+    REQUIRE(std::as_const(mock.terminal).currentScreen().currentLine().storage().shape == LineShape::Mixed);
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 6);
+
+    mock.writeToScreen("\xE4\xB8\xAD"sv); // a wide character: the line now spans
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+}
+
+TEST_CASE("BulkText.theRunIsSizedOnTheStatusLineBeingWritten", "[screen]")
+{
+    // DECSASD sends text to the host-writable status line, which has margins of its own. The cursor was
+    // already the status line's -- DECSASD repoints the current screen at it -- but the run was sized
+    // from the MAIN page's right margin: with the status line's cursor right of it, `margin - cursor`
+    // went negative and wrapped to a huge width, overflowing the status line.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("\033[?69h\033[1;4s"sv); // the main page: right margin at column 4
+    mock.writeToScreen("\033[2$~\033[1$}"sv);   // DECSSDT: host-writable; DECSASD: write to it
+    mock.terminal.setMode(DECMode::AutoWrap, false);
+
+    mock.writeToScreen("abcde"sv);
+    mock.writeToScreen("fghijk"sv); // one past the end of the line
+
+    CHECK(mock.terminal.hostWritableStatusLineDisplay().grid().lineText(LineOffset(0)) == "abcdefghik");
+}
+
+TEST_CASE("BulkText.theGateAsksTheLineOfTheDisplayBeingWritten", "[screen][LineShape]")
+{
+    // The gate asked page 0's current line whether it may be bulk-written, even while DECSASD sends text
+    // to the status line: a blank main page let the bulk write into a status line that spans.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("\033[2$~\033[1$}"sv); // DECSSDT: host-writable; DECSASD: write to it
+    mock.writeToScreen("\xE4\xB8\xAD"sv);     // a wide character: the status line now spans
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+}
+
+TEST_CASE("BulkText.aCursorRightOfTheRightMarginGetsNoBulkRun", "[screen]")
+{
+    // With DECLRMM set, CUP can put the cursor right of the right margin, where the margin no longer
+    // applies. Measuring the run as `right margin - cursor` went negative there and wrapped to a huge
+    // width, handing Screen::writeText more cells than the line has left.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[?69h\033[2;4s\033[1;7H"sv); // margins at columns 2..4, cursor at column 7
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+
+    mock.writeToScreen("abcdefgh"sv);
+    CHECK(screen.grid().lineText(LineOffset(0)) == "      abcd");
+}
+
+TEST_CASE("BulkText.theAlternateScreenWritesWhatThePrimaryWrites", "[screen]")
+{
+    // Before the gate opened, the primary screen already took the bulk path and the alternate screen
+    // wrote cell by cell, so this comparison checked one against the other under every mode the old
+    // primary-only gate shielded. Now that both take the bulk path, it keeps them from drifting apart.
+    struct Scenario
+    {
+        std::string_view name;
+        std::string_view bytes;
+    };
+    auto const scenarios = std::array {
+        Scenario { .name = "insert mode", .bytes = "XYZ\r\033[4hab" },
+        Scenario { .name = "autowrap off", .bytes = "\033[?7labcdefghijkl" },
+        Scenario { .name = "left/right margins", .bytes = "\033[?69h\033[3;6s\033[1;3Habcdefgh" },
+        Scenario { .name = "origin mode inside margins",
+                   .bytes = "\033[2;3r\033[?69h\033[3;6s\033[?6h\033[1;1Habcdefghij" },
+        Scenario { .name = "coloured runs",
+                   .bytes = "\033[31mred\033[0m plain\r\n\033[1;44mbold-blue\033[m" },
+        Scenario { .name = "a cluster, then ASCII",
+                   .bytes = "e\xCC\x81"
+                            "xyz" },
+        Scenario { .name = "ASCII over a wide character", .bytes = "\xE4\xB8\xAD\xE4\xB8\xAD\r ab" },
+        Scenario { .name = "ASCII over a wide character's tail",
+                   .bytes = "\xE4\xB8\xAD\xE4\xB8\xAD\033[1;2Hxy" },
+        Scenario { .name = "DEC special graphics", .bytes = "\033(0lqk\033(Bok" },
+        Scenario { .name = "autowrap across lines", .bytes = "0123456789abcdefghijklmn" },
+    };
+
+    auto const pageAfter = [](std::string_view screenSelect, std::string_view bytes) {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen(screenSelect);
+        mock.writeToScreen(bytes);
+        return pageSnapshotOf(mock.terminal.currentScreen());
+    };
+
+    for (auto const& scenario: scenarios)
+    {
+        INFO(scenario.name);
+        CHECK(pageAfter(""sv, scenario.bytes) == pageAfter("\033[?1049h"sv, scenario.bytes));
+    }
 }
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
