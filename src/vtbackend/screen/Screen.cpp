@@ -1017,8 +1017,14 @@ void Screen::applyClusterWidthChange(int delta) noexcept
 
     // The continuation inherits the HEAD cell's pen, not the current one: the SGR may have changed
     // between the base codepoint and the variation selector that widened it.
+    //
+    // The head's own column is never a continuation, even when the cluster grows from zero columns:
+    // a combining mark or a zero-width character that opened it took no column, and the cursor still
+    // stands on the head. Starting at oldWidth there would turn the head into a continuation of
+    // nothing, losing the cluster. Every cluster takes at least one column (appendCodepointToCluster),
+    // so the continuations start one past the head, as they do for a cell written that wide.
     auto const sgr = headCell.graphicsAttributes().with(CellFlag::WideCharContinuation);
-    for (int i = oldWidth; i < newWidth; ++i)
+    for (auto const i: iota(std::max(oldWidth, 1), newWidth))
     {
         line.useCellAt(head.column + ColumnOffset::cast_from(i)).reset(sgr, headCell.hyperlink());
         _terminal->markCellDirty(head + ColumnOffset::cast_from(i));

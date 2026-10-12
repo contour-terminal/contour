@@ -364,6 +364,45 @@ TEST_CASE("BulkScan.AsciiAfterAPrependCharacterJoinsIt", "[BulkScan]")
     CHECK(dumpScreen(bulk.terminal.currentScreen()) == dumpScreen(reference.terminal.currentScreen()));
 }
 
+TEST_CASE("BulkScan.AClusterGrowingFromZeroColumnsKeepsItsHead", "[BulkScan]")
+{
+    // A combining mark on a blank line opens a cluster of zero columns, and the cursor stays on it. A
+    // second mark widens the cluster to the one column every cluster takes; a skin tone, which joins
+    // as an extension and is two columns wide, widens it to two. The head must stay a head that holds
+    // the whole cluster, with the cursor after it, and the columns it grew into must continue it --
+    // with bulk scanning and without.
+    struct Growth
+    {
+        std::string_view text;       ///< Written to a blank line.
+        std::u32string_view cluster; ///< What the head at column 0 must hold.
+        unsigned width;              ///< How many columns the head must take.
+    };
+    auto const growths = std::array {
+        Growth { .text = "\xCC\x81\xCC\x81"sv, .cluster = U"\U00000301\U00000301", .width = 1u },
+        Growth { .text = "\xCC\x81\xF0\x9F\x8F\xBD"sv, .cluster = U"\U00000301\U0001F3FD", .width = 2u },
+    };
+    for (auto const& growth: growths)
+        for (auto const bulkScan: { vtparser::BulkScan::Enabled, vtparser::BulkScan::Disabled })
+        {
+            INFO(std::format("text \"{}\", bulk scanning {}",
+                             core::escape(growth.text),
+                             bulkScan == vtparser::BulkScan::Enabled ? "on" : "off"));
+            auto mock = makeTerminal(PageSize { LineCount(2), ColumnCount(10) }, bulkScan);
+            mock.writeToScreen(growth.text);
+            auto const& screen = mock.terminal.primaryScreen();
+            auto const head = screen.at(LineOffset(0), ColumnOffset(0));
+            CHECK(!head.flags().contains(CellFlag::WideCharContinuation));
+            CHECK(head.codepoints() == growth.cluster);
+            CHECK(head.width() == growth.width);
+            for (auto const column: std::views::iota(1u, growth.width))
+                CHECK(screen.at(LineOffset(0), ColumnOffset::cast_from(column))
+                          .flags()
+                          .contains(CellFlag::WideCharContinuation));
+            CHECK(screen.cursor().position
+                  == CellLocation { .line = LineOffset(0), .column = ColumnOffset::cast_from(growth.width) });
+        }
+}
+
 namespace
 {
 /// One piece of text that is not ASCII, from each class the bulk paths treat differently: one, two and
@@ -474,10 +513,8 @@ bool asciiFollowsAPrependCharacter(std::string_view text)
         });
 }
 
-/// Known divergence, in the per-codepoint path itself: a cluster that grows from zero columns -- a
-/// zero-width character or a mark that opened it, widened by VS16 -- overwrites its own head with a
-/// continuation (Screen::applyClusterWidthChange()). Both paths leave such an orphan, each a different
-/// one.
+/// The state the renderer and the selection cannot resolve: a continuation cell with no head. A
+/// cluster that grew from zero columns used to leave one, by overwriting its own head.
 /// @return Whether a cell of @p screen's page continues a character that does not reach it.
 bool holdsAnOrphanContinuation(Screen const& screen)
 {
@@ -497,14 +534,14 @@ bool holdsAnOrphanContinuation(Screen const& screen)
 }
 
 /// Writes each seed's case to a terminal with bulk scanning and to one without, and requires the two
-/// screens to agree and every line's shape to cover its cells.
+/// screens to agree, every line's shape to cover its cells, and no continuation to be an orphan.
 ///
 /// Well-formed UTF-8 only. Ill-formed input waits for libunicode's text scanner to stop at ill-formed
 /// UTF-8 (the libunicode version bump): 0.9.3 hands a read that ends inside a character on as a
 /// complete run, which the bulk path then decodes differently from the state machine.
 ///
-/// The screens are not compared for a case in a known divergence class (asciiFollowsAPrependCharacter,
-/// holdsAnOrphanContinuation); its shapes still are.
+/// The screens are not compared for a case in a known divergence class (asciiFollowsAPrependCharacter);
+/// its other checks still run.
 void checkRandomMixedText(uint32_t firstSeed, uint32_t seedCount)
 {
     for (auto const seed: std::views::iota(firstSeed, firstSeed + seedCount))
@@ -533,12 +570,14 @@ void checkRandomMixedText(uint32_t firstSeed, uint32_t seedCount)
                          core::escape(testCase.setup),
                          core::escape(testCase.text),
                          cuts));
-        if (!asciiFollowsAPrependCharacter(testCase.text)
-            && !holdsAnOrphanContinuation(reference.terminal.currentScreen()))
+        if (!asciiFollowsAPrependCharacter(testCase.text))
             CHECK(dumpScreen(bulk.terminal.currentScreen())
                   == dumpScreen(reference.terminal.currentScreen()));
-        test::checkShapeCoversCells(bulk.terminal.currentScreen());
-        test::checkShapeCoversCells(reference.terminal.currentScreen());
+        for (auto const* const mock: { &bulk, &reference })
+        {
+            test::checkShapeCoversCells(mock->terminal.currentScreen());
+            CHECK_FALSE(holdsAnOrphanContinuation(mock->terminal.currentScreen()));
+        }
     }
 }
 } // namespace
