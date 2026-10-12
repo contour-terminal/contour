@@ -1175,17 +1175,14 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void writeAsciiRun(std::string_view text);
 
     /// Writes text that mixes ASCII with other UTF-8: the interiors of long ASCII stretches in bulk,
-    /// everything else per codepoint.
-    void writeMixedText(std::string_view text);
+    /// everything else per codepoint. @see forEachBulkAsciiInterior
+    /// @param text      The run.
+    /// @param cellCount How many columns the parser measured the run to take.
+    void writeMixedText(std::string_view text, size_t cellCount);
 
     /// Writes @p text one codepoint at a time through the grapheme segmenter, seeded from the cell
     /// the previous write ended in, so a cluster continues across calls.
     void writeTextPerCodepoint(std::string_view text);
-
-    /// Writes @p text as writeTextPerCodepoint(std::string_view) does, decoding it with @p utf8.
-    /// @param utf8 The UTF-8 decoder, carried from one part of a run to the next: a part may end
-    ///             inside a character the next part completes.
-    void writeTextPerCodepoint(std::string_view text, unicode::utf8_decoder_state& utf8);
 
     void configureCurrentLineSize(LineFlags enabled);
 

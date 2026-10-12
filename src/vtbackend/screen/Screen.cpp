@@ -114,12 +114,6 @@ namespace // {{{ helper
         return ((5 * color.green) + (2 * color.red) + color.blue) > 8 * 128;
     }
 
-    /// The shortest interior of an ASCII stretch inside mixed text that is worth a bulk write. A shorter
-    /// one costs more to set up than the per-codepoint path costs to write it. Tuned on the utf8 and
-    /// utf8sparse throughput workloads: 2 costs dense text more than it saves, 4 does not, and longer
-    /// minimums leave more of sparse text to the per-codepoint path.
-    constexpr auto MinimumBulkAsciiStretch = size_t { 4 };
-
     /// Whether @p codepoint is a Regional_Indicator, U+1F1E6..U+1F1FF: the letters that pair into a flag.
     constexpr bool isRegionalIndicator(char32_t codepoint) noexcept
     {
@@ -481,7 +475,7 @@ void Screen::writeText(string_view text, size_t cellCount)
     else if (isAsciiOnly(text))
         writeAsciiRun(text);
     else
-        writeMixedText(text);
+        writeMixedText(text, cellCount);
 }
 
 bool Screen::canBulkWriteAscii() const noexcept
@@ -557,69 +551,24 @@ void Screen::writeAsciiRun(std::string_view text)
     _terminal->markCellDirty(_cursor.position);
 }
 
-void Screen::writeMixedText(std::string_view text)
+void Screen::writeMixedText(std::string_view text, size_t cellCount)
 {
-    auto const isAscii = [](char ch) noexcept {
-        return static_cast<unsigned char>(ch) < 0x80;
-    };
-
-    // The walk below costs a few instructions per byte, which only long stretches repay. Dense UTF-8
-    // text goes through the segmenter whole, as before: a run whose ASCII stretches average shorter
-    // than the shortest stretch with a bulk-written interior. The estimate counts every other character
-    // as two bytes, the fewest it can take, so it errs towards the segmenter.
-    auto const nonAsciiBytes = nonAsciiByteCount(text);
-    auto const asciiBytes = text.size() - nonAsciiBytes;
-    if (2 * asciiBytes < (MinimumBulkAsciiStretch + 2) * nonAsciiBytes)
-    {
-        writeTextPerCodepoint(text);
-        return;
-    }
-
-    auto utf8 = unicode::utf8_decoder_state {}; // one decoder for the whole run, as one call would use
-    auto unwritten = size_t { 0 };              // the first byte not yet written
-
-    for (auto const chunk:
-         text | std::views::chunk_by([&](char a, char b) { return isAscii(a) == isAscii(b); }))
-    {
-        auto const begin = static_cast<size_t>(chunk.begin() - text.begin());
-        auto const end = static_cast<size_t>(chunk.end() - text.begin());
-        if (!isAscii(text[begin]))
-            continue; // left for the segmenter, together with its ASCII neighbours
-
-        // Only a stretch's interior is written in bulk. Its first byte may join the cluster before it
-        // (GB9b: nothing breaks after a Prepend character), and its last byte, when non-ASCII text
-        // follows, may be the base that text attaches to (a combining mark, VS16). Both go through the
-        // segmenter, and so does a stretch too short to repay a bulk write.
-        auto const interiorBegin = begin + 1;
-        auto const interiorEnd = end == text.size() ? end : end - 1;
-        if (interiorEnd < interiorBegin + MinimumBulkAsciiStretch)
-            continue;
-
-        // A stretch is ASCII text only if the decoder is idle where it begins: it takes the bytes after
-        // an incomplete lead byte as that character's continuation bytes, ASCII ones included.
-        writeTextPerCodepoint(text.substr(unwritten, begin - unwritten), utf8);
-        unwritten = begin;
-        if (utf8.expectedLength != 0)
-            continue;
-
-        writeTextPerCodepoint(text.substr(begin, interiorBegin - begin), utf8);
-        auto const interior = text.substr(interiorBegin, interiorEnd - interiorBegin);
+    // The planner cuts the run only at character boundaries, so every part between two interiors
+    // decodes on its own.
+    auto unwritten = size_t { 0 }; // the first byte not yet written
+    forEachBulkAsciiInterior(text, cellCount, [&](size_t begin, size_t end) {
+        writeTextPerCodepoint(text.substr(unwritten, begin - unwritten));
+        auto const interior = text.substr(begin, end - begin);
         if (canBulkWriteAsciiStretch(interior.size()))
             writeAsciiRun(interior);
         else
-            writeTextPerCodepoint(interior, utf8);
-        unwritten = interiorEnd;
-    }
-    writeTextPerCodepoint(text.substr(unwritten), utf8);
+            writeTextPerCodepoint(interior);
+        unwritten = end;
+    });
+    writeTextPerCodepoint(text.substr(unwritten));
 }
 
 void Screen::writeTextPerCodepoint(std::string_view text)
-{
-    auto utf8 = unicode::utf8_decoder_state {};
-    writeTextPerCodepoint(text, utf8);
-}
-
-void Screen::writeTextPerCodepoint(std::string_view text, unicode::utf8_decoder_state& utf8)
 {
     if (text.empty())
         return;
@@ -658,6 +607,7 @@ void Screen::writeTextPerCodepoint(std::string_view text, unicode::utf8_decoder_
 
     // Decoded as the state machine decodes text: the bulk text path hands a byte that is not UTF-8
     // on inside its run, and it must become the same U+FFFD here that it becomes there.
+    auto utf8 = unicode::utf8_decoder_state {};
     for (auto const byte: text)
     {
         auto const decoded = vtparser::decodeUtf8Byte(utf8, static_cast<uint8_t>(byte));

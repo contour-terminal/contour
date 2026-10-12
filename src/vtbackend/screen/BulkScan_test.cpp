@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/screen/AsciiText.hpp>
 #include <vtbackend/screen/ScreenTestFixtures.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/Workloads.hpp>
@@ -290,21 +291,30 @@ TEST_CASE("BulkScan.AStretchPastANarrowedEmojiGivesTheSameScreen", "[BulkScan]")
 {
     // The screen can take more columns than the parser's scan counted for a run. The scan measures a
     // wide emoji followed by VS15 as one column; the screen keeps the two columns the emoji took
-    // before VS15 arrived, because it never narrows a cluster already on screen. Two of them before 37
-    // letters: the scan counts 39 columns, which the 40-column page allows, but the screen needs 41.
+    // before VS15 arrived, because it never narrows a cluster already on screen. Two of them before 77
+    // letters: the scan counts 79 columns, which the 80-column page allows, but the screen needs 81.
     // Only asking again before the stretch is written in bulk keeps the letters past the margin from
     // being lost. Also with a letter first, so the emoji sit inside the run.
+    struct Writing
+    {
+        std::string text; ///< Cut into two reads at every byte.
+        size_t cellCount; ///< The columns the parser's scan counts for it in one read.
+    };
     auto const watchVs15 = "\xE2\x8C\x9A\xEF\xB8\x8E"sv; // U+231A WATCH, U+FE0E VS15
-    auto const texts = std::array {
-        std::format("{0}{0}{1}", watchVs15, std::string(37, 'a')),
-        std::format("x{0}{0}{1}", watchVs15, std::string(36, 'b')),
+    auto const writings = std::array {
+        Writing { .text = std::format("{0}{0}{1}", watchVs15, std::string(77, 'a')), .cellCount = 79 },
+        Writing { .text = std::format("x{0}{0}{1}", watchVs15, std::string(76, 'b')), .cellCount = 79 },
     };
     for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
-        for (auto const& text: texts)
+        for (auto const& writing: writings)
         {
-            INFO(std::format(
-                "{}, text \"{}\"", screenSelect.empty() ? "primary" : "alternate", core::escape(text)));
-            checkSameScreenAtEverySplit(PageSize { LineCount(4), ColumnCount(40) }, screenSelect, text);
+            INFO(std::format("{}, text \"{}\"",
+                             screenSelect.empty() ? "primary" : "alternate",
+                             core::escape(writing.text)));
+            // Dense text skips the search for stretches and never reaches the check this is about.
+            REQUIRE_FALSE(isTooDenseForBulkAscii(writing.text.size(), writing.cellCount));
+            checkSameScreenAtEverySplit(
+                PageSize { LineCount(4), ColumnCount(80) }, screenSelect, writing.text);
         }
 }
 
