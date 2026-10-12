@@ -1418,20 +1418,21 @@ void WindowController::rebuildActiveTabPaneProxies()
     // instead would prune the hidden panes' proxies and tear their terminals down on every zoom.
     std::unordered_map<uint64_t, vtworkspace::Pane*> live;
     if (tab != nullptr)
+    {
         tab->rootPane()->walkTree([&](vtworkspace::Pane& p) { live[p.id().value] = &p; });
 
-    for (auto const& [idValue, p]: live)
-    {
-        auto* proxy = getProxy(vtworkspace::PaneId { idValue });
-        // live is only populated when tab != nullptr, so tab->id() is safe here. The tab id keys the
-        // proxy's write-backs (setRatio/activate) to exactly this tab.
-        proxy->setPane(p, tab->id());
-        if (p->isLeaf())
-            proxy->setChildren(nullptr, nullptr);
-        else
-            proxy->setChildren(getProxy(p->first()->id()), getProxy(p->second()->id()));
-        proxy->notifyChanged();
-        proxy->notifyActiveChanged();
+        for (auto const& [idValue, p]: live)
+        {
+            auto* proxy = getProxy(vtworkspace::PaneId { idValue });
+            // The tab id keys the proxy's write-backs (setRatio/activate) to exactly this tab.
+            proxy->setPane(p, tab->id());
+            if (p->isLeaf())
+                proxy->setChildren(nullptr, nullptr);
+            else
+                proxy->setChildren(getProxy(p->first()->id()), getProxy(p->second()->id()));
+            proxy->notifyChanged();
+            proxy->notifyActiveChanged();
+        }
     }
 
     for (auto it = _paneProxies.begin(); it != _paneProxies.end();)
