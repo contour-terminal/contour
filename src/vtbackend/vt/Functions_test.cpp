@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/testing/Workloads.hpp>
 #include <vtbackend/vt/Functions.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -274,7 +275,7 @@ std::vector<FunctionSelector> randomSelectors(uint32_t seed, size_t count)
 
     auto rng = std::mt19937 { seed };
     auto const below = [&](size_t n) {
-        return static_cast<size_t>(rng() % n);
+        return static_cast<size_t>(test::detail::drawBetween(rng, 0, static_cast<int>(n) - 1));
     };
     auto selectors = std::vector<FunctionSelector> {};
     for ([[maybe_unused]] auto const _: std::views::iota(size_t { 0 }, count))
