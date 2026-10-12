@@ -82,6 +82,7 @@ set(vtbackend_HEADERS
     screen/Viewport.hpp
     core/WindowSizeStack.hpp
     core/WorkingDirectory.hpp
+    testing/Workloads.hpp
     graphics/regis/ReGISColor.hpp
     graphics/regis/ReGISContext.hpp
     graphics/regis/ReGISFont.hpp
@@ -255,6 +256,7 @@ if(LIBTERMINAL_TESTING)
         graphics/regis/ReGISTextRasterizer_test.cpp
         graphics/regis/ReGISParser_test.cpp
         input/vi/ViCommands_test.cpp
+        testing/Workloads_test.cpp
         vt/VTWriter_test.cpp
     )
     target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend)
@@ -281,6 +283,13 @@ if(LIBTERMINAL_TESTING)
 
         # One short run of each subcommand that needs no input file, so that a crash like the one
         # `bench-headless pty` had -- it used its PTY before opening it -- fails the suite.
+        add_test(NAME bench_headless_throughput_smoke COMMAND bench-headless throughput size 1 runs 1)
+        # A name that is not a workload must fail, naming the ones that are.
+        add_test(NAME bench_headless_throughput_rejects_unknown_kind
+                 COMMAND bench-headless throughput size 1 runs 1 kinds no-such-workload)
+        set_tests_properties(bench_headless_throughput_rejects_unknown_kind PROPERTIES WILL_FAIL TRUE)
+        set_tests_properties(bench_headless_throughput_smoke bench_headless_throughput_rejects_unknown_kind
+                             PROPERTIES LABELS bench)
         if(NOT WIN32)
             add_test(NAME bench_headless_pty_smoke COMMAND bench-headless pty seconds 1)
             set_tests_properties(bench_headless_pty_smoke PROPERTIES LABELS bench)

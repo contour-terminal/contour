@@ -2,6 +2,7 @@
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
+#include <vtbackend/testing/Workloads.hpp>
 
 #include <vtparser/ParserEvents.hpp>
 
@@ -21,6 +22,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -30,7 +32,9 @@
 #include <numeric>
 #include <optional>
 #include <random>
+#include <ranges>
 #include <span>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <tuple>
@@ -190,6 +194,10 @@ static int benchSixelStream(std::string const& sixelData,
 namespace
 {
 
+/// What contour reads per PTY read by default: Config's `read_buffer_size`. The throughput and key press
+/// benchmarks start from it, so that their numbers are contour's.
+constexpr unsigned ContourPtyReadSize = 16384;
+
 /// What the application on the other end of the PTY does while key presses are measured.
 enum class ApplicationLoad : uint8_t
 {
@@ -233,8 +241,8 @@ struct KeyPressBenchOptions
     ApplicationLoad load = ApplicationLoad::Flood;
     std::chrono::seconds duration { 10 };
     unsigned keyPressesPerSecond = 1000;
-    unsigned ptyReadSize = 16384; ///< What contour reads per PTY read by default.
-    unsigned queryEvery = 0;      ///< Lines between DA1 queries in the flood; 0 sends none.
+    unsigned ptyReadSize = ContourPtyReadSize; ///< What contour reads per PTY read by default.
+    unsigned queryEvery = 0;                   ///< Lines between DA1 queries in the flood; 0 sends none.
 };
 
 /// The application's process, counting the bytes read from its PTY: the output the terminal parsed.
@@ -495,6 +503,133 @@ static int benchKeyPressLatency(KeyPressBenchOptions const& options, core::Envir
 #endif
 }
 
+namespace
+{
+
+/// The page every throughput and snapshot run uses: as tall as the TUI workload's frames, and wider than any
+/// workload's lines.
+constexpr auto BenchPageSize =
+    vtbackend::PageSize { .lines = vtbackend::LineCount(vtbackend::test::WorkloadPageLines),
+                          .columns = vtbackend::ColumnCount(vtbackend::test::WorkloadPageColumns) };
+
+/// Scrollback for the runs: small next to the workloads, so the ring fills and then recycles lines, as a long
+/// session's does.
+constexpr auto BenchHistory = vtbackend::LineCount(4000);
+
+/// A screen the throughput and snapshot benchmarks write to.
+struct BenchScreen
+{
+    std::string_view name;          ///< How the command line names it.
+    std::string_view entrySequence; ///< What switches a fresh terminal to it.
+};
+
+/// Every screen the benchmarks know, in the order they report them.
+constexpr auto BenchScreens = std::array {
+    BenchScreen { .name = "primary", .entrySequence = "" },
+    BenchScreen { .name = "alternate", .entrySequence = "\033[?1049h" },
+};
+
+/// Picks the rows of @p table that the comma-separated @p names name, in the order named.
+/// @param table The rows to pick from; each has a @c name.
+/// @param names The names to pick, comma-separated; all rows when empty.
+/// @param what  What a row is called, for the error message.
+/// @return The rows, or a message naming the unknown name and every known one.
+template <typename Row>
+std::expected<std::vector<Row>, std::string> pickByName(std::span<Row const> table,
+                                                        std::string_view names,
+                                                        std::string_view what)
+{
+    if (names.empty())
+        return std::vector<Row>(table.begin(), table.end());
+
+    auto picked = std::vector<Row> {};
+    for (auto const nameRange: std::views::split(names, ','))
+    {
+        auto const name = std::string_view(nameRange.begin(), nameRange.end());
+        auto const row = std::ranges::find(table, name, &Row::name);
+        if (row == table.end())
+        {
+            auto const known = table | std::views::transform(&Row::name) | std::views::join_with(", "sv)
+                               | std::ranges::to<std::string>();
+            return std::unexpected(std::format("Unknown {} '{}'. Known: {}.", what, name, known));
+        }
+        picked.push_back(*row);
+    }
+    return picked;
+}
+
+/// Writes @p text into @p vt's terminal through its mock PTY, outside any measurement.
+void feed(vtbackend::MockTerm<vtpty::MockViewPty>& vt, std::string_view text)
+{
+    vt.mockPty().setReadData(text);
+    while (!vt.mockPty().stdoutBuffer().empty())
+        vt.terminal.processInputOnce();
+}
+
+/// Lets @p terminal take in everything @p pty holds, the way contour's PTY thread does: read, lock, parse.
+///
+/// Out of line so that callgrind can count exactly this, with `--toggle-collect='*runWorkloadOnce*'`.
+/// @return How long it took.
+[[gnu::noinline]] std::chrono::nanoseconds runWorkloadOnce(vtbackend::Terminal& terminal,
+                                                           vtpty::MockViewPty& pty)
+{
+    auto const start = std::chrono::steady_clock::now();
+    while (!pty.stdoutBuffer().empty())
+        terminal.processInputOnce();
+    return std::chrono::steady_clock::now() - start;
+}
+
+/// How the throughput benchmark runs. Its defaults are the command line's.
+struct ThroughputOptions
+{
+    size_t bytesPerWorkload = size_t { 16 } * 1024 * 1024; ///< How much of each workload to generate.
+    unsigned runs = 5;                         ///< Runs per workload and screen; the fastest counts.
+    unsigned ptyReadSize = ContourPtyReadSize; ///< Bytes per PTY read, as the parser takes them.
+};
+
+/// @return How long a fresh terminal took to take in @p input on @p screen, fed from memory
+///         @p ptyReadSize bytes per read.
+std::chrono::nanoseconds measureFromMemory(std::string_view input,
+                                           BenchScreen const& screen,
+                                           size_t ptyReadSize)
+{
+    auto vt = vtbackend::MockTerm<vtpty::MockViewPty>(BenchPageSize, BenchHistory, ptyReadSize);
+    vt.terminal.setMode(vtbackend::DECMode::AutoWrap, true);
+    feed(vt, screen.entrySequence);
+    vt.mockPty().setReadData(input);
+    return runWorkloadOnce(vt.terminal, vt.mockPty());
+}
+
+/// Runs every picked workload on every picked screen, and prints the fastest run of each.
+int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
+                           std::span<BenchScreen const> screens,
+                           ThroughputOptions const& options)
+{
+    cout << std::format(
+        "Throughput: {} MiB per workload, fastest of {} runs, PTY read size {} bytes\n",
+        options.bytesPerWorkload / (size_t { 1024 } * 1024),
+        options.runs,
+        core::nextPowerOfTwo(static_cast<size_t>(options.ptyReadSize))); // as Terminal rounds it
+    for (auto const& workload: workloads)
+    {
+        auto const input = vtbackend::test::makeWorkload(workload, options.bytesPerWorkload);
+        auto const mebibytes = static_cast<double>(input.size()) / (1024.0 * 1024.0);
+        for (auto const& screen: screens)
+        {
+            auto fastest = std::chrono::nanoseconds::max();
+            for ([[maybe_unused]] auto const run: std::views::iota(0u, options.runs))
+                fastest = std::min(fastest, measureFromMemory(input, screen, options.ptyReadSize));
+            cout << std::format("{:<8} {:<9} {:9.1f} MiB/s\n",
+                                workload.name,
+                                screen.name,
+                                mebibytes / std::chrono::duration<double>(fastest).count());
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+} // namespace
+
 namespace CLI = core::cli;
 
 namespace
@@ -518,6 +653,7 @@ class ContourHeadlessBench: public core::cli::App
         link("bench-headless.sixel", bind(&ContourHeadlessBench::benchSixel, this));
         link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY, this));
         link("bench-headless.keypress", bind(&ContourHeadlessBench::benchKeyPress, this));
+        link("bench-headless.throughput", bind(&ContourHeadlessBench::benchThroughput, this));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
 
         if (auto const logFilterString = env.get("LOG"))
@@ -530,6 +666,7 @@ class ContourHeadlessBench: public core::cli::App
     [[nodiscard]] core::cli::Command parameterDefinition() const override
     {
         auto constexpr KeyPressDefaults = KeyPressBenchOptions {};
+        auto constexpr ThroughputDefaults = ThroughputOptions {};
 
         auto const perfOptions = CLI::OptionList {
             CLI::Option { .name = "size",
@@ -545,6 +682,32 @@ class ContourHeadlessBench: public core::cli::App
             CLI::Option { .name = "sgr", .v = CLI::Value { false }, .helpText = "Enable SGR stream test." },
             CLI::Option {
                 .name = "binary", .v = CLI::Value { false }, .helpText = "Enable binary stream test." },
+        };
+
+        auto const throughputOptions = CLI::OptionList {
+            CLI::Option { .name = "size",
+                          .v = CLI::Value { static_cast<unsigned>(ThroughputDefaults.bytesPerWorkload
+                                                                  / (size_t { 1024 } * 1024)) },
+                          .helpText = "Mebibytes per workload.",
+                          .placeholder = "MIB" },
+            CLI::Option { .name = "runs",
+                          .v = CLI::Value { ThroughputDefaults.runs },
+                          .helpText = "Runs per workload and screen; the fastest counts." },
+            CLI::Option { .name = "kinds",
+                          .v = CLI::Value { ""s },
+                          .helpText = "Comma-separated workloads to run, all when empty; an unknown name "
+                                      "lists the known ones.",
+                          .placeholder = "LIST" },
+            CLI::Option { .name = "screens",
+                          .v = CLI::Value { ""s },
+                          .helpText = "Comma-separated screens to run on (primary, alternate), both when "
+                                      "empty.",
+                          .placeholder = "LIST" },
+            CLI::Option { .name = "read-size",
+                          .v = CLI::Value { ThroughputDefaults.ptyReadSize },
+                          .helpText = "Bytes per PTY read, which is what the parser takes per lock; the "
+                                      "default is contour's.",
+                          .placeholder = "BYTES" },
         };
 
         return CLI::Command {
@@ -577,6 +740,12 @@ class ContourHeadlessBench: public core::cli::App
                                                          .v = CLI::Value { 10u },
                                                          .helpText = "How long to write for." },
                                        } },
+                    CLI::Command {
+                        .name = "throughput",
+                        .helpText = "Measures how fast the terminal takes in output -- PTY read, state lock, "
+                                    "parse and grid, as contour's PTY thread runs them -- for each workload "
+                                    "on each screen.",
+                        .options = throughputOptions },
                     CLI::Command {
                         .name = "keypress",
                         .helpText = "Measures how long a key press takes to reach the PTY while an "
@@ -678,6 +847,35 @@ class ContourHeadlessBench: public core::cli::App
             return EXIT_FAILURE;
         }
         return benchKeyPressLatency(options, processEnvironment());
+    }
+
+    int benchThroughput()
+    {
+        auto const workloads = pickByName<vtbackend::test::Workload>(
+            vtbackend::test::Workloads, parameters().str("bench-headless.throughput.kinds"), "workload");
+        if (!workloads)
+        {
+            cerr << workloads.error() << '\n';
+            return EXIT_FAILURE;
+        }
+        auto const screens = pickByName<BenchScreen>(
+            BenchScreens, parameters().str("bench-headless.throughput.screens"), "screen");
+        if (!screens)
+        {
+            cerr << screens.error() << '\n';
+            return EXIT_FAILURE;
+        }
+        auto const options = ThroughputOptions {
+            .bytesPerWorkload = size_t { parameters().uint("bench-headless.throughput.size") } * 1024 * 1024,
+            .runs = parameters().uint("bench-headless.throughput.runs"),
+            .ptyReadSize = parameters().uint("bench-headless.throughput.read-size"),
+        };
+        if (options.bytesPerWorkload == 0 || options.runs == 0 || options.ptyReadSize == 0)
+        {
+            cerr << "size, runs and read-size must each be at least 1.\n";
+            return EXIT_FAILURE;
+        }
+        return runThroughputBenchmark(*workloads, *screens, options);
     }
 
     int benchSixel()
