@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ConPty.hpp>
 
+#include <crispy/BufferObject.hpp>
+
 #include <catch2/catch_test_macros.hpp>
+
+#include <cerrno>
+#include <chrono>
+#include <future>
+#include <ranges>
 
 using vtpty::ColumnCount;
 using vtpty::ConPty;
@@ -80,4 +87,32 @@ TEST_CASE("ConPty.resizeScreen.afterRepeatedClose", "[vtpty][conpty]")
     pty.resizeScreen(pageSize(20, 10));
 
     CHECK(pty.pageSize() == pageSize(20, 10));
+}
+
+// Terminal::processInputOnce() reads ahead with a zero timeout while the render thread holds the
+// terminal. A zero-timeout read that parked in ReadFile there would hold back output already read
+// until the child wrote again -- forever, for a child sitting at a prompt.
+TEST_CASE("ConPty.read.aZeroTimeoutNeverBlocks", "[vtpty][conpty]")
+{
+    using namespace std::chrono_literals;
+    auto pty = ConPty { pageSize(80, 24) };
+    REQUIRE(pty.start().has_value());
+
+    // Whatever the pseudoconsole announces on start is read first; once nothing is waiting, a
+    // zero-timeout read must come back empty-handed at once, saying EAGAIN.
+    auto reader = std::async(std::launch::async, [&pty]() -> int {
+        auto pool = crispy::BufferObjectPool<char> { 4096 };
+        for ([[maybe_unused]] auto const attempt: std::views::iota(0, 100))
+        {
+            auto const storage = pool.allocateBufferObject();
+            if (!pty.read(*storage, std::chrono::milliseconds::zero(), 4096))
+                return errno;
+        }
+        return 0;
+    });
+
+    auto const finished = reader.wait_for(5s) == std::future_status::ready;
+    pty.close(); // breaks the pipe, so a ReadFile that wrongly parked returns and the test can end
+    CHECK(finished);
+    CHECK(reader.get() == EAGAIN);
 }

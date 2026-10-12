@@ -3,6 +3,7 @@
 
 #include <crispy/BufferObject.hpp>
 
+#include <cerrno>
 #include <memory>
 #include <utility>
 
@@ -240,8 +241,24 @@ std::optional<Pty::ReadResult> ConPty::read(crispy::BufferObject<char>& buffer,
                                             std::optional<std::chrono::milliseconds> timeout,
                                             size_t size)
 {
-    // TODO: wait for timeout time at most AND got woken up upon wakeupReader() invokcation.
-    (void) timeout;
+    // A zero timeout asks "is anything waiting?" and must not park in ReadFile: the terminal reads ahead
+    // this way while the render thread holds its state (Terminal::processInputOnce), and a ReadFile parked
+    // there would hold back output already read until the child wrote again.
+    // TODO: wait for a non-zero timeout at most, and wake up upon wakeupReader().
+    if (timeout == std::chrono::milliseconds::zero())
+    {
+        DWORD available {};
+        if (!PeekNamedPipe(_input, nullptr, 0, nullptr, &available, nullptr))
+        {
+            errno = EIO;
+            return nullopt;
+        }
+        if (available == 0)
+        {
+            errno = EAGAIN;
+            return nullopt;
+        }
+    }
 
     auto const n = static_cast<DWORD>(std::min(size, buffer.bytesAvailable()));
 
