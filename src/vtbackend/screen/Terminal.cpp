@@ -1767,29 +1767,7 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
 {
     // Measured on the display the text lands on: a status line selected with DECSASD has margins and a
     // line of its own.
-    auto const& display = activeDisplay();
-
-    // A pending wrap moves the run to the next line, which nothing below looks at. At a real deferred
-    // wrap the cursor stands on the right margin, where the run would be empty anyway; a margin widened
-    // under the wrap, or a DECRC after a resize, leaves it pending further left.
-    if (display.cursor().wrapPending)
-        return 0;
-
-    // A line holding a cell that reaches past its own column or row -- a wide character's or a scaled
-    // block's continuation, a scaled block's head -- or an image is written cell by cell: only the
-    // per-codepoint path erases the rest of a cell it overwrites part of. Any other line takes the
-    // bulk path, whatever its renditions and on whichever screen. @see LineShape
-    if (!display.currentLine().isBulkWritable())
-        return 0;
-
-    // Right of the right margin -- DECLRMM lets CUP put the cursor there -- the margin no longer bounds
-    // the run, and `margin - cursor` would go negative.
-    auto const column = display.cursor().position.column;
-    auto const rightMargin = display.margin().horizontal.to;
-    if (column > rightMargin)
-        return 0;
-
-    return unbox<size_t>(rightMargin - column);
+    return activeDisplay().bulkWritableColumns();
 }
 
 // {{{ SimpleSequenceHandler

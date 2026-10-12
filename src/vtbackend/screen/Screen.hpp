@@ -657,6 +657,38 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         return margin().horizontal.to.value + 1 == pageSize().columns.value;
     }
 
+    /// How many columns of text may go straight into the cursor's line, from the cursor towards the
+    /// right margin, without the per-codepoint path. The one owner of every condition that depends on
+    /// where the cursor stands and what its line holds; the modes and charsets, which hold for a whole
+    /// run of text, are the text writer's own business.
+    /// @return 0 while a wrap is pending, on a line holding a cell that spans, or right of the right
+    ///         margin; otherwise the columns from the cursor up to the right margin, the margin's own
+    ///         column left out.
+    [[nodiscard]] size_t bulkWritableColumns() const noexcept
+    {
+        // A pending wrap moves the text to the next line, which nothing below looks at. At a real
+        // deferred wrap the cursor stands on the right margin, where the answer would be 0 anyway; a
+        // margin widened under the wrap, or a DECRC after a resize, leaves it pending further left.
+        if (_cursor.wrapPending)
+            return 0;
+
+        // A line holding a cell that reaches past its own column or row -- a wide character's or a
+        // scaled block's continuation, a scaled block's head -- or an image is written cell by cell:
+        // only the per-codepoint path erases the rest of a cell it overwrites part of. Any other line
+        // takes the bulk path, whatever its renditions and on whichever screen. @see LineShape
+        if (!currentLine().isBulkWritable())
+            return 0;
+
+        // Right of the right margin -- DECLRMM lets CUP put the cursor there -- the margin no longer
+        // bounds the text, and `margin - cursor` would go negative.
+        auto const column = _cursor.position.column;
+        auto const rightMargin = margin().horizontal.to;
+        if (column > rightMargin)
+            return 0;
+
+        return unbox<size_t>(rightMargin - column);
+    }
+
     [[nodiscard]] bool isCursorInsideMargins() const noexcept;
 
     /// Tests whether the cursor sits within the active left/right margins.
@@ -1155,24 +1187,29 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
   private:
     void writeTextInternal(char32_t codepoint);
 
-    /// Whether the cursor's state lets ASCII go straight into the line's arrays: no insert mode,
+    /// Whether the modes and charsets let ASCII go straight into the line's arrays: no insert mode,
     /// no left/right margins, and every ASCII character mapping to itself (CharsetMapping::isPlainUSASCII()).
+    /// The half of the question that holds for a whole run of text; bulkWritableColumns() is the other.
     [[nodiscard]] bool canBulkWriteAscii() const noexcept;
 
-    /// Whether an ASCII stretch of @p length bytes may be written in bulk where the cursor stands now.
+    /// Whether an ASCII stretch of @p length bytes may be written in bulk where the cursor stands now,
+    /// inside a run for which canBulkWriteAscii() holds.
     ///
-    /// Asks of the stretch what Terminal::maxBulkTextSequenceWidth() asked of the whole run when it
-    /// began, because the text written before the stretch can change the answer. The screen may have
-    /// taken more columns than the parser's scan counted for that text: the scan measures a wide emoji
-    /// followed by VS15 as one column, while the screen keeps the two the emoji already took, since
-    /// applyClusterWidthChange() never narrows a cluster on screen. The stretch then no longer fits
-    /// before the margin, and a bulk write would drop the letters that cross it. That text may also
-    /// have left a wrap pending or put a wide character on the line.
+    /// Asks bulkWritableColumns() again, what Terminal::maxBulkTextSequenceWidth() asked for the whole
+    /// run when it began, because the text written before the stretch can change the answer. The
+    /// screen may have taken more columns than the parser's scan counted for that text: the scan
+    /// measures a wide emoji followed by VS15 as one column, while the screen keeps the two the emoji
+    /// already took, since applyClusterWidthChange() never narrows a cluster on screen. The stretch
+    /// then no longer fits before the margin, and a bulk write would drop the letters that cross it.
+    /// That text may also have left a wrap pending or put a wide character on the line.
     [[nodiscard]] bool canBulkWriteAsciiStretch(size_t length) const noexcept;
 
-    /// Writes printable ASCII @p text straight into the current line's arrays and advances the cursor.
-    /// The caller has checked canBulkWriteAscii() and that @p text fits on the current line.
-    void writeAsciiRun(std::string_view text);
+    /// Writes the interior of an ASCII stretch straight into the current line's arrays and moves the
+    /// cursor past it. Lean, because canBulkWriteAsciiStretch() has ruled out all that writeText() sees
+    /// to before a run of nothing but ASCII: no wrap can be pending, the line holds no wide character
+    /// to overwrite half of, and the interior ends left of the margin. The run's end -- the parsing
+    /// buffer's hot end, the instruction counter -- is writeText()'s.
+    void writeAsciiInterior(std::string_view interior);
 
     /// Whether the ASCII stretches of a run may go into the line in bulk.
     enum class AsciiStretches : uint8_t
@@ -1186,7 +1223,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @param text      The run.
     /// @param cellCount How many columns the parser measured the run to take.
     /// @param stretches Whether the run's ASCII stretches may be written in bulk.
-    void writeSegmentedText(std::string_view text, size_t cellCount, AsciiStretches stretches);
+    /// @return The offset into @p text where the last interior written in bulk ends, if any was.
+    [[nodiscard]] std::optional<size_t> writeSegmentedText(std::string_view text,
+                                                           size_t cellCount,
+                                                           AsciiStretches stretches);
 
     /// Grapheme segmentation carried from one codepoint of a run of text to the next.
     struct GraphemeRun

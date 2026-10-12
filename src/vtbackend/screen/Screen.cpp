@@ -472,10 +472,71 @@ void Screen::writeText(string_view text, size_t cellCount)
 
     // Asked once per run: nothing the run writes changes the modes or the charsets.
     auto const stretches = canBulkWriteAscii() ? AsciiStretches::InBulk : AsciiStretches::PerCodepoint;
+
+    // Where the part of the run written in bulk ends, if it has one: the whole run, or its last interior.
+    auto bulkWrittenUntil = std::optional<size_t> {};
     if (stretches == AsciiStretches::InBulk && isAsciiOnly(text))
-        writeAsciiRun(text);
+    {
+        // A run of nothing but ASCII, straight into the line's arrays. Written out here rather than as
+        // a function of its own: clang inlines no function this size, and the call costs every run of
+        // the ascii and tui workloads about 12 instructions.
+        crlfIfWrapPending();
+
+        auto const columnsAvailable = unbox<size_t>(pageSize().columns - _cursor.position.column);
+        auto& line = currentLine();
+        auto& soa = line.materializedStorage();
+        auto const startCol = unbox<size_t>(_cursor.position.column);
+
+        // If the cursor is at a wide-char continuation cell, erase the left half
+        // of the wide character before overwriting. The bulk SoA write path does
+        // not handle this, unlike the per-character writeCharToCurrentAndAdvance.
+        if (startCol > 0 && soa.sgr[startCol].flags.contains(CellFlag::WideCharContinuation))
+        {
+            auto prevCell = line.useCellAt(_cursor.position.column - 1);
+            prevCell.reset(_cursor.graphicsRendition);
+        }
+
+        auto const written = writeTextToSoA(
+            soa, startCol, text, _cursor.graphicsRendition, _cursor.hyperlink, /*asciiHint=*/true);
+        if (written > 0)
+        {
+            // The cell a codepoint arriving in a LATER read joins -- a combining mark, a ZWJ, a
+            // variation selector -- is the last one this run wrote, not the one it started at.
+            _lastCursorPosition = CellLocation { .line = _cursor.position.line,
+                                                 .column = ColumnOffset::cast_from(startCol + written - 1) };
+
+            // The parser's gate keeps a run left of the margin. A run the trace handler replays was
+            // measured before the sequences queued ahead of it moved the cursor, and may reach it.
+            if (written < columnsAvailable)
+                _cursor.position.column += ColumnOffset::cast_from(written);
+            else if (_terminal->isModeEnabled(DECMode::AutoWrap))
+            {
+                _cursor.position.column = ColumnOffset::cast_from(startCol + written - 1);
+                _cursor.wrapPending = true;
+            }
+            else
+                _cursor.position.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+
+            // REP (CSI Ps b) repeats the run's last character: the parser records it after every bulk
+            // print (@see REP.after_bulk_text).
+        }
+        _terminal->markCellDirty(_cursor.position);
+        bulkWrittenUntil = text.size();
+    }
     else
-        writeSegmentedText(text, cellCount, stretches);
+        bulkWrittenUntil = writeSegmentedText(text, cellCount, stretches);
+
+    if (bulkWrittenUntil)
+    {
+        // Advance parsing buffer hot-end to match baseline's tryEmplaceChars behavior.
+        // This reduces bytesAvailable(), forcing the next readFromPty() to allocate a
+        // fresh buffer. Without this, the next PTY read reuses the same large buffer,
+        // batching the subsequent output (e.g., shell prompt) into the same chunk —
+        // preventing the display from refreshing between them.
+        if (auto const buf = _terminal->parsingBuffer(); buf)
+            buf->advanceHotEndUntil(text.data() + *bulkWrittenUntil);
+        _terminal->resetInstructionCounter();
+    }
 }
 
 bool Screen::canBulkWriteAscii() const noexcept
@@ -486,72 +547,28 @@ bool Screen::canBulkWriteAscii() const noexcept
 
 bool Screen::canBulkWriteAsciiStretch(size_t length) const noexcept
 {
-    return canBulkWriteAscii() && !_cursor.wrapPending && currentLine().isBulkWritable()
-           && std::cmp_less(length, pageSize().columns.value - _cursor.position.column.value);
+    return length <= bulkWritableColumns();
 }
 
-void Screen::writeAsciiRun(std::string_view text)
+void Screen::writeAsciiInterior(std::string_view interior)
 {
-    crlfIfWrapPending();
-
-    auto const columnsAvailable =
-        static_cast<size_t>(pageSize().columns.value - _cursor.position.column.value);
-
-    auto& line = currentLine();
-    auto& soa = line.materializedStorage();
-    auto const startCol = static_cast<size_t>(_cursor.position.column.value);
-
-    // If the cursor is at a wide-char continuation cell, erase the left half
-    // of the wide character before overwriting. The bulk SoA write path does
-    // not handle this, unlike the per-character writeCharToCurrentAndAdvance.
-    if (startCol > 0 && soa.sgr[startCol].flags.contains(CellFlag::WideCharContinuation))
-    {
-        auto prevCell = line.useCellAt(_cursor.position.column - 1);
-        prevCell.reset(_cursor.graphicsRendition);
-    }
-
-    auto const written =
-        writeTextToSoA(soa, startCol, text, _cursor.graphicsRendition, _cursor.hyperlink, /*asciiHint=*/true);
-
-    // Advance parsing buffer hot-end to match baseline's tryEmplaceChars behavior.
-    // This reduces bytesAvailable(), forcing the next readFromPty() to allocate a
-    // fresh buffer. Without this, the next PTY read reuses the same large buffer,
-    // batching the subsequent output (e.g., shell prompt) into the same chunk —
-    // preventing the display from refreshing between them.
-    if (auto const buf = _terminal->parsingBuffer(); buf)
-        buf->advanceHotEndUntil(text.data() + text.size());
-
-    // The cell a codepoint arriving in a LATER read joins -- a combining mark, a ZWJ, a variation
-    // selector -- is the last one this run wrote, not the one it started at.
-    if (written > 0)
-        _lastCursorPosition = CellLocation { .line = _cursor.position.line,
-                                             .column = ColumnOffset::cast_from(startCol + written - 1) };
-
-    // Advance cursor
-    if (written > 0)
-    {
-        if (static_cast<int>(written) < static_cast<int>(columnsAvailable))
-        {
-            _cursor.position.column += ColumnOffset::cast_from(written);
-        }
-        else if (_terminal->isModeEnabled(DECMode::AutoWrap))
-        {
-            _cursor.position.column = ColumnOffset::cast_from(static_cast<int>(startCol + written) - 1);
-            _cursor.wrapPending = true;
-        }
-        else
-        {
-            _cursor.position.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
-        }
-
-        // REP (CSI Ps b) repeats the run's last character: the parser records it after every bulk
-        // print (@see REP.after_bulk_text).
-    }
-    _terminal->resetInstructionCounter();
+    auto const startCol = unbox<size_t>(_cursor.position.column);
+    auto const written = writeTextToSoA(currentLine().materializedStorage(),
+                                        startCol,
+                                        interior,
+                                        _cursor.graphicsRendition,
+                                        _cursor.hyperlink,
+                                        /*asciiHint=*/true);
+    assert(written == interior.size() && "canBulkWriteAsciiStretch() let through more than fits");
+    _lastCursorPosition = CellLocation { .line = _cursor.position.line,
+                                         .column = ColumnOffset::cast_from(startCol + written - 1) };
+    _cursor.position.column += ColumnOffset::cast_from(written);
     _terminal->markCellDirty(_cursor.position);
 }
 
-void Screen::writeSegmentedText(std::string_view text, size_t cellCount, AsciiStretches stretches)
+std::optional<size_t> Screen::writeSegmentedText(std::string_view text,
+                                                 size_t cellCount,
+                                                 AsciiStretches stretches)
 {
     // One segmentation state for the whole run, seeded once. The planner cuts the run only at
     // character boundaries, so every part between two interiors decodes on its own.
@@ -559,17 +576,19 @@ void Screen::writeSegmentedText(std::string_view text, size_t cellCount, AsciiSt
     if (stretches == AsciiStretches::PerCodepoint)
     {
         writeTextPerCodepoint(text, run);
-        return;
+        return std::nullopt;
     }
 
-    auto unwritten = size_t { 0 }; // the first byte not yet written
+    auto unwritten = size_t { 0 };                    // the first byte not yet written
+    auto bulkWrittenUntil = std::optional<size_t> {}; // the end of the last interior written in bulk
     forEachBulkAsciiInterior(text, cellCount, [&](size_t begin, size_t end) {
         writeTextPerCodepoint(text.substr(unwritten, begin - unwritten), run);
         auto const interior = text.substr(begin, end - begin);
         if (canBulkWriteAsciiStretch(interior.size()))
         {
-            writeAsciiRun(interior);
-            // What seeding from the cell writeAsciiRun() wrote last would replay: its last letter, alone.
+            writeAsciiInterior(interior);
+            bulkWrittenUntil = end;
+            // What seeding from the cell just written last would replay: its last letter, alone.
             run.previousCodepoint = static_cast<char32_t>(interior.back());
             unicode::grapheme_process_init(run.previousCodepoint, run.segmenter);
         }
@@ -578,6 +597,7 @@ void Screen::writeSegmentedText(std::string_view text, size_t cellCount, AsciiSt
         unwritten = end;
     });
     writeTextPerCodepoint(text.substr(unwritten), run);
+    return bulkWrittenUntil;
 }
 
 Screen::GraphemeRun Screen::seedGraphemeStateFromLastCell() const noexcept
