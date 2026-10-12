@@ -54,6 +54,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 
 #include <QtTest/QTest>
@@ -218,6 +219,23 @@ struct DisplayHarness
         QCoreApplication::processEvents();
     }
 };
+
+/// Removes @p path once nothing holds it open any more, giving up after about two seconds: on Windows a
+/// file still open elsewhere -- by a writer on another thread, say -- cannot be removed.
+/// @param path The file.
+/// @return Whether the file is gone.
+[[nodiscard]] bool removeOnceReleased(std::filesystem::path const& path)
+{
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 200))
+    {
+        auto ec = std::error_code {};
+        std::filesystem::remove(path, ec);
+        if (!ec)
+            return true;
+        QTest::qWait(10);
+    }
+    return false;
+}
 
 /// A font size no profile default uses, so "did the request land?" is unambiguous.
 constexpr auto RequestedFontSize = 13.0;
@@ -582,7 +600,7 @@ TEST_CASE("display: the deferred screenshot readback delivers a real image", "[d
     // The deferred readback needs CONSECUTIVE live frames (capture, then delivery). grabWindow() on
     // an unexposed window won't do: each such grab renders through a throwaway context and then
     // INVALIDATES the scene graph, destroying the pending-readback state between frames. Wait for
-    // real exposure so the window's own render loop carries the capture across frames.
+    // real exposure, so each grab below is one of the window's own frames.
     if (!QTest::qWaitForWindowExposed(h.window.get(), 3000))
     {
         WARN("Skipping screenshot check: compositor did not expose the window");
@@ -599,24 +617,34 @@ TEST_CASE("display: the deferred screenshot readback delivers a real image", "[d
         std::filesystem::path(QDir::tempPath().toStdString()) / "contour-e2e-screenshot.png";
     std::filesystem::remove(shotPath);
 
-    // CopyScreenshot arms the deferred RHI readback; keep frames flowing until it delivers. The
-    // capture+delivery both ran (that is the coverage this exercises); whether the pixels actually
-    // arrive depends on the compositor servicing the offscreen readback across frames, which not
-    // every environment does. So treat a non-delivery as an environment skip (WARN), not a failure —
-    // the readback machinery was driven regardless.
+    // CopyScreenshot arms the deferred RHI readback; keep frames flowing until it delivers. A frame is
+    // forced per round rather than waited for: where the window's own frames do not come, the capture and
+    // its delivery would otherwise never get the frames they need. Whether the pixels arrive still depends
+    // on the compositor servicing the offscreen readback, which not every environment does, so a
+    // non-delivery is an environment skip (WARN), not a failure -- the readback machinery was driven
+    // regardless.
+    //
+    // The image is written on the render thread -- by the window's own frames too, which the cursor's
+    // blink keeps scheduling -- and the file exists from the moment the writer opens it, while the image
+    // is still being encoded into it. So what is waited for is a whole image in the file, and the file is
+    // removed only once the writer has let go of it: Windows refuses to remove a file open elsewhere.
     h.display->setScreenshotOutput(shotPath);
-    for (int i = 0; i < 300 && !std::filesystem::exists(shotPath);
-         ++i) // generous: instrumented builds are slow
+    auto const shotFile = QString::fromStdU16String(shotPath.u16string());
+    auto delivered = QImage {};
+    // Generous: instrumented builds are slow.
+    for ([[maybe_unused]] auto const round: std::views::iota(0, 300))
     {
-        h.display->update();
-        QTest::qWait(20);
+        h.pump();
+        delivered = QImage(shotFile);
+        if (!delivered.isNull())
+            break;
     }
-    if (!std::filesystem::exists(shotPath))
+    if (delivered.isNull())
         WARN("Screenshot readback did not deliver in this environment (compositor-dependent)");
     else
     {
         SUCCEED("deferred screenshot readback delivered a real image");
-        std::filesystem::remove(shotPath);
+        CHECK(removeOnceReleased(shotPath));
     }
 }
 
