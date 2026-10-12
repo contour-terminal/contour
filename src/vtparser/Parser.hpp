@@ -738,15 +738,15 @@ class Parser
     void printUtf8Byte(char ch);
 
   private:
-    enum class ProcessKind : uint8_t
-    {
-        /// Processing bulk-text in ground state succeed, keep on going.
-        ContinueBulk,
-        /// Processing bulk-text failed (various reasons), fallback to finit state machine.
-        FallbackToFSM
-    };
-
-    std::tuple<ProcessKind, size_t> parseBulkText(char const* begin, char const* end) noexcept;
+    /// Hands the leading run of text to the listener in one print() call, together with the C0
+    /// controls that follow it inline. Called in the Ground state only.
+    ///
+    /// Like every bulk scanner here, it returns how many bytes it consumed, and 0 when the state
+    /// machine must take the next byte instead: a scanner that consumes nothing is a fallback.
+    /// @param begin First byte to consider.
+    /// @param end   One past the last byte.
+    /// @return The number of bytes consumed, or 0 to fall back to the state machine.
+    [[nodiscard]] size_t parseBulkText(char const* begin, char const* end) noexcept;
 
     /// The one exit from parseBulkText() that hands the next byte to the state machine after
     /// unicode::scan_text() has run. The scan starts from an idle decoder, so this returns the decoder
@@ -755,8 +755,8 @@ class Parser
     /// The other bulk scanners need no counterpart. They decide from the bytes alone and change no
     /// state before they know they consume at least one byte, so their fallback leaves everything as
     /// the state machine expects it.
-    /// @return FallbackToFSM.
-    std::tuple<ProcessKind, size_t> fallBackToStateMachineAfterScan() noexcept;
+    /// @return 0, the bulk scanners' fallback.
+    [[nodiscard]] size_t fallBackToStateMachineAfterScan() noexcept;
 
     /// The shared body of the bulk string scanners: takes the leading run of plain payload bytes
     /// (see plainStringPayloadRunLength()) and hands it to @p putPayload in one call.
@@ -767,11 +767,11 @@ class Parser
     /// @param begin      First byte to consider.
     /// @param end        One past the last byte.
     /// @param putPayload Receives the run as a std::string_view.
-    /// @return ContinueBulk and the run's length, or FallbackToFSM.
+    /// @return The run's length, or 0 to fall back to the state machine.
     template <typename PutPayload>
-    std::tuple<ProcessKind, size_t> takePlainStringRun(char const* begin,
-                                                       char const* end,
-                                                       PutPayload putPayload) noexcept;
+    [[nodiscard]] size_t takePlainStringRun(char const* begin,
+                                            char const* end,
+                                            PutPayload putPayload) noexcept;
 
     /// Hands a whole run of DCS payload bytes to the handler in one call.
     ///
@@ -781,9 +781,9 @@ class Parser
     ///
     /// @param begin First byte to consider.
     /// @param end   One past the last byte.
-    /// @return ContinueBulk and the run's length, or FallbackToFSM when the next byte is not plain
-    ///         payload (a terminator, or anything the state machine must act on).
-    std::tuple<ProcessKind, size_t> parseBulkDcsPassThrough(char const* begin, char const* end) noexcept;
+    /// @return The run's length, or 0 to fall back to the state machine when the next byte is not
+    ///         plain payload (a terminator, or anything the state machine must act on).
+    [[nodiscard]] size_t parseBulkDcsPassThrough(char const* begin, char const* end) noexcept;
 
     /// Hands a whole run of APC payload bytes to the handler in one call.
     ///
@@ -793,9 +793,9 @@ class Parser
     ///
     /// @param begin First byte to consider.
     /// @param end   One past the last byte.
-    /// @return ContinueBulk and the run's length, or FallbackToFSM when the next byte is not plain
-    ///         payload (a terminator, or anything the state machine must act on).
-    std::tuple<ProcessKind, size_t> parseBulkApcString(char const* begin, char const* end) noexcept;
+    /// @return The run's length, or 0 to fall back to the state machine when the next byte is not
+    ///         plain payload (a terminator, or anything the state machine must act on).
+    [[nodiscard]] size_t parseBulkApcString(char const* begin, char const* end) noexcept;
 
     /// Hands a run of CSI parameter bytes -- digits, ';' and ':' -- to the listener in one go.
     ///
@@ -807,9 +807,9 @@ class Parser
     ///
     /// @param begin First byte to consider.
     /// @param end   One past the last byte.
-    /// @return ContinueBulk and the run's length, or FallbackToFSM when the next byte is anything
-    ///         else (a leader, an intermediate, the final byte, a control), or in VT52 mode.
-    std::tuple<ProcessKind, size_t> parseBulkCsiParameters(char const* begin, char const* end) noexcept;
+    /// @return The run's length, or 0 to fall back to the state machine when the next byte is
+    ///         anything else (a leader, an intermediate, the final byte, a control), or in VT52 mode.
+    [[nodiscard]] size_t parseBulkCsiParameters(char const* begin, char const* end) noexcept;
 
     void processOnceViaStateMachine(uint8_t ch);
     /// Handles one input byte while in VT52 mode. @see setVT52Mode. Returns true if the byte was
