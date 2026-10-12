@@ -439,7 +439,7 @@ std::expected<SshHostConfigMap, std::error_code> loadSshConfig(std::filesystem::
             else if (key == "User")
                 config.username = value;
             else if (key == "IdentityFile")
-                config.privateKeyFile = value;
+                config.privateKeyFile = core::pathFromUtf8(value).value_or(std::filesystem::path {});
             else if (key == "ForwardAgent")
                 config.forwardAgent = (value == "yes");
             else

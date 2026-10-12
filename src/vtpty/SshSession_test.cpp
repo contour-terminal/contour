@@ -91,3 +91,17 @@ TEST_CASE("SshHostConfig spells its files in UTF-8", "[ssh]")
     CHECK(config.toConfigString().contains(std::format("IdentityFile {}/id_ed25519\n", spelled)));
     CHECK(config.toConfigString().contains(std::format("KnownHostsFile {}/known_hosts\n", spelled)));
 }
+
+TEST_CASE("loadSshConfig reads an IdentityFile beyond ASCII as UTF-8", "[ssh]")
+{
+    // The file is UTF-8. Assigned to a path as a narrow string, Windows read it in the ANSI code page.
+    auto const temp = core::testing::ScopedTempDir { "contour-ssh-config" };
+    auto const identity = std::format("/home/{}/.ssh/id_ed25519", vtpty::testing::NonAsciiNameUtf8);
+    writeFile(temp / "config",
+              std::format("Host work\n    HostName example.invalid\n    IdentityFile {}\n", identity));
+
+    auto const configs = vtpty::loadSshConfig(temp / "config");
+    REQUIRE(configs.has_value());
+    REQUIRE(configs->contains("work"));
+    CHECK(configs->at("work").privateKeyFile == core::pathFromTrustedUtf8(identity));
+}
