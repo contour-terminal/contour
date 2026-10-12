@@ -2,6 +2,7 @@
 
 // clang-format off
 #include <system_error>
+#include <tuple>
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <winsock2.h>
@@ -21,6 +22,7 @@
 #include <vtpty/Pty.hpp>
 #include <vtpty/SandboxInfo.hpp>
 #include <vtpty/SshFailureMessage.hpp>
+#include <vtpty/SshKnownHosts.hpp>
 
 #include <core/Escape.hpp>
 #include <core/Utils.hpp>
@@ -184,32 +186,6 @@ namespace
         }
     }
 
-    constexpr int hostkeyTypeToKnownHostType(int type) noexcept
-    {
-        switch (type)
-        {
-#ifdef LIBSSH2_HOSTKEY_TYPE_RSA
-            case LIBSSH2_HOSTKEY_TYPE_RSA: return LIBSSH2_KNOWNHOST_KEY_SSHRSA;
-#endif
-#ifdef LIBSSH2_HOSTKEY_TYPE_DSS
-            case LIBSSH2_HOSTKEY_TYPE_DSS: return LIBSSH2_KNOWNHOST_KEY_SSHDSS;
-#endif
-#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_256
-            case LIBSSH2_HOSTKEY_TYPE_ECDSA_256: return LIBSSH2_KNOWNHOST_KEY_ECDSA_256;
-#endif
-#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_384
-            case LIBSSH2_HOSTKEY_TYPE_ECDSA_384: return LIBSSH2_KNOWNHOST_KEY_ECDSA_384;
-#endif
-#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_521
-            case LIBSSH2_HOSTKEY_TYPE_ECDSA_521: return LIBSSH2_KNOWNHOST_KEY_ECDSA_521;
-#endif
-#ifdef LIBSSH2_HOSTKEY_TYPE_ED25519
-            case LIBSSH2_HOSTKEY_TYPE_ED25519: return LIBSSH2_KNOWNHOST_KEY_ED25519;
-#endif
-            default: return LIBSSH2_KNOWNHOST_KEY_UNKNOWN;
-        }
-    }
-
     constexpr std::expected<std::string_view, int> hostkeyTypeToString(int hostkeyType) noexcept
     {
         switch (hostkeyType)
@@ -295,74 +271,6 @@ namespace
 #endif
     }
 
-    struct SshKnownhostsFile
-    {
-        LIBSSH2_KNOWNHOSTS* handle = nullptr;
-
-        explicit SshKnownhostsFile(LIBSSH2_SESSION* session): handle { libssh2_knownhost_init(session) } {}
-
-        ~SshKnownhostsFile()
-        {
-            if (handle)
-                libssh2_knownhost_free(handle);
-        }
-
-        // NOLINTNEXTLINE(readability-make-member-function-const)
-        std::optional<std::string> readFromFile(std::filesystem::path const& path)
-        {
-            int const rc =
-                libssh2_knownhost_readfile(handle, path.string().c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
-            if (rc < 0)
-                return std::string(libssl2ErrorString(rc));
-            return std::nullopt;
-        }
-
-        struct SshKnownhostKey
-        {
-            int status;
-            std::string key;
-        };
-
-        [[nodiscard]] SshKnownhostKey checkHostkey(SshHostConfig const& host, SshHostkey const& hostkey) const
-        {
-            libssh2_knownhost* knownHost = nullptr;
-            auto const knownhostType = hostkeyTypeToKnownHostType(hostkey.type);
-            auto const rc = libssh2_knownhost_checkp(handle,
-                                                     host.hostname.c_str(),
-                                                     host.port,
-                                                     hostkey.data.data(),
-                                                     hostkey.data.size(),
-                                                     LIBSSH2_KNOWNHOST_TYPE_PLAIN
-                                                         | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType,
-                                                     &knownHost);
-            switch (rc)
-            {
-                case LIBSSH2_KNOWNHOST_CHECK_MATCH: return { .status = rc, .key = knownHost->key };
-                case LIBSSH2_KNOWNHOST_CHECK_MISMATCH: return { .status = rc, .key = knownHost->key };
-                case LIBSSH2_KNOWNHOST_CHECK_NOTFOUND: return { .status = rc, .key = ""s };
-                default: return { .status = rc, .key = ""s };
-            }
-        }
-
-        /// Adds the host key to the known_hosts file.
-        [[nodiscard]] int addToFile(SshHostConfig const& host, SshHostkey const& hostkey) const
-        {
-            auto const knownhostType = hostkeyTypeToKnownHostType(hostkey.type);
-            auto const comment = host.toKnownhostComment();
-            auto const typeMask = LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType;
-            libssh2_knownhost_addc(handle,
-                                   host.hostname.c_str(),
-                                   nullptr /* salt */,
-                                   hostkey.data.data(),
-                                   hostkey.data.size(),
-                                   comment.data(),
-                                   comment.size(),
-                                   typeMask,
-                                   nullptr /* store */);
-            return libssh2_knownhost_writefile(
-                handle, host.knownHostsFile.string().c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
-        }
-    };
 } // namespace
 // }}}
 
@@ -1417,9 +1325,9 @@ SshSession::HostkeyVerificationStatus SshSession::verifyHostkey()
     if (_config.knownHostsFile.empty())
         return HostkeyVerificationStatus::Skipped;
 
-    auto knownhostFile = SshKnownhostsFile { _p->sshSession };
+    auto knownhostFile = SshKnownHosts { _p->sshSession };
 
-    if (auto const error = knownhostFile.readFromFile(_config.knownHostsFile); error.has_value())
+    if (knownhostFile.readFromFile(_config.knownHostsFile) != LIBSSH2_ERROR_NONE)
         return HostkeyVerificationStatus::FailedToReadKnownHosts;
 
     auto const hostkey = getHostkey(_p->sshSession);
@@ -1473,8 +1381,9 @@ void SshSession::hostkeyVerificationResultCallback(bool accepted)
     _hostkeyVerified = accepted;
     if (accepted)
     {
-        auto knownhostsFile = SshKnownhostsFile { _p->sshSession };
-        knownhostsFile.readFromFile(_config.knownHostsFile);
+        auto knownhostsFile = SshKnownHosts { _p->sshSession };
+        // A file that is not there yet is what a first connection creates.
+        std::ignore = knownhostsFile.readFromFile(_config.knownHostsFile);
         auto const hostkey = getHostkey(_p->sshSession);
         auto const rc = knownhostsFile.addToFile(_config, hostkey);
 
