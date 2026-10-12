@@ -1174,15 +1174,54 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// The caller has checked canBulkWriteAscii() and that @p text fits on the current line.
     void writeAsciiRun(std::string_view text);
 
-    /// Writes text that mixes ASCII with other UTF-8: the interiors of long ASCII stretches in bulk,
-    /// everything else per codepoint. @see forEachBulkAsciiInterior
+    /// Whether the ASCII stretches of a run may go into the line in bulk.
+    enum class AsciiStretches : uint8_t
+    {
+        PerCodepoint, ///< The modes or the charsets need every codepoint looked at (canBulkWriteAscii()).
+        InBulk,       ///< The long ones may (forEachBulkAsciiInterior).
+    };
+
+    /// Writes a run of text through the grapheme segmenter, one codepoint at a time, apart from the
+    /// interiors of long ASCII stretches when @p stretches lets those go into the line in bulk.
     /// @param text      The run.
     /// @param cellCount How many columns the parser measured the run to take.
-    void writeMixedText(std::string_view text, size_t cellCount);
+    /// @param stretches Whether the run's ASCII stretches may be written in bulk.
+    void writeSegmentedText(std::string_view text, size_t cellCount, AsciiStretches stretches);
 
-    /// Writes @p text one codepoint at a time through the grapheme segmenter, seeded from the cell
-    /// the previous write ended in, so a cluster continues across calls.
-    void writeTextPerCodepoint(std::string_view text);
+    /// Grapheme segmentation carried from one codepoint of a run of text to the next.
+    struct GraphemeRun
+    {
+        unicode::grapheme_segmenter_state segmenter {}; ///< Where segmentation stands.
+        char32_t previousCodepoint = 0;                 ///< The codepoint segmented last; 0 before any.
+    };
+
+    /// The segmentation state after the cell the previous write ended in, replayed from that cell's
+    /// codepoints, so that a cluster continues across writes: 👨 written by one, then the ZWJ in the
+    /// next, joins the 👨. Not the parser's state, which its text scan has already advanced past the
+    /// text being written: reusing it would segment that text twice.
+    /// @return An empty run if that cell is off the page or its line is blank.
+    [[nodiscard]] GraphemeRun seedGraphemeStateFromLastCell() const noexcept;
+
+    /// Where the next codepoint of a run of text goes.
+    enum class ClusterPlacement : uint8_t
+    {
+        JoinsLastCluster, ///< No grapheme cluster breaks before it: into the cell written last.
+        StartsCluster,    ///< A grapheme cluster breaks before it: into a cell of its own.
+    };
+
+    /// Segments @p codepoint, already mapped through the charsets, as the next codepoint of @p run, and
+    /// advances @p run past it. Holds the one segmentation rule both per-codepoint writers follow.
+    /// @return Whether @p codepoint starts a grapheme cluster or joins the one written last.
+    [[nodiscard]] static ClusterPlacement placeInRun(char32_t codepoint, GraphemeRun& run) noexcept;
+
+    /// Adds @p codepoint to the grapheme cluster the previous write ended in, and claims the columns
+    /// that widens it by.
+    void appendToLastCluster(char32_t codepoint);
+
+    /// Writes @p text one codepoint at a time through the grapheme segmenter, continuing @p run.
+    /// @param text Whole characters: decoding starts afresh.
+    /// @param run  The run's segmentation state, carried on to whatever the run writes next.
+    void writeTextPerCodepoint(std::string_view text, GraphemeRun& run);
 
     void configureCurrentLineSize(LineFlags enabled);
 

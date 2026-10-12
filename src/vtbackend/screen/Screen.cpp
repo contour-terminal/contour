@@ -470,12 +470,12 @@ void Screen::writeText(string_view text, size_t cellCount)
 
     assert(std::cmp_less_equal(cellCount, pageSize().columns.value - _cursor.position.column.value));
 
-    if (!canBulkWriteAscii())
-        writeTextPerCodepoint(text);
-    else if (isAsciiOnly(text))
+    // Asked once per run: nothing the run writes changes the modes or the charsets.
+    auto const stretches = canBulkWriteAscii() ? AsciiStretches::InBulk : AsciiStretches::PerCodepoint;
+    if (stretches == AsciiStretches::InBulk && isAsciiOnly(text))
         writeAsciiRun(text);
     else
-        writeMixedText(text, cellCount);
+        writeSegmentedText(text, cellCount, stretches);
 }
 
 bool Screen::canBulkWriteAscii() const noexcept
@@ -551,60 +551,89 @@ void Screen::writeAsciiRun(std::string_view text)
     _terminal->markCellDirty(_cursor.position);
 }
 
-void Screen::writeMixedText(std::string_view text, size_t cellCount)
+void Screen::writeSegmentedText(std::string_view text, size_t cellCount, AsciiStretches stretches)
 {
-    // The planner cuts the run only at character boundaries, so every part between two interiors
-    // decodes on its own.
-    auto unwritten = size_t { 0 }; // the first byte not yet written
-    forEachBulkAsciiInterior(text, cellCount, [&](size_t begin, size_t end) {
-        writeTextPerCodepoint(text.substr(unwritten, begin - unwritten));
-        auto const interior = text.substr(begin, end - begin);
-        if (canBulkWriteAsciiStretch(interior.size()))
-            writeAsciiRun(interior);
-        else
-            writeTextPerCodepoint(interior);
-        unwritten = end;
-    });
-    writeTextPerCodepoint(text.substr(unwritten));
-}
-
-void Screen::writeTextPerCodepoint(std::string_view text)
-{
-    if (text.empty())
-        return;
-
-    // A LOCAL grapheme state: the parser's scan_text has already advanced the parser's
-    // graphemeSegmenterState and lastCodepointHint past this text, and reusing it would segment the
-    // text twice, corrupting ZWJ emoji sequences and other multi-codepoint clusters.
-    //
-    // Seeded from the cell the previous write ended in, so a cluster continues across calls (e.g.,
-    // 👨 written by one call, then the ZWJ in the next -- the ZWJ must join the 👨).
-    char32_t prevCodepoint = 0;
-    unicode::grapheme_segmenter_state localGraphemeState {};
-    if (_lastCursorPosition.column >= ColumnOffset(0) && _lastCursorPosition.line >= LineOffset(0)
-        && _lastCursorPosition.line < boxed_cast<LineOffset>(pageSize().lines))
+    // One segmentation state for the whole run, seeded once. The planner cuts the run only at
+    // character boundaries, so every part between two interiors decodes on its own.
+    auto run = seedGraphemeStateFromLastCell();
+    if (stretches == AsciiStretches::PerCodepoint)
     {
-        auto const& prevLine = grid().lineAt(_lastCursorPosition.line);
-        auto const prevCol = unbox<size_t>(_lastCursorPosition.column);
-        // Blank lines have no preceding codepoints to seed grapheme state with.
-        if (prevCol < unbox<size_t>(prevLine.size()) && !prevLine.isBlank())
-        {
-            auto const& prevStorage = prevLine.storage();
-            auto const prevProxy = ConstCellProxy(prevStorage, prevCol);
-            // Replay all codepoints from the preceding cell to build correct state
-            // (needed for GB11: Extended_Pictographic Extend* ZWJ × Extended_Pictographic)
-            for (auto const i: iota(size_t { 0 }, prevProxy.codepointCount()))
-            {
-                auto const cp = prevProxy.codepoint(i);
-                if (!prevCodepoint)
-                    unicode::grapheme_process_init(cp, localGraphemeState);
-                else
-                    unicode::grapheme_process_breakable(cp, localGraphemeState);
-                prevCodepoint = cp;
-            }
-        }
+        writeTextPerCodepoint(text, run);
+        return;
     }
 
+    auto unwritten = size_t { 0 }; // the first byte not yet written
+    forEachBulkAsciiInterior(text, cellCount, [&](size_t begin, size_t end) {
+        writeTextPerCodepoint(text.substr(unwritten, begin - unwritten), run);
+        auto const interior = text.substr(begin, end - begin);
+        if (canBulkWriteAsciiStretch(interior.size()))
+        {
+            writeAsciiRun(interior);
+            // What seeding from the cell writeAsciiRun() wrote last would replay: its last letter, alone.
+            run.previousCodepoint = static_cast<char32_t>(interior.back());
+            unicode::grapheme_process_init(run.previousCodepoint, run.segmenter);
+        }
+        else
+            writeTextPerCodepoint(interior, run);
+        unwritten = end;
+    });
+    writeTextPerCodepoint(text.substr(unwritten), run);
+}
+
+Screen::GraphemeRun Screen::seedGraphemeStateFromLastCell() const noexcept
+{
+    auto run = GraphemeRun {};
+    if (_lastCursorPosition.column < ColumnOffset(0) || _lastCursorPosition.line < LineOffset(0)
+        || _lastCursorPosition.line >= boxed_cast<LineOffset>(pageSize().lines))
+        return run;
+
+    // A blank line has no codepoints to replay.
+    auto const& lastLine = grid().lineAt(_lastCursorPosition.line);
+    auto const lastColumn = unbox<size_t>(_lastCursorPosition.column);
+    if (lastColumn >= unbox<size_t>(lastLine.size()) || lastLine.isBlank())
+        return run;
+
+    // All of the cell's codepoints, not just its last: GB11 (Extended_Pictographic Extend* ZWJ ×
+    // Extended_Pictographic) looks back across the whole cluster.
+    auto const cell = ConstCellProxy(lastLine.storage(), lastColumn);
+    for (auto const i: iota(size_t { 0 }, cell.codepointCount()))
+    {
+        auto const codepoint = cell.codepoint(i);
+        if (!run.previousCodepoint)
+            unicode::grapheme_process_init(codepoint, run.segmenter);
+        else
+            unicode::grapheme_process_breakable(codepoint, run.segmenter);
+        run.previousCodepoint = codepoint;
+    }
+    return run;
+}
+
+Screen::ClusterPlacement Screen::placeInRun(char32_t codepoint, GraphemeRun& run) noexcept
+{
+    auto placement = ClusterPlacement::StartsCluster;
+    if (!run.previousCodepoint)
+        unicode::grapheme_process_init(codepoint, run.segmenter);
+    else if (!unicode::grapheme_process_breakable(codepoint, run.segmenter))
+        placement = ClusterPlacement::JoinsLastCluster;
+    else if (isRegionalIndicator(codepoint))
+        // libunicode's streaming grapheme_process_breakable() counts regional indicators only
+        // from the one grapheme_process_init() was seeded with, so a flag that begins after a
+        // break would pair one letter off (GB12/GB13). Seed the new cluster as init() would.
+        // This re-seed can go once the minimum libunicode version carries the upstream fix.
+        unicode::grapheme_process_init(codepoint, run.segmenter);
+    run.previousCodepoint = codepoint;
+    return placement;
+}
+
+void Screen::appendToLastCluster(char32_t codepoint)
+{
+    auto const widthChange = usePreviousCell().appendCharacter(codepoint, clusterWidthPolicy());
+    applyClusterWidthChange(widthChange);
+    _terminal->markCellDirty(_lastCursorPosition);
+}
+
+void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
+{
     // Decoded as the state machine decodes text: the bulk text path hands a byte that is not UTF-8
     // on inside its run, and it must become the same U+FFFD here that it becomes there.
     auto utf8 = unicode::utf8_decoder_state {};
@@ -636,7 +665,7 @@ void Screen::writeTextPerCodepoint(std::string_view text)
                     cell.setImageFragment(rasterizedImage,
                                           CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
                     _lastCursorPosition = _cursor.position;
-                    prevCodepoint = U' ';
+                    run.previousCodepoint = U' ';
                     advanceCursorAfterWrite(ColumnCount(1));
                     _terminal->markCellDirty(_lastCursorPosition);
                     continue;
@@ -644,31 +673,11 @@ void Screen::writeTextPerCodepoint(std::string_view text)
             }
         }
 
-        auto const cp = _cursor.charsets.map(rawCp);
-
-        if (!prevCodepoint)
-        {
-            unicode::grapheme_process_init(cp, localGraphemeState);
-            writeCharToCurrentAndAdvance(cp);
-        }
-        else if (unicode::grapheme_process_breakable(cp, localGraphemeState))
-        {
-            // libunicode's streaming grapheme_process_breakable() counts regional indicators only
-            // from the one grapheme_process_init() was seeded with, so a flag that begins after a
-            // break would pair one letter off (GB12/GB13). Seed the new cluster as init() would.
-            // This re-seed can go once the minimum libunicode version carries the upstream fix.
-            if (isRegionalIndicator(cp))
-                unicode::grapheme_process_init(cp, localGraphemeState);
-            writeCharToCurrentAndAdvance(cp);
-        }
+        auto const codepoint = _cursor.charsets.map(rawCp);
+        if (placeInRun(codepoint, run) == ClusterPlacement::StartsCluster)
+            writeCharToCurrentAndAdvance(codepoint);
         else
-        {
-            auto const widthChange = usePreviousCell().appendCharacter(cp, clusterWidthPolicy());
-            applyClusterWidthChange(widthChange);
-            _terminal->markCellDirty(_lastCursorPosition);
-        }
-
-        prevCodepoint = cp;
+            appendToLastCluster(codepoint);
         _terminal->resetInstructionCounter();
     }
 }
@@ -768,51 +777,15 @@ void Screen::writeTextInternal(char32_t sourceCodepoint)
 
     char32_t const codepoint = _cursor.charsets.map(sourceCodepoint);
 
-    // Reconstruct grapheme segmentation state from the preceding cell rather than
-    // using the parser's state. The parser's scan_text may have already advanced
-    // lastCodepointHint and graphemeSegmenterState past this codepoint (when the
-    // bulk text path partially processes bytes then falls back to the FSM),
-    // causing double-processing that corrupts ZWJ emoji sequences.
-    char32_t precedingChar = 0;
-    unicode::grapheme_segmenter_state graphemeState {};
-    if (_lastCursorPosition.column >= ColumnOffset(0) && _lastCursorPosition.line >= LineOffset(0)
-        && _lastCursorPosition.line < boxed_cast<LineOffset>(pageSize().lines))
-    {
-        auto const& prevLine = grid().lineAt(_lastCursorPosition.line);
-        auto const prevCol = unbox<size_t>(_lastCursorPosition.column);
-        if (prevCol < unbox<size_t>(prevLine.size()) && !prevLine.isBlank())
-        {
-            auto const& prevStorage = prevLine.storage();
-            auto const prevProxy = ConstCellProxy(prevStorage, prevCol);
-            auto const cpCount = prevProxy.codepointCount();
-            for (size_t i = 0; i < cpCount; ++i)
-            {
-                auto const cp = prevProxy.codepoint(i);
-                if (!precedingChar)
-                    unicode::grapheme_process_init(cp, graphemeState);
-                else
-                    unicode::grapheme_process_breakable(cp, graphemeState);
-                precedingChar = cp;
-            }
-        }
-    }
-
-    if (!precedingChar)
-    {
-        unicode::grapheme_process_init(codepoint, graphemeState);
+    // Seeded after the pending wrap above, which can scroll a different line under the cell the last
+    // write ended in. The parser's own state does not serve: its text scan may already have advanced
+    // past this codepoint, when the bulk text path processed part of a run and fell back to the state
+    // machine.
+    auto run = seedGraphemeStateFromLastCell();
+    if (placeInRun(codepoint, run) == ClusterPlacement::StartsCluster)
         writeCharToCurrentAndAdvance(codepoint);
-    }
-    else if (unicode::grapheme_process_breakable(codepoint, graphemeState))
-    {
-        writeCharToCurrentAndAdvance(codepoint);
-    }
     else
-    {
-        auto const widthChange = usePreviousCell().appendCharacter(codepoint, clusterWidthPolicy());
-        applyClusterWidthChange(widthChange);
-        _terminal->markCellDirty(_lastCursorPosition);
-    }
-
+        appendToLastCluster(codepoint);
     _terminal->resetInstructionCounter();
 }
 
