@@ -3,15 +3,14 @@
 #include <text_shaper/DirectWriteAnalysisWrapper.hpp>
 #include <text_shaper/FontLocator.hpp>
 
+#include <core/WideString.hpp>
+
+#include <libunicode/convert.h>
+
 #include <algorithm>
-#include <string>
-
-// {{{ TODO: replace with libunicode
-#include <codecvt>
-#include <locale>
-// }}}
-
 #include <iostream> // DEBUGGING ONLY
+#include <string>
+#include <string_view>
 
 #include <dwrite.h>
 #include <dwrite_3.h>
@@ -20,19 +19,14 @@
 
 using Microsoft::WRL::ComPtr;
 
-using std::codecvt_utf8;
-using std::codecvt_utf8_utf16;
 using std::make_unique;
 using std::max;
 using std::move;
 using std::nullopt;
 using std::optional;
 using std::pair;
-using std::string;
-using std::u32string;
 using std::vector;
 using std::wstring;
-using std::wstring_convert;
 
 namespace text
 {
@@ -173,11 +167,12 @@ struct DirectWriteShaper::Private
 
         auto const& sourcePath = std::get<FontPath>(source);
 
-        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> wStringConverter;
-        std::wstring wSourcePath = wStringConverter.from_bytes(sourcePath.value);
+        auto const wSourcePath = core::toUtf16(sourcePath.value);
+        if (!wSourcePath)
+            return nullopt; // names no file
 
         ComPtr<IDWriteFontFile> fontFile;
-        auto hr = factory->CreateFontFileReference(wSourcePath.c_str(), NULL, &fontFile);
+        auto hr = factory->CreateFontFileReference(wSourcePath->c_str(), nullptr, &fontFile);
         if (FAILED(hr))
         {
             return nullopt;
@@ -245,7 +240,7 @@ struct DirectWriteShaper::Private
 
         DxFontInfo fontInfo {};
         fontInfo.description = description;
-        fontInfo.description.familyName = wStringConverter.to_bytes(resolvedFamilyName);
+        fontInfo.description.familyName = core::toUtf8(resolvedFamilyName);
         fontInfo.description.wFamilyName = resolvedFamilyName;
         fontInfo.size = size;
         fontInfo.metrics.lineHeight = int(ceil(lineHeight * dipScalar));
@@ -320,10 +315,7 @@ void DirectWriteShaper::shape(FontKey font,
                               unicode::PresentationStyle presentation,
                               ShapeResult& result)
 {
-    wstring_convert<codecvt_utf8<char32_t>, char32_t> conv1;
-    string bytes = conv1.to_bytes(u32string { text });
-    wstring_convert<codecvt_utf8_utf16<wchar_t>> conv2;
-    wstring wText = conv2.from_bytes(bytes);
+    auto const wText = unicode::convert_to<wchar_t>(text);
 
     WCHAR const* textString = wText.c_str();
     UINT32 textLength = wText.size();

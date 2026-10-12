@@ -4,12 +4,12 @@
 #include <text_shaper/DirectWriteAnalysisWrapper.hpp>
 #include <text_shaper/Font.hpp>
 
-#include <string_view>
+#include <core/WideString.hpp>
 
-// {{{ TODO: replace with libunicode
-#include <codecvt>
-#include <locale>
-// }}}
+#include <libunicode/convert.h>
+
+#include <string>
+#include <string_view>
 
 #include <dwrite.h>
 #include <dwrite_3.h>
@@ -123,13 +123,12 @@ FontSourceList DirectWriteLocator::locate(FontDescription const& fd)
 
     FontSourceList output;
 
-    // TODO: use libunicode for that (TODO: create wchar_t/char16_t converters in libunicode)
-    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> wStringConverter;
-    std::wstring familyName = wStringConverter.from_bytes(fd.familyName);
+    // A name that is not UTF-8 names no family, and the fallback below is used.
+    auto const familyName = core::toUtf16(fd.familyName).value_or(std::wstring {});
 
     UINT32 familyIndex;
     BOOL familyExists = FALSE;
-    _d->systemFontCollection->FindFamilyName(familyName.data(), &familyIndex, &familyExists);
+    _d->systemFontCollection->FindFamilyName(familyName.c_str(), &familyIndex, &familyExists);
 
     if (!familyExists)
     {
@@ -156,7 +155,7 @@ FontSourceList DirectWriteLocator::locate(FontDescription const& fd)
 
         ComPtr<IDWriteFontFace> fontFace;
         font->CreateFontFace(&fontFace);
-        output.emplace_back(FontPath { wStringConverter.to_bytes(getFontPath(fontFace.Get())) });
+        output.emplace_back(FontPath { core::toUtf8(getFontPath(fontFace.Get())) });
         locatorLog()("Adding font file: {}", output.back());
     }
 
@@ -173,10 +172,8 @@ FontSourceList DirectWriteLocator::resolve(gsl::span<char32_t const> codepoints)
 {
     FontSourceList output;
 
-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv1;
-    std::string bytes = conv1.to_bytes(std::u32string { codepoints.data(), codepoints.size() });
-    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv2;
-    std::wstring wText = conv2.from_bytes(bytes);
+    auto const wText =
+        unicode::convert_to<wchar_t>(std::u32string_view { codepoints.data(), codepoints.size() });
 
     const UINT32 textLength = wText.size();
     UINT32 mappedLength = 0;
@@ -202,10 +199,7 @@ FontSourceList DirectWriteLocator::resolve(gsl::span<char32_t const> codepoints)
         ComPtr<IDWriteFontFace> fontFace;
         mappedFont->CreateFontFace(&fontFace);
 
-        // TODO: use libunicode for that (TODO: create wchar_t/char16_t converters in libunicode)
-        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> wStringConverter;
-
-        output.emplace_back(FontPath { wStringConverter.to_bytes(getFontPath(fontFace.Get())) });
+        output.emplace_back(FontPath { core::toUtf8(getFontPath(fontFace.Get())) });
     }
 
     return output;
