@@ -114,6 +114,12 @@ namespace // {{{ helper
         return ((5 * color.green) + (2 * color.red) + color.blue) > 8 * 128;
     }
 
+    /// The shortest interior of an ASCII stretch inside mixed text that is worth a bulk write. A shorter
+    /// one costs more to set up than the per-codepoint path costs to write it. Tuned on the utf8 and
+    /// utf8sparse throughput workloads: 2 costs dense text more than it saves, 4 does not, and longer
+    /// minimums leave more of sparse text to the per-codepoint path.
+    constexpr auto MinimumBulkAsciiStretch = size_t { 4 };
+
     /// Whether @p codepoint is a Regional_Indicator, U+1F1E6..U+1F1FF: the letters that pair into a flag.
     constexpr bool isRegionalIndicator(char32_t codepoint) noexcept
     {
@@ -470,179 +476,250 @@ void Screen::writeText(string_view text, size_t cellCount)
 
     assert(std::cmp_less_equal(cellCount, pageSize().columns.value - _cursor.position.column.value));
 
-    // Fast path: bulk-write ASCII directly into SoA arrays.
-    // Only for pure ASCII content — non-ASCII needs the per-codepoint grapheme segmenter
-    // to handle multi-codepoint clusters (emoji + VS16, ZWJ sequences, etc.).
-    if (isAsciiOnly(text) && !_terminal->isModeEnabled(AnsiMode::Insert) && isFullHorizontalMargins()
-        && _cursor.charsets.isPlainUSASCII())
+    if (!canBulkWriteAscii())
+        writeTextPerCodepoint(text);
+    else if (isAsciiOnly(text))
+        writeAsciiRun(text);
+    else
+        writeMixedText(text);
+}
+
+bool Screen::canBulkWriteAscii() const noexcept
+{
+    return !_terminal->isModeEnabled(AnsiMode::Insert) && isFullHorizontalMargins()
+           && _cursor.charsets.isPlainUSASCII();
+}
+
+bool Screen::canBulkWriteAsciiStretch(size_t length) const noexcept
+{
+    return canBulkWriteAscii() && !_cursor.wrapPending && currentLine().isBulkWritable()
+           && std::cmp_less(length, pageSize().columns.value - _cursor.position.column.value);
+}
+
+void Screen::writeAsciiRun(std::string_view text)
+{
+    crlfIfWrapPending();
+
+    auto const columnsAvailable =
+        static_cast<size_t>(pageSize().columns.value - _cursor.position.column.value);
+
+    auto& line = currentLine();
+    auto& soa = line.materializedStorage();
+    auto const startCol = static_cast<size_t>(_cursor.position.column.value);
+
+    // If the cursor is at a wide-char continuation cell, erase the left half
+    // of the wide character before overwriting. The bulk SoA write path does
+    // not handle this, unlike the per-character writeCharToCurrentAndAdvance.
+    if (startCol > 0 && soa.sgr[startCol].flags.contains(CellFlag::WideCharContinuation))
     {
-        crlfIfWrapPending();
+        auto prevCell = line.useCellAt(_cursor.position.column - 1);
+        prevCell.reset(_cursor.graphicsRendition);
+    }
 
-        auto const columnsAvailable =
-            static_cast<size_t>(pageSize().columns.value - _cursor.position.column.value);
+    auto const written =
+        writeTextToSoA(soa, startCol, text, _cursor.graphicsRendition, _cursor.hyperlink, /*asciiHint=*/true);
 
-        auto& line = currentLine();
-        auto& soa = line.materializedStorage();
-        auto const startCol = static_cast<size_t>(_cursor.position.column.value);
+    // Advance parsing buffer hot-end to match baseline's tryEmplaceChars behavior.
+    // This reduces bytesAvailable(), forcing the next readFromPty() to allocate a
+    // fresh buffer. Without this, the next PTY read reuses the same large buffer,
+    // batching the subsequent output (e.g., shell prompt) into the same chunk —
+    // preventing the display from refreshing between them.
+    if (auto const buf = _terminal->parsingBuffer(); buf)
+        buf->advanceHotEndUntil(text.data() + text.size());
 
-        // If the cursor is at a wide-char continuation cell, erase the left half
-        // of the wide character before overwriting. The bulk SoA write path does
-        // not handle this, unlike the per-character writeCharToCurrentAndAdvance.
-        if (startCol > 0 && soa.sgr[startCol].flags.contains(CellFlag::WideCharContinuation))
+    // The cell a codepoint arriving in a LATER read joins -- a combining mark, a ZWJ, a variation
+    // selector -- is the last one this run wrote, not the one it started at.
+    if (written > 0)
+        _lastCursorPosition = CellLocation { .line = _cursor.position.line,
+                                             .column = ColumnOffset::cast_from(startCol + written - 1) };
+
+    // Advance cursor
+    if (written > 0)
+    {
+        if (static_cast<int>(written) < static_cast<int>(columnsAvailable))
         {
-            auto prevCell = line.useCellAt(_cursor.position.column - 1);
-            prevCell.reset(_cursor.graphicsRendition);
+            _cursor.position.column += ColumnOffset::cast_from(written);
+        }
+        else if (_terminal->isModeEnabled(DECMode::AutoWrap))
+        {
+            _cursor.position.column = ColumnOffset::cast_from(static_cast<int>(startCol + written) - 1);
+            _cursor.wrapPending = true;
+        }
+        else
+        {
+            _cursor.position.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
         }
 
-        auto const written = writeTextToSoA(soa,
-                                            startCol,
-                                            text,
-                                            _cursor.graphicsRendition,
-                                            _cursor.hyperlink,
-                                            /*asciiHint=*/true);
+        // REP (CSI Ps b) repeats the run's last character: the parser records it after every bulk
+        // print (@see REP.after_bulk_text).
+    }
+    _terminal->resetInstructionCounter();
+    _terminal->markCellDirty(_cursor.position);
+}
 
-        // Advance parsing buffer hot-end to match baseline's tryEmplaceChars behavior.
-        // This reduces bytesAvailable(), forcing the next readFromPty() to allocate a
-        // fresh buffer. Without this, the next PTY read reuses the same large buffer,
-        // batching the subsequent output (e.g., shell prompt) into the same chunk —
-        // preventing the display from refreshing between them.
-        if (auto const buf = _terminal->parsingBuffer(); buf)
-            buf->advanceHotEndUntil(text.data() + text.size());
+void Screen::writeMixedText(std::string_view text)
+{
+    auto const isAscii = [](char ch) noexcept {
+        return static_cast<unsigned char>(ch) < 0x80;
+    };
 
-        // The cell a codepoint arriving in a LATER read joins -- a combining mark, a ZWJ, a variation
-        // selector -- is the last one this run wrote, not the one it started at.
-        if (written > 0)
-            _lastCursorPosition = CellLocation { .line = _cursor.position.line,
-                                                 .column = ColumnOffset::cast_from(startCol + written - 1) };
-
-        // Advance cursor
-        if (written > 0)
-        {
-            if (static_cast<int>(written) < static_cast<int>(columnsAvailable))
-            {
-                _cursor.position.column += ColumnOffset::cast_from(written);
-            }
-            else if (_terminal->isModeEnabled(DECMode::AutoWrap))
-            {
-                _cursor.position.column = ColumnOffset::cast_from(static_cast<int>(startCol + written) - 1);
-                _cursor.wrapPending = true;
-            }
-            else
-            {
-                _cursor.position.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
-            }
-
-            // REP (CSI Ps b) repeats the run's last character: the parser records it after every bulk
-            // print (@see REP.after_bulk_text).
-        }
-        _terminal->resetInstructionCounter();
-        _terminal->markCellDirty(_cursor.position);
+    // The walk below costs a few instructions per byte, which only long stretches repay. Dense UTF-8
+    // text goes through the segmenter whole, as before: a run whose ASCII stretches average shorter
+    // than the shortest stretch with a bulk-written interior. The estimate counts every other character
+    // as two bytes, the fewest it can take, so it errs towards the segmenter.
+    auto const nonAsciiBytes = nonAsciiByteCount(text);
+    auto const asciiBytes = text.size() - nonAsciiBytes;
+    if (2 * asciiBytes < (MinimumBulkAsciiStretch + 2) * nonAsciiBytes)
+    {
+        writeTextPerCodepoint(text);
         return;
     }
 
-    // Slow path: decode UTF-8 and process per-codepoint with grapheme segmentation.
-    // We use a LOCAL grapheme state here — the parser's scan_text has already advanced
-    // the parser's graphemeSegmenterState and lastCodepointHint past this text.
-    // Reusing the parser state would double-process the grapheme segmentation,
-    // corrupting ZWJ emoji sequences and other multi-codepoint clusters.
+    auto utf8 = unicode::utf8_decoder_state {}; // one decoder for the whole run, as one call would use
+    auto unwritten = size_t { 0 };              // the first byte not yet written
+
+    for (auto const chunk:
+         text | std::views::chunk_by([&](char a, char b) { return isAscii(a) == isAscii(b); }))
     {
-        // Reconstruct the grapheme state from the preceding cell's codepoints.
-        // This is needed for cross-call clusters (e.g., 👨 written in one call,
-        // then ZWJ in the next — the ZWJ must join with the preceding 👨).
-        char32_t prevCodepoint = 0;
-        unicode::grapheme_segmenter_state localGraphemeState {};
-        if (_lastCursorPosition.column >= ColumnOffset(0) && _lastCursorPosition.line >= LineOffset(0)
-            && _lastCursorPosition.line < boxed_cast<LineOffset>(pageSize().lines))
+        auto const begin = static_cast<size_t>(chunk.begin() - text.begin());
+        auto const end = static_cast<size_t>(chunk.end() - text.begin());
+        if (!isAscii(text[begin]))
+            continue; // left for the segmenter, together with its ASCII neighbours
+
+        // Only a stretch's interior is written in bulk. Its first byte may join the cluster before it
+        // (GB9b: nothing breaks after a Prepend character), and its last byte, when non-ASCII text
+        // follows, may be the base that text attaches to (a combining mark, VS16). Both go through the
+        // segmenter, and so does a stretch too short to repay a bulk write.
+        auto const interiorBegin = begin + 1;
+        auto const interiorEnd = end == text.size() ? end : end - 1;
+        if (interiorEnd < interiorBegin + MinimumBulkAsciiStretch)
+            continue;
+
+        // A stretch is ASCII text only if the decoder is idle where it begins: it takes the bytes after
+        // an incomplete lead byte as that character's continuation bytes, ASCII ones included.
+        writeTextPerCodepoint(text.substr(unwritten, begin - unwritten), utf8);
+        unwritten = begin;
+        if (utf8.expectedLength != 0)
+            continue;
+
+        writeTextPerCodepoint(text.substr(begin, interiorBegin - begin), utf8);
+        auto const interior = text.substr(interiorBegin, interiorEnd - interiorBegin);
+        if (canBulkWriteAsciiStretch(interior.size()))
+            writeAsciiRun(interior);
+        else
+            writeTextPerCodepoint(interior, utf8);
+        unwritten = interiorEnd;
+    }
+    writeTextPerCodepoint(text.substr(unwritten), utf8);
+}
+
+void Screen::writeTextPerCodepoint(std::string_view text)
+{
+    auto utf8 = unicode::utf8_decoder_state {};
+    writeTextPerCodepoint(text, utf8);
+}
+
+void Screen::writeTextPerCodepoint(std::string_view text, unicode::utf8_decoder_state& utf8)
+{
+    if (text.empty())
+        return;
+
+    // A LOCAL grapheme state: the parser's scan_text has already advanced the parser's
+    // graphemeSegmenterState and lastCodepointHint past this text, and reusing it would segment the
+    // text twice, corrupting ZWJ emoji sequences and other multi-codepoint clusters.
+    //
+    // Seeded from the cell the previous write ended in, so a cluster continues across calls (e.g.,
+    // 👨 written by one call, then the ZWJ in the next -- the ZWJ must join the 👨).
+    char32_t prevCodepoint = 0;
+    unicode::grapheme_segmenter_state localGraphemeState {};
+    if (_lastCursorPosition.column >= ColumnOffset(0) && _lastCursorPosition.line >= LineOffset(0)
+        && _lastCursorPosition.line < boxed_cast<LineOffset>(pageSize().lines))
+    {
+        auto const& prevLine = grid().lineAt(_lastCursorPosition.line);
+        auto const prevCol = unbox<size_t>(_lastCursorPosition.column);
+        // Blank lines have no preceding codepoints to seed grapheme state with.
+        if (prevCol < unbox<size_t>(prevLine.size()) && !prevLine.isBlank())
         {
-            auto const& prevLine = grid().lineAt(_lastCursorPosition.line);
-            auto const prevCol = unbox<size_t>(_lastCursorPosition.column);
-            // Blank lines have no preceding codepoints to seed grapheme state with.
-            if (prevCol < unbox<size_t>(prevLine.size()) && !prevLine.isBlank())
+            auto const& prevStorage = prevLine.storage();
+            auto const prevProxy = ConstCellProxy(prevStorage, prevCol);
+            // Replay all codepoints from the preceding cell to build correct state
+            // (needed for GB11: Extended_Pictographic Extend* ZWJ × Extended_Pictographic)
+            for (auto const i: iota(size_t { 0 }, prevProxy.codepointCount()))
             {
-                auto const& prevStorage = prevLine.storage();
-                auto const prevProxy = ConstCellProxy(prevStorage, prevCol);
-                auto const cpCount = prevProxy.codepointCount();
-                // Replay all codepoints from the preceding cell to build correct state
-                // (needed for GB11: Extended_Pictographic Extend* ZWJ × Extended_Pictographic)
-                for (size_t i = 0; i < cpCount; ++i)
-                {
-                    auto const cp = prevProxy.codepoint(i);
-                    if (!prevCodepoint)
-                        unicode::grapheme_process_init(cp, localGraphemeState);
-                    else
-                        unicode::grapheme_process_breakable(cp, localGraphemeState);
-                    prevCodepoint = cp;
-                }
-            }
-        }
-
-        // Decoded as the state machine decodes text: the bulk text path hands a byte that is not UTF-8
-        // on inside its run, and it must become the same U+FFFD here that it becomes there.
-        auto utf8 = unicode::utf8_decoder_state {};
-        for (auto const byte: text)
-        {
-            auto const decoded = vtparser::decodeUtf8Byte(utf8, static_cast<uint8_t>(byte));
-            if (!decoded)
-                continue;
-            auto const rawCp = *decoded;
-
-            crlfIfWrapPending();
-
-            // DRCS check: if the active charset is a DRCS font, render as image
-            if (auto const drcsFont = _cursor.charsets.activeDRCSFont(); drcsFont.has_value())
-            {
-                (void) _cursor.charsets.map(rawCp); // Advance single-shift state
-                if (auto const* charset = _terminal->drcsCharset(*drcsFont); charset != nullptr)
-                {
-                    auto const charPos = static_cast<int>(rawCp);
-                    if (auto const glyphIt = charset->glyphs.find(charPos); glyphIt != charset->glyphs.end())
-                    {
-                        auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
-                                                              _cursor.graphicsRendition.foregroundColor,
-                                                              ColorTarget::Foreground,
-                                                              ColorMode::Normal);
-                        auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
-                        auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
-                        cell.write(_cursor.graphicsRendition, U' ', 1, _cursor.hyperlink);
-                        cell.setImageFragment(
-                            rasterizedImage,
-                            CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
-                        _lastCursorPosition = _cursor.position;
-                        prevCodepoint = U' ';
-                        advanceCursorAfterWrite(ColumnCount(1));
-                        _terminal->markCellDirty(_lastCursorPosition);
-                        continue;
-                    }
-                }
-            }
-
-            auto const cp = _cursor.charsets.map(rawCp);
-
-            if (!prevCodepoint)
-            {
-                unicode::grapheme_process_init(cp, localGraphemeState);
-                writeCharToCurrentAndAdvance(cp);
-            }
-            else if (unicode::grapheme_process_breakable(cp, localGraphemeState))
-            {
-                // libunicode's streaming grapheme_process_breakable() counts regional indicators only
-                // from the one grapheme_process_init() was seeded with, so a flag that begins after a
-                // break would pair one letter off (GB12/GB13). Seed the new cluster as init() would.
-                // This re-seed can go once the minimum libunicode version carries the upstream fix.
-                if (isRegionalIndicator(cp))
+                auto const cp = prevProxy.codepoint(i);
+                if (!prevCodepoint)
                     unicode::grapheme_process_init(cp, localGraphemeState);
-                writeCharToCurrentAndAdvance(cp);
+                else
+                    unicode::grapheme_process_breakable(cp, localGraphemeState);
+                prevCodepoint = cp;
             }
-            else
-            {
-                auto const widthChange = usePreviousCell().appendCharacter(cp, clusterWidthPolicy());
-                applyClusterWidthChange(widthChange);
-                _terminal->markCellDirty(_lastCursorPosition);
-            }
-
-            prevCodepoint = cp;
-            _terminal->resetInstructionCounter();
         }
+    }
+
+    // Decoded as the state machine decodes text: the bulk text path hands a byte that is not UTF-8
+    // on inside its run, and it must become the same U+FFFD here that it becomes there.
+    for (auto const byte: text)
+    {
+        auto const decoded = vtparser::decodeUtf8Byte(utf8, static_cast<uint8_t>(byte));
+        if (!decoded)
+            continue;
+        auto const rawCp = *decoded;
+
+        crlfIfWrapPending();
+
+        // DRCS check: if the active charset is a DRCS font, render as image
+        if (auto const drcsFont = _cursor.charsets.activeDRCSFont(); drcsFont.has_value())
+        {
+            (void) _cursor.charsets.map(rawCp); // Advance single-shift state
+            if (auto const* charset = _terminal->drcsCharset(*drcsFont); charset != nullptr)
+            {
+                auto const charPos = static_cast<int>(rawCp);
+                if (auto const glyphIt = charset->glyphs.find(charPos); glyphIt != charset->glyphs.end())
+                {
+                    auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
+                                                          _cursor.graphicsRendition.foregroundColor,
+                                                          ColorTarget::Foreground,
+                                                          ColorMode::Normal);
+                    auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
+                    auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
+                    cell.write(_cursor.graphicsRendition, U' ', 1, _cursor.hyperlink);
+                    cell.setImageFragment(rasterizedImage,
+                                          CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+                    _lastCursorPosition = _cursor.position;
+                    prevCodepoint = U' ';
+                    advanceCursorAfterWrite(ColumnCount(1));
+                    _terminal->markCellDirty(_lastCursorPosition);
+                    continue;
+                }
+            }
+        }
+
+        auto const cp = _cursor.charsets.map(rawCp);
+
+        if (!prevCodepoint)
+        {
+            unicode::grapheme_process_init(cp, localGraphemeState);
+            writeCharToCurrentAndAdvance(cp);
+        }
+        else if (unicode::grapheme_process_breakable(cp, localGraphemeState))
+        {
+            // libunicode's streaming grapheme_process_breakable() counts regional indicators only
+            // from the one grapheme_process_init() was seeded with, so a flag that begins after a
+            // break would pair one letter off (GB12/GB13). Seed the new cluster as init() would.
+            // This re-seed can go once the minimum libunicode version carries the upstream fix.
+            if (isRegionalIndicator(cp))
+                unicode::grapheme_process_init(cp, localGraphemeState);
+            writeCharToCurrentAndAdvance(cp);
+        }
+        else
+        {
+            auto const widthChange = usePreviousCell().appendCharacter(cp, clusterWidthPolicy());
+            applyClusterWidthChange(widthChange);
+            _terminal->markCellDirty(_lastCursorPosition);
+        }
+
+        prevCodepoint = cp;
+        _terminal->resetInstructionCounter();
     }
 }
 

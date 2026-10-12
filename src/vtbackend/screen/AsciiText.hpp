@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <ranges>
 #include <string_view>
 
 namespace vtbackend
@@ -20,6 +24,22 @@ namespace vtbackend
     for (auto const ch: text)
         bits |= static_cast<unsigned char>(ch);
     return bits < 0x80;
+}
+
+/// Counts the bytes of @p text that are not 7-bit ASCII.
+///
+/// Counts each block of 255 bytes in a byte-wide counter that cannot overflow there, so that the
+/// count vectorizes on bytes instead of widening every byte to a 64-bit lane.
+/// @param text The bytes to count.
+/// @return How many bytes have their high bit set.
+[[nodiscard]] inline size_t nonAsciiByteCount(std::string_view text) noexcept
+{
+    auto count = size_t { 0 };
+    for (auto const block: text | std::views::chunk(255))
+        count += std::ranges::fold_left(block, uint8_t { 0 }, [](uint8_t n, char ch) {
+            return static_cast<uint8_t>(n + (static_cast<unsigned char>(ch) >> 7));
+        });
+    return count;
 }
 
 } // namespace vtbackend

@@ -219,3 +219,119 @@ TEST_CASE("BulkScan.ModesTheOldGateShieldedGiveTheSameScreen", "[BulkScan]")
     checkSameScreenAtEverySplit(
         PageSize { LineCount(3), ColumnCount(10) }, setup, "XYZ\rab cdefghijkl \033[31mred\033[m mn"sv);
 }
+
+TEST_CASE("BulkScan.MixedTextGivesTheSameScreen", "[BulkScan]")
+{
+    auto const text = GENERATE(values<std::string_view>({
+        "The quick brown fox w\xC3\xB6rld jumps over the lazy dog \xC3\xA4\xC3\xB6\xC3\xBC end of line"sv,
+        // combining marks
+        "plain words then e\xCC\x81 and more plain words a\xCC\x81\xCC\x82 tail"sv,
+        // a ZWJ sequence
+        "family emoji \xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA7 after it"sv,
+        // regional-indicator pairs
+        "flags \xF0\x9F\x87\xA9\xF0\x9F\x87\xAA\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8 after the flags"sv,
+        // VS16
+        "a red heart \xE2\x9D\xA4\xEF\xB8\x8F and keycap one 1\xEF\xB8\x8F\xE2\x83\xA3 done"sv,
+        // two columns each
+        "wide text \xE4\xB8\xAD\xE6\x96\x87 between ascii words here"sv,
+        // box drawing
+        "\xE2\x94\x82 column one      \xE2\x94\x82 column two      \xE2\x94\x82"sv,
+        // starts and ends non-ASCII
+        "\xC3\xA4\xC3\xB6\xC3\xBC some ascii in the middle \xC3\x9F"sv,
+        // a mark at the margin
+        "abcdefghijkl\xCC\x81 then more text after the mark"sv,
+        // a ZWJ and a VS16 on ASCII bases, in text sparse enough for its stretches to be walked
+        "plain words then a joiner\xE2\x80\x8D and a keycap 1\xEF\xB8\x8F in more plain words"sv,
+    }));
+    auto const setup = GENERATE(values<std::string_view>({
+        // primary screen, from the left edge
+        ""sv,
+        // from mid-line, so runs end at the margin with a wrap pending
+        "\033[1;8H"sv,
+        // autowrap off: the last column is overwritten instead
+        "\033[?7l\033[1;8H"sv,
+        // the alternate screen
+        "\033[?1049h\033[1;8H"sv,
+        // a Mixed line: a coloured cell ahead of the text
+        "\033[1;6H\033[41mX\033[m\033[1;1H"sv,
+        // a Mixed line on the alternate screen
+        "\033[?1049h\033[1;6H\033[41mX\033[m\033[1;1H"sv,
+    }));
+    auto const columns = GENERATE(12, 80);
+    INFO(
+        std::format("columns {} setup \"{}\" text \"{}\"", columns, core::escape(setup), core::escape(text)));
+    checkSameScreenAtEverySplit(PageSize { LineCount(4), ColumnCount(columns) }, setup, text);
+}
+
+TEST_CASE("BulkScan.MixedTextOnShapedLinesGivesTheSameScreen", "[BulkScan]")
+{
+    // Mixed text written over every edit that leaves a line Mixed or Spanning, on both screens: a long
+    // ASCII stretch, a combining mark on its last letter, another stretch and a ZWJ after it. The page
+    // is wide enough for each stretch's interior to be written in bulk wherever the line allows it.
+    auto const text = "\033[1;1H\xC3\xA4"
+                      "bcdefghijklm\xCC\x81 nopqrstuvwx\xE2\x80\x8Dyz"sv;
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+        for (auto const& edit: test::EditsOfShapedLines)
+        {
+            INFO(std::format("{}, {}", screenSelect.empty() ? "primary" : "alternate", edit.name));
+            checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(40) },
+                                        std::string(screenSelect) + std::string(edit.bytes),
+                                        text);
+        }
+}
+
+TEST_CASE("BulkScan.InvalidUtf8BesideALongAsciiStretchGivesTheSameScreen", "[BulkScan]")
+{
+    // The text decoder takes the bytes after an incomplete lead byte as its continuation bytes,
+    // whatever they are, ASCII included. So an ASCII stretch after one can lose its first bytes to a
+    // codepoint that is not ASCII -- "\xD8" "A" decodes to U+0601 ARABIC SIGN SANAH, a Prepend
+    // character the next letter joins -- and a stretch is only ASCII text where the decoder is idle.
+    auto const text = GENERATE(values<std::string_view>({
+        "\xE2"
+        "abcdefghijklmnop \xC3\xA4 tail"sv, // a three-byte lead, two ASCII bytes short
+        "\xF0"
+        "abcdefghijklmnop \xC3\xA4 tail"sv, // a four-byte lead, three ASCII bytes short
+        "\xD8"
+        "A1234567890 after a decoded prepend \xC3\xA4"sv, // U+0601, then '1' joins its cluster
+        "ascii first \xE2\x94"
+        "abcdefghijklmnop end"sv, // a truncated U+2502 between two stretches
+    }));
+    auto const setup = GENERATE(values<std::string_view>({ ""sv, "\033[?1049h"sv }));
+    INFO(std::format("setup \"{}\" text \"{}\"", core::escape(setup), core::escape(text)));
+
+    // In one read: libunicode's text scanner (0.9.3) hands a read that ends inside such a character on
+    // as a complete run, so cuts between reads wait for its fix (scan_text stopping at ill-formed UTF-8).
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(80) };
+    auto bulk = makeTerminal(pageSize, vtparser::BulkScan::Enabled);
+    auto reference = makeTerminal(pageSize, vtparser::BulkScan::Disabled);
+    for (auto* const mock: { &bulk, &reference })
+    {
+        mock->writeToScreen(setup);
+        mock->writeToScreen(text);
+    }
+    CHECK(dumpScreen(bulk.terminal.currentScreen()) == dumpScreen(reference.terminal.currentScreen()));
+}
+
+TEST_CASE("BulkScan.AsciiAfterAPrependCharacterJoinsIt", "[BulkScan]")
+{
+    // GB9b: nothing breaks after a Prepend character, so the '1' after U+0600 ARABIC NUMBER SIGN
+    // belongs to its cluster. The stretch after it is long enough to be written in bulk, and its
+    // first byte must still go through the segmenter. Written in one read, and in two cut after U+0600.
+    auto const text = "\xD8\x80"
+                      "1234567890 ascii after a prepend \xC3\xA4"sv;
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(80) };
+    auto bulk = makeTerminal(pageSize, vtparser::BulkScan::Enabled);
+    auto reference = makeTerminal(pageSize, vtparser::BulkScan::Disabled);
+    for (auto* const mock: { &bulk, &reference })
+        mock->writeToScreen(text);
+    CHECK(dumpScreen(bulk.terminal.currentScreen()) == dumpScreen(reference.terminal.currentScreen()));
+    CHECK(bulk.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).codepointCount() == 2);
+
+    for (auto* const mock: { &bulk, &reference })
+    {
+        mock->writeToScreen("\033c"sv);
+        mock->writeToScreen(text.substr(0, 2));
+        mock->writeToScreen(text.substr(2));
+    }
+    CHECK(dumpScreen(bulk.terminal.currentScreen()) == dumpScreen(reference.terminal.currentScreen()));
+}

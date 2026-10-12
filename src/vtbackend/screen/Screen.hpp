@@ -29,6 +29,7 @@
 #include <core/log/LogStore.hpp>
 
 #include <libunicode/grapheme_segmenter.h>
+#include <libunicode/utf8.h>
 #include <libunicode/width.h>
 
 #include <gsl/pointers>
@@ -1153,6 +1154,34 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
   private:
     void writeTextInternal(char32_t codepoint);
+
+    /// Whether the cursor's state lets ASCII go straight into the line's arrays: no insert mode,
+    /// no left/right margins, and every ASCII character mapping to itself (CharsetMapping::isPlainUSASCII()).
+    [[nodiscard]] bool canBulkWriteAscii() const noexcept;
+
+    /// Whether an ASCII stretch of @p length bytes may be written in bulk where the cursor stands now.
+    ///
+    /// Asks of the stretch what Terminal::maxBulkTextSequenceWidth() asked of the whole run when it
+    /// began, because the text written before the stretch may have left a wrap pending or put a wide
+    /// character on the line.
+    [[nodiscard]] bool canBulkWriteAsciiStretch(size_t length) const noexcept;
+
+    /// Writes printable ASCII @p text straight into the current line's arrays and advances the cursor.
+    /// The caller has checked canBulkWriteAscii() and that @p text fits on the current line.
+    void writeAsciiRun(std::string_view text);
+
+    /// Writes text that mixes ASCII with other UTF-8: the interiors of long ASCII stretches in bulk,
+    /// everything else per codepoint.
+    void writeMixedText(std::string_view text);
+
+    /// Writes @p text one codepoint at a time through the grapheme segmenter, seeded from the cell
+    /// the previous write ended in, so a cluster continues across calls.
+    void writeTextPerCodepoint(std::string_view text);
+
+    /// Writes @p text as writeTextPerCodepoint(std::string_view) does, decoding it with @p utf8.
+    /// @param utf8 The UTF-8 decoder, carried from one part of a run to the next: a part may end
+    ///             inside a character the next part completes.
+    void writeTextPerCodepoint(std::string_view text, unicode::utf8_decoder_state& utf8);
 
     void configureCurrentLineSize(LineFlags enabled);
 
