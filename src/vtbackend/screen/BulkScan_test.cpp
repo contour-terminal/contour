@@ -93,6 +93,16 @@ TEST_CASE("BulkScan.PlainStreamGivesTheSameScreen", "[BulkScan]")
                                 "Hello \033[1;31mWorld\033[m \xC3\xA4\xC3\xB6 e\xCC\x81!"sv);
 }
 
+TEST_CASE("BulkScan.AnInvalidByteInsideARunGivesTheSameScreen", "[BulkScan]")
+{
+    // The bulk text path hands a byte that is not UTF-8 on inside its run; the screen must show the
+    // U+FFFD the state machine prints for it. Only mid-run: libunicode's text scanner (0.9.3) consumes
+    // an invalid byte that ends a run without returning it.
+    auto const setup = GENERATE(values<std::string_view>({ ""sv, "\033[?1049h"sv }));
+    INFO(std::format("setup \"{}\"", core::escape(setup)));
+    checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(10) }, setup, "\xFF\xE2\x94\x82X"sv);
+}
+
 TEST_CASE("BulkScan.ModesTheOldGateShieldedGiveTheSameScreen", "[BulkScan]")
 {
     // Review Focus 2 against a true per-codepoint reference. Task 2.4 opened the bulk path to the

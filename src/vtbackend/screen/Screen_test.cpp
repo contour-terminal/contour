@@ -8,6 +8,8 @@
 #include <vtbackend/testing/TestHelpers.hpp>
 #include <vtbackend/vt/Charset.hpp>
 
+#include <vtparser/BulkScan.hpp>
+
 #include <core/Escape.hpp>
 #include <core/Utils.hpp>
 
@@ -5032,6 +5034,32 @@ TEST_CASE("BulkText.aReadEndingInsideACharacterKeepsItWhole", "[screen]")
 
     CHECK(screen.grid().lineText(LineOffset(0)) == "a\xC3\xA4   ");
     CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
+}
+
+TEST_CASE("BulkText.anInvalidByteInsideARunShowsAsAReplacementCharacter", "[screen]")
+{
+    // The state machine prints U+FFFD for a byte that is not UTF-8. The bulk text path hands such a
+    // byte on as it came, inside its run, and Screen::writeText decoded the run with a decoder that
+    // drops it: "\xFF│X" showed "│X". Compared against a parser that runs without its bulk scanners.
+    auto const pageSize = PageSize { LineCount(2), ColumnCount(6) };
+    auto const pageAfter = [&](std::string_view screenSelect, vtparser::BulkScan bulkScan) {
+        auto settings = MockTerm<>::createSettings(pageSize, HistoryLimits {}, 1024);
+        settings.parserBulkScan = bulkScan;
+        auto mock = MockTerm<> { std::move(settings) };
+        mock.writeToScreen(screenSelect);
+        mock.writeToScreen("\xFF\xE2\x94\x82X"sv);
+        auto snapshot = pageSnapshotOf(mock.terminal.currentScreen());
+        snapshot.insert(snapshot.begin(), mock.terminal.currentScreen().grid().lineText(LineOffset(0)));
+        return snapshot;
+    };
+
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+    {
+        INFO((screenSelect.empty() ? "primary" : "alternate"));
+        auto const reference = pageAfter(screenSelect, vtparser::BulkScan::Disabled);
+        REQUIRE(reference.front() == "\xEF\xBF\xBD\xE2\x94\x82X   ");
+        CHECK(pageAfter(screenSelect, vtparser::BulkScan::Enabled) == reference);
+    }
 }
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

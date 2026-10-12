@@ -21,6 +21,8 @@
 #include <vtbackend/vt/VTType.hpp>
 #include <vtbackend/vt/VTWriter.hpp>
 
+#include <vtparser/Utf8Decoding.hpp>
+
 #include <crispy/Comparison.hpp>
 #include <crispy/Size.hpp>
 
@@ -33,6 +35,7 @@
 #include <libunicode/convert.h>
 #include <libunicode/emoji_segmenter.h>
 #include <libunicode/grapheme_segmenter.h>
+#include <libunicode/utf8.h>
 #include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/word_segmenter.h>
 
@@ -568,8 +571,16 @@ void Screen::writeText(string_view text, size_t cellCount)
             }
         }
 
-        for (auto const rawCp: unicode::convert_to<char32_t>(text))
+        // Decoded as the state machine decodes text: the bulk text path hands a byte that is not UTF-8
+        // on inside its run, and it must become the same U+FFFD here that it becomes there.
+        auto utf8 = unicode::utf8_decoder_state {};
+        for (auto const byte: text)
         {
+            auto const decoded = vtparser::decodeUtf8Byte(utf8, static_cast<uint8_t>(byte));
+            if (!decoded)
+                continue;
+            auto const rawCp = *decoded;
+
             crlfIfWrapPending();
 
             // DRCS check: if the active charset is a DRCS font, render as image

@@ -2,6 +2,7 @@
 #include <vtparser/BulkScan.hpp>
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserEvents.hpp>
+#include <vtparser/Utf8Decoding.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/utf8.h>
@@ -14,6 +15,7 @@
 #include <array>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <random>
 #include <ranges>
 #include <span>
@@ -50,6 +52,18 @@ class MockParserEvents final: public vtparser::NullParserEvents
     void putPM(char ch) override { pm += ch; }
     void dispatchPM() override { pm += "}"; }
 };
+
+/// @p text decoded the way the state machine decodes it, a byte that is not UTF-8 as U+FFFD. The bulk
+/// text path hands such a byte on as it came, inside its run of text.
+std::u32string decodedAsTheStateMachineDoes(std::string_view text)
+{
+    auto state = unicode::utf8_decoder_state {};
+    auto codepoints = std::u32string {};
+    for (auto const ch: text)
+        if (auto const codepoint = vtparser::decodeUtf8Byte(state, static_cast<uint8_t>(ch)))
+            codepoints += *codepoint;
+    return codepoints;
+}
 } // namespace
 
 TEST_CASE("Parser.utf8_single", "[Parser]")
@@ -200,22 +214,6 @@ TEST_CASE("Parser.BulkText_IncompleteUtf8_NothingCompleteBeforeIt", "[Parser]")
         { "\xFF\xE2\x94\x82X"sv, U"\uFFFD\u2502X"sv }, // U+2502 right after an invalid byte
     }));
 
-    // Decodes the way the state machine does, an invalid byte as U+FFFD. The bulk path hands such a
-    // byte on as it came, inside its run of text.
-    auto const decoded = [](std::string_view text) {
-        auto state = unicode::utf8_decoder_state {};
-        auto codepoints = std::u32string {};
-        for (auto const ch: text)
-        {
-            auto const result = unicode::from_utf8(state, static_cast<uint8_t>(ch));
-            if (auto const* success = std::get_if<unicode::Success>(&result))
-                codepoints += success->value;
-            else if (std::holds_alternative<unicode::Invalid>(result))
-                codepoints += U'\uFFFD';
-        }
-        return codepoints;
-    };
-
     for (auto const split: std::views::iota(size_t { 0 }, input.size() + 1))
     {
         MockParserEvents listener;
@@ -224,9 +222,39 @@ TEST_CASE("Parser.BulkText_IncompleteUtf8_NothingCompleteBeforeIt", "[Parser]")
         parser.parseFragment(input.substr(split));
 
         INFO(std::format("split at byte {}", split));
-        CHECK(decoded(listener.text) == printed);
+        CHECK(decodedAsTheStateMachineDoes(listener.text) == printed);
         CHECK(parser.precedingGraphicCharacter() == printed.back());
     }
+}
+
+TEST_CASE("Utf8Decoding.anAsciiByteDecodesAsFromUtf8Does", "[Parser]")
+{
+    // decodeUtf8Byte answers an ASCII byte on an idle decoder itself, as from_utf8's first branch
+    // does. Should libunicode ever handle that byte differently, this fails rather than letting the
+    // state machine and the bulk text path decode it two ways.
+    for (auto const byte: std::views::iota(0x00, 0x80))
+    {
+        INFO(std::format("byte {:02X}", byte));
+        auto viaFromUtf8 = unicode::utf8_decoder_state {};
+        auto const expected = unicode::from_utf8(viaFromUtf8, static_cast<uint8_t>(byte));
+        REQUIRE(std::holds_alternative<unicode::Success>(expected));
+
+        auto viaHelper = unicode::utf8_decoder_state {};
+        CHECK(vtparser::decodeUtf8Byte(viaHelper, static_cast<uint8_t>(byte))
+              == std::get<unicode::Success>(expected).value);
+        CHECK(viaHelper.expectedLength == 0);
+        CHECK(viaFromUtf8.expectedLength == 0);
+    }
+}
+
+TEST_CASE("Utf8Decoding.everythingElseIsFromUtf8sDecision", "[Parser]")
+{
+    auto state = unicode::utf8_decoder_state {};
+    CHECK(vtparser::decodeUtf8Byte(state, 0xE2) == std::nullopt); // a character begins
+    CHECK(vtparser::decodeUtf8Byte(state, 0x94) == std::nullopt);
+    CHECK(vtparser::decodeUtf8Byte(state, 0x82) == U'│');
+    CHECK(vtparser::decodeUtf8Byte(state, 0xFF) == vtparser::ReplacementCharacter); // never UTF-8
+    CHECK(state.expectedLength == 0);
 }
 
 TEST_CASE("Parser.BulkText_ZeroWidthAfterAsciiBase", "[Parser]")
@@ -311,7 +339,8 @@ namespace
 ///
 /// Text is normalised to codepoints: the bulk text path reports a run with one
 /// print(string_view), the state machine reports one print(char32_t) per codepoint, and both
-/// describe the same text.
+/// describe the same text. A run is decoded as the state machine decodes it, so a byte that is not
+/// UTF-8 counts as the U+FFFD the state machine prints for it.
 class EventRecorder final: public vtparser::NullParserEvents
 {
   public:
@@ -331,7 +360,7 @@ class EventRecorder final: public vtparser::NullParserEvents
     void print(char32_t codepoint) override { _text += codepoint; }
     size_t print(std::string_view chars, size_t /*cellCount*/) override
     {
-        _text += unicode::convert_to<char32_t>(chars);
+        _text += decodedAsTheStateMachineDoes(chars);
         return 0;
     }
     void printEnd() override { record("printEnd"); }

@@ -7,6 +7,7 @@ add_library(vtparser STATIC
     Parser.hpp
     Parser-impl.hpp
     ParserEvents.hpp
+    Utf8Decoding.hpp
 )
 target_link_libraries(vtparser PUBLIC
     Microsoft.GSL::GSL

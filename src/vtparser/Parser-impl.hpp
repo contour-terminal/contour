@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include <vtparser/Parser.hpp>
+#include <vtparser/Utf8Decoding.hpp>
 
 #include <libunicode/utf8.h>
 
@@ -731,15 +732,12 @@ void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
         return;
     }
 
-    unicode::ConvertResult const r = unicode::from_utf8(_scanState.utf8, byte);
-    if (std::holds_alternative<unicode::Incomplete>(r))
+    auto const codepoint = decodeUtf8Byte(_scanState.utf8, byte);
+    if (!codepoint)
         return;
 
-    auto constexpr ReplacementCharacter = char32_t { 0xFFFD };
-    auto const codepoint = std::holds_alternative<unicode::Success>(r) ? std::get<unicode::Success>(r).value
-                                                                       : ReplacementCharacter;
-    _eventListener.print(codepoint);
-    _scanState.lastCodepointHint = codepoint;
+    _eventListener.print(*codepoint);
+    _scanState.lastCodepointHint = *codepoint;
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
