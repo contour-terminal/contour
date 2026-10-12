@@ -642,7 +642,15 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     assert(subStart <= subEnd);
     auto const byteCount = static_cast<size_t>(std::distance(subStart, subEnd));
     if (byteCount == 0)
+    {
+        // The scan consumed bytes but completed no text: a partial character at the end of the read,
+        // possibly after an invalid byte. Its decoder state already holds that partial character, and
+        // the state machine decoding the same bytes on top of it decoded them twice and printed U+FFFD.
+        // Discard the scan's decoder state, so the state machine decodes those bytes once, from a
+        // clean decoder.
+        _scanState.utf8 = {};
         return { ProcessKind::FallbackToFSM, 0 };
+    }
 
     assert(cellCount <= maxCharCount);
     assert(subEnd <= chunk.data() + chunk.size());

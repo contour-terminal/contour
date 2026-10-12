@@ -3,9 +3,17 @@
 #include <vtparser/ParserEvents.hpp>
 
 #include <libunicode/convert.h>
+#include <libunicode/utf8.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+
+#include <cstdint>
+#include <format>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <variant>
 
 using namespace std;
 
@@ -171,6 +179,47 @@ TEST_CASE("Parser.BulkText_MultipleIncompleteUtf8Splits", "[Parser]")
           == "A\xE2\x94\x82"
              "B\xE2\x94\x9C"
              "C");
+}
+
+TEST_CASE("Parser.BulkText_IncompleteUtf8_NothingCompleteBeforeIt", "[Parser]")
+{
+    // A read that ends inside a character with no complete character before it in the run: at the
+    // start of a read, right after a control sequence, or right after an invalid byte. scan_text()
+    // takes the partial character into its pending state; falling back to the state machine fed it to
+    // the decoder a second time, which reported it invalid and printed U+FFFD ahead of it.
+    auto const [input, printed] = GENERATE(table<std::string_view, std::u32string_view>({
+        { "\xE2\x94\x82"sv, U"\u2502"sv },             // U+2502 at the start of a read
+        { "\033[0m\xC3\xA4"sv, U"\u00E4"sv },          // U+00E4 right after a control sequence
+        { "\xFF\xE2\x94\x82X"sv, U"\uFFFD\u2502X"sv }, // U+2502 right after an invalid byte
+    }));
+
+    // Decodes the way the state machine does, an invalid byte as U+FFFD. The bulk path hands such a
+    // byte on as it came, inside its run of text.
+    auto const decoded = [](std::string_view text) {
+        auto state = unicode::utf8_decoder_state {};
+        auto codepoints = std::u32string {};
+        for (auto const ch: text)
+        {
+            auto const result = unicode::from_utf8(state, static_cast<uint8_t>(ch));
+            if (auto const* success = std::get_if<unicode::Success>(&result))
+                codepoints += success->value;
+            else if (std::holds_alternative<unicode::Invalid>(result))
+                codepoints += U'\uFFFD';
+        }
+        return codepoints;
+    };
+
+    for (auto const split: std::views::iota(size_t { 0 }, input.size() + 1))
+    {
+        MockParserEvents listener;
+        auto parser = vtparser::Parser<vtparser::ParserEvents>(listener);
+        parser.parseFragment(input.substr(0, split));
+        parser.parseFragment(input.substr(split));
+
+        INFO(std::format("split at byte {}", split));
+        CHECK(decoded(listener.text) == printed);
+        CHECK(parser.precedingGraphicCharacter() == printed.back());
+    }
 }
 
 TEST_CASE("Parser.BulkText_ZeroWidthAfterAsciiBase", "[Parser]")

@@ -4979,4 +4979,19 @@ TEST_CASE("BulkText.aRecycledLineIsCleanWhateverItHeld", "[screen][LineShape]")
         CHECK(cursorLine().cellWidthAt(ColumnOffset(column)) == 1);
 }
 
+TEST_CASE("BulkText.aReadEndingInsideACharacterKeepsItWhole", "[screen]")
+{
+    // The read ends after the lead byte of "ä", with nothing complete before it since the SGR. The
+    // parser once decoded that lead byte twice, so the screen showed U+FFFD ahead of the "ä" and the
+    // cursor stood one cell too far right.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("a\033[m\xC3"sv);
+    mock.writeToScreen("\xA4"sv);
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "a\xC3\xA4   ");
+    CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
+}
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
