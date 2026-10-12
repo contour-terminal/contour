@@ -25,9 +25,11 @@
 #include <core/Escape.hpp>
 #include <core/Utils.hpp>
 
+#include <cerrno>
 #include <chrono>
 #include <expected>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -257,6 +259,42 @@ namespace
         return SshHostkeyHash(KeyType, fingerprint, FingerprintLength);
     }
 
+    /// Offers @p config's key pair to the server for its user.
+    ///
+    /// libssh2 opens a key file through fopen(), which takes its name as a narrow string. A POSIX path is
+    /// one as it is. Windows would read it in the ANSI code page, which spells most of Unicode not at all,
+    /// so there the files are read here and handed over in memory. Not so everywhere, because libssh2's
+    /// libgcrypt backend reads no key from memory.
+    /// @return What libssh2 answers: LIBSSH2_ERROR_NONE, LIBSSH2_ERROR_EAGAIN, or the failure;
+    ///         LIBSSH2_ERROR_FILE where a key file cannot be read.
+    [[nodiscard]] int authenticateWithKeyFiles(LIBSSH2_SESSION* session,
+                                               SshHostConfig const& config,
+                                               std::string const& passphrase)
+    {
+#ifdef _WIN32
+        auto const keys = readSshKeyFiles(config);
+        if (!keys)
+            return LIBSSH2_ERROR_FILE;
+        return libssh2_userauth_publickey_frommemory(session,
+                                                     config.username.data(),
+                                                     config.username.size(),
+                                                     keys->publicKey.empty() ? nullptr
+                                                                             : keys->publicKey.data(),
+                                                     keys->publicKey.size(),
+                                                     keys->privateKey.data(),
+                                                     keys->privateKey.size(),
+                                                     passphrase.c_str());
+#else
+        return libssh2_userauth_publickey_fromfile_ex(
+            session,
+            config.username.data(),
+            static_cast<unsigned int>(config.username.size()),
+            config.publicKeyFile.empty() ? nullptr : config.publicKeyFile.c_str(),
+            config.privateKeyFile.c_str(),
+            passphrase.c_str());
+#endif
+    }
+
     struct SshKnownhostsFile
     {
         LIBSSH2_KNOWNHOSTS* handle = nullptr;
@@ -421,6 +459,23 @@ std::string SshHostConfig::toKnownhostComment() const
         return std::format("{}@{}:{} (added by Contour)", username, hostname, port);
     else
         return std::format("{}@{} (added by Contour)", username, hostname);
+}
+
+std::expected<SshKeyFiles, std::error_code> readSshKeyFiles(SshHostConfig const& config)
+{
+    auto const read = [](std::filesystem::path const& file) -> std::expected<std::string, std::error_code> {
+        auto stream = std::ifstream { file, std::ios::binary };
+        if (!stream)
+            return std::unexpected(std::error_code { errno, std::generic_category() });
+        return std::string { std::istreambuf_iterator<char> { stream }, std::istreambuf_iterator<char> {} };
+    };
+    auto const publicKey = config.publicKeyFile.empty() ? std::expected<std::string, std::error_code> {}
+                                                        : read(config.publicKeyFile);
+    return publicKey.and_then([&](std::string const& publicText) {
+        return read(config.privateKeyFile).transform([&](std::string privateText) {
+            return SshKeyFiles { .publicKey = publicText, .privateKey = std::move(privateText) };
+        });
+    });
 }
 
 std::expected<SshHostConfigMap, std::error_code> loadSshConfig(std::filesystem::path const& configPath)
@@ -1486,13 +1541,7 @@ int SshSession::waitForSocket(std::optional<std::chrono::milliseconds> timeout)
 void SshSession::authenticateWithPrivateKey()
 {
     auto const password = _injectedWrite;
-    auto const rc = libssh2_userauth_publickey_fromfile_ex(
-        _p->sshSession,
-        _config.username.data(),
-        _config.username.size(),
-        _config.publicKeyFile.empty() ? nullptr : _config.publicKeyFile.string().data(),
-        _config.privateKeyFile.string().data(),
-        password.data());
+    auto const rc = authenticateWithKeyFiles(_p->sshSession, _config, password);
 
     if (rc == LIBSSH2_ERROR_EAGAIN)
     {
