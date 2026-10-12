@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <expected>
@@ -528,8 +529,9 @@ constexpr auto BenchPageSize =
     vtbackend::PageSize { .lines = vtbackend::LineCount(vtbackend::test::WorkloadPageLines),
                           .columns = vtbackend::ColumnCount(vtbackend::test::WorkloadPageColumns) };
 
-/// Scrollback for the runs: small next to the workloads, so the ring fills and then recycles lines, as a long
-/// session's does.
+/// Scrollback for the runs: small next to the workloads, so that one untimed pass of a workload fills the
+/// ring, and the timed pass after it recycles lines all the way, as a long session's scrolling does. Timing
+/// the pass that fills it would mix in a cold path, and more of it the smaller the run.
 constexpr auto BenchHistory = vtbackend::LineCount(4000);
 
 /// A screen the throughput and snapshot benchmarks write to.
@@ -622,8 +624,8 @@ struct ThroughputOptions
     ThroughputDevice device = ThroughputDevice::MockPty; ///< Where each run's bytes come from.
 };
 
-/// @return How long a fresh terminal took to take in @p input on @p screen, fed from memory
-///         @p ptyReadSize bytes per read.
+/// @return How long a terminal took to take in @p input on @p screen, fed from memory @p ptyReadSize
+///         bytes per read, once an untimed pass of the same input had brought it to its steady state.
 std::chrono::nanoseconds measureFromMemory(std::string_view input,
                                            BenchScreen const& screen,
                                            size_t ptyReadSize)
@@ -631,13 +633,14 @@ std::chrono::nanoseconds measureFromMemory(std::string_view input,
     auto vt = vtbackend::MockTerm<vtpty::MockViewPty>(BenchPageSize, BenchHistory, ptyReadSize);
     vt.terminal.setMode(vtbackend::DECMode::AutoWrap, true);
     feed(vt, screen.entrySequence);
+    feed(vt, input); // fills the scrollback, @see BenchHistory
     vt.mockPty().setReadData(input);
     return runWorkloadOnce(vt.terminal, vt.mockPty());
 }
 
 /// @return How long a terminal took to take in @p input on @p screen when a child process wrote it through a
-///         real PTY: from the first byte read to the read that reported the writer gone. Or why the run could
-///         not happen.
+///         real PTY, once an untimed pass of the same input had brought it to its steady state: from the
+///         first byte read to the read that reported the writer gone. Or why the run could not happen.
 std::expected<std::chrono::nanoseconds, std::string> measureThroughPty(std::string_view input,
                                                                        BenchScreen const& screen,
                                                                        size_t ptyReadSize,
@@ -656,13 +659,14 @@ std::expected<std::chrono::nanoseconds, std::string> measureThroughPty(std::stri
         auto ignored = std::error_code {};
         std::filesystem::remove(file, ignored);
     } };
-    if (!(std::ofstream(file, std::ios::binary) << screen.entrySequence << input))
+    if (!(std::ofstream(file, std::ios::binary) << input))
         return std::unexpected(std::format("Cannot write the workload to '{}'.", file.string()));
 
-    // Raw mode, so that the line discipline passes every byte through unchanged: no CRLF translation.
+    // Raw mode, so that the line discipline passes every byte through unchanged: no CRLF translation. Should
+    // stty fail, nothing is written, and the byte count below reports it.
     auto ownedProcess = std::make_unique<ByteCountingProcess>(
         vtpty::Process::ExecInfo { .program = "/bin/sh",
-                                   .arguments = { "-c", "stty raw -echo; exec cat \"$0\"", file.string() },
+                                   .arguments = { "-c", "stty raw -echo && exec cat \"$0\"", file.string() },
                                    .workingDirectory = std::filesystem::temp_directory_path(),
                                    .env = {},
                                    .removedEnvironment = {} },
@@ -681,6 +685,9 @@ std::expected<std::chrono::nanoseconds, std::string> measureThroughPty(std::stri
         events, env, std::move(ownedProcess), settings, std::chrono::steady_clock::now()
     };
     terminal.setMode(vtbackend::DECMode::AutoWrap, true);
+    // Straight to the screen, before the writer exists: fills the scrollback, @see BenchHistory.
+    terminal.writeToScreen(screen.entrySequence);
+    terminal.writeToScreen(input);
 
     if (auto const started = terminal.device().start(); !started)
         return std::unexpected(std::format("Cannot start the writer: {}", started.error().detail));
@@ -691,10 +698,11 @@ std::expected<std::chrono::nanoseconds, std::string> measureThroughPty(std::stri
     }
     auto const finished = std::chrono::steady_clock::now();
 
-    auto const expected = screen.entrySequence.size() + input.size();
+    auto const expected = input.size();
     auto const firstRead = process.firstReadAt();
-    if (!firstRead || process.bytesRead() < expected)
-        return std::unexpected(std::format("Only {} of {} bytes arrived.", process.bytesRead(), expected));
+    if (!firstRead || process.bytesRead() != expected)
+        return std::unexpected(
+            std::format("{} bytes arrived where {} were written.", process.bytesRead(), expected));
     return finished - *firstRead;
 #endif
 }
@@ -756,12 +764,19 @@ struct SnapshotStatusLine
 {
     vtbackend::StatusDisplayType type; ///< What the terminal shows.
     std::string_view label;            ///< How the report names it.
+    /// The rows it takes. The terminal gets them on top of BenchPageSize, so that every column renders the
+    /// same main page, and the difference between two columns is the status line's own cost.
+    vtbackend::LineCount height;
 };
 
 /// Every status line a snapshot run measures, in the order the report shows them.
 constexpr auto SnapshotStatusLines = std::array {
-    SnapshotStatusLine { .type = vtbackend::StatusDisplayType::None, .label = "no status line" },
-    SnapshotStatusLine { .type = vtbackend::StatusDisplayType::Indicator, .label = "indicator" },
+    SnapshotStatusLine { .type = vtbackend::StatusDisplayType::None,
+                         .label = "no status line",
+                         .height = vtbackend::LineCount(0) },
+    SnapshotStatusLine { .type = vtbackend::StatusDisplayType::Indicator,
+                         .label = "indicator",
+                         .height = vtbackend::LineCount(1) },
 };
 
 /// How much of a workload fills the terminal before frames are timed: the page and the scrollback, many
@@ -791,12 +806,15 @@ struct SnapshotOptions
 /// @return The mean time of one frame, once @p fill has been written on @p screen with @p statusLine shown.
 std::chrono::duration<double, std::micro> measureSnapshot(std::string_view fill,
                                                           BenchScreen const& screen,
-                                                          vtbackend::StatusDisplayType statusLine,
+                                                          SnapshotStatusLine const& statusLine,
                                                           unsigned frames)
 {
-    auto vt = vtbackend::MockTerm<vtpty::MockViewPty>(BenchPageSize, BenchHistory, ContourPtyReadSize);
+    auto const totalPageSize = vtbackend::PageSize { .lines = BenchPageSize.lines + statusLine.height,
+                                                     .columns = BenchPageSize.columns };
+    auto vt = vtbackend::MockTerm<vtpty::MockViewPty>(totalPageSize, BenchHistory, ContourPtyReadSize);
     vt.terminal.setMode(vtbackend::DECMode::AutoWrap, true);
-    vt.terminal.setStatusDisplay(statusLine);
+    vt.terminal.setStatusDisplay(statusLine.type);
+    assert(vt.terminal.pageSize() == BenchPageSize && "a status line's height is not the terminal's");
     feed(vt, screen.entrySequence);
     feed(vt, fill);
     return std::chrono::duration<double, std::micro>(runSnapshotFrames(vt.terminal, frames)) / frames;
@@ -822,8 +840,7 @@ int runSnapshotBenchmark(std::span<vtbackend::test::Workload const> workloads,
             {
                 auto fastest = std::chrono::duration<double, std::micro>::max();
                 for ([[maybe_unused]] auto const run: std::views::iota(0u, options.runs))
-                    fastest =
-                        std::min(fastest, measureSnapshot(fill, screen, statusLine.type, options.frames));
+                    fastest = std::min(fastest, measureSnapshot(fill, screen, statusLine, options.frames));
                 line += std::format(" {:9.1f} us/frame ({})", fastest.count(), statusLine.label);
             }
             cout << line << '\n';

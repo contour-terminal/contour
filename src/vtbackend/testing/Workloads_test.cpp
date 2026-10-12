@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <format>
 #include <ranges>
 #include <set>
@@ -36,6 +37,37 @@ constexpr auto Signatures = std::array {
     Signature { .workload = "tui", .mustContain = "\033[50;1H" },
 };
 
+/// What a workload generates at TargetBytes: its size, and the FNV-1a digest of its bytes.
+struct Golden
+{
+    std::string_view workload;
+    size_t size;
+    uint64_t digest;
+};
+
+/// The bytes every benchmark baseline was measured on. A generator change that alters them makes every
+/// earlier measurement incomparable, so it must show up here first, and come with a new baseline.
+constexpr auto Goldens = std::array {
+    Golden { .workload = "ascii", .size = 65554, .digest = 0x5a83029e1652730a },
+    Golden { .workload = "colored", .size = 65593, .digest = 0x1dee961d0676b761 },
+    Golden { .workload = "sgr", .size = 65582, .digest = 0xf1068e82e13a4813 },
+    Golden { .workload = "utf8", .size = 65545, .digest = 0x417b51eebafc7b58 },
+    Golden { .workload = "tui", .size = 65812, .digest = 0x5fc962bd2d35cc14 },
+};
+
+/// @return The 64-bit FNV-1a digest of @p bytes.
+constexpr uint64_t fnv1a(std::string_view bytes)
+{
+    auto digest = uint64_t { 0xcbf29ce484222325 };
+    for (auto const byte: bytes)
+    {
+        digest ^= static_cast<unsigned char>(byte);
+        digest *= 0x100000001b3;
+    }
+    return digest;
+}
+static_assert(fnv1a("") == 0xcbf29ce484222325 && fnv1a("a") == 0xaf63dc4c8601ec8c); // the reference vectors
+
 Workload const& workloadNamed(std::string_view name)
 {
     auto const workload = std::ranges::find(Workloads, name, &Workload::name);
@@ -58,6 +90,18 @@ TEST_CASE("Workloads.are_deterministic", "[workloads]")
     {
         INFO(workload.name);
         CHECK(makeWorkload(workload, TargetBytes) == makeWorkload(workload, TargetBytes));
+    }
+}
+
+TEST_CASE("Workloads.bytes_are_pinned", "[workloads]")
+{
+    CHECK(Goldens.size() == Workloads.size());
+    for (auto const& golden: Goldens)
+    {
+        INFO(golden.workload);
+        auto const text = makeWorkload(workloadNamed(golden.workload), TargetBytes);
+        CHECK(text.size() == golden.size);
+        CHECK(fnv1a(text) == golden.digest);
     }
 }
 

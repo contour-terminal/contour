@@ -10,7 +10,9 @@
 #include <string_view>
 
 /// Synthetic terminal output for the benchmarks: what one kind of application writes, generated from a fixed
-/// seed so that every run on every machine parses the same bytes.
+/// seed so that every run on every machine parses the same bytes. Every random value is drawn from the engine
+/// directly: `std::mt19937` and `std::seed_seq` are specified to the bit, while each standard library picks
+/// its own algorithm for a distribution.
 namespace vtbackend::test
 {
 
@@ -31,25 +33,30 @@ using WorkloadWriter = void (*)(std::string& out, std::mt19937& rng);
 /// One synthetic workload: what one kind of application writes to its terminal.
 struct Workload
 {
-    std::string_view name;        ///< How the command line names it.
-    std::string_view description; ///< What it stands for.
-    WorkloadWriter writeUnit;     ///< Appends one line or one frame of it.
+    std::string_view name;    ///< How the command line names it.
+    WorkloadWriter writeUnit; ///< Appends one line or one frame of it.
 };
 
 namespace detail
 {
+    /// @return A random number in [@p low, @p high], drawn from @p rng directly, so that it is the same with
+    ///         every standard library. Slightly biased towards @p low, which a benchmark does not mind.
+    inline int drawBetween(std::mt19937& rng, int low, int high)
+    {
+        return low + static_cast<int>(rng() % static_cast<std::mt19937::result_type>(high - low + 1));
+    }
+
     /// Appends @p count random printable ASCII characters (0x21 to 0x7E).
     inline void appendPrintable(std::string& out, std::mt19937& rng, int count)
     {
-        auto printable = std::uniform_int_distribution<int> { 0x21, 0x7E };
         for ([[maybe_unused]] auto const column: std::views::iota(0, count))
-            out.push_back(static_cast<char>(printable(rng)));
+            out.push_back(static_cast<char>(drawBetween(rng, 0x21, 0x7E)));
     }
 
     /// @return A line length as source code or a log file has them: 20 to 180 columns.
     inline int lineLength(std::mt19937& rng)
     {
-        return std::uniform_int_distribution<int> { 20, 180 }(rng);
+        return drawBetween(rng, 20, 180);
     }
 
     /// Plain text, as `cat` of a large file writes it.
@@ -99,7 +106,7 @@ namespace detail
     /// end.
     inline void writeTuiFrame(std::string& out, std::mt19937& rng)
     {
-        auto const shade = std::uniform_int_distribution<int> { 0, 255 }(rng);
+        auto const shade = drawBetween(rng, 0, 255);
         for (auto const row: std::views::iota(1, WorkloadPageLines + 1))
         {
             out += std::format("\033[{};1H\033[38;5;{}m", row, ((row * 7) + shade) % 256);
@@ -113,27 +120,19 @@ namespace detail
     }
 } // namespace detail
 
-/// Every workload the benchmarks know, in the order they report them. A new workload is a new row.
+/// Every workload the benchmarks know, in the order they report them. A new workload is a new row. What each
+/// stands for is its writer's documentation.
 inline constexpr auto Workloads = std::array {
-    Workload { .name = "ascii",
-               .description = "plain text, as cat of a large file writes it",
-               .writeUnit = &detail::writeAsciiLine },
-    Workload { .name = "colored",
-               .description = "one coloured token per line, as ls --color or a compiler writes",
-               .writeUnit = &detail::writeColoredLine },
-    Workload { .name = "sgr",
-               .description = "a colour change every word, as a syntax highlighter writes",
-               .writeUnit = &detail::writeSgrLine },
-    Workload { .name = "utf8",
-               .description = "Latin text with every fifth character outside ASCII",
-               .writeUnit = &detail::writeUtf8Line },
-    Workload { .name = "tui",
-               .description = "full-screen repaints, as htop, vim or tmux write them",
-               .writeUnit = &detail::writeTuiFrame },
+    Workload { .name = "ascii", .writeUnit = &detail::writeAsciiLine },
+    Workload { .name = "colored", .writeUnit = &detail::writeColoredLine },
+    Workload { .name = "sgr", .writeUnit = &detail::writeSgrLine },
+    Workload { .name = "utf8", .writeUnit = &detail::writeUtf8Line },
+    Workload { .name = "tui", .writeUnit = &detail::writeTuiFrame },
 };
 
 /// Generates @p workload until it holds at least @p targetBytes, ending on a whole line or frame.
-/// @return The same bytes for the same arguments, on every run and every machine.
+/// @return The same bytes for the same arguments, on every run, every machine and every standard library.
+///         `Workloads.bytes_are_pinned` holds each workload to them.
 [[nodiscard]] inline std::string makeWorkload(Workload const& workload, size_t targetBytes)
 {
     // Predictable on purpose: one fixed seed, spread over the engine's whole state by the seed_seq algorithm
