@@ -816,7 +816,10 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
     _currentColorPreference = preference;
     if (auto const* colorPalette = config::preferredColorPalette(_profile.colors.value(), preference))
     {
-        _terminal.resetColorPalette(*colorPalette);
+        // Under the lock, as configureTerminal() re-seeds it: the parser thread reads the palette for every
+        // colour query and frame, and with mode 2031 set the reset writes a report. The signal is emitted
+        // outside it, because the QML binding it wakes reads back into this session.
+        core::locked(_terminal, [&] { _terminal.resetColorPalette(*colorPalette); });
 
         emit backgroundColorChanged();
     }
