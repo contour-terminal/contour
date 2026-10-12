@@ -122,7 +122,7 @@ TEST_CASE("isDecoderIdleAt.knownBytes", "[AsciiText]")
 TEST_CASE("isDecoderIdleAt.agreesWithTheDecoderAtEveryOffset", "[AsciiText]")
 {
     // Random bytes, biased towards lead and continuation bytes, against the decoder the text paths
-    // decode with: after every prefix, idle exactly when the decoder expects no further byte.
+    // decode with: after every prefix, idle exactly when the parser's own test says so.
     constexpr auto Alphabet = std::string_view { "ab\x80\xA4\xBF\xC3\xD8\xE2\xEF\xF0\xF7\xF8\xFF" };
     auto misses = std::vector<std::string> {};
     for (auto const seed: std::views::iota(1u, 2001u))
@@ -135,7 +135,7 @@ TEST_CASE("isDecoderIdleAt.agreesWithTheDecoderAtEveryOffset", "[AsciiText]")
         auto decoder = unicode::utf8_decoder_state {};
         for (auto const offset: std::views::iota(size_t { 0 }, text.size() + 1))
         {
-            if (isDecoderIdleAt(text, offset) != (decoder.expectedLength == 0))
+            if (isDecoderIdleAt(text, offset) != vtparser::isDecoderIdle(decoder))
                 misses.push_back(std::format("seed {}: \"{}\" at {}", seed, core::escape(text), offset));
             if (offset < text.size())
                 std::ignore = vtparser::decodeUtf8Byte(decoder, static_cast<uint8_t>(text[offset]));
