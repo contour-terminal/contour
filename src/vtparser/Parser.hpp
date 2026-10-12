@@ -805,10 +805,15 @@ class Parser
     /// first makes the one transition to CSI_Param, which has no actions either. A leading ':' is
     /// left to the state machine, which sends it to CSI_Ignore.
     ///
+    /// When a final byte (0x40..0x7E) follows the run, or opens the sequence, this also hands it to
+    /// the state machine in the same call: most sequences end right after their parameters, and
+    /// that saves the empty scan the final byte would otherwise cost.
+    ///
     /// @param begin First byte to consider.
     /// @param end   One past the last byte.
-    /// @return The run's length, or 0 to fall back to the state machine when the next byte is
-    ///         anything else (a leader, an intermediate, the final byte, a control), or in VT52 mode.
+    /// @return The bytes consumed: the run, plus a final byte that follows it. 0 to fall back to the
+    ///         state machine when the next byte is anything else (a leader, an intermediate, a
+    ///         control), or in VT52 mode.
     [[nodiscard]] size_t parseBulkCsiParameters(char const* begin, char const* end) noexcept;
 
     void processOnceViaStateMachine(uint8_t ch);

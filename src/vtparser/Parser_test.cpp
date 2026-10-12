@@ -744,6 +744,7 @@ TEST_CASE("Parser.CsiParameterBulk.ExplicitCases", "[Parser][BulkScan]")
         "\033[38:2::255:128:0m\033[4:3m\033[58:5:12m"sv, // ':' sub-parameters
         "\033[:1m"sv,                                    // a leading ':' goes to CSI_Ignore
         "\033[;1m\033[;;m\033[m"sv,                      // empty parameters, and none
+        "\033[H\033[2J\033[@\033[~x"sv,                  // final bytes, at both ends of the range
         "\033[1;2\x18"
         "3m"sv, // CAN mid-parameters
         "\033[1;2\x1A"

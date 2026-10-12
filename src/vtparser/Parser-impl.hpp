@@ -512,6 +512,13 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkApcString(char const* be
     return static_cast<unsigned char>(ch - '0') <= ';' - '0';
 }
 
+/// The bytes that end a control sequence, 0x40 ('@') to 0x7E ('~'). From CSI_Entry and CSI_Param
+/// each dispatches the sequence and returns to Ground.
+[[nodiscard]] constexpr bool isCsiFinalByte(char ch) noexcept
+{
+    return static_cast<unsigned char>(ch - '@') <= '~' - '@';
+}
+
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkCsiParameters(char const* begin,
                                                                       char const* end) noexcept -> size_t
@@ -521,24 +528,35 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkCsiParameters(char const
         return 0;
 
     // CSI_Entry sends a leading ':' to CSI_Ignore, so there only a digit or ';' may open the run.
-    if (auto const first = *begin; !isCsiParameterByte(first) || (_state == State::CSI_Entry && first == ':'))
+    if (_state == State::CSI_Entry && *begin == ':')
         return 0;
 
-    // From CSI_Entry this is the transition the table makes on the run's first byte. CSI_Entry has
-    // no exit action and CSI_Param no entry action, so the assignment is all of it.
-    _state = State::CSI_Param;
-
-    // One pass scans and dispatches: the run ends at the first byte that is not a parameter byte,
-    // and its length is the number of bytes dispatched.
     auto byteCount = size_t { 0 };
-    for (auto const ch: std::string_view { begin, end } | std::views::take_while(isCsiParameterByte))
+    if (isCsiParameterByte(*begin))
     {
-        switch (ch)
+        // From CSI_Entry this is the transition the table makes on the run's first byte. CSI_Entry
+        // has no exit action and CSI_Param no entry action, so the assignment is all of it.
+        _state = State::CSI_Param;
+
+        // One pass scans and dispatches: the run ends at the first byte that is not a parameter
+        // byte, and its length is the number of bytes dispatched.
+        for (auto const ch: std::string_view { begin, end } | std::views::take_while(isCsiParameterByte))
         {
-            case ';': _eventListener.paramSeparator(); break;
-            case ':': _eventListener.paramSubSeparator(); break;
-            default: _eventListener.paramDigit(ch); break;
+            switch (ch)
+            {
+                case ';': _eventListener.paramSeparator(); break;
+                case ':': _eventListener.paramSubSeparator(); break;
+                default: _eventListener.paramDigit(ch); break;
+            }
+            ++byteCount;
         }
+    }
+
+    // Most sequences end right after their parameters. The final byte goes through the state
+    // machine as it would have, but from here rather than after one more empty scan.
+    if (auto const* const next = begin + byteCount; next != end && isCsiFinalByte(*next))
+    {
+        processOnceViaStateMachine(static_cast<uint8_t>(*next));
         ++byteCount;
     }
     return byteCount;
