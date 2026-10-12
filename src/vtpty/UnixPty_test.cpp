@@ -34,6 +34,8 @@ struct Flood
 {
     std::string received;
     std::size_t oversizedBatches = 0; ///< Reads that returned more than the budget or the buffer's room.
+    std::size_t fullBatches = 0;      ///< Reads that returned all the budget and the buffer's room allowed.
+    std::size_t largestBatch = 0;     ///< The most one read returned.
 };
 
 /// Writes @p payload into a real PTY's slave side and reads it back through UnixPty::read().
@@ -61,19 +63,23 @@ Flood floodThroughRead(std::string const& payload, std::size_t budget, std::size
 
     auto pool = crispy::BufferObjectPool<char> { bufferSize };
     auto flood = Flood {};
-    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 10'000))
+    // Bounded by the clock rather than by a count of reads: a read() that lost bytes would otherwise
+    // wait out every remaining attempt's timeout.
+    auto const deadline = std::chrono::steady_clock::now() + 30s;
+    while (flood.received.size() < payload.size() && std::chrono::steady_clock::now() < deadline)
     {
-        if (flood.received.size() >= payload.size())
-            break;
         auto const storage = pool.allocateBufferObject();
-        auto const room = storage->bytesAvailable();
+        auto const bound = std::min(budget, storage->bytesAvailable());
         auto const result = pty.read(*storage, 1000ms, budget);
         if (!result)
             continue; // a timeout: the writer has not caught up yet
         if (result->data.empty())
             break; // end of file: nothing more is coming
-        if (result->data.size() > std::min(budget, room))
+        if (result->data.size() > bound)
             ++flood.oversizedBatches;
+        if (result->data.size() == bound)
+            ++flood.fullBatches;
+        flood.largestBatch = std::max(flood.largestBatch, result->data.size());
         flood.received += result->data;
     }
 
@@ -88,21 +94,28 @@ TEST_CASE("UnixPty.read.deliversAFloodWholeAndInBoundedBatches", "[vtpty][unixpt
 {
     // Whatever size of piece the kernel hands out, a flood written into the slave must arrive through
     // read() whole and in order, and no batch may outgrow the read budget or the free space of the
-    // buffer it lands in.
+    // buffer it lands in. Each section makes one of the two the tighter bound, well below the most the
+    // kernel hands out per read (about 4 KiB), and checks that some read reached it. A 256-byte chunk
+    // makes a buffer of a few hundred bytes: the pool rounds the buffer object and its storage up
+    // together.
     auto const payload = letters(std::size_t { 256 } * 1024);
 
     SECTION("the read budget bounds a batch")
     {
-        auto const flood = floodThroughRead(payload, std::size_t { 16 } * 1024, std::size_t { 1024 } * 1024);
+        auto const flood = floodThroughRead(payload, std::size_t { 1000 }, std::size_t { 1024 } * 1024);
+        INFO("largest batch: " << flood.largestBatch);
         CHECK(flood.oversizedBatches == 0);
+        CHECK(flood.fullBatches > 0);
         CHECK(flood.received.size() == payload.size());
         CHECK(std::ranges::equal(flood.received, payload));
     }
 
     SECTION("the buffer's free space bounds a batch")
     {
-        auto const flood = floodThroughRead(payload, std::size_t { 64 } * 1024, std::size_t { 4096 });
+        auto const flood = floodThroughRead(payload, std::size_t { 64 } * 1024, std::size_t { 256 });
+        INFO("largest batch: " << flood.largestBatch);
         CHECK(flood.oversizedBatches == 0);
+        CHECK(flood.fullBatches > 0);
         CHECK(flood.received.size() == payload.size());
         CHECK(std::ranges::equal(flood.received, payload));
     }
