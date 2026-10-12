@@ -2,6 +2,7 @@
 #include <vtbackend/grid/CellProxy.hpp>
 #include <vtbackend/grid/Line.hpp>
 #include <vtbackend/grid/LineSoA.hpp>
+#include <vtbackend/grid/SoAClusterWriter.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -724,3 +725,35 @@ TEST_CASE("Line.trivialBuffer.resetPreservesFillAttributes", "[Line]")
 }
 
 // LineView tests removed — Line is now backed by LineSoA directly (tested via Line_test.cpp)
+
+TEST_CASE("LineSoA.resetLine.repaintsAUniformColouredLine", "[LineSoA]")
+{
+    // resetLine's fill skip had the same blind spot as writeAsciiToSoA's: a uniform line whose cells
+    // all wear a pen other than fillAttrs must still be repainted when it is reset to fillAttrs.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(5));
+    auto const coloured = GraphicsAttributes { .backgroundColor = Color::Indexed(4) };
+    (void) writeTextToSoA(line, 0, "Hello", coloured, HyperlinkId {}, /*asciiHint=*/true);
+    REQUIRE(line.trivial);
+
+    resetLine(line, ColumnCount(5));
+
+    for (auto const col: std::views::iota(size_t { 0 }, size_t { 5 }))
+    {
+        CHECK(line.codepoints[col] == 0);
+        CHECK(line.sgr[col] == GraphicsAttributes {});
+    }
+}
+
+TEST_CASE("LineSoA.resetLine.narrowsATwoColumnCellOnTheLastColumn", "[LineSoA]")
+{
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(5));
+    writeCellToSoA(line, 4, U'世', 2, GraphicsAttributes {});
+    REQUIRE(line.trivial);
+
+    resetLine(line, ColumnCount(5));
+
+    CHECK(line.codepoints[4] == 0);
+    CHECK(line.widths[4] == 1);
+}

@@ -131,9 +131,9 @@ struct LineSoA
     /// @c Terminal::maxBulkTextSequenceWidth, which gates the parser's bulk-write path on it.
     bool trivial = true;
 
-    /// The GraphicsAttributes used in the most recent full-line reset/clear.
-    /// Used by writeAsciiToSoA and resetLine to skip redundant fill operations
-    /// when the line is being rewritten with the same default attributes.
+    /// The GraphicsAttributes used in the most recent full-line reset/clear: what a cell nothing has
+    /// written since appears to wear. Not what the written cells wear -- a full-width write keeps a
+    /// line uniform in another pen -- so a fill skip must compare against the cells, not this.
     GraphicsAttributes fillAttrs {};
 };
 

@@ -125,16 +125,18 @@ void resetLine(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAt
     // blank and cols == 0.
     assert(!line.codepoints.empty() || n == 0);
 
-    // When the line was used in a "clean" manner (uniform SGR, same fill attrs,
-    // no hyperlinks), the widths/sgr/hyperlinks/clusterPoolIndex arrays already
-    // contain correct default values. Only codepoints and clusterSize need clearing
-    // (their values change between write and reset: chars→0, 1→0).
+    // A uniform line whose cells already wear fillAttrs and no hyperlink holds the right values in
+    // every array but the ones a write changes. Compared against cell 0, not against the line's
+    // fillAttrs: those only say what the line was last cleared with, and a full-width write keeps a
+    // line uniform in another pen. Widths are cleared too, because a uniform line can still end in
+    // one two-column cell (@see Line::trivialBuffer).
     auto const canSkipFill =
-        line.trivial && (fillAttrs == line.fillAttrs) && (n == 0 || line.hyperlinks[0] == HyperlinkId {});
+        line.trivial && (n == 0 || (line.sgr[0] == fillAttrs && line.hyperlinks[0] == HyperlinkId {}));
 
     if (canSkipFill)
     {
         std::fill_n(line.codepoints.data(), n, char32_t { 0 });
+        std::fill_n(line.widths.data(), n, uint8_t { 1 });
         std::fill_n(line.clusterSize.data(), n, uint8_t { 0 });
     }
     else

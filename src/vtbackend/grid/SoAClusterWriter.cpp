@@ -21,8 +21,8 @@ namespace
     /// Bulk-fills SGR/width/hyperlink arrays instead of per-cell writeCellToSoA.
     /// Avoids the per-cell trivial flag check (sets it ONCE at the end).
     ///
-    /// When writing to a freshly-reset trivial line with matching attributes,
-    /// skips redundant widths/sgr/hyperlinks fills (they already hold correct values).
+    /// On a uniform line whose cells already wear the run's pen and hyperlink, skips rewriting those
+    /// arrays and the sizing ones, which a uniform line keeps ordinary. Widths are always rewritten.
     size_t writeAsciiToSoA(LineSoA& line,
                            size_t startCol,
                            std::string_view text,
@@ -42,15 +42,19 @@ namespace
         // clusterSize: always required (reset fills with 0, we need 1)
         std::fill_n(line.clusterSize.data() + startCol, count, uint8_t { 1 });
 
-        // Skip redundant fills when writing to a freshly-reset trivial line
-        // with matching attributes. The arrays already contain correct values
-        // from the most recent resetLine/clearRange.
+        // Widths, too: a uniform line can still hold ONE two-column cell, on its last column, where a
+        // wide character had no room for its continuation (@see Line::trivialBuffer).
+        std::fill_n(line.widths.data() + startCol, count, uint8_t { 1 });
+
+        // Skip the rest when the cells already hold it. A uniform line's cells all share cell 0's
+        // rendition and hyperlink, so comparing the run against cell 0 -- not against fillAttrs, which
+        // only says what the line was last cleared with -- tells whether rewriting would change
+        // anything. A full-width run keeps its line uniform in a pen other than fillAttrs.
         auto const skipFills =
-            line.trivial && (startCol == 0) && (attrs == line.fillAttrs) && (hyperlink == HyperlinkId {});
+            line.trivial && (startCol == 0) && (attrs == line.sgr[0]) && (hyperlink == line.hyperlinks[0]);
 
         if (!skipFills)
         {
-            std::fill_n(line.widths.data() + startCol, count, uint8_t { 1 });
             std::fill_n(line.sgr.data() + startCol, count, attrs);
             std::fill_n(line.hyperlinks.data() + startCol, count, hyperlink);
 
