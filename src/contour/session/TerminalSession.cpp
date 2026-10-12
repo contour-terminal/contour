@@ -2948,11 +2948,11 @@ bool TerminalSession::operator()(actions::SaveScreenshot)
         / fs::path(std::format("contour-screenshot-{:%Y-%m-%d-%H-%M-%S}.png", chrono::system_clock::now()));
 
     _display->setScreenshotOutput(savePath);
-    sessionLog()("Saving screenshot to {}", savePath.string());
+    sessionLog()("Saving screenshot to {}", vtpty::utf8Of(savePath));
 
     // The log line and the toast are deliberately separate strings: one is for a developer reading a
     // log in English, the other is shown to the user and therefore goes through tr().
-    auto const notice = tr("Saving screenshot to %1").arg(QString::fromStdString(savePath.string()));
+    auto const notice = tr("Saving screenshot to %1").arg(QString::fromStdString(vtpty::utf8Of(savePath)));
     _display->post([this, notice]() { emit showNotification(tr("Screenshot"), notice); });
     return true;
 }

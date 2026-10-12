@@ -13,6 +13,7 @@
 #include <contour/platform/Announcer.hpp>
 #include <contour/platform/BlurBehind.hpp>
 #include <contour/platform/QtInvoke.hpp>
+#include <contour/platform/QtPath.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/SessionInput.hpp>
 
@@ -25,6 +26,7 @@
 #include <core/Utils.hpp>
 #include <core/cli/App.hpp>
 #include <core/log/LogStore.hpp>
+#include <core/platform/PathUtils.hpp>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
@@ -1182,7 +1184,7 @@ void TerminalDisplay::paint()
             _saveScreenshot = std::nullopt;
             requestScreenshot([destination](QImage const& image) {
                 std::visit(core::Overloaded { [&](std::filesystem::path const& path) {
-                                                 image.save(QString::fromStdString(path.string()));
+                                                 image.save(platform::toQString(path));
                                              },
                                               [&](std::monostate) {
                                                   if (QClipboard* clipboard = QGuiApplication::clipboard();
@@ -1836,7 +1838,7 @@ void TerminalDisplay::doDumpStateInternal()
 
     fs::create_symlink(workDirName, targetBaseDir / latestDirName);
 
-    displayLog()("Dumping state into directory: {}", targetDir.generic_string());
+    displayLog()("Dumping state into directory: {}", core::platform::normalizePath(targetDir));
 
     // TODO: The above should be done from the outside and the targetDir being passed into this call.
     // TODO: maybe zip this dir in the end.
@@ -1853,7 +1855,7 @@ void TerminalDisplay::doDumpStateInternal()
         std::cout << screenStateDump;
 
         auto const screenStateDumpFilePath = targetDir / "screen-state-dump.vt";
-        auto fs = ofstream { screenStateDumpFilePath.string(), ios::trunc };
+        auto fs = ofstream { screenStateDumpFilePath, ios::trunc };
         fs << screenStateDump;
         fs.close();
     }
@@ -1875,17 +1877,18 @@ void TerminalDisplay::doDumpStateInternal()
 
         vtrasterizer::AtlasTextureScreenshot const& info = infoOpt.value();
         auto const fileName = targetDir / "texture-atlas-rgba.png";
-        displayLog()("Saving image {} to: {}", info.size, fileName.generic_string());
+        displayLog()("Saving image {} to: {}", info.size, core::platform::normalizePath(fileName));
 
         QImage(info.buffer.data(),
                info.size.width.as<int>(),
                info.size.height.as<int>(),
                QImage::Format_RGBA8888)
-            .save(QString::fromStdString(fileName.generic_string()));
+            .save(platform::toQString(fileName));
     } while (0);
 
     auto screenshotFilePath = targetDir / "screenshot.png";
-    displayLog()("Requesting screenshot for state dump: {}", screenshotFilePath.generic_string());
+    displayLog()("Requesting screenshot for state dump: {}",
+                 core::platform::normalizePath(screenshotFilePath));
 
     // Deferred capture: the RHI reads the offscreen render back a frame or two later, so save it when it
     // arrives and only *then* terminate on the at-exit path — terminating now would close the window before
@@ -1897,7 +1900,7 @@ void TerminalDisplay::doDumpStateInternal()
         return;
     }
     requestScreenshot([screenshotFilePath, terminateOnExit](QImage const& image) {
-        image.save(QString::fromStdString(screenshotFilePath.string()));
+        image.save(platform::toQString(screenshotFilePath));
         terminateOnExit();
     });
 }
