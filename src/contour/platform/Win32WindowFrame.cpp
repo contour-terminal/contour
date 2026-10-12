@@ -192,6 +192,12 @@ namespace
             // Keep a real, resizable, maximizable frame. WS_CAPTION is what DWM keys its shadow and
             // its rounded corners off; WS_THICKFRAME is what keeps the window snappable and sizable.
             // Both are then made invisible by the WM_NCCALCSIZE handler above.
+            // Removing the native frame grows the client area unless its size is preserved.
+            RECT clientBefore {};
+            bool const preserveClientSize = window.windowState() == Qt::WindowNoState
+                                            && !IsZoomed(hwnd) && !IsIconic(hwnd)
+                                            && GetClientRect(hwnd, &clientBefore);
+
             auto const style = GetWindowLongPtrW(hwnd, GWL_STYLE);
             SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_THICKFRAME | WS_CAPTION | WS_MAXIMIZEBOX);
 
@@ -206,6 +212,27 @@ namespace
                          0,
                          SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
                              | SWP_NOOWNERZORDER);
+
+            if (preserveClientSize)
+            {
+                RECT clientAfter {};
+                RECT windowAfter {};
+                if (GetClientRect(hwnd, &clientAfter) && GetWindowRect(hwnd, &windowAfter))
+                {
+                    auto const widthChange = (clientBefore.right - clientBefore.left)
+                                             - (clientAfter.right - clientAfter.left);
+                    auto const heightChange = (clientBefore.bottom - clientBefore.top)
+                                              - (clientAfter.bottom - clientAfter.top);
+                    if (widthChange != 0 || heightChange != 0)
+                        SetWindowPos(hwnd,
+                                     nullptr,
+                                     0,
+                                     0,
+                                     static_cast<int>(windowAfter.right - windowAfter.left + widthChange),
+                                     static_cast<int>(windowAfter.bottom - windowAfter.top + heightChange),
+                                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+                }
+            }
 
             Win32FrameEventFilter::extendFrame(hwnd);
 
