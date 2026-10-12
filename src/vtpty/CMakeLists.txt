@@ -157,7 +157,7 @@ if(VTPTY_TESTING)
         # ConPty is the Windows-only PTY backend.
         target_sources(vtpty_test PRIVATE ConPty_test.cpp)
     else()
-        target_sources(vtpty_test PRIVATE ProcessPlacement_test.cpp ScopeRequestEncoding_test.cpp SystemdScopePlacement_test.cpp)
+        target_sources(vtpty_test PRIVATE ProcessPlacement_test.cpp ScopeRequestEncoding_test.cpp SystemdScopePlacement_test.cpp UnixPty_test.cpp)
     endif()
     target_link_libraries(vtpty_test vtpty core::testing Catch2::Catch2)
     add_test(NAME vtpty_test COMMAND $<TARGET_FILE:vtpty_test>)
