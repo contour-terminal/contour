@@ -279,6 +279,13 @@ if(LIBTERMINAL_TESTING)
             vtbackend
         )
 
+        # One short run of each subcommand that needs no input file, so that a crash like the one
+        # `bench-headless pty` had -- it used its PTY before opening it -- fails the suite.
+        if(NOT WIN32)
+            add_test(NAME bench_headless_pty_smoke COMMAND bench-headless pty seconds 1)
+            set_tests_properties(bench_headless_pty_smoke PROPERTIES LABELS bench)
+        endif()
+
         if(CONTOUR_INSTALL_TOOLS)
             if(APPLE)
                 # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834

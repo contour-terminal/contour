@@ -516,7 +516,7 @@ class ContourHeadlessBench: public core::cli::App
         link("bench-headless.parser", bind(&ContourHeadlessBench::benchParserOnly, this));
         link("bench-headless.grid", bind(&ContourHeadlessBench::benchGrid, this));
         link("bench-headless.sixel", bind(&ContourHeadlessBench::benchSixel, this));
-        link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY));
+        link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY, this));
         link("bench-headless.keypress", bind(&ContourHeadlessBench::benchKeyPress, this));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
 
@@ -570,7 +570,13 @@ class ContourHeadlessBench: public core::cli::App
                                    .options = perfOptions },
                     CLI::Command { .name = "pty",
                                    .helpText = "Performs performance tests utilizing the underlying "
-                                               "operating system's PTY only." },
+                                               "operating system's PTY only.",
+                                   .options =
+                                       CLI::OptionList {
+                                           CLI::Option { .name = "seconds",
+                                                         .v = CLI::Value { 10u },
+                                                         .helpText = "How long to write for." },
+                                       } },
                     CLI::Command {
                         .name = "keypress",
                         .helpText = "Measures how long a key press takes to reach the PTY while an "
@@ -746,7 +752,7 @@ class ContourHeadlessBench: public core::cli::App
         return rv;
     }
 
-    static int benchPTY()
+    int benchPTY()
     {
         using std::chrono::steady_clock;
         using vtpty::ColumnCount;
@@ -755,18 +761,27 @@ class ContourHeadlessBench: public core::cli::App
         using vtpty::PageSize;
         using vtpty::Pty;
 
-        // Benchmark configuration
-        // TODO make these values CLI configurable.
-        auto constexpr WritesPerLoop = 1;
+        auto constexpr WritesPerLoop = 1u;
         auto constexpr PtyWriteSize = 4096;
         auto constexpr PtyReadSize = 4096;
-        auto const benchTime = chrono::seconds(10);
+        auto const benchTime = chrono::seconds(parameters().uint("bench-headless.pty.seconds"));
+        if (benchTime.count() < 1)
+        {
+            cerr << "seconds must be at least 1.\n";
+            return EXIT_FAILURE;
+        }
 
         // Setup benchmark
         std::string const text = createText(PtyWriteSize);
         unique_ptr<Pty> ptyObject =
             createPty(PageSize { .lines = LineCount(25), .columns = ColumnCount(80) }, std::nullopt);
         auto& pty = *ptyObject;
+        // createPty() only describes the PTY: start() opens it, and only then is there a slave to configure.
+        if (auto const started = pty.start(); !started)
+        {
+            cerr << std::format("Cannot open a PTY: {}\n", started.error().detail);
+            return EXIT_FAILURE;
+        }
         auto& ptySlave = pty.slave();
         (void) ptySlave.configure();
 
@@ -799,7 +814,7 @@ class ContourHeadlessBench: public core::cli::App
         auto stopTime = startTime;
         while (stopTime - startTime < benchTime)
         {
-            for (int i = 0; i < WritesPerLoop; ++i)
+            for ([[maybe_unused]] auto const write: core::times(WritesPerLoop))
                 (void) ptySlave.write(text);
             stopTime = steady_clock::now();
         }
@@ -809,9 +824,9 @@ class ContourHeadlessBench: public core::cli::App
         // Create summary
         auto const elapsedTime = stopTime - startTime;
         auto const msecs = std::chrono::duration_cast<std::chrono::milliseconds>(elapsedTime);
-        auto const secs = std::chrono::duration_cast<std::chrono::seconds>(elapsedTime);
-        auto const mbPerSecs =
-            static_cast<long double>(bytesTransferred) / static_cast<long double>(secs.count());
+        auto const seconds = std::chrono::duration<double>(elapsedTime).count();
+        auto const bytesPerSecond = static_cast<uint64_t>(static_cast<double>(bytesTransferred) / seconds);
+        auto const averageRead = loopIterations != 0 ? bytesTransferred / loopIterations : uint64_t { 0 };
 
         std::cout << std::format("\n");
         std::cout << std::format("PTY stdout throughput bandwidth test\n");
@@ -823,12 +838,9 @@ class ContourHeadlessBench: public core::cli::App
             "Test time              : {}.{:03} seconds\n", msecs.count() / 1000, msecs.count() % 1000);
         std::cout << std::format("Data transferred       : {}\n", core::humanReadableBytes(bytesTransferred));
         std::cout << std::format("Reader loop iterations : {}\n", loopIterations);
-        std::cout << std::format(
-            "Average size per read  : {}\n",
-            core::humanReadableBytes(static_cast<uint64_t>(static_cast<long double>(bytesTransferred)
-                                                           / static_cast<long double>(loopIterations))));
+        std::cout << std::format("Average size per read  : {}\n", core::humanReadableBytes(averageRead));
         std::cout << std::format("Transfer speed         : {} per second\n",
-                                 core::humanReadableBytes(static_cast<uint64_t>(mbPerSecs)));
+                                 core::humanReadableBytes(bytesPerSecond));
 
         return EXIT_SUCCESS;
     }
