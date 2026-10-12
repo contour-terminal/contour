@@ -529,6 +529,38 @@ void appendControl(std::string& out, std::mt19937& rng)
     out += oneOf(rng, "\r\n\t\b\a\x0E\x0F"sv);
 }
 
+/// Bytes that are not well-formed UTF-8, or that begin a sequence the next piece may not finish: stray
+/// continuation bytes, lead bytes cut short by ASCII or by another lead, bytes no encoding uses, and
+/// overlong, surrogate and out-of-range encodings.
+void appendIllFormedUtf8(std::string& out, std::mt19937& rng)
+{
+    static constexpr auto Sequences = std::array {
+        "\x80"sv,     // a stray continuation byte
+        "\xBF"sv,     // the last one
+        "\xC3"sv,     // a two-byte lead, one byte short
+        "\xE2\x94"sv, // a three-byte lead, one byte short
+        "\xF0\x9F"sv, // a four-byte lead, two bytes short
+        "\xE2"
+        "a"sv, // a three-byte lead cut short by ASCII
+        "\xF0\x9F"
+        "xyz"sv,                  // a four-byte lead cut short by ASCII
+        "\xC3\xE2\x94\x82"sv,     // a lead cut short by another lead
+        "\xE2\xF0\x9F\x98\x80"sv, // the same with a four-byte character behind it
+        "\xC0\xAF"sv,             // 0xC0 and 0xC1 are overlong leads
+        "\xC1\xBF"sv,
+        "\xF5\x80\x80\x80"sv, // 0xF5..0xFF lead nothing
+        "\xF8"sv,
+        "\xFE"sv,
+        "\xFF"sv,
+        "\xE0\x80\xAF"sv,     // overlong: '/' in three bytes
+        "\xF0\x80\x80\xAF"sv, // overlong: '/' in four bytes
+        "\xED\xA0\x80"sv,     // a surrogate, U+D800
+        "\xED\xBF\xBF"sv,     // a surrogate, U+DFFF
+        "\xF4\x90\x80\x80"sv, // above U+10FFFF
+    };
+    out += oneOf(rng, Sequences);
+}
+
 /// One CSI sequence: usually well-formed, sometimes interrupted or malformed in the ways the state
 /// machine must catch.
 void appendCsi(std::string& out, std::mt19937& rng)
@@ -597,9 +629,9 @@ void appendEscape(std::string& out, std::mt19937& rng)
 using PieceWriter = void (*)(std::string&, std::mt19937&);
 
 /// What a random stream is assembled from, weighted by repetition.
-constexpr auto PieceWriters = std::array<PieceWriter, 11> {
+constexpr auto PieceWriters = std::array<PieceWriter, 12> {
     appendText, appendText, appendControl, appendCsi,         appendCsi,    appendCsi,
-    appendDcs,  appendApc,  appendOsc,     appendOtherString, appendEscape,
+    appendDcs,  appendApc,  appendOsc,     appendOtherString, appendEscape, appendIllFormedUtf8,
 };
 
 std::string randomStream(std::mt19937& rng, size_t pieceCount)
@@ -644,6 +676,27 @@ TEST_CASE("Parser.BulkScan.KnownStreamsMatchTheStateMachine", "[Parser][BulkScan
         "0;t\x9C"
         "Z"sv,                                           // 8-bit CSI, 8-bit OSC and ST
         "\xE2\x94\x82\xE2\x94\x82 x \xF0\x9F\x98\x80"sv, // multi-byte text, split mid-character
+    }));
+    checkEveryTwoWaySplit(input);
+}
+
+TEST_CASE("Parser.BulkScan.ReadsEndingInsideIllFormedUtf8MatchTheStateMachine", "[Parser][BulkScan]")
+{
+    // A read that ends on an incomplete or ill-formed sequence, and the next one continues: the
+    // text scan stops in front of the sequence (libunicode 0.9.4), and the state machine takes it
+    // from there, in the middle of a stretch of ASCII, of mixed text, or on its own.
+    auto const input = GENERATE(values<std::string_view>({
+        "\xE2"
+        "abcdefghijklmnopqrstuvwxyz tail"sv, // a lead byte, then ASCII it takes for continuation bytes
+        "head abcdefghijklmnopqrstuvwxyz\xF0\x9F"
+        " tail"sv,                                               // a stretch, then a four-byte lead cut short
+        "w\xC3\xB6rld \xC3 abcdefghijklmnopqrstuvwxyz"sv,        // mixed text, a lead cut short, a stretch
+        "abc\x80\xBF def\xC0\xAF ghi\xF5\x80\x80\x80 jkl\xFF"sv, // stray and unused bytes inside a stretch
+        "ab\xE0\x80\xAF"
+        "cd\xED\xA0\x80"
+        "ef\xF4\x90\x80\x80"
+        "gh"sv,                                                     // overlong, surrogate, too large
+        "\xE2\x94\xE2\x94\x82 \xF0\x9F\x98 \xF0\x9F\x98\x80 end"sv, // a lead cut short by a lead
     }));
     checkEveryTwoWaySplit(input);
 }
