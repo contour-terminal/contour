@@ -666,7 +666,8 @@ void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
 
         crlfIfWrapPending();
 
-        if (writeSoftFontGlyph(rawCp) == SoftFontGlyph::Written)
+        if (auto const font = _cursor.charsets.activeDRCSFont();
+            font.has_value() && writeSoftFontGlyph(*font, rawCp) == SoftFontGlyph::Written) [[unlikely]]
         {
             run.previousCodepoint = U' ';
             continue;
@@ -735,13 +736,9 @@ void Screen::writeText(char32_t codepoint)
     writeTextInternal(codepoint);
 }
 
-Screen::SoftFontGlyph Screen::writeSoftFontGlyph(char32_t sourceCodepoint)
+Screen::SoftFontGlyph Screen::writeSoftFontGlyph(int font, char32_t sourceCodepoint)
 {
-    auto const drcsFont = _cursor.charsets.activeDRCSFont();
-    if (!drcsFont.has_value())
-        return SoftFontGlyph::Absent;
-
-    auto const* charset = _terminal->drcsCharset(*drcsFont);
+    auto const* charset = _terminal->drcsCharset(font);
     if (charset == nullptr)
         return SoftFontGlyph::Absent;
 
@@ -775,7 +772,8 @@ void Screen::writeTextInternal(char32_t sourceCodepoint)
     crlfIfWrapPending();
 
     // A soft font glyph, if the active charset is a DRCS font that defines one; otherwise fall through.
-    if (writeSoftFontGlyph(sourceCodepoint) == SoftFontGlyph::Written)
+    if (auto const font = _cursor.charsets.activeDRCSFont();
+        font.has_value() && writeSoftFontGlyph(*font, sourceCodepoint) == SoftFontGlyph::Written) [[unlikely]]
     {
         _terminal->resetInstructionCounter();
         return;

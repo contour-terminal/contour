@@ -1194,14 +1194,18 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         Written, ///< The glyph is in the cell and the cursor has advanced.
     };
 
-    /// Writes @p sourceCodepoint as a DRCS soft font glyph when the charset invoked for the next
-    /// graphic character is a soft font that defines one for it.
+    /// Writes @p sourceCodepoint as a glyph of the DRCS soft font @p font, the font the charset
+    /// invoked for the next graphic character names (Charsets::activeDRCSFont()), when it defines one.
+    ///
+    /// The caller asks activeDRCSFont() first, an inline load, so that the text paths pay a call only
+    /// when a soft font is invoked at all.
     ///
     /// The single-shift state (SS2/SS3) is consumed only when a glyph was written, so a character
     /// that falls back to the ordinary path is still mapped through the single-shifted set.
+    /// @param font            The soft font's number.
     /// @param sourceCodepoint The character as received, before charset mapping.
     /// @return Whether a glyph was written.
-    [[nodiscard]] SoftFontGlyph writeSoftFontGlyph(char32_t sourceCodepoint);
+    [[nodiscard]] SoftFontGlyph writeSoftFontGlyph(int font, char32_t sourceCodepoint);
 
     /// Whether the modes and charsets let ASCII go straight into the line's arrays: no insert mode,
     /// no left/right margins, and every ASCII character mapping to itself (CharsetMapping::isPlainUSASCII()).
