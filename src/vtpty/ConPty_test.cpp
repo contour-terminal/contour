@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <chrono>
 #include <future>
+#include <optional>
 #include <ranges>
 
 using vtpty::ColumnCount;
@@ -115,4 +116,37 @@ TEST_CASE("ConPty.read.aZeroTimeoutNeverBlocks", "[vtpty][conpty]")
     pty.close(); // breaks the pipe, so a ReadFile that wrongly parked returns and the test can end
     CHECK(finished);
     CHECK(reader.get() == EAGAIN);
+}
+
+// Terminal::processInputOnce() takes EAGAIN and EINTR for "nothing yet" and reads again. A zero-timeout
+// read leaves EAGAIN behind, so a read that fails once the child is gone must not leave it standing: the
+// parser thread would read again, fail again at once, and spin.
+TEST_CASE("ConPty.read.aFailedReadSaysTheDeviceIsGone", "[vtpty][conpty]")
+{
+    auto pty = ConPty { pageSize(80, 24) };
+    REQUIRE(pty.start().has_value());
+    auto pool = crispy::BufferObjectPool<char> { 4096 };
+
+    // Whatever the pseudoconsole announces on start is read first, until a zero-timeout read finds
+    // nothing waiting.
+    auto const nothingWaiting = [&]() {
+        for ([[maybe_unused]] auto const attempt: std::views::iota(0, 100))
+        {
+            auto const storage = pool.allocateBufferObject();
+            if (!pty.read(*storage, std::chrono::milliseconds::zero(), 4096))
+                return true;
+        }
+        return false;
+    }();
+    REQUIRE(nothingWaiting);
+    REQUIRE(errno == EAGAIN);
+
+    pty.close();
+    auto const storage = pool.allocateBufferObject();
+    auto const result = pty.read(*storage, std::nullopt, 4096);
+    auto const error = errno;
+
+    CHECK_FALSE(result.has_value());
+    CHECK(error != EAGAIN);
+    CHECK(error != EINTR);
 }

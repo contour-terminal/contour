@@ -264,7 +264,12 @@ std::optional<Pty::ReadResult> ConPty::read(crispy::BufferObject<char>& buffer,
 
     DWORD nread {};
     if (!ReadFile(_input, buffer.hotEnd(), n, &nread, nullptr))
+    {
+        // The pipe is broken or closed: the child is gone. Said explicitly, because an earlier
+        // zero-timeout read may have left EAGAIN behind, which the caller would take for "read again".
+        errno = EIO;
         return nullopt;
+    }
 
     if (ptyInLog)
         ptyInLog()("{} received: \"{}\"", "master", core::escape(buffer.hotEnd(), buffer.hotEnd() + nread));
