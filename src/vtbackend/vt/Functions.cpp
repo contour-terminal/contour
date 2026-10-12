@@ -61,4 +61,21 @@ Function const* select(FunctionSelector const& selector,
     return nullptr;
 }
 
+Function const* SupportedSequences::select(FunctionSelector const& selector) const noexcept
+{
+    auto const finalByte = static_cast<uint8_t>(selector.finalSymbol);
+    if (finalByte >= FinalSymbolCount || static_cast<size_t>(selector.category) >= CategoryCount)
+        return nullptr;
+
+    auto const& bucket = _buckets[bucketIndex(selector.category, finalByte)];
+
+    // An empty bucket answers on its own -- and keeps select() off an empty span, which it does not handle.
+    if (bucket.count == 0)
+        return nullptr;
+
+    // The bucket is a slice of the sorted active table, so precedence inside it resolves exactly as it
+    // would over the whole table.
+    return vtbackend::select(selector, activeSequences().subspan(bucket.first, bucket.count));
+}
+
 } // namespace vtbackend

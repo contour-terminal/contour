@@ -16,6 +16,7 @@
 #include <cassert>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -1186,10 +1187,6 @@ class SupportedSequences
 {
 
   public:
-    [[nodiscard]] constexpr auto begin() noexcept { return _supportedSequences.data(); }
-
-    [[nodiscard]] constexpr auto end() noexcept { return begin() + _lastIndex; }
-
     [[nodiscard]] constexpr auto cbegin() const noexcept { return _supportedSequences.data(); }
 
     [[nodiscard]] constexpr auto cend() const noexcept { return cbegin() + _lastIndex; }
@@ -1203,6 +1200,14 @@ class SupportedSequences
     {
         return { cbegin(), _lastIndex };
     }
+
+    /// Selects the active definition @p selector names, exactly as select() over activeSequences().
+    ///
+    /// Searches only the definitions that share the selector's category and final byte -- usually
+    /// one, at most a handful -- instead of the whole active table, on every sequence.
+    ///
+    /// @return The matching definition, or nullptr if no active definition matches.
+    [[nodiscard]] Function const* select(FunctionSelector const& selector) const noexcept;
 
     CORE_CONSTEXPR void reset(VTType vt) noexcept
     {
@@ -1231,16 +1236,18 @@ class SupportedSequences
         gsl::span<Function> availableDefinition(begin(), _lastIndex);
         crispy::sort(availableDefinition,
                      [](Function const& a, Function const& b) constexpr { return compare(a, b); });
+        _buckets = makeBucketIndex(activeSequences());
     }
 
     CORE_CONSTEXPR void disableSequence(Function seq) noexcept
     {
-        Function* seqIter = std::ranges::find(*this, seq);
+        Function* seqIter = std::ranges::find(begin(), end(), seq);
         if (seqIter != end())
         {
             // Move the disabled sequence to the end of array, keep the rest of active sequences sorted
             std::rotate(seqIter, seqIter + 1, _supportedSequences.data() + _supportedSequences.size());
             --_lastIndex;
+            _buckets = makeBucketIndex(activeSequences());
         }
     }
 
@@ -1255,12 +1262,67 @@ class SupportedSequences
             ++_lastIndex;
             gsl::span<Function> arr(begin(), end());
             crispy::sort(arr, [](Function const& a, Function const& b) constexpr { return compare(a, b); });
+            _buckets = makeBucketIndex(activeSequences());
         }
     }
 
   private:
+    // Mutable access stays private: changing the table any other way than through reset(),
+    // enableSequence() and disableSequence() would leave the index describing an old active set.
+    // The return types are spelled out because the members above use these before they are defined.
+    [[nodiscard]] constexpr Function* begin() noexcept { return _supportedSequences.data(); }
+
+    [[nodiscard]] constexpr Function* end() noexcept { return begin() + _lastIndex; }
+
+    /// The slice of the sorted active table that holds every definition sharing one
+    /// (category, final byte) pair.
+    struct Bucket
+    {
+        uint16_t first = 0; ///< Index of the slice's first definition.
+        uint16_t count = 0; ///< Number of definitions in the slice; zero when none is active.
+    };
+
+    static constexpr auto FinalSymbolCount = size_t { 0x80 };
+    /// VT52 is FunctionCategory's last enumerator.
+    static constexpr auto CategoryCount = static_cast<size_t>(FunctionCategory::VT52) + 1;
+
+    using BucketIndex = std::array<Bucket, CategoryCount * FinalSymbolCount>;
+
+    static_assert(allFunctionsArray().size() <= std::numeric_limits<uint16_t>::max(),
+                  "Bucket counts definitions in 16 bits");
+
+    [[nodiscard]] static constexpr size_t bucketIndex(FunctionCategory category, uint8_t finalByte) noexcept
+    {
+        return (static_cast<size_t>(category) * FinalSymbolCount) + finalByte;
+    }
+
+    /// Groups the active definitions by (category, final byte).
+    ///
+    /// compare() orders by category and then by final byte before anything else, so the definitions
+    /// of one pair are contiguous in the sorted active table.
+    ///
+    /// @param active The active definitions, sorted by compare().
+    /// @return For every (category, final byte) pair, its slice of @p active.
+    [[nodiscard]] static constexpr BucketIndex makeBucketIndex(gsl::span<Function const> active) noexcept
+    {
+        auto index = BucketIndex {};
+        auto position = uint16_t { 0 };
+        for (Function const& function: active)
+        {
+            auto const finalByte = static_cast<uint8_t>(function.finalSymbol);
+            assert(finalByte < FinalSymbolCount);
+            auto& bucket = index[bucketIndex(function.category, finalByte)];
+            if (bucket.count == 0)
+                bucket.first = position;
+            ++bucket.count;
+            ++position;
+        }
+        return index;
+    }
+
     std::array<Function, allFunctionsArray().size()> _supportedSequences = allFunctions();
     size_t _lastIndex = allFunctions().size(); // No of total active sequences
+    BucketIndex _buckets = makeBucketIndex(gsl::span<Function const>(_supportedSequences.data(), _lastIndex));
 };
 
 /// Selects a FunctionDefinition based on a FunctionSelector.

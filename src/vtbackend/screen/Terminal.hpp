@@ -2197,6 +2197,13 @@ class Terminal
         return _supportedVTSequences.activeSequences();
     }
 
+    /// The terminal's sequence table: what is active at the current operating level, and the index
+    /// that resolves a sequence against it. @see SupportedSequences::select
+    [[nodiscard]] SupportedSequences const& supportedSequences() const noexcept
+    {
+        return _supportedVTSequences;
+    }
+
     /// The complete VT sequence table, independent of the current operating level. A sequence that is in
     /// here but not in activeSequences() is a real capability of the terminal that is merely gated out at
     /// the present conformance level (set by DECSCL) -- recognised, but deliberately inert.

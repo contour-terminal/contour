@@ -5688,7 +5688,7 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
 {
     if (auto const* seq = std::get_if<Sequence>(&pendingSequence))
     {
-        if (auto const* functionDefinition = seq->functionDefinition(_terminal->activeSequences()))
+        if (auto const* functionDefinition = seq->functionDefinition(_terminal->supportedSequences()))
             std::cout << std::format("\t{:<20} ; {:<18} ; {}\n",
                                      seq->text(),
                                      functionDefinition->documentation.mnemonic,

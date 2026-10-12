@@ -6184,7 +6184,7 @@ void Screen::processSequence(Sequence const& seq)
 #ifdef LIBTERMINAL_LOG_TRACE
     if (vtTraceSequenceLog)
     {
-        if (auto const* fd = seq.functionDefinition(_terminal->activeSequences()))
+        if (auto const* fd = seq.functionDefinition(_terminal->supportedSequences()))
         {
             vtTraceSequenceLog()("[{}] Processing {:<14} {}", _name, fd->documentation.mnemonic, seq.text());
         }
@@ -6197,7 +6197,8 @@ void Screen::processSequence(Sequence const& seq)
     //         seq.functionDefinition() ? seq.functionDefinition()->comment : ""sv);
 
     _terminal->incrementInstructionCounter();
-    if (Function const* funcSpec = seq.functionDefinition(_terminal->activeSequences()); funcSpec != nullptr)
+    if (Function const* funcSpec = seq.functionDefinition(_terminal->supportedSequences());
+        funcSpec != nullptr)
     {
         // Name the zone after the sequence it is executing, so the timeline reads SGR/CUP/ED rather
         // than a wall of identical processSequence rows. The mnemonic is a string_view over a

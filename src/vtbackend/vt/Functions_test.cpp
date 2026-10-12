@@ -3,7 +3,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <format>
+#include <random>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace vtbackend
 {
@@ -237,4 +243,166 @@ TEST_CASE("Functions.DECSTGLT_VTLevelConstrain", "[Functions]")
     auto const* f = vtbackend::select(selector, availableSequences.activeSequences());
     REQUIRE(f);
     CHECK(*f == DECSTGLT);
+}
+
+namespace
+{
+/// Every selector that names a known definition: each one's own category, leader, intermediate and
+/// final byte, with every argument count from 0 to one past its maximum.
+std::vector<FunctionSelector> selectorsForEveryDefinition(SupportedSequences const& sequences)
+{
+    auto selectors = std::vector<FunctionSelector> {};
+    for (Function const& definition: sequences.allSequences())
+        for (auto const argc: std::views::iota(0, static_cast<int>(definition.maximumParameters) + 2))
+            selectors.push_back({ .category = definition.category,
+                                  .leader = definition.leader,
+                                  .argc = argc,
+                                  .intermediate = definition.intermediate,
+                                  .finalSymbol = definition.finalSymbol });
+    return selectors;
+}
+
+/// @p count selectors drawn from everything a sequence could name, including final bytes at 0x80 and
+/// above, which no definition uses.
+std::vector<FunctionSelector> randomSelectors(uint32_t seed, size_t count)
+{
+    static constexpr auto Categories =
+        std::array { FunctionCategory::C0,  FunctionCategory::ESC, FunctionCategory::CSI,
+                     FunctionCategory::OSC, FunctionCategory::DCS, FunctionCategory::VT52 };
+    static constexpr auto Leaders = std::string_view { "\0<=>?", 5 };
+    static constexpr auto Intermediates = std::string_view { "\0 !\"#$%&'()*+,-./", 17 };
+
+    auto rng = std::mt19937 { seed };
+    auto const below = [&](size_t n) {
+        return static_cast<size_t>(rng() % n);
+    };
+    auto selectors = std::vector<FunctionSelector> {};
+    for ([[maybe_unused]] auto const _: std::views::iota(size_t { 0 }, count))
+    {
+        auto const category = Categories[below(Categories.size())];
+        selectors.push_back({ .category = category,
+                              .leader = Leaders[below(Leaders.size())],
+                              .argc = static_cast<int>(below(category == FunctionCategory::OSC ? 6000 : 140)),
+                              .intermediate = Intermediates[below(Intermediates.size())],
+                              .finalSymbol = static_cast<char>(below(0x100)) });
+    }
+    return selectors;
+}
+
+/// Where the index and select() over the whole active table disagree: the count and the first ten,
+/// or an empty string when they agree on every selector.
+std::string disagreements(SupportedSequences const& sequences, std::vector<FunctionSelector> const& selectors)
+{
+    auto const nameOf = [](Function const* f) {
+        return f ? std::string { f->documentation.mnemonic } : std::string { "none" };
+    };
+    auto lines = std::vector<std::string> {};
+    for (auto const& selector: selectors)
+    {
+        auto const* const expected = vtbackend::select(selector, sequences.activeSequences());
+        auto const* const actual = sequences.select(selector);
+        if (expected != actual)
+            lines.push_back(std::format("category {} leader {:02X} intermediate {:02X} final {:02X} argc {}: "
+                                        "full table {}, index {}",
+                                        static_cast<int>(selector.category),
+                                        static_cast<unsigned char>(selector.leader),
+                                        static_cast<unsigned char>(selector.intermediate),
+                                        static_cast<unsigned char>(selector.finalSymbol),
+                                        selector.argc,
+                                        nameOf(expected),
+                                        nameOf(actual)));
+    }
+    if (lines.empty())
+        return {};
+    auto report = std::format("{} disagreements, the first of them:\n", lines.size());
+    for (auto const& line: lines | std::views::take(10))
+        report += line + '\n';
+    return report;
+}
+} // namespace
+
+TEST_CASE("Functions.SupportedSequences.Select", "[Functions]")
+{
+    auto const sequences = SupportedSequences {};
+    auto const* const sgr = sequences.select(
+        { .category = FunctionCategory::CSI, .leader = 0, .argc = 1, .intermediate = 0, .finalSymbol = 'm' });
+    REQUIRE(sgr);
+    CHECK(*sgr == SGR);
+
+    auto const* const hyperlink = sequences.select(
+        { .category = FunctionCategory::OSC, .leader = 0, .argc = 8, .intermediate = 0, .finalSymbol = 0 });
+    REQUIRE(hyperlink);
+    CHECK(*hyperlink == HYPERLINK);
+
+    // No definition ends in DEL, none in a byte at 0x80 or above.
+    CHECK(sequences.select({ .category = FunctionCategory::CSI,
+                             .leader = 0,
+                             .argc = 0,
+                             .intermediate = 0,
+                             .finalSymbol = '\x7F' })
+          == nullptr);
+    CHECK(sequences.select({ .category = FunctionCategory::CSI,
+                             .leader = 0,
+                             .argc = 0,
+                             .intermediate = 0,
+                             .finalSymbol = static_cast<char>(0x80) })
+          == nullptr);
+}
+
+TEST_CASE("Functions.EveryFinalByteIsSevenBit", "[Functions]")
+{
+    // The index has one bucket per final byte below 0x80. A definition outside that range would need a
+    // bigger index, not a silently aliased bucket.
+    auto const sequences = SupportedSequences {};
+    for (Function const& definition: sequences.allSequences())
+        CHECK(static_cast<unsigned char>(definition.finalSymbol) < 0x80);
+}
+
+TEST_CASE("Functions.SupportedSequences.IndexAgreesWithFullTableSelect", "[Functions]")
+{
+    auto sequences = SupportedSequences {};
+    auto const everyDefinition = selectorsForEveryDefinition(sequences);
+    auto const random = randomSelectors(20261012, 20000);
+    auto const check = [&](std::string_view activeSet) {
+        auto const forDefinitions = disagreements(sequences, everyDefinition);
+        auto const forRandom = disagreements(sequences, random);
+        INFO(std::format("active set: {}\n{}{}", activeSet, forDefinitions, forRandom));
+        CHECK(forDefinitions.empty());
+        CHECK(forRandom.empty());
+    };
+
+    check("as constructed");
+    for (auto const level: { VTType::VT100,
+                             VTType::VT220,
+                             VTType::VT240,
+                             VTType::VT320,
+                             VTType::VT330,
+                             VTType::VT340,
+                             VTType::VT420,
+                             VTType::VT510,
+                             VTType::VT520,
+                             VTType::VT525 })
+    {
+        sequences.reset(level);
+        check(std::format("reset to level {}", static_cast<int>(level)));
+    }
+    // DECLRMM enables one of DECSLRM and SCOSC, then disables the other. Checking in between as well holds
+    // enableSequence() to its own rebuild, which the disableSequence() right after it would otherwise mask.
+    auto const swap = [&](Function const& enabled, Function const& disabled, std::string_view state) {
+        sequences.enableSequence(enabled);
+        check(std::format("{}: {} enabled", state, enabled.documentation.mnemonic));
+        sequences.disableSequence(disabled);
+        check(std::format("{}: {} enabled, {} disabled",
+                          state,
+                          enabled.documentation.mnemonic,
+                          disabled.documentation.mnemonic));
+    };
+    swap(DECSLRM, SCOSC, "DECLRMM set");
+    swap(SCOSC, DECSLRM, "DECLRMM reset");
+
+    // Below DECSLRM's own level the swap pulls it from among the gated-out definitions, not from the end
+    // of the active table.
+    sequences.reset(VTType::VT100);
+    swap(DECSLRM, SCOSC, "level VT100, DECLRMM set");
+    swap(SCOSC, DECSLRM, "level VT100, DECLRMM reset");
 }
