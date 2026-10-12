@@ -105,11 +105,15 @@ TEST_CASE("BulkScan.PlainStreamGivesTheSameScreen", "[BulkScan]")
 TEST_CASE("BulkScan.AnInvalidByteInsideARunGivesTheSameScreen", "[BulkScan]")
 {
     // The bulk text path hands a byte that is not UTF-8 on inside its run; the screen must show the
-    // U+FFFD the state machine prints for it. Only mid-run: libunicode's text scanner (0.9.3) consumes
-    // an invalid byte that ends a run without returning it.
+    // U+FFFD the state machine prints for it. Also where the byte ends the run: libunicode's text
+    // scanner stops in front of it (0.9.4), where 0.9.3 consumed it without returning it.
+    auto const text = GENERATE(values<std::string_view>({
+        "\xFF\xE2\x94\x82X"sv, // inside a run
+        "\xE2\x94\x82X\xFF"sv, // ending one
+    }));
     auto const setup = GENERATE(values<std::string_view>({ ""sv, "\033[?1049h"sv }));
-    INFO(std::format("setup \"{}\"", core::escape(setup)));
-    checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(10) }, setup, "\xFF\xE2\x94\x82X"sv);
+    INFO(std::format("setup \"{}\" text \"{}\"", core::escape(setup), core::escape(text)));
+    checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(10) }, setup, text);
 }
 
 TEST_CASE("BulkScan.RegionalIndicatorPairsGiveTheSameScreen", "[BulkScan]")
@@ -329,16 +333,29 @@ TEST_CASE("BulkScan.InvalidUtf8BesideALongAsciiStretchGivesTheSameScreen", "[Bul
         "abcdefghijklmnop \xC3\xA4 tail"sv, // a three-byte lead, two ASCII bytes short
         "\xF0"
         "abcdefghijklmnop \xC3\xA4 tail"sv, // a four-byte lead, three ASCII bytes short
-        "\xD8"
-        "A1234567890 after a decoded prepend \xC3\xA4"sv, // U+0601, then '1' joins its cluster
         "ascii first \xE2\x94"
         "abcdefghijklmnop end"sv, // a truncated U+2502 between two stretches
     }));
     auto const setup = GENERATE(values<std::string_view>({ ""sv, "\033[?1049h"sv }));
     INFO(std::format("setup \"{}\" text \"{}\"", core::escape(setup), core::escape(text)));
 
-    // In one read: libunicode's text scanner (0.9.3) hands a read that ends inside such a character on
-    // as a complete run, so cuts between reads wait for its fix (scan_text stopping at ill-formed UTF-8).
+    // Cut into two reads at every byte, so also where a read ends inside the incomplete character:
+    // libunicode's text scanner stops in front of ill-formed UTF-8 (0.9.4), where 0.9.3 handed such a
+    // read on as a run that ended inside the character, which the screen's run-local decoder dropped.
+    checkSameScreenAtEverySplit(PageSize { LineCount(4), ColumnCount(80) }, setup, text);
+}
+
+TEST_CASE("BulkScan.InvalidUtf8DecodedToAPrependCharacterGivesTheSameScreen", "[BulkScan]")
+{
+    // "\xD8" "A" decodes to U+0601 ARABIC SIGN SANAH, a Prepend character the '1' after it joins. In one
+    // read the stretch after it is part of mixed text, whose first byte goes through the segmenter. Cut
+    // anywhere after the '1', the stretch is a run of nothing but ASCII, which is written in bulk whole
+    // and does not join a Prepend character before it: the accepted divergence of the test below, so
+    // this one does not cut the read.
+    auto const text = "\xD8"
+                      "A1234567890 after a decoded prepend \xC3\xA4"sv;
+    auto const setup = GENERATE(values<std::string_view>({ ""sv, "\033[?1049h"sv }));
+    INFO(std::format("setup \"{}\"", core::escape(setup)));
     auto const pageSize = PageSize { LineCount(4), ColumnCount(80) };
     auto bulk = makeTerminal(pageSize, vtparser::BulkScan::Enabled);
     auto reference = makeTerminal(pageSize, vtparser::BulkScan::Disabled);
