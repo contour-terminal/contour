@@ -463,6 +463,11 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkDcsPassThrough(char cons
     if (byteCount == 0)
         return { ProcessKind::FallbackToFSM, 0 };
 
+    // Every byte of the run is ASCII, and the state machine abandons a pending multi-byte sequence
+    // at any byte that is not a continuation byte. Skipping it must not skip that, or an 8-bit ST
+    // after the run would still be taken for a continuation byte and the string would never end.
+    _stringUtf8Pending = 0;
+
     auto const payload = std::string_view { begin, byteCount };
     // Offering the bulk form is optional: the concept only asks for put(char), so a listener that
     // has nothing better to do with a run still gets it a byte at a time -- just without the state
@@ -483,6 +488,9 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkApcString(char const* be
     auto const byteCount = plainStringPayloadRunLength(begin, end);
     if (byteCount == 0)
         return { ProcessKind::FallbackToFSM, 0 };
+
+    // As in parseBulkDcsPassThrough(): the run abandons any pending multi-byte sequence.
+    _stringUtf8Pending = 0;
 
     auto const payload = std::string_view { begin, byteCount };
     // As in parseBulkDcsPassThrough(): the bulk form is optional, and a listener that only offers

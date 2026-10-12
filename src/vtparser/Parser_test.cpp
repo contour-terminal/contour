@@ -639,3 +639,36 @@ TEST_CASE("Parser.BulkScan.RandomStreamsMatchTheStateMachine", "[Parser][BulkSca
     INFO(std::format("seed {}\n{}", seed, difference));
     CHECK(difference.empty());
 }
+
+TEST_CASE("Parser.APC_MalformedUtf8_BulkRunStillEndsAt8bitST", "[Parser]")
+{
+    // A lead byte (E2) that no continuation byte follows: the state machine abandons it at 'A', so the
+    // 8-bit ST after 'A' sits at a character boundary and ends the string. 'A' arrives through the
+    // bulk APC scanner, which must abandon the sequence too.
+    MockParserEvents listener;
+    auto p = vtparser::Parser<vtparser::ParserEvents>(listener);
+    p.parseFragment("\033_x\xE2"
+                    "A\x9C"
+                    "Z"sv);
+    CHECK(p.state() == vtparser::State::Ground);
+    CHECK(listener.apc
+          == "{x\xE2"
+             "A}");
+    CHECK(listener.text == "Z");
+}
+
+TEST_CASE("Parser.BulkScan.MalformedUtf8InStringPayload", "[Parser][BulkScan]")
+{
+    auto const input = GENERATE(values<std::string_view>({
+        "\033Px\xE2"
+        "A\x9C"
+        "Z"sv, // DCS: a three-byte lead, cut short by ASCII
+        "\033_x\xE2"
+        "A\x9C"
+        "Z"sv, // APC: the same
+        "\033_x\xF0\x9F"
+        "AB\x9C"
+        "Z"sv, // APC: a four-byte lead cut short after two bytes
+    }));
+    checkEveryTwoWaySplit(input);
+}
