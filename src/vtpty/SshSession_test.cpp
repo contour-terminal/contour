@@ -61,3 +61,16 @@ TEST_CASE("readSshKeyFiles reads a key pair under a directory beyond ASCII", "[s
         CHECK(keys.error() == std::errc::no_such_file_or_directory);
     }
 }
+
+TEST_CASE("SshHostConfig::toString names each key file under its own label", "[ssh]")
+{
+    auto config = vtpty::SshHostConfig {};
+    config.hostname = "example.invalid";
+    config.username = "user";
+    config.privateKeyFile = "id_ed25519";
+    config.publicKeyFile = "id_ed25519.pub";
+    config.knownHostsFile = "known_hosts";
+    CHECK(config.toString()
+          == "user@example.invalid:22, private key: id_ed25519, public key: id_ed25519.pub, "
+             "known hosts: known_hosts, ForwardAgent: No");
+}

@@ -328,7 +328,7 @@ std::string SshHostConfig::toString() const
         add(std::format("private key: {}", privateKeyFile.string()));
 
     if (!publicKeyFile.empty())
-        add(std::format("public key: {}", privateKeyFile.string()));
+        add(std::format("public key: {}", publicKeyFile.string()));
 
     if (!knownHostsFile.empty())
         add(std::format("known hosts: {}", knownHostsFile.string()));
