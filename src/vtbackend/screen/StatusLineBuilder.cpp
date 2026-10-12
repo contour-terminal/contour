@@ -24,7 +24,9 @@
 
 using namespace std::string_view_literals;
 
-#ifdef _WIN32
+#ifdef CONTOUR_STATUSLINE_QPROCESS
+    #include <vtbackend/screen/WindowsStatusCommand.hpp>
+#elif defined(_WIN32)
     #define popen  _popen
     #define pclose _pclose
 #endif
@@ -449,6 +451,9 @@ namespace
         {
             core::ignoreUnused(this);
 
+#ifdef CONTOUR_STATUSLINE_QPROCESS
+            return detail::runWindowsStatusCommand(item.command);
+#else
             std::string result;
             if (FILE* fp = popen(item.command.c_str(), "r"); fp)
             {
@@ -466,6 +471,7 @@ namespace
             else
                 result = std::generic_category().message(errno);
             return result;
+#endif
         }
 
         std::string visit(StatusLineDefinitions::Text const& item)

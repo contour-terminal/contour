@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 
+#ifdef CONTOUR_STATUSLINE_QPROCESS
+    #include <vtbackend/screen/WindowsStatusCommand.hpp>
+#endif
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <concepts>
 #include <cstddef>
+#include <cstdio>
 #include <string>
 #include <variant>
 #include <vector>
@@ -321,3 +326,67 @@ TEST_CASE("parseStatusLineSegment.commandWithoutProgramIsNotAnItem", "[statuslin
     REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(segment[0]));
     CHECK(std::get<StatusLineDefinitions::Text>(segment[0]).text == "{Command}");
 }
+
+#ifdef CONTOUR_STATUSLINE_QPROCESS
+TEST_CASE("StatusLineCommand.WindowsShell", "[statusline][windows]")
+{
+    using detail::runWindowsStatusCommand;
+    CHECK(runWindowsStatusCommand("echo OK") == "OK");
+    CHECK(runWindowsStatusCommand("echo FIRST & echo SECOND") == "FIRST ");
+    CHECK(runWindowsStatusCommand("echo \"quoted text\"") == "\"quoted text\"");
+    CHECK(runWindowsStatusCommand("exit /b 7").empty());
+    CHECK(runWindowsStatusCommand("echo ERROR 1>&2").empty());
+    CHECK(runWindowsStatusCommand("(echo ERROR 1>&2) 2>&1") == "ERROR ");
+}
+
+TEST_CASE("StatusLineCommand.WindowsDrainsPipe", "[statusline][windows]")
+{
+    // Output exceeds the pipe capacity. Waiting before draining would deadlock.
+    CHECK(detail::runWindowsStatusCommand("for /L %i in (1,1,20000) do @echo OUTPUT") == "OUTPUT");
+}
+#endif
+
+#ifdef CONTOUR_STATUSLINE_QPROCESS
+TEST_CASE("StatusLineCommand.WindowsMatchesPopen", "[statusline][windows]")
+{
+    auto const reference = [](char const* command) {
+        auto* pipe = _popen(command, "r");
+        REQUIRE(pipe != nullptr);
+        std::string result;
+        std::array<char, 256> buffer {};
+        while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe))
+            result += buffer.data();
+        _pclose(pipe);
+        if (auto const newline = result.find('\n'); newline != std::string::npos)
+            result.erase(newline);
+        return result;
+    };
+    for (auto const* command: { "echo OK", "echo FIRST & echo SECOND", "echo \"quoted text\"",
+                              "exit /b 7", "(echo ERROR 1>&2) 2>&1",
+                              "for /L %i in (1,1,20000) do @echo OUTPUT" })
+    {
+        CAPTURE(command);
+        CHECK(detail::runWindowsStatusCommand(command) == reference(command));
+    }
+
+    std::array<char, MAX_PATH> directory {};
+    std::array<char, MAX_PATH> filename {};
+    REQUIRE(GetTempPathA(static_cast<DWORD>(directory.size()), directory.data()) != 0);
+    REQUIRE(GetTempFileNameA(directory.data(), "csl", 0, filename.data()) != 0);
+    struct RemoveFile
+    {
+        char const* path;
+        ~RemoveFile() { DeleteFileA(path); }
+    } cleanup { filename.data() };
+    auto const command = "type \"" + std::string(filename.data()) + "\"";
+    for (auto const* bytes: { "CRLF\r\nSECOND", "BARE\rRETURN", "CTRL\x1aTAIL", "FINAL\r" })
+    {
+        CAPTURE(bytes);
+        auto* file = std::fopen(filename.data(), "wb");
+        REQUIRE(file != nullptr);
+        std::fputs(bytes, file);
+        std::fclose(file);
+        CHECK(detail::runWindowsStatusCommand(command) == reference(command.c_str()));
+    }
+}
+#endif

@@ -172,6 +172,13 @@ target_link_libraries(vtbackend PUBLIC
     vtpty
 )
 
+# QProcess fixes GUI command capture on Windows; keep Unix and headless builds Qt-free.
+if(WIN32 AND CONTOUR_FRONTEND_GUI)
+    find_package(Qt6 REQUIRED COMPONENTS Core)
+    target_link_libraries(vtbackend PRIVATE Qt6::Core)
+    target_compile_definitions(vtbackend PRIVATE CONTOUR_STATUSLINE_QPROCESS)
+endif()
+
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_LOG_TRACE=1)
 endif()
@@ -254,6 +261,10 @@ if(LIBTERMINAL_TESTING)
         vt/VTWriter_test.cpp
     )
     target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend)
+    if(WIN32 AND CONTOUR_FRONTEND_GUI)
+        target_link_libraries(vtbackend_test Qt6::Core)
+        target_compile_definitions(vtbackend_test PRIVATE CONTOUR_STATUSLINE_QPROCESS)
+    endif()
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
 
     if(NOT WIN32)
