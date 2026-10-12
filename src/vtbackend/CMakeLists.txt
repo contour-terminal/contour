@@ -287,18 +287,21 @@ if(LIBTERMINAL_TESTING)
         # A name that is not a workload must fail, naming the ones that are.
         add_test(NAME bench_headless_throughput_rejects_unknown_kind
                  COMMAND bench-headless throughput size 1 runs 1 kinds no-such-workload)
-        set_tests_properties(bench_headless_throughput_rejects_unknown_kind PROPERTIES WILL_FAIL TRUE)
-        set_tests_properties(bench_headless_throughput_smoke bench_headless_throughput_rejects_unknown_kind
-                             PROPERTIES LABELS bench)
+        set_tests_properties(bench_headless_throughput_rejects_unknown_kind PROPERTIES PASS_REGULAR_EXPRESSION
+                             "Unknown workload 'no-such-workload'\\. Known: ascii, colored, sgr, utf8, tui\\.")
         add_test(NAME bench_headless_snapshot_smoke COMMAND bench-headless snapshot frames 10 runs 1)
-        set_tests_properties(bench_headless_snapshot_smoke PROPERTIES LABELS bench)
+        set(BENCH_HEADLESS_SMOKE_TESTS
+            bench_headless_throughput_smoke
+            bench_headless_throughput_rejects_unknown_kind
+            bench_headless_snapshot_smoke)
         if(NOT WIN32)
             add_test(NAME bench_headless_pty_smoke COMMAND bench-headless pty seconds 1)
-            set_tests_properties(bench_headless_pty_smoke PROPERTIES LABELS bench)
             add_test(NAME bench_headless_throughput_pty_smoke
                      COMMAND bench-headless throughput size 1 runs 1 kinds ascii screens primary pty)
-            set_tests_properties(bench_headless_throughput_pty_smoke PROPERTIES LABELS bench)
+            list(APPEND BENCH_HEADLESS_SMOKE_TESTS bench_headless_pty_smoke bench_headless_throughput_pty_smoke)
         endif()
+        # A hang -- a PTY nobody drains any more, say -- fails within a minute, not at CI's step timeout.
+        set_tests_properties(${BENCH_HEADLESS_SMOKE_TESTS} PROPERTIES LABELS bench TIMEOUT 60)
 
         if(CONTOUR_INSTALL_TOOLS)
             if(APPLE)

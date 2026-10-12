@@ -21,6 +21,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <expected>
@@ -1271,12 +1272,20 @@ class ContourHeadlessBench: public core::cli::App
 
         auto bytesTransferred = uint64_t { 0 };
         auto loopIterations = uint64_t { 0 };
+        // Set before the PTY is closed. The reader cannot ask the PTY instead: isClosed() takes no lock.
+        auto stopping = std::atomic<bool> { false };
         auto ptyStdoutReaderThread = std::thread { [&]() {
-            while (!pty.isClosed())
+            while (!stopping.load())
             {
                 auto const readResult = pty.read(*bufferObject, std::chrono::seconds(2), PtyReadSize);
                 if (!readResult)
+                {
+                    // Nothing to read yet is no reason to stop: once the PTY is full, the writer blocks
+                    // until this loop drains it, and nothing else would.
+                    if (errno == EAGAIN || errno == EINTR)
+                        continue;
                     break;
+                }
                 auto const dataChunk = readResult.value().data;
                 if (dataChunk.empty())
                     break;
@@ -1285,6 +1294,7 @@ class ContourHeadlessBench: public core::cli::App
             }
         } };
         auto cleanupReader = core::Finally { [&]() {
+            stopping.store(true);
             pty.close();
             ptyStdoutReaderThread.join();
         } };
