@@ -748,6 +748,31 @@ class Parser
 
     std::tuple<ProcessKind, size_t> parseBulkText(char const* begin, char const* end) noexcept;
 
+    /// The one exit from parseBulkText() that hands the next byte to the state machine after
+    /// unicode::scan_text() has run. The scan starts from an idle decoder, so this returns the decoder
+    /// to idle: the state machine then decodes every byte the scan did not print, exactly once.
+    ///
+    /// The other bulk scanners need no counterpart. They decide from the bytes alone and change no
+    /// state before they know they consume at least one byte, so their fallback leaves everything as
+    /// the state machine expects it.
+    /// @return FallbackToFSM.
+    std::tuple<ProcessKind, size_t> fallBackToStateMachineAfterScan() noexcept;
+
+    /// The shared body of the bulk string scanners: takes the leading run of plain payload bytes
+    /// (see plainStringPayloadRunLength()) and hands it to @p putPayload in one call.
+    ///
+    /// Falls back to the state machine, changing nothing, when the run is empty. Otherwise it
+    /// abandons any pending UTF-8 sequence in the string body, as the state machine does at an ASCII
+    /// byte, so that an 8-bit ST after the run still terminates the string.
+    /// @param begin      First byte to consider.
+    /// @param end        One past the last byte.
+    /// @param putPayload Receives the run as a std::string_view.
+    /// @return ContinueBulk and the run's length, or FallbackToFSM.
+    template <typename PutPayload>
+    std::tuple<ProcessKind, size_t> takePlainStringRun(char const* begin,
+                                                       char const* end,
+                                                       PutPayload putPayload) noexcept;
+
     /// Hands a whole run of DCS payload bytes to the handler in one call.
     ///
     /// The counterpart of parseBulkText() for device control strings. Without it every byte of a

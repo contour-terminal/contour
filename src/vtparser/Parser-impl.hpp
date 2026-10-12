@@ -458,8 +458,10 @@ constexpr bool isStringCollectingState(State s) noexcept
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
-auto Parser<EventListener, TraceStateChanges>::parseBulkDcsPassThrough(char const* begin,
-                                                                       char const* end) noexcept
+template <typename PutPayload>
+auto Parser<EventListener, TraceStateChanges>::takePlainStringRun(char const* begin,
+                                                                  char const* end,
+                                                                  PutPayload putPayload) noexcept
     -> std::tuple<ProcessKind, size_t>
 {
     auto const byteCount = plainStringPayloadRunLength(begin, end);
@@ -471,40 +473,39 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkDcsPassThrough(char cons
     // after the run would still be taken for a continuation byte and the string would never end.
     _stringUtf8Pending = 0;
 
-    auto const payload = std::string_view { begin, byteCount };
-    // Offering the bulk form is optional: the concept only asks for put(char), so a listener that
-    // has nothing better to do with a run still gets it a byte at a time -- just without the state
-    // machine in between, which is where the cost was.
-    if constexpr (requires { _eventListener.put(payload); })
-        _eventListener.put(payload);
-    else
-        for (auto const ch: payload)
-            _eventListener.put(ch);
-
+    putPayload(std::string_view { begin, byteCount });
     return { ProcessKind::ContinueBulk, byteCount };
+}
+
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
+auto Parser<EventListener, TraceStateChanges>::parseBulkDcsPassThrough(char const* begin,
+                                                                       char const* end) noexcept
+    -> std::tuple<ProcessKind, size_t>
+{
+    return takePlainStringRun(begin, end, [this](std::string_view payload) {
+        // Offering the bulk form is optional: the concept only asks for put(char), so a listener that
+        // has nothing better to do with a run still gets it a byte at a time -- just without the state
+        // machine in between, which is where the cost was.
+        if constexpr (requires { _eventListener.put(payload); })
+            _eventListener.put(payload);
+        else
+            for (auto const ch: payload)
+                _eventListener.put(ch);
+    });
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkApcString(char const* begin, char const* end) noexcept
     -> std::tuple<ProcessKind, size_t>
 {
-    auto const byteCount = plainStringPayloadRunLength(begin, end);
-    if (byteCount == 0)
-        return { ProcessKind::FallbackToFSM, 0 };
-
-    // As in parseBulkDcsPassThrough(): the run abandons any pending multi-byte sequence.
-    _stringUtf8Pending = 0;
-
-    auto const payload = std::string_view { begin, byteCount };
-    // As in parseBulkDcsPassThrough(): the bulk form is optional, and a listener that only offers
-    // putAPC(char) still gets the run without the state machine in between.
-    if constexpr (requires { _eventListener.putAPC(payload); })
-        _eventListener.putAPC(payload);
-    else
-        for (auto const ch: payload)
-            _eventListener.putAPC(ch);
-
-    return { ProcessKind::ContinueBulk, byteCount };
+    return takePlainStringRun(begin, end, [this](std::string_view payload) {
+        // As in parseBulkDcsPassThrough(): the bulk form is optional.
+        if constexpr (requires { _eventListener.putAPC(payload); })
+            _eventListener.putAPC(payload);
+        else
+            for (auto const ch: payload)
+                _eventListener.putAPC(ch);
+    });
 }
 
 /// The bytes a CSI parameter string is made of: digits, ';' between parameters and ':' between
@@ -661,6 +662,17 @@ bool Parser<EventListener, TraceStateChanges>::processVT52(uint8_t ch)
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
+auto Parser<EventListener, TraceStateChanges>::fallBackToStateMachineAfterScan() noexcept
+    -> std::tuple<ProcessKind, size_t>
+{
+    // parseBulkText() only scans from an idle decoder, and the state machine re-decodes from the
+    // first byte the scan did not hand on as text. Whatever partial character the scan left in the
+    // decoder is therefore the state machine's to decode, from the same idle state.
+    _scanState.utf8 = {};
+    return { ProcessKind::FallbackToFSM, 0 };
+}
+
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
     -> std::tuple<ProcessKind, size_t>
 {
@@ -698,7 +710,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     auto const [cellCount, subStart, subEnd] = unicode::scan_text(_scanState, chunk, maxCharCount);
 
     if (_scanState.next == input)
-        return { ProcessKind::FallbackToFSM, 0 };
+        return fallBackToStateMachineAfterScan();
 
     // We do not test on cellCount>0 because the scan could contain only a ZWJ (zero width
     // joiner), and that would be misleading.
@@ -709,11 +721,9 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     {
         // The scan consumed bytes but completed no text: a partial character at the end of the read,
         // possibly after an invalid byte. Its decoder state already holds that partial character, and
-        // the state machine decoding the same bytes on top of it decoded them twice and printed U+FFFD.
-        // Discard the scan's decoder state, so the state machine decodes those bytes once, from a
-        // clean decoder.
-        _scanState.utf8 = {};
-        return { ProcessKind::FallbackToFSM, 0 };
+        // the state machine decoding the same bytes on top of it would decode them twice and print
+        // U+FFFD.
+        return fallBackToStateMachineAfterScan();
     }
 
     assert(cellCount <= maxCharCount);
