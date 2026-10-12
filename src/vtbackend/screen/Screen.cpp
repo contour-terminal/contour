@@ -533,7 +533,7 @@ void Screen::writeText(string_view text, size_t cellCount)
         // fresh buffer. Without this, the next PTY read reuses the same large buffer,
         // batching the subsequent output (e.g., shell prompt) into the same chunk —
         // preventing the display from refreshing between them.
-        if (auto const buf = _terminal->parsingBuffer(); buf)
+        if (auto const& buf = _terminal->parsingBuffer(); buf)
             buf->advanceHotEndUntil(text.data() + *bulkWrittenUntil);
         _terminal->resetInstructionCounter();
     }
