@@ -3369,6 +3369,31 @@ TEST_CASE("Terminal.processInputOnce.readsAheadWhileTheStateIsTaken", "[terminal
               .starts_with("0123456789abcdefghijklmnopqrstuv"));
 }
 
+TEST_CASE("Terminal.processInputOnce.readAheadLeavesTheHotEndWhereAPlainReadWould", "[terminal][threading]")
+{
+    // readAhead() claims the bytes it reads by moving the buffer's hot end over them; the parse then
+    // moves it on exactly as for a batch that was never read ahead. releaseReadAhead() is what hands
+    // the claim back first -- without it the hot end stays at the batch's end, which a plain read of
+    // the same input never leaves it at, and the next read allocates a fresh buffer too early.
+    constexpr auto Text = "0123456789abcdefghijklmnopqrstuv\r\n"sv; // four pieces of eight and a tail
+
+    auto plain = MockTerm<> { PageSize { LineCount(3), ColumnCount(40) }, LineCount(10), 1024 };
+    plain.mockPty().appendStdOutBuffer(Text);
+    REQUIRE(plain.terminal.processInputOnce());
+    auto const expected = plain.terminal.currentPtyBuffer()->bytesUsed();
+
+    auto mock = MockTerm<PiecewisePty<8>> { PageSize { LineCount(3), ColumnCount(40) }, LineCount(10), 1024 };
+    mock.mockPty().appendStdOutBuffer(Text);
+    mock.terminal.lock(); // the render thread's hold
+    auto parse = std::async(std::launch::async, [&mock] { return mock.terminal.processInputOnce(); });
+    auto const served = mock.mockPty().awaitServed(Text.size(), 2s);
+    mock.terminal.unlock();
+    REQUIRE(parse.get());
+
+    CHECK(served == Awaited::Reached);
+    CHECK(mock.terminal.currentPtyBuffer()->bytesUsed() == expected);
+}
+
 TEST_CASE("Terminal.processInputOnce.readAheadStepsAroundBytesAppendedMeanwhile", "[terminal][threading]")
 {
     // Another writer appended to the buffer while the parser thread read ahead, so the next read lands
