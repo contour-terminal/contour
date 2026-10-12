@@ -281,8 +281,8 @@ if(LIBTERMINAL_TESTING)
             vtbackend
         )
 
-        # One short run of each subcommand that needs no input file, so that a crash like the one
-        # `bench-headless pty` had -- it used its PTY before opening it -- fails the suite.
+        # A short run of throughput, snapshot and pty each, so that a crash like the one `bench-headless pty`
+        # had -- it used its PTY before opening it -- fails the suite.
         add_test(NAME bench_headless_throughput_smoke COMMAND bench-headless throughput size 1 runs 1)
         # A name that is not a workload must fail, naming the ones that are.
         add_test(NAME bench_headless_throughput_rejects_unknown_kind

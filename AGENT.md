@@ -283,7 +283,8 @@ not about naming it:
 - `shell/` — OSC 133 semantic prompts and what is built on them (command blocks, folding).
 - `render/` — `RenderBuffer`, what `vtrasterizer` consumes, and nothing else.
 - `screen/` — the engine, and everything that walks it: `Screen`, `Terminal`, and the builders.
-- `testing/` — `MockTerm` and `TestHelpers`, consumed by `vtconformance` and a `vtrasterizer` test.
+- `testing/` — `MockTerm` and `TestHelpers`, consumed by `vtconformance` and a `vtrasterizer` test, and
+  `Workloads`, the table of synthetic output that `bench-headless` measures with.
 
 The graph is acyclic — `core/ → grid/ → vt/ → render/ → screen/` — and it stays that way because
 the builders live with the engine they walk rather than with the buffer they fill. Only

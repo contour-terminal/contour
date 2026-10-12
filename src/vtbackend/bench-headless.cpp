@@ -40,6 +40,7 @@
 #include <system_error>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -247,7 +248,9 @@ struct KeyPressBenchOptions
     unsigned queryEvery = 0;                   ///< Lines between DA1 queries in the flood; 0 sends none.
 };
 
-/// The application's process, counting the bytes read from its PTY: the output the terminal parsed.
+/// The application's process, keeping count of what the terminal read from its PTY -- the output it parsed:
+/// the bytes, the reads that delivered them, and when the first one arrived. Any thread may ask, while
+/// another one reads.
 class ByteCountingProcess final: public vtpty::Process
 {
   public:
@@ -256,13 +259,15 @@ class ByteCountingProcess final: public vtpty::Process
     /// @return How many bytes have been read so far.
     [[nodiscard]] uint64_t bytesRead() const noexcept { return _bytesRead.load(std::memory_order_relaxed); }
 
+    /// @return How many reads have delivered bytes so far.
+    [[nodiscard]] uint64_t reads() const noexcept { return _reads.load(std::memory_order_relaxed); }
+
     /// @return When the first byte was read, or nullopt while none has been.
     [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> firstReadAt() const noexcept
     {
-        auto const ticks = _firstReadAt.load(std::memory_order_relaxed);
-        if (ticks == 0)
+        if (!_hasFirstReadAt.load(std::memory_order_acquire))
             return std::nullopt;
-        return std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(ticks));
+        return _firstReadAt;
     }
 
     [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
@@ -270,20 +275,121 @@ class ByteCountingProcess final: public vtpty::Process
                                                  size_t size) override
     {
         auto result = Process::read(storage, timeout, size);
-        if (result)
+        if (result && !result->data.empty())
         {
-            if (!result->data.empty() && _firstReadAt.load(std::memory_order_relaxed) == 0)
-                _firstReadAt.store(std::chrono::steady_clock::now().time_since_epoch().count(),
-                                   std::memory_order_relaxed);
+            if (!_hasFirstReadAt.load(std::memory_order_relaxed))
+            {
+                _firstReadAt = std::chrono::steady_clock::now();
+                _hasFirstReadAt.store(true, std::memory_order_release); // publishes _firstReadAt
+            }
             _bytesRead.fetch_add(result->data.size(), std::memory_order_relaxed);
+            _reads.fetch_add(1, std::memory_order_relaxed);
         }
         return result;
     }
 
   private:
     std::atomic<uint64_t> _bytesRead = 0;
-    /// When the first byte was read, in ticks since the clock's epoch; 0 for none.
-    std::atomic<std::chrono::steady_clock::rep> _firstReadAt = 0;
+    std::atomic<uint64_t> _reads = 0;
+    /// When the first byte was read. Written once, by the reading thread, before _hasFirstReadAt is set.
+    std::chrono::steady_clock::time_point _firstReadAt {};
+    std::atomic<bool> _hasFirstReadAt = false;
+};
+
+/// A file in the temporary directory, for an application to read; removed again when this goes.
+class ScratchFile
+{
+  public:
+    /// Writes @p content to a new file.
+    /// @param purpose What the file is for, which its name says.
+    /// @return The file, or why it could not be written.
+    [[nodiscard]] static std::expected<ScratchFile, std::string> create(std::string_view purpose,
+                                                                        std::string_view content)
+    {
+        auto file = ScratchFile { std::filesystem::temp_directory_path()
+                                  / std::format("contour-bench-{}-{}", purpose, std::random_device {}()) };
+        if (!(std::ofstream(file._path, std::ios::binary) << content))
+            return std::unexpected(std::format("Cannot write '{}'.", file._path.string()));
+        return file;
+    }
+
+    ScratchFile(ScratchFile&& other) noexcept: _path { std::exchange(other._path, {}) } {}
+    ScratchFile(ScratchFile const&) = delete;
+    ScratchFile& operator=(ScratchFile const&) = delete;
+    ScratchFile& operator=(ScratchFile&&) = delete;
+
+    ~ScratchFile()
+    {
+        if (_path.empty())
+            return;
+        auto ignored = std::error_code {};
+        std::filesystem::remove(_path, ignored);
+    }
+
+    /// @return Where the file is.
+    [[nodiscard]] std::filesystem::path const& path() const noexcept { return _path; }
+
+  private:
+    explicit ScratchFile(std::filesystem::path path): _path { std::move(path) } {}
+
+    std::filesystem::path _path; ///< Empty once moved from.
+};
+
+/// A terminal on a real PTY whose application is a script, as the key press and pty throughput benchmarks run
+/// one. Constructing it builds both; start() runs the script.
+class ScriptedSession
+{
+  public:
+    /// @param script   Run by `/bin/sh -c`, with @p input as `$0`.
+    /// @param input    The file the script reads.
+    /// @param settings The terminal's settings; its page size is the PTY's too.
+    /// @param env      The environment the terminal reads.
+    ScriptedSession(std::string_view script,
+                    std::filesystem::path const& input,
+                    vtbackend::Settings const& settings,
+                    core::Environment const& env):
+        _terminal { _events,
+                    env,
+                    std::make_unique<ByteCountingProcess>(
+                        vtpty::Process::ExecInfo { .program = "/bin/sh",
+                                                   .arguments = { "-c", std::string(script), input.string() },
+                                                   .workingDirectory = std::filesystem::temp_directory_path(),
+                                                   .env = {},
+                                                   .removedEnvironment = {} },
+                        vtpty::createPty(settings.pageSize, std::nullopt),
+                        /*escapeSandbox=*/false,
+                        // a benchmark measures the terminal, not systemd: no scope, and no placement latency
+                        std::make_shared<vtpty::NoPlacement>()),
+                    settings,
+                    std::nullopt,
+                    std::chrono::steady_clock::now() }
+    {
+    }
+
+    /// Starts the script.
+    /// @return Nothing, or why it could not be started.
+    [[nodiscard]] std::expected<void, std::string> start()
+    {
+        return _terminal.device()
+            .start()
+            .transform([](vtpty::StartOutcome const&) {})
+            .transform_error([](vtpty::StartFailure const& failure) {
+                return std::format("Cannot start the application: {}", failure);
+            });
+    }
+
+    /// @return The terminal the script writes to.
+    [[nodiscard]] vtbackend::Terminal& terminal() noexcept { return _terminal; }
+
+    /// @return The script's process, and what has been read from it.
+    [[nodiscard]] ByteCountingProcess& process() noexcept
+    {
+        return static_cast<ByteCountingProcess&>(_terminal.device());
+    }
+
+  private:
+    vtbackend::Terminal::NullEvents _events;
+    vtbackend::Terminal _terminal;
 };
 
 /// Creates log-like output: a dimmed timestamp, a coloured level and a message on every line.
@@ -436,42 +542,24 @@ static int benchKeyPressLatency(KeyPressBenchOptions const& options, core::Envir
     auto const pageSize = vtbackend::PageSize { vtbackend::LineCount(40), vtbackend::ColumnCount(120) };
     auto const application = applicationFor(options.load);
 
-    auto const logFile = std::filesystem::temp_directory_path()
-                         / std::format("contour-bench-keypress-{}.log", std::random_device {}());
-    auto removeLogFile = core::Finally { [&]() {
-        auto ignored = std::error_code {};
-        std::filesystem::remove(logFile, ignored);
-    } };
-    if (!(std::ofstream(logFile, std::ios::binary) << createLogText(LogSize, options.queryEvery)))
+    auto const logFile = ScratchFile::create("keypress", createLogText(LogSize, options.queryEvery));
+    if (!logFile)
     {
-        cerr << std::format("Cannot write the application's output to '{}'.\n", logFile.string());
+        cerr << logFile.error() << '\n';
         return EXIT_FAILURE;
     }
-
-    auto ownedProcess = std::make_unique<ByteCountingProcess>(
-        vtpty::Process::ExecInfo { .program = "/bin/sh",
-                                   .arguments = { "-c", std::string(application.script), logFile.string() },
-                                   .workingDirectory = std::filesystem::temp_directory_path(),
-                                   .env = {},
-                                   .removedEnvironment = {} },
-        vtpty::createPty(pageSize, std::nullopt),
-        /*escapeSandbox=*/false,
-        // a benchmark measures the terminal, not systemd: no scope, and no placement latency
-        std::make_shared<vtpty::NoPlacement>());
-    auto& process = *ownedProcess;
 
     auto settings = vtbackend::Settings {};
     settings.pageSize = pageSize;
     settings.ptyReadBufferSize = options.ptyReadSize;
-    auto events = vtbackend::Terminal::NullEvents {};
-    auto terminal = vtbackend::Terminal { events,   env,          std::move(ownedProcess),
-                                          settings, std::nullopt, std::chrono::steady_clock::now() };
-
-    if (auto const started = terminal.device().start(); !started)
+    auto session = ScriptedSession { application.script, logFile->path(), settings, env };
+    if (auto const started = session.start(); !started)
     {
-        cerr << std::format("Cannot start the application: {}\n", started.error().detail);
+        cerr << started.error() << '\n';
         return EXIT_FAILURE;
     }
+    auto& terminal = session.terminal();
+    auto& process = session.process();
 
     // Runs until the PTY reports the application gone, as contour's own read loop does.
     auto parser = std::thread { [&]() {
@@ -554,9 +642,9 @@ constexpr auto BenchScreens = std::array {
 /// @param what  What a row is called, for the error message.
 /// @return The rows, or a message naming the unknown name and every known one.
 template <typename Row>
-std::expected<std::vector<Row>, std::string> pickByName(std::span<Row const> table,
-                                                        std::string_view names,
-                                                        std::string_view what)
+[[nodiscard]] std::expected<std::vector<Row>, std::string> pickByName(std::span<Row const> table,
+                                                                      std::string_view names,
+                                                                      std::string_view what)
 {
     if (names.empty())
         return std::vector<Row>(table.begin(), table.end());
@@ -567,14 +655,46 @@ std::expected<std::vector<Row>, std::string> pickByName(std::span<Row const> tab
         auto const name = std::string_view(nameRange.begin(), nameRange.end());
         auto const row = std::ranges::find(table, name, &Row::name);
         if (row == table.end())
-        {
-            auto const known = table | std::views::transform(&Row::name) | std::views::join_with(", "sv)
-                               | std::ranges::to<std::string>();
-            return std::unexpected(std::format("Unknown {} '{}'. Known: {}.", what, name, known));
-        }
+            return std::unexpected(
+                std::format("Unknown {} '{}'. Known: {}.",
+                            what,
+                            name,
+                            core::joinHumanReadable(table | std::views::transform(&Row::name))));
         picked.push_back(*row);
     }
     return picked;
+}
+
+/// The workloads and screens one throughput or snapshot run covers, in the order it reports them.
+struct BenchSelection
+{
+    std::vector<vtbackend::test::Workload> workloads; ///< What is written.
+    std::vector<BenchScreen> screens;                 ///< Where each workload is written.
+};
+
+/// Runs @p measure @p runs times, and keeps the fastest run.
+/// @param runs    How many runs; at least one.
+/// @param measure One run. It returns what the run measured, the fastest run ordering least, or a
+///                std::expected of that where a run can fail.
+/// @return The least of what @p measure returned. A failed run ends the series, and its failure is returned.
+template <typename Measure>
+[[nodiscard]] auto fastestOf(unsigned runs, Measure const& measure) -> std::invoke_result_t<Measure const&>
+{
+    auto fastest = measure();
+    for ([[maybe_unused]] auto const run: std::views::iota(1u, runs))
+    {
+        if constexpr (requires(decltype(fastest) const& result) { result.error(); })
+        {
+            if (!fastest)
+                break;
+            fastest = measure().transform([&](auto const& next) { return std::min(*fastest, next); });
+        }
+        else
+        {
+            fastest = std::min(fastest, measure());
+        }
+    }
+    return fastest;
 }
 
 /// Writes @p text into @p vt's terminal through its mock PTY, outside any measurement.
@@ -589,8 +709,8 @@ void feed(vtbackend::MockTerm<vtpty::MockViewPty>& vt, std::string_view text)
 ///
 /// Out of line so that callgrind can count exactly this, with `--toggle-collect='*runWorkloadOnce*'`.
 /// @return How long it took.
-[[gnu::noinline]] std::chrono::nanoseconds runWorkloadOnce(vtbackend::Terminal& terminal,
-                                                           vtpty::MockViewPty& pty)
+[[gnu::noinline, nodiscard]] std::chrono::nanoseconds runWorkloadOnce(vtbackend::Terminal& terminal,
+                                                                      vtpty::MockViewPty& pty)
 {
     auto const start = std::chrono::steady_clock::now();
     while (!pty.stdoutBuffer().empty())
@@ -606,7 +726,7 @@ enum class ThroughputDevice : uint8_t
 };
 
 /// @return How the report describes @p device.
-constexpr std::string_view describe(ThroughputDevice device) noexcept
+[[nodiscard]] constexpr std::string_view describe(ThroughputDevice device) noexcept
 {
     switch (device)
     {
@@ -625,73 +745,62 @@ struct ThroughputOptions
     ThroughputDevice device = ThroughputDevice::MockPty; ///< Where each run's bytes come from.
 };
 
+/// What one throughput run measured. Runs order by how long they took first, so the fastest of several is the
+/// least.
+struct ThroughputRun
+{
+    std::chrono::nanoseconds elapsed {}; ///< How long the terminal took to take the workload in.
+    std::optional<uint64_t> reads {}; ///< The PTY reads that delivered it; counted through a real PTY only.
+
+    auto operator<=>(ThroughputRun const&) const = default;
+};
+
 /// @return How long a terminal took to take in @p input on @p screen, fed from memory @p ptyReadSize
 ///         bytes per read, once an untimed pass of the same input had brought it to its steady state.
-std::chrono::nanoseconds measureFromMemory(std::string_view input,
-                                           BenchScreen const& screen,
-                                           size_t ptyReadSize)
+[[nodiscard]] ThroughputRun measureFromMemory(std::string_view input,
+                                              BenchScreen const& screen,
+                                              size_t ptyReadSize)
 {
     auto vt = vtbackend::MockTerm<vtpty::MockViewPty>(BenchPageSize, BenchHistory, ptyReadSize);
     vt.terminal.setMode(vtbackend::DECMode::AutoWrap, true);
     feed(vt, screen.entrySequence);
     feed(vt, input); // fills the scrollback, @see BenchHistory
     vt.mockPty().setReadData(input);
-    return runWorkloadOnce(vt.terminal, vt.mockPty());
+    return ThroughputRun { .elapsed = runWorkloadOnce(vt.terminal, vt.mockPty()), .reads = std::nullopt };
 }
 
 /// @return How long a terminal took to take in @p input on @p screen when a child process wrote it through a
-///         real PTY, once an untimed pass of the same input had brought it to its steady state: from the
-///         first byte read to the read that reported the writer gone. Or why the run could not happen.
-std::expected<std::chrono::nanoseconds, std::string> measureThroughPty(std::string_view input,
-                                                                       BenchScreen const& screen,
-                                                                       size_t ptyReadSize,
-                                                                       core::Environment const& env)
-{
+///         real PTY, reading it from @p file, once an untimed pass of the same input had brought the terminal
+///         to its steady state: from the first byte read to the read that reported the writer gone, including
+///         the writer's exit. Or why the run could not happen.
 #ifdef _WIN32
-    (void) input;
-    (void) screen;
-    (void) ptyReadSize;
-    (void) env;
+[[nodiscard]] std::expected<ThroughputRun, std::string> measureThroughPty(
+    std::string_view, std::filesystem::path const&, BenchScreen const&, size_t, core::Environment const&)
+{
     return std::unexpected("The pty mode writes through a POSIX shell, which Windows lacks."s);
+}
 #else
-    auto const file = std::filesystem::temp_directory_path()
-                      / std::format("contour-bench-throughput-{}.bin", std::random_device {}());
-    auto removeFile = core::Finally { [&]() {
-        auto ignored = std::error_code {};
-        std::filesystem::remove(file, ignored);
-    } };
-    if (!(std::ofstream(file, std::ios::binary) << input))
-        return std::unexpected(std::format("Cannot write the workload to '{}'.", file.string()));
-
-    // Raw mode, so that the line discipline passes every byte through unchanged: no CRLF translation. Should
-    // stty fail, nothing is written, and the byte count below reports it.
-    auto ownedProcess = std::make_unique<ByteCountingProcess>(
-        vtpty::Process::ExecInfo { .program = "/bin/sh",
-                                   .arguments = { "-c", "stty raw -echo && exec cat \"$0\"", file.string() },
-                                   .workingDirectory = std::filesystem::temp_directory_path(),
-                                   .env = {},
-                                   .removedEnvironment = {} },
-        vtpty::createPty(BenchPageSize, std::nullopt),
-        /*escapeSandbox=*/false,
-        // a benchmark measures the terminal, not systemd: no scope, and no placement latency
-        std::make_shared<vtpty::NoPlacement>());
-    auto& process = *ownedProcess;
-
+[[nodiscard]] std::expected<ThroughputRun, std::string> measureThroughPty(std::string_view input,
+                                                                          std::filesystem::path const& file,
+                                                                          BenchScreen const& screen,
+                                                                          size_t ptyReadSize,
+                                                                          core::Environment const& env)
+{
     auto settings = vtbackend::Settings {};
     settings.pageSize = BenchPageSize;
     settings.historyLimits = vtbackend::HistoryLimits::plain(BenchHistory);
     settings.ptyReadBufferSize = ptyReadSize;
-    auto events = vtbackend::Terminal::NullEvents {};
-    auto terminal = vtbackend::Terminal {
-        events, env, std::move(ownedProcess), settings, std::chrono::steady_clock::now()
-    };
+    // Raw mode, so that the line discipline passes every byte through unchanged: no CRLF translation. Should
+    // stty fail, nothing is written, and the byte count below reports it.
+    auto session = ScriptedSession { "stty raw -echo && exec cat \"$0\"", file, settings, env };
+    auto& terminal = session.terminal();
     terminal.setMode(vtbackend::DECMode::AutoWrap, true);
     // Straight to the screen, before the writer exists: fills the scrollback, @see BenchHistory.
     terminal.writeToScreen(screen.entrySequence);
     terminal.writeToScreen(input);
 
-    if (auto const started = terminal.device().start(); !started)
-        return std::unexpected(std::format("Cannot start the writer: {}", started.error().detail));
+    if (auto const started = session.start(); !started)
+        return std::unexpected(started.error());
 
     // Runs until the PTY reports the writer gone, as contour's own read loop does.
     while (terminal.processInputOnce())
@@ -699,25 +808,35 @@ std::expected<std::chrono::nanoseconds, std::string> measureThroughPty(std::stri
     }
     auto const finished = std::chrono::steady_clock::now();
 
-    auto const expected = input.size();
+    auto const& process = session.process();
+    auto const bytesWritten = input.size();
     auto const firstRead = process.firstReadAt();
-    if (!firstRead || process.bytesRead() != expected)
+    if (!firstRead || process.bytesRead() != bytesWritten)
         return std::unexpected(
-            std::format("{} bytes arrived where {} were written.", process.bytesRead(), expected));
-    return finished - *firstRead;
-#endif
+            std::format("{} bytes arrived where {} were written.", process.bytesRead(), bytesWritten));
+    return ThroughputRun { .elapsed = finished - *firstRead, .reads = process.reads() };
 }
+#endif
 
-/// @return How long one run took, or why it could not run.
-std::expected<std::chrono::nanoseconds, std::string> measureThroughput(std::string_view input,
-                                                                       BenchScreen const& screen,
-                                                                       ThroughputOptions const& options,
-                                                                       core::Environment const& env)
+/// @return The fastest of @p options.runs runs of @p input on @p screen, or why one could not run.
+[[nodiscard]] std::expected<ThroughputRun, std::string> measureFastestThroughput(
+    std::string_view input,
+    BenchScreen const& screen,
+    ThroughputOptions const& options,
+    core::Environment const& env)
 {
     switch (options.device)
     {
-        case ThroughputDevice::MockPty: return measureFromMemory(input, screen, options.ptyReadSize);
-        case ThroughputDevice::RealPty: return measureThroughPty(input, screen, options.ptyReadSize, env);
+        case ThroughputDevice::MockPty:
+            return fastestOf(options.runs,
+                             [&] { return measureFromMemory(input, screen, options.ptyReadSize); });
+        case ThroughputDevice::RealPty:
+            // The writer reads the workload from a file, which every run reuses.
+            return ScratchFile::create("throughput", input).and_then([&](ScratchFile const& file) {
+                return fastestOf(options.runs, [&] {
+                    return measureThroughPty(input, file.path(), screen, options.ptyReadSize, env);
+                });
+            });
     }
     std::unreachable();
 }
@@ -729,7 +848,7 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
                            core::Environment const& env)
 {
     cout << std::format(
-        "Throughput: {} MiB per workload, fastest of {} runs, PTY read size {} bytes, {}\n",
+        "Throughput: {} MiB per workload, fastest of {} runs, PTY reads of up to {} bytes, {}\n",
         options.bytesPerWorkload / (size_t { 1024 } * 1024),
         options.runs,
         core::nextPowerOfTwo(static_cast<size_t>(options.ptyReadSize)), // as Terminal rounds it
@@ -740,21 +859,19 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
         auto const mebibytes = static_cast<double>(input.size()) / (1024.0 * 1024.0);
         for (auto const& screen: screens)
         {
-            auto fastest = std::chrono::nanoseconds::max();
-            for ([[maybe_unused]] auto const run: std::views::iota(0u, options.runs))
+            auto const fastest = measureFastestThroughput(input, screen, options, env);
+            if (!fastest)
             {
-                auto const elapsed = measureThroughput(input, screen, options, env);
-                if (!elapsed)
-                {
-                    cerr << elapsed.error() << '\n';
-                    return EXIT_FAILURE;
-                }
-                fastest = std::min(fastest, *elapsed);
+                cerr << fastest.error() << '\n';
+                return EXIT_FAILURE;
             }
-            cout << std::format("{:<8} {:<9} {:9.1f} MiB/s\n",
-                                workload.name,
-                                screen.name,
-                                mebibytes / std::chrono::duration<double>(fastest).count());
+            auto row = std::format("{:<8} {:<9} {:9.1f} MiB/s",
+                                   workload.name,
+                                   screen.name,
+                                   mebibytes / std::chrono::duration<double>(fastest->elapsed).count());
+            if (fastest->reads)
+                row += std::format(" {:9} bytes/read", input.size() / *fastest->reads);
+            cout << row << '\n';
         }
     }
     return EXIT_SUCCESS;
@@ -796,7 +913,8 @@ struct SnapshotOptions
 ///
 /// Out of line so that callgrind can count exactly this, with `--toggle-collect='*runSnapshotFrames*'`.
 /// @return How long all the frames took.
-[[gnu::noinline]] std::chrono::nanoseconds runSnapshotFrames(vtbackend::Terminal& terminal, unsigned frames)
+[[gnu::noinline, nodiscard]] std::chrono::nanoseconds runSnapshotFrames(vtbackend::Terminal& terminal,
+                                                                        unsigned frames)
 {
     auto const start = std::chrono::steady_clock::now();
     for ([[maybe_unused]] auto const frame: std::views::iota(0u, frames))
@@ -805,10 +923,10 @@ struct SnapshotOptions
 }
 
 /// @return The mean time of one frame, once @p fill has been written on @p screen with @p statusLine shown.
-std::chrono::duration<double, std::micro> measureSnapshot(std::string_view fill,
-                                                          BenchScreen const& screen,
-                                                          SnapshotStatusLine const& statusLine,
-                                                          unsigned frames)
+[[nodiscard]] std::chrono::duration<double, std::micro> measureSnapshot(std::string_view fill,
+                                                                        BenchScreen const& screen,
+                                                                        SnapshotStatusLine const& statusLine,
+                                                                        unsigned frames)
 {
     auto const totalPageSize = vtbackend::PageSize { .lines = BenchPageSize.lines + statusLine.height,
                                                      .columns = BenchPageSize.columns };
@@ -839,9 +957,8 @@ int runSnapshotBenchmark(std::span<vtbackend::test::Workload const> workloads,
             auto line = std::format("{:<8} {:<9}", workload.name, screen.name);
             for (auto const& statusLine: SnapshotStatusLines)
             {
-                auto fastest = std::chrono::duration<double, std::micro>::max();
-                for ([[maybe_unused]] auto const run: std::views::iota(0u, options.runs))
-                    fastest = std::min(fastest, measureSnapshot(fill, screen, statusLine, options.frames));
+                auto const fastest = fastestOf(
+                    options.runs, [&] { return measureSnapshot(fill, screen, statusLine, options.frames); });
                 line += std::format(" {:9.1f} us/frame ({})", fastest.count(), statusLine.label);
             }
             cout << line << '\n';
@@ -892,6 +1009,18 @@ class ContourHeadlessBench: public core::cli::App
         auto constexpr ThroughputDefaults = ThroughputOptions {};
         auto constexpr SnapshotDefaults = SnapshotOptions {};
 
+        // What the throughput and snapshot benchmarks cover, which both pick alike: @see selectionFor().
+        auto const kindsOption = CLI::Option { .name = "kinds",
+                                               .v = CLI::Value { ""s },
+                                               .helpText = "Comma-separated workloads, all when empty; an "
+                                                           "unknown name lists the known ones.",
+                                               .placeholder = "LIST" };
+        auto const screensOption =
+            CLI::Option { .name = "screens",
+                          .v = CLI::Value { ""s },
+                          .helpText = "Comma-separated screens (primary, alternate), both when empty.",
+                          .placeholder = "LIST" };
+
         auto const perfOptions = CLI::OptionList {
             CLI::Option { .name = "size",
                           .v = CLI::Value { 32u },
@@ -917,16 +1046,8 @@ class ContourHeadlessBench: public core::cli::App
             CLI::Option { .name = "runs",
                           .v = CLI::Value { ThroughputDefaults.runs },
                           .helpText = "Runs per workload and screen; the fastest counts." },
-            CLI::Option { .name = "kinds",
-                          .v = CLI::Value { ""s },
-                          .helpText = "Comma-separated workloads to run, all when empty; an unknown name "
-                                      "lists the known ones.",
-                          .placeholder = "LIST" },
-            CLI::Option { .name = "screens",
-                          .v = CLI::Value { ""s },
-                          .helpText = "Comma-separated screens to run on (primary, alternate), both when "
-                                      "empty.",
-                          .placeholder = "LIST" },
+            kindsOption,
+            screensOption,
             CLI::Option { .name = "read-size",
                           .v = CLI::Value { ThroughputDefaults.ptyReadSize },
                           .helpText = "Bytes per PTY read, which is what the parser takes per lock; the "
@@ -945,16 +1066,8 @@ class ContourHeadlessBench: public core::cli::App
             CLI::Option { .name = "runs",
                           .v = CLI::Value { SnapshotDefaults.runs },
                           .helpText = "Runs per workload, screen and status line; the fastest counts." },
-            CLI::Option { .name = "kinds",
-                          .v = CLI::Value { ""s },
-                          .helpText = "Comma-separated workloads to fill with, all when empty; an unknown "
-                                      "name lists the known ones.",
-                          .placeholder = "LIST" },
-            CLI::Option { .name = "screens",
-                          .v = CLI::Value { ""s },
-                          .helpText = "Comma-separated screens to fill (primary, alternate), both when "
-                                      "empty.",
-                          .placeholder = "LIST" },
+            kindsOption,
+            screensOption,
         };
 
         return CLI::Command {
@@ -1103,20 +1216,32 @@ class ContourHeadlessBench: public core::cli::App
         return benchKeyPressLatency(options, processEnvironment());
     }
 
+    /// Picks the workloads and screens that @p command's `kinds` and `screens` options name.
+    /// @param command The subcommand, as the command line names it.
+    /// @return Both, or a message naming the unknown name and every known one.
+    [[nodiscard]] std::expected<BenchSelection, std::string> selectionFor(std::string_view command) const
+    {
+        auto const prefix = std::format("bench-headless.{}.", command);
+        return pickByName<vtbackend::test::Workload>(
+                   vtbackend::test::Workloads, parameters().str(prefix + "kinds"), "workload")
+            .and_then([&](std::vector<vtbackend::test::Workload> workloads) {
+                return pickByName<BenchScreen>(BenchScreens, parameters().str(prefix + "screens"), "screen")
+                    .transform([&](std::vector<BenchScreen> screens) {
+                        return BenchSelection { .workloads = std::move(workloads),
+                                                .screens = std::move(screens) };
+                    });
+            });
+    }
+
+    /// Runs `bench-headless throughput`: how fast the terminal takes in each picked workload on each picked
+    /// screen.
+    /// @return EXIT_SUCCESS, or EXIT_FAILURE when an option is invalid or a run fails.
     int benchThroughput()
     {
-        auto const workloads = pickByName<vtbackend::test::Workload>(
-            vtbackend::test::Workloads, parameters().str("bench-headless.throughput.kinds"), "workload");
-        if (!workloads)
+        auto const selection = selectionFor("throughput");
+        if (!selection)
         {
-            cerr << workloads.error() << '\n';
-            return EXIT_FAILURE;
-        }
-        auto const screens = pickByName<BenchScreen>(
-            BenchScreens, parameters().str("bench-headless.throughput.screens"), "screen");
-        if (!screens)
-        {
-            cerr << screens.error() << '\n';
+            cerr << selection.error() << '\n';
             return EXIT_FAILURE;
         }
         auto const options = ThroughputOptions {
@@ -1131,23 +1256,19 @@ class ContourHeadlessBench: public core::cli::App
             cerr << "size, runs and read-size must each be at least 1.\n";
             return EXIT_FAILURE;
         }
-        return runThroughputBenchmark(*workloads, *screens, options, processEnvironment());
+        return runThroughputBenchmark(
+            selection->workloads, selection->screens, options, processEnvironment());
     }
 
+    /// Runs `bench-headless snapshot`: what the render thread does per frame, once each picked workload has
+    /// filled each picked screen.
+    /// @return EXIT_SUCCESS, or EXIT_FAILURE when an option is invalid.
     int benchSnapshot()
     {
-        auto const workloads = pickByName<vtbackend::test::Workload>(
-            vtbackend::test::Workloads, parameters().str("bench-headless.snapshot.kinds"), "workload");
-        if (!workloads)
+        auto const selection = selectionFor("snapshot");
+        if (!selection)
         {
-            cerr << workloads.error() << '\n';
-            return EXIT_FAILURE;
-        }
-        auto const screens = pickByName<BenchScreen>(
-            BenchScreens, parameters().str("bench-headless.snapshot.screens"), "screen");
-        if (!screens)
-        {
-            cerr << screens.error() << '\n';
+            cerr << selection.error() << '\n';
             return EXIT_FAILURE;
         }
         auto const options = SnapshotOptions {
@@ -1159,7 +1280,7 @@ class ContourHeadlessBench: public core::cli::App
             cerr << "frames and runs must each be at least 1.\n";
             return EXIT_FAILURE;
         }
-        return runSnapshotBenchmark(*workloads, *screens, options);
+        return runSnapshotBenchmark(selection->workloads, selection->screens, options);
     }
 
     int benchSixel()
@@ -1261,7 +1382,7 @@ class ContourHeadlessBench: public core::cli::App
         // createPty() only describes the PTY: start() opens it, and only then is there a slave to configure.
         if (auto const started = pty.start(); !started)
         {
-            cerr << std::format("Cannot open a PTY: {}\n", started.error().detail);
+            cerr << std::format("Cannot open a PTY: {}\n", started.error());
             return EXIT_FAILURE;
         }
         auto& ptySlave = pty.slave();
