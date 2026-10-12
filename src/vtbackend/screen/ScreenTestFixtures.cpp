@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/screen/ScreenTestFixtures.hpp>
 
+#include <format>
+
 namespace vtbackend::test
 {
 
@@ -156,6 +158,16 @@ std::vector<int> changedLineOffsets(Grid& grid, GridDeltaCursor& cursor)
     std::ignore = grid.forEachLineChangedSince(
         cursor, [&](LineOffset offset, Line const&) { out.push_back(unbox<int>(offset)); });
     return out;
+}
+
+void checkShapeCoversCells(Screen const& screen)
+{
+    for (auto const lineNo: std::views::iota(0, *screen.pageSize().lines))
+    {
+        INFO(std::format("line {}", lineNo));
+        auto const& soa = screen.grid().lineAt(LineOffset(lineNo)).storage();
+        CHECK(soa.shape >= shapeImpliedByCells(soa));
+    }
 }
 
 } // namespace vtbackend::test

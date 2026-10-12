@@ -49,7 +49,7 @@ TEST_CASE("writeTextToSoA.ascii.clears_a_previous_block_scale", "[SoAWriter]")
     initializeLineSoA(line, ColumnCount(10));
 
     // The cells a scale-2 block leaves behind, set the way the write path sets them -- which also
-    // marks the line non-trivial, so the "freshly reset line" fill-skip does not apply.
+    // makes the line Spanning, so the "freshly reset line" fill-skip does not apply.
     CellProxy(line, 0).setTextScale(CellScale { .scale = 2 });
     CellProxy(line, 1).setTextScale(CellScale { .scale = 2 });
     REQUIRE(line.scales[0] == 2);
@@ -225,7 +225,7 @@ TEST_CASE("writeCellToSoA.empty", "[SoAWriter]")
     CHECK(line.clusterSize[0] == 0);
 }
 
-TEST_CASE("writeCellToSoA.trivial.invalidatedAtCol0", "[SoAWriter]")
+TEST_CASE("writeCellToSoA.shape.mixedAtCol0", "[SoAWriter]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
@@ -235,15 +235,15 @@ TEST_CASE("writeCellToSoA.trivial.invalidatedAtCol0", "[SoAWriter]")
     auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(5) };
     writeCellToSoA(line, 0, U'X', 1, attrs);
 
-    // Col 0 now has Indexed(5), cols 1-9 still have default — trivial must be false.
+    // Col 0 now has Indexed(5), cols 1-9 still have default — the line is Mixed.
     CHECK(line.shape == LineShape::Mixed);
 }
 
 // =============================================================================
-// writeTextToSoA / writeAsciiToSoA — trivial flag edge cases
+// writeTextToSoA / writeAsciiToSoA — line shape edge cases
 // =============================================================================
 
-TEST_CASE("writeTextToSoA.ascii.trivial.invalidatedFromCol0Partial", "[SoAWriter]")
+TEST_CASE("writeTextToSoA.ascii.shape.mixedFromCol0Partial", "[SoAWriter]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(20));
@@ -254,19 +254,19 @@ TEST_CASE("writeTextToSoA.ascii.trivial.invalidatedFromCol0Partial", "[SoAWriter
     auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
     writeTextToSoA(line, 0, "Hello", attrs);
 
-    // Line has mixed SGR — trivial must be false.
+    // Line has mixed SGR — it is Mixed.
     CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("writeTextToSoA.ascii.trivial.preservedFullLine", "[SoAWriter]")
+TEST_CASE("writeTextToSoA.ascii.shape.uniformFullLine", "[SoAWriter]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(5));
     REQUIRE(line.shape == LineShape::Uniform);
 
-    // Full-line bulk ASCII write with uniform attrs — trivial should remain true.
-    // Uses asciiHint=true to exercise the bulk path (per-cell path can't preserve
-    // trivial because it writes one cell at a time and can't predict future writes).
+    // Full-line bulk ASCII write with uniform attrs — the line stays Uniform.
+    // Uses asciiHint=true to exercise the bulk path (per-cell path can't keep
+    // it Uniform because it writes one cell at a time and can't predict future writes).
     auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
     writeTextToSoA(line, 0, "Hello", attrs, HyperlinkId {}, /*asciiHint=*/true);
 

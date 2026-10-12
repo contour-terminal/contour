@@ -132,7 +132,7 @@ TEST_CASE("LineSoA.copyColumns", "[LineSoA]")
     CHECK(dst.codepoints[0] == 0);
 }
 
-TEST_CASE("LineSoA.copyColumns.trivialInvalidated", "[LineSoA]")
+TEST_CASE("LineSoA.copyColumns.mixesTheDestination", "[LineSoA]")
 {
     // Source line with non-uniform SGR
     LineSoA src;
@@ -141,18 +141,18 @@ TEST_CASE("LineSoA.copyColumns.trivialInvalidated", "[LineSoA]")
     src.clusterSize[0] = 1;
     src.sgr[0].foregroundColor = Color::Indexed(1);
 
-    // Destination line starts trivial
+    // Destination line starts Uniform
     LineSoA dst;
     initializeLineSoA(dst, ColumnCount(10));
     REQUIRE(dst.shape == LineShape::Uniform);
 
     copyColumns(src, 0, dst, 0, 1);
 
-    // After copying non-uniform data, trivial must be false
+    // After copying cells in another pen, the destination is Mixed
     CHECK(dst.shape == LineShape::Mixed);
 }
 
-TEST_CASE("LineSoA.copyColumns.trivialInvalidated.partialCopy", "[LineSoA]")
+TEST_CASE("LineSoA.copyColumns.mixesTheDestination.partialCopy", "[LineSoA]")
 {
     // Simulates horizontal-margin scroll: copy columns 2-7 from source into destination
     auto const srcAttrs = GraphicsAttributes { .foregroundColor = Color::Indexed(5) };
@@ -168,7 +168,7 @@ TEST_CASE("LineSoA.copyColumns.trivialInvalidated.partialCopy", "[LineSoA]")
     // Partial copy: columns 2-7 from source into destination at same position
     copyColumns(src, 2, dst, 2, 6);
 
-    // Destination now has mixed SGR (cols 0-1 default, cols 2-7 indexed(5)), trivial must be false
+    // Destination now has mixed SGR (cols 0-1 default, cols 2-7 indexed(5)), so the destination is Mixed
     CHECK(dst.shape == LineShape::Mixed);
 }
 
@@ -186,7 +186,7 @@ TEST_CASE("LineSoA.resizeLineSoA.grow", "[LineSoA]")
     CHECK(line.codepoints[7] == 0);    // new columns are empty
 }
 
-TEST_CASE("LineSoA.resizeLineSoA.grow.trivialInvalidatedOnMismatch", "[LineSoA]")
+TEST_CASE("LineSoA.resizeLineSoA.grow.mixesOnAnotherFill", "[LineSoA]")
 {
     auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
     LineSoA line;
@@ -199,14 +199,14 @@ TEST_CASE("LineSoA.resizeLineSoA.grow.trivialInvalidatedOnMismatch", "[LineSoA]"
     CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("LineSoA.resizeLineSoA.grow.trivialPreservedOnMatch", "[LineSoA]")
+TEST_CASE("LineSoA.resizeLineSoA.grow.staysUniformOnTheSameFill", "[LineSoA]")
 {
     auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
     LineSoA line;
     initializeLineSoA(line, ColumnCount(5), attrs);
     REQUIRE(line.shape == LineShape::Uniform);
 
-    // Growing with same fillAttrs keeps trivial.
+    // Growing with the same fillAttrs keeps the line Uniform.
     resizeLineSoA(line, ColumnCount(10), attrs);
 
     CHECK(line.shape == LineShape::Uniform);
@@ -270,7 +270,7 @@ TEST_CASE("LineSoA.graphemeCluster.multiCodepoint", "[LineSoA]")
     CHECK(collected[1] == U'\u0301');
 }
 
-TEST_CASE("LineSoA.graphemeCluster.appendLeavesTheTrivialPath", "[LineSoA]")
+TEST_CASE("LineSoA.graphemeCluster.appendMixesTheLine", "[LineSoA]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
@@ -282,7 +282,7 @@ TEST_CASE("LineSoA.graphemeCluster.appendLeavesTheTrivialPath", "[LineSoA]")
 
     // The batched RenderLine path stores one codepoint per column (@see Line::trivialBuffer), so a
     // cell holding a cluster cannot be represented there and its line must leave that path -- the
-    // same reason a wide cell's continuation and an image fragment already clear the flag. Note the
+    // same reason a wide cell's continuation and an image fragment already make it Spanning. Note the
     // cluster stays ONE column wide here: it is the extra codepoint, not any width change, that the
     // batched representation cannot carry.
     auto const widthChange = appendCodepointToCluster(line, 0, U'\u0301');
@@ -291,7 +291,7 @@ TEST_CASE("LineSoA.graphemeCluster.appendLeavesTheTrivialPath", "[LineSoA]")
     CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("LineSoA.graphemeCluster.appendLeavesTheTrivialPathUnderFirstCodepoint", "[LineSoA]")
+TEST_CASE("LineSoA.graphemeCluster.appendMixesTheLineUnderFirstCodepoint", "[LineSoA]")
 {
     // Under ClusterWidthPolicy::FirstCodepoint (DEC mode 2027 reset) the cluster keeps its width,
     // and appendCodepointToCluster returns early -- but the codepoint still joined the cluster, so
@@ -554,35 +554,35 @@ TEST_CASE("CellProxy.beginsWith", "[CellProxy]")
 }
 
 // =============================================================================
-// CellProxy trivial flag invalidation tests
+// CellProxy -- the setters that mix a Uniform line
 // =============================================================================
 
-TEST_CASE("CellProxy.trivialInvalidation.atCol0", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.atCol0", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
     CellProxy(line, 0).write(GraphicsAttributes {}, U'A', 1);
     CellProxy(line, 1).write(GraphicsAttributes {}, U'B', 1);
-    REQUIRE(line.shape == LineShape::Uniform); // uniform SGR — still trivial
+    REQUIRE(line.shape == LineShape::Uniform); // uniform SGR — still Uniform
 
-    // Changing SGR at col 0 must invalidate trivial (col 1 still has default attrs)
+    // Changing SGR at col 0 must mix the line (col 1 still has default attrs)
     CellProxy(line, 0).setForegroundColor(Color::Indexed(IndexedColor::Red));
     CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.setForegroundColor", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.setForegroundColor", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
     CellProxy(line, 0).write(GraphicsAttributes {}, U'A', 1);
     CellProxy(line, 1).write(GraphicsAttributes {}, U'B', 1);
-    REQUIRE(line.shape == LineShape::Uniform); // uniform SGR — still trivial
+    REQUIRE(line.shape == LineShape::Uniform); // uniform SGR — still Uniform
 
     CellProxy(line, 1).setForegroundColor(Color::Indexed(IndexedColor::Red));
     CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.setBackgroundColor", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.setBackgroundColor", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
@@ -594,7 +594,7 @@ TEST_CASE("CellProxy.trivialInvalidation.setBackgroundColor", "[CellProxy]")
     CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.setUnderlineColor", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.setUnderlineColor", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
@@ -606,7 +606,7 @@ TEST_CASE("CellProxy.trivialInvalidation.setUnderlineColor", "[CellProxy]")
     CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.resetFlags", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.resetFlags", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
@@ -618,7 +618,7 @@ TEST_CASE("CellProxy.trivialInvalidation.resetFlags", "[CellProxy]")
     CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.setGraphicsRendition", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.setGraphicsRendition", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
@@ -630,7 +630,7 @@ TEST_CASE("CellProxy.trivialInvalidation.setGraphicsRendition", "[CellProxy]")
     CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.setHyperlink", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.setHyperlink", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));

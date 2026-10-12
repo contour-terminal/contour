@@ -526,9 +526,8 @@ void Screen::writeText(string_view text, size_t cellCount)
                 _cursor.position.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
             }
 
-            // Note: parser's lastCodepointHint is not updated here (private).
-            // REP (CSI Ps b) may not work correctly after bulk writes.
-            // TODO: Add a public setter if REP-after-bulk-text is needed.
+            // REP (CSI Ps b) repeats the run's last character: the parser records it after every bulk
+            // print (@see REP.after_bulk_text).
         }
         _terminal->resetInstructionCounter();
         _terminal->markCellDirty(_cursor.position);

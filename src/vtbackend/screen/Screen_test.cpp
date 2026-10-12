@@ -398,32 +398,32 @@ TEST_CASE("AppendChar.a_joiner_in_a_later_read_joins_the_last_bulk_written_cell"
     // one go but remembered the run's FIRST cell as the one a following codepoint joins, so a
     // combining mark, a ZWJ or a variation selector arriving in the next read decorated the `a`.
     // A joiner in the same read as its base travels in the same text run and never reached that
-    // path, which is what hid it.
-    struct Joiner
-    {
-        std::string_view name;
-        std::string_view utf8;
-        std::u32string_view codepoint;
-    };
+    // path, which is what hid it. On either screen, and on a line whose renditions differ.
     auto const joiners = std::array {
-        Joiner { .name = "U+0301 COMBINING ACUTE ACCENT", .utf8 = "\xCC\x81", .codepoint = U"́" },
-        Joiner { .name = "U+200D ZERO WIDTH JOINER", .utf8 = "\xE2\x80\x8D", .codepoint = U"‍" },
-        Joiner { .name = "U+FE0F VARIATION SELECTOR-16", .utf8 = "\xEF\xB8\x8F", .codepoint = U"️" },
+        Scenario { .name = "U+0301 COMBINING ACUTE ACCENT", .bytes = "\xCC\x81" },
+        Scenario { .name = "U+200D ZERO WIDTH JOINER", .bytes = "\xE2\x80\x8D" },
+        Scenario { .name = "U+FE0F VARIATION SELECTOR-16", .bytes = "\xEF\xB8\x8F" },
+    };
+    auto const lines = std::array {
+        Scenario { .name = "primary, uniform line", .bytes = "abc" },
+        Scenario { .name = "primary, mixed line", .bytes = "\033[31mab\033[mc" },
+        Scenario { .name = "alternate, uniform line", .bytes = "\033[?1049habc" },
+        Scenario { .name = "alternate, mixed line", .bytes = "\033[?1049h\033[31mab\033[mc" },
     };
 
-    for (auto const& joiner: joiners)
-    {
-        INFO(joiner.name);
-        auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
-        auto const& screen = mock.terminal.primaryScreen();
+    for (auto const& line: lines)
+        for (auto const& joiner: joiners)
+        {
+            INFO(std::format("{}, {}", line.name, joiner.name));
+            auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+            mock.writeToScreen(line.bytes);
+            mock.writeToScreen(joiner.bytes); // a read of its own
 
-        mock.writeToScreen("abc"sv);
-        mock.writeToScreen(joiner.utf8); // a read of its own
-
-        CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"a");
-        CHECK(screen.at(LineOffset(0), ColumnOffset(2)).codepoints()
-              == U"c" + std::u32string(joiner.codepoint));
-    }
+            auto const& screen = std::as_const(mock.terminal).currentScreen();
+            CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"a");
+            CHECK(screen.at(LineOffset(0), ColumnOffset(2)).codepoints()
+                  == U"c" + unicode::convert_to<char32_t>(joiner.bytes));
+        }
 }
 
 TEST_CASE("AppendChar.a_joiner_after_a_bulk_run_that_filled_the_line", "[screen]")
@@ -443,19 +443,30 @@ TEST_CASE("AppendChar.a_joiner_after_a_bulk_run_that_filled_the_line", "[screen]
         auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
         for (auto const read: reads)
             mock.writeToScreen(read);
-        auto const& screen = mock.terminal.primaryScreen();
+        auto const& screen = std::as_const(mock.terminal).currentScreen();
         return Outcome { .firstCell = screen.at(LineOffset(0), ColumnOffset(0)).codepoints(),
                          .lastCell = screen.at(LineOffset(0), ColumnOffset(4)).codepoints(),
                          .cursor = screen.cursor().position,
                          .wrapPending = screen.cursor().wrapPending };
     };
 
-    auto const twoReads = writeInReads({ "abcde"sv, "\xCC\x81"sv });
-    auto const oneRead = writeInReads({ "abcde\xCC\x81"sv });
+    // On either screen, and on a line whose renditions differ.
+    auto const lines = std::array {
+        Scenario { .name = "primary, uniform line", .bytes = "abcde" },
+        Scenario { .name = "primary, mixed line", .bytes = "\033[31ma\033[mbcde" },
+        Scenario { .name = "alternate, uniform line", .bytes = "\033[?1049habcde" },
+        Scenario { .name = "alternate, mixed line", .bytes = "\033[?1049h\033[31ma\033[mbcde" },
+    };
+    for (auto const& line: lines)
+    {
+        INFO(line.name);
+        auto const twoReads = writeInReads({ line.bytes, "\xCC\x81"sv });
+        auto const oneRead = writeInReads({ std::string(line.bytes) + "\xCC\x81" });
 
-    CHECK(twoReads.firstCell == U"a");
-    CHECK(twoReads.lastCell == U"é");
-    CHECK(twoReads == oneRead);
+        CHECK(twoReads.firstCell == U"a");
+        CHECK(twoReads.lastCell == U"é");
+        CHECK(twoReads == oneRead);
+    }
 }
 
 TEST_CASE("AppendChar.a_wide_char_at_the_second_to_last_column_claims_the_last_one", "[screen]")
@@ -4753,44 +4764,13 @@ TEST_CASE("LineShape.neverUndercutsTheCellsAfterAnEdit", "[screen][LineShape]")
     // write needs anything short of Spanning. So after ANY edit -- on lines that had already left
     // Uniform -- the stored shape must be at least as conservative as what the cells hold, and writing
     // into the edited line again must keep it so.
-    struct Scenario
-    {
-        std::string_view name;
-        std::string_view bytes;
-    };
-    auto const scenarios = std::array {
-        Scenario { .name = "EL on a coloured line", .bytes = "\033[44mabc\033[m def\033[1;3H\033[K" },
-        Scenario { .name = "ED below a wide character",
-                   .bytes = "\xE4\xB8\xAD"
-                            "x\033[1;2H\033[J" },
-        Scenario { .name = "ECH over a cluster",
-                   .bytes = "e\xCC\x81"
-                            "abc\033[1;1H\033[2X" },
-        Scenario { .name = "DCH through a wide character",
-                   .bytes = "a\xE4\xB8\xAD"
-                            "b\033[1;2H\033[P" },
-        Scenario { .name = "ICH before a coloured cell", .bytes = "ab\033[31mc\033[m\033[1;1H\033[2@" },
-        Scenario { .name = "EL 2 on a wide line", .bytes = "\xE4\xB8\xAD\xE4\xB8\xAD\033[2K" },
-        Scenario { .name = "ASCII over a coloured line", .bytes = "\033[42mgreen\033[m\033[1;1Hplain text" },
-        Scenario { .name = "ASCII beside a wide character", .bytes = "\033[1;5H\xE4\xB8\xAD\033[1;1Habc" },
-        Scenario { .name = "ASCII over a wide character's tail",
-                   .bytes = "\xE4\xB8\xAD\xE4\xB8\xAD\033[1;2Hxyz" },
-    };
-
-    for (auto const& scenario: scenarios)
+    for (auto const& scenario: EditsOfShapedLines)
     {
         INFO(scenario.name);
         auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
         mock.writeToScreen(scenario.bytes);
         mock.writeToScreen("\033[1;1Hxyz"sv); // and write into the edited line again
-
-        auto const& grid = mock.terminal.primaryScreen().grid();
-        for (auto const lineNo: std::views::iota(0, 3))
-        {
-            INFO(std::format("line {}", lineNo));
-            auto const& soa = grid.lineAt(LineOffset(lineNo)).storage();
-            CHECK(soa.shape >= shapeImpliedByCells(soa));
-        }
+        checkShapeCoversCells(mock.terminal.primaryScreen());
     }
 }
 
@@ -4809,14 +4789,7 @@ TEST_CASE("LineShape.neverUndercutsTheCellsAfterAResize", "[screen][LineShape]")
         mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(6) });
         mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(12) });
         mock.writeToScreen("\033[1;1Hxyz"sv);
-
-        auto& screen = mock.terminal.currentScreen();
-        for (auto const lineNo: std::views::iota(0, *screen.pageSize().lines))
-        {
-            INFO(std::format("line {}", lineNo));
-            auto const& soa = std::as_const(screen.grid()).lineAt(LineOffset(lineNo)).storage();
-            CHECK(soa.shape >= shapeImpliedByCells(soa));
-        }
+        checkShapeCoversCells(std::as_const(mock.terminal).currentScreen());
     }
 }
 
@@ -4955,14 +4928,8 @@ TEST_CASE("BulkText.aSingleShiftMapsOneCharacterOnly", "[screen]")
 
 TEST_CASE("BulkText.theAlternateScreenWritesWhatThePrimaryWrites", "[screen]")
 {
-    // Before the gate opened, the primary screen already took the bulk path and the alternate screen
-    // wrote cell by cell, so this comparison checked one against the other under every mode the old
-    // primary-only gate shielded. Now that both take the bulk path, it keeps them from drifting apart.
-    struct Scenario
-    {
-        std::string_view name;
-        std::string_view bytes;
-    };
+    // Both screens take the same text paths, so they must agree on every mode those paths test. The
+    // comparison against a per-codepoint parser is BulkScan_test's.
     auto const scenarios = std::array {
         Scenario { .name = "insert mode", .bytes = "XYZ\r\033[4hab" },
         Scenario { .name = "autowrap off", .bytes = "\033[?7labcdefghijkl" },

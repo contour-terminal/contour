@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/screen/ScreenTestFixtures.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 
 #include <vtparser/BulkScan.hpp>
@@ -8,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <array>
 #include <format>
 #include <ranges>
 #include <string>
@@ -101,6 +103,75 @@ TEST_CASE("BulkScan.AnInvalidByteInsideARunGivesTheSameScreen", "[BulkScan]")
     auto const setup = GENERATE(values<std::string_view>({ ""sv, "\033[?1049h"sv }));
     INFO(std::format("setup \"{}\"", core::escape(setup)));
     checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(10) }, setup, "\xFF\xE2\x94\x82X"sv);
+}
+
+TEST_CASE("BulkScan.EditsOfShapedLinesGiveTheSameScreen", "[BulkScan]")
+{
+    // The surface F1's gate opened, on both screens: every edit that leaves a line Mixed or Spanning,
+    // then ASCII written into the edited line again.
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+        for (auto const& edit: test::EditsOfShapedLines)
+        {
+            INFO(std::format("{}, {}", screenSelect.empty() ? "primary" : "alternate", edit.name));
+            checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(10) },
+                                        std::string(screenSelect) + std::string(edit.bytes),
+                                        "\033[1;1Hxyz"sv);
+        }
+}
+
+TEST_CASE("BulkScan.TextOnTheOpenedSurfaceGivesTheSameScreen", "[BulkScan]")
+{
+    struct Writing
+    {
+        std::string_view name;  ///< What the case covers, for the failure message.
+        std::string_view setup; ///< Written in one read.
+        std::string_view text;  ///< Cut into two reads at every byte.
+    };
+    auto const writings = std::array {
+        Writing { .name = "ASCII after a cluster",
+                  .setup = ""sv,
+                  .text = "e\xCC\x81"
+                          "abc\033[1;1Hxy"sv },
+        Writing { .name = "non-ASCII text after a coloured run",
+                  .setup = "\033[44mab\033[m"sv,
+                  .text = "\xC3\xA4\xE4\xB8\xAD e\xCC\x81"sv },
+        Writing { .name = "a wrap pending left of a widened margin, onto a wide character",
+                  .setup = "\033[2;1Hab\xE4\xB8\xAD\033[?69h\033[1;5sabcde\033[?69l"sv,
+                  .text = "xyz"sv },
+        Writing { .name = "a single shift into US-ASCII over DEC graphics",
+                  .setup = "\033(0\033*B"sv,
+                  .text = "\033Nqqq"sv },
+    };
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+        for (auto const& writing: writings)
+        {
+            INFO(std::format("{}, {}", screenSelect.empty() ? "primary" : "alternate", writing.name));
+            checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(10) },
+                                        std::string(screenSelect) + std::string(writing.setup),
+                                        writing.text);
+        }
+}
+
+TEST_CASE("BulkScan.AWrapRestoredAfterAWideningResizeGivesTheSameScreen", "[BulkScan]")
+{
+    // DECSC with a wrap pending on the last column, then DECCOLM widens the page in-band (DECNCSM keeps
+    // its contents) and DECRC restores the wrap, now pending left of the right margin. The next line
+    // holds a wide character for the wrapped text to land on.
+    auto const setup = std::format("\033[?40h\033[?95h\033[2;1Hab\xE4\xB8\xAD\033[1;1H{}\0337\033[?3h\0338",
+                                   std::string(80, '.'));
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+    {
+        INFO((screenSelect.empty() ? "primary" : "alternate"));
+        auto const fullSetup = std::string(screenSelect) + setup;
+
+        auto probe = makeTerminal(PageSize { LineCount(3), ColumnCount(80) }, vtparser::BulkScan::Disabled);
+        probe.writeToScreen(fullSetup);
+        auto const& cursor = probe.terminal.currentScreen().cursor();
+        REQUIRE(cursor.wrapPending);
+        REQUIRE(cursor.position.column < probe.terminal.currentScreen().margin().horizontal.to);
+
+        checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(80) }, fullSetup, "xyz"sv);
+    }
 }
 
 TEST_CASE("BulkScan.ModesTheOldGateShieldedGiveTheSameScreen", "[BulkScan]")
