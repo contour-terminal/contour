@@ -855,6 +855,7 @@ if(CONTOUR_TESTING)
         test/core_test_main.cpp
         config/Actions_test.cpp
         config/LayoutBuilder_test.cpp
+        config/PtyReadBufferSize_test.cpp
         config/UiStyle_test.cpp
         config/WindowControlStyle_test.cpp
         command/CommandCatalog_test.cpp

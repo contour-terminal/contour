@@ -199,7 +199,7 @@ namespace
 
 /// What contour reads per PTY read by default: Config's `read_buffer_size`. The throughput and key press
 /// benchmarks start from it, so that their numbers are contour's.
-constexpr unsigned ContourPtyReadSize = 16384;
+constexpr unsigned ContourPtyReadSize = 65536;
 
 /// What the application on the other end of the PTY does while key presses are measured.
 enum class ApplicationLoad : uint8_t

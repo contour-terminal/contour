@@ -439,7 +439,7 @@ renderer:
     tile_cache_count: 4000
     tile_direct_mapping: true
 word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
-read_buffer_size: 16384
+read_buffer_size: 65536
 pty_buffer_size: 1048576
 default_profile: main
 spawn_new_process: false

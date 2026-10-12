@@ -996,7 +996,7 @@ namespace
               [](QVariant const& v) { return boolToYaml(v).toStdString(); } },
             { "read_buffer_size",
               "PTY read buffer size",
-              "Number of bytes read from the pseudo-terminal per read.",
+              "Most bytes read from the pseudo-terminal and parsed in one go.",
               "int",
               [](config::Config const& c) { return QVariant(c.ptyReadBufferSize.value()); },
               [](QVariant const& v) { return std::to_string(v.toInt()); } },

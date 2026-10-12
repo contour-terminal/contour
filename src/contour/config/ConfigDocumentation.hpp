@@ -835,11 +835,14 @@ constexpr StringLiteral CommandPaletteRecentCountConfig {
     "\n"
 };
 
-constexpr StringLiteral PTYReadBufferSizeConfig { "{comment} Default PTY read buffer size.\n"
-                                                  "{comment}\n"
-                                                  "{comment} This is an advance option. Use with care!\n"
-                                                  "read_buffer_size: {}\n"
-                                                  "\n" };
+constexpr StringLiteral PTYReadBufferSizeConfig {
+    "{comment} The most bytes taken from the PTY in one read, and so the most parsed in one go.\n"
+    "{comment}\n"
+    "{comment} Larger batches parse output faster; smaller ones show a flood of it in smaller steps.\n"
+    "{comment} This is an advanced option. Use with care!\n"
+    "read_buffer_size: {}\n"
+    "\n"
+};
 
 constexpr StringLiteral PTYBufferObjectSizeConfig {
     "{comment} Size in bytes per PTY Buffer Object.\n"
@@ -1584,8 +1587,9 @@ constexpr StringLiteral CommandPaletteRecentCountWeb {
 };
 
 constexpr StringLiteral PTYReadBufferSizeWeb {
-    "option specifies the default PTY read buffer size in bytes. It is an advanced option and should be used "
-    "with caution. The default value is `16384`."
+    "option sets the most bytes taken from the PTY in one read, and so the most parsed in one go. Larger "
+    "batches parse output faster; smaller ones show a flood of it in smaller steps. It is an advanced option "
+    "and should be used with caution. The default value is `65536`."
 };
 
 constexpr StringLiteral PTYBufferObjectSizeWeb {

@@ -17,12 +17,15 @@ Default: auto
     platform_plugin: auto
 
 
-## Default PTY read buffer size
+## PTY read buffer size
 
-This is an advance option. Use with care!
-Default: 16384
+The most bytes taken from the PTY in one read, and so the most parsed in one go. Larger batches parse
+output faster; smaller ones show a flood of it in smaller steps. This is an advanced option. Use with
+care!
 
-    read_buffer_size: 16384
+Default: 65536
+
+    read_buffer_size: 65536
 
 
 ## New-Terminal spawn behaviour
