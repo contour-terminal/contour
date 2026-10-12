@@ -257,6 +257,26 @@ TEST_CASE("Utf8Decoding.everythingElseIsFromUtf8sDecision", "[Parser]")
     CHECK(state.expectedLength == 0);
 }
 
+TEST_CASE("Utf8Decoding.idleOnlyAtACharacterBoundary", "[Parser]")
+{
+    auto state = unicode::utf8_decoder_state {};
+    CHECK(vtparser::isDecoderIdle(state));
+    std::ignore = vtparser::decodeUtf8Byte(state, 0xF0); // a 4-byte character begins
+    CHECK_FALSE(vtparser::isDecoderIdle(state));
+    std::ignore = vtparser::decodeUtf8Byte(state, 0x9F);
+    std::ignore = vtparser::decodeUtf8Byte(state, 0x98);
+    CHECK_FALSE(vtparser::isDecoderIdle(state));
+    std::ignore = vtparser::decodeUtf8Byte(state, 0x80); // U+1F600 is complete
+    CHECK(vtparser::isDecoderIdle(state));
+
+    // Why idleness matters: after a lead byte, from_utf8 takes an ASCII byte as the continuation byte
+    // and folds it into the pending character, so 0xC3 'a' decodes to U+00E1 rather than to 'a'.
+    std::ignore = vtparser::decodeUtf8Byte(state, 0xC3);
+    CHECK_FALSE(vtparser::isDecoderIdle(state));
+    CHECK(vtparser::decodeUtf8Byte(state, 'a') == U'á');
+    CHECK(vtparser::isDecoderIdle(state));
+}
+
 TEST_CASE("Parser.BulkText_ZeroWidthAfterAsciiBase", "[Parser]")
 {
     // Zero COLUMNS is not zero BYTES. scan_text() splits a run at the ASCII/non-ASCII boundary, and a

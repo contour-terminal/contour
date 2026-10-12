@@ -677,7 +677,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     // This is necessary because unicode::scan_text assumes contiguous memory when
     // continuing an incomplete sequence, but parse calls can span different buffers.
     // The FSM's printUtf8Byte function correctly handles cross-buffer UTF-8 sequences.
-    if (_scanState.utf8.expectedLength != 0)
+    if (!isDecoderIdle(_scanState.utf8))
         return { ProcessKind::FallbackToFSM, 0 };
 
     // A leading 8-bit C1 control (0x80..0x9F) is not text: the bulk scanner would consume it as an
@@ -738,7 +738,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
             _scanState.lastCodepointHint = static_cast<char32_t>(lastByte);
     }
 
-    if (_scanState.utf8.expectedLength == 0)
+    if (isDecoderIdle(_scanState.utf8))
     {
         // Process trailing C0 control characters inline, bypassing the FSM.
         // This handles the common (TEXT C0)+ pattern (e.g. text followed by LF, HT, CR)
@@ -779,7 +779,7 @@ void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
     // before from_utf8() would fold them to U+FFFD. A C1 control is exactly ESC followed by
     // (byte - 0x40), so replay that pair through the state machine: this reuses every bit of the 7-bit
     // ESC handling (CSI/DCS/OSC entry, single dispatch, string collection) with no duplication.
-    if (_scanState.utf8.expectedLength == 0 && byte >= 0x80 && byte <= 0x9F)
+    if (isDecoderIdle(_scanState.utf8) && byte >= 0x80 && byte <= 0x9F)
     {
         processOnceViaStateMachine(0x1B);                              // ESC
         processOnceViaStateMachine(static_cast<uint8_t>(byte - 0x40)); // the equivalent 7-bit byte
