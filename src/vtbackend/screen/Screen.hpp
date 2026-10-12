@@ -1162,8 +1162,12 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Whether an ASCII stretch of @p length bytes may be written in bulk where the cursor stands now.
     ///
     /// Asks of the stretch what Terminal::maxBulkTextSequenceWidth() asked of the whole run when it
-    /// began, because the text written before the stretch may have left a wrap pending or put a wide
-    /// character on the line.
+    /// began, because the text written before the stretch can change the answer. The screen may have
+    /// taken more columns than the parser's scan counted for that text: the scan measures a wide emoji
+    /// followed by VS15 as one column, while the screen keeps the two the emoji already took, since
+    /// applyClusterWidthChange() never narrows a cluster on screen. The stretch then no longer fits
+    /// before the margin, and a bulk write would drop the letters that cross it. That text may also
+    /// have left a wrap pending or put a wide character on the line.
     [[nodiscard]] bool canBulkWriteAsciiStretch(size_t length) const noexcept;
 
     /// Writes printable ASCII @p text straight into the current line's arrays and advances the cursor.

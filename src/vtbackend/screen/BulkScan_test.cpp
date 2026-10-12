@@ -280,6 +280,28 @@ TEST_CASE("BulkScan.MixedTextOnShapedLinesGivesTheSameScreen", "[BulkScan]")
         }
 }
 
+TEST_CASE("BulkScan.AStretchPastANarrowedEmojiGivesTheSameScreen", "[BulkScan]")
+{
+    // The screen can take more columns than the parser's scan counted for a run. The scan measures a
+    // wide emoji followed by VS15 as one column; the screen keeps the two columns the emoji took
+    // before VS15 arrived, because it never narrows a cluster already on screen. Two of them before 37
+    // letters: the scan counts 39 columns, which the 40-column page allows, but the screen needs 41.
+    // Only asking again before the stretch is written in bulk keeps the letters past the margin from
+    // being lost. Also with a letter first, so the emoji sit inside the run.
+    auto const watchVs15 = "\xE2\x8C\x9A\xEF\xB8\x8E"sv; // U+231A WATCH, U+FE0E VS15
+    auto const texts = std::array {
+        std::format("{0}{0}{1}", watchVs15, std::string(37, 'a')),
+        std::format("x{0}{0}{1}", watchVs15, std::string(36, 'b')),
+    };
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+        for (auto const& text: texts)
+        {
+            INFO(std::format(
+                "{}, text \"{}\"", screenSelect.empty() ? "primary" : "alternate", core::escape(text)));
+            checkSameScreenAtEverySplit(PageSize { LineCount(4), ColumnCount(40) }, screenSelect, text);
+        }
+}
+
 TEST_CASE("BulkScan.InvalidUtf8BesideALongAsciiStretchGivesTheSameScreen", "[BulkScan]")
 {
     // The text decoder takes the bytes after an incomplete lead byte as its continuation bytes,
