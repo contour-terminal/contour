@@ -501,8 +501,11 @@ void Screen::writeText(string_view text, size_t cellCount)
         if (auto const buf = _terminal->parsingBuffer(); buf)
             buf->advanceHotEndUntil(text.data() + text.size());
 
-        // Update last cursor position for grapheme cluster continuation
-        _lastCursorPosition = _cursor.position;
+        // The cell a codepoint arriving in a LATER read joins -- a combining mark, a ZWJ, a variation
+        // selector -- is the last one this run wrote, not the one it started at.
+        if (written > 0)
+            _lastCursorPosition = CellLocation { .line = _cursor.position.line,
+                                                 .column = ColumnOffset::cast_from(startCol + written - 1) };
 
         // Advance cursor
         if (written > 0)

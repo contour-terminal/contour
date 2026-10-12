@@ -15,6 +15,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <ranges>
@@ -383,6 +384,72 @@ TEST_CASE("AppendChar.a_zero_width_codepoint_after_an_ASCII_base_joins_its_cell"
         CHECK(screen.at(LineOffset(0), ColumnOffset(5)).codepoints() == U"f");
         CHECK(screen.renderMainPageText() == "abcdéfgh  \n");
     }
+}
+
+TEST_CASE("AppendChar.a_joiner_in_a_later_read_joins_the_last_bulk_written_cell", "[screen]")
+{
+    // A PTY read can end between a letter and whatever joins it. The bulk ASCII path wrote "abc" in
+    // one go but remembered the run's FIRST cell as the one a following codepoint joins, so a
+    // combining mark, a ZWJ or a variation selector arriving in the next read decorated the `a`.
+    // A joiner in the same read as its base travels in the same text run and never reached that
+    // path, which is what hid it.
+    struct Joiner
+    {
+        std::string_view name;
+        std::string_view utf8;
+        std::u32string_view codepoint;
+    };
+    auto const joiners = std::array {
+        Joiner { .name = "U+0301 COMBINING ACUTE ACCENT", .utf8 = "\xCC\x81", .codepoint = U"́" },
+        Joiner { .name = "U+200D ZERO WIDTH JOINER", .utf8 = "\xE2\x80\x8D", .codepoint = U"‍" },
+        Joiner { .name = "U+FE0F VARIATION SELECTOR-16", .utf8 = "\xEF\xB8\x8F", .codepoint = U"️" },
+    };
+
+    for (auto const& joiner: joiners)
+    {
+        INFO(joiner.name);
+        auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+        auto const& screen = mock.terminal.primaryScreen();
+
+        mock.writeToScreen("abc"sv);
+        mock.writeToScreen(joiner.utf8); // a read of its own
+
+        CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"a");
+        CHECK(screen.at(LineOffset(0), ColumnOffset(2)).codepoints()
+              == U"c" + std::u32string(joiner.codepoint));
+    }
+}
+
+TEST_CASE("AppendChar.a_joiner_after_a_bulk_run_that_filled_the_line", "[screen]")
+{
+    // The same seam where the run reaches the right margin and leaves a wrap pending: the joiner must
+    // land exactly where it lands when the same bytes arrive in a single read. The bulk path stops one
+    // column short of the margin today, so this pins the boundary rather than a defect.
+    struct Outcome
+    {
+        std::u32string firstCell;
+        std::u32string lastCell;
+        CellLocation cursor;
+        bool wrapPending = false;
+        bool operator==(Outcome const&) const = default;
+    };
+    auto const writeInReads = [](std::initializer_list<std::string_view> reads) {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
+        for (auto const read: reads)
+            mock.writeToScreen(read);
+        auto const& screen = mock.terminal.primaryScreen();
+        return Outcome { .firstCell = screen.at(LineOffset(0), ColumnOffset(0)).codepoints(),
+                         .lastCell = screen.at(LineOffset(0), ColumnOffset(4)).codepoints(),
+                         .cursor = screen.cursor().position,
+                         .wrapPending = screen.cursor().wrapPending };
+    };
+
+    auto const twoReads = writeInReads({ "abcde"sv, "\xCC\x81"sv });
+    auto const oneRead = writeInReads({ "abcde\xCC\x81"sv });
+
+    CHECK(twoReads.firstCell == U"a");
+    CHECK(twoReads.lastCell == U"é");
+    CHECK(twoReads == oneRead);
 }
 
 TEST_CASE("AppendChar.a_wide_char_at_the_second_to_last_column_claims_the_last_one", "[screen]")
