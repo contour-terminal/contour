@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/screen/ScreenTestFixtures.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
+#include <vtbackend/testing/Workloads.hpp>
 
 #include <vtparser/BulkScan.hpp>
 
@@ -9,11 +10,16 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <format>
+#include <optional>
+#include <random>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using namespace vtbackend;
 using namespace std::string_view_literals;
@@ -356,4 +362,194 @@ TEST_CASE("BulkScan.AsciiAfterAPrependCharacterJoinsIt", "[BulkScan]")
         mock->writeToScreen(text.substr(2));
     }
     CHECK(dumpScreen(bulk.terminal.currentScreen()) == dumpScreen(reference.terminal.currentScreen()));
+}
+
+namespace
+{
+/// One piece of text that is not ASCII, from each class the bulk paths treat differently: one, two and
+/// three columns' worth of bytes, every way a codepoint joins the cluster before it (marks, joiners,
+/// variation selectors, modifiers, regional indicators, Prepend, Hangul jamo, Indic conjuncts), and the
+/// zero-width characters that join nothing.
+constexpr auto NonAsciiPieces = std::array {
+    "\xC3\xA4"sv,                             // U+00E4, two bytes
+    "\xE2\x94\x82"sv,                         // U+2502, three bytes
+    "\xE4\xB8\xAD"sv,                         // U+4E2D, two columns
+    "\xF0\x9F\x98\x80"sv,                     // U+1F600, four bytes, two columns
+    "\xCC\x81"sv,                             // U+0301 COMBINING ACUTE ACCENT
+    "\xE2\x80\x8D"sv,                         // U+200D ZERO WIDTH JOINER
+    "\xEF\xB8\x8F"sv,                         // U+FE0F VS16
+    "\xEF\xB8\x8E"sv,                         // U+FE0E VS15
+    "\xE2\x8C\x9A"sv,                         // U+231A WATCH, a wide emoji
+    "\xE2\x8C\x9A\xEF\xB8\x8E"sv,             // U+231A narrowed by VS15
+    "\xE2\x9D\xA4"sv,                         // U+2764 HEAVY BLACK HEART, narrow until VS16
+    "\xF0\x9F\x87\xA9"sv,                     // U+1F1E9, regional indicator D
+    "\xF0\x9F\x87\xAA"sv,                     // U+1F1EA, regional indicator E
+    "\xD8\x80"sv,                             // U+0600 ARABIC NUMBER SIGN, Prepend
+    "\xE2\x80\x8B"sv,                         // U+200B ZERO WIDTH SPACE
+    "\xC2\xAD"sv,                             // U+00AD SOFT HYPHEN
+    "\xE1\x84\x80"sv,                         // U+1100, a Hangul leading jamo
+    "\xE1\x85\xA1"sv,                         // U+1161, a Hangul vowel jamo
+    "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xA8"sv, // KA, VIRAMA, NA: a Devanagari conjunct
+    "\xE0\xA4\x95\xE0\xA4\xBE"sv,             // KA with a spacing vowel sign
+    "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD"sv,     // thumbs up with a skin tone
+    "\xF0\x9F\x8F\xBD"sv,                     // a skin tone on its own
+};
+
+/// What the page holds and which modes are set before the random text arrives.
+constexpr auto RandomTextSetups = std::array {
+    ""sv,                                  // the primary screen, from the left edge
+    "\033[1;5H"sv,                         // from mid-line
+    "\033[?7l"sv,                          // autowrap off
+    "\033[?7l\033[1;9H"sv,                 // autowrap off, from mid-line
+    "\033[?1049h"sv,                       // the alternate screen
+    "\033[?1049h\033[1;7H"sv,              // the alternate screen, from mid-line
+    "\033[1;4H\033[41mX\033[m\033[1;1H"sv, // a Mixed line: a coloured cell ahead of the text
+    "\033[?2027l"sv,                       // a cluster keeps its first codepoint's width
+    "\033[?2027l\033[1;6H"sv,              // the same, from mid-line
+    "\033[?1049h\033[?7l\033[1;3H"sv,      // the alternate screen, autowrap off
+    "\033[31m"sv,                          // a coloured pen
+    "Q\xCC\x81"sv,                         // the line already ends in a cluster
+};
+
+/// A choice in [0, @p n), drawn from the engine directly so that a seed reproduces on every platform.
+size_t below(std::mt19937& rng, size_t n)
+{
+    return static_cast<size_t>(test::detail::drawBetween(rng, 0, static_cast<int>(n) - 1));
+}
+
+/// Random well-formed UTF-8: up to ten pieces, half of them ASCII words of up to 30 letters (some
+/// followed by a space), half of them NonAsciiPieces.
+std::string randomMixedText(std::mt19937& rng)
+{
+    auto out = std::string {};
+    for ([[maybe_unused]] auto const piece: std::views::iota(size_t { 0 }, 1 + below(rng, 10)))
+    {
+        if (auto const kind = below(rng, 10); kind < 5)
+        {
+            auto const letters = 1 + below(rng, kind < 2 ? 4 : 30);
+            for ([[maybe_unused]] auto const letter: std::views::iota(size_t { 0 }, letters))
+                out += static_cast<char>('a' + below(rng, 26));
+            if (below(rng, 4) == 0)
+                out += ' ';
+        }
+        else
+            out += NonAsciiPieces[below(rng, NonAsciiPieces.size())];
+    }
+    return out;
+}
+
+/// One random case: a page width, a setup, the text and where PTY reads cut it.
+struct RandomTextCase
+{
+    ColumnCount columns;      ///< The page width; the page is four lines high.
+    std::string_view setup;   ///< Written in one read, before the text.
+    std::string text;         ///< Random well-formed UTF-8.
+    std::vector<size_t> cuts; ///< Sorted offsets into text; text is written in cuts.size() + 1 reads.
+};
+
+/// @return The case @p seed stands for.
+RandomTextCase randomTextCase(uint32_t seed)
+{
+    auto rng = std::mt19937 { seed };
+    auto const columns = ColumnCount::cast_from(8 + below(rng, 60));
+    auto const setup = RandomTextSetups[below(rng, RandomTextSetups.size())];
+    auto text = randomMixedText(rng);
+    auto cuts = std::vector<size_t> {};
+    for ([[maybe_unused]] auto const cut: std::views::iota(size_t { 0 }, below(rng, 4)))
+        cuts.push_back(below(rng, text.size() + 1));
+    std::ranges::sort(cuts);
+    return { .columns = columns, .setup = setup, .text = std::move(text), .cuts = std::move(cuts) };
+}
+
+/// Known divergence, older than the bulk paths for mixed text: a run of nothing but ASCII never joins
+/// the Prepend character written before it (GB9b), where the per-codepoint path does.
+/// @return Whether @p text holds an ASCII byte right after U+0600, the one Prepend character in
+///         NonAsciiPieces.
+bool asciiFollowsAPrependCharacter(std::string_view text)
+{
+    auto const prepend = "\xD8\x80"sv;
+    return std::ranges::any_of(
+        std::views::iota(prepend.size(), std::max(text.size(), prepend.size())), [&](size_t next) {
+            return text.substr(0, next).ends_with(prepend) && static_cast<unsigned char>(text[next]) < 0x80;
+        });
+}
+
+/// Known divergence, in the per-codepoint path itself: a cluster that grows from zero columns -- a
+/// zero-width character or a mark that opened it, widened by VS16 -- overwrites its own head with a
+/// continuation (Screen::applyClusterWidthChange()). Both paths leave such an orphan, each a different
+/// one.
+/// @return Whether a cell of @p screen's page continues a character that does not reach it.
+bool holdsAnOrphanContinuation(Screen const& screen)
+{
+    for (auto const line: std::views::iota(0, screen.pageSize().lines.value))
+    {
+        auto head = std::optional<int> {}; // the column of the last cell that is no continuation
+        for (auto const column: std::views::iota(0, screen.pageSize().columns.value))
+        {
+            auto const cell = screen.at(LineOffset(line), ColumnOffset(column));
+            if (!cell.flags().contains(CellFlag::WideCharContinuation))
+                head = column;
+            else if (!head || screen.at(LineOffset(line), ColumnOffset(*head)).width() <= column - *head)
+                return true;
+        }
+    }
+    return false;
+}
+
+/// Writes each seed's case to a terminal with bulk scanning and to one without, and requires the two
+/// screens to agree and every line's shape to cover its cells.
+///
+/// Well-formed UTF-8 only. Ill-formed input waits for libunicode's text scanner to stop at ill-formed
+/// UTF-8 (the libunicode version bump): 0.9.3 hands a read that ends inside a character on as a
+/// complete run, which the bulk path then decodes differently from the state machine.
+///
+/// The screens are not compared for a case in a known divergence class (asciiFollowsAPrependCharacter,
+/// holdsAnOrphanContinuation); its shapes still are.
+void checkRandomMixedText(uint32_t firstSeed, uint32_t seedCount)
+{
+    for (auto const seed: std::views::iota(firstSeed, firstSeed + seedCount))
+    {
+        auto const testCase = randomTextCase(seed);
+        auto const pageSize = PageSize { LineCount(4), testCase.columns };
+        auto bulk = makeTerminal(pageSize, vtparser::BulkScan::Enabled);
+        auto reference = makeTerminal(pageSize, vtparser::BulkScan::Disabled);
+        for (auto* const mock: { &bulk, &reference })
+        {
+            mock->writeToScreen(testCase.setup);
+            auto begin = size_t { 0 };
+            for (auto const cut: testCase.cuts)
+            {
+                mock->writeToScreen(std::string_view(testCase.text).substr(begin, cut - begin));
+                begin = cut;
+            }
+            mock->writeToScreen(std::string_view(testCase.text).substr(begin));
+        }
+        auto cuts = std::string {};
+        for (auto const cut: testCase.cuts)
+            cuts += std::format(" {}", cut);
+        INFO(std::format("seed {}: {} columns, setup \"{}\", text \"{}\", cut at [{} ]",
+                         seed,
+                         testCase.columns,
+                         core::escape(testCase.setup),
+                         core::escape(testCase.text),
+                         cuts));
+        if (!asciiFollowsAPrependCharacter(testCase.text)
+            && !holdsAnOrphanContinuation(reference.terminal.currentScreen()))
+            CHECK(dumpScreen(bulk.terminal.currentScreen())
+                  == dumpScreen(reference.terminal.currentScreen()));
+        test::checkShapeCoversCells(bulk.terminal.currentScreen());
+        test::checkShapeCoversCells(reference.terminal.currentScreen());
+    }
+}
+} // namespace
+
+TEST_CASE("BulkScan.RandomMixedTextGivesTheSameScreen", "[BulkScan]")
+{
+    checkRandomMixedText(1, 300);
+}
+
+TEST_CASE("BulkScan.RandomMixedTextGivesTheSameScreen.ManySeeds", "[.][BulkScanManySeeds]")
+{
+    // Opt-in, by its tag: the same check over many more seeds, for a change to the text paths.
+    checkRandomMixedText(1, 10000);
 }
