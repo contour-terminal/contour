@@ -672,3 +672,101 @@ TEST_CASE("Parser.BulkScan.MalformedUtf8InStringPayload", "[Parser][BulkScan]")
     }));
     checkEveryTwoWaySplit(input);
 }
+
+TEST_CASE("Parser.CsiParameterBulk.TableAssumptions", "[Parser]")
+{
+    // parseBulkCsiParameters() stands in for the table on exactly these bytes. It is correct only
+    // while the table says what this test pins: an event without a transition in CSI_Param, one
+    // action-free transition from CSI_Entry, and ':' leaving CSI_Entry for CSI_Ignore.
+    using vtparser::Action;
+    using vtparser::State;
+    auto const table = vtparser::ParserTable::get();
+    auto const entry = static_cast<size_t>(State::CSI_Entry);
+    auto const param = static_cast<size_t>(State::CSI_Param);
+
+    for (auto const digit: std::views::iota(size_t { '0' }, size_t { '9' } + 1))
+    {
+        CHECK(table.transitions[param][digit] == State::Undefined);
+        CHECK(table.events[param][digit] == Action::ParamDigit);
+        CHECK(table.transitions[entry][digit] == State::CSI_Param);
+        CHECK(table.events[entry][digit] == Action::ParamDigit);
+    }
+    CHECK(table.transitions[param][';'] == State::Undefined);
+    CHECK(table.events[param][';'] == Action::ParamSeparator);
+    CHECK(table.transitions[param][':'] == State::Undefined);
+    CHECK(table.events[param][':'] == Action::ParamSubSeparator);
+    CHECK(table.transitions[entry][';'] == State::CSI_Param);
+    CHECK(table.events[entry][';'] == Action::ParamSeparator);
+    CHECK(table.transitions[entry][':'] == State::CSI_Ignore);
+    CHECK(table.exitEvents[entry] == Action::Undefined);
+    CHECK(table.entryEvents[param] == Action::Undefined);
+}
+
+TEST_CASE("Parser.CsiParameterBulk.ExplicitCases", "[Parser][BulkScan]")
+{
+    auto const input = GENERATE(values<std::string_view>({
+        "\033[38;5;123m"sv, // cut mid-number at every byte
+        "\033[1;2;3;4;5;6;7;8;9;10;11;12;13;14;15;16;17;18;19;20;"
+        "21;22;23;24;25;26;27;28;29;30;31;32;33m"sv,     // more parameters than the builder holds
+        "\033[99999999999999999999;65536;65535H"sv,      // values past the maximum
+        "\033[38:2::255:128:0m\033[4:3m\033[58:5:12m"sv, // ':' sub-parameters
+        "\033[:1m"sv,                                    // a leading ':' goes to CSI_Ignore
+        "\033[;1m\033[;;m\033[m"sv,                      // empty parameters, and none
+        "\033[1;2\x18"
+        "3m"sv, // CAN mid-parameters
+        "\033[1;2\x1A"
+        "3m"sv,                // SUB mid-parameters
+        "\033[1;2\033[3;4m"sv, // ESC restarts the sequence
+        "\033[1;\n2m"sv,       // a C0 control executes inside
+        "\033[1;\x7F"
+        "2m"sv, // DEL is ignored inside
+        "\033[1;2\x85"
+        "3m"sv,                                // a byte the table has no action for
+        "\033[1?2m\033[?25;1004h\033[>4;2m"sv, // leader mid-parameters, and leading
+        "\033[1 q\033[2;3$}"sv,                // intermediates after parameters
+        "\x9B"
+        "12;34H"sv,     // 8-bit CSI
+        "\033[12;34"sv, // cut short at the end of the input
+    }));
+    checkEveryTwoWaySplit(input);
+}
+
+TEST_CASE("Parser.CsiParameterBulk.Vt52ModeIsUntouched", "[Parser][BulkScan]")
+{
+    // VT52 mode consumes ESC before the ANSI table ever sees it. The bulk scanner must leave that path alone.
+    // setVT52Mode() leaves the ANSI state as it is, so the second case switches VT52 mode on in the middle
+    // of a control sequence's parameters: the ESC Y coordinates and the ESC 4 command that follow are
+    // digits the bulk scanner would otherwise take for more parameters.
+    auto const [ansiPrefix, input] = GENERATE(table<std::string_view, std::string_view>({
+        { ""sv, "\033A\033Y  \033[12;3Hx"sv },
+        { "\033[12"sv, "3\033Y12\03345;6m"sv },
+    }));
+    auto const eventsInVt52Mode = [&](vtparser::BulkScan bulkScan) {
+        auto recorder = EventRecorder { 7 };
+        auto parser = vtparser::Parser<vtparser::ParserEvents>(recorder, bulkScan);
+        parser.parseFragment(ansiPrefix);
+        parser.setVT52Mode(true);
+        parser.parseFragment(input);
+        return recorder.finish(parser.state());
+    };
+    auto const difference = firstDifference(eventsInVt52Mode(vtparser::BulkScan::Disabled),
+                                            eventsInVt52Mode(vtparser::BulkScan::Enabled));
+    INFO(difference);
+    CHECK(difference.empty());
+}
+
+TEST_CASE("Parser.CsiParameterBulk.RandomCsiHeavyStreams", "[Parser][BulkScan]")
+{
+    static constexpr auto CsiHeavy =
+        std::array<PieceWriter, 5> { appendCsi, appendCsi, appendCsi, appendText, appendControl };
+    auto const seed = GENERATE(range(1000U, 1128U));
+    auto rng = std::mt19937 { seed };
+    auto input = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 300))
+        oneOf(rng, CsiHeavy)(input, rng);
+    auto const cuts = randomCuts(rng, input.size(), 64);
+    auto const difference = firstDifference(eventsOf(vtparser::BulkScan::Disabled, input, {}),
+                                            eventsOf(vtparser::BulkScan::Enabled, input, cuts));
+    INFO(std::format("seed {}\n{}", seed, difference));
+    CHECK(difference.empty());
+}

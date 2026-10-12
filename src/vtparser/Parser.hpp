@@ -772,6 +772,20 @@ class Parser
     ///         payload (a terminator, or anything the state machine must act on).
     std::tuple<ProcessKind, size_t> parseBulkApcString(char const* begin, char const* end) noexcept;
 
+    /// Hands a run of CSI parameter bytes -- digits, ';' and ':' -- to the listener in one go.
+    ///
+    /// The counterpart of parseBulkText() for control sequences. Inside CSI_Param these bytes are
+    /// pure events: no transition, no entry or exit action. The table lookup and the handle()
+    /// switch they each paid for therefore decided nothing. In CSI_Entry, a leading digit or ';'
+    /// first makes the one transition to CSI_Param, which has no actions either. A leading ':' is
+    /// left to the state machine, which sends it to CSI_Ignore.
+    ///
+    /// @param begin First byte to consider.
+    /// @param end   One past the last byte.
+    /// @return ContinueBulk and the run's length, or FallbackToFSM when the next byte is anything
+    ///         else (a leader, an intermediate, the final byte, a control), or in VT52 mode.
+    std::tuple<ProcessKind, size_t> parseBulkCsiParameters(char const* begin, char const* end) noexcept;
+
     void processOnceViaStateMachine(uint8_t ch);
     /// Handles one input byte while in VT52 mode. @see setVT52Mode. Returns true if the byte was
     /// consumed by the VT52 grammar; false if it should fall through to the normal (Ground) handling.

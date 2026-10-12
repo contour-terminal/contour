@@ -5,6 +5,7 @@
 
 #include <libunicode/utf8.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <string_view>
@@ -403,6 +404,8 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
         auto const [processKind, processedByteCount] = [&] {
             switch (_state)
             {
+                case State::CSI_Entry:
+                case State::CSI_Param: return parseBulkCsiParameters(input, end);
                 case State::DCS_PassThrough: return parseBulkDcsPassThrough(input, end);
                 case State::APC_String: return parseBulkApcString(input, end);
                 default: return parseBulkText(input, end);
@@ -502,6 +505,49 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkApcString(char const* be
             _eventListener.putAPC(ch);
 
     return { ProcessKind::ContinueBulk, byteCount };
+}
+
+/// The bytes a CSI parameter string is made of: digits, ';' between parameters and ':' between
+/// sub-parameters. Inside CSI_Param each is an event without a transition.
+[[nodiscard]] constexpr bool isCsiParameterByte(char ch) noexcept
+{
+    return (ch >= '0' && ch <= '9') || ch == ';' || ch == ':';
+}
+
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
+auto Parser<EventListener, TraceStateChanges>::parseBulkCsiParameters(char const* begin,
+                                                                      char const* end) noexcept
+    -> std::tuple<ProcessKind, size_t>
+{
+    // VT52 mode routes every byte through processVT52() before the table. Leave that path untouched.
+    if (_vt52Mode)
+        return { ProcessKind::FallbackToFSM, 0 };
+
+    auto const bytes = std::string_view { begin, static_cast<size_t>(std::distance(begin, end)) };
+
+    // CSI_Entry sends a leading ':' to CSI_Ignore, so there only a digit or ';' may open the run.
+    if (_state == State::CSI_Entry && bytes.front() == ':')
+        return { ProcessKind::FallbackToFSM, 0 };
+
+    auto const run = bytes.substr(
+        0, static_cast<size_t>(std::ranges::find_if_not(bytes, isCsiParameterByte) - bytes.begin()));
+    if (run.empty())
+        return { ProcessKind::FallbackToFSM, 0 };
+
+    // From CSI_Entry this is the transition the table makes on the run's first byte. CSI_Entry has
+    // no exit action and CSI_Param no entry action, so the assignment is all of it.
+    _state = State::CSI_Param;
+
+    for (auto const ch: run)
+    {
+        switch (ch)
+        {
+            case ';': _eventListener.paramSeparator(); break;
+            case ':': _eventListener.paramSubSeparator(); break;
+            default: _eventListener.paramDigit(ch); break;
+        }
+    }
+    return { ProcessKind::ContinueBulk, run.size() };
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
