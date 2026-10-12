@@ -818,6 +818,19 @@ TEST_CASE("Screen.osc3008 a container renders with its type prefix", "[context]"
     CHECK(breadcrumb(mock) == "container:foobar");
 }
 
+TEST_CASE("Screen.osc3008 a field's bidi override is shown, not obeyed", "[context]")
+{
+    // Any program on the tty can name a context: a right-to-left override in the name would reverse the
+    // rest of the status line. Replaced, the reader still sees that something was there.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=box;type=container;container=foo\xE2\x80\xAE"
+                               "bar"));
+
+    CHECK(breadcrumb(mock)
+          == "container:foo\xEF\xBF\xBD"
+             "bar");
+}
+
 TEST_CASE("Screen.osc3008 an elevate renders its target user without a prefix", "[context]")
 {
     auto mock = makeTerm();
@@ -902,7 +915,7 @@ TEST_CASE("Screen.osc3008 control bytes in a context field never reach the statu
 {
     // Defence in depth: this string is handed to writeToScreenInternal(), which PARSES it. The
     // decoder already rejects control bytes, so one arriving here would mean a parser bug -- and
-    // without the strip, that bug would be an injection able to clear the status screen from a field
+    // without the sanitiser, that bug would be an injection able to clear the status screen from a field
     // any program on the tty can write.
     auto mock = makeTerm();
     mock.writeToScreen(osc3008("start=box;type=container;container=safe"));
@@ -912,10 +925,11 @@ TEST_CASE("Screen.osc3008 control bytes in a context field never reach the statu
     record.container = "ev\033[2Jil";
     mock.terminal.adoptContext(record);
 
-    // The ESC is what makes the rest a SEQUENCE; strip it and "[2J" is inert text on the status line.
+    // The ESC is what makes the rest a SEQUENCE; replaced, "[2J" is inert text on the status line, and the
+    // reader sees that something stood before it, as everywhere else untrusted text is shown.
     auto const text = breadcrumb(mock);
     CHECK(!text.contains('\033'));
-    CHECK(text == "container:ev[2Jil");
+    CHECK(text == "container:ev\xEF\xBF\xBD[2Jil");
 }
 
 TEST_CASE("Screen.osc3008 the breadcrumb round-trips through the status-line serializer", "[context]")
