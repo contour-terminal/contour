@@ -343,25 +343,33 @@ TEST_CASE("BulkScan.InvalidUtf8BesideALongAsciiStretchGivesTheSameScreen", "[Bul
 TEST_CASE("BulkScan.AsciiAfterAPrependCharacterJoinsIt", "[BulkScan]")
 {
     // GB9b: nothing breaks after a Prepend character, so the '1' after U+0600 ARABIC NUMBER SIGN
-    // belongs to its cluster. The stretch after it is long enough to be written in bulk, and its
-    // first byte must still go through the segmenter. Written in one read, and in two cut after U+0600.
+    // belongs to its cluster. This covers mixed text: the text ends in a letter that is not ASCII, so
+    // wherever the reads are cut, the read holding the '1' goes through the walk over mixed text, which
+    // writes the first byte of every ASCII stretch through the segmenter, and only the rest in bulk.
+    //
+    // Accepted divergence: a run of nothing but ASCII is written in bulk whole, so it does NOT join a
+    // Prepend character before it, where the per-codepoint path does. Two reads, "\xD8\x80" and then
+    // "1234567", give 0600 | 1 | 2 ... with bulk scanning and 0600+1 | 2 ... without; so does one read
+    // whose run before U+0600 fills the line, as the state machine then writes U+0600 and the letters
+    // after it are a run of their own (35 columns, mode 2027 reset, 35 letters, U+0600, "mhfrjdp").
+    // Asking the cell the last write ended in before each such run costs more than it is worth: it is
+    // a read of another line per run, measured at +1.15% instructions on the ascii workload, +1.38% on
+    // tui and +2.04% on sgr, and worse when kept out of line. Prepend characters are rare (Arabic
+    // number signs, a few Indic letters), and the random differential below excludes the case by name.
     auto const text = "\xD8\x80"
                       "1234567890 ascii after a prepend \xC3\xA4"sv;
-    auto const pageSize = PageSize { LineCount(4), ColumnCount(80) };
-    auto bulk = makeTerminal(pageSize, vtparser::BulkScan::Enabled);
-    auto reference = makeTerminal(pageSize, vtparser::BulkScan::Disabled);
-    for (auto* const mock: { &bulk, &reference })
-        mock->writeToScreen(text);
-    CHECK(dumpScreen(bulk.terminal.currentScreen()) == dumpScreen(reference.terminal.currentScreen()));
-    CHECK(bulk.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).codepointCount() == 2);
-
-    for (auto* const mock: { &bulk, &reference })
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
     {
-        mock->writeToScreen("\033c"sv);
-        mock->writeToScreen(text.substr(0, 2));
-        mock->writeToScreen(text.substr(2));
+        INFO((screenSelect.empty() ? "primary" : "alternate"));
+        checkSameScreenAtEverySplit(PageSize { LineCount(4), ColumnCount(80) }, screenSelect, text);
     }
-    CHECK(dumpScreen(bulk.terminal.currentScreen()) == dumpScreen(reference.terminal.currentScreen()));
+
+    // And what both must show: U+0600 and the '1' in one cell, also with the reads cut after U+0600.
+    auto mock = makeTerminal(PageSize { LineCount(4), ColumnCount(80) }, vtparser::BulkScan::Enabled);
+    mock.writeToScreen(text.substr(0, 2));
+    mock.writeToScreen(text.substr(2));
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(0)).codepoints()
+          == U"\U00000600\U00000031");
 }
 
 TEST_CASE("BulkScan.AClusterGrowingFromZeroColumnsKeepsItsHead", "[BulkScan]")
@@ -500,8 +508,9 @@ RandomTextCase randomTextCase(uint32_t seed)
     return { .columns = columns, .setup = setup, .text = std::move(text), .cuts = std::move(cuts) };
 }
 
-/// Known divergence, older than the bulk paths for mixed text: a run of nothing but ASCII never joins
-/// the Prepend character written before it (GB9b), where the per-codepoint path does.
+/// An accepted divergence, older than the bulk path for mixed text: a run of nothing but ASCII never
+/// joins the Prepend character written before it (GB9b), where the per-codepoint path does. Why it is
+/// accepted is said at BulkScan.AsciiAfterAPrependCharacterJoinsIt.
 /// @return Whether @p text holds an ASCII byte right after U+0600, the one Prepend character in
 ///         NonAsciiPieces.
 bool asciiFollowsAPrependCharacter(std::string_view text)
@@ -540,8 +549,8 @@ bool holdsAnOrphanContinuation(Screen const& screen)
 /// UTF-8 (the libunicode version bump): 0.9.3 hands a read that ends inside a character on as a
 /// complete run, which the bulk path then decodes differently from the state machine.
 ///
-/// The screens are not compared for a case in a known divergence class (asciiFollowsAPrependCharacter);
-/// its other checks still run.
+/// The screens are not compared for a case in the accepted divergence class
+/// (asciiFollowsAPrependCharacter); its other checks still run.
 void checkRandomMixedText(uint32_t firstSeed, uint32_t seedCount)
 {
     for (auto const seed: std::views::iota(firstSeed, firstSeed + seedCount))
