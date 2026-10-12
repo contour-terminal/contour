@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <ranges>
 #include <string_view>
 
 #include <tracy/Tracy.hpp>
@@ -503,9 +504,12 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkApcString(char const* be
 
 /// The bytes a CSI parameter string is made of: digits, ';' between parameters and ':' between
 /// sub-parameters. Inside CSI_Param each is an event without a transition.
+///
+/// The three classes are one contiguous range, '0' (0x30) to ';' (0x3B), with ':' between '9' and
+/// ';', so a single unsigned compare classifies a byte.
 [[nodiscard]] constexpr bool isCsiParameterByte(char ch) noexcept
 {
-    return (ch >= '0' && ch <= '9') || ch == ';' || ch == ':';
+    return static_cast<unsigned char>(ch - '0') <= ';' - '0';
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
@@ -516,22 +520,18 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkCsiParameters(char const
     if (_vt52Mode)
         return 0;
 
-    auto const bytes = std::string_view { begin, static_cast<size_t>(std::distance(begin, end)) };
-
     // CSI_Entry sends a leading ':' to CSI_Ignore, so there only a digit or ';' may open the run.
-    if (_state == State::CSI_Entry && bytes.front() == ':')
-        return 0;
-
-    auto const run = bytes.substr(
-        0, static_cast<size_t>(std::ranges::find_if_not(bytes, isCsiParameterByte) - bytes.begin()));
-    if (run.empty())
+    if (auto const first = *begin; !isCsiParameterByte(first) || (_state == State::CSI_Entry && first == ':'))
         return 0;
 
     // From CSI_Entry this is the transition the table makes on the run's first byte. CSI_Entry has
     // no exit action and CSI_Param no entry action, so the assignment is all of it.
     _state = State::CSI_Param;
 
-    for (auto const ch: run)
+    // One pass scans and dispatches: the run ends at the first byte that is not a parameter byte,
+    // and its length is the number of bytes dispatched.
+    auto byteCount = size_t { 0 };
+    for (auto const ch: std::string_view { begin, end } | std::views::take_while(isCsiParameterByte))
     {
         switch (ch)
         {
@@ -539,8 +539,9 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkCsiParameters(char const
             case ':': _eventListener.paramSubSeparator(); break;
             default: _eventListener.paramDigit(ch); break;
         }
+        ++byteCount;
     }
-    return run.size();
+    return byteCount;
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>

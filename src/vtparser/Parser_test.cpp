@@ -720,6 +720,18 @@ TEST_CASE("Parser.CsiParameterBulk.TableAssumptions", "[Parser]")
     CHECK(table.transitions[entry][':'] == State::CSI_Ignore);
     CHECK(table.exitEvents[entry] == Action::Undefined);
     CHECK(table.entryEvents[param] == Action::Undefined);
+
+    // And the scanner's byte class, one range test, is exactly the set of bytes the table treats as
+    // a parameter event in CSI_Param -- no byte more, no byte less.
+    for (auto const byte: std::views::iota(size_t { 0 }, size_t { 256 }))
+    {
+        INFO(std::format("byte {:02X}", byte));
+        auto const event = table.events[param][byte];
+        auto const isParameterEvent = table.transitions[param][byte] == State::Undefined
+                                      && (event == Action::ParamDigit || event == Action::ParamSeparator
+                                          || event == Action::ParamSubSeparator);
+        CHECK(vtparser::isCsiParameterByte(static_cast<char>(byte)) == isParameterEvent);
+    }
 }
 
 TEST_CASE("Parser.CsiParameterBulk.ExplicitCases", "[Parser][BulkScan]")
