@@ -8,6 +8,7 @@
 
 #include <core/Utils.hpp>
 
+#include <chrono>
 #include <cstdlib>
 #include <format>
 #include <fstream>
@@ -22,7 +23,7 @@
 
 // clang-format off
 #ifdef _WIN32
-    #include <Winsock2.h>
+    #include <Windows.h>
 #else
     #include <fcntl.h>
     #include <sys/select.h>
@@ -163,21 +164,21 @@ namespace
             modes &= ~ENABLE_LINE_INPUT;
             modes &= ~ENABLE_ECHO_INPUT;
 
-            SetConsoleMode(stdinHandle, modes);
-            configured = true;
+            configured = SetConsoleMode(stdinHandle, modes) != 0;
 #endif
         }
 
-        int wait(timeval* timeout) override
+        int wait(std::chrono::microseconds& timeout) override
         {
 #ifdef _WIN32
             auto const fd0 = GetStdHandle(STD_INPUT_HANDLE);
-            DWORD const timeoutMillis = timeout->tv_sec * 1000 + timeout->tv_usec / 1000;
+            auto const timeoutMillis =
+                static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count());
             DWORD const result = WaitForSingleObject(fd0, timeoutMillis);
             switch (result)
             {
-                case WSA_WAIT_EVENT_0: return 1;
-                case WSA_WAIT_TIMEOUT: return 0;
+                case WAIT_OBJECT_0: return 1;
+                case WAIT_TIMEOUT: return 0;
                 case WAIT_FAILED:
                 case WAIT_ABANDONED:
                 default: return -1;
@@ -191,7 +192,14 @@ namespace
             FD_ZERO(&serr);
             FD_SET(fd, &sin);
             auto const watermark = fd + 1;
-            return select(watermark, &sin, &sout, &serr, timeout);
+            auto const seconds = std::chrono::duration_cast<std::chrono::seconds>(timeout);
+            auto remaining = timeval {};
+            remaining.tv_sec = static_cast<decltype(remaining.tv_sec)>(seconds.count());
+            remaining.tv_usec = static_cast<decltype(remaining.tv_usec)>((timeout - seconds).count());
+            auto const result = select(watermark, &sin, &sout, &serr, &remaining);
+            timeout =
+                std::chrono::seconds { remaining.tv_sec } + std::chrono::microseconds { remaining.tv_usec };
+            return result;
 #endif
         }
 
@@ -225,7 +233,7 @@ namespace
     };
 
     /// Queries the peer terminal's screen size over @p input (CSI 18 t / CSI 8;lines;cols t reply).
-    optional<tuple<int, int>> queryScreenSize(CaptureTransport& input, timeval* timeout)
+    optional<tuple<int, int>> queryScreenSize(CaptureTransport& input, std::chrono::microseconds& timeout)
     {
         // Naive implementation. TODO: use select() to poll and time out properly.
         if (input.write("\033[18t") < 0)
@@ -258,7 +266,10 @@ namespace
     }
 
     // Reads a response chunk.
-    bool readCaptureReply(CaptureTransport& input, timeval* timeout, bool words, ostream& output)
+    bool readCaptureReply(CaptureTransport& input,
+                          std::chrono::microseconds& timeout,
+                          bool words,
+                          ostream& output)
     {
         auto captureBufferCollector = CaptureBufferCollector { output, words };
         auto parser = vtparser::Parser<vtparser::ParserEvents> { captureBufferCollector };
@@ -297,13 +308,10 @@ namespace
 
 bool captureScreen(CaptureSettings const& settings, CaptureTransport& transport, ostream& output)
 {
-    auto constexpr MicrosPerSecond = 1'000'000;
-    auto const timeoutMicros = int(settings.timeout * MicrosPerSecond);
-    auto timeout = timeval {};
-    timeout.tv_sec = timeoutMicros / MicrosPerSecond;
-    timeout.tv_usec = timeoutMicros % MicrosPerSecond;
+    auto timeout = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::duration<double> { settings.timeout });
 
-    auto const screenSizeOpt = queryScreenSize(transport, &timeout);
+    auto const screenSizeOpt = queryScreenSize(transport, timeout);
     if (!screenSizeOpt.has_value())
     {
         cerr << "Could not get current screen size.\r\n";
@@ -331,7 +339,7 @@ bool captureScreen(CaptureSettings const& settings, CaptureTransport& transport,
         return false;
     }
 
-    return readCaptureReply(transport, &timeout, settings.words, output);
+    return readCaptureReply(transport, timeout, settings.words, output);
 }
 
 bool captureScreen(CaptureSettings const& settings)

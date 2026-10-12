@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cctype>
+#include <chrono>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -31,7 +32,10 @@ class CannedTransport final: public contour::cli::CaptureTransport
     {
     }
 
-    int wait(timeval*) override { return _readOffset < _pending.size() ? 1 : 0; }
+    int wait(std::chrono::microseconds& /*timeout*/) override
+    {
+        return _readOffset < _pending.size() ? 1 : 0;
+    }
 
     int read(void* buf, std::size_t size) override
     {

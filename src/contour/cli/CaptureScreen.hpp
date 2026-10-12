@@ -3,11 +3,10 @@
 
 #include <vtbackend/core/Primitives.hpp>
 
+#include <chrono>
 #include <iosfwd>
 #include <string>
 #include <string_view>
-
-struct timeval;
 
 namespace contour::cli
 {
@@ -30,9 +29,11 @@ class CaptureTransport
   public:
     virtual ~CaptureTransport() = default;
 
-    /// Waits for readable data. @param timeout In/out remaining time, select(2) semantics.
+    /// Waits for readable data, for at most @p timeout, which it decreases by the time it waited, as
+    /// select(2) does.
+    /// @param timeout The time left, in and out.
     /// @return >0 when readable, 0 on timeout, <0 on error.
-    virtual int wait(timeval* timeout) = 0;
+    virtual int wait(std::chrono::microseconds& timeout) = 0;
 
     /// Reads at most @p size bytes into @p buf. @return bytes read, or <0 on error.
     virtual int read(void* buf, std::size_t size) = 0;
