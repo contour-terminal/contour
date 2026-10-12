@@ -209,6 +209,13 @@ void initializeLineSoA(LineSoA& line, ColumnCount cols, GraphicsAttributes const
 /// @param fillAttrs Default graphics attributes that empty cells appear to have.
 void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs = {}) noexcept;
 
+/// Puts a line in the blank state exactly as @c initializeBlankLineSoA does, but keeps every array's
+/// capacity, so the line's next materialization reuses that storage instead of allocating it.
+/// For a line that is about to be written again at once (@see Line::recycle).
+/// @param line      The LineSoA to put into the blank state.
+/// @param fillAttrs Default graphics attributes that empty cells appear to have.
+void recycleBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs = {}) noexcept;
+
 /// Test whether a LineSoA is in the blank (un-materialized) state.
 /// @return true iff @c codepoints is empty (all six arrays are empty by invariant).
 [[nodiscard]] inline bool isBlankLineSoA(LineSoA const& line) noexcept

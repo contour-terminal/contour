@@ -460,10 +460,12 @@ LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defa
     {
         rotateBuffersLeft(linesCountToScrollUp);
 
+        // At capacity each line scrolled in IS one evicted from the top of the ring, and it is about to
+        // be written: keep its storage rather than release it and allocate it again.
         for (auto y = boxed_cast<LineOffset>(_pageSize.lines - linesCountToScrollUp);
              y < boxed_cast<LineOffset>(_pageSize.lines);
              ++y)
-            lineAt(y).reset(defaultLineFlags(), defaultAttributes, _pageSize.columns);
+            lineAt(y).recycle(defaultLineFlags(), defaultAttributes, _pageSize.columns);
 
         return linesCountToScrollUp;
     }
@@ -488,10 +490,11 @@ LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defa
             auto const incrementCount = linesCountToScrollUp - linesAppendCount;
             rotateBuffersLeft(incrementCount);
 
+            // The ring just filled up: as above, the lines scrolled in include evicted ones.
             for (auto y = boxed_cast<LineOffset>(_pageSize.lines - linesCountToScrollUp);
                  y < boxed_cast<LineOffset>(_pageSize.lines);
                  ++y)
-                lineAt(y).reset(defaultLineFlags(), defaultAttributes, _pageSize.columns);
+                lineAt(y).recycle(defaultLineFlags(), defaultAttributes, _pageSize.columns);
         }
         return LineCount::cast_from(linesAppendCount);
     }

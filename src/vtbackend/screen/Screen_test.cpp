@@ -4953,4 +4953,30 @@ TEST_CASE("BulkText.theAlternateScreenWritesWhatThePrimaryWrites", "[screen]")
     }
 }
 
+TEST_CASE("BulkText.aRecycledLineIsCleanWhateverItHeld", "[screen][LineShape]")
+{
+    // At full scrollback each new line is the storage of the one evicted from the top. Whatever that
+    // line held -- colours, a cluster, wide characters -- must be gone from the line it becomes, and
+    // ASCII written there must land in a clean, uniform line.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) }, LineCount(1) };
+    auto const& screen = mock.terminal.primaryScreen();
+    auto const cursorLine = [&]() -> Line const& {
+        return screen.grid().lineAt(screen.cursor().position.line);
+    };
+
+    mock.writeToScreen("\033[41mred\033[m e\xCC\x81\r\n"sv); // Mixed: a colour and a cluster
+    mock.writeToScreen("\xE4\xB8\xAD\xE4\xB8\xAD\r\n"sv);    // Spanning: wide characters
+    mock.writeToScreen("filler\r\n"sv);                      // the ring is full from here on
+
+    mock.writeToScreen("plain"sv); // lands on the line that held "red é"
+    CHECK(cursorLine().toUtf8WithSgr(ColumnOffset(0), ColumnOffset(10)) == "plain     ");
+    CHECK(cursorLine().storage().shape == LineShape::Uniform);
+
+    mock.writeToScreen("\r\nmore"sv); // lands on the line that held the wide characters
+    CHECK(cursorLine().toUtf8WithSgr(ColumnOffset(0), ColumnOffset(10)) == "more      ");
+    CHECK(cursorLine().storage().shape == LineShape::Uniform);
+    for (auto const column: std::views::iota(0, 10))
+        CHECK(cursorLine().cellWidthAt(ColumnOffset(column)) == 1);
+}
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

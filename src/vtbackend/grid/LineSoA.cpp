@@ -14,6 +14,19 @@
 namespace vtbackend
 {
 
+namespace
+{
+    /// The line-level state every blank state shares, however its arrays were emptied.
+    void resetBlankLineMetadata(LineSoA& line, GraphicsAttributes const& fillAttrs) noexcept
+    {
+        line.imageFragments.reset();
+        line.lineFlags = {};
+        line.usedColumns = {};
+        line.shape = LineShape::Uniform;
+        line.fillAttrs = fillAttrs;
+    }
+} // namespace
+
 void initializeLineSoA(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAttrs)
 {
     auto const n = unbox<size_t>(cols);
@@ -51,11 +64,24 @@ void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs) 
     AlignedVector<uint16_t> {}.swap(line.clusterPoolIndex);
 
     std::vector<char32_t> {}.swap(line.clusterPool);
-    line.imageFragments.reset();
-    line.lineFlags = {};
-    line.usedColumns = {};
-    line.shape = LineShape::Uniform;
-    line.fillAttrs = fillAttrs;
+    resetBlankLineMetadata(line, fillAttrs);
+}
+
+void recycleBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs) noexcept
+{
+    // clear(), not a swap with an empty vector: size 0 is what makes the line blank (@see
+    // isBlankLineSoA), and the capacity that stays is what the next materialization assigns into
+    // without allocating.
+    line.codepoints.clear();
+    line.widths.clear();
+    line.scales.clear();
+    line.textScaleExtras.clear();
+    line.sgr.clear();
+    line.hyperlinks.clear();
+    line.clusterSize.clear();
+    line.clusterPoolIndex.clear();
+    line.clusterPool.clear();
+    resetBlankLineMetadata(line, fillAttrs);
 }
 
 void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const& fillAttrs)

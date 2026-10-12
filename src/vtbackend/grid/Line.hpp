@@ -178,11 +178,7 @@ class Line
     /// Skips the six vector swaps when the line is already blank with matching fillAttrs.
     void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
     {
-        _dirty = true;
-        _flags = flags;
-        _contextId = {};
-        _commandEndOffset = {};
-        _promptEndOffset = {};
+        resetMetadata(flags);
         if (isBlankWithFillAttrs(attributes))
             return;
         initializeBlankLineSoA(_storage, attributes);
@@ -190,15 +186,30 @@ class Line
 
     void reset(LineFlags flags, GraphicsAttributes attributes, ColumnCount count) noexcept
     {
-        _dirty = true;
-        _flags = flags;
-        _contextId = {};
-        _commandEndOffset = {};
-        _promptEndOffset = {};
+        resetMetadata(flags);
         _columns = count;
         if (isBlankWithFillAttrs(attributes))
             return;
         initializeBlankLineSoA(_storage, attributes);
+    }
+
+    /// Resets the line exactly as reset() does, but keeps its storage's capacity, so the next write
+    /// into it assigns into that storage instead of allocating it again.
+    ///
+    /// For a line about to be written again at once: the one the scrollback ring evicts at capacity
+    /// and hands back as the new bottom line (@see Grid::scrollUp). reset() releases the storage on
+    /// purpose -- after a clear, resident memory should follow the lines in use -- but for this line
+    /// the release and the allocation that follows a moment later are pure churn.
+    /// @param flags      The line's new flags.
+    /// @param attributes The fill attributes its blank cells appear to have.
+    /// @param columns    The line's new column count.
+    void recycle(LineFlags flags, GraphicsAttributes attributes, ColumnCount columns) noexcept
+    {
+        resetMetadata(flags);
+        _columns = columns;
+        if (isBlankWithFillAttrs(attributes))
+            return;
+        recycleBlankLineSoA(_storage, attributes);
     }
 
     /// Fill all cells with the given codepoint and attributes.
@@ -207,11 +218,7 @@ class Line
               char32_t codepoint,
               uint8_t width) noexcept
     {
-        _dirty = true;
-        _flags = flags;
-        _contextId = {};
-        _commandEndOffset = {};
-        _promptEndOffset = {};
+        resetMetadata(flags);
         if (codepoint == 0)
         {
             initializeBlankLineSoA(_storage, attributes);
@@ -643,6 +650,16 @@ class Line
     }
 
   private:
+    /// What every reset clears besides the cells: flags, the context, the prompt and command borders.
+    void resetMetadata(LineFlags flags) noexcept
+    {
+        _dirty = true;
+        _flags = flags;
+        _contextId = {};
+        _commandEndOffset = {};
+        _promptEndOffset = {};
+    }
+
     LineSoA _storage;
     ColumnCount _columns {};
     LineFlags _flags {};

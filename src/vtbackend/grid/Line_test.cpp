@@ -5,6 +5,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
+#include <ranges>
+#include <tuple>
+#include <vector>
+
 using namespace std;
 
 using namespace vtbackend;
@@ -488,4 +493,71 @@ TEST_CASE("Line.isBulkWritable.refusesOnlySpanningLines", "[Line]")
     CHECK(line.isBulkWritable());
     degradeShape(soa, LineShape::Spanning);
     CHECK_FALSE(line.isBulkWritable());
+}
+
+TEST_CASE("Line.recycle.leavesTheSameLineAsReset", "[Line]")
+{
+    // Whatever the evicted line held -- colour, a hyperlink, a wide character, a grapheme cluster --
+    // a recycled line must be indistinguishable from a reset one, at once and after the next write.
+    auto const usedLine = [] {
+        auto line = Line(ColumnCount(10), LineFlag::Wrappable);
+        (void) writeTextToSoA(line.materializedStorage(),
+                              0,
+                              "ab\xE4\xB8\xAD"
+                              "e\xCC\x81",
+                              GraphicsAttributes { .foregroundColor = Color::Indexed(2) },
+                              HyperlinkId(3));
+        line.setFlag(LineFlag::Marked, true);
+        line.setPromptEndOffset(ColumnOffset(2));
+        return line;
+    };
+    auto const observe = [](Line const& line) {
+        auto widths = std::vector<uint8_t> {};
+        for (auto const column: views::iota(0, unbox<int>(line.size())))
+            widths.push_back(line.cellWidthAt(ColumnOffset(column)));
+        return std::tuple { line.isBlank(),
+                            line.empty(),
+                            line.size(),
+                            line.flags(),
+                            line.toUtf8(),
+                            line.toUtf8WithSgr(ColumnOffset(0), boxed_cast<ColumnOffset>(line.size())),
+                            line.trimmedColumns(),
+                            line.isTrivialBuffer(),
+                            line.isBulkWritable(),
+                            line.storage().shape,
+                            line.storage().fillAttrs,
+                            widths,
+                            line.promptEndOffset(),
+                            line.commandEndOffset(),
+                            line.contextId() };
+    };
+    auto const fill = GraphicsAttributes { .backgroundColor = Color::Indexed(4) };
+
+    auto recycled = usedLine();
+    auto reset = usedLine();
+    recycled.recycle(LineFlag::Wrappable, fill, ColumnCount(10));
+    reset.reset(LineFlag::Wrappable, fill, ColumnCount(10));
+    CHECK(observe(recycled) == observe(reset));
+
+    recycled.fill(ColumnOffset(2), GraphicsAttributes {}, "xyz");
+    reset.fill(ColumnOffset(2), GraphicsAttributes {}, "xyz");
+    CHECK(observe(recycled) == observe(reset));
+}
+
+TEST_CASE("Line.recycle.keepsTheStorageForTheNextWrite", "[Line]")
+{
+    auto line = Line(ColumnCount(80));
+    line.fill(ColumnOffset(0), GraphicsAttributes {}, "evicted");
+    auto const* const storage = line.storage().codepoints.data();
+
+    line.recycle(LineFlag::None, GraphicsAttributes {}, ColumnCount(80));
+    REQUIRE(line.isBlank());
+    CHECK(line.storage().codepoints.capacity() >= 80);
+
+    line.fill(ColumnOffset(0), GraphicsAttributes {}, "scrolled in");
+    CHECK(line.storage().codepoints.data() == storage);
+
+    // reset() still releases it, which is what clearing the screen wants.
+    line.reset(LineFlag::None, GraphicsAttributes {}, ColumnCount(80));
+    CHECK(line.storage().codepoints.capacity() == 0);
 }
