@@ -114,6 +114,12 @@ namespace // {{{ helper
         return ((5 * color.green) + (2 * color.red) + color.blue) > 8 * 128;
     }
 
+    /// Whether @p codepoint is a Regional_Indicator, U+1F1E6..U+1F1FF: the letters that pair into a flag.
+    constexpr bool isRegionalIndicator(char32_t codepoint) noexcept
+    {
+        return codepoint >= U'\U0001F1E6' && codepoint <= U'\U0001F1FF';
+    }
+
     template <typename Rep, typename Period>
     inline void sleepFor(std::chrono::duration<Rep, Period> const& rtime)
     {
@@ -619,6 +625,12 @@ void Screen::writeText(string_view text, size_t cellCount)
             }
             else if (unicode::grapheme_process_breakable(cp, localGraphemeState))
             {
+                // libunicode's streaming grapheme_process_breakable() counts regional indicators only
+                // from the one grapheme_process_init() was seeded with, so a flag that begins after a
+                // break would pair one letter off (GB12/GB13). Seed the new cluster as init() would.
+                // This re-seed can go once the minimum libunicode version carries the upstream fix.
+                if (isRegionalIndicator(cp))
+                    unicode::grapheme_process_init(cp, localGraphemeState);
                 writeCharToCurrentAndAdvance(cp);
             }
             else

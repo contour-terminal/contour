@@ -105,6 +105,32 @@ TEST_CASE("BulkScan.AnInvalidByteInsideARunGivesTheSameScreen", "[BulkScan]")
     checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(10) }, setup, "\xFF\xE2\x94\x82X"sv);
 }
 
+TEST_CASE("BulkScan.RegionalIndicatorPairsGiveTheSameScreen", "[BulkScan]")
+{
+    // GB12/GB13: regional indicators pair up counting from the first one after a break, whatever
+    // precedes it -- ASCII, other text, or the end of a read.
+    auto const texts = std::array {
+        "flags \xF0\x9F\x87\xA9\xF0\x9F\x87\xAA\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8 after"sv,     // DE US
+        "odd \xF0\x9F\x87\xA9\xF0\x9F\x87\xAA\xF0\x9F\x87\xBA after"sv,                       // DE, a lone U
+        "\xC3\xA4\xF0\x9F\x87\xA9\xF0\x9F\x87\xAA\xC3\xB6\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"sv, // after letters
+    };
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+        for (auto const text: texts)
+        {
+            INFO(std::format(
+                "{}, text \"{}\"", screenSelect.empty() ? "primary" : "alternate", core::escape(text)));
+            checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(40) }, screenSelect, text);
+        }
+
+    // And what both must show: "flags ", then DE in one cell and US in the next.
+    auto mock = makeTerminal(PageSize { LineCount(3), ColumnCount(40) }, vtparser::BulkScan::Enabled);
+    mock.writeToScreen("flags \xF0\x9F\x87\xA9\xF0\x9F\x87\xAA\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"sv);
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(6)).codepoints()
+          == U"\U0001F1E9\U0001F1EA");
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(8)).codepoints()
+          == U"\U0001F1FA\U0001F1F8");
+}
+
 TEST_CASE("BulkScan.EditsOfShapedLinesGiveTheSameScreen", "[BulkScan]")
 {
     // The surface F1's gate opened, on both screens: every edit that leaves a line Mixed or Spanning,
