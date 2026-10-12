@@ -469,6 +469,35 @@ constexpr auto NonAsciiPieces = std::array {
     "\xF0\x9F\x8F\xBD"sv,                     // a skin tone on its own
 };
 
+/// One piece of ill-formed UTF-8, from each way the decoders can disagree about where it ends: stray
+/// continuation bytes, lead bytes cut short by ASCII or by another lead, the bytes no encoding uses, and
+/// overlong, surrogate and out-of-range encodings. A lead byte cut short takes the ASCII after it for its
+/// continuation bytes, so a stretch of ASCII can lose its first bytes to a character that is not ASCII.
+constexpr auto IllFormedPieces = std::array {
+    "\x80"sv,     // a stray continuation byte
+    "\xBF"sv,     // the last one
+    "\xC3"sv,     // a two-byte lead, one byte short
+    "\xE2\x94"sv, // a three-byte lead, one byte short
+    "\xF0\x9F"sv, // a four-byte lead, two bytes short
+    "\xE2"
+    "a"sv, // a three-byte lead cut short by ASCII
+    "\xF0\x9F"
+    "xyz"sv,                  // a four-byte lead cut short by ASCII
+    "\xC3\xE2\x94\x82"sv,     // a lead cut short by another lead
+    "\xE2\xF0\x9F\x98\x80"sv, // the same with a four-byte character behind it
+    "\xC0\xAF"sv,             // 0xC0 and 0xC1 are overlong leads
+    "\xC1\xBF"sv,
+    "\xF5\x80\x80\x80"sv, // 0xF5..0xFF lead nothing
+    "\xF8"sv,
+    "\xFE"sv,
+    "\xFF"sv,
+    "\xE0\x80\xAF"sv,     // overlong: '/' in three bytes
+    "\xF0\x80\x80\xAF"sv, // overlong: '/' in four bytes
+    "\xED\xA0\x80"sv,     // a surrogate, U+D800
+    "\xED\xBF\xBF"sv,     // a surrogate, U+DFFF
+    "\xF4\x90\x80\x80"sv, // above U+10FFFF
+};
+
 /// What the page holds and which modes are set before the random text arrives.
 constexpr auto RandomTextSetups = std::array {
     ""sv,                                  // the primary screen, from the left edge
@@ -491,23 +520,25 @@ size_t below(std::mt19937& rng, size_t n)
     return static_cast<size_t>(test::detail::drawBetween(rng, 0, static_cast<int>(n) - 1));
 }
 
-/// Random well-formed UTF-8: up to ten pieces, half of them ASCII words of up to 30 letters (some
-/// followed by a space), half of them NonAsciiPieces.
+/// Random text: up to ten pieces, half of them ASCII words of up to 30 letters (some followed by a
+/// space), nine in twenty NonAsciiPieces, and one in twenty IllFormedPieces.
 std::string randomMixedText(std::mt19937& rng)
 {
     auto out = std::string {};
     for ([[maybe_unused]] auto const piece: std::views::iota(size_t { 0 }, 1 + below(rng, 10)))
     {
-        if (auto const kind = below(rng, 10); kind < 5)
+        if (auto const kind = below(rng, 20); kind < 10)
         {
-            auto const letters = 1 + below(rng, kind < 2 ? 4 : 30);
+            auto const letters = 1 + below(rng, kind < 4 ? 4 : 30);
             for ([[maybe_unused]] auto const letter: std::views::iota(size_t { 0 }, letters))
                 out += static_cast<char>('a' + below(rng, 26));
             if (below(rng, 4) == 0)
                 out += ' ';
         }
-        else
+        else if (kind < 19)
             out += NonAsciiPieces[below(rng, NonAsciiPieces.size())];
+        else
+            out += IllFormedPieces[below(rng, IllFormedPieces.size())];
     }
     return out;
 }
@@ -517,7 +548,7 @@ struct RandomTextCase
 {
     ColumnCount columns;      ///< The page width; the page is four lines high.
     std::string_view setup;   ///< Written in one read, before the text.
-    std::string text;         ///< Random well-formed UTF-8.
+    std::string text;         ///< Random text, now and then ill-formed UTF-8.
     std::vector<size_t> cuts; ///< Sorted offsets into text; text is written in cuts.size() + 1 reads.
 };
 
@@ -571,10 +602,6 @@ bool holdsAnOrphanContinuation(Screen const& screen)
 
 /// Writes each seed's case to a terminal with bulk scanning and to one without, and requires the two
 /// screens to agree, every line's shape to cover its cells, and no continuation to be an orphan.
-///
-/// Well-formed UTF-8 only. Ill-formed input waits for libunicode's text scanner to stop at ill-formed
-/// UTF-8 (the libunicode version bump): 0.9.3 hands a read that ends inside a character on as a
-/// complete run, which the bulk path then decodes differently from the state machine.
 ///
 /// The screens are not compared for a case in the accepted divergence class
 /// (asciiFollowsAPrependCharacter); its other checks still run.
