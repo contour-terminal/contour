@@ -70,13 +70,9 @@ namespace
         clearReplacedImageFragments(line.imageFragments, static_cast<uint16_t>(startCol), count);
 
         // Check once whether the written range breaks the line's uniformity, against an unwritten
-        // cell: from col 0, the cell just past the run; from col > 0, cell 0. ASCII never spans.
-        if (line.shape == LineShape::Uniform && count < maxCols)
-        {
-            auto const checkCol = (startCol > 0) ? size_t(0) : startCol + count;
-            if (checkCol < maxCols && (attrs != line.sgr[checkCol] || hyperlink != line.hyperlinks[checkCol]))
-                degradeShape(line, LineShape::Mixed);
-        }
+        // cell: from col 0, the cell just past the run (none, for a full-width run); from col > 0,
+        // cell 0. ASCII never spans.
+        degradeToMixedIfDiffers(line, startCol, startCol > 0 ? size_t { 0 } : startCol + count);
 
         return count;
     }

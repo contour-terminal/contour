@@ -1765,9 +1765,8 @@ string_view Terminal::lockedWriteToPtyBuffer(string_view data)
 
 size_t Terminal::maxBulkTextSequenceWidth() const noexcept
 {
-    // Measured on the display the text lands on. A status line selected with DECSASD has margins and a
-    // line of its own: sizing the run from the main page's margin let it overflow that line, and asking
-    // page 0's line let it write into a status line that spans.
+    // Measured on the display the text lands on: a status line selected with DECSASD has margins and a
+    // line of its own.
     auto const& display = activeDisplay();
 
     // A pending wrap moves the run to the next line, which nothing below looks at. At a real deferred

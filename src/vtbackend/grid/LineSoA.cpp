@@ -10,14 +10,33 @@
 #include <iterator>
 #include <limits>
 #include <ranges>
+#include <type_traits>
 
 namespace vtbackend
 {
 
 namespace
 {
-    /// The line-level state every blank state shares, however its arrays were emptied.
-    void resetBlankLineMetadata(LineSoA& line, GraphicsAttributes const& fillAttrs) noexcept
+    /// Calls @p visit once per per-cell array of a LineSoA, with the array's member and the value an
+    /// empty cell holds in it. The one list of those arrays: every operation on all of them goes
+    /// through here, so an array added to LineSoA cannot be left out of one.
+    /// @param emptyAttrs The rendition an empty cell wears.
+    /// @param visit      Called as `visit(&LineSoA::array, emptyValue)` for each array.
+    template <typename Visitor>
+    void forEachCellArray(GraphicsAttributes const& emptyAttrs, Visitor const& visit)
+    {
+        visit(&LineSoA::codepoints, char32_t { 0 });
+        visit(&LineSoA::widths, uint8_t { 1 });
+        visit(&LineSoA::scales, uint8_t { 1 });
+        visit(&LineSoA::textScaleExtras, uint16_t { 0 });
+        visit(&LineSoA::sgr, emptyAttrs);
+        visit(&LineSoA::hyperlinks, HyperlinkId {});
+        visit(&LineSoA::clusterSize, uint8_t { 0 });
+        visit(&LineSoA::clusterPoolIndex, uint16_t { 0 });
+    }
+
+    /// The line-level state of a fresh line, blank or materialized, however its arrays were set.
+    void resetLineMetadata(LineSoA& line, GraphicsAttributes const& fillAttrs) noexcept
     {
         line.imageFragments.reset();
         line.lineFlags = {};
@@ -30,22 +49,9 @@ namespace
 void initializeLineSoA(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAttrs)
 {
     auto const n = unbox<size_t>(cols);
-
-    line.codepoints.assign(n, char32_t { 0 });
-    line.widths.assign(n, uint8_t { 1 });
-    line.scales.assign(n, uint8_t { 1 });
-    line.textScaleExtras.assign(n, uint16_t { 0 });
-    line.sgr.assign(n, fillAttrs);
-    line.hyperlinks.assign(n, HyperlinkId {});
-    line.clusterSize.assign(n, uint8_t { 0 });
-    line.clusterPoolIndex.assign(n, uint16_t { 0 });
-
+    forEachCellArray(fillAttrs, [&](auto array, auto const& empty) { (line.*array).assign(n, empty); });
     line.clusterPool.clear();
-    line.imageFragments.reset();
-    line.lineFlags = {};
-    line.usedColumns = {};
-    line.shape = LineShape::Uniform;
-    line.fillAttrs = fillAttrs;
+    resetLineMetadata(line, fillAttrs);
 }
 
 void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs) noexcept
@@ -54,17 +60,11 @@ void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs) 
     // and would defeat the lazy-blank memory savings after a line cycles through
     // materialize → reset. For long sessions with ED/clear-screen ops, this keeps the
     // resident set proportional to currently-used lines rather than high-water mark.
-    AlignedVector<char32_t> {}.swap(line.codepoints);
-    AlignedVector<uint8_t> {}.swap(line.widths);
-    AlignedVector<uint8_t> {}.swap(line.scales);
-    AlignedVector<uint16_t> {}.swap(line.textScaleExtras);
-    AlignedVector<GraphicsAttributes> {}.swap(line.sgr);
-    AlignedVector<HyperlinkId> {}.swap(line.hyperlinks);
-    AlignedVector<uint8_t> {}.swap(line.clusterSize);
-    AlignedVector<uint16_t> {}.swap(line.clusterPoolIndex);
-
+    forEachCellArray(fillAttrs, [&](auto array, auto const& /*empty*/) {
+        std::remove_cvref_t<decltype(line.*array)> {}.swap(line.*array);
+    });
     std::vector<char32_t> {}.swap(line.clusterPool);
-    resetBlankLineMetadata(line, fillAttrs);
+    resetLineMetadata(line, fillAttrs);
 }
 
 void recycleBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs) noexcept
@@ -72,16 +72,9 @@ void recycleBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs) noe
     // clear(), not a swap with an empty vector: size 0 is what makes the line blank (@see
     // isBlankLineSoA), and the capacity that stays is what the next materialization assigns into
     // without allocating.
-    line.codepoints.clear();
-    line.widths.clear();
-    line.scales.clear();
-    line.textScaleExtras.clear();
-    line.sgr.clear();
-    line.hyperlinks.clear();
-    line.clusterSize.clear();
-    line.clusterPoolIndex.clear();
+    forEachCellArray(fillAttrs, [&](auto array, auto const& /*empty*/) { (line.*array).clear(); });
     line.clusterPool.clear();
-    resetBlankLineMetadata(line, fillAttrs);
+    resetLineMetadata(line, fillAttrs);
 }
 
 void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const& fillAttrs)
@@ -92,15 +85,7 @@ void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const&
     // 0-column LineSoA where this is unambiguous.
     auto const oldSize = line.codepoints.size();
     auto const n = unbox<size_t>(newCols);
-
-    line.codepoints.resize(n, char32_t { 0 });
-    line.widths.resize(n, uint8_t { 1 });
-    line.scales.resize(n, uint8_t { 1 });
-    line.textScaleExtras.resize(n, uint16_t { 0 });
-    line.sgr.resize(n, fillAttrs);
-    line.hyperlinks.resize(n, HyperlinkId {});
-    line.clusterSize.resize(n, uint8_t { 0 });
-    line.clusterPoolIndex.resize(n, uint16_t { 0 });
+    forEachCellArray(fillAttrs, [&](auto array, auto const& empty) { (line.*array).resize(n, empty); });
 
     // Clamp usedColumns to new size
     if (line.usedColumns > newCols)
@@ -118,14 +103,9 @@ void clearRange(LineSoA& line, size_t from, size_t count, GraphicsAttributes con
     assert(!line.codepoints.empty() || count == 0);
     assert(from + count <= line.codepoints.size());
 
-    std::fill_n(line.codepoints.data() + from, count, char32_t { 0 });
-    std::fill_n(line.widths.data() + from, count, uint8_t { 1 });
-    std::fill_n(line.scales.data() + from, count, uint8_t { 1 });
-    std::fill_n(line.textScaleExtras.data() + from, count, uint16_t { 0 });
-    std::fill_n(line.sgr.data() + from, count, attrs);
-    std::fill_n(line.hyperlinks.data() + from, count, HyperlinkId {});
-    std::fill_n(line.clusterSize.data() + from, count, uint8_t { 0 });
-    std::fill_n(line.clusterPoolIndex.data() + from, count, uint16_t { 0 });
+    forEachCellArray(attrs, [&](auto array, auto const& empty) {
+        std::fill_n((line.*array).data() + from, count, empty);
+    });
 
     // Remove image fragments in the cleared range
     if (line.imageFragments)
@@ -195,14 +175,11 @@ void copyColumns(LineSoA const& src, size_t srcCol, LineSoA& dst, size_t dstCol,
     assert(srcCol + count <= src.codepoints.size());
     assert(dstCol + count <= dst.codepoints.size());
 
-    // Bulk copy each SoA array (SIMD auto-vectorizable)
-    std::copy_n(src.codepoints.data() + srcCol, count, dst.codepoints.data() + dstCol);
-    std::copy_n(src.widths.data() + srcCol, count, dst.widths.data() + dstCol);
-    std::copy_n(src.scales.data() + srcCol, count, dst.scales.data() + dstCol);
-    std::copy_n(src.textScaleExtras.data() + srcCol, count, dst.textScaleExtras.data() + dstCol);
-    std::copy_n(src.sgr.data() + srcCol, count, dst.sgr.data() + dstCol);
-    std::copy_n(src.hyperlinks.data() + srcCol, count, dst.hyperlinks.data() + dstCol);
-    std::copy_n(src.clusterSize.data() + srcCol, count, dst.clusterSize.data() + dstCol);
+    // Bulk copy each SoA array (SIMD auto-vectorizable). The pool indices are the source line's, and
+    // are rewritten for the destination's pool below.
+    forEachCellArray(src.fillAttrs, [&](auto array, auto const& /*empty*/) {
+        std::copy_n((src.*array).data() + srcCol, count, (dst.*array).data() + dstCol);
+    });
 
     // Transfer cluster pool entries for cells with grapheme cluster extras
     for (size_t i = 0; i < count; ++i)
@@ -249,18 +226,10 @@ void moveColumns(LineSoA& line, size_t srcCol, size_t dstCol, size_t count)
     assert(dstCol + count <= line.codepoints.size());
 
     // Use memmove for overlapping ranges (one per array)
-    std::memmove(line.codepoints.data() + dstCol, line.codepoints.data() + srcCol, count * sizeof(char32_t));
-    std::memmove(line.widths.data() + dstCol, line.widths.data() + srcCol, count * sizeof(uint8_t));
-    std::memmove(line.scales.data() + dstCol, line.scales.data() + srcCol, count * sizeof(uint8_t));
-    std::memmove(
-        line.textScaleExtras.data() + dstCol, line.textScaleExtras.data() + srcCol, count * sizeof(uint16_t));
-    std::memmove(line.sgr.data() + dstCol, line.sgr.data() + srcCol, count * sizeof(GraphicsAttributes));
-    std::memmove(
-        line.hyperlinks.data() + dstCol, line.hyperlinks.data() + srcCol, count * sizeof(HyperlinkId));
-    std::memmove(line.clusterSize.data() + dstCol, line.clusterSize.data() + srcCol, count * sizeof(uint8_t));
-    std::memmove(line.clusterPoolIndex.data() + dstCol,
-                 line.clusterPoolIndex.data() + srcCol,
-                 count * sizeof(uint16_t));
+    forEachCellArray(line.fillAttrs, [&](auto array, auto const& /*empty*/) {
+        auto* const data = (line.*array).data();
+        std::memmove(data + dstCol, data + srcCol, count * sizeof(*data));
+    });
 
     // Note: moveColumns does NOT handle cluster pool or image fragment reindexing.
     // Callers must handle cluster pool entries if source cells have extras.

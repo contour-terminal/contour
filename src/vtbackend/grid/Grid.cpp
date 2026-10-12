@@ -459,14 +459,7 @@ LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defa
     if (unbox<size_t>(_linesUsed) == _lines.size())
     {
         rotateBuffersLeft(linesCountToScrollUp);
-
-        // At capacity each line scrolled in IS one evicted from the top of the ring, and it is about to
-        // be written: keep its storage rather than release it and allocate it again.
-        for (auto y = boxed_cast<LineOffset>(_pageSize.lines - linesCountToScrollUp);
-             y < boxed_cast<LineOffset>(_pageSize.lines);
-             ++y)
-            lineAt(y).recycle(defaultLineFlags(), defaultAttributes, _pageSize.columns);
-
+        recycleEvictedLines(linesCountToScrollUp, defaultAttributes);
         return linesCountToScrollUp;
     }
     else
@@ -489,15 +482,20 @@ LineCount Grid::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defa
         {
             auto const incrementCount = linesCountToScrollUp - linesAppendCount;
             rotateBuffersLeft(incrementCount);
-
-            // The ring just filled up: as above, the lines scrolled in include evicted ones.
-            for (auto y = boxed_cast<LineOffset>(_pageSize.lines - linesCountToScrollUp);
-                 y < boxed_cast<LineOffset>(_pageSize.lines);
-                 ++y)
-                lineAt(y).recycle(defaultLineFlags(), defaultAttributes, _pageSize.columns);
+            recycleEvictedLines(incrementCount, defaultAttributes); // the ring just filled up
         }
         return LineCount::cast_from(linesAppendCount);
     }
+}
+
+// inline: both of scrollUp's eviction branches call this once per scroll, and without the hint clang
+// keeps it out of line, which costs every scrolled line a call.
+inline void Grid::recycleEvictedLines(LineCount count, GraphicsAttributes const& defaultAttributes) noexcept
+{
+    // Each of these lines IS one evicted from the top of the ring, and it is about to be written: keep
+    // its storage rather than release it and allocate it again.
+    for (auto const y: std::views::iota(*(_pageSize.lines - count), *_pageSize.lines))
+        lineAt(LineOffset(y)).recycle(defaultLineFlags(), defaultAttributes, _pageSize.columns);
 }
 
 LineCount Grid::scrollUp(LineCount n, GraphicsAttributes defaultAttributes, Margin margin) noexcept

@@ -430,7 +430,7 @@ TEST_CASE("AppendChar.a_joiner_after_a_bulk_run_that_filled_the_line", "[screen]
 {
     // The same seam where the run reaches the right margin and leaves a wrap pending: the joiner must
     // land exactly where it lands when the same bytes arrive in a single read. The bulk path stops one
-    // column short of the margin today, so this pins the boundary rather than a defect.
+    // column short of the margin, so this pins the boundary rather than a defect.
     struct Outcome
     {
         std::u32string firstCell;
@@ -4831,8 +4831,8 @@ std::vector<std::string> pageSnapshotOf(Screen const& screen)
 
 TEST_CASE("BulkText.theGateFollowsTheLineShapeOnEveryScreen", "[screen][LineShape]")
 {
-    // The bulk write used to be refused on the alternate screen outright, and on any line that had left
-    // the batched render path. Only a line holding a spanning cell needs refusing.
+    // Only a line holding a spanning cell is refused the bulk write -- not the alternate screen, and not
+    // a line that has left the batched render path.
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
     mock.writeToScreen("\033[?1049h"sv);
     CHECK(mock.terminal.maxBulkTextSequenceWidth() == 9);

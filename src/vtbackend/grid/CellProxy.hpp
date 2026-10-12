@@ -359,32 +359,20 @@ class BasicCellProxy
             _line->imageFragments->erase(static_cast<uint16_t>(_col));
     }
 
-    /// Degrades the line's shape to what this cell now requires: Spanning for a cell reaching past its
-    /// own column or row, otherwise what degradeToMixedIfNeeded() decides.
+    /// Degrades the line's shape to what this cell now requires. @see degradeShapeForCell
     void degradeShapeIfNeeded() noexcept
         requires(!IsConst)
     {
-        if (isSpanningCell(_line->sgr[_col].flags, _line->scales[_col]))
-        {
-            degradeShape(*_line, LineShape::Spanning);
-            return;
-        }
-        degradeToMixedIfNeeded();
+        degradeShapeForCell(*_line, _col);
     }
 
-    /// Degrades a Uniform line to Mixed when this cell's rendition or hyperlink differs from another
-    /// cell's. At col 0 the comparison is against col 1 (an unwritten cell), otherwise against col 0.
+    /// Degrades a Uniform line to Mixed when this cell's rendition or hyperlink differs from the rest.
     /// Enough on its own after a write that cannot make the cell span: a colour or a hyperlink.
+    /// @see degradeToMixedIfDiffers
     void degradeToMixedIfNeeded() noexcept
         requires(!IsConst)
     {
-        if (_line->shape != LineShape::Uniform)
-            return;
-        auto const checkCol = (_col > 0) ? size_t(0) : size_t(1);
-        if (checkCol < _line->codepoints.size()
-            && (_line->sgr[_col] != _line->sgr[checkCol]
-                || _line->hyperlinks[_col] != _line->hyperlinks[checkCol]))
-            degradeShape(*_line, LineShape::Mixed);
+        degradeToMixedIfDiffers(*_line, _col);
     }
 
     LineType* _line;

@@ -64,10 +64,26 @@ enum class LineShape : uint8_t
     Spanning,
 };
 
+/// Tests whether a line of @p shape may render as ONE batched RenderLine (@see Line::trivialBuffer).
+/// @param shape The line's shape.
+/// @return true for LineShape::Uniform only.
+[[nodiscard]] constexpr bool isRenderBatchable(LineShape shape) noexcept
+{
+    return shape == LineShape::Uniform;
+}
+
+/// Tests whether the parser may bulk-write ASCII into a line of @p shape.
+/// @param shape The line's shape.
+/// @return true for any shape short of LineShape::Spanning.
+[[nodiscard]] constexpr bool isBulkWritable(LineShape shape) noexcept
+{
+    return shape != LineShape::Spanning;
+}
+
 /// Structure-of-Arrays storage for one terminal line.
 ///
 /// Each array has exactly `columns` elements OR is empty (blank state).
-/// In the blank state, all six AlignedVectors have size 0 — the line is logically
+/// In the blank state, every per-cell array has size 0 — the line is logically
 /// `cols` wide and uniformly filled with @c fillAttrs. Reads are short-circuited by
 /// the owning @c Line; writes call @c materialize() first to inflate the arrays
 /// via @c initializeLineSoA. Blank lines are O(1) to construct and reset.
@@ -217,7 +233,7 @@ void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs =
 void recycleBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs = {}) noexcept;
 
 /// Test whether a LineSoA is in the blank (un-materialized) state.
-/// @return true iff @c codepoints is empty (all six arrays are empty by invariant).
+/// @return true iff @c codepoints is empty (every per-cell array is empty by invariant).
 [[nodiscard]] inline bool isBlankLineSoA(LineSoA const& line) noexcept
 {
     return line.codepoints.empty();
@@ -244,6 +260,14 @@ inline void degradeShapeForTextScale(LineSoA& line, CellScale const& cellScale) 
         degradeShape(line, LineShape::Spanning);
 }
 
+/// Tests whether a cell continues a wide character or a scaled block, which its flags alone say.
+/// @param flags The cell's flags.
+/// @return true if the cell belongs to the head before or above it.
+[[nodiscard]] inline bool isContinuationCell(CellFlags flags) noexcept
+{
+    return flags.contains(CellFlag::WideCharContinuation) || flags.contains(CellFlag::MulticellContinuation);
+}
+
 /// Tests whether a cell reaches past its own column or row: a wide character's or a scaled block's
 /// continuation, or a scaled block's head.
 /// @param flags The cell's flags.
@@ -251,8 +275,43 @@ inline void degradeShapeForTextScale(LineSoA& line, CellScale const& cellScale) 
 /// @return true if overwriting part of the cell must erase the rest of it.
 [[nodiscard]] inline bool isSpanningCell(CellFlags flags, uint8_t scale) noexcept
 {
-    return flags.contains(CellFlag::WideCharContinuation) || flags.contains(CellFlag::MulticellContinuation)
-           || scale > 1;
+    return isContinuationCell(flags) || scale > 1;
+}
+
+/// Degrades a Uniform @p line to Mixed when the cell at @p col wears another rendition or hyperlink
+/// than the cell at @p reference. Every cell of a Uniform line matches every other, so one unwritten
+/// cell stands for all of them.
+/// @param line      The line a write just changed.
+/// @param col       The written cell.
+/// @param reference A cell the write did not change; nothing is compared if it lies past the line.
+inline void degradeToMixedIfDiffers(LineSoA& line, size_t col, size_t reference) noexcept
+{
+    if (line.shape == LineShape::Uniform && reference < line.codepoints.size()
+        && (line.sgr[col] != line.sgr[reference] || line.hyperlinks[col] != line.hyperlinks[reference]))
+        degradeShape(line, LineShape::Mixed);
+}
+
+/// Degrades a Uniform @p line to Mixed when the one cell just written at @p col differs from the rest:
+/// compared against col 0, or against col 1 when col 0 is the written cell.
+/// @param line The line a write just changed.
+/// @param col  The written cell.
+inline void degradeToMixedIfDiffers(LineSoA& line, size_t col) noexcept
+{
+    // Tested before the reference is chosen: most lines a per-cell write reaches have left Uniform.
+    if (line.shape == LineShape::Uniform)
+        degradeToMixedIfDiffers(line, col, col > 0 ? size_t { 0 } : size_t { 1 });
+}
+
+/// Degrades @p line to what the one cell just written at @p col requires: Spanning for a cell reaching
+/// past its own column or row, otherwise what degradeToMixedIfDiffers() decides.
+/// @param line The line a write just changed.
+/// @param col  The written cell.
+inline void degradeShapeForCell(LineSoA& line, size_t col) noexcept
+{
+    if (isSpanningCell(line.sgr[col].flags, line.scales[col]))
+        degradeShape(line, LineShape::Spanning);
+    else
+        degradeToMixedIfDiffers(line, col);
 }
 
 /// The least conservative shape @p line's cells allow: the floor @c LineSoA::shape must never be

@@ -1416,20 +1416,17 @@ class Terminal
     [[nodiscard]] Screen& currentScreen() noexcept { return *_currentScreen; }
     [[nodiscard]] Screen const& currentScreen() const noexcept { return *_currentScreen; }
 
-    [[nodiscard]] Screen& activeDisplay() noexcept
-    {
-        return const_cast<Screen&>(std::as_const(*this).activeDisplay());
-    }
-
     /// The display text and sequences are written to: the current page, or the status line DECSASD
-    /// selected.
-    [[nodiscard]] Screen const& activeDisplay() const noexcept
+    /// selected. Const on a const terminal.
+    [[nodiscard]] auto& activeDisplay(this auto& self) noexcept
     {
-        switch (_activeStatusDisplay)
+        switch (self._activeStatusDisplay)
         {
-            case ActiveStatusDisplay::Main: return *_currentScreen;
-            case ActiveStatusDisplay::StatusLine: return _hostWritableStatusLineScreen;
-            case ActiveStatusDisplay::IndicatorStatusLine: return _indicatorStatusScreen;
+            case ActiveStatusDisplay::Main: return std::forward_like<decltype(self)>(*self._currentScreen);
+            case ActiveStatusDisplay::StatusLine:
+                return std::forward_like<decltype(self)>(self._hostWritableStatusLineScreen);
+            case ActiveStatusDisplay::IndicatorStatusLine:
+                return std::forward_like<decltype(self)>(self._indicatorStatusScreen);
         }
         core::unreachable();
     }

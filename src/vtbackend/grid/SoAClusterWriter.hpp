@@ -56,9 +56,8 @@ inline void writeCellToSoA(LineSoA& line,
 
     // A continuation cell -- of a wide character or of a scaled block -- spans. The cell is written
     // ordinary-scaled below, so only its flags can make it span, and they are tested here, before the
-    // calls further down: testing them after those calls costs every per-cell write 13 instructions
-    // instead of 2 (callgrind, `bench-headless throughput`), more than 2% of a colored workload.
-    if (isSpanningCell(attrs.flags, uint8_t { 1 }))
+    // calls further down: tested after them, the check costs every per-cell write measurably more.
+    if (isContinuationCell(attrs.flags))
         degradeShape(line, LineShape::Spanning);
 
     auto const oldClusterSize = line.clusterSize[col];
@@ -76,16 +75,9 @@ inline void writeCellToSoA(LineSoA& line,
 
     clearReplacedImageFragment(line.imageFragments, static_cast<uint16_t>(col));
 
-    // Otherwise a rendition or hyperlink differing from another cell's mixes: at col 0 the comparison
-    // is against col 1 (an unwritten cell), at col > 0 against col 0. A spanning cell already left the
-    // line Spanning above, so this test skips it.
-    if (line.shape == LineShape::Uniform)
-    {
-        auto const checkCol = (col > 0) ? size_t(0) : size_t(1);
-        if (checkCol < line.codepoints.size()
-            && (line.sgr[col] != line.sgr[checkCol] || line.hyperlinks[col] != line.hyperlinks[checkCol]))
-            degradeShape(line, LineShape::Mixed);
-    }
+    // Otherwise a rendition or hyperlink differing from another cell's mixes. A spanning cell already
+    // left the line Spanning above, so this test skips it.
+    degradeToMixedIfDiffers(line, col);
 }
 
 /// Fill wide-char continuation cells following a wide character.

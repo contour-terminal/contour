@@ -178,19 +178,12 @@ class Line
     /// Skips the six vector swaps when the line is already blank with matching fillAttrs.
     void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
     {
-        resetMetadata(flags);
-        if (isBlankWithFillAttrs(attributes))
-            return;
-        initializeBlankLineSoA(_storage, attributes);
+        resetTo(flags, attributes, _columns, Storage::Release);
     }
 
     void reset(LineFlags flags, GraphicsAttributes attributes, ColumnCount count) noexcept
     {
-        resetMetadata(flags);
-        _columns = count;
-        if (isBlankWithFillAttrs(attributes))
-            return;
-        initializeBlankLineSoA(_storage, attributes);
+        resetTo(flags, attributes, count, Storage::Release);
     }
 
     /// Resets the line exactly as reset() does, but keeps its storage's capacity, so the next write
@@ -205,11 +198,7 @@ class Line
     /// @param columns    The line's new column count.
     void recycle(LineFlags flags, GraphicsAttributes attributes, ColumnCount columns) noexcept
     {
-        resetMetadata(flags);
-        _columns = columns;
-        if (isBlankWithFillAttrs(attributes))
-            return;
-        recycleBlankLineSoA(_storage, attributes);
+        resetTo(flags, attributes, columns, Storage::Keep);
     }
 
     /// Fill all cells with the given codepoint and attributes.
@@ -482,18 +471,21 @@ class Line
     /// @return The column count to render; 0 for a row that is default cells throughout.
     [[nodiscard]] ColumnCount trimmedColumns() const noexcept;
 
-    /// Tests whether the line can render as ONE batched RenderLine: blank, or LineShape::Uniform.
-    /// O(1) -- reads the shape every write maintains. @see LineShape
+    /// Tests whether the line can render as ONE batched RenderLine: its shape allows it, or it is blank.
+    /// O(1) -- reads the shape every write maintains. @see isRenderBatchable(LineShape)
     [[nodiscard]] bool isTrivialBuffer() const noexcept
     {
-        return isBlank() || _storage.shape == LineShape::Uniform;
+        return vtbackend::isRenderBatchable(_storage.shape) || isBlank();
     }
 
-    /// Tests whether the parser may bulk-write ASCII into this line: blank, or any shape short of
-    /// LineShape::Spanning. O(1). @see Terminal::maxBulkTextSequenceWidth
+    /// Tests whether the parser may bulk-write ASCII into this line: its shape allows it, or it is blank.
+    /// O(1) -- reads the shape every write maintains. @see isBulkWritable(LineShape)
+    ///
+    /// The blank test stays even though every reset leaves a blank line Uniform: a line moved from
+    /// keeps its shape beside emptied arrays, and is blank until it is reset or assigned.
     [[nodiscard]] bool isBulkWritable() const noexcept
     {
-        return isBlank() || _storage.shape != LineShape::Spanning;
+        return vtbackend::isBulkWritable(_storage.shape) || isBlank();
     }
 
     /// Build a TrivialLineBuffer for the render fast path.
@@ -650,6 +642,13 @@ class Line
     }
 
   private:
+    /// What a reset does with the storage of the cells it clears.
+    enum class Storage : uint8_t
+    {
+        Release, ///< Free it, so resident memory follows the lines in use (@see reset).
+        Keep,    ///< Keep its capacity for the write about to follow (@see recycle).
+    };
+
     /// What every reset clears besides the cells: flags, the context, the prompt and command borders.
     void resetMetadata(LineFlags flags) noexcept
     {
@@ -658,6 +657,28 @@ class Line
         _contextId = {};
         _commandEndOffset = {};
         _promptEndOffset = {};
+    }
+
+    /// Resets the line to a blank one of @p columns, filled with @p attributes. Skips the cells when
+    /// the line is already blank with those attributes.
+    /// @param flags      The line's new flags.
+    /// @param attributes The fill attributes its blank cells appear to have.
+    /// @param columns    The line's new column count.
+    /// @param storage    Whether the cells' storage is released or kept.
+    void resetTo(LineFlags flags,
+                 GraphicsAttributes const& attributes,
+                 ColumnCount columns,
+                 Storage storage) noexcept
+    {
+        resetMetadata(flags);
+        _columns = columns;
+        if (isBlankWithFillAttrs(attributes))
+            return;
+        switch (storage)
+        {
+            case Storage::Release: initializeBlankLineSoA(_storage, attributes); break;
+            case Storage::Keep: recycleBlankLineSoA(_storage, attributes); break;
+        }
     }
 
     LineSoA _storage;

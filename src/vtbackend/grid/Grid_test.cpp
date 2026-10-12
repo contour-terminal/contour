@@ -2267,7 +2267,8 @@ TEST_CASE("Grid.historyEviction.theGuaranteeSurvivesAReverseScroll", "[grid][his
 TEST_CASE("Grid.scrollUp.atCapacityKeepsTheEvictedLinesStorage", "[grid]")
 {
     // At full scrollback, the line scrolled in at the bottom IS the line evicted from the top of the
-    // ring, and the next write fills it at once. Its storage used to be released and allocated again.
+    // ring, and the next write fills it at once, so its storage is kept rather than released and
+    // allocated again.
     auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(1));
     grid.setLineText(LineOffset(0), "ABCDE");
     grid.setLineText(LineOffset(1), "abcde");
@@ -2295,6 +2296,8 @@ TEST_CASE("Grid.scrollUp.atCapacityKeepsTheEvictedLinesStorage", "[grid]")
 
         REQUIRE(grid.historyLineCount() == LineCount(1));
         CHECK(grid.lineText(LineOffset(-1)) == "abcde");
+        CHECK(grid.lineText(LineOffset(0)) == "     "); // the appended line
+        CHECK(grid.lineText(LineOffset(1)) == "     "); // the line "ABCDE" was evicted from
         auto const keptStorage = std::ranges::count_if(std::views::iota(0, 2), [&](int lineNo) {
             return std::as_const(grid).lineAt(LineOffset(lineNo)).storage().codepoints.capacity() >= 5;
         });
