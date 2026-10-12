@@ -1236,7 +1236,7 @@ class SupportedSequences
         gsl::span<Function> availableDefinition(begin(), _lastIndex);
         crispy::sort(availableDefinition,
                      [](Function const& a, Function const& b) constexpr { return compare(a, b); });
-        _buckets = makeBucketIndex(activeSequences());
+        fillBucketIndex(_buckets, activeSequences());
     }
 
     CORE_CONSTEXPR void disableSequence(Function seq) noexcept
@@ -1247,7 +1247,7 @@ class SupportedSequences
             // Move the disabled sequence to the end of array, keep the rest of active sequences sorted
             std::rotate(seqIter, seqIter + 1, _supportedSequences.data() + _supportedSequences.size());
             --_lastIndex;
-            _buckets = makeBucketIndex(activeSequences());
+            fillBucketIndex(_buckets, activeSequences());
         }
     }
 
@@ -1262,7 +1262,7 @@ class SupportedSequences
             ++_lastIndex;
             gsl::span<Function> arr(begin(), end());
             crispy::sort(arr, [](Function const& a, Function const& b) constexpr { return compare(a, b); });
-            _buckets = makeBucketIndex(activeSequences());
+            fillBucketIndex(_buckets, activeSequences());
         }
     }
 
@@ -1291,32 +1291,50 @@ class SupportedSequences
     static_assert(allFunctionsArray().size() <= std::numeric_limits<uint16_t>::max(),
                   "Bucket counts definitions in 16 bits");
 
+    // bucketIndex() addresses BucketIndex without a bounds check, so every definition must land
+    // inside it: a final byte of 0x80 or above, or a category after VT52, would write past the
+    // index while every Terminal is constructed.
+    static_assert(std::ranges::all_of(allFunctionsArray(),
+                                      [](Function const& function) {
+                                          return static_cast<uint8_t>(function.finalSymbol) < FinalSymbolCount
+                                                 && static_cast<size_t>(function.category) < CategoryCount;
+                                      }),
+                  "Every definition's final byte and category must fit the bucket index");
+
     [[nodiscard]] static constexpr size_t bucketIndex(FunctionCategory category, uint8_t finalByte) noexcept
     {
         return (static_cast<size_t>(category) * FinalSymbolCount) + finalByte;
     }
 
-    /// Groups the active definitions by (category, final byte).
+    /// Groups the active definitions by (category, final byte), rebuilding @p index in place.
     ///
     /// compare() orders by category and then by final byte before anything else, so the definitions
     /// of one pair are contiguous in the sorted active table.
     ///
+    /// @param index  Receives, for every (category, final byte) pair, its slice of @p active.
     /// @param active The active definitions, sorted by compare().
-    /// @return For every (category, final byte) pair, its slice of @p active.
-    [[nodiscard]] static constexpr BucketIndex makeBucketIndex(gsl::span<Function const> active) noexcept
+    static constexpr void fillBucketIndex(BucketIndex& index, gsl::span<Function const> active) noexcept
     {
-        auto index = BucketIndex {};
+        index.fill(Bucket {});
         auto position = uint16_t { 0 };
         for (Function const& function: active)
         {
-            auto const finalByte = static_cast<uint8_t>(function.finalSymbol);
-            assert(finalByte < FinalSymbolCount);
-            auto& bucket = index[bucketIndex(function.category, finalByte)];
+            auto& bucket = index[bucketIndex(function.category, static_cast<uint8_t>(function.finalSymbol))];
             if (bucket.count == 0)
                 bucket.first = position;
+            // The sort order the index rests on: a pair's definitions follow one another, so each one
+            // extends its bucket's slice by exactly one.
+            assert(bucket.first + bucket.count == position);
             ++bucket.count;
             ++position;
         }
+    }
+
+    /// @return The bucket index of @p active. @see fillBucketIndex()
+    [[nodiscard]] static constexpr BucketIndex makeBucketIndex(gsl::span<Function const> active) noexcept
+    {
+        auto index = BucketIndex {};
+        fillBucketIndex(index, active);
         return index;
     }
 
