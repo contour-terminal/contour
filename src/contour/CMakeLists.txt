@@ -314,7 +314,10 @@ if(CONTOUR_WITH_GPU_SELECTION)
 endif()
 
 if(WIN32)
-    list(APPEND _main_source_files packaging/contour.rc)
+    # The application manifest, which makes contour.exe's process code page UTF-8 (see the file). A
+    # .manifest source is embedded by the linker, and qt_add_executable() then generates none of its own.
+    # These sources are the contour executable's alone, so no test binary gets it.
+    list(APPEND _main_source_files packaging/contour.rc packaging/contour.manifest)
 endif()
 
 # Both QML modules exist only for the GUI frontend, so they are built only for it. Outside that
@@ -943,6 +946,17 @@ if(CONTOUR_TESTING)
         ARGS -D "SHELLS=${_shell_integration_shells}"
              -D "SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/cli"
              -D "WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}")
+
+    # The application manifest (packaging/contour.manifest), read back out of the built contour.exe as
+    # Windows reads it. Its own executable, so that building the unit tests does not build the application.
+    if(WIN32)
+        add_executable(contour_manifest_test test/core_test_main.cpp test/ApplicationManifest_test.cpp)
+        target_link_libraries(contour_manifest_test PRIVATE core::base core::testing Catch2::Catch2)
+        target_compile_definitions(contour_manifest_test PRIVATE CONTOUR_BINARY="$<TARGET_FILE:contour>")
+        add_dependencies(contour_manifest_test contour)
+        add_test(NAME contour_e2e_manifest COMMAND $<TARGET_FILE:contour_manifest_test>)
+        set_tests_properties(contour_e2e_manifest PROPERTIES LABELS e2e)
+    endif()
 endif()
 # }}}
 
