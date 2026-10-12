@@ -53,7 +53,7 @@ TEST_CASE("writeTextToSoA.ascii.clears_a_previous_block_scale", "[SoAWriter]")
     CellProxy(line, 0).setTextScale(CellScale { .scale = 2 });
     CellProxy(line, 1).setTextScale(CellScale { .scale = 2 });
     REQUIRE(line.scales[0] == 2);
-    REQUIRE_FALSE(line.trivial);
+    REQUIRE(line.shape == LineShape::Spanning);
 
     (void) writeTextToSoA(line, 0, "hello"sv, GraphicsAttributes {}, HyperlinkId {}, true);
 
@@ -229,14 +229,14 @@ TEST_CASE("writeCellToSoA.trivial.invalidatedAtCol0", "[SoAWriter]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     // Write a cell at col 0 with different attrs than the rest of the line.
     auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(5) };
     writeCellToSoA(line, 0, U'X', 1, attrs);
 
     // Col 0 now has Indexed(5), cols 1-9 still have default — trivial must be false.
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
 // =============================================================================
@@ -247,7 +247,7 @@ TEST_CASE("writeTextToSoA.ascii.trivial.invalidatedFromCol0Partial", "[SoAWriter
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(20));
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     // Partial write from col 0 with non-default attrs.
     // Only cols 0-4 are written; cols 5-19 still have default SGR.
@@ -255,14 +255,14 @@ TEST_CASE("writeTextToSoA.ascii.trivial.invalidatedFromCol0Partial", "[SoAWriter
     writeTextToSoA(line, 0, "Hello", attrs);
 
     // Line has mixed SGR — trivial must be false.
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
 TEST_CASE("writeTextToSoA.ascii.trivial.preservedFullLine", "[SoAWriter]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(5));
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     // Full-line bulk ASCII write with uniform attrs — trivial should remain true.
     // Uses asciiHint=true to exercise the bulk path (per-cell path can't preserve
@@ -270,7 +270,7 @@ TEST_CASE("writeTextToSoA.ascii.trivial.preservedFullLine", "[SoAWriter]")
     auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
     writeTextToSoA(line, 0, "Hello", attrs, HyperlinkId {}, /*asciiHint=*/true);
 
-    CHECK(line.trivial);
+    CHECK(line.shape == LineShape::Uniform);
 }
 
 // =============================================================================
@@ -303,7 +303,7 @@ TEST_CASE("writeTextToSoA.ascii.defaultTextOverAUniformColouredLineRepaintsIt", 
     initializeLineSoA(line, ColumnCount(5));
     auto const coloured = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
     (void) writeTextToSoA(line, 0, "Hello"sv, coloured, HyperlinkId {}, /*asciiHint=*/true);
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
     REQUIRE(line.fillAttrs == GraphicsAttributes {});
 
     (void) writeTextToSoA(line, 0, "World"sv, GraphicsAttributes {}, HyperlinkId {}, /*asciiHint=*/true);
@@ -317,7 +317,7 @@ TEST_CASE("writeTextToSoA.ascii.unlinkedTextOverAUniformLinkedLineUnlinksIt", "[
     LineSoA line;
     initializeLineSoA(line, ColumnCount(5));
     (void) writeTextToSoA(line, 0, "Hello"sv, GraphicsAttributes {}, HyperlinkId(7), /*asciiHint=*/true);
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     (void) writeTextToSoA(line, 0, "World"sv, GraphicsAttributes {}, HyperlinkId {}, /*asciiHint=*/true);
 
@@ -333,7 +333,7 @@ TEST_CASE("writeTextToSoA.ascii.narrowsATwoColumnCellOnTheLastColumn", "[SoAWrit
     LineSoA line;
     initializeLineSoA(line, ColumnCount(5));
     writeCellToSoA(line, 4, U'世', 2, GraphicsAttributes {});
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     (void) writeTextToSoA(line, 0, "Hello"sv, GraphicsAttributes {}, HyperlinkId {}, /*asciiHint=*/true);
 

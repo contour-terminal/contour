@@ -19,7 +19,7 @@ namespace
 
     /// Fast path: write pure ASCII text directly to SoA arrays.
     /// Bulk-fills SGR/width/hyperlink arrays instead of per-cell writeCellToSoA.
-    /// Avoids the per-cell trivial flag check (sets it ONCE at the end).
+    /// Checks the line's shape once at the end rather than per cell.
     ///
     /// On a uniform line whose cells already wear the run's pen and hyperlink, skips rewriting those
     /// arrays and the sizing ones, which a uniform line keeps ordinary. Widths are always rewritten.
@@ -50,8 +50,8 @@ namespace
         // rendition and hyperlink, so comparing the run against cell 0 -- not against fillAttrs, which
         // only says what the line was last cleared with -- tells whether rewriting would change
         // anything. A full-width run keeps its line uniform in a pen other than fillAttrs.
-        auto const skipFills =
-            line.trivial && (startCol == 0) && (attrs == line.sgr[0]) && (hyperlink == line.hyperlinks[0]);
+        auto const skipFills = line.shape == LineShape::Uniform && (startCol == 0) && (attrs == line.sgr[0])
+                               && (hyperlink == line.hyperlinks[0]);
 
         if (!skipFills)
         {
@@ -61,7 +61,7 @@ namespace
             // Ordinary text carries no sizing. Every per-cell write path resets these two; leaving
             // them here let a previous `OSC 66` block's scale survive underneath the text that
             // replaced it, so the text was drawn at the block's size. A line that still carries a
-            // block is never trivial (@see BasicCellProxy::setTextScale), so the skip above cannot
+            // block is never Uniform (@see BasicCellProxy::setTextScale), so the skip above cannot
             // hide a stale scale.
             std::fill_n(line.scales.data() + startCol, count, uint8_t { 1 });
             std::fill_n(line.textScaleExtras.data() + startCol, count, uint16_t { 0 });
@@ -69,16 +69,13 @@ namespace
 
         clearReplacedImageFragments(line.imageFragments, static_cast<uint16_t>(startCol), count);
 
-        // Trivial flag: check if the written range breaks SGR uniformity.
-        // Compare against an unwritten cell: when writing from col 0, check the cell just past
-        // the written range; when writing from col > 0, check cell 0.
-        if (line.trivial && count < maxCols)
+        // Check once whether the written range breaks the line's uniformity, against an unwritten
+        // cell: from col 0, the cell just past the run; from col > 0, cell 0. ASCII never spans.
+        if (line.shape == LineShape::Uniform && count < maxCols)
         {
             auto const checkCol = (startCol > 0) ? size_t(0) : startCol + count;
             if (checkCol < maxCols && (attrs != line.sgr[checkCol] || hyperlink != line.hyperlinks[checkCol]))
-            {
-                line.trivial = false;
-            }
+                degradeShape(line, LineShape::Mixed);
         }
 
         return count;

@@ -53,6 +53,14 @@ inline void writeCellToSoA(LineSoA& line,
                            HyperlinkId hyperlink = {}) noexcept
 {
     assert(col < line.codepoints.size());
+
+    // A continuation cell -- of a wide character or of a scaled block -- spans. The cell is written
+    // ordinary-scaled below, so only its flags can make it span, and they are tested here, before the
+    // calls further down: testing them after those calls costs every per-cell write 13 instructions
+    // instead of 2 (callgrind, `bench-headless throughput`), more than 2% of a colored workload.
+    if (isSpanningCell(attrs.flags, uint8_t { 1 }))
+        degradeShape(line, LineShape::Spanning);
+
     auto const oldClusterSize = line.clusterSize[col];
     line.codepoints[col] = codepoint;
     line.widths[col] = width;
@@ -68,17 +76,15 @@ inline void writeCellToSoA(LineSoA& line,
 
     clearReplacedImageFragment(line.imageFragments, static_cast<uint16_t>(col));
 
-    // Invalidate trivial flag if this cell's SGR or hyperlink differs from another cell's.
-    // When writing at col 0, compare against col 1 (an unwritten cell).
-    // When writing at col > 0, compare against col 0.
-    if (line.trivial)
+    // Otherwise a rendition or hyperlink differing from another cell's mixes: at col 0 the comparison
+    // is against col 1 (an unwritten cell), at col > 0 against col 0. A spanning cell already left the
+    // line Spanning above, so this test skips it.
+    if (line.shape == LineShape::Uniform)
     {
         auto const checkCol = (col > 0) ? size_t(0) : size_t(1);
         if (checkCol < line.codepoints.size()
             && (line.sgr[col] != line.sgr[checkCol] || line.hyperlinks[col] != line.hyperlinks[checkCol]))
-        {
-            line.trivial = false;
-        }
+            degradeShape(line, LineShape::Mixed);
     }
 }
 
@@ -104,9 +110,9 @@ inline void fillWideCharContinuation(LineSoA& line,
         line.hyperlinks[col + i] = hyperlink;
     }
 
-    // Continuation cells always have WideCharContinuation flag, which differs from the head cell's SGR.
-    if (line.trivial && count > 0)
-        line.trivial = false;
+    // A continuation cell belongs to the head before it, so the line now spans.
+    if (count > 0)
+        degradeShape(line, LineShape::Spanning);
 }
 
 } // namespace vtbackend

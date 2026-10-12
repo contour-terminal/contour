@@ -18,9 +18,11 @@
 #include <array>
 #include <charconv>
 #include <cstddef>
+#include <format>
 #include <ranges>
 #include <set>
 #include <string_view>
+#include <utility>
 using namespace vtbackend;
 using namespace vtbackend::test;
 using namespace std;
@@ -4739,6 +4741,87 @@ TEST_CASE("DECSMBV: a hand-built two-parameter sequence is rejected", "[screen]"
     auto const result = mock.terminal.primaryScreen().apply(DECSMBV, seq);
     CHECK(result == ApplyResult::Invalid);
     CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+}
+
+TEST_CASE("LineShape.neverUndercutsTheCellsAfterAnEdit", "[screen][LineShape]")
+{
+    // Every fast path trusts LineSoA::shape: the renderer batches a Uniform line, and the parser's bulk
+    // write needs anything short of Spanning. So after ANY edit -- on lines that had already left
+    // Uniform -- the stored shape must be at least as conservative as what the cells hold, and writing
+    // into the edited line again must keep it so.
+    struct Scenario
+    {
+        std::string_view name;
+        std::string_view bytes;
+    };
+    auto const scenarios = std::array {
+        Scenario { .name = "EL on a coloured line", .bytes = "\033[44mabc\033[m def\033[1;3H\033[K" },
+        Scenario { .name = "ED below a wide character",
+                   .bytes = "\xE4\xB8\xAD"
+                            "x\033[1;2H\033[J" },
+        Scenario { .name = "ECH over a cluster",
+                   .bytes = "e\xCC\x81"
+                            "abc\033[1;1H\033[2X" },
+        Scenario { .name = "DCH through a wide character",
+                   .bytes = "a\xE4\xB8\xAD"
+                            "b\033[1;2H\033[P" },
+        Scenario { .name = "ICH before a coloured cell", .bytes = "ab\033[31mc\033[m\033[1;1H\033[2@" },
+        Scenario { .name = "EL 2 on a wide line", .bytes = "\xE4\xB8\xAD\xE4\xB8\xAD\033[2K" },
+        Scenario { .name = "ASCII over a coloured line", .bytes = "\033[42mgreen\033[m\033[1;1Hplain text" },
+        Scenario { .name = "ASCII beside a wide character", .bytes = "\033[1;5H\xE4\xB8\xAD\033[1;1Habc" },
+        Scenario { .name = "ASCII over a wide character's tail",
+                   .bytes = "\xE4\xB8\xAD\xE4\xB8\xAD\033[1;2Hxyz" },
+    };
+
+    for (auto const& scenario: scenarios)
+    {
+        INFO(scenario.name);
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen(scenario.bytes);
+        mock.writeToScreen("\033[1;1Hxyz"sv); // and write into the edited line again
+
+        auto const& grid = mock.terminal.primaryScreen().grid();
+        for (auto const lineNo: std::views::iota(0, 3))
+        {
+            INFO(std::format("line {}", lineNo));
+            auto const& soa = grid.lineAt(LineOffset(lineNo)).storage();
+            CHECK(soa.shape >= shapeImpliedByCells(soa));
+        }
+    }
+}
+
+TEST_CASE("LineShape.neverUndercutsTheCellsAfterAResize", "[screen][LineShape]")
+{
+    // A resize rebuilds lines -- reflow copies cells into new ones on the primary screen, while the
+    // alternate screen only cuts or pads them -- and both must carry the shape along.
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+    {
+        INFO((screenSelect.empty() ? "primary (reflows)" : "alternate (does not reflow)"));
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(5) };
+        mock.writeToScreen(screenSelect);
+        mock.writeToScreen("\033[44mblu\033[m e\xCC\x81 ta\r\n"sv); // Mixed: a colour and a cluster
+        mock.writeToScreen("ab\xE4\xB8\xAD\xE4\xB8\xAD"
+                           "cd\r\n"sv); // Spanning: wide characters
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(6) });
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(12) });
+        mock.writeToScreen("\033[1;1Hxyz"sv);
+
+        auto& screen = mock.terminal.currentScreen();
+        for (auto const lineNo: std::views::iota(0, *screen.pageSize().lines))
+        {
+            INFO(std::format("line {}", lineNo));
+            auto const& soa = std::as_const(screen.grid()).lineAt(LineOffset(lineNo)).storage();
+            CHECK(soa.shape >= shapeImpliedByCells(soa));
+        }
+    }
+}
+
+TEST_CASE("LineShape.anImageFragmentSpans", "[screen][LineShape]")
+{
+    auto mock = MockTerm { PageSize { LineCount(11), ColumnCount(11) }, LineCount(11) };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
+    mock.writeToScreen(ChessBoard);
+    CHECK(mock.terminal.primaryScreen().grid().lineAt(LineOffset(0)).storage().shape == LineShape::Spanning);
 }
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

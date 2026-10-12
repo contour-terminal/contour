@@ -475,10 +475,12 @@ class Line
     /// @return The column count to render; 0 for a row that is default cells throughout.
     [[nodiscard]] ColumnCount trimmedColumns() const noexcept;
 
-    /// Check if all cells share the same graphics attributes (uniform SGR).
-    /// O(1) — reads a cached flag maintained by writeCellToSoA/resetLine. Blank lines
-    /// are trivial by definition (uniformly filled with @c fillAttrs).
-    [[nodiscard]] bool isTrivialBuffer() const noexcept { return isBlank() || _storage.trivial; }
+    /// Tests whether the line can render as ONE batched RenderLine: blank, or LineShape::Uniform.
+    /// O(1) -- reads the shape every write maintains. @see LineShape
+    [[nodiscard]] bool isTrivialBuffer() const noexcept
+    {
+        return isBlank() || _storage.shape == LineShape::Uniform;
+    }
 
     /// Build a TrivialLineBuffer for the render fast path.
     /// Only valid when isTrivialBuffer() returns true.
@@ -487,7 +489,7 @@ class Line
     /// bounds when it may be used: a cell holding a grapheme cluster cannot be represented here,
     /// because the flat text has no cell boundaries for the renderer to recover the extra codepoints
     /// from. Such a line therefore never reaches this function -- appending a continuation codepoint
-    /// clears the trivial flag (@see appendCodepointToCluster), as writing a wide cell's
+    /// degrades the line to Mixed (@see appendCodepointToCluster), as writing a wide cell's
     /// continuation and an image fragment already do. Without that, everything after each cluster's
     /// base codepoint is silently dropped from the rendered text.
     ///

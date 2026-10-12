@@ -31,7 +31,7 @@ void initializeLineSoA(LineSoA& line, ColumnCount cols, GraphicsAttributes const
     line.imageFragments.reset();
     line.lineFlags = {};
     line.usedColumns = {};
-    line.trivial = true;
+    line.shape = LineShape::Uniform;
     line.fillAttrs = fillAttrs;
 }
 
@@ -54,7 +54,7 @@ void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs) 
     line.imageFragments.reset();
     line.lineFlags = {};
     line.usedColumns = {};
-    line.trivial = true;
+    line.shape = LineShape::Uniform;
     line.fillAttrs = fillAttrs;
 }
 
@@ -80,9 +80,9 @@ void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const&
     if (line.usedColumns > newCols)
         line.usedColumns = newCols;
 
-    // When growing, new cells get fillAttrs. If existing cells had different SGR, no longer trivial.
-    if (n > oldSize && line.trivial && oldSize > 0 && fillAttrs != line.sgr[0])
-        line.trivial = false;
+    // When growing, new cells get fillAttrs. If existing cells wear a different SGR, the line mixes.
+    if (n > oldSize && line.shape == LineShape::Uniform && oldSize > 0 && fillAttrs != line.sgr[0])
+        degradeShape(line, LineShape::Mixed);
 }
 
 void clearRange(LineSoA& line, size_t from, size_t count, GraphicsAttributes const& attrs)
@@ -113,7 +113,7 @@ void clearRange(LineSoA& line, size_t from, size_t count, GraphicsAttributes con
 
     // Partial clear may break SGR uniformity.
     if (from != 0 || count != line.codepoints.size())
-        line.trivial = false;
+        degradeShape(line, LineShape::Mixed);
 }
 
 void resetLine(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAttrs)
@@ -131,7 +131,8 @@ void resetLine(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAt
     // line uniform in another pen. Widths are cleared too, because a uniform line can still end in
     // one two-column cell (@see Line::trivialBuffer).
     auto const canSkipFill =
-        line.trivial && (n == 0 || (line.sgr[0] == fillAttrs && line.hyperlinks[0] == HyperlinkId {}));
+        line.shape == LineShape::Uniform
+        && (n == 0 || (line.sgr[0] == fillAttrs && line.hyperlinks[0] == HyperlinkId {}));
 
     if (canSkipFill)
     {
@@ -147,7 +148,7 @@ void resetLine(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAt
     line.clusterPool.clear();
     line.imageFragments.reset();
     line.usedColumns = {};
-    line.trivial = true;
+    line.shape = LineShape::Uniform;
     line.fillAttrs = fillAttrs;
 }
 
@@ -208,8 +209,9 @@ void copyColumns(LineSoA const& src, size_t srcCol, LineSoA& dst, size_t dstCol,
         }
     }
 
-    // Copied SGR data may break uniformity on the destination line.
-    dst.trivial = false;
+    // Copied cells may break the destination's uniformity, and they bring their own line's spans.
+    degradeShape(dst, LineShape::Mixed);
+    degradeShape(dst, src.shape);
 }
 
 void moveColumns(LineSoA& line, size_t srcCol, size_t dstCol, size_t count)
@@ -320,9 +322,9 @@ int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint, Clus
             // The batched RenderLine path stores ONE codepoint per column (@see
             // Line::trivialBuffer), so a cell holding a cluster cannot be expressed there at all:
             // everything after the base is silently dropped, and a decomposed "e" + U+0301 draws
-            // without its accent. Leave the fast path, exactly as a wide cell's continuation
-            // (@see fillWideCharContinuation) and an image fragment (@see CellProxy::setImageFragment)
-            // already do.
+            // without its accent. The line becomes Mixed, which leaves that path, just as a wide
+            // cell's continuation (@see fillWideCharContinuation) and an image fragment (@see
+            // CellProxy::setImageFragment) make it Spanning.
             //
             // Independent of @p policy and of any width change: under FirstCodepoint the cluster
             // keeps its width, but the codepoint still joins it -- and it is the codepoint, not the
@@ -331,20 +333,13 @@ int appendCodepointToCluster(LineSoA& line, size_t col, char32_t codepoint, Clus
             // Only when a cluster is actually FORMED. Appending to a cell with no base codepoint
             // (currentSize == 0) leaves the pool entry unreferenced -- clusterPoolIndex is set only
             // on the transition from 1 -- so the cell still reads back as its single (empty) base
-            // and stays perfectly expressible. Clearing the flag there would cost the line its fast
-            // path for a codepoint nothing can read.
+            // and stays perfectly expressible. Degrading the line there would cost it its fast path
+            // for a codepoint nothing can read.
             //
-            // The flag also gates the PARSER's bulk-write path (@see
-            // Terminal::maxBulkTextSequenceWidth), so a cluster costs its line that too, for the
-            // rest of the line. Measured (clang-release, 1.46 MB): text carrying combining marks
-            // throughout is unaffected (8.0 vs 8.3 ms) because such a line already takes the
-            // per-codepoint write path; the worst case -- ONE mark followed by 480 ASCII columns --
-            // costs about 45% on that line, 21 ms to 31 ms. That is the price of not dropping the
-            // codepoints, and it is paid only by lines that carry a cluster. Separating "may the
-            // parser bulk-write here" from "can the renderer batch this line" would recover it, but
-            // they are one flag today and splitting them is not this change.
+            // Mixed, not Spanning: the cell still occupies exactly its own column, so nothing about
+            // it stops a later ASCII run from being bulk-written over it.
             if (currentSize >= 1)
-                line.trivial = false;
+                degradeShape(line, LineShape::Mixed);
         }
     }
 
@@ -387,6 +382,22 @@ void clearClusterExtras(LineSoA& line, size_t col)
         line.clusterSize[col] = std::min(line.clusterSize[col], uint8_t { 1 });
         line.clusterPoolIndex[col] = 0;
     }
+}
+
+LineShape shapeImpliedByCells(LineSoA const& line) noexcept
+{
+    auto shape = LineShape::Uniform;
+    for (auto const col: std::views::iota(size_t { 0 }, line.codepoints.size()))
+    {
+        auto const hasImage =
+            line.imageFragments && line.imageFragments->contains(static_cast<uint16_t>(col));
+        if (hasImage || isSpanningCell(line.sgr[col].flags, line.scales[col]))
+            return LineShape::Spanning;
+        if (line.sgr[col] != line.sgr[0] || line.hyperlinks[col] != line.hyperlinks[0]
+            || line.clusterSize[col] > 1 || line.textScaleExtras[col] != 0)
+            shape = LineShape::Mixed;
+    }
+    return shape;
 }
 
 } // namespace vtbackend

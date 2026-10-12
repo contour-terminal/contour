@@ -12,6 +12,7 @@
 
 #include <crispy/AlignedAllocator.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <ranges>
@@ -36,6 +37,32 @@ using AlignedVector = crispy::AlignedVector<T>;
 /// layout: only @c clusterPool grows in the worst case, and no element type changes.
 inline constexpr uint8_t MaxGraphemeClusterSize = 16;
 static_assert(MaxGraphemeClusterSize <= 255, "clusterSize is a uint8_t");
+
+/// How far a line has departed from the shape every fast path handles: one codepoint per cell, one
+/// column per cell, one rendition throughout.
+///
+/// Ordered from least to most per-cell treatment. A line only ever moves down this list until it is
+/// reset (@see degradeShape): a later write cannot prove an earlier one gone without rescanning the
+/// line, and no fast path is worth that scan.
+enum class LineShape : uint8_t
+{
+    /// Every cell holds at most one codepoint and wears the same rendition and hyperlink. The renderer
+    /// emits such a line as ONE batched RenderLine (@see Line::trivialBuffer), and the parser may
+    /// bulk-write ASCII into it. A two-column character on the last writable column, which had no room
+    /// for a continuation cell, leaves its line Uniform.
+    Uniform,
+
+    /// Renditions or hyperlinks differ between cells, or a cell holds a grapheme cluster, but every
+    /// cell still occupies exactly its own column on its own row. Rendered cell by cell; the parser may
+    /// still bulk-write ASCII into it, because overwriting any of its cells disturbs no other cell.
+    Mixed,
+
+    /// A cell reaches beyond its own column or row -- a wide character's or a scaled block's
+    /// continuation, a scaled block's head -- or carries an image fragment. Rendered cell by cell and
+    /// never bulk-written: overwriting part of such a cell must erase the rest of it, which only the
+    /// per-codepoint write path does.
+    Spanning,
+};
 
 /// Structure-of-Arrays storage for one terminal line.
 ///
@@ -115,21 +142,21 @@ struct LineSoA
     /// Number of columns populated with content (for efficient trim operations).
     ColumnCount usedColumns {};
 
-    /// Cached: true while this line can be rendered as ONE batched RenderLine.
+    /// How far this line has departed from the shape every fast path handles. @see LineShape
     ///
-    /// That representation is a flat string of one codepoint per column with uniform attributes, so
-    /// the flag answers "is the line still expressible that way", not merely "is its SGR uniform".
-    /// Set to true on line init/reset, and cleared when a cell becomes inexpressible:
+    /// Uniform on line init and reset, and degraded -- never restored -- by every write that leaves a
+    /// cell the current shape does not cover:
     ///
-    /// - its SGR or hyperlink differs from the first cell's (@see writeCellToSoA)
-    /// - it is a wide cell's continuation (@see fillWideCharContinuation)
-    /// - it carries an image fragment (@see BasicCellProxy::setImageFragment)
-    /// - it holds a grapheme cluster, i.e. more than one codepoint (@see appendCodepointToCluster)
+    /// - its SGR or hyperlink differs from another cell's: Mixed (@see writeCellToSoA)
+    /// - it holds a grapheme cluster: Mixed (@see appendCodepointToCluster)
+    /// - it continues a wide character or a scaled block, or is scaled: Spanning (@see
+    ///   fillWideCharContinuation, writeCellToSoA, BasicCellProxy::setTextScale)
+    /// - it carries an image fragment: Spanning (@see BasicCellProxy::setImageFragment)
     ///
-    /// Anything that makes a cell fail that test must clear this, or @c Line::trivialBuffer will
-    /// silently drop what it cannot represent. Read as O(1) by the render path -- and by
-    /// @c Terminal::maxBulkTextSequenceWidth, which gates the parser's bulk-write path on it.
-    bool trivial = true;
+    /// Anything that makes a cell fail its line's shape must degrade it, or @c Line::trivialBuffer
+    /// silently drops what it cannot represent and the parser's bulk write overwrites half a cell.
+    /// Read as O(1) by the render path and by @c Terminal::maxBulkTextSequenceWidth.
+    LineShape shape = LineShape::Uniform;
 
     /// The GraphicsAttributes used in the most recent full-line reset/clear: what a cell nothing has
     /// written since appears to wear. Not what the written cells wear -- a full-width write keeps a
@@ -175,7 +202,7 @@ inline void clearReplacedImageFragments(std::optional<LineSoA::ImageFragmentMap>
 /// @param fillAttrs Default graphics attributes for empty cells.
 void initializeLineSoA(LineSoA& line, ColumnCount cols, GraphicsAttributes const& fillAttrs = {});
 
-/// Initialize a line in the blank state: all arrays empty, but @c fillAttrs and @c trivial set.
+/// Initialize a line in the blank state: all arrays empty, @c fillAttrs set, the shape Uniform.
 /// O(1) — no per-column allocation. The owning @c Line tracks the logical column count
 /// separately. Reads short-circuit; writes must call @c materialize() first.
 /// @param line      The LineSoA to put into the blank state.
@@ -188,6 +215,33 @@ void initializeBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs =
 {
     return line.codepoints.empty();
 }
+
+/// Degrades @p line's shape to at least @p atLeast. Never restores it: only a reset does that.
+/// @param line    The line a write just changed.
+/// @param atLeast The shape the written cell requires.
+inline void degradeShape(LineSoA& line, LineShape atLeast) noexcept
+{
+    line.shape = std::max(line.shape, atLeast);
+}
+
+/// Tests whether a cell reaches past its own column or row: a wide character's or a scaled block's
+/// continuation, or a scaled block's head.
+/// @param flags The cell's flags.
+/// @param scale The cell's vertical scale (@see LineSoA::scales); 1 for ordinary text.
+/// @return true if overwriting part of the cell must erase the rest of it.
+[[nodiscard]] inline bool isSpanningCell(CellFlags flags, uint8_t scale) noexcept
+{
+    return flags.contains(CellFlag::WideCharContinuation) || flags.contains(CellFlag::MulticellContinuation)
+           || scale > 1;
+}
+
+/// The least conservative shape @p line's cells allow: the floor @c LineSoA::shape must never be
+/// below. Scans every cell, so it is for verification and tests, never for a fast path.
+/// @param line The line to inspect; a blank line is Uniform.
+/// @return Spanning if a cell spans or carries an image; otherwise Mixed if a cell's rendition or
+///         hyperlink differs from the first cell's, or it holds a cluster or a fractional scale;
+///         otherwise Uniform.
+[[nodiscard]] LineShape shapeImpliedByCells(LineSoA const& line) noexcept;
 
 /// Resize all arrays to a new column count, preserving existing data.
 /// New columns (if growing) are initialized with @p fillAttrs.
@@ -256,9 +310,9 @@ enum class ClusterWidthPolicy : uint8_t
 
 /// Appends @p codepoint to the grapheme cluster at @p col.
 ///
-/// Also clears @c LineSoA::trivial, because a cell holding more than one codepoint cannot be
-/// represented on the batched render path (@see Line::trivialBuffer, which keeps one codepoint per
-/// column). Any future path that grows a cluster without going through here owes the same clear;
+/// Also degrades the line to LineShape::Mixed, because a cell holding more than one codepoint cannot
+/// be represented on the batched render path (@see Line::trivialBuffer, which keeps one codepoint per
+/// column). Any future path that grows a cluster without going through here owes the same degrade;
 /// without it the extra codepoints are dropped from the rendered text with no diagnostic.
 ///
 /// @return by how many columns the cluster's width changed, which is always 0 under

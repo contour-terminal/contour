@@ -1778,7 +1778,7 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
     // an image fragment or a grapheme cluster anywhere in the line therefore also costs the rest of
     // that line its bulk write, even though none of them makes an ASCII bulk write unsafe.
     // Measured worst case: about 45% on a line whose first cell holds a combining mark and whose
-    // remaining 480 columns are ASCII. @see LineSoA::trivial for what else clears it.
+    // remaining 480 columns are ASCII. @see LineSoA::shape for what else degrades it.
     if (!primaryScreen().currentLine().isTrivialBuffer())
         return 0;
 
