@@ -705,7 +705,11 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     // invalid UTF-8 byte and print U+FFFD, so route it through the state machine, where printUtf8Byte
     // recognises it as the control it is. (It cannot be a UTF-8 continuation byte here -- we are in the
     // Ground state with no pending sequence.)
-    if (auto const first = static_cast<uint8_t>(*input); first >= 0x80 && first <= 0x9F)
+    //
+    // A leading C0 control or ESC (below 0x20) is not text either: scan_text() would stop at it
+    // having consumed nothing. Every control sequence starts here, so this test saves asking the
+    // listener for its bulk width and calling the scanner just to learn that.
+    if (auto const first = static_cast<uint8_t>(*input); first < 0x20 || (first >= 0x80 && first <= 0x9F))
         return 0;
 
     auto const maxCharCount = _eventListener.maxBulkTextSequenceWidth();
