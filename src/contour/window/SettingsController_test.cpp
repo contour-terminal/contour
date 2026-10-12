@@ -13,6 +13,8 @@
 
 #include <vtbackend/core/Color.hpp>
 
+#include <vtpty/test/NonAsciiSample.hpp>
+
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>
 
@@ -278,6 +280,24 @@ TEST_CASE("SettingsController: rename moves a side-file color scheme with its dr
     CHECK(std::filesystem::exists(dir / "colorschemes" / "nightfall.yml"));
     CHECK_FALSE(std::filesystem::exists(dir / "colorschemes" / "midnight.yml"));
     CHECK(fx.controller->editingScheme() == "nightfall");
+}
+
+TEST_CASE("SettingsController: rename keeps the colors of a side-file scheme named beyond ASCII",
+          "[settings]")
+{
+    // A side-file scheme no profile uses is not loaded with the configuration, so the rename reads its colors
+    // from its file.
+    auto fx = Fixture(BasicConfig);
+    auto palette = vtbackend::ColorPalette {};
+    palette.defaultBackground = vtbackend::RGBColor { 0x10, 0x20, 0x30 };
+    auto const name = std::string { vtpty::testing::NonAsciiNameUtf8 };
+    REQUIRE(fx.store->saveColorScheme(name, palette).has_value());
+
+    REQUIRE(fx.controller->renameColorScheme(QString::fromStdString(name), "nightfall"));
+    auto const renamed = config::loadColorSchemeFile(std::filesystem::path(fx.dir.path().toStdU16String())
+                                                     / "colorschemes" / "nightfall.yml");
+    REQUIRE(renamed.has_value());
+    CHECK(renamed->defaultBackground == palette.defaultBackground);
 }
 
 // A contour.yml with an inline color scheme; the settings page must treat that name as read-only, since

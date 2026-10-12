@@ -1732,7 +1732,8 @@ bool SettingsController::renameColorScheme(QString const& oldName, QString const
     if (auto const it = _config().colorschemes.value().find(oldName.toStdString());
         it != _config().colorschemes.value().end())
         palette = it->second;
-    else if (auto const loaded = config::loadColorSchemeFile(schemesDir / (oldName.toStdString() + ".yml")))
+    else if (auto const loaded =
+                 config::loadColorSchemeFile(schemesDir / config::sideFileName(oldName.toStdString())))
         palette = *loaded;
 
     if (auto const result = _store->saveColorScheme(trimmed.toStdString(), palette); !result)
