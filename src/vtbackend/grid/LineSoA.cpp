@@ -106,8 +106,10 @@ void resizeLineSoA(LineSoA& line, ColumnCount newCols, GraphicsAttributes const&
     if (line.usedColumns > newCols)
         line.usedColumns = newCols;
 
-    // When growing, new cells get fillAttrs. If existing cells wear a different SGR, the line mixes.
-    if (n > oldSize && line.shape == LineShape::Uniform && oldSize > 0 && fillAttrs != line.sgr[0])
+    // When growing, new cells get fillAttrs and no hyperlink. If existing cells wear a different SGR or
+    // carry a hyperlink, the line mixes.
+    if (n > oldSize && line.shape == LineShape::Uniform && oldSize > 0
+        && (fillAttrs != line.sgr[0] || line.hyperlinks[0] != HyperlinkId {}))
         degradeShape(line, LineShape::Mixed);
 }
 
@@ -236,8 +238,8 @@ void copyColumns(LineSoA const& src, size_t srcCol, LineSoA& dst, size_t dstCol,
     }
 
     // Copied cells may break the destination's uniformity, and they bring their own line's spans.
-    degradeShape(dst, LineShape::Mixed);
-    degradeShape(dst, src.shape);
+    if (count > 0)
+        degradeShape(dst, std::max(LineShape::Mixed, src.shape));
 }
 
 void moveColumns(LineSoA& line, size_t srcCol, size_t dstCol, size_t count)

@@ -102,9 +102,10 @@ namespace vthost
 /// Writes one wire cell into @p column of @p soa — the inverse of @ref toWireCell.
 ///
 /// Goes through the engine's own `writeCellToSoA` rather than assigning the arrays, because that
-/// is what maintains the state a direct write would silently corrupt: the `trivial` fast-path flag
-/// the render path reads as O(1), the grapheme-cluster extra pool, and the image fragment a text
-/// write replaces. The server's own measurements (width, scale) are then restored over it — the
+/// is what maintains the state a direct write would silently corrupt: the line's shape (@see
+/// vtbackend::LineShape) the render path reads as O(1), the grapheme-cluster extra pool, and the
+/// image fragment a text write replaces. The server's own measurements (width, scale) are then
+/// restored over it, degrading the shape for the restored sizing as a local write would — the
 /// authority on how many columns a cluster occupies is the terminal that measured it, never a
 /// re-measurement here, which is how a late variation selector would disagree.
 /// @param soa The line's storage; must already be materialized.

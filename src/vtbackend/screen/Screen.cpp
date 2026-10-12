@@ -465,7 +465,7 @@ void Screen::writeText(string_view text, size_t cellCount)
     // Only for pure ASCII content — non-ASCII needs the per-codepoint grapheme segmenter
     // to handle multi-codepoint clusters (emoji + VS16, ZWJ sequences, etc.).
     if (isAsciiOnly(text) && !_terminal->isModeEnabled(AnsiMode::Insert) && isFullHorizontalMargins()
-        && _cursor.charsets.isSelected(CharsetId::USASCII) && !_cursor.charsets.activeDRCSFont().has_value())
+        && _cursor.charsets.isPlainUSASCII())
     {
         crlfIfWrapPending();
 

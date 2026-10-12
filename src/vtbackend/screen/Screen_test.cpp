@@ -4911,6 +4911,46 @@ TEST_CASE("BulkText.aCursorRightOfTheRightMarginGetsNoBulkRun", "[screen]")
     CHECK(screen.grid().lineText(LineOffset(0)) == "      abcd");
 }
 
+TEST_CASE("BulkText.aPendingWrapGetsNoBulkRun", "[screen][LineShape]")
+{
+    // A pending wrap moves the run to the NEXT line before it is written, and the gate asks only about
+    // the current one. At a real deferred wrap the cursor stands on the right margin, where the gate
+    // returns 0 anyway; but the wrap survives a margin widened under it and a DECRC after a resize, and
+    // both leave the cursor left of the margin. The run then landed on a line holding a wide character
+    // and overwrote its head without erasing its continuation.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[2;1Hab\xE4\xB8\xAD"sv); // line 1 holds a wide character at columns 2..3
+
+    SECTION("a margin widened under it")
+    {
+        mock.writeToScreen("\033[?69h\033[1;5s"sv); // DECSLRM at columns 1..5, which homes the cursor
+        mock.writeToScreen("abcde\033[?69l"sv);     // a wrap pending at column 4, then DECLRMM reset
+    }
+    SECTION("restored after a resize")
+    {
+        mock.writeToScreen("\033[1;1H0123456789\0337"sv); // a wrap pending at column 9, then DECSC
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(14) });
+        mock.writeToScreen("\0338"sv); // DECRC
+    }
+    REQUIRE(screen.cursor().wrapPending);
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+
+    mock.writeToScreen("xyz"sv);
+    CHECK(screen.at(LineOffset(1), ColumnOffset(2)).codepoints() == U"z");
+    CHECK_FALSE(screen.at(LineOffset(1), ColumnOffset(3)).isFlagEnabled(CellFlag::WideCharContinuation));
+}
+
+TEST_CASE("BulkText.aSingleShiftMapsOneCharacterOnly", "[screen]")
+{
+    // SS2 invokes G2 for the next graphic character alone. The bulk write asked whether the table for
+    // that one character holds US-ASCII, and then wrote the whole run through it.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+    mock.writeToScreen("\033(0\033*B"sv); // G0: DEC special graphics, G2: US-ASCII
+    mock.writeToScreen("\033Nqqq"sv);     // SS2, then three times "q"
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)) == "q\xE2\x94\x80\xE2\x94\x80       ");
+}
+
 TEST_CASE("BulkText.theAlternateScreenWritesWhatThePrimaryWrites", "[screen]")
 {
     // Before the gate opened, the primary screen already took the bulk path and the alternate screen

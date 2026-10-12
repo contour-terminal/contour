@@ -888,6 +888,46 @@ TEST_CASE("LineShape.copyColumnsTakesTheHigherShapeAndAtLeastMixed", "[LineSoA][
     CHECK(fromSpanning.shape == LineShape::Spanning);
 }
 
+TEST_CASE("LineShape.aZeroWidthCopyLeavesTheShape", "[LineSoA][LineShape]")
+{
+    // Copying no cells changes no cell, so it must not cost the destination its bulk path.
+    LineSoA spanning;
+    initializeLineSoA(spanning, ColumnCount(6));
+    fillWideCharContinuation(spanning, 1, 1, GraphicsAttributes {});
+
+    LineSoA dst;
+    initializeLineSoA(dst, ColumnCount(6));
+    copyColumns(spanning, 0, dst, 0, 0);
+    CHECK(dst.shape == LineShape::Uniform);
+}
+
+TEST_CASE("LineShape.growingALinkedLineMixes", "[LineSoA][LineShape]")
+{
+    // Grown cells carry no hyperlink, so a line whose cells all carry one mixes, as one whose cells all
+    // wear a pen other than the fill does.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(4));
+    (void) writeTextToSoA(line, 0, "abcd", GraphicsAttributes {}, HyperlinkId(7), /*asciiHint=*/true);
+    REQUIRE(line.shape == LineShape::Uniform);
+
+    resizeLineSoA(line, ColumnCount(8));
+    CHECK(line.shape >= shapeImpliedByCells(line));
+    CHECK(line.shape == LineShape::Mixed);
+}
+
+TEST_CASE("LineShape.aResetToTheLinesOwnLinkStaysUniform", "[LineSoA][LineShape]")
+{
+    // reset(attrs, hyperlink) wrote the cell without its hyperlink first and checked the shape there:
+    // on a uniformly linked line that unlinked cell mixed the line, and nothing restores a shape.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(4));
+    (void) writeTextToSoA(line, 0, "abcd", GraphicsAttributes {}, HyperlinkId(7), /*asciiHint=*/true);
+    REQUIRE(line.shape == LineShape::Uniform);
+
+    CellProxy(line, 2).reset(GraphicsAttributes {}, HyperlinkId(7));
+    CHECK(line.shape == LineShape::Uniform);
+}
+
 TEST_CASE("LineShape.shapeImpliedByCells", "[LineSoA][LineShape]")
 {
     LineSoA blank;

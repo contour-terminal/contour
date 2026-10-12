@@ -178,6 +178,26 @@ TEST_CASE("LS2 and LS3 (locking shift into GL)", "[screen]")
     CHECK(charsets.isSelected(CharsetId::USASCII));
 }
 
+TEST_CASE("CharsetMapping.isPlainUSASCII", "[screen]")
+{
+    // What lets Screen::writeText skip the charset mapping for a whole run of ASCII.
+    auto charsets = CharsetMapping {};
+    CHECK(charsets.isPlainUSASCII());
+
+    charsets.singleShift(CharsetTable::G2); // G2 holds US-ASCII too, but only for one character
+    CHECK_FALSE(charsets.isPlainUSASCII());
+    (void) charsets.map(U'a');
+    CHECK(charsets.isPlainUSASCII());
+
+    charsets.select(CharsetTable::G0, CharsetId::Special);
+    CHECK_FALSE(charsets.isPlainUSASCII());
+    charsets.lockingShift(CharsetTable::G1); // GL is G1 now, which still holds US-ASCII
+    CHECK(charsets.isPlainUSASCII());
+
+    charsets.selectDRCS(CharsetTable::G1, 1); // a DRCS font designates US-ASCII as its fallback
+    CHECK_FALSE(charsets.isPlainUSASCII());
+}
+
 TEST_CASE("LS1R LS2R LS3R (locking shift into GR)", "[screen]")
 {
     auto mock = MockTerm { ColumnCount(8), LineCount(4) };

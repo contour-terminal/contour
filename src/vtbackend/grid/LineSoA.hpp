@@ -150,7 +150,7 @@ struct LineSoA
     /// - its SGR or hyperlink differs from another cell's: Mixed (@see writeCellToSoA)
     /// - it holds a grapheme cluster: Mixed (@see appendCodepointToCluster)
     /// - it continues a wide character or a scaled block, or is scaled: Spanning (@see
-    ///   fillWideCharContinuation, writeCellToSoA, BasicCellProxy::setTextScale)
+    ///   fillWideCharContinuation, writeCellToSoA, degradeShapeForTextScale)
     /// - it carries an image fragment: Spanning (@see BasicCellProxy::setImageFragment)
     ///
     /// Anything that makes a cell fail its line's shape must degrade it, or @c Line::trivialBuffer
@@ -229,6 +229,19 @@ void recycleBlankLineSoA(LineSoA& line, GraphicsAttributes const& fillAttrs = {}
 inline void degradeShape(LineSoA& line, LineShape atLeast) noexcept
 {
     line.shape = std::max(line.shape, atLeast);
+}
+
+/// Degrades @p line for a cell sized as @p cellScale: Spanning for any sizing but the ordinary one.
+///
+/// Neither the batched render path nor the bulk write knows about sizing. A purely fractional cell --
+/// such as `OSC 66 ; n=1:d=2:w=1`, which occupies a single ordinary-width cell -- has nothing else
+/// about it that takes its line off them, so without this its fraction would be silently dropped.
+/// @param line      The line holding the cell.
+/// @param cellScale The sizing just stored for the cell.
+inline void degradeShapeForTextScale(LineSoA& line, CellScale const& cellScale) noexcept
+{
+    if (!cellScale.isOrdinary())
+        degradeShape(line, LineShape::Spanning);
 }
 
 /// Tests whether a cell reaches past its own column or row: a wide character's or a scaled block's

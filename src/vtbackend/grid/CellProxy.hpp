@@ -163,6 +163,8 @@ class BasicCellProxy
         auto const oldClusterSize = _line->clusterSize[_col];
         _line->codepoints[_col] = ch;
         _line->widths[_col] = cellWidth;
+        // writeCellToSoA sees the flags that say whether a continuation follows a wide head; this entry
+        // point cannot, so it assumes one.
         if (cellWidth > 1)
             degradeShape(*_line, LineShape::Spanning);
         _line->clusterSize[_col] = (ch != 0) ? uint8_t { 1 } : uint8_t { 0 };
@@ -173,46 +175,23 @@ class BasicCellProxy
     void reset() noexcept
         requires(!IsConst)
     {
-        markDirty();
-        auto const oldClusterSize = _line->clusterSize[_col];
-        _line->codepoints[_col] = 0;
-        _line->widths[_col] = 1;
-        _line->scales[_col] = 1;
-        _line->textScaleExtras[_col] = 0;
-        _line->sgr[_col] = GraphicsAttributes {};
-        _line->hyperlinks[_col] = {};
-        _line->clusterSize[_col] = 0;
-        if (oldClusterSize > 1)
-            clearClusterExtras(*_line, _col);
-        if (_line->imageFragments)
-            _line->imageFragments->erase(static_cast<uint16_t>(_col));
-        degradeShapeIfNeeded();
+        resetCell(GraphicsAttributes {}, HyperlinkId {});
+        // An empty, ordinary-sized cell in the default pen cannot span; it can only mix the line.
+        degradeToMixedIfNeeded();
     }
 
     void reset(GraphicsAttributes const& attrs) noexcept
         requires(!IsConst)
     {
-        markDirty();
-        auto const oldClusterSize = _line->clusterSize[_col];
-        _line->codepoints[_col] = 0;
-        _line->widths[_col] = 1;
-        _line->scales[_col] = 1;
-        _line->textScaleExtras[_col] = 0;
-        _line->sgr[_col] = attrs;
-        _line->hyperlinks[_col] = {};
-        _line->clusterSize[_col] = 0;
-        if (oldClusterSize > 1)
-            clearClusterExtras(*_line, _col);
-        if (_line->imageFragments)
-            _line->imageFragments->erase(static_cast<uint16_t>(_col));
+        resetCell(attrs, HyperlinkId {});
+        // The flags can carry a continuation: Screen::clearAndAdvance writes a wide character's this way.
         degradeShapeIfNeeded();
     }
 
     void reset(GraphicsAttributes const& attrs, HyperlinkId hyperlinkId) noexcept
         requires(!IsConst)
     {
-        reset(attrs);
-        _line->hyperlinks[_col] = hyperlinkId;
+        resetCell(attrs, hyperlinkId);
         degradeShapeIfNeeded();
     }
 
@@ -257,14 +236,7 @@ class BasicCellProxy
         markDirty();
         _line->scales[_col] = cellScale.scale;
         _line->textScaleExtras[_col] = packTextScaleExtras(cellScale);
-
-        // A sized cell cannot render through the batched fast path, which knows nothing about scales.
-        // degradeShapeIfNeeded() looks only at the block scale, so a request that changes nothing
-        // else -- a purely fractional one such as `OSC 66 ; n=1:d=2:w=1`, which occupies a single
-        // ordinary-width cell -- would leave the line Uniform and the fraction silently dropped.
-        if (!cellScale.isOrdinary())
-            degradeShape(*_line, LineShape::Spanning);
-
+        degradeShapeForTextScale(*_line, cellScale);
         degradeShapeIfNeeded();
     }
 
@@ -273,6 +245,8 @@ class BasicCellProxy
     {
         markDirty();
         _line->widths[_col] = w;
+        // writeCellToSoA sees the flags that say whether a continuation follows a wide head; this entry
+        // point cannot, so it assumes one.
         if (w > 1)
             degradeShape(*_line, LineShape::Spanning);
     }
@@ -298,7 +272,7 @@ class BasicCellProxy
     {
         markDirty();
         _line->sgr[_col].foregroundColor = c;
-        degradeShapeIfNeeded();
+        degradeToMixedIfNeeded();
     }
 
     void setBackgroundColor(Color c) noexcept
@@ -306,7 +280,7 @@ class BasicCellProxy
     {
         markDirty();
         _line->sgr[_col].backgroundColor = c;
-        degradeShapeIfNeeded();
+        degradeToMixedIfNeeded();
     }
 
     void setUnderlineColor(Color c) noexcept
@@ -314,7 +288,7 @@ class BasicCellProxy
     {
         markDirty();
         _line->sgr[_col].underlineColor = c;
-        degradeShapeIfNeeded();
+        degradeToMixedIfNeeded();
     }
 
     void setHyperlink(HyperlinkId hyperlinkId) noexcept
@@ -322,7 +296,7 @@ class BasicCellProxy
     {
         markDirty();
         _line->hyperlinks[_col] = hyperlinkId;
-        degradeShapeIfNeeded();
+        degradeToMixedIfNeeded();
     }
 
     void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset)
@@ -365,9 +339,28 @@ class BasicCellProxy
             *_dirty = true;
     }
 
+    /// Clears the cell to an empty one wearing @p attrs and @p hyperlinkId. Leaves the line's shape to
+    /// the caller, which knows whether the cell can span.
+    void resetCell(GraphicsAttributes const& attrs, HyperlinkId hyperlinkId) noexcept
+        requires(!IsConst)
+    {
+        markDirty();
+        auto const oldClusterSize = _line->clusterSize[_col];
+        _line->codepoints[_col] = 0;
+        _line->widths[_col] = 1;
+        _line->scales[_col] = 1;
+        _line->textScaleExtras[_col] = 0;
+        _line->sgr[_col] = attrs;
+        _line->hyperlinks[_col] = hyperlinkId;
+        _line->clusterSize[_col] = 0;
+        if (oldClusterSize > 1)
+            clearClusterExtras(*_line, _col);
+        if (_line->imageFragments)
+            _line->imageFragments->erase(static_cast<uint16_t>(_col));
+    }
+
     /// Degrades the line's shape to what this cell now requires: Spanning for a cell reaching past its
-    /// own column or row, otherwise Mixed for one whose rendition or hyperlink differs from another
-    /// cell's. At col 0 the comparison is against col 1 (an unwritten cell), otherwise against col 0.
+    /// own column or row, otherwise what degradeToMixedIfNeeded() decides.
     void degradeShapeIfNeeded() noexcept
         requires(!IsConst)
     {
@@ -376,6 +369,15 @@ class BasicCellProxy
             degradeShape(*_line, LineShape::Spanning);
             return;
         }
+        degradeToMixedIfNeeded();
+    }
+
+    /// Degrades a Uniform line to Mixed when this cell's rendition or hyperlink differs from another
+    /// cell's. At col 0 the comparison is against col 1 (an unwritten cell), otherwise against col 0.
+    /// Enough on its own after a write that cannot make the cell span: a colour or a hyperlink.
+    void degradeToMixedIfNeeded() noexcept
+        requires(!IsConst)
+    {
         if (_line->shape != LineShape::Uniform)
             return;
         auto const checkCol = (_col > 0) ? size_t(0) : size_t(1);

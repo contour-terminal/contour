@@ -1770,6 +1770,12 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
     // page 0's line let it write into a status line that spans.
     auto const& display = activeDisplay();
 
+    // A pending wrap moves the run to the next line, which nothing below looks at. At a real deferred
+    // wrap the cursor stands on the right margin, where the run would be empty anyway; a margin widened
+    // under the wrap, or a DECRC after a resize, leaves it pending further left.
+    if (display.cursor().wrapPending)
+        return 0;
+
     // A line holding a cell that reaches past its own column or row -- a wide character's or a scaled
     // block's continuation, a scaled block's head -- or an image is written cell by cell: only the
     // per-codepoint path erases the rest of a cell it overwrites part of. Any other line takes the
