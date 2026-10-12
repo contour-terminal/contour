@@ -836,4 +836,37 @@ TEST_CASE("DECDLD: switching away from DRCS uses normal font", "[screen]")
           == "X");
 }
 
+TEST_CASE("DECDLD: a single shift reaches the character after it when the soft font has no glyph for it",
+          "[screen][charset]")
+{
+    // G0 = DEC Special Graphics, G2 = soft font 1 with a glyph for '!' only, SS2, then 'q' twice. The
+    // first 'q' has no glyph, so it is the single-shifted G2 (US-ASCII fallback) that maps it: 'q'.
+    // The second one is back in G0: '─'.
+    auto constexpr Bytes = std::string_view { "\033P1;0;0;10;10;0;20;0{ A@\033\\"
+                                              "\033(0\033* A\033Nqq" };
+    auto const cellAt = [](auto& mock, int column) {
+        return mock.terminal.currentScreen().cellTextAt(
+            { .line = LineOffset(0), .column = ColumnOffset(column) });
+    };
+
+    auto bulk = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    bulk.writeToScreen(Bytes);
+    bulk.terminal.flushInput();
+    REQUIRE(bulk.terminal.drcsCharset(1) != nullptr);
+    CHECK(cellAt(bulk, 0) == "q");
+    CHECK(cellAt(bulk, 1) == "─");
+
+    // A wide character further along the line keeps the line from taking the bulk path, so the very
+    // same bytes reach the state machine's print path (writeTextInternal); both paths must agree.
+    auto stepwise = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    stepwise.writeToScreen("\033[1;10H世\033[1;1H");
+    for (auto const byte: Bytes)
+        stepwise.writeToScreen(std::string_view(&byte, 1));
+    stepwise.terminal.flushInput();
+    CHECK(cellAt(stepwise, 0) == "q");
+    CHECK(cellAt(stepwise, 1) == "─");
+    CHECK(cellAt(bulk, 0) == cellAt(stepwise, 0));
+    CHECK(cellAt(bulk, 1) == cellAt(stepwise, 1));
+}
+
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

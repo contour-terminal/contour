@@ -1187,6 +1187,22 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
   private:
     void writeTextInternal(char32_t codepoint);
 
+    /// Whether writeSoftFontGlyph() put a glyph on the screen.
+    enum class SoftFontGlyph : uint8_t
+    {
+        Absent,  ///< Nothing was written; the character takes the ordinary path.
+        Written, ///< The glyph is in the cell and the cursor has advanced.
+    };
+
+    /// Writes @p sourceCodepoint as a DRCS soft font glyph when the charset invoked for the next
+    /// graphic character is a soft font that defines one for it.
+    ///
+    /// The single-shift state (SS2/SS3) is consumed only when a glyph was written, so a character
+    /// that falls back to the ordinary path is still mapped through the single-shifted set.
+    /// @param sourceCodepoint The character as received, before charset mapping.
+    /// @return Whether a glyph was written.
+    [[nodiscard]] SoftFontGlyph writeSoftFontGlyph(char32_t sourceCodepoint);
+
     /// Whether the modes and charsets let ASCII go straight into the line's arrays: no insert mode,
     /// no left/right margins, and every ASCII character mapping to itself (CharsetMapping::isPlainUSASCII()).
     /// The half of the question that holds for a whole run of text; bulkWritableColumns() is the other.

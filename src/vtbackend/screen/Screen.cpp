@@ -666,31 +666,10 @@ void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
 
         crlfIfWrapPending();
 
-        // DRCS check: if the active charset is a DRCS font, render as image
-        if (auto const drcsFont = _cursor.charsets.activeDRCSFont(); drcsFont.has_value())
+        if (writeSoftFontGlyph(rawCp) == SoftFontGlyph::Written)
         {
-            (void) _cursor.charsets.map(rawCp); // Advance single-shift state
-            if (auto const* charset = _terminal->drcsCharset(*drcsFont); charset != nullptr)
-            {
-                auto const charPos = static_cast<int>(rawCp);
-                if (auto const glyphIt = charset->glyphs.find(charPos); glyphIt != charset->glyphs.end())
-                {
-                    auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
-                                                          _cursor.graphicsRendition.foregroundColor,
-                                                          ColorTarget::Foreground,
-                                                          ColorMode::Normal);
-                    auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
-                    auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
-                    cell.write(_cursor.graphicsRendition, U' ', 1, _cursor.hyperlink);
-                    cell.setImageFragment(rasterizedImage,
-                                          CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
-                    _lastCursorPosition = _cursor.position;
-                    run.previousCodepoint = U' ';
-                    advanceCursorAfterWrite(ColumnCount(1));
-                    _terminal->markCellDirty(_lastCursorPosition);
-                    continue;
-                }
-            }
+            run.previousCodepoint = U' ';
+            continue;
         }
 
         auto const codepoint = _cursor.charsets.map(rawCp);
@@ -756,43 +735,50 @@ void Screen::writeText(char32_t codepoint)
     writeTextInternal(codepoint);
 }
 
+Screen::SoftFontGlyph Screen::writeSoftFontGlyph(char32_t sourceCodepoint)
+{
+    auto const drcsFont = _cursor.charsets.activeDRCSFont();
+    if (!drcsFont.has_value())
+        return SoftFontGlyph::Absent;
+
+    auto const* charset = _terminal->drcsCharset(*drcsFont);
+    if (charset == nullptr)
+        return SoftFontGlyph::Absent;
+
+    auto const glyphIt = charset->glyphs.find(static_cast<int>(sourceCodepoint));
+    if (glyphIt == charset->glyphs.end())
+        return SoftFontGlyph::Absent;
+
+    // Create an RGBA image from the monochrome DRCS glyph, in the foreground color.
+    auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
+                                          _cursor.graphicsRendition.foregroundColor,
+                                          ColorTarget::Foreground,
+                                          ColorMode::Normal);
+    auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
+
+    // Write a space as placeholder, attach the DRCS image, then advance cursor.
+    {
+        auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
+        cell.write(_cursor.graphicsRendition, U' ', 1, _cursor.hyperlink);
+        cell.setImageFragment(rasterizedImage,
+                              CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+        _lastCursorPosition = _cursor.position;
+        advanceCursorAfterWrite(ColumnCount(1));
+        _terminal->markCellDirty(_lastCursorPosition);
+    }
+    (void) _cursor.charsets.map(sourceCodepoint); // Consume the single shift, now that a glyph used it.
+    return SoftFontGlyph::Written;
+}
+
 void Screen::writeTextInternal(char32_t sourceCodepoint)
 {
     crlfIfWrapPending();
 
-    // Check if the active charset is a DRCS font
-    if (auto const drcsFont = _cursor.charsets.activeDRCSFont(); drcsFont.has_value())
+    // A soft font glyph, if the active charset is a DRCS font that defines one; otherwise fall through.
+    if (writeSoftFontGlyph(sourceCodepoint) == SoftFontGlyph::Written)
     {
-        if (auto const* charset = _terminal->drcsCharset(*drcsFont); charset != nullptr)
-        {
-            auto const charPos = static_cast<int>(sourceCodepoint);
-            if (auto const glyphIt = charset->glyphs.find(charPos); glyphIt != charset->glyphs.end())
-            {
-                // Resolve foreground color for the glyph
-                auto const fgColor = vtbackend::apply(_terminal->colorPalette(),
-                                                      _cursor.graphicsRendition.foregroundColor,
-                                                      ColorTarget::Foreground,
-                                                      ColorMode::Normal);
-
-                // Create an RGBA image from the monochrome DRCS glyph
-                auto rasterizedImage = _terminal->createDRCSImage(glyphIt->second, fgColor);
-
-                // Write a space as placeholder, attach the DRCS image, then advance cursor.
-                {
-                    auto cell = useCellAt(_cursor.position.line, _cursor.position.column);
-                    cell.write(_cursor.graphicsRendition, U' ', 1, _cursor.hyperlink);
-                    cell.setImageFragment(rasterizedImage,
-                                          CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
-                    _lastCursorPosition = _cursor.position;
-                    advanceCursorAfterWrite(ColumnCount(1));
-                    _terminal->markCellDirty(_lastCursorPosition);
-                }
-                (void) _cursor.charsets.map(sourceCodepoint); // Advance single-shift state
-                _terminal->resetInstructionCounter();
-                return;
-            }
-        }
-        // Fall through to normal rendering if glyph not found
+        _terminal->resetInstructionCounter();
+        return;
     }
 
     char32_t const codepoint = _cursor.charsets.map(sourceCodepoint);
