@@ -37,6 +37,11 @@ enum class TabsNamingMode : uint8_t
     Title
 };
 
+/// The most bytes taken from the PTY in one read by default, and so the most parsed in one hold of the
+/// terminal's lock: the batch Alacritty holds its lock for. The configuration's `read_buffer_size`
+/// defaults to it too, so a host that builds Settings without a configuration reads alike.
+inline constexpr size_t DefaultPtyReadBufferSize = 65536;
+
 /// Terminal settings, enabling hardware reset to be easier implemented.
 struct Settings
 {
@@ -191,11 +196,8 @@ struct Settings
     // Defaults to 1 MB, that's roughly 10k lines when column count is 100.
     size_t ptyBufferObjectSize = 1024lu * 1024lu;
     // The most bytes taken from the PTY in one read, and so the most parsed in one hold of the terminal's
-    // lock. Matches the configuration's default (read_buffer_size), so a host that builds Settings without
-    // a configuration reads alike.
-    //
-    // This value must be integer-devisable by 16.
-    size_t ptyReadBufferSize = 65536;
+    // lock. The terminal rounds it up to a power of two.
+    size_t ptyReadBufferSize = DefaultPtyReadBufferSize;
     /// Whether the VT parser may skip its state machine for runs of bytes it would only pass on.
     /// Always Enabled in production. Disabled is the per-byte reference the tests compare against.
     vtparser::BulkScan parserBulkScan = vtparser::BulkScan::Enabled;

@@ -1589,7 +1589,7 @@ constexpr StringLiteral CommandPaletteRecentCountWeb {
 constexpr StringLiteral PTYReadBufferSizeWeb {
     "option sets the most bytes taken from the PTY in one read, and so the most parsed in one go. Larger "
     "batches parse output faster; smaller ones show a flood of it in smaller steps. It is an advanced option "
-    "and should be used with caution. The default value is `65536`."
+    "and should be used with caution. The default value is `{}`."
 };
 
 constexpr StringLiteral PTYBufferObjectSizeWeb {

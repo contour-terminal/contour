@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Config.hpp>
 
-#include <vtbackend/screen/Settings.hpp>
-
 #include <catch2/catch_test_macros.hpp>
-
-#include <utility>
 
 TEST_CASE("Config.readBufferSize.defaultsTo64KiB", "[config]")
 {
@@ -14,10 +10,8 @@ TEST_CASE("Config.readBufferSize.defaultsTo64KiB", "[config]")
     CHECK(contour::config::Config {}.ptyReadBufferSize.value() == 65536);
 }
 
-TEST_CASE("Config.readBufferSize.agreesWithTheBackendDefault", "[config]")
+TEST_CASE("Config.readBufferSize.documentationNamesTheDefault", "[config]")
 {
-    // A host that builds its terminal settings without a configuration -- the conformance harness, a
-    // bare vthost::DaemonConfig -- reads in the same batches as one that has it.
-    CHECK(std::cmp_equal(contour::config::Config {}.ptyReadBufferSize.value(),
-                         vtbackend::Settings {}.ptyReadBufferSize));
+    // The option's web documentation takes the default from the configuration instead of repeating it.
+    CHECK(contour::config::documentationGlobalConfig().contains("The default value is `65536`."));
 }

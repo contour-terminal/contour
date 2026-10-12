@@ -1240,7 +1240,8 @@ struct Config
         " /\\()\"'-.,:;<>~!@#$%^&*+=[]{{}}~?|│"
     };
     ConfigEntry<int, documentation::CommandPaletteRecentCount> commandPaletteRecentCount { 5 };
-    ConfigEntry<int, documentation::PTYReadBufferSize> ptyReadBufferSize { 65536 };
+    ConfigEntry<int, documentation::PTYReadBufferSize> ptyReadBufferSize { static_cast<int>(
+        vtbackend::DefaultPtyReadBufferSize) };
     ConfigEntry<int, documentation::PTYBufferObjectSize> ptyBufferObjectSize { 1024 * 1024 };
     ConfigEntry<std::string, documentation::DefaultProfiles> defaultProfileName { "main" };
     ConfigEntry<unsigned, documentation::EarlyExitThreshold> earlyExitThreshold {
