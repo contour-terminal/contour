@@ -229,6 +229,11 @@ void TerminalDisplay::assignSession(session::TerminalSession* newSession)
 {
     fenceRenderThread();
     _session = newSession;
+
+    // A display starts over with every new owner: a queued redraw that was dropped -- its call removed
+    // rather than delivered -- must not leave the next session's requests waiting on it. If one is still
+    // in flight, the worst this costs is one extra update.
+    _redrawCoalescer.disarm();
 }
 
 void TerminalDisplay::setSession(session::TerminalSession* newSession)
@@ -2144,6 +2149,11 @@ void TerminalDisplay::scheduleRedraw()
     if (!hasSession())
         return;
 
+    // One queued redraw covers every request made before it starts: a frame draws the state as it is
+    // when it renders. Under a flood the parser asks after every batch, many times per frame.
+    if (_redrawCoalescer.arm() == RedrawPost::NotNeeded)
+        return;
+
     // QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
     // post() queues the lambda to run LATER on the GUI event loop, so window() must be re-checked at the
     // point of USE, not only here at scheduling time: closing a split pane unparents this item (window() ->
@@ -2151,6 +2161,9 @@ void TerminalDisplay::scheduleRedraw()
     // (member call on null QQuickWindow). Guarding only the outer post() is a check-then-use-later race.
     post([this]() {
         ZoneScopedN("scheduleRedraw.dispatch");
+        // Disarmed before update(), so a request made while the update runs queues another redraw rather
+        // than being folded into this one.
+        _redrawCoalescer.disarm();
         if (window())
             window()->update();
     });

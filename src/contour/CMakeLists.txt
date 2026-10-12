@@ -867,6 +867,7 @@ if(CONTOUR_TESTING)
         cli/CaptureScreen_test.cpp
         cli/CatImageArgs_test.cpp
         cli/ShellIntegration_test.cpp
+        display/RedrawCoalescer_test.cpp
         session/SearchStatus_test.cpp
     )
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally, and

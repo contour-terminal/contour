@@ -50,6 +50,7 @@
 #include <filesystem>
 #include <format>
 #include <memory>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -2270,5 +2271,78 @@ TEST_CASE("display: rebinding the session under live frames does not tear a fram
     secondSession->terminate();
     QCoreApplication::processEvents();
     secondSession.reset();
+}
+// }}}
+
+// {{{ redraw coalescing
+namespace
+{
+
+/// Counts the queued calls delivered to the object it filters: one per post() that reached it.
+class QueuedCallCounter final: public QObject
+{
+  public:
+    [[nodiscard]] int calls() const noexcept { return _calls; }
+
+  protected:
+    bool eventFilter(QObject* watched, QEvent* event) override // Qt's signature
+    {
+        if (event->type() == QEvent::MetaCall)
+            ++_calls;
+        return QObject::eventFilter(watched, event);
+    }
+
+  private:
+    int _calls = 0;
+};
+
+} // namespace
+
+TEST_CASE("display: redraw requests made before the event loop runs post one redraw", "[display][redraw]")
+{
+    // The parser thread requests a redraw after every batch it parses; under a flood that is many per
+    // frame. Each used to post its own queued call to the GUI thread.
+    DisplayHarness h { HarnessWindow::None };
+    QCoreApplication::processEvents(); // whatever attaching the session posted
+
+    auto counter = QueuedCallCounter {};
+    h.display->installEventFilter(&counter);
+
+    for ([[maybe_unused]] auto const request: std::views::iota(0, 100))
+        h.display->scheduleRedraw();
+    QCoreApplication::processEvents();
+    CHECK(counter.calls() == 1);
+
+    // Once that redraw has run, the next request posts again.
+    h.display->scheduleRedraw();
+    QCoreApplication::processEvents();
+    CHECK(counter.calls() == 2);
+
+    h.display->removeEventFilter(&counter);
+}
+
+TEST_CASE("display: a redraw whose queued call was dropped does not block the next one",
+          "[display][redraw][teardown]")
+{
+    // A queued call that never runs must not leave the display waiting for it forever. The session
+    // hand-off -- here a split collapse: detach, then re-attach -- is where a display starts over.
+    DisplayHarness h { HarnessWindow::None };
+    QCoreApplication::processEvents();
+
+    auto counter = QueuedCallCounter {};
+    h.display->installEventFilter(&counter);
+
+    h.display->scheduleRedraw();
+    QCoreApplication::removePostedEvents(h.display, QEvent::MetaCall); // the queued redraw is dropped
+    h.display->setSession(nullptr);
+    h.display->setSession(h.session.get());
+    QCoreApplication::processEvents(); // whatever re-attaching posted
+    auto const before = counter.calls();
+
+    h.display->scheduleRedraw();
+    QCoreApplication::processEvents();
+    CHECK(counter.calls() == before + 1);
+
+    h.display->removeEventFilter(&counter);
 }
 // }}}
