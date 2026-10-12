@@ -2,11 +2,13 @@
 #include <vtpty/SshSession.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <string_view>
 #include <system_error>
@@ -73,4 +75,19 @@ TEST_CASE("SshHostConfig::toString names each key file under its own label", "[s
     CHECK(config.toString()
           == "user@example.invalid:22, private key: id_ed25519, public key: id_ed25519.pub, "
              "known hosts: known_hosts, ForwardAgent: No");
+}
+
+TEST_CASE("SshHostConfig spells its files in UTF-8", "[ssh]")
+{
+    // path::string() spelled them in the ANSI code page on Windows, and threw for a name beyond it.
+    auto const spelled = std::format("/home/{}/.ssh", vtpty::testing::NonAsciiNameUtf8);
+    auto config = vtpty::SshHostConfig {};
+    config.hostname = "example.invalid";
+    config.privateKeyFile = core::pathFromTrustedUtf8(spelled + "/id_ed25519");
+    config.knownHostsFile = core::pathFromTrustedUtf8(spelled + "/known_hosts");
+
+    CHECK(config.toString().contains(std::format("private key: {}/id_ed25519", spelled)));
+    CHECK(config.toString().contains(std::format("known hosts: {}/known_hosts", spelled)));
+    CHECK(config.toConfigString().contains(std::format("IdentityFile {}/id_ed25519\n", spelled)));
+    CHECK(config.toConfigString().contains(std::format("KnownHostsFile {}/known_hosts\n", spelled)));
 }

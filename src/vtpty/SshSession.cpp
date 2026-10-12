@@ -25,6 +25,7 @@
 #include <vtpty/SshKnownHosts.hpp>
 
 #include <core/Escape.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 
 #include <cerrno>
@@ -325,13 +326,13 @@ std::string SshHostConfig::toString() const
         result += "*:" + std::to_string(port);
 
     if (!privateKeyFile.empty())
-        add(std::format("private key: {}", privateKeyFile.string()));
+        add(std::format("private key: {}", core::pathToUtf8(privateKeyFile)));
 
     if (!publicKeyFile.empty())
-        add(std::format("public key: {}", publicKeyFile.string()));
+        add(std::format("public key: {}", core::pathToUtf8(publicKeyFile)));
 
     if (!knownHostsFile.empty())
-        add(std::format("known hosts: {}", knownHostsFile.string()));
+        add(std::format("known hosts: {}", core::pathToUtf8(knownHostsFile)));
 
     add(std::format("ForwardAgent: {}", forwardAgent ? "Yes" : "No"));
 
@@ -353,9 +354,9 @@ std::string SshHostConfig::toConfigString(std::string const& host) const
     if (!username.empty())
         result += std::format("{}User {}\n", prefix, username);
     if (!privateKeyFile.empty())
-        result += std::format("{}IdentityFile {}\n", prefix, privateKeyFile.string());
+        result += std::format("{}IdentityFile {}\n", prefix, core::pathToUtf8(privateKeyFile));
     if (!knownHostsFile.empty())
-        result += std::format("{}KnownHostsFile {}\n", prefix, knownHostsFile.string());
+        result += std::format("{}KnownHostsFile {}\n", prefix, core::pathToUtf8(knownHostsFile));
     result += std::format("{}ForwardAgent {}\n", prefix, forwardAgent);
     result += std::format("\n");
     return result;
@@ -673,7 +674,8 @@ void SshSession::processState()
                         fail("Host key verification failed. Connection aborted.");
                         break;
                     case HostkeyVerificationStatus::FailedToReadKnownHosts:
-                        fail("Failed to read known_hosts file \"{}\".", _config.knownHostsFile.string());
+                        fail("Failed to read known_hosts file \"{}\".",
+                             core::pathToUtf8(_config.knownHostsFile));
                         break;
                     case HostkeyVerificationStatus::WaitingForUserConfirmation:
                         logInfoWithInject("Waiting for user confirmation for host key.");
