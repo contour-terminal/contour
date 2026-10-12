@@ -295,6 +295,9 @@ if(LIBTERMINAL_TESTING)
         if(NOT WIN32)
             add_test(NAME bench_headless_pty_smoke COMMAND bench-headless pty seconds 1)
             set_tests_properties(bench_headless_pty_smoke PROPERTIES LABELS bench)
+            add_test(NAME bench_headless_throughput_pty_smoke
+                     COMMAND bench-headless throughput size 1 runs 1 kinds ascii screens primary pty)
+            set_tests_properties(bench_headless_throughput_pty_smoke PROPERTIES LABELS bench)
         endif()
 
         if(CONTOUR_INSTALL_TOOLS)

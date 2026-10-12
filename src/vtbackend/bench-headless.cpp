@@ -254,18 +254,34 @@ class ByteCountingProcess final: public vtpty::Process
     /// @return How many bytes have been read so far.
     [[nodiscard]] uint64_t bytesRead() const noexcept { return _bytesRead.load(std::memory_order_relaxed); }
 
+    /// @return When the first byte was read, or nullopt while none has been.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> firstReadAt() const noexcept
+    {
+        auto const ticks = _firstReadAt.load(std::memory_order_relaxed);
+        if (ticks == 0)
+            return std::nullopt;
+        return std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(ticks));
+    }
+
     [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
                                                  std::optional<std::chrono::milliseconds> timeout,
                                                  size_t size) override
     {
         auto result = Process::read(storage, timeout, size);
         if (result)
+        {
+            if (!result->data.empty() && _firstReadAt.load(std::memory_order_relaxed) == 0)
+                _firstReadAt.store(std::chrono::steady_clock::now().time_since_epoch().count(),
+                                   std::memory_order_relaxed);
             _bytesRead.fetch_add(result->data.size(), std::memory_order_relaxed);
+        }
         return result;
     }
 
   private:
     std::atomic<uint64_t> _bytesRead = 0;
+    /// When the first byte was read, in ticks since the clock's epoch; 0 for none.
+    std::atomic<std::chrono::steady_clock::rep> _firstReadAt = 0;
 };
 
 /// Creates log-like output: a dimmed timestamp, a coloured level and a message on every line.
@@ -579,12 +595,31 @@ void feed(vtbackend::MockTerm<vtpty::MockViewPty>& vt, std::string_view text)
     return std::chrono::steady_clock::now() - start;
 }
 
+/// Where a throughput run's bytes come from.
+enum class ThroughputDevice : uint8_t
+{
+    MockPty, ///< Fed from memory: the terminal's own cost, with no system calls.
+    RealPty, ///< Written by a child process through a real PTY, system calls and all.
+};
+
+/// @return How the report describes @p device.
+constexpr std::string_view describe(ThroughputDevice device) noexcept
+{
+    switch (device)
+    {
+        case ThroughputDevice::MockPty: return "fed from memory";
+        case ThroughputDevice::RealPty: return "written through a real PTY";
+    }
+    std::unreachable();
+}
+
 /// How the throughput benchmark runs. Its defaults are the command line's.
 struct ThroughputOptions
 {
     size_t bytesPerWorkload = size_t { 16 } * 1024 * 1024; ///< How much of each workload to generate.
     unsigned runs = 5;                         ///< Runs per workload and screen; the fastest counts.
     unsigned ptyReadSize = ContourPtyReadSize; ///< Bytes per PTY read, as the parser takes them.
+    ThroughputDevice device = ThroughputDevice::MockPty; ///< Where each run's bytes come from.
 };
 
 /// @return How long a fresh terminal took to take in @p input on @p screen, fed from memory
@@ -600,16 +635,96 @@ std::chrono::nanoseconds measureFromMemory(std::string_view input,
     return runWorkloadOnce(vt.terminal, vt.mockPty());
 }
 
+/// @return How long a terminal took to take in @p input on @p screen when a child process wrote it through a
+///         real PTY: from the first byte read to the read that reported the writer gone. Or why the run could
+///         not happen.
+std::expected<std::chrono::nanoseconds, std::string> measureThroughPty(std::string_view input,
+                                                                       BenchScreen const& screen,
+                                                                       size_t ptyReadSize,
+                                                                       core::Environment const& env)
+{
+#ifdef _WIN32
+    (void) input;
+    (void) screen;
+    (void) ptyReadSize;
+    (void) env;
+    return std::unexpected("The pty mode writes through a POSIX shell, which Windows lacks."s);
+#else
+    auto const file = std::filesystem::temp_directory_path()
+                      / std::format("contour-bench-throughput-{}.bin", std::random_device {}());
+    auto removeFile = core::Finally { [&]() {
+        auto ignored = std::error_code {};
+        std::filesystem::remove(file, ignored);
+    } };
+    if (!(std::ofstream(file, std::ios::binary) << screen.entrySequence << input))
+        return std::unexpected(std::format("Cannot write the workload to '{}'.", file.string()));
+
+    // Raw mode, so that the line discipline passes every byte through unchanged: no CRLF translation.
+    auto ownedProcess = std::make_unique<ByteCountingProcess>(
+        vtpty::Process::ExecInfo { .program = "/bin/sh",
+                                   .arguments = { "-c", "stty raw -echo; exec cat \"$0\"", file.string() },
+                                   .workingDirectory = std::filesystem::temp_directory_path(),
+                                   .env = {},
+                                   .removedEnvironment = {} },
+        vtpty::createPty(BenchPageSize, std::nullopt),
+        /*escapeSandbox=*/false,
+        // a benchmark measures the terminal, not systemd: no scope, and no placement latency
+        std::make_shared<vtpty::NoPlacement>());
+    auto& process = *ownedProcess;
+
+    auto settings = vtbackend::Settings {};
+    settings.pageSize = BenchPageSize;
+    settings.historyLimits = vtbackend::HistoryLimits::plain(BenchHistory);
+    settings.ptyReadBufferSize = ptyReadSize;
+    auto events = vtbackend::Terminal::NullEvents {};
+    auto terminal = vtbackend::Terminal {
+        events, env, std::move(ownedProcess), settings, std::chrono::steady_clock::now()
+    };
+    terminal.setMode(vtbackend::DECMode::AutoWrap, true);
+
+    if (auto const started = terminal.device().start(); !started)
+        return std::unexpected(std::format("Cannot start the writer: {}", started.error().detail));
+
+    // Runs until the PTY reports the writer gone, as contour's own read loop does.
+    while (terminal.processInputOnce())
+    {
+    }
+    auto const finished = std::chrono::steady_clock::now();
+
+    auto const expected = screen.entrySequence.size() + input.size();
+    auto const firstRead = process.firstReadAt();
+    if (!firstRead || process.bytesRead() < expected)
+        return std::unexpected(std::format("Only {} of {} bytes arrived.", process.bytesRead(), expected));
+    return finished - *firstRead;
+#endif
+}
+
+/// @return How long one run took, or why it could not run.
+std::expected<std::chrono::nanoseconds, std::string> measureThroughput(std::string_view input,
+                                                                       BenchScreen const& screen,
+                                                                       ThroughputOptions const& options,
+                                                                       core::Environment const& env)
+{
+    switch (options.device)
+    {
+        case ThroughputDevice::MockPty: return measureFromMemory(input, screen, options.ptyReadSize);
+        case ThroughputDevice::RealPty: return measureThroughPty(input, screen, options.ptyReadSize, env);
+    }
+    std::unreachable();
+}
+
 /// Runs every picked workload on every picked screen, and prints the fastest run of each.
 int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
                            std::span<BenchScreen const> screens,
-                           ThroughputOptions const& options)
+                           ThroughputOptions const& options,
+                           core::Environment const& env)
 {
     cout << std::format(
-        "Throughput: {} MiB per workload, fastest of {} runs, PTY read size {} bytes\n",
+        "Throughput: {} MiB per workload, fastest of {} runs, PTY read size {} bytes, {}\n",
         options.bytesPerWorkload / (size_t { 1024 } * 1024),
         options.runs,
-        core::nextPowerOfTwo(static_cast<size_t>(options.ptyReadSize))); // as Terminal rounds it
+        core::nextPowerOfTwo(static_cast<size_t>(options.ptyReadSize)), // as Terminal rounds it
+        describe(options.device));
     for (auto const& workload: workloads)
     {
         auto const input = vtbackend::test::makeWorkload(workload, options.bytesPerWorkload);
@@ -618,7 +733,15 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
         {
             auto fastest = std::chrono::nanoseconds::max();
             for ([[maybe_unused]] auto const run: std::views::iota(0u, options.runs))
-                fastest = std::min(fastest, measureFromMemory(input, screen, options.ptyReadSize));
+            {
+                auto const elapsed = measureThroughput(input, screen, options, env);
+                if (!elapsed)
+                {
+                    cerr << elapsed.error() << '\n';
+                    return EXIT_FAILURE;
+                }
+                fastest = std::min(fastest, *elapsed);
+            }
             cout << std::format("{:<8} {:<9} {:9.1f} MiB/s\n",
                                 workload.name,
                                 screen.name,
@@ -791,6 +914,10 @@ class ContourHeadlessBench: public core::cli::App
                           .helpText = "Bytes per PTY read, which is what the parser takes per lock; the "
                                       "default is contour's.",
                           .placeholder = "BYTES" },
+            CLI::Option { .name = "pty",
+                          .v = CLI::Value { ThroughputDefaults.device == ThroughputDevice::RealPty },
+                          .helpText = "Write each workload from a child process through a real PTY instead "
+                                      "of feeding it from memory (POSIX only)." },
         };
 
         auto const snapshotOptions = CLI::OptionList {
@@ -978,13 +1105,15 @@ class ContourHeadlessBench: public core::cli::App
             .bytesPerWorkload = size_t { parameters().uint("bench-headless.throughput.size") } * 1024 * 1024,
             .runs = parameters().uint("bench-headless.throughput.runs"),
             .ptyReadSize = parameters().uint("bench-headless.throughput.read-size"),
+            .device = parameters().boolean("bench-headless.throughput.pty") ? ThroughputDevice::RealPty
+                                                                            : ThroughputDevice::MockPty,
         };
         if (options.bytesPerWorkload == 0 || options.runs == 0 || options.ptyReadSize == 0)
         {
             cerr << "size, runs and read-size must each be at least 1.\n";
             return EXIT_FAILURE;
         }
-        return runThroughputBenchmark(*workloads, *screens, options);
+        return runThroughputBenchmark(*workloads, *screens, options, processEnvironment());
     }
 
     int benchSnapshot()
