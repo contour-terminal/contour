@@ -15,6 +15,8 @@
 
 #include <vtbackend/core/Primitives.hpp>
 
+#include <vtpty/test/NonAsciiSample.hpp>
+
 #include <QtCore/QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
@@ -23,6 +25,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -421,9 +424,6 @@ TEST_CASE("TerminalSessionManager: a directory-only layout pane does not overrid
 
     contour::config::Layout layout;
     contour::config::LayoutTab tab;
-    // Plain string, not std::filesystem::path: LayoutPane::directory is an
-    // optional<string>, and path only converts to string on POSIX (Windows
-    // paths are wide).
     tab.root.directory = "/tmp";
     layout.tabs = { tab };
     REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
@@ -433,6 +433,26 @@ TEST_CASE("TerminalSessionManager: a directory-only layout pane does not overrid
     REQUIRE(factory->requestedCwds.size() == 1);
     REQUIRE(factory->requestedCwds[0].has_value());
     CHECK(*factory->requestedCwds[0] == "/tmp"); // ...but the directory still applies
+}
+
+TEST_CASE("TerminalSessionManager: a layout pane's directory beyond ASCII reaches its session in UTF-8",
+          "[manager][layout]")
+{
+    // Every new session reads its cwd as UTF-8. Narrowed with path::string(), Windows spelled the directory
+    // in the ANSI code page, or threw for one beyond it.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* factory = factoryOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    contour::config::Layout layout;
+    contour::config::LayoutTab tab;
+    tab.root.directory = std::filesystem::path { u8"/tmp/" } / vtpty::testing::NonAsciiName;
+    layout.tabs = { tab };
+    REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
+
+    REQUIRE(factory->requestedCwds.size() == 1);
+    CHECK(factory->requestedCwds[0] == std::format("/tmp/{}", vtpty::testing::NonAsciiNameUtf8));
 }
 
 TEST_CASE("TerminalSessionManager: consumeDefaultLayout applies the startup layout exactly once",

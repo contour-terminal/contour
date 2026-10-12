@@ -415,11 +415,9 @@ bool TerminalSessionManager::applyLayoutToWindow(
                 managerLog()("Layout references unknown profile '{}'; using window profile.", *profileName);
                 profileName.reset();
             }
-            // Narrow the layout directory to the cwd string HERE (apply-time), not at config parse:
-            // on Windows path::string() throws for a path outside the active code page, and doing it
-            // at parse would fail the whole config rather than just this pane's launch.
-            auto cwd =
-                leaf.directory ? std::optional { leaf.directory->string() } : std::optional<std::string> {};
+            // The directory as every new tab's and split's cwd travels: in UTF-8.
+            auto cwd = leaf.directory.transform(
+                [](std::filesystem::path const& directory) { return core::pathToUtf8(directory); });
             // Report whether the backing session was actually created: a nullptr (the factory
             // refused, e.g. an attach-mode pool that ran dry) stops the realizer before it
             // allocates a pane with no session behind it — the same guard the split path uses.
