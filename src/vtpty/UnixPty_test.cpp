@@ -83,8 +83,14 @@ Flood floodThroughRead(std::string const& payload, std::size_t budget, std::size
         flood.received += result->data;
     }
 
+    // A writer whose bytes all arrived has returned or is about to, and is joined before the PTY closes
+    // under it: its calls read the PTY's handles. Only a read loop that gave up closes first, to fail
+    // the write the writer may still be blocked in.
+    if (flood.received.size() == payload.size())
+        writer.join();
     pty.close();
-    writer.join();
+    if (writer.joinable())
+        writer.join();
     return flood;
 }
 
