@@ -47,3 +47,13 @@ TEST_CASE("VTWriter.writeBlankLine.emitsNormalWhenNoBold", "[VTWriter][blank]")
     CHECK(emitted.starts_with("\x1b[22;"));
     CHECK(emitted.contains("   "));
 }
+
+TEST_CASE("VTWriter.writeFormatted.substitutesItsArguments", "[VTWriter]")
+{
+    auto output = std::vector<char> {};
+    auto writer = VTWriter(output);
+    auto const row = 3;
+    writer.write("\x1b[{};{}H{}", row, 7U, std::string { "x" });
+
+    CHECK(std::string(output.data(), output.size()) == "\x1b[3;7Hx");
+}
