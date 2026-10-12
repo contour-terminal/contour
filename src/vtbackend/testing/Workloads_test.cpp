@@ -34,6 +34,7 @@ constexpr auto Signatures = std::array {
     Signature { .workload = "colored", .mustContain = "\033[1;32m" },
     Signature { .workload = "sgr", .mustContain = "\033[38;5;" },
     Signature { .workload = "utf8", .mustContain = "\xC3\xA4" },
+    Signature { .workload = "utf8sparse", .mustContain = "\xE2\x94\x82" },
     Signature { .workload = "tui", .mustContain = "\033[50;1H" },
 };
 
@@ -52,6 +53,7 @@ constexpr auto Goldens = std::array {
     Golden { .workload = "colored", .size = 65593, .digest = 0x1dee961d0676b761 },
     Golden { .workload = "sgr", .size = 65582, .digest = 0xf1068e82e13a4813 },
     Golden { .workload = "utf8", .size = 65545, .digest = 0x417b51eebafc7b58 },
+    Golden { .workload = "utf8sparse", .size = 65663, .digest = 0x6c2738dd607d0df0 },
     Golden { .workload = "tui", .size = 65812, .digest = 0x5fc962bd2d35cc14 },
 };
 
@@ -134,14 +136,26 @@ TEST_CASE("Workloads.ascii_is_printable_text_and_line_ends", "[workloads]")
         text, [](char ch) { return (ch >= 0x21 && ch <= 0x7E) || ch == '\r' || ch == '\n'; }));
 }
 
-TEST_CASE("Workloads.utf8_holds_no_byte_above_0x7F_but_U+00E4", "[workloads]")
+TEST_CASE("Workloads.utf8_kinds_hold_no_byte_above_0x7F_but_their_one_character", "[workloads]")
 {
-    auto const text = makeWorkload(workloadNamed("utf8"), TargetBytes);
-    auto rest = std::string {};
-    for (auto const part: std::views::split(text, "\xC3\xA4"sv))
-        rest.append(part.begin(), part.end());
-    CHECK(rest.size() < text.size());
-    CHECK(std::ranges::none_of(rest, [](char ch) { return static_cast<unsigned char>(ch) >= 0x80; }));
+    struct OneCharacter
+    {
+        std::string_view workload;
+        std::string_view character; ///< The only non-ASCII character it writes, in UTF-8.
+    };
+    for (auto const& [workload, character]: std::array {
+             OneCharacter { .workload = "utf8", .character = "\xC3\xA4"sv },           // U+00E4
+             OneCharacter { .workload = "utf8sparse", .character = "\xE2\x94\x82"sv }, // U+2502
+         })
+    {
+        INFO(workload);
+        auto const text = makeWorkload(workloadNamed(workload), TargetBytes);
+        auto rest = std::string {};
+        for (auto const part: std::views::split(text, character))
+            rest.append(part.begin(), part.end());
+        CHECK(rest.size() < text.size());
+        CHECK(std::ranges::none_of(rest, [](char ch) { return static_cast<unsigned char>(ch) >= 0x80; }));
+    }
 }
 
 TEST_CASE("Workloads.tui_repaints_every_row_without_a_line_feed", "[workloads]")

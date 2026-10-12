@@ -102,6 +102,20 @@ namespace detail
         out += "\r\n";
     }
 
+    /// ASCII with a box-drawing character every 40 columns, as a TUI table or source code with the odd
+    /// non-ASCII character writes it: long ASCII stretches inside UTF-8 text.
+    inline void writeUtf8SparseLine(std::string& out, std::mt19937& rng)
+    {
+        for (auto const column: std::views::iota(0, lineLength(rng)))
+        {
+            if (column % 40 == 39)
+                out += "\xE2\x94\x82"; // U+2502 BOX DRAWINGS LIGHT VERTICAL
+            else
+                appendPrintable(out, rng, 1);
+        }
+        out += "\r\n";
+    }
+
     /// One full-screen repaint as htop, vim or tmux write it: per row, position, colour, text, erase to the
     /// end.
     inline void writeTuiFrame(std::string& out, std::mt19937& rng)
@@ -127,6 +141,7 @@ inline constexpr auto Workloads = std::array {
     Workload { .name = "colored", .writeUnit = &detail::writeColoredLine },
     Workload { .name = "sgr", .writeUnit = &detail::writeSgrLine },
     Workload { .name = "utf8", .writeUnit = &detail::writeUtf8Line },
+    Workload { .name = "utf8sparse", .writeUnit = &detail::writeUtf8SparseLine },
     Workload { .name = "tui", .writeUnit = &detail::writeTuiFrame },
 };
 

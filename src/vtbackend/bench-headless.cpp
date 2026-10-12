@@ -636,6 +636,17 @@ constexpr auto BenchScreens = std::array {
     BenchScreen { .name = "alternate", .entrySequence = "\033[?1049h" },
 };
 
+/// @return The length of the longest name in @p table: the width of a report column that names its rows.
+template <typename Row, size_t N>
+[[nodiscard]] constexpr size_t longestName(std::array<Row, N> const& table)
+{
+    return std::ranges::max(table | std::views::transform([](Row const& row) { return row.name.size(); }));
+}
+
+/// The widths of the workload and screen columns the throughput and snapshot reports align on.
+constexpr auto WorkloadColumnWidth = longestName(vtbackend::test::Workloads);
+constexpr auto ScreenColumnWidth = longestName(BenchScreens);
+
 /// Picks the rows of @p table that the comma-separated @p names name, in the order named.
 /// @param table The rows to pick from; each has a @c name.
 /// @param names The names to pick, comma-separated; all rows when empty.
@@ -865,9 +876,11 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
                 cerr << fastest.error() << '\n';
                 return EXIT_FAILURE;
             }
-            auto row = std::format("{:<8} {:<9} {:9.1f} MiB/s",
+            auto row = std::format("{:<{}} {:<{}} {:9.1f} MiB/s",
                                    workload.name,
+                                   WorkloadColumnWidth,
                                    screen.name,
+                                   ScreenColumnWidth,
                                    mebibytes / std::chrono::duration<double>(fastest->elapsed).count());
             if (fastest->reads)
                 row += std::format(" {:9} bytes/read", input.size() / *fastest->reads);
@@ -954,7 +967,8 @@ int runSnapshotBenchmark(std::span<vtbackend::test::Workload const> workloads,
         auto const fill = vtbackend::test::makeWorkload(workload, SnapshotFillBytes);
         for (auto const& screen: screens)
         {
-            auto line = std::format("{:<8} {:<9}", workload.name, screen.name);
+            auto line = std::format(
+                "{:<{}} {:<{}}", workload.name, WorkloadColumnWidth, screen.name, ScreenColumnWidth);
             for (auto const& statusLine: SnapshotStatusLines)
             {
                 auto const fastest = fastestOf(
