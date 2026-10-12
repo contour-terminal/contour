@@ -147,4 +147,9 @@ TEST_CASE("a daemon-hosted shell is told where its own daemon is", "[vthost][soc
 
     REQUIRE(environment.contains("CONTOUR_MUX"));
     CHECK(environment.at("CONTOUR_MUX") == "/run/user/1000/contour/default");
+
+    // In UTF-8, as the spawn reads an environment value -- narrowed, a path is spelled in the ANSI code
+    // page on Windows, or throws on one beyond it.
+    auto const awkward = vthost::hostedShellEnvironment(std::filesystem::path { u8"/tmp/ü€李\U0001F600" });
+    CHECK(awkward.at("CONTOUR_MUX") == "/tmp/\xc3\xbc\xe2\x82\xac\xe6\x9d\x8e\xf0\x9f\x98\x80");
 }

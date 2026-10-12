@@ -9,6 +9,7 @@
 /// spawns, and it is the one thing here that needs vtpty/Process.hpp.
 
 #include <vtpty/Process.hpp>
+#include <vtpty/Utf8Path.hpp>
 
 #include <filesystem>
 
@@ -33,11 +34,11 @@ namespace vthost
 /// because closing it means deciding which layer owns the terminfo answer.
 ///
 /// @param socketPath The daemon's control socket, as it bound it.
-/// @return The variables to add to a hosted shell's environment.
+/// @return The variables to add to a hosted shell's environment, in UTF-8 as the spawn reads them.
 [[nodiscard]] inline vtpty::Process::Environment hostedShellEnvironment(
     std::filesystem::path const& socketPath)
 {
-    return vtpty::Process::Environment { { "CONTOUR_MUX", socketPath.string() } };
+    return vtpty::Process::Environment { { "CONTOUR_MUX", vtpty::utf8Of(socketPath) } };
 }
 
 } // namespace vthost
