@@ -2403,6 +2403,36 @@ class Terminal
     };
     [[nodiscard]] std::optional<PtyReadResult> readFromPty();
 
+    /// Reads on while another thread holds the terminal's state, rather than waiting for it idle.
+    ///
+    /// The render thread holds the state for as long as it takes to build a frame. Reading meanwhile
+    /// keeps a fast writer from blocking on a full PTY, and the parse that follows covers all of it in
+    /// the same hold of the lock. A read lands at the hot end of @p buffer, which is first moved past
+    /// everything read so far: that keeps the parser's own later reads from overwriting the batch, and
+    /// each run of bytes from one source contiguous. A read that lands further on, because another
+    /// writer appended to the buffer meanwhile and moved the hot end, becomes a piece of its own and
+    /// ends the read-ahead.
+    ///
+    /// @param buffer The buffer @p first was read into, at its hot end.
+    /// @param first  The batch's first read.
+    /// @return The batch in order, starting with @p first: one piece per contiguous run of bytes from
+    ///         the same source.
+    [[nodiscard]] std::vector<vtpty::Pty::ReadResult> readAhead(crispy::BufferObject<char>& buffer,
+                                                                vtpty::Pty::ReadResult const& first);
+
+    /// Hands the bytes readAhead() claimed back, once the state lock is held: moves @p buffer's hot end
+    /// back to the batch's start, so the parse moves it on again exactly as for a batch that was never
+    /// read ahead.
+    ///
+    /// Claimed but unparsed bytes belong to this thread, and everything else in the buffer is already
+    /// parsed: whatever another writer appended amid or after the batch, it parsed under the state lock
+    /// this thread now holds, and nothing refers to a PTY buffer's bytes once they are parsed.
+    ///
+    /// @param buffer The buffer readAhead() claimed bytes in.
+    /// @param batch  What readAhead() returned.
+    void releaseReadAhead(crispy::BufferObject<char>& buffer,
+                          std::span<vtpty::Pty::ReadResult const> batch) noexcept;
+
     // Writes partially or all input data to the PTY buffer object and returns a string view to it.
     [[nodiscard]] std::string_view lockedWriteToPtyBuffer(std::string_view data);
 

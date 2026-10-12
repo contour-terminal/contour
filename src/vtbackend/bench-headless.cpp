@@ -36,6 +36,7 @@
 #include <random>
 #include <ranges>
 #include <span>
+#include <stop_token>
 #include <string_view>
 #include <system_error>
 #include <thread>
@@ -754,6 +755,7 @@ struct ThroughputOptions
     unsigned runs = 5;                         ///< Runs per workload and screen; the fastest counts.
     unsigned ptyReadSize = ContourPtyReadSize; ///< Bytes per PTY read, as the parser takes them.
     ThroughputDevice device = ThroughputDevice::MockPty; ///< Where each run's bytes come from.
+    unsigned refreshHz = 0; ///< Render-buffer refreshes per second during a pty run; 0 for none.
 };
 
 /// What one throughput run measured. Runs order by how long they took first, so the fastest of several is the
@@ -785,22 +787,44 @@ struct ThroughputRun
 ///         to its steady state: from the first byte read to the read that reported the writer gone, including
 ///         the writer's exit. Or why the run could not happen.
 #ifdef _WIN32
-[[nodiscard]] std::expected<ThroughputRun, std::string> measureThroughPty(
-    std::string_view, std::filesystem::path const&, BenchScreen const&, size_t, core::Environment const&)
+[[nodiscard]] std::expected<ThroughputRun, std::string> measureThroughPty(std::string_view,
+                                                                          std::filesystem::path const&,
+                                                                          BenchScreen const&,
+                                                                          ThroughputOptions const&,
+                                                                          core::Environment const&)
 {
     return std::unexpected("The pty mode writes through a POSIX shell, which Windows lacks."s);
 }
 #else
+/// Refreshes @p terminal's render buffer @p hz times a second until stopped, the way the render thread
+/// contends for the terminal's state while output floods in.
+/// @return The refreshing thread, or no thread at all when @p hz is 0.
+[[nodiscard]] std::jthread startRefresher(vtbackend::Terminal& terminal, unsigned hz)
+{
+    if (hz == 0)
+        return {};
+    return std::jthread { [&terminal, hz](std::stop_token const& stop) {
+        auto const interval = std::chrono::microseconds { 1'000'000 / hz };
+        auto next = std::chrono::steady_clock::now();
+        while (!stop.stop_requested())
+        {
+            terminal.refreshRenderBuffer();
+            next += interval;
+            std::this_thread::sleep_until(next);
+        }
+    } };
+}
+
 [[nodiscard]] std::expected<ThroughputRun, std::string> measureThroughPty(std::string_view input,
                                                                           std::filesystem::path const& file,
                                                                           BenchScreen const& screen,
-                                                                          size_t ptyReadSize,
+                                                                          ThroughputOptions const& options,
                                                                           core::Environment const& env)
 {
     auto settings = vtbackend::Settings {};
     settings.pageSize = BenchPageSize;
     settings.historyLimits = vtbackend::HistoryLimits::plain(BenchHistory);
-    settings.ptyReadBufferSize = ptyReadSize;
+    settings.ptyReadBufferSize = options.ptyReadSize;
     // Raw mode, so that the line discipline passes every byte through unchanged: no CRLF translation. Should
     // stty fail, nothing is written, and the byte count below reports it.
     auto session = ScriptedSession { "stty raw -echo && exec cat \"$0\"", file, settings, env };
@@ -812,6 +836,9 @@ struct ThroughputRun
 
     if (auto const started = session.start(); !started)
         return std::unexpected(started.error());
+
+    // Stopped and joined when it goes out of scope, before the terminal does.
+    auto const refresher = startRefresher(terminal, options.refreshHz);
 
     // Runs until the PTY reports the writer gone, as contour's own read loop does.
     while (terminal.processInputOnce())
@@ -844,9 +871,8 @@ struct ThroughputRun
         case ThroughputDevice::RealPty:
             // The writer reads the workload from a file, which every run reuses.
             return ScratchFile::create("throughput", input).and_then([&](ScratchFile const& file) {
-                return fastestOf(options.runs, [&] {
-                    return measureThroughPty(input, file.path(), screen, options.ptyReadSize, env);
-                });
+                return fastestOf(options.runs,
+                                 [&] { return measureThroughPty(input, file.path(), screen, options, env); });
             });
     }
     std::unreachable();
@@ -1071,6 +1097,12 @@ class ContourHeadlessBench: public core::cli::App
                           .v = CLI::Value { ThroughputDefaults.device == ThroughputDevice::RealPty },
                           .helpText = "Write each workload from a child process through a real PTY instead "
                                       "of feeding it from memory (POSIX only)." },
+            CLI::Option { .name = "refresh-hz",
+                          .v = CLI::Value { ThroughputDefaults.refreshHz },
+                          .helpText =
+                              "With pty: refresh the render buffer this many times a second while the "
+                              "workload floods in, as the render thread does; 0 for never.",
+                          .placeholder = "HZ" },
         };
 
         auto const snapshotOptions = CLI::OptionList {
@@ -1264,6 +1296,7 @@ class ContourHeadlessBench: public core::cli::App
             .ptyReadSize = parameters().uint("bench-headless.throughput.read-size"),
             .device = parameters().boolean("bench-headless.throughput.pty") ? ThroughputDevice::RealPty
                                                                             : ThroughputDevice::MockPty,
+            .refreshHz = parameters().uint("bench-headless.throughput.refresh-hz"),
         };
         if (options.bytesPerWorkload == 0 || options.runs == 0 || options.ptyReadSize == 0)
         {

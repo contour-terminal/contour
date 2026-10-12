@@ -361,6 +361,53 @@ std::optional<Terminal::PtyReadResult> Terminal::readFromPty()
     return PtyReadResult { .readResult = *result, .buffer = bufferUsedForReading };
 }
 
+std::vector<vtpty::Pty::ReadResult> Terminal::readAhead(crispy::BufferObject<char>& buffer,
+                                                        vtpty::Pty::ReadResult const& first)
+{
+    ZoneScoped;
+    auto batch = std::vector { first };
+    auto const* const batchBegin = first.data.data();
+    auto const* claimedEnd = batchBegin + first.data.size();
+    auto const claim = [&]() {
+        auto const _ = std::scoped_lock { buffer };
+        buffer.advanceHotEndUntil(claimedEnd);
+    };
+
+    // The batch's size while it is contiguous, which it is until a read is overtaken and ends the loop.
+    auto const batchSize = [&]() {
+        return static_cast<size_t>(claimedEnd - batchBegin);
+    };
+
+    claim();
+    while (batchSize() < _ptyReadBufferSize && buffer.bytesAvailable() > 0)
+    {
+        auto const more =
+            _pty->read(buffer, std::chrono::milliseconds::zero(), _ptyReadBufferSize - batchSize());
+        if (!more || more->data.empty())
+            break;
+        // A read lands at the hot end, which is right after the batch unless another writer appended
+        // there meanwhile and moved it on.
+        auto const overtaken = more->data.data() != claimedEnd;
+        if (auto& last = batch.back(); !overtaken && last.fromStdoutFastPipe == more->fromStdoutFastPipe)
+            last.data = string_view { last.data.data(), last.data.size() + more->data.size() };
+        else
+            batch.push_back(*more);
+        claimedEnd = more->data.data() + more->data.size();
+        claim();
+        if (overtaken)
+            break;
+    }
+    return batch;
+}
+
+void Terminal::releaseReadAhead(crispy::BufferObject<char>& buffer,
+                                std::span<vtpty::Pty::ReadResult const> batch) noexcept
+{
+    auto const* const batchBegin = batch.front().data.data();
+    auto const _ = std::scoped_lock { buffer };
+    buffer.rewindHotEndTo(batchBegin);
+}
+
 void Terminal::setExecutionMode(ExecutionMode mode)
 {
     auto _ = std::unique_lock(_breakMutex);
@@ -404,6 +451,9 @@ bool Terminal::processInputOnce()
     }
     // clang-format on
 
+    // A backend that fails without setting errno must read as gone, not as whatever an earlier call on
+    // this thread left behind: a stale EAGAIN would have this loop read again forever.
+    errno = 0;
     auto const ptyReadResult = readFromPty();
 
     if (!ptyReadResult)
@@ -416,28 +466,45 @@ bool Terminal::processInputOnce()
         return false;
     }
 
-    string_view const buf = ptyReadResult->readResult.data;
-    TracyPlot("pty.read.bytes", static_cast<int64_t>(buf.size()));
-    _usingStdoutFastPipe = ptyReadResult->readResult.fromStdoutFastPipe;
-
-    if (buf.empty())
+    if (ptyReadResult->readResult.data.empty())
     {
         terminalLog()("PTY read returned with zero bytes. Closing PTY.");
         _pty->close();
         return false;
     }
 
+    auto readAheadBatch = std::vector<vtpty::Pty::ReadResult> {};
+    auto batch = std::span { &ptyReadResult->readResult, 1 };
     auto batchedRendering = false;
     {
-        auto const _ = std::lock_guard { *this };
-        // Use the buffer that readFromPty() actually read into, not _currentPtyBuffer
-        // which might have been changed by another thread (e.g., writeToScreen()).
-        // This is critical to ensure BufferFragment in TrivialLineBuffer holds
-        // the correct buffer reference.
+        auto lock = std::unique_lock { _stateMutex, std::try_to_lock };
+        if (!lock.owns_lock())
+        {
+            // Another thread -- the render thread, building a frame -- holds the state. Read what the
+            // child writes meanwhile instead of waiting idle, so it is not left blocked on a full PTY and
+            // the parse below covers all of it in this one hold of the lock.
+            readAheadBatch = readAhead(*ptyReadResult->buffer, ptyReadResult->readResult);
+            batch = readAheadBatch;
+            lock.lock();
+            releaseReadAhead(*ptyReadResult->buffer, batch);
+        }
+        TracyPlot("pty.read.bytes",
+                  static_cast<int64_t>(std::ranges::fold_left(
+                      batch | std::views::transform([](auto const& piece) { return piece.data.size(); }),
+                      size_t { 0 },
+                      std::plus {})));
+
+        // Parse against the buffer readFromPty() read into, not _currentPtyBuffer, which writeToScreen()
+        // on another thread may have replaced meanwhile: Screen's bulk text path moves this buffer's hot
+        // end past the text it parsed.
         _parsingBuffer = ptyReadResult->buffer;
         {
             auto const parseGuard = ParseDepthGuard {};
-            _parser.parseFragment(buf);
+            for (auto const& piece: batch)
+            {
+                _usingStdoutFastPipe = piece.fromStdoutFastPipe;
+                _parser.parseFragment(piece.data);
+            }
         }
         _parsingBuffer = nullptr;
 

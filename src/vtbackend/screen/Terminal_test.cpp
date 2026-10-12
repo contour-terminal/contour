@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <deque>
 #include <expected>
 #include <filesystem>
@@ -3208,6 +3209,248 @@ TEST_CASE("Terminal.historyEviction.aShellWithoutOsc133SimplyBoundsAtTheHardLimi
     // eviction is line-wise exactly as it was before this existed.
     CHECK(mock.terminal.primaryScreen().historyLineCount() == LineCount(24));
     CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(-24)) == "line174   ");
+}
+
+namespace
+{
+
+/// Whether a count a test thread polled for got there in time.
+enum class Awaited : uint8_t
+{
+    TimedOut,
+    Reached,
+};
+
+/// Polls @p count until it reaches @p target, or @p timeout passes.
+/// @return Whether it got there.
+template <typename T>
+[[nodiscard]] Awaited awaitCount(std::atomic<T> const& count, T target, chrono::milliseconds timeout)
+{
+    auto const deadline = chrono::steady_clock::now() + timeout;
+    while (count.load(std::memory_order_acquire) < target)
+    {
+        if (chrono::steady_clock::now() >= deadline)
+            return Awaited::TimedOut;
+        std::this_thread::sleep_for(1ms);
+    }
+    return Awaited::Reached;
+}
+
+/// A PTY that hands over at most @p PieceSize bytes per read -- the way a kernel PTY hands a fast
+/// writer's output over in pieces -- and counts its reads, the zero-timeout ones that delivered bytes,
+/// and the bytes it served, for a test thread to wait on.
+template <size_t PieceSize>
+class PiecewisePty: public vtpty::MockPty
+{
+  public:
+    using vtpty::MockPty::MockPty;
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t size) override
+    {
+        auto result = MockPty::read(storage, timeout, std::min(size, PieceSize));
+        if (result && !result->data.empty() && timeout == std::chrono::milliseconds::zero())
+            _readsAhead.fetch_add(1, std::memory_order_relaxed);
+        if (result)
+            _served.fetch_add(result->data.size(), std::memory_order_release);
+        _reads.fetch_add(1, std::memory_order_release);
+        return result;
+    }
+
+    /// @return How many reads were served.
+    [[nodiscard]] int reads() const noexcept { return _reads.load(std::memory_order_acquire); }
+
+    /// @return How many zero-timeout reads -- reads ahead -- delivered bytes.
+    [[nodiscard]] int readsAhead() const noexcept { return _readsAhead.load(std::memory_order_relaxed); }
+
+    /// Waits until @p count reads were served, or @p timeout passes.
+    [[nodiscard]] Awaited awaitReads(int count, chrono::milliseconds timeout) const
+    {
+        return awaitCount(_reads, count, timeout);
+    }
+
+    /// Waits until @p bytes were served in total, or @p timeout passes.
+    [[nodiscard]] Awaited awaitServed(size_t bytes, chrono::milliseconds timeout) const
+    {
+        return awaitCount(_served, bytes, timeout);
+    }
+
+  private:
+    std::atomic<int> _reads = 0;
+    std::atomic<int> _readsAhead = 0;
+    std::atomic<size_t> _served = 0;
+};
+
+/// A PiecewisePty whose second read finds bytes another writer appended to the buffer since the first --
+/// the way writeToScreen() on the GUI thread appends, and its parse moves the hot end past them, while the
+/// parser thread reads ahead.
+class OvertakenPty final: public PiecewisePty<8>
+{
+  public:
+    using PiecewisePty<8>::PiecewisePty;
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t size) override
+    {
+        if (reads() == 1)
+        {
+            auto const appended = storage.writeAtEnd("XYZ"sv);
+            storage.advanceHotEndUntil(appended.data() + appended.size());
+        }
+        return PiecewisePty<8>::read(storage, timeout, size);
+    }
+};
+
+/// A PiecewisePty serving three bytes per read, whose second read comes through the stdout fast pipe:
+/// there a line feed acts as CR LF, and through the PTY it does not.
+class FastPipePty final: public PiecewisePty<3>
+{
+  public:
+    using PiecewisePty<3>::PiecewisePty;
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t size) override
+    {
+        auto result = PiecewisePty<3>::read(storage, timeout, size);
+        if (result && reads() == 2)
+            result->fromStdoutFastPipe = true;
+        return result;
+    }
+};
+
+/// A PTY whose reads fail without saying why in errno.
+class SilentlyFailingPty final: public vtpty::MockPty
+{
+  public:
+    using vtpty::MockPty::MockPty;
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& /*storage*/,
+                                                 std::optional<std::chrono::milliseconds> /*timeout*/,
+                                                 size_t /*size*/) override
+    {
+        return std::nullopt;
+    }
+};
+
+} // namespace
+
+TEST_CASE("Terminal.processInputOnce.aReadFailingWithoutErrnoClosesThePty", "[terminal]")
+{
+    // A read ahead that found nothing waiting leaves EAGAIN in errno. A later read that fails without
+    // setting errno must not pass for another "nothing yet", or the parser thread reads forever.
+    auto mock =
+        MockTerm<SilentlyFailingPty> { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10), 1024 };
+    errno = EAGAIN; // what an earlier read ahead left behind
+
+    CHECK_FALSE(mock.terminal.processInputOnce());
+    CHECK(mock.mockPty().isClosed());
+}
+
+TEST_CASE("Terminal.processInputOnce.readsAheadWhileTheStateIsTaken", "[terminal][threading]")
+{
+    // While another thread -- the render thread, building a frame -- holds the terminal's state, the
+    // parser thread keeps reading instead of waiting idle, and parses all of it in its next hold.
+    auto mock = MockTerm<PiecewisePty<8>> { PageSize { LineCount(3), ColumnCount(40) }, LineCount(10), 1024 };
+    mock.mockPty().appendStdOutBuffer("0123456789abcdefghijklmnopqrstuv"); // four pieces of eight
+
+    mock.terminal.lock(); // the render thread's hold
+    auto parse = std::async(std::launch::async, [&mock] { return mock.terminal.processInputOnce(); });
+    auto const served = mock.mockPty().awaitServed(32, 2s);
+    mock.terminal.unlock();
+    REQUIRE(parse.get());
+
+    CHECK(served == Awaited::Reached);
+    CHECK(mock.terminal.primaryScreen()
+              .grid()
+              .lineText(LineOffset(0))
+              .starts_with("0123456789abcdefghijklmnopqrstuv"));
+}
+
+TEST_CASE("Terminal.processInputOnce.readAheadStepsAroundBytesAppendedMeanwhile", "[terminal][threading]")
+{
+    // Another writer appended to the buffer while the parser thread read ahead, so the next read lands
+    // after those bytes rather than after the batch. The parse must take exactly what the PTY served --
+    // the other writer parses its own bytes -- and the read-ahead stops there.
+    auto mock = MockTerm<OvertakenPty> { PageSize { LineCount(3), ColumnCount(40) }, LineCount(10), 1024 };
+    mock.mockPty().appendStdOutBuffer("0123456789abcdefghijklmnopqrstuv");
+
+    mock.terminal.lock(); // the render thread's hold
+    auto parse = std::async(std::launch::async, [&mock] { return mock.terminal.processInputOnce(); });
+    auto const readTwice = mock.mockPty().awaitReads(2, 2s);
+    mock.terminal.unlock();
+    REQUIRE(parse.get());
+
+    CHECK(readTwice == Awaited::Reached);
+    CHECK(mock.mockPty().reads() == 2);
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 17) == "0123456789abcdef ");
+}
+
+TEST_CASE("Terminal.processInputOnce.readAheadKeepsEachSourceApart", "[terminal][threading]")
+{
+    // The PTY's "ab\n", the fast pipe's "cd\n", then the PTY's "ef", all read ahead into one batch. Each
+    // piece must be parsed as its own source made it: the PTY's line feed keeps the column, the fast
+    // pipe's returns the carriage as well.
+    auto mock = MockTerm<FastPipePty> { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10), 1024 };
+    mock.mockPty().appendStdOutBuffer("ab\ncd\nef");
+
+    mock.terminal.lock(); // the render thread's hold
+    auto parse = std::async(std::launch::async, [&mock] { return mock.terminal.processInputOnce(); });
+    auto const served = mock.mockPty().awaitServed(8, 2s);
+    mock.terminal.unlock();
+    REQUIRE(parse.get());
+
+    CHECK(served == Awaited::Reached);
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    CHECK(grid.lineText(LineOffset(0)) == "ab        ");
+    CHECK(grid.lineText(LineOffset(1)) == "  cd      ");
+    CHECK(grid.lineText(LineOffset(2)) == "ef        ");
+}
+
+TEST_CASE("Terminal.processInputOnce.readsOnceWhenTheStateIsFree", "[terminal]")
+{
+    // Nobody holds the state: one read, one parse, as before.
+    auto mock = MockTerm<PiecewisePty<8>> { PageSize { LineCount(3), ColumnCount(40) }, LineCount(10), 1024 };
+    mock.mockPty().appendStdOutBuffer("0123456789abcdefghijklmnopqrstuv");
+
+    REQUIRE(mock.terminal.processInputOnce());
+
+    CHECK(mock.mockPty().reads() == 1);
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).substr(0, 9) == "01234567 ");
+}
+
+TEST_CASE("Terminal.processInputOnce.readAheadKeepsTheScreenExactWhileRendering", "[terminal][threading]")
+{
+    // The parser thread floods the terminal while another thread refreshes the render buffer as fast as
+    // it can, so most reads find the state taken and read ahead. Run under the clang-tsan tree for the
+    // races; anywhere, the screen must come out exactly as a single-threaded parse leaves it.
+    auto constexpr TermSize = PageSize { LineCount(10), ColumnCount(40) };
+    auto const flood = [] {
+        auto text = std::string {};
+        for (auto const i: std::views::iota(0, 3000))
+            text += std::format("\033[3{}mline {}\033[m plain tail\r\n", i % 8, i);
+        return text;
+    }();
+
+    auto threaded = MockTerm<PiecewisePty<64>> { TermSize, LineCount(100), 4096 };
+    threaded.mockPty().appendStdOutBuffer(flood);
+    auto parsed = std::atomic<bool> { false };
+    auto parser = std::thread { [&] {
+        while (threaded.mockPty().isStdoutDataAvailable())
+            threaded.terminal.processInputOnce();
+        parsed.store(true, std::memory_order_release);
+    } };
+    while (!parsed.load(std::memory_order_acquire))
+        threaded.terminal.refreshRenderBuffer();
+    parser.join();
+
+    auto reference = MockTerm { TermSize, LineCount(100), 4096 };
+    reference.writeToScreen(flood);
+
+    CHECK(threaded.mockPty().readsAhead() > 0); // else the contended path never ran
+    CHECK(screenText(threaded.terminal.primaryScreen()) == screenText(reference.terminal.primaryScreen()));
 }
 
 TEST_CASE("Terminal.flushInput.concurrentFlushesDeliverEveryReplyExactlyOnce", "[terminal][input][threading]")

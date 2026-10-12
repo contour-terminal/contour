@@ -122,7 +122,10 @@ class Pty
     ///
     /// @param storage Target buffer to store the read data to.
     /// @param timeout Wait only for up to given timeout before giving up the blocking read attempt.
-    /// @param size    The number of bytes to read at most, even if the storage has more bytes available.
+    ///                A zero timeout never blocks: the read returns what is waiting, or nothing (an
+    ///                error or an empty result). Terminal::processInputOnce() relies on that to read
+    ///                ahead while another thread holds the terminal.
+    /// @param size   The number of bytes to read at most, even if the storage has more bytes available.
     ///
     /// @returns A view to the consumed buffer. The boolean in the ReadResult
     ///          indicates whether or not this data was coming through

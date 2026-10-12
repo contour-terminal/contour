@@ -112,6 +112,17 @@ template <typename T = vtpty::MockPty>
     return screen.renderMainPageText();
 }
 
+/// @return Every line of @p screen, scrollback first and then the page, one text line each.
+[[nodiscard]] inline std::string screenText(Screen const& screen)
+{
+    auto text = std::string {};
+    auto const top = -unbox<int>(screen.historyLineCount());
+    auto const bottom = unbox<int>(screen.pageSize().lines);
+    for (auto const line: std::views::iota(top, bottom))
+        text += screen.grid().lineText(LineOffset(line)) + '\n';
+    return text;
+}
+
 inline void logScreenTextAlways(Screen const& screen, std::string const& headline = "")
 {
     std::cout << std::format("{}: ZI={} cursor={} HM={}..{}\n",
