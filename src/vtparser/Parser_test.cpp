@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtparser/BulkScan.hpp>
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserEvents.hpp>
 
@@ -7,13 +8,19 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <format>
+#include <random>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 using namespace std;
 
@@ -296,4 +303,310 @@ TEST_CASE("Parser.precedingGraphicCharacter.persists_through_escape", "[Parser]"
     // only fires when entering Ground, not when leaving it.
     p.parseFragment("A\033"sv);
     CHECK(p.precedingGraphicCharacter() == U'A');
+}
+
+namespace
+{
+/// Records every parser event as one line of text, so two event logs can be compared.
+///
+/// Text is normalised to codepoints: the bulk text path reports a run with one
+/// print(string_view), the state machine reports one print(char32_t) per codepoint, and both
+/// describe the same text.
+class EventRecorder final: public vtparser::NullParserEvents
+{
+  public:
+    /// @param bulkTextWidth What maxBulkTextSequenceWidth() reports. A small value makes the bulk
+    ///                      text path stop and resume mid-run.
+    explicit EventRecorder(size_t bulkTextWidth): _bulkTextWidth { bulkTextWidth } {}
+
+    /// Ends the log with @p finalState and returns it.
+    [[nodiscard]] std::vector<std::string> finish(vtparser::State finalState)
+    {
+        flushText();
+        _events.push_back(std::format("state {}", finalState));
+        return std::move(_events);
+    }
+
+    void error(std::string_view const& message) override { record(std::format("error {}", message)); }
+    void print(char32_t codepoint) override { _text += codepoint; }
+    size_t print(std::string_view chars, size_t /*cellCount*/) override
+    {
+        _text += unicode::convert_to<char32_t>(chars);
+        return 0;
+    }
+    void printEnd() override { record("printEnd"); }
+    [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept override { return _bulkTextWidth; }
+    void execute(char ch) override { record("execute", ch); }
+    void clear() override { record("clear"); }
+    void collect(char ch) override { record("collect", ch); }
+    void collectLeader(char ch) override { record("collectLeader", ch); }
+    void param(char ch) override { record("param", ch); }
+    void paramDigit(char ch) override { record("paramDigit", ch); }
+    void paramSeparator() override { record("paramSeparator"); }
+    void paramSubSeparator() override { record("paramSubSeparator"); }
+    void dispatchESC(char ch) override { record("dispatchESC", ch); }
+    void dispatchCSI(char ch) override { record("dispatchCSI", ch); }
+    void dispatchVT52(char ch, unsigned line, unsigned column) override
+    {
+        record(std::format("dispatchVT52 {:02X} {} {}", static_cast<unsigned char>(ch), line, column));
+    }
+    void startOSC() override { record("startOSC"); }
+    void putOSC(char ch) override { record("putOSC", ch); }
+    void dispatchOSC() override { record("dispatchOSC"); }
+    void hook(char ch) override { record("hook", ch); }
+    void put(char ch) override { record("put", ch); }
+    void unhook() override { record("unhook"); }
+    void startAPC() override { record("startAPC"); }
+    void putAPC(char ch) override { record("putAPC", ch); }
+    void dispatchAPC() override { record("dispatchAPC"); }
+    void startPM() override { record("startPM"); }
+    void putPM(char ch) override { record("putPM", ch); }
+    void dispatchPM() override { record("dispatchPM"); }
+
+  private:
+    void flushText()
+    {
+        if (_text.empty())
+            return;
+        _events.push_back("text " + unicode::convert_to<char>(std::u32string_view { _text }));
+        _text.clear();
+    }
+
+    void record(std::string event)
+    {
+        flushText();
+        _events.push_back(std::move(event));
+    }
+
+    void record(std::string_view name, char ch)
+    {
+        record(std::format("{} {:02X}", name, static_cast<unsigned char>(ch)));
+    }
+
+    size_t _bulkTextWidth;
+    std::u32string _text;
+    std::vector<std::string> _events;
+};
+
+/// The events @p input produces, cut into reads at @p cuts: sorted offsets, the last read
+/// running to the end.
+std::vector<std::string> eventsOf(vtparser::BulkScan bulkScan,
+                                  std::string_view input,
+                                  std::span<size_t const> cuts)
+{
+    auto recorder = EventRecorder { 7 };
+    auto parser = vtparser::Parser<vtparser::ParserEvents>(recorder, bulkScan);
+    auto begin = size_t { 0 };
+    for (auto const cut: cuts)
+    {
+        parser.parseFragment(input.substr(begin, cut - begin));
+        begin = cut;
+    }
+    parser.parseFragment(input.substr(begin));
+    return recorder.finish(parser.state());
+}
+
+/// Where two event logs part ways, with three events of context on either side, or an empty
+/// string when they agree.
+std::string firstDifference(std::vector<std::string> const& expected, std::vector<std::string> const& actual)
+{
+    auto const [expectedAt, actualAt] = std::ranges::mismatch(expected, actual);
+    if (expectedAt == expected.end() && actualAt == actual.end())
+        return {};
+
+    auto const at = static_cast<size_t>(std::distance(expected.begin(), expectedAt));
+    auto const eventAt = [](std::vector<std::string> const& events, size_t i) {
+        return i < events.size() ? events[i] : std::string { "<end>" };
+    };
+    auto report = std::format("first difference at event {}\n", at);
+    for (auto const i: std::views::iota(at >= 3 ? at - 3 : 0, at + 4))
+        report += std::format(
+            "  {:>6}  state machine: {:<28}  bulk: {}\n", i, eventAt(expected, i), eventAt(actual, i));
+    return report;
+}
+
+/// Requires the bulk scanners to reproduce the state machine's events for @p input cut into two
+/// reads at every byte.
+void checkEveryTwoWaySplit(std::string_view input)
+{
+    auto const reference = eventsOf(vtparser::BulkScan::Disabled, input, {});
+    for (auto const split: std::views::iota(size_t { 0 }, input.size() + 1))
+    {
+        auto const cuts = std::array { split };
+        auto const difference =
+            firstDifference(reference, eventsOf(vtparser::BulkScan::Enabled, input, cuts));
+        INFO(std::format("split at byte {}\n{}", split, difference));
+        CHECK(difference.empty());
+    }
+}
+
+/// A choice in [0, n). mt19937's output sequence is fixed by the standard, unlike the
+/// distributions', so a failing seed reproduces on every platform.
+size_t below(std::mt19937& rng, size_t n)
+{
+    return static_cast<size_t>(rng() % n);
+}
+
+template <typename T, size_t N>
+T const& oneOf(std::mt19937& rng, std::array<T, N> const& choices)
+{
+    return choices[below(rng, N)];
+}
+
+char oneOf(std::mt19937& rng, std::string_view choices)
+{
+    return choices[below(rng, choices.size())];
+}
+
+void appendText(std::string& out, std::mt19937& rng)
+{
+    static constexpr auto Words = std::array {
+        "hello"sv,
+        "w\xC3\xB6rld"sv,
+        "\xE2\x94\x82"sv,                                 // U+2502, three bytes
+        "e\xCC\x81"sv,                                    // a combining acute on an ASCII base
+        "\xF0\x9F\x98\x80"sv,                             // U+1F600, four bytes
+        "\xE4\xB8\xAD"sv,                                 // U+4E2D, two columns wide
+        "\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9"sv, // two emoji joined by ZWJ
+        " "sv,
+        "x"sv,
+    };
+    for ([[maybe_unused]] auto const _: std::views::iota(size_t { 0 }, 1 + below(rng, 12)))
+        out += oneOf(rng, Words);
+}
+
+void appendControl(std::string& out, std::mt19937& rng)
+{
+    out += oneOf(rng, "\r\n\t\b\a\x0E\x0F"sv);
+}
+
+/// One CSI sequence: usually well-formed, sometimes interrupted or malformed in the ways the state
+/// machine must catch.
+void appendCsi(std::string& out, std::mt19937& rng)
+{
+    static constexpr auto Introducers = std::array { "\033["sv, "\x9B"sv };
+    static constexpr auto Leaders = std::array { ""sv, ""sv, "?"sv, ">"sv, "<"sv, "="sv };
+    static constexpr auto Interruptions =
+        std::array { "\x18"sv, "\x1A"sv, "\033"sv, "\n"sv, "\x7F"sv, "?"sv, "\x85"sv, "\033[2"sv };
+    static constexpr auto Intermediates = std::array { ""sv, ""sv, ""sv, " "sv, "$"sv, "\""sv, "'"sv };
+
+    out += oneOf(rng, Introducers);
+    out += oneOf(rng, Leaders);
+    for ([[maybe_unused]] auto const _: std::views::iota(size_t { 0 }, below(rng, 40)))
+        out += oneOf(rng, "0123456789012345;;;:"sv);
+    if (below(rng, 8) == 0)
+        out += oneOf(rng, Interruptions);
+    out += oneOf(rng, Intermediates);
+    out += oneOf(rng, "mmmmHJKABCDfhlrstqu@PXLMbcdgnp~|}{"sv);
+}
+
+void appendDcs(std::string& out, std::mt19937& rng)
+{
+    static constexpr auto Payloads =
+        std::array { "q#0;2;0;0;0#1!10~-"sv, "$qm"sv, "1;1|17/AB"sv, "+q544e"sv, "\xE2\x9C\x85"sv };
+    static constexpr auto Interruptions = std::array { ""sv, ""sv, ""sv, "\n"sv, "\x7F"sv, "\x18"sv };
+    static constexpr auto Terminators = std::array { "\033\\"sv, "\x9C"sv, "\x18"sv, "\a"sv };
+
+    out += "\033P"sv;
+    for ([[maybe_unused]] auto const _: std::views::iota(size_t { 0 }, below(rng, 5)))
+        out += oneOf(rng, "0123456789;"sv);
+    out += oneOf(rng, Payloads);
+    out += oneOf(rng, Interruptions);
+    out += oneOf(rng, Terminators);
+}
+
+void appendApc(std::string& out, std::mt19937& rng)
+{
+    static constexpr auto Payloads = std::array { "Gi=1,a=q;AAAA"sv, "Ga=d"sv, "x\xE2\x9C\x85y"sv };
+    static constexpr auto Terminators = std::array { "\033\\"sv, "\x9C"sv, "\a"sv, "\x18"sv };
+    out += "\033_"sv;
+    out += oneOf(rng, Payloads);
+    out += oneOf(rng, Terminators);
+}
+
+void appendOsc(std::string& out, std::mt19937& rng)
+{
+    static constexpr auto Payloads =
+        std::array { "0;title"sv, "8;;http://example.com"sv, "133;A"sv, "52;c;Zm9v"sv };
+    static constexpr auto Terminators = std::array { "\a"sv, "\033\\"sv, "\x9C"sv };
+    out += "\033]"sv;
+    out += oneOf(rng, Payloads);
+    out += oneOf(rng, Terminators);
+}
+
+void appendOtherString(std::string& out, std::mt19937& rng)
+{
+    out += oneOf(rng, std::array { "\033^private\033\\"sv, "\033Xsos\x9C"sv, "\033^\xE2\x9C\x85\a"sv });
+}
+
+void appendEscape(std::string& out, std::mt19937& rng)
+{
+    out += oneOf(
+        rng, std::array { "\0337"sv, "\0338"sv, "\033(B"sv, "\033(0"sv, "\033#8"sv, "\033="sv, "\033 F"sv });
+}
+
+using PieceWriter = void (*)(std::string&, std::mt19937&);
+
+/// What a random stream is assembled from, weighted by repetition.
+constexpr auto PieceWriters = std::array<PieceWriter, 11> {
+    appendText, appendText, appendControl, appendCsi,         appendCsi,    appendCsi,
+    appendDcs,  appendApc,  appendOsc,     appendOtherString, appendEscape,
+};
+
+std::string randomStream(std::mt19937& rng, size_t pieceCount)
+{
+    auto out = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(size_t { 0 }, pieceCount))
+        oneOf(rng, PieceWriters)(out, rng);
+    return out;
+}
+
+/// @p count sorted offsets into an input of @p inputSize bytes, the way PTY reads split a stream.
+std::vector<size_t> randomCuts(std::mt19937& rng, size_t inputSize, size_t count)
+{
+    auto cuts = std::vector<size_t> {};
+    for ([[maybe_unused]] auto const _: std::views::iota(size_t { 0 }, count))
+        cuts.push_back(below(rng, inputSize + 1));
+    std::ranges::sort(cuts);
+    return cuts;
+}
+} // namespace
+
+TEST_CASE("Parser.BulkScan.DefaultIsEnabled", "[Parser][BulkScan]")
+{
+    MockParserEvents listener;
+    CHECK(vtparser::Parser<vtparser::ParserEvents>(listener).bulkScan() == vtparser::BulkScan::Enabled);
+    CHECK(vtparser::Parser<vtparser::ParserEvents>(listener, vtparser::BulkScan::Disabled).bulkScan()
+          == vtparser::BulkScan::Disabled);
+}
+
+TEST_CASE("Parser.BulkScan.KnownStreamsMatchTheStateMachine", "[Parser][BulkScan]")
+{
+    auto const input = GENERATE(values<std::string_view>({
+        "ABC\033^hello \xE2\x9C\x85 world\033\\DEF"sv, // PM
+        "ABC\033\\\033_Gi=1,a=q;\033\\DEF"sv,          // APC, bulk payload
+        "\033Pq#0;2;0;0;0#1!10~-\n#1!5~\033\\after"sv, // DCS, bulk payload with a C0 inside
+        "abcde\xCC\x81"
+        "fgh"sv,                                    // a mark joining an ASCII base mid-run
+        "\033]0;title\aX\033]8;;http://x\033\\Y"sv, // OSC, both terminators
+        "A\033[1;31mB\033[mC\r\nD\tE"sv,            // text, SGR, trailing C0s
+        "\x9B"
+        "2J\x9D"
+        "0;t\x9C"
+        "Z"sv,                                           // 8-bit CSI, 8-bit OSC and ST
+        "\xE2\x94\x82\xE2\x94\x82 x \xF0\x9F\x98\x80"sv, // multi-byte text, split mid-character
+    }));
+    checkEveryTwoWaySplit(input);
+}
+
+TEST_CASE("Parser.BulkScan.RandomStreamsMatchTheStateMachine", "[Parser][BulkScan]")
+{
+    auto const seed = GENERATE(range(1U, 129U));
+    auto rng = std::mt19937 { seed };
+    auto const input = randomStream(rng, 300);
+    auto const cuts = randomCuts(rng, input.size(), 64);
+    auto const difference = firstDifference(eventsOf(vtparser::BulkScan::Disabled, input, {}),
+                                            eventsOf(vtparser::BulkScan::Enabled, input, cuts));
+    INFO(std::format("seed {}\n{}", seed, difference));
+    CHECK(difference.empty());
 }

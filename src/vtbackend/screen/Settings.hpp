@@ -10,6 +10,8 @@
 #include <vtbackend/vt/RectangularAreaChecksum.hpp>
 #include <vtbackend/vt/VTType.hpp>
 
+#include <vtparser/BulkScan.hpp>
+
 #include <chrono>
 #include <map>
 
@@ -193,6 +195,9 @@ struct Settings
     //
     // This value must be integer-devisable by 16.
     size_t ptyReadBufferSize = 4096;
+    /// Whether the VT parser may skip its state machine for runs of bytes it would only pass on.
+    /// Always Enabled in production. Disabled is the per-byte reference the tests compare against.
+    vtparser::BulkScan parserBulkScan = vtparser::BulkScan::Enabled;
     std::u32string wordDelimiters;
     std::u32string extendedWordDelimiters;
     Modifiers mouseProtocolBypassModifiers = Modifier::Shift;

@@ -2,6 +2,7 @@
 #project(vtparser VERSION "0.0.0" LANGUAGES CXX)
 
 add_library(vtparser STATIC
+    BulkScan.hpp
     Parser.cpp
     Parser.hpp
     Parser-impl.hpp

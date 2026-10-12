@@ -246,6 +246,7 @@ if(LIBTERMINAL_TESTING)
         screen/Terminal_scroll_test.cpp
         screen/Terminal_selection_test.cpp
         screen/Terminal_input_test.cpp
+        screen/BulkScan_test.cpp
         shell/ShellIntegration_test.cpp
         grid/LineSoA_test.cpp
         grid/SoAClusterWriter_test.cpp

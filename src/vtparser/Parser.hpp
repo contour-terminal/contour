@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtparser/BulkScan.hpp>
+
 #include <libunicode/convert.h>
 #include <libunicode/scan.h>
 
@@ -686,7 +688,12 @@ class Parser
 
     Parser() = default;
 
-    explicit Parser(EventListener& listener): _eventListener { listener } {}
+    /// @param listener Receives every event the parser emits.
+    /// @param bulkScan Whether runs of bytes may skip the state machine. @see BulkScan
+    explicit Parser(EventListener& listener, BulkScan bulkScan = BulkScan::Enabled):
+        _eventListener { listener }, _bulkScan { bulkScan }
+    {
+    }
 
     using ParseError = std::function<void(std::string const&)>;
     // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
@@ -703,6 +710,9 @@ class Parser
     void parseFragment(gsl::span<char const> data);
 
     [[nodiscard]] State state() const noexcept { return _state; }
+
+    /// @return Whether this parser hands runs of bytes to its listener in bulk.
+    [[nodiscard]] BulkScan bulkScan() const noexcept { return _bulkScan; }
 
     /// Enables or disables VT52 compatibility mode. In VT52 mode the parser recognises the legacy
     /// single-character escape grammar (ESC A/B/.../Y/<) rather than the ANSI CSI grammar. The backend
@@ -787,6 +797,7 @@ class Parser
     Vt52State _vt52State = Vt52State::Ground;
     uint8_t _vt52CursorRow = 0; ///< The row byte captured after ESC Y, pending the column byte.
     EventListener& _eventListener;
+    BulkScan _bulkScan = BulkScan::Enabled;
     unicode::scan_state _scanState {};
 
     /// UTF-8 continuation bytes still expected while collecting a string (OSC/APC/PM/DCS/SOS). String

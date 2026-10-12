@@ -383,6 +383,15 @@ template <ParserEventsConcept EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char const> data)
 {
     ZoneScoped;
+
+    // The reference every bulk scanner is checked against: each byte through the state machine.
+    if (_bulkScan == BulkScan::Disabled)
+    {
+        for (auto const ch: data)
+            processOnceViaStateMachine(static_cast<uint8_t>(ch));
+        return;
+    }
+
     auto const* input = data.data();
     auto const* const end = data.data() + data.size();
 

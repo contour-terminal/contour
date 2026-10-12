@@ -29,6 +29,13 @@ class MockTerm: public Terminal::NullEvents
                       size_t ptyReadBufferSize = 1024,
                       std::optional<StatusLineCommandServices> commandServices = std::nullopt);
 
+    /// Builds the terminal from @p settings exactly as given, for a test that needs a setting the
+    /// other constructors do not expose, such as the parser's BulkScan.
+    /// @see createSettings for what the other constructors set.
+    /// @param commandServices Who runs `{Command}` status-line items; nullopt renders them empty.
+    explicit MockTerm(vtbackend::Settings settings,
+                      std::optional<StatusLineCommandServices> commandServices = std::nullopt);
+
     /// A scrollback with no headroom, which is what a bare line count has always meant here.
     MockTerm(PageSize size,
              MaxHistoryLineCount maxHistoryLineCount,
@@ -297,11 +304,18 @@ inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
                                      HistoryLimits historyLimits,
                                      size_t ptyReadBufferSize,
                                      std::optional<StatusLineCommandServices> commandServices):
+    MockTerm { createSettings(pageSize, historyLimits, ptyReadBufferSize), std::move(commandServices) }
+{
+}
+
+template <typename PtyDevice>
+inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
+                                     std::optional<StatusLineCommandServices> commandServices):
     terminal { *this,
                core::defaultEnvironment(),
-               std::make_unique<PtyDevice>(pageSize),
-               createSettings(pageSize, historyLimits, ptyReadBufferSize),
-               commandServices,
+               std::make_unique<PtyDevice>(settings.pageSize),
+               std::move(settings),
+               std::move(commandServices),
                std::chrono::steady_clock::time_point() } // explicitly start with empty timepoint
 {
     if (auto const logFilterString = core::defaultEnvironment().get("LOG"))
