@@ -284,8 +284,8 @@ if(LIBTERMINAL_TESTING)
             vtbackend
         )
 
-        # A short run of throughput, snapshot and pty each, so that a crash like the one `bench-headless pty`
-        # had -- it used its PTY before opening it -- fails the suite.
+        # A short run of throughput, snapshot, keypress and pty each, so that a crash like the one
+        # `bench-headless pty` had -- it used its PTY before opening it -- fails the suite.
         add_test(NAME bench_headless_throughput_smoke COMMAND bench-headless throughput size 1 runs 1)
         # A name that is not a workload must fail, naming the ones that are.
         add_test(NAME bench_headless_throughput_rejects_unknown_kind
@@ -293,15 +293,21 @@ if(LIBTERMINAL_TESTING)
         set_tests_properties(bench_headless_throughput_rejects_unknown_kind PROPERTIES PASS_REGULAR_EXPRESSION
                              "Unknown workload 'no-such-workload'\\. Known: ascii, colored, sgr, utf8, utf8sparse, tui\\.")
         add_test(NAME bench_headless_snapshot_smoke COMMAND bench-headless snapshot frames 10 runs 1)
+        # The benchmarks with an application on a real PTY: a script under /bin/sh on POSIX, and
+        # `bench-headless pty-child` through ConPTY on Windows.
+        add_test(NAME bench_headless_throughput_pty_smoke
+                 COMMAND bench-headless throughput size 1 runs 1 kinds ascii screens primary pty)
+        add_test(NAME bench_headless_keypress_smoke COMMAND bench-headless keypress seconds 1 rate 100)
         set(BENCH_HEADLESS_SMOKE_TESTS
             bench_headless_throughput_smoke
             bench_headless_throughput_rejects_unknown_kind
-            bench_headless_snapshot_smoke)
+            bench_headless_snapshot_smoke
+            bench_headless_throughput_pty_smoke
+            bench_headless_keypress_smoke)
+        # ConPTY has no slave end that `bench-headless pty` could write into.
         if(NOT WIN32)
             add_test(NAME bench_headless_pty_smoke COMMAND bench-headless pty seconds 1)
-            add_test(NAME bench_headless_throughput_pty_smoke
-                     COMMAND bench-headless throughput size 1 runs 1 kinds ascii screens primary pty)
-            list(APPEND BENCH_HEADLESS_SMOKE_TESTS bench_headless_pty_smoke bench_headless_throughput_pty_smoke)
+            list(APPEND BENCH_HEADLESS_SMOKE_TESTS bench_headless_pty_smoke)
         endif()
         # A hang -- a PTY nobody drains any more, say -- fails within a minute, not at CI's step timeout.
         set_tests_properties(${BENCH_HEADLESS_SMOKE_TESTS} PROPERTIES LABELS bench TIMEOUT 60)
