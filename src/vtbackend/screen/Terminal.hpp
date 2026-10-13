@@ -60,6 +60,7 @@
 #include <span>
 #include <stack>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -1418,15 +1419,19 @@ class Terminal
 
     /// The display text and sequences are written to: the current page, or the status line DECSASD
     /// selected. Const on a const terminal.
-    [[nodiscard]] auto& activeDisplay(this auto& self) noexcept
+    template <typename Self>
+    [[nodiscard]] auto& activeDisplay(this Self& self) noexcept
     {
+        // The constness is spelled out: clang with Ubuntu 24.04's libstdc++ rejects std::forward_like
+        // here ("with deduced return type cannot be used before it is defined").
+        using Display = std::conditional_t<std::is_const_v<Self>, Screen const, Screen>;
         switch (self._activeStatusDisplay)
         {
-            case ActiveStatusDisplay::Main: return std::forward_like<decltype(self)>(*self._currentScreen);
+            case ActiveStatusDisplay::Main: return static_cast<Display&>(*self._currentScreen);
             case ActiveStatusDisplay::StatusLine:
-                return std::forward_like<decltype(self)>(self._hostWritableStatusLineScreen);
+                return static_cast<Display&>(self._hostWritableStatusLineScreen);
             case ActiveStatusDisplay::IndicatorStatusLine:
-                return std::forward_like<decltype(self)>(self._indicatorStatusScreen);
+                return static_cast<Display&>(self._indicatorStatusScreen);
         }
         core::unreachable();
     }
