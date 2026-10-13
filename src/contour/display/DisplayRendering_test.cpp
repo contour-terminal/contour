@@ -2284,8 +2284,7 @@ class QueuedCallCounter final: public QObject
   public:
     [[nodiscard]] int calls() const noexcept { return _calls; }
 
-  protected:
-    bool eventFilter(QObject* watched, QEvent* event) override // Qt's signature
+    bool eventFilter(QObject* watched, QEvent* event) override // Qt's signature, public as in QObject
     {
         if (event->type() == QEvent::MetaCall)
             ++_calls;
