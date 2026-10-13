@@ -132,7 +132,8 @@ class Pty
     ///          the stdout-fastpipe.
     ///          An empty result means end of file and nothing else: callers close the PTY on it.
     ///          Nothing to read within the timeout, a zero one included, is std::nullopt with
-    ///          `errno == EAGAIN`, as is a read that was interrupted (wakeupReader(), EINTR). Any other
+    ///          `errno == EAGAIN`; a read that was interrupted (wakeupReader()) is std::nullopt with
+    ///          `errno` being `EAGAIN` or `EINTR`, and callers treat the two alike. Any other
     ///          std::nullopt is a failure or a closed PTY, with `errno` saying which.
     [[nodiscard]] virtual std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
                                                          std::optional<std::chrono::milliseconds> timeout,
