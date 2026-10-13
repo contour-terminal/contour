@@ -79,6 +79,12 @@
 #include <thread>
 #include <vector>
 
+#ifndef _WIN32
+    #include <csignal>
+
+    #include <pthread.h>
+#endif
+
 #include <QtQuickControls2/QQuickStyle>
 
 using std::bind;
@@ -130,6 +136,54 @@ bool hasStrandedQmlOverrides(fs::path const& configHome)
 
 namespace
 {
+    /// Worker threads of the pool every session's status-line commands run on.
+    constexpr auto StatusLineCommandThreads = std::size_t { 2 };
+
+#ifndef _WIN32
+    /// Blocks every signal in the constructing thread and restores the previous mask on destruction.
+    ///
+    /// A thread inherits the signal mask of the thread that creates it, so threads started while this
+    /// guard is alive never receive an asynchronous signal.
+    class ScopedAllSignalsBlocked
+    {
+      public:
+        ScopedAllSignalsBlocked() noexcept
+        {
+            auto all = sigset_t {};
+            sigfillset(&all);
+            // Synchronous fault signals stay deliverable: they are raised by the faulting thread itself,
+            // and blocking them turns a crash into a silent kill with no sanitizer or crash report.
+            for (auto const fault: { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGTRAP })
+                sigdelset(&all, fault);
+            pthread_sigmask(SIG_BLOCK, &all, &_previous);
+        }
+        ScopedAllSignalsBlocked(ScopedAllSignalsBlocked const&) = delete;
+        ScopedAllSignalsBlocked& operator=(ScopedAllSignalsBlocked const&) = delete;
+        ScopedAllSignalsBlocked(ScopedAllSignalsBlocked&&) = delete;
+        ScopedAllSignalsBlocked& operator=(ScopedAllSignalsBlocked&&) = delete;
+        ~ScopedAllSignalsBlocked() { pthread_sigmask(SIG_SETMASK, &_previous, nullptr); }
+
+      private:
+        sigset_t _previous {};
+    };
+#endif
+
+    /// Creates the pool every session's status-line commands run on.
+    ///
+    /// On POSIX the workers are created with every signal blocked. Otherwise they would keep SIGINT and
+    /// SIGTERM unblocked, and the kernel may deliver a process-directed signal to any thread that does
+    /// not block it: `contour daemon` blocks them in its own thread and consumes them on a dedicated
+    /// sigwait thread (vthost::runDaemon), so a delivery to a pool worker would kill the process with
+    /// the default disposition before the daemon could clean up its socket. The spawned shells do not
+    /// inherit the blocked mask (SystemCommandCapture resets it).
+    [[nodiscard]] core::async::ThreadPoolExecutor makeStatusLineCommandExecutor()
+    {
+#ifndef _WIN32
+        auto const signalsBlocked = ScopedAllSignalsBlocked {};
+#endif
+        return core::async::ThreadPoolExecutor { StatusLineCommandThreads };
+    }
+
     /// The production ProgramReachablePredicate: the reachability test every external launch in the
     /// app already asks, phrased for the CLI's UTF-8 token.
     [[nodiscard]] bool isReachableProgram(std::string_view program)
@@ -189,6 +243,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<command::CommandHistoryStore> commandHistoryStore,
                              std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer):
     ContourApp { env },
+    _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
+    _commandExecutor(makeStatusLineCommandExecutor()),
     _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
         sessionFactory
             ? std::move(sessionFactory)
@@ -208,7 +264,12 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     link("contour.client", bind(&ContourGuiApp::clientAction, this));
 }
 
-ContourGuiApp::~ContourGuiApp() = default;
+ContourGuiApp::~ContourGuiApp()
+{
+    // Before any member is destroyed: cancels the status-line commands still running or queued, so the
+    // command pool joins without waiting out their timeouts.
+    _commandShutdown.request_stop();
+}
 
 void ContourGuiApp::applyGraphicsDevice(QQuickWindow& window)
 {

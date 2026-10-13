@@ -2132,23 +2132,17 @@ void TerminalDisplay::setHyperlinkDecoration(vtrasterizer::Decorator normal, vtr
 void TerminalDisplay::scheduleRedraw()
 {
     ZoneScoped;
-    // Reached synchronously from the backend/parser thread (TerminalSession::screenUpdated ->
-    // scheduleRedraw) while a VT sequence is processed. During a split, the GUI thread hands this session
-    // from the hidden single-pane display to the new pane display: attachDisplay() calls the old display's
-    // releaseSession(), which nulls its _session before the session's _display is repointed. In that window
-    // the parser thread can land here on a display whose _session is already null. A released display has
-    // nothing to redraw, so bail out. hasSession() reads _session once; the pointed-to session (when
-    // non-null) owns the very thread calling us and is joined in its own destructor, so it cannot be freed
-    // mid-call — the check is sufficient without a lock.
+    // Reached from any thread, per the Terminal::Events::renderBufferUpdated() contract: the parser
+    // thread while a VT sequence is processed, or a pool thread (status-line command completion). During a
+    // split, the GUI thread hands this session from the hidden single-pane display to the new pane
+    // display: attachDisplay() calls the old display's releaseSession(), which nulls its _session. A
+    // released display has nothing to redraw, so bail out. hasSession() reads _session once; the session
+    // serializes its renderBufferUpdated() forward against attach/detach, and the work below only posts to
+    // the GUI thread. It must not read terminal state or take the terminal's mutex. Only that forward is
+    // serialized: the parser thread's screenUpdated() -> scheduleRedraw() path is not, and relies on the
+    // hand-off ordering in releaseSession().
     if (!hasSession())
         return;
-
-    auto const currentHistoryLineCount = terminal().currentScreen().historyLineCount();
-    if (currentHistoryLineCount != _lastHistoryLineCount)
-    {
-        // emit historyLineCountChanged(unbox<int>(currentHistoryLineCount));
-        _lastHistoryLineCount = currentHistoryLineCount;
-    }
 
     // QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
     // post() queues the lambda to run LATER on the GUI event loop, so window() must be re-checked at the

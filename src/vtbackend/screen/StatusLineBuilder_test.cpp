@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 
-#ifdef CONTOUR_STATUSLINE_QPROCESS
-    #include <vtbackend/screen/WindowsStatusCommand.hpp>
-#endif
-
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <concepts>
 #include <cstddef>
-#include <cstdio>
 #include <string>
 #include <variant>
 #include <vector>
@@ -327,66 +322,91 @@ TEST_CASE("parseStatusLineSegment.commandWithoutProgramIsNotAnItem", "[statuslin
     CHECK(std::get<StatusLineDefinitions::Text>(segment[0]).text == "{Command}");
 }
 
-#ifdef CONTOUR_STATUSLINE_QPROCESS
-TEST_CASE("StatusLineCommand.WindowsShell", "[statusline][windows]")
+TEST_CASE("parseStatusLineSegment.commandInterval", "[statusline]")
 {
-    using detail::runWindowsStatusCommand;
-    CHECK(runWindowsStatusCommand("echo OK") == "OK");
-    CHECK(runWindowsStatusCommand("echo FIRST & echo SECOND") == "FIRST ");
-    CHECK(runWindowsStatusCommand("echo \"quoted text\"") == "\"quoted text\"");
-    CHECK(runWindowsStatusCommand("exit /b 7").empty());
-    CHECK(runWindowsStatusCommand("echo ERROR 1>&2").empty());
-    CHECK(runWindowsStatusCommand("(echo ERROR 1>&2) 2>&1") == "ERROR ");
+    using StatusLineDefinitions::Command;
+    auto const segment = parseStatusLineSegment("{Command:Program=git status,Interval=30}");
+    REQUIRE(segment.size() == 1);
+    REQUIRE(std::holds_alternative<Command>(segment[0]));
+    CHECK(std::get<Command>(segment[0]).command == "git status");
+    CHECK(std::get<Command>(segment[0]).interval == std::chrono::seconds { 30 });
 }
 
-TEST_CASE("StatusLineCommand.WindowsDrainsPipe", "[statusline][windows]")
+TEST_CASE("parseStatusLineSegment.commandIntervalDefaultsWhenAbsentOrInvalid", "[statusline]")
 {
-    // Output exceeds the pipe capacity. Waiting before draining would deadlock.
-    CHECK(detail::runWindowsStatusCommand("for /L %i in (1,1,20000) do @echo OUTPUT") == "OUTPUT");
-}
-#endif
-
-#ifdef CONTOUR_STATUSLINE_QPROCESS
-TEST_CASE("StatusLineCommand.WindowsMatchesPopen", "[statusline][windows]")
-{
-    auto const reference = [](char const* command) {
-        auto* pipe = _popen(command, "r");
-        REQUIRE(pipe != nullptr);
-        std::string result;
-        std::array<char, 256> buffer {};
-        while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe))
-            result += buffer.data();
-        _pclose(pipe);
-        if (auto const newline = result.find('\n'); newline != std::string::npos)
-            result.erase(newline);
-        return result;
-    };
-    for (auto const* command: { "echo OK", "echo FIRST & echo SECOND", "echo \"quoted text\"",
-                              "exit /b 7", "(echo ERROR 1>&2) 2>&1",
-                              "for /L %i in (1,1,20000) do @echo OUTPUT" })
+    using StatusLineDefinitions::Command;
+    for (auto const* text: { "{Command:Program=date}",
+                             "{Command:Program=date,Interval=0}",
+                             "{Command:Program=date,Interval=-3}",
+                             "{Command:Program=date,Interval=soon}" })
     {
-        CAPTURE(command);
-        CHECK(detail::runWindowsStatusCommand(command) == reference(command));
-    }
-
-    std::array<char, MAX_PATH> directory {};
-    std::array<char, MAX_PATH> filename {};
-    REQUIRE(GetTempPathA(static_cast<DWORD>(directory.size()), directory.data()) != 0);
-    REQUIRE(GetTempFileNameA(directory.data(), "csl", 0, filename.data()) != 0);
-    struct RemoveFile
-    {
-        char const* path;
-        ~RemoveFile() { DeleteFileA(path); }
-    } cleanup { filename.data() };
-    auto const command = "type \"" + std::string(filename.data()) + "\"";
-    for (auto const* bytes: { "CRLF\r\nSECOND", "BARE\rRETURN", "CTRL\x1aTAIL", "FINAL\r" })
-    {
-        CAPTURE(bytes);
-        auto* file = std::fopen(filename.data(), "wb");
-        REQUIRE(file != nullptr);
-        std::fputs(bytes, file);
-        std::fclose(file);
-        CHECK(detail::runWindowsStatusCommand(command) == reference(command.c_str()));
+        CAPTURE(text);
+        auto const segment = parseStatusLineSegment(text);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<Command>(segment[0]));
+        CHECK(std::get<Command>(segment[0]).interval == StatusLineDefinitions::DefaultCommandInterval);
     }
 }
-#endif
+
+TEST_CASE("parseStatusLineSegment.commandShorthand", "[statusline]")
+{
+    using StatusLineDefinitions::Command;
+    auto const segment = parseStatusLineSegment("[{Command:git log -1 --format=%h,%s}]");
+    REQUIRE(segment.size() == 3);
+    REQUIRE(std::holds_alternative<Command>(segment[1]));
+    auto const& command = std::get<Command>(segment[1]);
+    CHECK(command.command == "git log -1 --format=%h,%s");
+    CHECK(command.interval == StatusLineDefinitions::DefaultCommandInterval);
+    CHECK(command.flags == CellFlags {});
+}
+
+TEST_CASE("parseStatusLineSegment.commandIntervalWithoutProgramIsNotAnItem", "[statusline]")
+{
+    auto const segment = parseStatusLineSegment("{Command:Interval=5}");
+    REQUIRE(segment.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(segment[0]));
+    CHECK(std::get<StatusLineDefinitions::Text>(segment[0]).text == "{Command:Interval=5}");
+}
+
+TEST_CASE("serializeStatusLineSegment.commandInterval", "[statusline]")
+{
+    CHECK(serializeStatusLineSegment(parseStatusLineSegment("{Command:Program=date}"))
+          == "{Command:Program=date}");
+    CHECK(serializeStatusLineSegment(parseStatusLineSegment("{Command:Program=date,Interval=30}"))
+          == "{Command:Program=date,Interval=30}");
+    CHECK(serializeStatusLineSegment(parseStatusLineSegment("{Command:date}")) == "{Command:Program=date}");
+}
+
+TEST_CASE("serializeStatusLineSegment.commandWithCommaRoundTripsAsShorthand", "[statusline]")
+{
+    using StatusLineDefinitions::Command;
+    auto const segment = parseStatusLineSegment("{Command:git log -1 --format=%h,%s}");
+    REQUIRE(segment.size() == 1);
+    REQUIRE(std::holds_alternative<Command>(segment[0]));
+
+    auto const text = serializeStatusLineSegment(segment);
+    CHECK(text == "{Command:git log -1 --format=%h,%s}");
+
+    auto const readBack = parseStatusLineSegment(text);
+    REQUIRE(readBack.size() == 1);
+    REQUIRE(std::holds_alternative<Command>(readBack[0]));
+    CHECK(std::get<Command>(readBack[0]).command == "git log -1 --format=%h,%s");
+    CHECK(std::get<Command>(readBack[0]).interval == StatusLineDefinitions::DefaultCommandInterval);
+}
+
+TEST_CASE("serializeStatusLineSegment.commandWithCommaAndIntervalStaysProgramForm", "[statusline]")
+{
+    // The shorthand cannot carry an interval, so a non-default one keeps the Program= form (lossy for the
+    // comma, as before the shorthand existed).
+    auto item = StatusLineDefinitions::Command { StatusLineDefinitions::Styles {}, "a,b" };
+    item.interval = std::chrono::seconds { 30 };
+    CHECK(serializeStatusLineSegment({ item }) == "{Command:Program=a,b,Interval=30}");
+}
+
+TEST_CASE("parseStatusLineSegment.commandShorthandWhitespaceOnlyIsNotAnItem", "[statusline]")
+{
+    auto const segment = parseStatusLineSegment("{Command: }");
+    REQUIRE(segment.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(segment[0]));
+    CHECK(std::get<StatusLineDefinitions::Text>(segment[0]).text == "{Command: }");
+}

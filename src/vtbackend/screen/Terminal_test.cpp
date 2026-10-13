@@ -7,11 +7,13 @@
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
+#include <vtpty/CommandCapture.hpp>
 #include <vtpty/MockPty.hpp>
 
 #include <core/Escape.hpp>
 #include <core/Times.hpp>
 #include <core/Utils.hpp>
+#include <core/async/testing/ManualExecutor.hpp>
 #include <core/cli/App.hpp>
 #include <core/testing/Environment.hpp>
 
@@ -24,6 +26,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <deque>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -2998,11 +3002,8 @@ TEST_CASE("Terminal reports the identity its settings named", "[terminal]")
     settings.terminalId = vtbackend::VTType::VT340;
 
     auto const environment = core::testing::FakeEnvironment {};
-    auto terminal = vtbackend::Terminal { events,
-                                          environment,
-                                          std::make_unique<vtpty::MockPty>(pageSize),
-                                          settings,
-                                          std::chrono::steady_clock::now() };
+    auto terminal = vtbackend::Terminal { events,   environment,  std::make_unique<vtpty::MockPty>(pageSize),
+                                          settings, std::nullopt, std::chrono::steady_clock::now() };
 
     CHECK(terminal.terminalId() == vtbackend::VTType::VT340);
     // The operating level follows the identity at birth, as setTerminalId() also makes it do -- a
@@ -3032,11 +3033,8 @@ TEST_CASE("a terminal constructed below VT525 narrows its sequence table too", "
         auto settings = vtbackend::Settings {};
         settings.pageSize = pageSize;
         settings.terminalId = id;
-        return vtbackend::Terminal { events,
-                                     environment,
-                                     std::make_unique<vtpty::MockPty>(pageSize),
-                                     settings,
-                                     std::chrono::steady_clock::time_point() };
+        return vtbackend::Terminal { events,   environment,  std::make_unique<vtpty::MockPty>(pageSize),
+                                     settings, std::nullopt, std::chrono::steady_clock::time_point() };
     };
 
     SECTION("a VT220 identity excludes the VT420-only sequences")
@@ -3343,4 +3341,198 @@ TEST_CASE("Terminal.flushInput.overlappingFlushNeitherResendsNorOverconsumes", "
     CHECK_NOTHROW(mock.sendCharEvent(U'x'));
     CHECK_FALSE(mock.terminal.hasInput());
     CHECK(mock.mockPty().stdinBuffer() == "\033[A\033[?997;1nx");
+}
+
+namespace
+{
+/// Answers status-line command runs from a script; local to this suite on purpose.
+struct FakeCommandCapture final: vtpty::CommandCapture
+{
+    std::deque<std::expected<std::string, vtpty::CommandCaptureError>> answers;
+    std::vector<std::string> commands;
+
+    std::expected<std::string, vtpty::CommandCaptureError> run(std::string_view command,
+                                                               std::chrono::milliseconds,
+                                                               core::async::StopToken) override
+    {
+        commands.emplace_back(command);
+        if (answers.empty())
+            return std::unexpected(
+                vtpty::CommandCaptureError { vtpty::CommandCaptureError::Kind::SpawnFailed,
+                                             std::make_error_code(std::errc::invalid_argument) });
+        auto answer = std::move(answers.front());
+        answers.pop_front();
+        return answer;
+    }
+};
+
+/// A MockTerm that counts how often the terminal asked its host for a repaint.
+struct CountingMockTerm: vtbackend::MockTerm<>
+{
+    using MockTerm::MockTerm;
+    int renderBufferUpdates = 0;
+    void renderBufferUpdated() override { ++renderBufferUpdates; }
+};
+
+constexpr auto CommandPageSize = vtbackend::PageSize { vtbackend::LineCount(5), vtbackend::ColumnCount(40) };
+} // namespace
+
+TEST_CASE("Terminal.statusLineCommandRunsOffThreadAndSchedulesWakeup", "[terminal][statusline]")
+{
+    using namespace vtbackend;
+    using namespace std::chrono_literals;
+
+    auto capture = FakeCommandCapture {};
+    capture.answers.emplace_back("main");
+    auto executor = core::async::testing::ManualExecutor {};
+    auto mock =
+        MockTerm { CommandPageSize, HistoryLimits {}, 1024, StatusLineCommandServices { capture, executor } };
+    auto& terminal = mock.terminal;
+    terminal.setStatusLineDefinition(
+        parseStatusLineDefinition("", "", "{Command:Program=git branch,Interval=10}"));
+    terminal.setStatusDisplay(StatusDisplayType::Indicator);
+
+    auto const item = StatusLineDefinitions::Command { {}, "git branch", 10s };
+    CHECK(terminal.statusLineCommandOutput(item).empty());
+    CHECK(capture.commands.empty()); // nothing ran on the calling thread
+    executor.drain();
+    CHECK(terminal.statusLineCommandOutput(item) == "main");
+
+    // The minute wakeup is never below a second, so 500 ms can only be the command coming due.
+    terminal.tick(terminal.currentTime() + 9500ms);
+    auto const wakeup = terminal.nextRender();
+    REQUIRE(wakeup.has_value());
+    CHECK(*wakeup == 500ms);
+}
+
+TEST_CASE("Terminal.statusLineCommandWithoutServicesRendersEmpty", "[terminal][statusline]")
+{
+    using namespace vtbackend;
+    using namespace std::chrono_literals;
+
+    auto mock = MockTerm { CommandPageSize };
+    CHECK(
+        mock.terminal.statusLineCommandOutput(StatusLineDefinitions::Command { {}, "echo hi", 10s }).empty());
+}
+
+TEST_CASE("Terminal.statusLineCommandItemRendersThroughTheVisitor", "[terminal][statusline]")
+{
+    using namespace vtbackend;
+
+    auto capture = FakeCommandCapture {};
+    capture.answers.emplace_back("main");
+    auto executor = core::async::testing::ManualExecutor {};
+    auto mock =
+        MockTerm { CommandPageSize, HistoryLimits {}, 1024, StatusLineCommandServices { capture, executor } };
+    auto const segment = parseStatusLineSegment("{Command:Program=git branch}");
+    REQUIRE(segment.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Command>(segment[0]));
+
+    CHECK(serializeToVT(mock.terminal, segment, StatusLineStyling::Disabled).empty());
+    executor.drain();
+    CHECK(serializeToVT(mock.terminal, segment, StatusLineStyling::Disabled) == "main");
+}
+
+TEST_CASE("Terminal.statusLineCommandCompletionNotifiesTheHost", "[terminal][statusline]")
+{
+    using namespace vtbackend;
+    using namespace std::chrono_literals;
+
+    auto capture = FakeCommandCapture {};
+    capture.answers.emplace_back("main");
+    capture.answers.emplace_back("main"); // identical: the second run changes nothing
+    auto executor = core::async::testing::ManualExecutor {};
+    auto mock = CountingMockTerm {
+        CommandPageSize, HistoryLimits {}, 1024, StatusLineCommandServices { capture, executor }
+    };
+    auto& terminal = mock.terminal;
+    auto const item = StatusLineDefinitions::Command { {}, "git branch", 1s };
+
+    (void) terminal.statusLineCommandOutput(item);
+    terminal.ensureFreshRenderBuffer(); // settle the buffer so a later dirtying is observable
+    REQUIRE(terminal.renderBufferState() == RenderBufferState::WaitingForRefresh);
+    auto const before = mock.renderBufferUpdates;
+    executor.drain();
+    CHECK(mock.renderBufferUpdates == before + 1);
+    CHECK(terminal.renderBufferState() == RenderBufferState::RefreshBuffersAndTrySwap); // Changed
+
+    terminal.ensureFreshRenderBuffer();
+    REQUIRE(terminal.renderBufferState() == RenderBufferState::WaitingForRefresh);
+    terminal.tick(terminal.currentTime() + 2s);
+    (void) terminal.statusLineCommandOutput(item); // due again: starts the second run
+    auto const afterFirst = mock.renderBufferUpdates;
+    executor.drain();
+    CHECK(mock.renderBufferUpdates == afterFirst + 1);
+    CHECK(terminal.renderBufferState() == RenderBufferState::WaitingForRefresh); // Unchanged: not dirtied
+}
+
+TEST_CASE("Terminal.suppressedRenderingDoesNotSpinOnAnOverdueCommand", "[terminal][statusline]")
+{
+    using namespace vtbackend;
+    using namespace std::chrono_literals;
+
+    auto capture = FakeCommandCapture {};
+    capture.answers.emplace_back("main");
+    auto executor = core::async::testing::ManualExecutor {};
+    auto mock =
+        MockTerm { CommandPageSize, HistoryLimits {}, 1024, StatusLineCommandServices { capture, executor } };
+    auto& terminal = mock.terminal;
+    terminal.setStatusLineDefinition(
+        parseStatusLineDefinition("", "", "{Command:Program=git branch,Interval=1}"));
+    terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    (void) serializeToVT(terminal,
+                         parseStatusLineSegment("{Command:Program=git branch,Interval=1}"),
+                         StatusLineStyling::Disabled);
+    executor.drain();
+    terminal.tick(terminal.currentTime() + 30s);
+    REQUIRE(terminal.nextRender().value_or(1h) == 0ms); // overdue while rendering is live
+
+    // Synchronized output suppresses rendering, so the status line is not rebuilt and the command
+    // could never be refreshed: it must not ask for back-to-back immediate wakeups meanwhile.
+    // A generous timeout keeps a scheduler stall from ending the suppression window mid-test.
+    terminal.settings().synchronizedOutputTimeout = 1h;
+    mock.writeToScreen("\033[?2026h");
+    REQUIRE(terminal.isRenderingSuppressed());
+    CHECK(terminal.nextRender().value_or(1h) > 0ms);
+}
+
+TEST_CASE("Terminal.replacingTheStatusLineDefinitionForgetsOverdueCommands", "[terminal][statusline]")
+{
+    using namespace vtbackend;
+    using namespace std::chrono_literals;
+
+    auto capture = FakeCommandCapture {};
+    capture.answers.emplace_back("main");
+    capture.answers.emplace_back("main");
+    auto executor = core::async::testing::ManualExecutor {};
+    auto mock =
+        MockTerm { CommandPageSize, HistoryLimits {}, 1024, StatusLineCommandServices { capture, executor } };
+    auto& terminal = mock.terminal;
+    auto const withOverdueCommand = [&] {
+        terminal.setStatusLineDefinition(
+            parseStatusLineDefinition("", "", "{Command:Program=git branch,Interval=1}"));
+        terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        // Through the visitor, as the render path does.
+        (void) serializeToVT(terminal,
+                             parseStatusLineSegment("{Command:Program=git branch,Interval=1}"),
+                             StatusLineStyling::Disabled);
+        executor.drain();
+        // Long overdue: the command alone asks for an immediate wakeup.
+        terminal.tick(terminal.currentTime() + 30s);
+        REQUIRE(terminal.nextRender().value_or(1h) == 0ms);
+    };
+
+    SECTION("setStatusLineDefinition")
+    {
+        withOverdueCommand();
+        terminal.setStatusLineDefinition(parseStatusLineDefinition("", "", "plain"));
+        CHECK(terminal.nextRender().value_or(1h) > 0ms);
+    }
+
+    SECTION("resetStatusLineDefinition")
+    {
+        withOverdueCommand();
+        terminal.resetStatusLineDefinition(); // back to the settings' default, which has no commands
+        CHECK(terminal.nextRender().value_or(1h) > 0ms);
+    }
 }

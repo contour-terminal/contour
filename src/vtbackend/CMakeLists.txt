@@ -68,6 +68,7 @@ set(vtbackend_HEADERS
     graphics/SixelParser.hpp
     grid/SoAClusterWriter.hpp
     screen/StatusLineBuilder.hpp
+    screen/StatusLineCommandCache.hpp
     screen/Terminal.hpp
     screen/TerminalTestFixtures.hpp
     testing/TestHelpers.hpp
@@ -131,6 +132,7 @@ set(vtbackend_SOURCES
     graphics/regis/ReGISTextRasterizer.cpp
     graphics/regis/ReGISParser.cpp
     screen/StatusLineBuilder.cpp
+    screen/StatusLineCommandCache.cpp
     screen/Terminal.cpp
     vt/VTType.cpp
     vt/VTWriter.cpp
@@ -163,6 +165,7 @@ target_link_libraries(vtbackend PUBLIC
     boxed-cpp::boxed-cpp
     Threads::Threads
     contour::tracy
+    core::async
     core::base
     core::cli
     core::log
@@ -171,13 +174,6 @@ target_link_libraries(vtbackend PUBLIC
     vtparser
     vtpty
 )
-
-# QProcess fixes GUI command capture on Windows; keep Unix and headless builds Qt-free.
-if(WIN32 AND CONTOUR_FRONTEND_GUI)
-    find_package(Qt6 REQUIRED COMPONENTS Core)
-    target_link_libraries(vtbackend PRIVATE Qt6::Core)
-    target_compile_definitions(vtbackend PRIVATE CONTOUR_STATUSLINE_QPROCESS)
-endif()
 
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_LOG_TRACE=1)
@@ -241,6 +237,7 @@ if(LIBTERMINAL_TESTING)
         core/Search_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp
+        screen/StatusLineCommandCache_test.cpp
         core/WindowSizeStack_test.cpp
         screen/Terminal_test.cpp
         screen/Terminal_scroll_test.cpp
@@ -261,10 +258,6 @@ if(LIBTERMINAL_TESTING)
         vt/VTWriter_test.cpp
     )
     target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend)
-    if(WIN32 AND CONTOUR_FRONTEND_GUI)
-        target_link_libraries(vtbackend_test Qt6::Core)
-        target_compile_definitions(vtbackend_test PRIVATE CONTOUR_STATUSLINE_QPROCESS)
-    endif()
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
 
     if(NOT WIN32)

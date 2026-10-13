@@ -113,6 +113,7 @@ struct MirrorHarness
                                                        core::defaultEnvironment(),
                                                        std::make_unique<vtpty::MockPty>(settings.pageSize),
                                                        std::move(settings),
+                                                       std::nullopt,
                                                        std::chrono::steady_clock::now());
         populator = std::make_unique<ScreenMirror>(*mirror);
         // Construct client after mirror — the handler lambdas capture `this` and
@@ -245,6 +246,7 @@ struct BareMirror
                                                          core::defaultEnvironment(),
                                                          std::make_unique<vtpty::MockPty>(settings.pageSize),
                                                          std::move(settings),
+                                                         std::nullopt,
                                                          std::chrono::steady_clock::now());
         mirror = std::make_unique<ScreenMirror>(*terminal);
     }

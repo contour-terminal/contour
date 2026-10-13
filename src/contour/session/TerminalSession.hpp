@@ -1124,6 +1124,21 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Collapses repeat re-arm posts to at most one in flight, as _cursorMovedPostPending does.
     std::atomic_flag _searchTallyPostPending = ATOMIC_FLAG_INIT;
 
+    /// Repoints renderBufferUpdated() at @p target (null: drop notifications) under _renderNotifyMutex.
+    /// @param target The surface to forward to, or null.
+    void setRenderNotifyTarget(DisplaySurface* target);
+
+    /// Guards _renderNotifyTarget, the copy of _display that renderBufferUpdated() forwards to. That
+    /// callback can run on a pool thread (the status-line command cache), so it cannot read _display
+    /// itself. Lock order: the cache's mutex, then this one. Held only for the forward and the stores in
+    /// attachDisplay()/detachDisplay()/~TerminalSession(); a surface's renderBufferUpdated() only posts to
+    /// the GUI thread and takes no terminal or cache lock, so it cannot call back into the cache.
+    /// A plain pointer under a mutex, rather than an atomic, because the lock is what keeps the surface
+    /// alive for the duration of the forwarded call: a detach waits for an in-flight forward.
+    /// Declared above _terminal so it outlives the cache's last callback.
+    std::mutex _renderNotifyMutex;
+    DisplaySurface* _renderNotifyTarget = nullptr; ///< Guarded by _renderNotifyMutex.
+
     vtbackend::Terminal _terminal;
     /// A notice is on screen and the pane is alive only to be dismissed: the shell exited too early,
     /// the device never started, or the daemon connection went away. It is also what makes

@@ -316,6 +316,7 @@ struct MirrorPane
                                                          core::defaultEnvironment(),
                                                          std::move(pty),
                                                          std::move(settings),
+                                                         std::nullopt,
                                                          std::chrono::steady_clock::now());
         factory.bindTerminal(device, *terminal);
     }
@@ -1333,11 +1334,9 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
     auto settings = vtbackend::Settings {};
     auto pty = std::make_unique<vtpty::MockPty>(settings.pageSize);
     auto* device = pty.get();
-    auto terminal = vtbackend::Terminal { events,
-                                          core::defaultEnvironment(),
-                                          std::move(pty),
-                                          std::move(settings),
-                                          std::chrono::steady_clock::now() };
+    auto terminal = vtbackend::Terminal { events,         core::defaultEnvironment(),
+                                          std::move(pty), std::move(settings),
+                                          std::nullopt,   std::chrono::steady_clock::now() };
 
     CHECK(router.createPty(std::nullopt) == nullptr);
     CHECK_FALSE(router.canCreateSession());

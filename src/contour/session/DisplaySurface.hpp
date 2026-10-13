@@ -164,7 +164,9 @@ class DisplaySurface
     /// Asks for a frame. Reached from the terminal thread while a VT sequence is processed.
     virtual void scheduleRedraw() = 0;
 
-    /// Signals that the render buffer the surface reads has been refreshed. Terminal thread.
+    /// Signals that the render buffer the surface reads has been refreshed. May be called from any
+    /// thread, including a pool thread, under the contract of Terminal::Events::renderBufferUpdated():
+    /// take no terminal state lock and read no terminal state; hand the work to the GUI thread.
     virtual void renderBufferUpdated() = 0;
 
     /// Notifies that the active screen buffer changed (primary <-> alternate), so surface state keyed to

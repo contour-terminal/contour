@@ -13,23 +13,14 @@
 
 #include <chrono>
 #include <concepts>
-#include <cstdio>
 #include <ctime>
 #include <format>
 #include <iterator>
 #include <optional>
 #include <ranges>
-#include <system_error>
 #include <type_traits>
 
 using namespace std::string_view_literals;
-
-#ifdef CONTOUR_STATUSLINE_QPROCESS
-    #include <vtbackend/screen/WindowsStatusCommand.hpp>
-#elif defined(_WIN32)
-    #define popen  _popen
-    #define pclose _pclose
-#endif
 
 namespace vtbackend
 {
@@ -70,20 +61,49 @@ static std::optional<std::string> tryParseStringAttribute(crispy::StringInterpol
     return std::nullopt;
 }
 
+/// The raw text after "<Name>:" in a closed placeholder, e.g. "git status" for "{Command:git status}";
+/// empty for a placeholder without a colon, an unterminated one, or one built without its source slice.
+static std::string_view commandShorthandOf(crispy::StringInterpolation const& interpolation)
+{
+    auto text = interpolation.whole;
+    if (!text.starts_with('{') || !text.ends_with('}'))
+        return {};
+    text = text.substr(1, text.size() - 2);
+    auto const colon = text.find(':');
+    if (colon == std::string_view::npos)
+        return {};
+    return text.substr(colon + 1);
+}
+
 /// Builds the item of type @p T that @p interpolation describes, given its already-parsed @p styles.
 ///
-/// The three alternatives carrying payload beyond `Styles` are the only ones that need saying here;
-/// every other placeholder is exactly its styles. Returns nullopt when a required attribute is
-/// missing, which makes the placeholder unrecognized and so echoed verbatim by the caller.
+/// The alternatives carrying payload beyond `Styles` (Text, Command, Context and Tabs) are the only ones
+/// that need saying here; every other placeholder is exactly its styles. Returns nullopt when a required
+/// attribute is missing, which makes the placeholder unrecognized and so echoed verbatim by the caller.
 template <typename T>
 static std::optional<StatusLineDefinitions::Item> makeItemOfType(
     StatusLineDefinitions::Styles const& styles, crispy::StringInterpolation const& interpolation)
 {
     if constexpr (std::same_as<T, StatusLineDefinitions::Command>)
     {
+        auto const program = tryParseStringAttribute(interpolation, "Program");
+        auto const interval = tryParseStringAttribute(interpolation, "Interval");
+        if (program)
+        {
+            auto item = StatusLineDefinitions::Command { styles, *program };
+            if (interval)
+                if (auto const seconds = core::toInteger<10, int>(*interval); seconds && *seconds > 0)
+                    item.interval = std::chrono::seconds { *seconds };
+            return item;
+        }
+        // Shorthand {Command:<raw>}: with neither attribute, everything after "Command:" is the command,
+        // verbatim, commas and '=' included. A styled item needs the Program= form.
+        if (!interval)
+            if (auto const raw = commandShorthandOf(interpolation);
+                raw.find_first_not_of(" \t") != std::string_view::npos)
+                return StatusLineDefinitions::Command { StatusLineDefinitions::Styles {},
+                                                        std::string { raw } };
         // Without a program there is nothing to run, so this is not a usable {Command}.
-        if (auto program = tryParseStringAttribute(interpolation, "Program"))
-            return StatusLineDefinitions::Command { styles, std::move(*program) };
         return std::nullopt;
     }
     else if constexpr (std::same_as<T, StatusLineDefinitions::Text>)
@@ -391,8 +411,8 @@ namespace
 
         std::string visit(StatusLineDefinitions::Progress const&)
         {
-            // Read without locking, as every other visit() here does: buildStatusLineText runs on the
-            // terminal's own thread with _stateMutex held.
+            // Read without locking, as every other visit() here does: buildStatusLineText runs on
+            // whichever thread renders (the GUI's render thread by default) with _stateMutex held.
             auto const progress = vt.progress();
             switch (progress.state)
             {
@@ -449,29 +469,7 @@ namespace
 
         std::string visit(StatusLineDefinitions::Command const& item)
         {
-            core::ignoreUnused(this);
-
-#ifdef CONTOUR_STATUSLINE_QPROCESS
-            return detail::runWindowsStatusCommand(item.command);
-#else
-            std::string result;
-            if (FILE* fp = popen(item.command.c_str(), "r"); fp)
-            {
-                char buffer[256] {};
-                while (fgets(buffer, sizeof(buffer), fp) != nullptr)
-                {
-                    result += buffer;
-                }
-                pclose(fp);
-
-                // Only keep first line
-                if (auto const pos = result.find('\n'); pos != std::string::npos)
-                    result.erase(pos);
-            }
-            else
-                result = std::generic_category().message(errno);
-            return result;
-#endif
+            return vt.statusLineCommandOutput(item);
         }
 
         std::string visit(StatusLineDefinitions::Text const& item)
@@ -802,6 +800,26 @@ namespace
         return text.find_first_of(",{}") == std::string_view::npos;
     }
 
+    /// Whether @p styles carries no styling at all, so the item may be written in its bare form.
+    [[nodiscard]] bool isUnstyled(StatusLineDefinitions::Styles const& styles) noexcept
+    {
+        return !styles.foregroundColor && !styles.backgroundColor && !styles.flags.any()
+               && styles.textLeft.empty() && styles.textRight.empty();
+    }
+
+    /// Whether the shorthand {Command:<command>} reads back as an unstyled Command running @p command
+    /// with the default interval. A raw that holds a Program= or Interval= attribute, or a brace,
+    /// re-parses differently, so it is not written in the shorthand.
+    [[nodiscard]] bool shorthandRoundTrips(std::string const& command)
+    {
+        auto const segment = parseStatusLineSegment("{Command:" + command + "}");
+        if (segment.size() != 1 || !std::holds_alternative<StatusLineDefinitions::Command>(segment[0]))
+            return false;
+        auto const& item = std::get<StatusLineDefinitions::Command>(segment[0]);
+        return item.command == command && item.interval == StatusLineDefinitions::DefaultCommandInterval
+               && isUnstyled(item);
+    }
+
     /// Appends the attributes every item shares: its flags, colors and side adornments.
     void appendStyles(AttributeWriter& attributes, StatusLineDefinitions::Styles const& styles)
     {
@@ -832,13 +850,11 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
 
                 if constexpr (std::same_as<T, StatusLineDefinitions::Text>)
                 {
-                    auto const unstyled = !v.foregroundColor && !v.backgroundColor && !v.flags.any()
-                                          && v.textLeft.empty() && v.textRight.empty();
                     // A bare literal is the form parseStatusLineSegment produces for the plain text
                     // between placeholders, and the only form that can hold a comma or a brace at
                     // all -- so text that cannot be an attribute is emitted this way even when that
                     // costs its styling, because the styled form would come back corrupted instead.
-                    if (unstyled || !isAttributeSafe(v.text))
+                    if (isUnstyled(v) || !isAttributeSafe(v.text))
                     {
                         // Verbatim, with no brace escaping: a template has none, so a doubled brace
                         // would not read back as one -- it would gain a brace on every save.
@@ -850,6 +866,22 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
                     }
                 }
 
+                if constexpr (std::same_as<T, StatusLineDefinitions::Command>)
+                {
+                    // A comma or brace cannot survive the Program= form, so an unstyled default-interval
+                    // command that needs one is written as the shorthand, which carries it verbatim.
+                    // A styled or non-default-interval command with a comma stays on the Program= form and
+                    // is lossy, as it always was; the shorthand cannot carry styles or an interval.
+                    if (isUnstyled(v) && v.interval == StatusLineDefinitions::DefaultCommandInterval
+                        && !isAttributeSafe(v.command) && shorthandRoundTrips(v.command))
+                    {
+                        result += "{Command:";
+                        result += v.command;
+                        result += '}';
+                        return;
+                    }
+                }
+
                 result += '{';
                 result += StatusLineDefinitions::ItemTraits<T>::Name;
                 auto attributes = AttributeWriter { .out = result };
@@ -857,7 +889,11 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
                 if constexpr (std::same_as<T, StatusLineDefinitions::Text>)
                     attributes.add("text", v.text);
                 else if constexpr (std::same_as<T, StatusLineDefinitions::Command>)
+                {
                     attributes.add("Program", v.command);
+                    if (v.interval != StatusLineDefinitions::DefaultCommandInterval)
+                        attributes.add("Interval", std::to_string(v.interval.count()));
+                }
 
                 appendStyles(attributes, v);
 

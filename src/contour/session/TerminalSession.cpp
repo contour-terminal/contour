@@ -248,6 +248,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 app.processEnvironment(),
                 std::move(pty),
                 config::sessionSettings(_config, _profile, _currentColorPreference, initialPageSize),
+                app.statusLineCommandServices(),
                 std::chrono::steady_clock::now() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
     // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is
@@ -287,6 +288,11 @@ TerminalSession::~TerminalSession()
 {
     sessionLog()("Destroying terminal session.");
     _terminating = true;
+
+    // Stop forwarding renderBufferUpdated() before anything is torn down: the status-line command cache
+    // inside _terminal calls it from a pool thread and is only quiesced when _terminal is destroyed,
+    // which is after every member declared below it.
+    setRenderNotifyTarget(nullptr);
 
     // ~TerminalDisplay detaches in this direction, but nothing did it in the other: a session destroyed
     // while a display still names it left that display's _session dangling — and dangling is non-null, so
@@ -328,6 +334,7 @@ void TerminalSession::detachDisplay(DisplaySurface& display)
 {
     sessionLog()("Detaching display from session.");
     Require(_display == &display);
+    setRenderNotifyTarget(nullptr);
     _display = nullptr;
 }
 
@@ -359,6 +366,7 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
 
     // We're being called by newDisplay!
     _display = &newDisplay;
+    setRenderNotifyTarget(&newDisplay);
 
     // Start the freshly-attached display with clean cursor-move coalescing state. This heals the rare
     // case where the previous display was torn down after a cursorPositionChanged() post was queued but
@@ -700,12 +708,20 @@ void TerminalSession::flushInput()
         _display->post(bind(&TerminalSession::flushInput, this));
 }
 
+void TerminalSession::setRenderNotifyTarget(DisplaySurface* target)
+{
+    auto const lock = std::scoped_lock { _renderNotifyMutex };
+    _renderNotifyTarget = target;
+}
+
 void TerminalSession::renderBufferUpdated()
 {
-    if (!_display)
-        return;
-
-    _display->renderBufferUpdated();
+    // May run on a pool thread (see Terminal::Events::renderBufferUpdated), so it forwards to the
+    // mutex-guarded copy of _display rather than _display itself. Holding the lock across the call makes a
+    // concurrent detach wait for it, so the surface cannot go away mid-forward.
+    auto const lock = std::scoped_lock { _renderNotifyMutex };
+    if (_renderNotifyTarget != nullptr)
+        _renderNotifyTarget->renderBufferUpdated();
 }
 
 void TerminalSession::executeRole(GuardedRole role, bool allow, bool remember)

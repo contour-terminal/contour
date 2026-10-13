@@ -38,7 +38,12 @@ HostedSession::HostedSession(SessionId id,
                              std::function<void()> onClosed):
     _id(id),
     _events(std::move(onScreenUpdated), std::move(onBell), std::move(onNotify), std::move(onCopyToClipboard)),
-    _terminal(_events, env, std::move(pty), std::move(settings), std::chrono::steady_clock::now()),
+    _terminal(_events,
+              env,
+              std::move(pty),
+              std::move(settings),
+              std::nullopt, // the daemon never renders an indicator, so it runs no status-line commands
+              std::chrono::steady_clock::now()),
     _onClosed(std::move(onClosed))
 {
     // DECSSDT 2 only REQUESTS the host-writable status line; the frontend decides.

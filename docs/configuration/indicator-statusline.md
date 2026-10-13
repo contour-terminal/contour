@@ -25,7 +25,7 @@ This text may contain placeholders to be replaced by their respective dynamic co
 Variable             | Description
 ---------------------|--------------------------------------------------------------------
 `{Clock}`            | current clock in HH:MM format
-`{Command}`          | yields the result of the given command prompt, as specified via parameter `Program=...`
+`{Command}`          | yields the output of the given command, as specified via parameter `Program=...` (or the `{Command:<command>}` shorthand), re-run every `Interval=...` seconds
 `{HistoryLineCount}` | number of lines in history (only available in primary screen)
 `{Hyperlink}`        | reveals the hyperlink at the given mouse location
 `{InputMode}`        | current input mode (e.g. INSERT, NORMAL, VISUAL)
@@ -71,8 +71,34 @@ Parameter                 | Description
 
 These parameters apply to all variables above.
 
-The `Command` variable is the only one that requires a special attribute, `Program` whose value
-is the command to execute.
+The `Command` variable additionally takes these attributes:
+
+Parameter                 | Description
+--------------------------|--------------------------------------------------------------------
+`Program`                 | the command to execute (required, unless the shorthand below is used)
+`Interval`                | seconds between runs; default `10`. An invalid value or one `<= 0` selects the default.
+
+```
+{Command:Program=git rev-parse --abbrev-ref HEAD,Interval=30,Bold}
+```
+
+**Shorthand.** `{Command:<command>}` takes everything after `Command:` verbatim as the command, so it
+may contain commas and `=`, but no styling and no `Interval=`: `{Command:git log -1 --format=%h,%s}`.
+A template naming `Program=` or `Interval=` is read in the attribute form instead; anything else
+is the shorthand, so `{Command:Bold}` runs a program named `Bold` (a style flag needs `Program=`). A command cannot contain `}`.
+
+**Execution.** Commands run asynchronously in the background, so they never slow down rendering
+and, on Windows, never open a console window. The item shows the output of the previous run until a
+new one arrives, and is empty before the first run completes. A command that is still running after
+5 seconds (or after its `Interval`, if that is shorter) is killed together with its child processes,
+and the previous output is kept.
+
+Only the first line of the command's standard output is shown. Standard error and the exit status are
+ignored, and a command that cannot be started shows the operating system's error message.
+
+Unlike `popen`, background processes a command leaves behind are killed as soon as the command
+finishes, even when it succeeds (the process group on Unix, the job object on Windows): a command like
+`start notepad` starts nothing that outlives it.
 
 ### Tabs formatting extensions
 

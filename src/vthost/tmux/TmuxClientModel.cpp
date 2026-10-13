@@ -41,6 +41,7 @@ PaneView::PaneView(int columns, int lines, vtbackend::LineCount history)
                                                       core::defaultEnvironment(),
                                                       std::make_unique<vtpty::MockPty>(pageSize),
                                                       std::move(settings),
+                                                      std::nullopt,
                                                       std::chrono::steady_clock::now());
 }
 
