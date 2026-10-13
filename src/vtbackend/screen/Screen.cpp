@@ -662,7 +662,9 @@ void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
         if (auto const font = _cursor.charsets.activeDRCSFont();
             font.has_value() && writeSoftFontGlyph(*font, rawCp) == SoftFontGlyph::Written) [[unlikely]]
         {
+            // What seeding from the glyph's cell would replay: a space, alone.
             run.previousCodepoint = U' ';
+            unicode::grapheme_process_init(U' ', run.segmenter);
             continue;
         }
 
