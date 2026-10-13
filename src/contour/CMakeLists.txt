@@ -1114,6 +1114,9 @@ if(WIN32)
                 PATTERN "*_test.*" EXCLUDE
                 PATTERN "*.pdb" EXCLUDE
                 PATTERN "unicode_tablegen.exe" EXCLUDE
+                # A developer benchmark, built here so that it runs beside the staged conpty.dll: the .exe,
+                # and the .ilk an incremental link leaves beside it.
+                PATTERN "bench-headless.*" EXCLUDE
                 PATTERN "*"
         )
     endif()

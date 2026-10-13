@@ -1066,6 +1066,32 @@ jobs:
         run: |
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
+      - name: "Check that the package ships no bench-headless"
+        # bench-headless is built into bin/, beside the staged conpty.dll it must run with. Two things
+        # keep it out of the MSI and the zip, which cpack fills from the same install: its PATTERN
+        # exclusion in src/contour/CMakeLists.txt, against the GUI's wholesale copy of bin/, and
+        # CONTOUR_INSTALL_TOOLS=OFF in the Windows preset, against its own install rule. Assert it, as
+        # the macOS job does for its image: the day either goes, a developer tool would ship in a
+        # user-facing release with no other visible symptom. contour.exe must be found too, or the
+        # check would pass on a zip it cannot read.
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead("contour-${{ steps.set_vars.outputs.version }}-win64.zip")
+          try {
+            $entries = $zip.Entries | ForEach-Object { $_.FullName -replace '\\', '/' }
+          } finally {
+            $zip.Dispose()
+          }
+          if (-not ($entries | Where-Object { $_ -like '*/contour.exe' -or $_ -eq 'contour.exe' })) {
+            Write-Host "::error::the zip holds no contour.exe; the check below would pass vacuously"
+            exit 1
+          }
+          $shipped = $entries | Where-Object { $_ -like '*bench-headless*' }
+          if ($shipped) {
+            Write-Host "::error::the zip ships $($shipped -join ', ')"
+            exit 1
+          }
       - name: "Uploading MSI to artifact store"
         uses: actions/upload-artifact@v4
         with:
