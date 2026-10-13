@@ -322,6 +322,21 @@ TEST_CASE("BulkScan.AStretchPastANarrowedEmojiGivesTheSameScreen", "[BulkScan]")
         }
 }
 
+TEST_CASE("BulkScan.AJoinerAfterAWrapThatScrollsGivesTheSameScreen", "[BulkScan]")
+{
+    // The scan counts a wide emoji narrowed by VS15 as one column, the screen keeps the two it took, so
+    // the last letter lands on column 9 with a wrap pending that the scan did not expect. The combining
+    // mark after it is in the same run (the letters behind it keep the scan from holding it back as the
+    // end of the read), and the cursor is on the bottom row: the wrap scrolls, and the mark must be seen
+    // against the blank line that scrolled in, as the state machine sees it, not joined to a cell there.
+    auto const text = "\xE2\x8C\x9A\xEF\xB8\x8E"
+                      "\xE2\x8C\x9A\xEF\xB8\x8E"
+                      "abcdef"
+                      "\xCC\x81"
+                      "ij"sv;
+    checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(10) }, "\033[3;1H"sv, text);
+}
+
 TEST_CASE("BulkScan.InvalidUtf8BesideALongAsciiStretchGivesTheSameScreen", "[BulkScan]")
 {
     // The text decoder takes the bytes after an incomplete lead byte as its continuation bytes,
@@ -512,6 +527,8 @@ constexpr auto RandomTextSetups = std::array {
     "\033[?1049h\033[?7l\033[1;3H"sv,      // the alternate screen, autowrap off
     "\033[31m"sv,                          // a coloured pen
     "Q\xCC\x81"sv,                         // the line already ends in a cluster
+    "\033[4;1H"sv,                         // the bottom row: a wrap inside the run scrolls
+    "\033[4;6H"sv,                         // the bottom row, from mid-line
 };
 
 /// A choice in [0, @p n), drawn from the engine directly so that a seed reproduces on every platform.

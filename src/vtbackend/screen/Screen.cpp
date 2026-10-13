@@ -652,7 +652,12 @@ void Screen::writeTextPerCodepoint(std::string_view text, GraphemeRun& run)
             continue;
         auto const rawCp = *decoded;
 
+        // A wrap can scroll a different line under the cell the last write ended in, which makes the
+        // run's state stale: seed again after it, as writeTextInternal does.
+        auto const wrapPending = _cursor.wrapPending;
         crlfIfWrapPending();
+        if (wrapPending) [[unlikely]]
+            run = seedGraphemeStateFromLastCell();
 
         if (auto const font = _cursor.charsets.activeDRCSFont();
             font.has_value() && writeSoftFontGlyph(*font, rawCp) == SoftFontGlyph::Written) [[unlikely]]
