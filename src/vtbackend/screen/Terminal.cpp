@@ -34,6 +34,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <numeric>
 #include <optional>
 #include <ranges>
 #include <regex>
@@ -489,10 +490,10 @@ bool Terminal::processInputOnce()
             releaseReadAhead(*ptyReadResult->buffer, batch);
         }
         TracyPlot("pty.read.bytes",
-                  static_cast<int64_t>(std::ranges::fold_left(
-                      batch | std::views::transform([](auto const& piece) { return piece.data.size(); }),
-                      size_t { 0 },
-                      std::plus {})));
+                  static_cast<int64_t>(std::accumulate(
+                      batch.begin(), batch.end(), size_t { 0 }, [](size_t total, auto const& piece) {
+                          return total + piece.data.size();
+                      })));
 
         // Parse against the buffer readFromPty() read into, not _currentPtyBuffer, which writeToScreen()
         // on another thread may have replaced meanwhile: Screen's bulk text path moves this buffer's hot

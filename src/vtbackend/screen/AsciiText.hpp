@@ -46,15 +46,21 @@ constexpr auto AsciiScanBlockSize = size_t { 32 };
 /// @return The offset of the first byte that is not ASCII, or the size of @p text if there is none.
 [[nodiscard]] inline size_t asciiPrefixLength(std::string_view text) noexcept
 {
-    for (auto const blockBegin:
-         std::views::iota(size_t { 0 }, text.size()) | std::views::stride(AsciiScanBlockSize))
+    auto const firstNonAscii = [](std::string_view bytes) {
+        return static_cast<size_t>(std::ranges::find_if_not(bytes, isAsciiByte) - bytes.begin());
+    };
+    // Block indices rather than std::views::stride, which the libc++ that macOS ships lacks.
+    auto const wholeBlocks = text.size() / AsciiScanBlockSize;
+    for (auto const blockIndex: std::views::iota(size_t { 0 }, wholeBlocks))
     {
+        auto const blockBegin = blockIndex * AsciiScanBlockSize;
         auto const block = text.substr(blockBegin, AsciiScanBlockSize);
         if (!isAsciiOnly(block))
-            return blockBegin
-                   + static_cast<size_t>(std::ranges::find_if_not(block, isAsciiByte) - block.begin());
+            return blockBegin + firstNonAscii(block);
     }
-    return text.size();
+    auto const tailBegin = wholeBlocks * AsciiScanBlockSize;
+    auto const tail = text.substr(tailBegin);
+    return isAsciiOnly(tail) ? text.size() : tailBegin + firstNonAscii(tail);
 }
 
 /// Tests whether a UTF-8 decoder that is idle where @p text begins is idle again where byte @p offset
