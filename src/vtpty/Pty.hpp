@@ -122,14 +122,18 @@ class Pty
     ///
     /// @param storage Target buffer to store the read data to.
     /// @param timeout Wait only for up to given timeout before giving up the blocking read attempt.
-    ///                A zero timeout never blocks: the read returns what is waiting, or nothing (an
-    ///                error or an empty result). Terminal::processInputOnce() relies on that to read
+    ///                A zero timeout never blocks: the read returns what is waiting, or reports that
+    ///                nothing is (see below). Terminal::processInputOnce() relies on that to read
     ///                ahead while another thread holds the terminal.
     /// @param size   The number of bytes to read at most, even if the storage has more bytes available.
     ///
     /// @returns A view to the consumed buffer. The boolean in the ReadResult
     ///          indicates whether or not this data was coming through
     ///          the stdout-fastpipe.
+    ///          An empty result means end of file and nothing else: callers close the PTY on it.
+    ///          Nothing to read within the timeout, a zero one included, is std::nullopt with
+    ///          `errno == EAGAIN`, as is a read that was interrupted (wakeupReader(), EINTR). Any other
+    ///          std::nullopt is a failure or a closed PTY, with `errno` saying which.
     [[nodiscard]] virtual std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
                                                          std::optional<std::chrono::milliseconds> timeout,
                                                          size_t size) = 0;
