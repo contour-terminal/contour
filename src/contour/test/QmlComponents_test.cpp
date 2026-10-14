@@ -50,6 +50,7 @@
 #include <functional>
 #include <memory>
 #include <ranges>
+#include <tuple>
 #include <utility>
 
 #include <QtTest/QSignalSpy>
@@ -906,6 +907,25 @@ enum class TabStripAt : std::uint8_t
     Bottom //!< `tab_bar_position: Bottom`: the tab's bottom edge IS the window's bottom edge.
 };
 
+/// Deletes a QML test host once it has drawn one more frame and run what that frame queued.
+///
+/// A tab under the pointer grabs its drag image when its window first shows -- offscreen the pointer rests
+/// on the origin, where most hosts put their tab -- and the grab lands on the window's next frame. Nothing
+/// owns a grab still in flight, so a window destroyed before that frame would leak it.
+struct SettleThenDelete
+{
+    void operator()(QObject* host) const
+    {
+        if (auto* window = qobject_cast<QQuickWindow*>(host))
+            std::ignore = window->grabWindow();
+        QCoreApplication::processEvents();
+        delete host;
+    }
+};
+
+/// A QML test host, destroyed only once it has settled.
+using QmlHost = std::unique_ptr<QObject, SettleThenDelete>;
+
 /// Builds @p source as a QML component and instantiates it, failing the test on any QML error.
 ///
 /// Every host in this file is the same three steps — hand the engine the source, wait out the load (which
@@ -916,9 +936,7 @@ enum class TabStripAt : std::uint8_t
 /// @param source The QML source of the host, whose root must be a Window.
 /// @param name   A file name used for the component URL and in the failure message; it need not exist.
 /// @return The instantiated root object.
-[[nodiscard]] std::unique_ptr<QObject> buildQmlHost(QQmlEngine& engine,
-                                                    QString const& source,
-                                                    QString const& name)
+[[nodiscard]] QmlHost buildQmlHost(QQmlEngine& engine, QString const& source, QString const& name)
 {
     QQmlComponent component(&engine);
     component.setData(source.toUtf8(), QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/%1").arg(name)));
@@ -928,7 +946,7 @@ enum class TabStripAt : std::uint8_t
     INFO(name.toStdString() << " errors: " << component.errorString().toStdString());
     REQUIRE(component.isReady());
 
-    std::unique_ptr<QObject> host(component.create());
+    auto host = QmlHost(component.create());
     REQUIRE(host != nullptr);
     QCoreApplication::processEvents();
     return host;
@@ -962,10 +980,10 @@ constexpr auto TabItemBindings = "    controller: terminalSessions\n"
 /// @param stripAt    Where in the window to put the tab (mirrors the `tab_bar_position` option).
 /// @param windowWidth The host window's width; a narrow one is what makes a right-edge overflow testable.
 /// @return The host Window; the TabItem is reachable as its `tabItem` property.
-[[nodiscard]] std::unique_ptr<QObject> makeTabItemHost(QQmlEngine& engine,
-                                                       MockTabController& controller,
-                                                       TabStripAt stripAt = TabStripAt::Top,
-                                                       int windowWidth = 800)
+[[nodiscard]] QmlHost makeTabItemHost(QQmlEngine& engine,
+                                      MockTabController& controller,
+                                      TabStripAt stripAt = TabStripAt::Top,
+                                      int windowWidth = 800)
 {
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
@@ -3652,8 +3670,7 @@ void postGesture(
 /// @param engine     The engine to build in.
 /// @param controller The mock the tab binds to.
 /// @return The host Window; the tab is reachable as its `tabItem` property.
-[[nodiscard]] std::unique_ptr<QObject> makeTabItemUnderResizeBorderHost(QQmlEngine& engine,
-                                                                        MockTabController& controller)
+[[nodiscard]] QmlHost makeTabItemUnderResizeBorderHost(QQmlEngine& engine, MockTabController& controller)
 {
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
@@ -3694,7 +3711,7 @@ void postGesture(
 ///                           leaves the drag region real width and "left of the tabs" and "right of
 ///                           the drag region" are genuinely different places to be.
 /// @return The host Window; the bar is reachable via findChild("titleBar").
-[[nodiscard]] std::unique_ptr<QObject> makeTitleBarHost(
+[[nodiscard]] QmlHost makeTitleBarHost(
     QQmlEngine& engine,
     MockTabController& controller,
     contour::config::UiStyle uiStyle = contour::config::UiStyle::Native,
@@ -3730,6 +3747,52 @@ void postGesture(
     return buildQmlHost(engine, source, QStringLiteral("TitleBarTestHost.qml"));
 }
 } // namespace
+
+TEST_CASE("A TabItem grabs its drag image only while a drag can start from it (offscreen)",
+          "[contour][gui][qml]")
+{
+    // A tab's drag image is an asynchronous grab. Each one holds its image until the garbage collector
+    // frees it, and one still in flight when its window or engine goes away is never freed at all. A tab
+    // the pointer is not on has no drag to start, so its title changing grabs nothing; with the pointer
+    // on it, the next change does.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const host = makeTabItemHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    auto* tab = host->property("tabItem").value<QQuickItem*>();
+    REQUIRE(tab != nullptr);
+
+    // A frame drawn after each change, as a live window draws one: a grab started lands on it.
+    auto const retitle = [&](int build) {
+        tab->setProperty("tabTitle", QStringLiteral("build %1").arg(build));
+        std::ignore = window->grabWindow();
+        QCoreApplication::processEvents();
+    };
+
+    // The pointer off the window. Where an earlier test left it the tab may sit under it, and so have
+    // grabbed once already: that grab is let land, and its image set aside.
+    auto const away = QPoint(-1000, -1000);
+    QTest::mouseMove(window, away);
+    std::ignore = window->grabWindow();
+    QCoreApplication::processEvents();
+    tab->setProperty("dragImage", QUrl());
+
+    for (auto const build: std::views::iota(0, 5))
+        retitle(build);
+    CHECK(tab->property("dragImage").toUrl().isEmpty());
+
+    QTest::mouseMove(window, sceneRectOf(*tab).center().toPoint());
+    retitle(5);
+    CHECK_FALSE(tab->property("dragImage").toUrl().isEmpty());
+
+    // The pointer leaves the window, or the next test's tab could open under it and grab.
+    QTest::mouseMove(window, away);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
 
 TEST_CASE("A resize-border press over a tab does not start a tab drag (offscreen)",
           "[contour][gui][qml][resize]")
