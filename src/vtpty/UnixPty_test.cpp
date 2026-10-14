@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <optional>
@@ -125,4 +126,25 @@ TEST_CASE("UnixPty.read.deliversAFloodWholeAndInBoundedBatches", "[vtpty][unixpt
         CHECK(flood.received.size() == payload.size());
         CHECK(std::ranges::equal(flood.received, payload));
     }
+}
+
+TEST_CASE("UnixPty.isClosed.seesAConcurrentClose", "[vtpty][unixpty][threading]")
+{
+    // The session's parser thread closes the PTY when the child goes away, and the GUI thread asks
+    // isClosed() when it learns of it. The two hand over through a relaxed flag, which orders nothing,
+    // so under the clang-tsan tree the answer must come from state close() publishes under its lock.
+    auto pty =
+        vtpty::UnixPty { vtpty::PageSize { .lines = vtpty::LineCount(24), .columns = vtpty::ColumnCount(80) },
+                         std::nullopt };
+    REQUIRE(pty.start().has_value());
+
+    auto closed = std::atomic<bool> { false };
+    auto closer = std::thread { [&] {
+        pty.close();
+        closed.store(true, std::memory_order_relaxed);
+    } };
+    while (!closed.load(std::memory_order_relaxed))
+        std::this_thread::yield();
+    CHECK(pty.isClosed());
+    closer.join();
 }

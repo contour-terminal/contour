@@ -283,6 +283,9 @@ void UnixPty::close()
 
 bool UnixPty::isClosed() const noexcept
 {
+    // Under the lock close() writes the descriptor under: it is asked from the GUI thread while the
+    // session's parser thread closes the PTY on the child's exit.
+    auto const _ = std::scoped_lock { _mutex };
     return _masterFd == -1;
 }
 

@@ -73,7 +73,8 @@ class UnixPty final: public Pty
     PageSize _pageSize;
     std::optional<ImageSize> _pixels;
     std::unique_ptr<Slave> _slave;
-    std::mutex _mutex;
+    /// Guards the master descriptor against a concurrent close(), for readers and writers alike.
+    mutable std::mutex _mutex;
 };
 
 } // namespace vtpty
