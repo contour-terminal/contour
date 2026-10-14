@@ -277,7 +277,7 @@ Bright colors
 ``` yaml
 color_schemes:
   default:
-    normal:
+    bright:
       black:   '#707070'
       red:     '#ff0000'
       green:   '#00ff00'
@@ -287,6 +287,18 @@ color_schemes:
       cyan:    '#00ffff'
       white:   '#ffffff'
 ```
+
+### Writing a palette
+`normal`, `bright` and `dim` each take their eight colors either by name, as above, or as a list in the
+order black, red, green, yellow, blue, magenta, cyan, white:
+``` yaml
+color_schemes:
+  default:
+    bright: ['#707070', '#ff0000', '#00ff00', '#ffff00', '#0000ff', '#ff00ff', '#00ffff', '#ffffff']
+```
+A list may stop short: the colors it leaves out keep their values. Either way, each color is written as
+`'#rrggbb'` (quoted, since `#` would otherwise start a YAML comment) or as `0xrrggbb`. A bare decimal number
+is not a color, and leaves its slot as it was.
 
 ## Default color scheme
 

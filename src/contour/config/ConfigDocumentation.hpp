@@ -1478,17 +1478,21 @@ constexpr StringLiteral InputMethodEditorConfig { "\n"
                                                   "    foreground: {}\n"
                                                   "    background: {}\n" };
 
-constexpr StringLiteral NormalColorsConfig { "\n"
-                                             "{comment} Normal colors\n"
-                                             "normal:\n"
-                                             "    black:   {}\n"
-                                             "    red:     {}\n"
-                                             "    green:   {}\n"
-                                             "    yellow:  {}\n"
-                                             "    blue:    {}\n"
-                                             "    magenta: {}\n"
-                                             "    cyan:    {}\n"
-                                             "    white:   {}\n" };
+constexpr StringLiteral NormalColorsConfig {
+    "\n"
+    "{comment} Normal colors, by name. normal, bright and dim also take\n"
+    "{comment} a list in this order: [black, red, ..., white].\n"
+    "{comment} A color is '#rrggbb' or 0xrrggbb, not a decimal number.\n"
+    "normal:\n"
+    "    black:   {}\n"
+    "    red:     {}\n"
+    "    green:   {}\n"
+    "    yellow:  {}\n"
+    "    blue:    {}\n"
+    "    magenta: {}\n"
+    "    cyan:    {}\n"
+    "    white:   {}\n"
+};
 
 constexpr StringLiteral BrightColorsConfig { "\n"
                                              "{comment} Bright colors\n"
