@@ -26,7 +26,7 @@ struct CommandCaptureError
         Cancelled,   ///< A stop was requested and the run was killed.
     };
 
-    Kind kind;             ///< What went wrong.
+    Kind kind {};          ///< What went wrong.
     std::error_code cause; ///< The system error behind SpawnFailed; empty otherwise.
 };
 
