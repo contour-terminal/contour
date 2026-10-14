@@ -16,6 +16,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <ranges>
@@ -73,5 +74,42 @@ int parseDA1Level(std::string_view reply);
 GridDeltaCursor drainedDeltaCursor(Grid& grid);
 
 std::vector<int> changedLineOffsets(Grid& grid, GridDeltaCursor& cursor);
+
+// {{{ line shape
+
+/// Bytes a test writes, under the name a failure reports them by.
+struct Scenario
+{
+    std::string_view name;  ///< What the bytes do, for the failure message.
+    std::string_view bytes; ///< What the test writes.
+};
+
+/// Edits of lines that have already left LineShape::Uniform, each written from the top left of a fresh
+/// 3x10 page. Two oracles share them: the stored shape must cover the cells, and bulk scanning must
+/// leave the page a per-codepoint parser leaves.
+inline constexpr auto EditsOfShapedLines = std::array {
+    Scenario { .name = "EL on a coloured line", .bytes = "\033[44mabc\033[m def\033[1;3H\033[K" },
+    Scenario { .name = "ED below a wide character",
+               .bytes = "\xE4\xB8\xAD"
+                        "x\033[1;2H\033[J" },
+    Scenario { .name = "ECH over a cluster",
+               .bytes = "e\xCC\x81"
+                        "abc\033[1;1H\033[2X" },
+    Scenario { .name = "DCH through a wide character",
+               .bytes = "a\xE4\xB8\xAD"
+                        "b\033[1;2H\033[P" },
+    Scenario { .name = "ICH before a coloured cell", .bytes = "ab\033[31mc\033[m\033[1;1H\033[2@" },
+    Scenario { .name = "EL 2 on a wide line", .bytes = "\xE4\xB8\xAD\xE4\xB8\xAD\033[2K" },
+    Scenario { .name = "ASCII over a coloured line", .bytes = "\033[42mgreen\033[m\033[1;1Hplain text" },
+    Scenario { .name = "ASCII beside a wide character", .bytes = "\033[1;5H\xE4\xB8\xAD\033[1;1Habc" },
+    Scenario { .name = "ASCII over a wide character's tail",
+               .bytes = "\xE4\xB8\xAD\xE4\xB8\xAD\033[1;2Hxyz" },
+};
+
+/// Checks that every line of @p screen's page stores a shape at least as conservative as its cells
+/// imply, which every fast path trusts. @see shapeImpliedByCells
+void checkShapeCoversCells(Screen const& screen);
+
+// }}}
 
 } // namespace vtbackend::test

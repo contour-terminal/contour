@@ -12,6 +12,7 @@ option(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE "Updates the render buffer withi
 option(LIBTERMINAL_BUILD_BENCH_HEADLESS "Builds bench-headless CLI tool to benchmark libvtbackend [default: OFF]" OFF)
 
 set(vtbackend_HEADERS
+    screen/AsciiText.hpp
     vt/Capabilities.hpp
     core/CellFlags.hpp
     grid/CellProxy.hpp
@@ -82,6 +83,7 @@ set(vtbackend_HEADERS
     screen/Viewport.hpp
     core/WindowSizeStack.hpp
     core/WorkingDirectory.hpp
+    testing/Workloads.hpp
     graphics/regis/ReGISColor.hpp
     graphics/regis/ReGISContext.hpp
     graphics/regis/ReGISFont.hpp
@@ -226,6 +228,7 @@ if(LIBTERMINAL_TESTING)
         vt/TextSizing_test.cpp
         screen/ScreenTestFixtures.cpp
         screen/TerminalTestFixtures.cpp
+        screen/AsciiText_test.cpp
         screen/Screen_test.cpp
         screen/Screen_charset_test.cpp
         screen/Screen_rect_test.cpp
@@ -243,6 +246,7 @@ if(LIBTERMINAL_TESTING)
         screen/Terminal_scroll_test.cpp
         screen/Terminal_selection_test.cpp
         screen/Terminal_input_test.cpp
+        screen/BulkScan_test.cpp
         shell/ShellIntegration_test.cpp
         grid/LineSoA_test.cpp
         grid/SoAClusterWriter_test.cpp
@@ -255,6 +259,7 @@ if(LIBTERMINAL_TESTING)
         graphics/regis/ReGISTextRasterizer_test.cpp
         graphics/regis/ReGISParser_test.cpp
         input/vi/ViCommands_test.cpp
+        testing/Workloads_test.cpp
         vt/VTWriter_test.cpp
     )
     target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend)
@@ -278,6 +283,34 @@ if(LIBTERMINAL_TESTING)
             termbench::termbench
             vtbackend
         )
+
+        # A short run of throughput, snapshot, keypress and pty each, so that a crash like the one
+        # `bench-headless pty` had -- it used its PTY before opening it -- fails the suite.
+        add_test(NAME bench_headless_throughput_smoke COMMAND bench-headless throughput size 1 runs 1)
+        # A name that is not a workload must fail, naming the ones that are.
+        add_test(NAME bench_headless_throughput_rejects_unknown_kind
+                 COMMAND bench-headless throughput size 1 runs 1 kinds no-such-workload)
+        set_tests_properties(bench_headless_throughput_rejects_unknown_kind PROPERTIES PASS_REGULAR_EXPRESSION
+                             "Unknown workload 'no-such-workload'\\. Known: ascii, colored, sgr, utf8, utf8sparse, tui\\.")
+        add_test(NAME bench_headless_snapshot_smoke COMMAND bench-headless snapshot frames 10 runs 1)
+        # The benchmarks with an application on a real PTY: a script under /bin/sh on POSIX, and
+        # `bench-headless pty-child` through ConPTY on Windows.
+        add_test(NAME bench_headless_throughput_pty_smoke
+                 COMMAND bench-headless throughput size 1 runs 1 kinds ascii screens primary pty)
+        add_test(NAME bench_headless_keypress_smoke COMMAND bench-headless keypress seconds 1 rate 100)
+        set(BENCH_HEADLESS_SMOKE_TESTS
+            bench_headless_throughput_smoke
+            bench_headless_throughput_rejects_unknown_kind
+            bench_headless_snapshot_smoke
+            bench_headless_throughput_pty_smoke
+            bench_headless_keypress_smoke)
+        # ConPTY has no slave end that `bench-headless pty` could write into.
+        if(NOT WIN32)
+            add_test(NAME bench_headless_pty_smoke COMMAND bench-headless pty seconds 1)
+            list(APPEND BENCH_HEADLESS_SMOKE_TESTS bench_headless_pty_smoke)
+        endif()
+        # A hang -- a PTY nobody drains any more, say -- fails within a minute, not at CI's step timeout.
+        set_tests_properties(${BENCH_HEADLESS_SMOKE_TESTS} PROPERTIES LABELS bench TIMEOUT 60)
 
         if(CONTOUR_INSTALL_TOOLS)
             if(APPLE)

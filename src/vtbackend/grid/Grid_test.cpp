@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <format>
@@ -2262,3 +2263,44 @@ TEST_CASE("Grid.historyEviction.theGuaranteeSurvivesAReverseScroll", "[grid][his
     }
 }
 // }}}
+
+TEST_CASE("Grid.scrollUp.atCapacityKeepsTheEvictedLinesStorage", "[grid]")
+{
+    // At full scrollback, the line scrolled in at the bottom IS the line evicted from the top of the
+    // ring, and the next write fills it at once, so its storage is kept rather than released and
+    // allocated again.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(1));
+    grid.setLineText(LineOffset(0), "ABCDE");
+    grid.setLineText(LineOffset(1), "abcde");
+
+    SECTION("one line at a time")
+    {
+        grid.scrollUp(LineCount(1)); // "ABCDE" fills the only history slot: the ring is full now
+        grid.setLineText(LineOffset(1), "12345");
+        REQUIRE(grid.historyLineCount() == LineCount(1));
+        auto const* const evicted = std::as_const(grid).lineAt(LineOffset(-1)).storage().codepoints.data();
+
+        grid.scrollUp(LineCount(1));
+
+        auto const& scrolledIn = std::as_const(grid).lineAt(LineOffset(1));
+        CHECK(scrolledIn.isBlank());
+        CHECK(grid.lineText(LineOffset(1)) == "     ");
+        CHECK(grid.lineText(LineOffset(-1)) == "abcde");
+        CHECK(scrolledIn.storage().codepoints.data() == evicted);
+    }
+
+    SECTION("more lines than the ring has free")
+    {
+        // One free slot, two lines to scroll: the first is appended, the second evicts "ABCDE".
+        grid.scrollUp(LineCount(2));
+
+        REQUIRE(grid.historyLineCount() == LineCount(1));
+        CHECK(grid.lineText(LineOffset(-1)) == "abcde");
+        CHECK(grid.lineText(LineOffset(0)) == "     "); // the appended line
+        CHECK(grid.lineText(LineOffset(1)) == "     "); // the line "ABCDE" was evicted from
+        auto const keptStorage = std::ranges::count_if(std::views::iota(0, 2), [&](int lineNo) {
+            return std::as_const(grid).lineAt(LineOffset(lineNo)).storage().codepoints.capacity() >= 5;
+        });
+        CHECK(keptStorage == 1); // the evicted line; the appended one never had storage
+    }
+}

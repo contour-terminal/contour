@@ -855,6 +855,7 @@ if(CONTOUR_TESTING)
         test/core_test_main.cpp
         config/Actions_test.cpp
         config/LayoutBuilder_test.cpp
+        config/PtyReadBufferSize_test.cpp
         config/UiStyle_test.cpp
         config/WindowControlStyle_test.cpp
         command/CommandCatalog_test.cpp
@@ -866,6 +867,7 @@ if(CONTOUR_TESTING)
         cli/CaptureScreen_test.cpp
         cli/CatImageArgs_test.cpp
         cli/ShellIntegration_test.cpp
+        display/RedrawCoalescer_test.cpp
         session/SearchStatus_test.cpp
     )
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally, and
@@ -1112,6 +1114,9 @@ if(WIN32)
                 PATTERN "*_test.*" EXCLUDE
                 PATTERN "*.pdb" EXCLUDE
                 PATTERN "unicode_tablegen.exe" EXCLUDE
+                # A developer benchmark, built here so that it runs beside the staged conpty.dll: the .exe,
+                # and the .ilk an incremental link leaves beside it.
+                PATTERN "bench-headless.*" EXCLUDE
                 PATTERN "*"
         )
     endif()

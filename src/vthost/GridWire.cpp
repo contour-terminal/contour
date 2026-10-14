@@ -163,10 +163,12 @@ void applyWireCell(vtbackend::LineSoA& soa,
             soa, column, extra, vtbackend::ClusterWidthPolicy::FirstCodepoint);
     // Restored AFTER the writes above, both of which have their own opinion: writeCellToSoA resets
     // scale to 1, and appending a cluster codepoint re-measures the cluster's width. Neither may
-    // overrule the sender, which is the terminal that actually ran the emulation.
+    // overrule the sender, which is the terminal that actually ran the emulation. writeCellToSoA
+    // judged the line's shape for an ordinary-sized cell, so the restored sizing judges it again.
     soa.widths[column] = cell.width;
     soa.scales[column] = cell.scale;
     soa.textScaleExtras[column] = cell.textScaleExtras;
+    vtbackend::degradeShapeForTextScale(soa, vtbackend::unpackTextScale(cell.scale, cell.textScaleExtras));
 }
 
 void applyWireLine(vtbackend::Line& line,

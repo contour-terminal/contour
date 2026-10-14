@@ -2,10 +2,12 @@
 #project(vtparser VERSION "0.0.0" LANGUAGES CXX)
 
 add_library(vtparser STATIC
+    BulkScan.hpp
     Parser.cpp
     Parser.hpp
     Parser-impl.hpp
     ParserEvents.hpp
+    Utf8Decoding.hpp
 )
 target_link_libraries(vtparser PUBLIC
     Microsoft.GSL::GSL

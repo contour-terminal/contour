@@ -921,8 +921,22 @@ std::optional<SshSession::ReadResult> SshSession::read(crispy::BufferObject<char
 {
     {
         auto injectLock = std::unique_lock { _injectMutex };
-        _injectCV.wait(injectLock,
-                       [this]() { return _state == State::Operational || !_injectedRead.empty(); });
+        auto const readable = [this]() {
+            return _state == State::Operational || !_injectedRead.empty();
+        };
+        // Bounded by the timeout like any other read: the terminal reads ahead with a zero timeout while
+        // the render thread holds its state, and must not park here -- before it has parsed the password
+        // prompt it already read -- until the user types a password at a prompt they cannot see.
+        if (timeout.has_value())
+        {
+            if (!_injectCV.wait_for(injectLock, *timeout, readable))
+            {
+                errno = EAGAIN;
+                return std::nullopt;
+            }
+        }
+        else
+            _injectCV.wait(injectLock, readable);
 
         if (!_injectedRead.empty())
         {

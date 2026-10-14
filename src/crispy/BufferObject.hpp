@@ -111,7 +111,16 @@ class BufferObject: public std::enable_shared_from_this<BufferObject<T>>
     /// Advances the end of the used area by the given amount of bytes.
     gsl::span<T> advance(size_t n) noexcept;
 
+    /// Moves the hot end forward to @p ptr, a position in this buffer. A @p ptr at or before the hot end
+    /// leaves it where it is: a parse can find the hot end already past its text, where another writer
+    /// appended meanwhile, and only rewindHotEndTo() moves it back.
     void advanceHotEndUntil(T const* ptr) noexcept;
+
+    /// Moves the hot end back to @p ptr, handing the bytes after it to the next write.
+    ///
+    /// Only for bytes nobody refers to any more: the caller must own every byte between @p ptr and the
+    /// hot end that is still to be parsed, as Terminal::releaseReadAhead() does for the batch it claimed.
+    void rewindHotEndTo(T const* ptr) noexcept;
 
     /// Appends the given amount of data to the buffer object
     /// without advancing the end pointer.
@@ -302,7 +311,15 @@ inline gsl::span<T> BufferObject<T>::advance(size_t n) noexcept
 template <BufferObjectElementType T>
 inline void BufferObject<T>::advanceHotEndUntil(T const* ptr) noexcept
 {
-    assert(_hotEnd <= ptr && ptr <= _end);
+    assert(data() <= ptr && ptr <= _end);
+    if (_hotEnd < ptr)
+        _hotEnd = const_cast<T*>(ptr);
+}
+
+template <BufferObjectElementType T>
+inline void BufferObject<T>::rewindHotEndTo(T const* ptr) noexcept
+{
+    assert(data() <= ptr && ptr <= _hotEnd);
     _hotEnd = const_cast<T*>(ptr);
 }
 

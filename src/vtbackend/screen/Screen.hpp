@@ -29,6 +29,7 @@
 #include <core/log/LogStore.hpp>
 
 #include <libunicode/grapheme_segmenter.h>
+#include <libunicode/utf8.h>
 #include <libunicode/width.h>
 
 #include <gsl/pointers>
@@ -656,6 +657,38 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         return margin().horizontal.to.value + 1 == pageSize().columns.value;
     }
 
+    /// How many columns of text may go straight into the cursor's line, from the cursor towards the
+    /// right margin, without the per-codepoint path. The one owner of every condition that depends on
+    /// where the cursor stands and what its line holds; the modes and charsets, which hold for a whole
+    /// run of text, are the text writer's own business.
+    /// @return 0 while a wrap is pending, on a line holding a cell that spans, or right of the right
+    ///         margin; otherwise the columns from the cursor up to the right margin, the margin's own
+    ///         column left out.
+    [[nodiscard]] size_t bulkWritableColumns() const noexcept
+    {
+        // A pending wrap moves the text to the next line, which nothing below looks at. At a real
+        // deferred wrap the cursor stands on the right margin, where the answer would be 0 anyway; a
+        // margin widened under the wrap, or a DECRC after a resize, leaves it pending further left.
+        if (_cursor.wrapPending)
+            return 0;
+
+        // A line holding a cell that reaches past its own column or row -- a wide character's or a
+        // scaled block's continuation, a scaled block's head -- or an image is written cell by cell:
+        // only the per-codepoint path erases the rest of a cell it overwrites part of. Any other line
+        // takes the bulk path, whatever its renditions and on whichever screen. @see LineShape
+        if (!currentLine().isBulkWritable())
+            return 0;
+
+        // Right of the right margin -- DECLRMM lets CUP put the cursor there -- the margin no longer
+        // bounds the text, and `margin - cursor` would go negative.
+        auto const column = _cursor.position.column;
+        auto const rightMargin = margin().horizontal.to;
+        if (column > rightMargin)
+            return 0;
+
+        return unbox<size_t>(rightMargin - column);
+    }
+
     [[nodiscard]] bool isCursorInsideMargins() const noexcept;
 
     /// Tests whether the cursor sits within the active left/right margins.
@@ -1153,6 +1186,102 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
   private:
     void writeTextInternal(char32_t codepoint);
+
+    /// Whether writeSoftFontGlyph() put a glyph on the screen.
+    enum class SoftFontGlyph : uint8_t
+    {
+        Absent,  ///< Nothing was written; the character takes the ordinary path.
+        Written, ///< The glyph is in the cell and the cursor has advanced.
+    };
+
+    /// Writes @p sourceCodepoint as a glyph of the DRCS soft font @p font, the font the charset
+    /// invoked for the next graphic character names (Charsets::activeDRCSFont()), when it defines one.
+    ///
+    /// The caller asks activeDRCSFont() first, an inline load, so that the text paths pay a call only
+    /// when a soft font is invoked at all.
+    ///
+    /// The single-shift state (SS2/SS3) is consumed only when a glyph was written, so a character
+    /// that falls back to the ordinary path is still mapped through the single-shifted set.
+    /// @param font            The soft font's number.
+    /// @param sourceCodepoint The character as received, before charset mapping.
+    /// @return Whether a glyph was written.
+    [[nodiscard]] SoftFontGlyph writeSoftFontGlyph(int font, char32_t sourceCodepoint);
+
+    /// Whether the modes and charsets let ASCII go straight into the line's arrays: no insert mode,
+    /// no left/right margins, and every ASCII character mapping to itself (CharsetMapping::isPlainUSASCII()).
+    /// The half of the question that holds for a whole run of text; bulkWritableColumns() is the other.
+    [[nodiscard]] bool canBulkWriteAscii() const noexcept;
+
+    /// Whether an ASCII stretch of @p length bytes may be written in bulk where the cursor stands now,
+    /// inside a run for which canBulkWriteAscii() holds.
+    ///
+    /// Asks bulkWritableColumns() again, what Terminal::maxBulkTextSequenceWidth() asked for the whole
+    /// run when it began, because the text written before the stretch can change the answer. The
+    /// screen may have taken more columns than the parser's scan counted for that text: the scan
+    /// measures a wide emoji followed by VS15 as one column, while the screen keeps the two the emoji
+    /// already took, since applyClusterWidthChange() never narrows a cluster on screen. The stretch
+    /// then no longer fits before the margin, and a bulk write would drop the letters that cross it.
+    /// That text may also have left a wrap pending or put a wide character on the line.
+    [[nodiscard]] bool canBulkWriteAsciiStretch(size_t length) const noexcept;
+
+    /// Writes the interior of an ASCII stretch straight into the current line's arrays and moves the
+    /// cursor past it. Lean, because canBulkWriteAsciiStretch() has ruled out all that writeText() sees
+    /// to before a run of nothing but ASCII: no wrap can be pending, the line holds no wide character
+    /// to overwrite half of, and the interior ends left of the margin. The run's end -- the parsing
+    /// buffer's hot end, the instruction counter -- is writeText()'s.
+    void writeAsciiInterior(std::string_view interior);
+
+    /// Whether the ASCII stretches of a run may go into the line in bulk.
+    enum class AsciiStretches : uint8_t
+    {
+        PerCodepoint, ///< The modes or the charsets need every codepoint looked at (canBulkWriteAscii()).
+        InBulk,       ///< The long ones may (forEachBulkAsciiInterior).
+    };
+
+    /// Writes a run of text through the grapheme segmenter, one codepoint at a time, apart from the
+    /// interiors of long ASCII stretches when @p stretches lets those go into the line in bulk.
+    /// @param text      The run.
+    /// @param cellCount How many columns the parser measured the run to take.
+    /// @param stretches Whether the run's ASCII stretches may be written in bulk.
+    /// @return The offset into @p text where the last interior written in bulk ends, if any was.
+    [[nodiscard]] std::optional<size_t> writeSegmentedText(std::string_view text,
+                                                           size_t cellCount,
+                                                           AsciiStretches stretches);
+
+    /// Grapheme segmentation carried from one codepoint of a run of text to the next.
+    struct GraphemeRun
+    {
+        unicode::grapheme_segmenter_state segmenter {}; ///< Where segmentation stands.
+        char32_t previousCodepoint = 0;                 ///< The codepoint segmented last; 0 before any.
+    };
+
+    /// The segmentation state after the cell the previous write ended in, replayed from that cell's
+    /// codepoints, so that a cluster continues across writes: 👨 written by one, then the ZWJ in the
+    /// next, joins the 👨. Not the parser's state, which its text scan has already advanced past the
+    /// text being written: reusing it would segment that text twice.
+    /// @return An empty run if that cell is off the page or its line is blank.
+    [[nodiscard]] GraphemeRun seedGraphemeStateFromLastCell() const noexcept;
+
+    /// Where the next codepoint of a run of text goes.
+    enum class ClusterPlacement : uint8_t
+    {
+        JoinsLastCluster, ///< No grapheme cluster breaks before it: into the cell written last.
+        StartsCluster,    ///< A grapheme cluster breaks before it: into a cell of its own.
+    };
+
+    /// Segments @p codepoint, already mapped through the charsets, as the next codepoint of @p run, and
+    /// advances @p run past it. Holds the one segmentation rule both per-codepoint writers follow.
+    /// @return Whether @p codepoint starts a grapheme cluster or joins the one written last.
+    [[nodiscard]] static ClusterPlacement placeInRun(char32_t codepoint, GraphemeRun& run) noexcept;
+
+    /// Adds @p codepoint to the grapheme cluster the previous write ended in, and claims the columns
+    /// that widens it by.
+    void appendToLastCluster(char32_t codepoint);
+
+    /// Writes @p text one codepoint at a time through the grapheme segmenter, continuing @p run.
+    /// @param text Whole characters: decoding starts afresh.
+    /// @param run  The run's segmentation state, carried on to whatever the run writes next.
+    void writeTextPerCodepoint(std::string_view text, GraphemeRun& run);
 
     void configureCurrentLineSize(LineFlags enabled);
 

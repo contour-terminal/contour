@@ -2,6 +2,7 @@
 #include <vtbackend/grid/CellProxy.hpp>
 #include <vtbackend/grid/Line.hpp>
 #include <vtbackend/grid/LineSoA.hpp>
+#include <vtbackend/grid/SoAClusterWriter.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -131,7 +132,7 @@ TEST_CASE("LineSoA.copyColumns", "[LineSoA]")
     CHECK(dst.codepoints[0] == 0);
 }
 
-TEST_CASE("LineSoA.copyColumns.trivialInvalidated", "[LineSoA]")
+TEST_CASE("LineSoA.copyColumns.mixesTheDestination", "[LineSoA]")
 {
     // Source line with non-uniform SGR
     LineSoA src;
@@ -140,18 +141,18 @@ TEST_CASE("LineSoA.copyColumns.trivialInvalidated", "[LineSoA]")
     src.clusterSize[0] = 1;
     src.sgr[0].foregroundColor = Color::Indexed(1);
 
-    // Destination line starts trivial
+    // Destination line starts Uniform
     LineSoA dst;
     initializeLineSoA(dst, ColumnCount(10));
-    REQUIRE(dst.trivial);
+    REQUIRE(dst.shape == LineShape::Uniform);
 
     copyColumns(src, 0, dst, 0, 1);
 
-    // After copying non-uniform data, trivial must be false
-    CHECK_FALSE(dst.trivial);
+    // After copying cells in another pen, the destination is Mixed
+    CHECK(dst.shape == LineShape::Mixed);
 }
 
-TEST_CASE("LineSoA.copyColumns.trivialInvalidated.partialCopy", "[LineSoA]")
+TEST_CASE("LineSoA.copyColumns.mixesTheDestination.partialCopy", "[LineSoA]")
 {
     // Simulates horizontal-margin scroll: copy columns 2-7 from source into destination
     auto const srcAttrs = GraphicsAttributes { .foregroundColor = Color::Indexed(5) };
@@ -162,13 +163,13 @@ TEST_CASE("LineSoA.copyColumns.trivialInvalidated.partialCopy", "[LineSoA]")
 
     LineSoA dst;
     initializeLineSoA(dst, ColumnCount(10));
-    REQUIRE(dst.trivial);
+    REQUIRE(dst.shape == LineShape::Uniform);
 
     // Partial copy: columns 2-7 from source into destination at same position
     copyColumns(src, 2, dst, 2, 6);
 
-    // Destination now has mixed SGR (cols 0-1 default, cols 2-7 indexed(5)), trivial must be false
-    CHECK_FALSE(dst.trivial);
+    // Destination now has mixed SGR (cols 0-1 default, cols 2-7 indexed(5)), so the destination is Mixed
+    CHECK(dst.shape == LineShape::Mixed);
 }
 
 TEST_CASE("LineSoA.resizeLineSoA.grow", "[LineSoA]")
@@ -185,30 +186,30 @@ TEST_CASE("LineSoA.resizeLineSoA.grow", "[LineSoA]")
     CHECK(line.codepoints[7] == 0);    // new columns are empty
 }
 
-TEST_CASE("LineSoA.resizeLineSoA.grow.trivialInvalidatedOnMismatch", "[LineSoA]")
+TEST_CASE("LineSoA.resizeLineSoA.grow.mixesOnAnotherFill", "[LineSoA]")
 {
     auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
     LineSoA line;
     initializeLineSoA(line, ColumnCount(5), attrs);
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     // Growing with default fillAttrs ({}) differs from the existing sgr[0].
     resizeLineSoA(line, ColumnCount(10));
 
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("LineSoA.resizeLineSoA.grow.trivialPreservedOnMatch", "[LineSoA]")
+TEST_CASE("LineSoA.resizeLineSoA.grow.staysUniformOnTheSameFill", "[LineSoA]")
 {
     auto const attrs = GraphicsAttributes { .foregroundColor = Color::Indexed(3) };
     LineSoA line;
     initializeLineSoA(line, ColumnCount(5), attrs);
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
-    // Growing with same fillAttrs keeps trivial.
+    // Growing with the same fillAttrs keeps the line Uniform.
     resizeLineSoA(line, ColumnCount(10), attrs);
 
-    CHECK(line.trivial);
+    CHECK(line.shape == LineShape::Uniform);
 }
 
 TEST_CASE("LineSoA.resizeLineSoA.shrink", "[LineSoA]")
@@ -269,28 +270,28 @@ TEST_CASE("LineSoA.graphemeCluster.multiCodepoint", "[LineSoA]")
     CHECK(collected[1] == U'\u0301');
 }
 
-TEST_CASE("LineSoA.graphemeCluster.appendLeavesTheTrivialPath", "[LineSoA]")
+TEST_CASE("LineSoA.graphemeCluster.appendMixesTheLine", "[LineSoA]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     line.codepoints[0] = U'e';
     line.clusterSize[0] = 1;
-    CHECK(line.trivial); // a single-codepoint cell is still expressible
+    CHECK(line.shape == LineShape::Uniform); // a single-codepoint cell is still expressible
 
     // The batched RenderLine path stores one codepoint per column (@see Line::trivialBuffer), so a
     // cell holding a cluster cannot be represented there and its line must leave that path -- the
-    // same reason a wide cell's continuation and an image fragment already clear the flag. Note the
+    // same reason a wide cell's continuation and an image fragment already make it Spanning. Note the
     // cluster stays ONE column wide here: it is the extra codepoint, not any width change, that the
     // batched representation cannot carry.
     auto const widthChange = appendCodepointToCluster(line, 0, U'\u0301');
     CHECK(widthChange == 0);
     CHECK(line.widths[0] == 1);
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("LineSoA.graphemeCluster.appendLeavesTheTrivialPathUnderFirstCodepoint", "[LineSoA]")
+TEST_CASE("LineSoA.graphemeCluster.appendMixesTheLineUnderFirstCodepoint", "[LineSoA]")
 {
     // Under ClusterWidthPolicy::FirstCodepoint (DEC mode 2027 reset) the cluster keeps its width,
     // and appendCodepointToCluster returns early -- but the codepoint still joined the cluster, so
@@ -305,7 +306,7 @@ TEST_CASE("LineSoA.graphemeCluster.appendLeavesTheTrivialPathUnderFirstCodepoint
     auto const widthChange = appendCodepointToCluster(line, 0, U'\uFE0F', ClusterWidthPolicy::FirstCodepoint);
     CHECK(widthChange == 0);
     CHECK(line.widths[0] == 1); // VS16 may not widen it under this policy
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
 TEST_CASE("LineSoA.graphemeCluster.clearExtras", "[LineSoA]")
@@ -553,92 +554,92 @@ TEST_CASE("CellProxy.beginsWith", "[CellProxy]")
 }
 
 // =============================================================================
-// CellProxy trivial flag invalidation tests
+// CellProxy -- the setters that mix a Uniform line
 // =============================================================================
 
-TEST_CASE("CellProxy.trivialInvalidation.atCol0", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.atCol0", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
     CellProxy(line, 0).write(GraphicsAttributes {}, U'A', 1);
     CellProxy(line, 1).write(GraphicsAttributes {}, U'B', 1);
-    REQUIRE(line.trivial); // uniform SGR — still trivial
+    REQUIRE(line.shape == LineShape::Uniform); // uniform SGR — still Uniform
 
-    // Changing SGR at col 0 must invalidate trivial (col 1 still has default attrs)
+    // Changing SGR at col 0 must mix the line (col 1 still has default attrs)
     CellProxy(line, 0).setForegroundColor(Color::Indexed(IndexedColor::Red));
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.setForegroundColor", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.setForegroundColor", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
     CellProxy(line, 0).write(GraphicsAttributes {}, U'A', 1);
     CellProxy(line, 1).write(GraphicsAttributes {}, U'B', 1);
-    REQUIRE(line.trivial); // uniform SGR — still trivial
+    REQUIRE(line.shape == LineShape::Uniform); // uniform SGR — still Uniform
 
     CellProxy(line, 1).setForegroundColor(Color::Indexed(IndexedColor::Red));
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.setBackgroundColor", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.setBackgroundColor", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
     CellProxy(line, 0).write(GraphicsAttributes {}, U'A', 1);
     CellProxy(line, 1).write(GraphicsAttributes {}, U'B', 1);
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     CellProxy(line, 1).setBackgroundColor(Color::Indexed(IndexedColor::Blue));
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.setUnderlineColor", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.setUnderlineColor", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
     CellProxy(line, 0).write(GraphicsAttributes {}, U'A', 1);
     CellProxy(line, 1).write(GraphicsAttributes {}, U'B', 1);
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     CellProxy(line, 1).setUnderlineColor(Color::Indexed(IndexedColor::Green));
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.resetFlags", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.resetFlags", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
     CellProxy(line, 0).write(GraphicsAttributes {}, U'A', 1);
     CellProxy(line, 1).write(GraphicsAttributes {}, U'B', 1);
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     CellProxy(line, 1).resetFlags(CellFlags { CellFlag::Bold });
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.setGraphicsRendition", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.setGraphicsRendition", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
     CellProxy(line, 0).write(GraphicsAttributes {}, U'A', 1);
     CellProxy(line, 1).write(GraphicsAttributes {}, U'B', 1);
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     CellProxy(line, 1).setGraphicsRendition(GraphicsRendition::Bold);
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
-TEST_CASE("CellProxy.trivialInvalidation.setHyperlink", "[CellProxy]")
+TEST_CASE("CellProxy.mixesTheLine.setHyperlink", "[CellProxy]")
 {
     LineSoA line;
     initializeLineSoA(line, ColumnCount(10));
     CellProxy(line, 0).write(GraphicsAttributes {}, U'A', 1);
     CellProxy(line, 1).write(GraphicsAttributes {}, U'B', 1);
-    REQUIRE(line.trivial);
+    REQUIRE(line.shape == LineShape::Uniform);
 
     CellProxy(line, 1).setHyperlink(HyperlinkId(42));
-    CHECK_FALSE(line.trivial);
+    CHECK(line.shape == LineShape::Mixed);
 }
 
 // =============================================================================
@@ -724,3 +725,222 @@ TEST_CASE("Line.trivialBuffer.resetPreservesFillAttributes", "[Line]")
 }
 
 // LineView tests removed — Line is now backed by LineSoA directly (tested via Line_test.cpp)
+
+TEST_CASE("LineSoA.resetLine.repaintsAUniformColouredLine", "[LineSoA]")
+{
+    // resetLine's fill skip had the same blind spot as writeAsciiToSoA's: a uniform line whose cells
+    // all wear a pen other than fillAttrs must still be repainted when it is reset to fillAttrs.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(5));
+    auto const coloured = GraphicsAttributes { .backgroundColor = Color::Indexed(4) };
+    (void) writeTextToSoA(line, 0, "Hello", coloured, HyperlinkId {}, /*asciiHint=*/true);
+    REQUIRE(line.shape == LineShape::Uniform);
+
+    resetLine(line, ColumnCount(5));
+
+    for (auto const col: std::views::iota(size_t { 0 }, size_t { 5 }))
+    {
+        CHECK(line.codepoints[col] == 0);
+        CHECK(line.sgr[col] == GraphicsAttributes {});
+    }
+}
+
+TEST_CASE("LineSoA.resetLine.narrowsATwoColumnCellOnTheLastColumn", "[LineSoA]")
+{
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(5));
+    writeCellToSoA(line, 4, U'世', 2, GraphicsAttributes {});
+    REQUIRE(line.shape == LineShape::Uniform);
+
+    resetLine(line, ColumnCount(5));
+
+    CHECK(line.codepoints[4] == 0);
+    CHECK(line.widths[4] == 1);
+}
+
+// =============================================================================
+// LineShape -- one test per way a line leaves Uniform
+// =============================================================================
+
+TEST_CASE("LineShape.aResetLineIsUniform", "[LineSoA][LineShape]")
+{
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(4));
+    CHECK(line.shape == LineShape::Uniform);
+
+    degradeShape(line, LineShape::Spanning);
+    resetLine(line, ColumnCount(4));
+    CHECK(line.shape == LineShape::Uniform);
+
+    degradeShape(line, LineShape::Spanning);
+    initializeBlankLineSoA(line);
+    CHECK(line.shape == LineShape::Uniform);
+}
+
+TEST_CASE("LineShape.degradeShapeNeverRestores", "[LineSoA][LineShape]")
+{
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(4));
+    degradeShape(line, LineShape::Mixed);
+    degradeShape(line, LineShape::Uniform);
+    CHECK(line.shape == LineShape::Mixed);
+    degradeShape(line, LineShape::Spanning);
+    degradeShape(line, LineShape::Mixed);
+    CHECK(line.shape == LineShape::Spanning);
+}
+
+TEST_CASE("LineShape.aPartialClearMixesAFullOneDoesNot", "[LineSoA][LineShape]")
+{
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(4));
+    clearRange(line, 0, 4, GraphicsAttributes { .backgroundColor = Color::Indexed(4) });
+    CHECK(line.shape == LineShape::Uniform);
+    clearRange(line, 1, 2, GraphicsAttributes {});
+    CHECK(line.shape == LineShape::Mixed);
+}
+
+TEST_CASE("LineShape.aWideCharactersContinuationSpans", "[LineSoA][LineShape]")
+{
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(4));
+    fillWideCharContinuation(line, 1, 0, GraphicsAttributes {});
+    CHECK(line.shape == LineShape::Uniform); // nothing was filled
+    fillWideCharContinuation(line, 1, 1, GraphicsAttributes {});
+    CHECK(line.shape == LineShape::Spanning);
+}
+
+TEST_CASE("LineShape.aContinuationWrittenCellByCellSpans", "[LineSoA][LineShape]")
+{
+    // Screen::clearAndAdvance writes a wide character's continuation through CellProxy::reset, and a
+    // daemon mirror receives one as an ordinary cell carrying the flag (vthost's applyWireCell).
+    for (auto const flag: { CellFlag::WideCharContinuation, CellFlag::MulticellContinuation })
+    {
+        LineSoA viaReset;
+        initializeLineSoA(viaReset, ColumnCount(4));
+        CellProxy(viaReset, 1).reset(GraphicsAttributes { .flags = flag }, HyperlinkId {});
+        CHECK(viaReset.shape == LineShape::Spanning);
+
+        LineSoA viaWrite;
+        initializeLineSoA(viaWrite, ColumnCount(4));
+        writeCellToSoA(viaWrite, 1, char32_t { 0 }, 1, GraphicsAttributes { .flags = flag });
+        CHECK(viaWrite.shape == LineShape::Spanning);
+    }
+}
+
+TEST_CASE("LineShape.aWideHeadAloneStaysUniform", "[LineSoA][LineShape]")
+{
+    // A two-column character on the last column has no room for a continuation and stays on the
+    // batched path (@see Terminal.GraphemeCluster.aWideCellOnTheLastColumnKeepsItsWidth). It is the
+    // continuation cell, not the head, that makes a line span.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(4));
+    writeCellToSoA(line, 3, U'世', 2, GraphicsAttributes {});
+    CHECK(line.shape == LineShape::Uniform);
+}
+
+TEST_CASE("LineShape.aWidthAboveOneSetDirectlySpans", "[LineSoA][LineShape]")
+{
+    LineSoA viaSetWidth;
+    initializeLineSoA(viaSetWidth, ColumnCount(4));
+    CellProxy(viaSetWidth, 0).setWidth(1);
+    CHECK(viaSetWidth.shape == LineShape::Uniform);
+    CellProxy(viaSetWidth, 0).setWidth(2);
+    CHECK(viaSetWidth.shape == LineShape::Spanning);
+
+    LineSoA viaTextOnly;
+    initializeLineSoA(viaTextOnly, ColumnCount(4));
+    CellProxy(viaTextOnly, 0).writeTextOnly(U' ', 1);
+    CHECK(viaTextOnly.shape == LineShape::Uniform);
+    CellProxy(viaTextOnly, 0).writeTextOnly(U'世', 2);
+    CHECK(viaTextOnly.shape == LineShape::Spanning);
+}
+
+TEST_CASE("LineShape.aScaledCellSpans", "[LineSoA][LineShape]")
+{
+    LineSoA viaTextScale;
+    initializeLineSoA(viaTextScale, ColumnCount(4));
+    CellProxy(viaTextScale, 0).setTextScale(CellScale { .scale = 2 });
+    CHECK(viaTextScale.shape == LineShape::Spanning);
+
+    LineSoA viaScale;
+    initializeLineSoA(viaScale, ColumnCount(4));
+    CellProxy(viaScale, 0).setScale(2);
+    CHECK(viaScale.shape == LineShape::Spanning);
+}
+
+TEST_CASE("LineShape.copyColumnsTakesTheHigherShapeAndAtLeastMixed", "[LineSoA][LineShape]")
+{
+    LineSoA spanning;
+    initializeLineSoA(spanning, ColumnCount(6));
+    fillWideCharContinuation(spanning, 1, 1, GraphicsAttributes {});
+
+    LineSoA uniform;
+    initializeLineSoA(uniform, ColumnCount(6));
+
+    LineSoA fromUniform;
+    initializeLineSoA(fromUniform, ColumnCount(6));
+    copyColumns(uniform, 0, fromUniform, 0, 3);
+    CHECK(fromUniform.shape == LineShape::Mixed); // as conservative as the flag it replaces
+
+    LineSoA fromSpanning;
+    initializeLineSoA(fromSpanning, ColumnCount(6));
+    copyColumns(spanning, 0, fromSpanning, 0, 3);
+    CHECK(fromSpanning.shape == LineShape::Spanning);
+}
+
+TEST_CASE("LineShape.aZeroWidthCopyLeavesTheShape", "[LineSoA][LineShape]")
+{
+    // Copying no cells changes no cell, so it must not cost the destination its bulk path.
+    LineSoA spanning;
+    initializeLineSoA(spanning, ColumnCount(6));
+    fillWideCharContinuation(spanning, 1, 1, GraphicsAttributes {});
+
+    LineSoA dst;
+    initializeLineSoA(dst, ColumnCount(6));
+    copyColumns(spanning, 0, dst, 0, 0);
+    CHECK(dst.shape == LineShape::Uniform);
+}
+
+TEST_CASE("LineShape.growingALinkedLineMixes", "[LineSoA][LineShape]")
+{
+    // Grown cells carry no hyperlink, so a line whose cells all carry one mixes, as one whose cells all
+    // wear a pen other than the fill does.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(4));
+    (void) writeTextToSoA(line, 0, "abcd", GraphicsAttributes {}, HyperlinkId(7), /*asciiHint=*/true);
+    REQUIRE(line.shape == LineShape::Uniform);
+
+    resizeLineSoA(line, ColumnCount(8));
+    CHECK(line.shape >= shapeImpliedByCells(line));
+    CHECK(line.shape == LineShape::Mixed);
+}
+
+TEST_CASE("LineShape.aResetToTheLinesOwnLinkStaysUniform", "[LineSoA][LineShape]")
+{
+    // reset(attrs, hyperlink) wrote the cell without its hyperlink first and checked the shape there:
+    // on a uniformly linked line that unlinked cell mixed the line, and nothing restores a shape.
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(4));
+    (void) writeTextToSoA(line, 0, "abcd", GraphicsAttributes {}, HyperlinkId(7), /*asciiHint=*/true);
+    REQUIRE(line.shape == LineShape::Uniform);
+
+    CellProxy(line, 2).reset(GraphicsAttributes {}, HyperlinkId(7));
+    CHECK(line.shape == LineShape::Uniform);
+}
+
+TEST_CASE("LineShape.shapeImpliedByCells", "[LineSoA][LineShape]")
+{
+    LineSoA blank;
+    initializeBlankLineSoA(blank);
+    CHECK(shapeImpliedByCells(blank) == LineShape::Uniform);
+
+    LineSoA line;
+    initializeLineSoA(line, ColumnCount(4));
+    CHECK(shapeImpliedByCells(line) == LineShape::Uniform);
+
+    line.sgr[2].foregroundColor = Color::Indexed(1);
+    CHECK(shapeImpliedByCells(line) == LineShape::Mixed);
+
+    line.sgr[3].flags = CellFlag::WideCharContinuation;
+    CHECK(shapeImpliedByCells(line) == LineShape::Spanning);
+}

@@ -60,6 +60,7 @@
 #include <span>
 #include <stack>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -1416,13 +1417,21 @@ class Terminal
     [[nodiscard]] Screen& currentScreen() noexcept { return *_currentScreen; }
     [[nodiscard]] Screen const& currentScreen() const noexcept { return *_currentScreen; }
 
-    [[nodiscard]] Screen& activeDisplay() noexcept
+    /// The display text and sequences are written to: the current page, or the status line DECSASD
+    /// selected. Const on a const terminal.
+    template <typename Self>
+    [[nodiscard]] auto& activeDisplay(this Self& self) noexcept
     {
-        switch (_activeStatusDisplay)
+        // The constness is spelled out: clang with Ubuntu 24.04's libstdc++ rejects std::forward_like
+        // here ("with deduced return type cannot be used before it is defined").
+        using Display = std::conditional_t<std::is_const_v<Self>, Screen const, Screen>;
+        switch (self._activeStatusDisplay)
         {
-            case ActiveStatusDisplay::Main: return *_currentScreen;
-            case ActiveStatusDisplay::StatusLine: return _hostWritableStatusLineScreen;
-            case ActiveStatusDisplay::IndicatorStatusLine: return _indicatorStatusScreen;
+            case ActiveStatusDisplay::Main: return static_cast<Display&>(*self._currentScreen);
+            case ActiveStatusDisplay::StatusLine:
+                return static_cast<Display&>(self._hostWritableStatusLineScreen);
+            case ActiveStatusDisplay::IndicatorStatusLine:
+                return static_cast<Display&>(self._indicatorStatusScreen);
         }
         core::unreachable();
     }
@@ -2091,7 +2100,9 @@ class Terminal
     /// Returns the buffer currently being parsed by parseFragment().
     /// This is used to ensure BufferFragment holds the correct buffer reference
     /// when creating TrivialLineBuffer entries during parsing.
-    [[nodiscard]] crispy::BufferObjectPtr<char> parsingBuffer() const noexcept
+    /// @return A reference to the member that holds it, valid until parsing ends or the buffer is
+    ///         replaced; copy it to keep it longer.
+    [[nodiscard]] crispy::BufferObjectPtr<char> const& parsingBuffer() const noexcept
     {
         return _parsingBuffer ? _parsingBuffer : _currentPtyBuffer;
     }
@@ -2191,6 +2202,13 @@ class Terminal
     [[nodiscard]] gsl::span<Function const> activeSequences() const noexcept
     {
         return _supportedVTSequences.activeSequences();
+    }
+
+    /// The terminal's sequence table: what is active at the current operating level, and the index
+    /// that resolves a sequence against it. @see SupportedSequences::select
+    [[nodiscard]] SupportedSequences const& supportedSequences() const noexcept
+    {
+        return _supportedVTSequences;
     }
 
     /// The complete VT sequence table, independent of the current operating level. A sequence that is in
@@ -2391,6 +2409,36 @@ class Terminal
         crispy::BufferObjectPtr<char> buffer; // The buffer that was read into
     };
     [[nodiscard]] std::optional<PtyReadResult> readFromPty();
+
+    /// Reads on while another thread holds the terminal's state, rather than waiting for it idle.
+    ///
+    /// The render thread holds the state for as long as it takes to build a frame. Reading meanwhile
+    /// keeps a fast writer from blocking on a full PTY, and the parse that follows covers all of it in
+    /// the same hold of the lock. A read lands at the hot end of @p buffer, which is first moved past
+    /// everything read so far: that keeps the parser's own later reads from overwriting the batch, and
+    /// each run of bytes from one source contiguous. A read that lands further on, because another
+    /// writer appended to the buffer meanwhile and moved the hot end, becomes a piece of its own and
+    /// ends the read-ahead.
+    ///
+    /// @param buffer The buffer @p first was read into, at its hot end.
+    /// @param first  The batch's first read.
+    /// @return The batch in order, starting with @p first: one piece per contiguous run of bytes from
+    ///         the same source.
+    [[nodiscard]] std::vector<vtpty::Pty::ReadResult> readAhead(crispy::BufferObject<char>& buffer,
+                                                                vtpty::Pty::ReadResult const& first);
+
+    /// Hands the bytes readAhead() claimed back, once the state lock is held: moves @p buffer's hot end
+    /// back to the batch's start, so the parse moves it on again exactly as for a batch that was never
+    /// read ahead.
+    ///
+    /// Claimed but unparsed bytes belong to this thread, and everything else in the buffer is already
+    /// parsed: whatever another writer appended amid or after the batch, it parsed under the state lock
+    /// this thread now holds, and nothing refers to a PTY buffer's bytes once they are parsed.
+    ///
+    /// @param buffer The buffer readAhead() claimed bytes in.
+    /// @param batch  What readAhead() returned.
+    void releaseReadAhead(crispy::BufferObject<char>& buffer,
+                          std::span<vtpty::Pty::ReadResult const> batch) noexcept;
 
     // Writes partially or all input data to the PTY buffer object and returns a string view to it.
     [[nodiscard]] std::string_view lockedWriteToPtyBuffer(std::string_view data);

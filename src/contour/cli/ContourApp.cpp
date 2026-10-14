@@ -5,6 +5,7 @@
 #include <contour/cli/ShellIntegration.hpp>
 #include <contour/config/Config.hpp>
 
+#include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/vt/Capabilities.hpp>
 #include <vtbackend/vt/Functions.hpp>
 
@@ -428,7 +429,8 @@ you can utilize the `profile` parameter with the `contour` command <br/>
 Let's go through the different sections of the global configurations in the file:
 )";
 
-    std::string_view const additionalInfo = R"(
+    // A format string, for the defaults that have a name to take them from; its braces are doubled.
+    constexpr std::string_view AdditionalInfo = R"(
 ### Default global parameters
 
 ```yaml
@@ -438,8 +440,8 @@ renderer:
     tile_hashtable_slots: 4096
     tile_cache_count: 4000
     tile_direct_mapping: true
-word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
-read_buffer_size: 16384
+word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{{}}~?|│"
+read_buffer_size: {}
 pty_buffer_size: 1048576
 default_profile: main
 spawn_new_process: false
@@ -493,7 +495,7 @@ For the full list of options see generated configuration file on your system or 
 
     std::cout << headerInfo;
     std::cout << configInfo;
-    std::cout << additionalInfo;
+    std::cout << std::format(AdditionalInfo, vtbackend::DefaultPtyReadBufferSize);
     return EXIT_SUCCESS;
 }
 

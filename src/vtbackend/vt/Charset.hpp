@@ -224,6 +224,16 @@ class CharsetMapping
         return isSelected(_tableForNextGraphic, id);
     }
 
+    /// @returns whether every character of a run of ASCII maps to itself: GL holds US-ASCII -- and not
+    ///          a DRCS font, which designates US-ASCII as its fallback -- and no single shift (SS2,
+    ///          SS3) maps the run's first character through another table.
+    [[nodiscard]] constexpr bool isPlainUSASCII() const noexcept
+    {
+        auto const gl = static_cast<std::size_t>(_selectedTable);
+        return _tableForNextGraphic == _selectedTable && _charsetIds[gl] == CharsetId::USASCII
+               && !_drcsFontNumber[gl].has_value();
+    }
+
     /// Selects a given 94-character set into the table G0, G1, G2, or G3.
     void select(CharsetTable table, CharsetId id) noexcept
     {

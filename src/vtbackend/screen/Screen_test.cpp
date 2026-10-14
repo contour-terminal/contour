@@ -8,6 +8,8 @@
 #include <vtbackend/testing/TestHelpers.hpp>
 #include <vtbackend/vt/Charset.hpp>
 
+#include <vtparser/BulkScan.hpp>
+
 #include <core/Escape.hpp>
 #include <core/Utils.hpp>
 
@@ -15,11 +17,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <charconv>
 #include <cstddef>
+#include <format>
 #include <ranges>
 #include <set>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 using namespace vtbackend;
 using namespace vtbackend::test;
 using namespace std;
@@ -382,6 +389,83 @@ TEST_CASE("AppendChar.a_zero_width_codepoint_after_an_ASCII_base_joins_its_cell"
         // ... so what follows it is still 'f', not a column further along.
         CHECK(screen.at(LineOffset(0), ColumnOffset(5)).codepoints() == U"f");
         CHECK(screen.renderMainPageText() == "abcdéfgh  \n");
+    }
+}
+
+TEST_CASE("AppendChar.a_joiner_in_a_later_read_joins_the_last_bulk_written_cell", "[screen]")
+{
+    // A PTY read can end between a letter and whatever joins it. The bulk ASCII path wrote "abc" in
+    // one go but remembered the run's FIRST cell as the one a following codepoint joins, so a
+    // combining mark, a ZWJ or a variation selector arriving in the next read decorated the `a`.
+    // A joiner in the same read as its base travels in the same text run and never reached that
+    // path, which is what hid it. On either screen, and on a line whose renditions differ.
+    auto const joiners = std::array {
+        Scenario { .name = "U+0301 COMBINING ACUTE ACCENT", .bytes = "\xCC\x81" },
+        Scenario { .name = "U+200D ZERO WIDTH JOINER", .bytes = "\xE2\x80\x8D" },
+        Scenario { .name = "U+FE0F VARIATION SELECTOR-16", .bytes = "\xEF\xB8\x8F" },
+    };
+    auto const lines = std::array {
+        Scenario { .name = "primary, uniform line", .bytes = "abc" },
+        Scenario { .name = "primary, mixed line", .bytes = "\033[31mab\033[mc" },
+        Scenario { .name = "alternate, uniform line", .bytes = "\033[?1049habc" },
+        Scenario { .name = "alternate, mixed line", .bytes = "\033[?1049h\033[31mab\033[mc" },
+    };
+
+    for (auto const& line: lines)
+        for (auto const& joiner: joiners)
+        {
+            INFO(std::format("{}, {}", line.name, joiner.name));
+            auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(20) } };
+            mock.writeToScreen(line.bytes);
+            mock.writeToScreen(joiner.bytes); // a read of its own
+
+            auto const& screen = std::as_const(mock.terminal).currentScreen();
+            CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"a");
+            CHECK(screen.at(LineOffset(0), ColumnOffset(2)).codepoints()
+                  == U"c" + unicode::convert_to<char32_t>(joiner.bytes));
+        }
+}
+
+TEST_CASE("AppendChar.a_joiner_after_a_bulk_run_that_filled_the_line", "[screen]")
+{
+    // The same seam where the run reaches the right margin and leaves a wrap pending: the joiner must
+    // land exactly where it lands when the same bytes arrive in a single read. The bulk path stops one
+    // column short of the margin, so this pins the boundary rather than a defect.
+    struct Outcome
+    {
+        std::u32string firstCell;
+        std::u32string lastCell;
+        CellLocation cursor;
+        bool wrapPending = false;
+        bool operator==(Outcome const&) const = default;
+    };
+    auto const writeInReads = [](std::initializer_list<std::string_view> reads) {
+        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
+        for (auto const read: reads)
+            mock.writeToScreen(read);
+        auto const& screen = std::as_const(mock.terminal).currentScreen();
+        return Outcome { .firstCell = screen.at(LineOffset(0), ColumnOffset(0)).codepoints(),
+                         .lastCell = screen.at(LineOffset(0), ColumnOffset(4)).codepoints(),
+                         .cursor = screen.cursor().position,
+                         .wrapPending = screen.cursor().wrapPending };
+    };
+
+    // On either screen, and on a line whose renditions differ.
+    auto const lines = std::array {
+        Scenario { .name = "primary, uniform line", .bytes = "abcde" },
+        Scenario { .name = "primary, mixed line", .bytes = "\033[31ma\033[mbcde" },
+        Scenario { .name = "alternate, uniform line", .bytes = "\033[?1049habcde" },
+        Scenario { .name = "alternate, mixed line", .bytes = "\033[?1049h\033[31ma\033[mbcde" },
+    };
+    for (auto const& line: lines)
+    {
+        INFO(line.name);
+        auto const twoReads = writeInReads({ line.bytes, "\xCC\x81"sv });
+        auto const oneRead = writeInReads({ std::string(line.bytes) + "\xCC\x81" });
+
+        CHECK(twoReads.firstCell == U"a");
+        CHECK(twoReads.lastCell == U"é");
+        CHECK(twoReads == oneRead);
     }
 }
 
@@ -4672,6 +4756,277 @@ TEST_CASE("DECSMBV: a hand-built two-parameter sequence is rejected", "[screen]"
     auto const result = mock.terminal.primaryScreen().apply(DECSMBV, seq);
     CHECK(result == ApplyResult::Invalid);
     CHECK(mock.terminal.settings().marginBellVolume == BellVolume::Low);
+}
+
+TEST_CASE("LineShape.neverUndercutsTheCellsAfterAnEdit", "[screen][LineShape]")
+{
+    // Every fast path trusts LineSoA::shape: the renderer batches a Uniform line, and the parser's bulk
+    // write needs anything short of Spanning. So after ANY edit -- on lines that had already left
+    // Uniform -- the stored shape must be at least as conservative as what the cells hold, and writing
+    // into the edited line again must keep it so.
+    for (auto const& scenario: EditsOfShapedLines)
+    {
+        INFO(scenario.name);
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen(scenario.bytes);
+        mock.writeToScreen("\033[1;1Hxyz"sv); // and write into the edited line again
+        checkShapeCoversCells(mock.terminal.primaryScreen());
+    }
+}
+
+TEST_CASE("LineShape.neverUndercutsTheCellsAfterAResize", "[screen][LineShape]")
+{
+    // A resize rebuilds lines -- reflow copies cells into new ones on the primary screen, while the
+    // alternate screen only cuts or pads them -- and both must carry the shape along.
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+    {
+        INFO((screenSelect.empty() ? "primary (reflows)" : "alternate (does not reflow)"));
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(5) };
+        mock.writeToScreen(screenSelect);
+        mock.writeToScreen("\033[44mblu\033[m e\xCC\x81 ta\r\n"sv); // Mixed: a colour and a cluster
+        mock.writeToScreen("ab\xE4\xB8\xAD\xE4\xB8\xAD"
+                           "cd\r\n"sv); // Spanning: wide characters
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(6) });
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(12) });
+        mock.writeToScreen("\033[1;1Hxyz"sv);
+        checkShapeCoversCells(std::as_const(mock.terminal).currentScreen());
+    }
+}
+
+TEST_CASE("LineShape.anImageFragmentSpans", "[screen][LineShape]")
+{
+    auto mock = MockTerm { PageSize { LineCount(11), ColumnCount(11) }, LineCount(11) };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
+    mock.writeToScreen(ChessBoard);
+    CHECK(mock.terminal.primaryScreen().grid().lineAt(LineOffset(0)).storage().shape == LineShape::Spanning);
+}
+
+namespace
+{
+/// What a page shows: every line's text with its renditions (as `capture-pane -e` renders it, with
+/// ESC escaped) and the width of each cell, then the cursor.
+std::vector<std::string> pageSnapshotOf(Screen const& screen)
+{
+    auto const columns = screen.pageSize().columns;
+    auto snapshot = std::vector<std::string> {};
+    for (auto const lineNo: std::views::iota(0, *screen.pageSize().lines))
+    {
+        auto const& line = screen.grid().lineAt(LineOffset(lineNo));
+        auto widths = std::string {};
+        for (auto const column: std::views::iota(0, *columns))
+            widths += static_cast<char>('0' + line.cellWidthAt(ColumnOffset(column)));
+        snapshot.push_back(
+            std::format("{} [{}]",
+                        core::escape(line.toUtf8WithSgr(ColumnOffset(0), boxed_cast<ColumnOffset>(columns))),
+                        widths));
+    }
+    auto const& cursor = screen.cursor();
+    snapshot.push_back(std::format("cursor {}:{}{}",
+                                   *cursor.position.line,
+                                   *cursor.position.column,
+                                   cursor.wrapPending ? " (wrap pending)" : ""));
+    return snapshot;
+}
+} // namespace
+
+TEST_CASE("BulkText.theGateFollowsTheLineShapeOnEveryScreen", "[screen][LineShape]")
+{
+    // Only a line holding a spanning cell is refused the bulk write -- not the alternate screen, and not
+    // a line that has left the batched render path.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("\033[?1049h"sv);
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 9);
+
+    mock.writeToScreen("\033[31mab\033[mc"sv); // a Mixed line
+    REQUIRE(std::as_const(mock.terminal).currentScreen().currentLine().storage().shape == LineShape::Mixed);
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 6);
+
+    mock.writeToScreen("\xE4\xB8\xAD"sv); // a wide character: the line now spans
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+}
+
+TEST_CASE("BulkText.theRunIsSizedOnTheStatusLineBeingWritten", "[screen]")
+{
+    // DECSASD sends text to the host-writable status line, which has margins of its own. The cursor was
+    // already the status line's -- DECSASD repoints the current screen at it -- but the run was sized
+    // from the MAIN page's right margin: with the status line's cursor right of it, `margin - cursor`
+    // went negative and wrapped to a huge width, overflowing the status line.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("\033[?69h\033[1;4s"sv); // the main page: right margin at column 4
+    mock.writeToScreen("\033[2$~\033[1$}"sv);   // DECSSDT: host-writable; DECSASD: write to it
+    mock.terminal.setMode(DECMode::AutoWrap, false);
+
+    mock.writeToScreen("abcde"sv);
+    mock.writeToScreen("fghijk"sv); // one past the end of the line
+
+    CHECK(mock.terminal.hostWritableStatusLineDisplay().grid().lineText(LineOffset(0)) == "abcdefghik");
+}
+
+TEST_CASE("BulkText.theGateAsksTheLineOfTheDisplayBeingWritten", "[screen][LineShape]")
+{
+    // The gate asked page 0's current line whether it may be bulk-written, even while DECSASD sends text
+    // to the status line: a blank main page let the bulk write into a status line that spans.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("\033[2$~\033[1$}"sv); // DECSSDT: host-writable; DECSASD: write to it
+    mock.writeToScreen("\xE4\xB8\xAD"sv);     // a wide character: the status line now spans
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+}
+
+TEST_CASE("BulkText.aCursorRightOfTheRightMarginGetsNoBulkRun", "[screen]")
+{
+    // With DECLRMM set, CUP can put the cursor right of the right margin, where the margin no longer
+    // applies. Measuring the run as `right margin - cursor` went negative there and wrapped to a huge
+    // width, handing Screen::writeText more cells than the line has left.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[?69h\033[2;4s\033[1;7H"sv); // margins at columns 2..4, cursor at column 7
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+
+    mock.writeToScreen("abcdefgh"sv);
+    CHECK(screen.grid().lineText(LineOffset(0)) == "      abcd");
+}
+
+TEST_CASE("BulkText.aPendingWrapGetsNoBulkRun", "[screen][LineShape]")
+{
+    // A pending wrap moves the run to the NEXT line before it is written, and the gate asks only about
+    // the current one. At a real deferred wrap the cursor stands on the right margin, where the gate
+    // returns 0 anyway; but the wrap survives a margin widened under it and a DECRC after a resize, and
+    // both leave the cursor left of the margin. The run then landed on a line holding a wide character
+    // and overwrote its head without erasing its continuation.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("\033[2;1Hab\xE4\xB8\xAD"sv); // line 1 holds a wide character at columns 2..3
+
+    SECTION("a margin widened under it")
+    {
+        mock.writeToScreen("\033[?69h\033[1;5s"sv); // DECSLRM at columns 1..5, which homes the cursor
+        mock.writeToScreen("abcde\033[?69l"sv);     // a wrap pending at column 4, then DECLRMM reset
+    }
+    SECTION("restored after a resize")
+    {
+        mock.writeToScreen("\033[1;1H0123456789\0337"sv); // a wrap pending at column 9, then DECSC
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(14) });
+        mock.writeToScreen("\0338"sv); // DECRC
+    }
+    REQUIRE(screen.cursor().wrapPending);
+    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+
+    mock.writeToScreen("xyz"sv);
+    CHECK(screen.at(LineOffset(1), ColumnOffset(2)).codepoints() == U"z");
+    CHECK_FALSE(screen.at(LineOffset(1), ColumnOffset(3)).isFlagEnabled(CellFlag::WideCharContinuation));
+}
+
+TEST_CASE("BulkText.aSingleShiftMapsOneCharacterOnly", "[screen]")
+{
+    // SS2 invokes G2 for the next graphic character alone. The bulk write asked whether the table for
+    // that one character holds US-ASCII, and then wrote the whole run through it.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+    mock.writeToScreen("\033(0\033*B"sv); // G0: DEC special graphics, G2: US-ASCII
+    mock.writeToScreen("\033Nqqq"sv);     // SS2, then three times "q"
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)) == "q\xE2\x94\x80\xE2\x94\x80       ");
+}
+
+TEST_CASE("BulkText.theAlternateScreenWritesWhatThePrimaryWrites", "[screen]")
+{
+    // Both screens take the same text paths, so they must agree on every mode those paths test. The
+    // comparison against a per-codepoint parser is BulkScan_test's.
+    auto const scenarios = std::array {
+        Scenario { .name = "insert mode", .bytes = "XYZ\r\033[4hab" },
+        Scenario { .name = "autowrap off", .bytes = "\033[?7labcdefghijkl" },
+        Scenario { .name = "left/right margins", .bytes = "\033[?69h\033[3;6s\033[1;3Habcdefgh" },
+        Scenario { .name = "origin mode inside margins",
+                   .bytes = "\033[2;3r\033[?69h\033[3;6s\033[?6h\033[1;1Habcdefghij" },
+        Scenario { .name = "coloured runs",
+                   .bytes = "\033[31mred\033[0m plain\r\n\033[1;44mbold-blue\033[m" },
+        Scenario { .name = "a cluster, then ASCII",
+                   .bytes = "e\xCC\x81"
+                            "xyz" },
+        Scenario { .name = "ASCII over a wide character", .bytes = "\xE4\xB8\xAD\xE4\xB8\xAD\r ab" },
+        Scenario { .name = "ASCII over a wide character's tail",
+                   .bytes = "\xE4\xB8\xAD\xE4\xB8\xAD\033[1;2Hxy" },
+        Scenario { .name = "DEC special graphics", .bytes = "\033(0lqk\033(Bok" },
+        Scenario { .name = "autowrap across lines", .bytes = "0123456789abcdefghijklmn" },
+    };
+
+    auto const pageAfter = [](std::string_view screenSelect, std::string_view bytes) {
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+        mock.writeToScreen(screenSelect);
+        mock.writeToScreen(bytes);
+        return pageSnapshotOf(mock.terminal.currentScreen());
+    };
+
+    for (auto const& scenario: scenarios)
+    {
+        INFO(scenario.name);
+        CHECK(pageAfter(""sv, scenario.bytes) == pageAfter("\033[?1049h"sv, scenario.bytes));
+    }
+}
+
+TEST_CASE("BulkText.aRecycledLineIsCleanWhateverItHeld", "[screen][LineShape]")
+{
+    // At full scrollback each new line is the storage of the one evicted from the top. Whatever that
+    // line held -- colours, a cluster, wide characters -- must be gone from the line it becomes, and
+    // ASCII written there must land in a clean, uniform line.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) }, LineCount(1) };
+    auto const& screen = mock.terminal.primaryScreen();
+    auto const cursorLine = [&]() -> Line const& {
+        return screen.grid().lineAt(screen.cursor().position.line);
+    };
+
+    mock.writeToScreen("\033[41mred\033[m e\xCC\x81\r\n"sv); // Mixed: a colour and a cluster
+    mock.writeToScreen("\xE4\xB8\xAD\xE4\xB8\xAD\r\n"sv);    // Spanning: wide characters
+    mock.writeToScreen("filler\r\n"sv);                      // the ring is full from here on
+
+    mock.writeToScreen("plain"sv); // lands on the line that held "red é"
+    CHECK(cursorLine().toUtf8WithSgr(ColumnOffset(0), ColumnOffset(10)) == "plain     ");
+    CHECK(cursorLine().storage().shape == LineShape::Uniform);
+
+    mock.writeToScreen("\r\nmore"sv); // lands on the line that held the wide characters
+    CHECK(cursorLine().toUtf8WithSgr(ColumnOffset(0), ColumnOffset(10)) == "more      ");
+    CHECK(cursorLine().storage().shape == LineShape::Uniform);
+    for (auto const column: std::views::iota(0, 10))
+        CHECK(cursorLine().cellWidthAt(ColumnOffset(column)) == 1);
+}
+
+TEST_CASE("BulkText.aReadEndingInsideACharacterKeepsItWhole", "[screen]")
+{
+    // The read ends after the lead byte of "ä", with nothing complete before it since the SGR. The
+    // parser once decoded that lead byte twice, so the screen showed U+FFFD ahead of the "ä" and the
+    // cursor stood one cell too far right.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
+    auto const& screen = mock.terminal.primaryScreen();
+
+    mock.writeToScreen("a\033[m\xC3"sv);
+    mock.writeToScreen("\xA4"sv);
+
+    CHECK(screen.grid().lineText(LineOffset(0)) == "a\xC3\xA4   ");
+    CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
+}
+
+TEST_CASE("BulkText.anInvalidByteInsideARunShowsAsAReplacementCharacter", "[screen]")
+{
+    // The state machine prints U+FFFD for a byte that is not UTF-8. The bulk text path hands such a
+    // byte on as it came, inside its run, and Screen::writeText decoded the run with a decoder that
+    // drops it: "\xFF│X" showed "│X". Compared against a parser that runs without its bulk scanners.
+    auto const pageSize = PageSize { LineCount(2), ColumnCount(6) };
+    auto const pageAfter = [&](std::string_view screenSelect, vtparser::BulkScan bulkScan) {
+        auto settings = MockTerm<>::createSettings(pageSize, HistoryLimits {}, 1024);
+        settings.parserBulkScan = bulkScan;
+        auto mock = MockTerm<> { std::move(settings) };
+        mock.writeToScreen(screenSelect);
+        mock.writeToScreen("\xFF\xE2\x94\x82X"sv);
+        auto snapshot = pageSnapshotOf(mock.terminal.currentScreen());
+        snapshot.insert(snapshot.begin(), mock.terminal.currentScreen().grid().lineText(LineOffset(0)));
+        return snapshot;
+    };
+
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+    {
+        INFO((screenSelect.empty() ? "primary" : "alternate"));
+        auto const reference = pageAfter(screenSelect, vtparser::BulkScan::Disabled);
+        REQUIRE(reference.front() == "\xEF\xBF\xBD\xE2\x94\x82X   ");
+        CHECK(pageAfter(screenSelect, vtparser::BulkScan::Enabled) == reference);
+    }
 }
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

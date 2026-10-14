@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtparser/BulkScan.hpp>
+
 #include <libunicode/convert.h>
 #include <libunicode/scan.h>
 
@@ -686,7 +688,12 @@ class Parser
 
     Parser() = default;
 
-    explicit Parser(EventListener& listener): _eventListener { listener } {}
+    /// @param listener Receives every event the parser emits.
+    /// @param bulkScan Whether runs of bytes may skip the state machine. @see BulkScan
+    explicit Parser(EventListener& listener, BulkScan bulkScan = BulkScan::Enabled):
+        _eventListener { listener }, _bulkScan { bulkScan }
+    {
+    }
 
     using ParseError = std::function<void(std::string const&)>;
     // NOLINTNEXTLINE(readability-identifier-naming): standard iterator/container trait spelling.
@@ -703,6 +710,9 @@ class Parser
     void parseFragment(gsl::span<char const> data);
 
     [[nodiscard]] State state() const noexcept { return _state; }
+
+    /// @return Whether this parser hands runs of bytes to its listener in bulk.
+    [[nodiscard]] BulkScan bulkScan() const noexcept { return _bulkScan; }
 
     /// Enables or disables VT52 compatibility mode. In VT52 mode the parser recognises the legacy
     /// single-character escape grammar (ESC A/B/.../Y/<) rather than the ANSI CSI grammar. The backend
@@ -728,15 +738,40 @@ class Parser
     void printUtf8Byte(char ch);
 
   private:
-    enum class ProcessKind : uint8_t
-    {
-        /// Processing bulk-text in ground state succeed, keep on going.
-        ContinueBulk,
-        /// Processing bulk-text failed (various reasons), fallback to finit state machine.
-        FallbackToFSM
-    };
+    /// Hands the leading run of text to the listener in one print() call, together with the C0
+    /// controls that follow it inline. Called in the Ground state only.
+    ///
+    /// Like every bulk scanner here, it returns how many bytes it consumed, and 0 when the state
+    /// machine must take the next byte instead: a scanner that consumes nothing is a fallback.
+    /// @param begin First byte to consider.
+    /// @param end   One past the last byte.
+    /// @return The number of bytes consumed, or 0 to fall back to the state machine.
+    [[nodiscard]] size_t parseBulkText(char const* begin, char const* end) noexcept;
 
-    std::tuple<ProcessKind, size_t> parseBulkText(char const* begin, char const* end) noexcept;
+    /// The one exit from parseBulkText() that hands the next byte to the state machine after
+    /// unicode::scan_text() has run. The scan starts from an idle decoder, so this returns the decoder
+    /// to idle: the state machine then decodes every byte the scan did not print, exactly once.
+    ///
+    /// The other bulk scanners need no counterpart. They decide from the bytes alone and change no
+    /// state before they know they consume at least one byte, so their fallback leaves everything as
+    /// the state machine expects it.
+    /// @return 0, the bulk scanners' fallback.
+    [[nodiscard]] size_t fallBackToStateMachineAfterScan() noexcept;
+
+    /// The shared body of the bulk string scanners: takes the leading run of plain payload bytes
+    /// (see plainStringPayloadRunLength()) and hands it to @p putPayload in one call.
+    ///
+    /// Falls back to the state machine, changing nothing, when the run is empty. Otherwise it
+    /// abandons any pending UTF-8 sequence in the string body, as the state machine does at an ASCII
+    /// byte, so that an 8-bit ST after the run still terminates the string.
+    /// @param begin      First byte to consider.
+    /// @param end        One past the last byte.
+    /// @param putPayload Receives the run as a std::string_view.
+    /// @return The run's length, or 0 to fall back to the state machine.
+    template <typename PutPayload>
+    [[nodiscard]] size_t takePlainStringRun(char const* begin,
+                                            char const* end,
+                                            PutPayload putPayload) noexcept;
 
     /// Hands a whole run of DCS payload bytes to the handler in one call.
     ///
@@ -746,9 +781,9 @@ class Parser
     ///
     /// @param begin First byte to consider.
     /// @param end   One past the last byte.
-    /// @return ContinueBulk and the run's length, or FallbackToFSM when the next byte is not plain
-    ///         payload (a terminator, or anything the state machine must act on).
-    std::tuple<ProcessKind, size_t> parseBulkDcsPassThrough(char const* begin, char const* end) noexcept;
+    /// @return The run's length, or 0 to fall back to the state machine when the next byte is not
+    ///         plain payload (a terminator, or anything the state machine must act on).
+    [[nodiscard]] size_t parseBulkDcsPassThrough(char const* begin, char const* end) noexcept;
 
     /// Hands a whole run of APC payload bytes to the handler in one call.
     ///
@@ -758,9 +793,28 @@ class Parser
     ///
     /// @param begin First byte to consider.
     /// @param end   One past the last byte.
-    /// @return ContinueBulk and the run's length, or FallbackToFSM when the next byte is not plain
-    ///         payload (a terminator, or anything the state machine must act on).
-    std::tuple<ProcessKind, size_t> parseBulkApcString(char const* begin, char const* end) noexcept;
+    /// @return The run's length, or 0 to fall back to the state machine when the next byte is not
+    ///         plain payload (a terminator, or anything the state machine must act on).
+    [[nodiscard]] size_t parseBulkApcString(char const* begin, char const* end) noexcept;
+
+    /// Hands a run of CSI parameter bytes -- digits, ';' and ':' -- to the listener in one go.
+    ///
+    /// The counterpart of parseBulkText() for control sequences. Inside CSI_Param these bytes are
+    /// pure events: no transition, no entry or exit action. The table lookup and the handle()
+    /// switch they each paid for therefore decided nothing. In CSI_Entry, a leading digit or ';'
+    /// first makes the one transition to CSI_Param, which has no actions either. A leading ':' is
+    /// left to the state machine, which sends it to CSI_Ignore.
+    ///
+    /// When a final byte (0x40..0x7E) follows the run, or opens the sequence, this also hands it to
+    /// the state machine in the same call: most sequences end right after their parameters, and
+    /// that saves the empty scan the final byte would otherwise cost.
+    ///
+    /// @param begin First byte to consider.
+    /// @param end   One past the last byte.
+    /// @return The bytes consumed: the run, plus a final byte that follows it. 0 to fall back to the
+    ///         state machine when the next byte is anything else (a leader, an intermediate, a
+    ///         control), or in VT52 mode.
+    [[nodiscard]] size_t parseBulkCsiParameters(char const* begin, char const* end) noexcept;
 
     void processOnceViaStateMachine(uint8_t ch);
     /// Handles one input byte while in VT52 mode. @see setVT52Mode. Returns true if the byte was
@@ -787,6 +841,7 @@ class Parser
     Vt52State _vt52State = Vt52State::Ground;
     uint8_t _vt52CursorRow = 0; ///< The row byte captured after ESC Y, pending the column byte.
     EventListener& _eventListener;
+    BulkScan _bulkScan = BulkScan::Enabled;
     unicode::scan_state _scanState {};
 
     /// UTF-8 continuation bytes still expected while collecting a string (OSC/APC/PM/DCS/SOS). String

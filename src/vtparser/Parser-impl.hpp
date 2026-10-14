@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include <vtparser/Parser.hpp>
+#include <vtparser/Utf8Decoding.hpp>
 
 #include <libunicode/utf8.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
+#include <ranges>
 #include <string_view>
-#include <tuple>
 
 #include <tracy/Tracy.hpp>
 
@@ -383,32 +385,39 @@ template <ParserEventsConcept EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char const> data)
 {
     ZoneScoped;
+
+    // The reference every bulk scanner is checked against: each byte through the state machine.
+    if (_bulkScan == BulkScan::Disabled)
+    {
+        for (auto const ch: data)
+            processOnceViaStateMachine(static_cast<uint8_t>(ch));
+        return;
+    }
+
     auto const* input = data.data();
     auto const* const end = data.data() + data.size();
 
     while (input != end)
     {
-        // Which bulk scanner applies is a property of the state, so it reads as a switch rather than
-        // as a chain of conditionals -- and a state that gains a bulk path later adds a case here.
-        auto const [processKind, processedByteCount] = [&] {
+        // Which bulk scanner applies is a property of the state. Ground, where text is, comes first
+        // and on its own; the rest reads as a switch rather than as a chain of conditionals -- and a
+        // state that gains a bulk path later adds a case there.
+        auto const processedByteCount = [&]() -> size_t {
+            if (_state == State::Ground) [[likely]]
+                return parseBulkText(input, end);
             switch (_state)
             {
+                case State::CSI_Entry:
+                case State::CSI_Param: return parseBulkCsiParameters(input, end);
                 case State::DCS_PassThrough: return parseBulkDcsPassThrough(input, end);
                 case State::APC_String: return parseBulkApcString(input, end);
-                default: return parseBulkText(input, end);
+                default: return 0;
             }
         }();
-        switch (processKind)
-        {
-            case ProcessKind::ContinueBulk:
-                // clang-format off
-                input += processedByteCount;
-                break;
-                // clang-format on
-            case ProcessKind::FallbackToFSM:
-                processOnceViaStateMachine(static_cast<uint8_t>(*input++));
-                break;
-        }
+        if (processedByteCount != 0)
+            input += processedByteCount;
+        else
+            processOnceViaStateMachine(static_cast<uint8_t>(*input++));
     }
 }
 
@@ -445,45 +454,112 @@ constexpr bool isStringCollectingState(State s) noexcept
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
-auto Parser<EventListener, TraceStateChanges>::parseBulkDcsPassThrough(char const* begin,
-                                                                       char const* end) noexcept
-    -> std::tuple<ProcessKind, size_t>
+template <typename PutPayload>
+auto Parser<EventListener, TraceStateChanges>::takePlainStringRun(char const* begin,
+                                                                  char const* end,
+                                                                  PutPayload putPayload) noexcept -> size_t
 {
     auto const byteCount = plainStringPayloadRunLength(begin, end);
     if (byteCount == 0)
-        return { ProcessKind::FallbackToFSM, 0 };
+        return 0;
 
-    auto const payload = std::string_view { begin, byteCount };
-    // Offering the bulk form is optional: the concept only asks for put(char), so a listener that
-    // has nothing better to do with a run still gets it a byte at a time -- just without the state
-    // machine in between, which is where the cost was.
-    if constexpr (requires { _eventListener.put(payload); })
-        _eventListener.put(payload);
-    else
-        for (auto const ch: payload)
-            _eventListener.put(ch);
+    // Every byte of the run is ASCII, and the state machine abandons a pending multi-byte sequence
+    // at any byte that is not a continuation byte. Skipping it must not skip that, or an 8-bit ST
+    // after the run would still be taken for a continuation byte and the string would never end.
+    _stringUtf8Pending = 0;
 
-    return { ProcessKind::ContinueBulk, byteCount };
+    putPayload(std::string_view { begin, byteCount });
+    return byteCount;
+}
+
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
+auto Parser<EventListener, TraceStateChanges>::parseBulkDcsPassThrough(char const* begin,
+                                                                       char const* end) noexcept -> size_t
+{
+    return takePlainStringRun(begin, end, [this](std::string_view payload) {
+        // Offering the bulk form is optional: the concept only asks for put(char), so a listener that
+        // has nothing better to do with a run still gets it a byte at a time -- just without the state
+        // machine in between, which is where the cost was.
+        if constexpr (requires { _eventListener.put(payload); })
+            _eventListener.put(payload);
+        else
+            for (auto const ch: payload)
+                _eventListener.put(ch);
+    });
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkApcString(char const* begin, char const* end) noexcept
-    -> std::tuple<ProcessKind, size_t>
+    -> size_t
 {
-    auto const byteCount = plainStringPayloadRunLength(begin, end);
-    if (byteCount == 0)
-        return { ProcessKind::FallbackToFSM, 0 };
+    return takePlainStringRun(begin, end, [this](std::string_view payload) {
+        // As in parseBulkDcsPassThrough(): the bulk form is optional.
+        if constexpr (requires { _eventListener.putAPC(payload); })
+            _eventListener.putAPC(payload);
+        else
+            for (auto const ch: payload)
+                _eventListener.putAPC(ch);
+    });
+}
 
-    auto const payload = std::string_view { begin, byteCount };
-    // As in parseBulkDcsPassThrough(): the bulk form is optional, and a listener that only offers
-    // putAPC(char) still gets the run without the state machine in between.
-    if constexpr (requires { _eventListener.putAPC(payload); })
-        _eventListener.putAPC(payload);
-    else
-        for (auto const ch: payload)
-            _eventListener.putAPC(ch);
+/// The bytes a CSI parameter string is made of: digits, ';' between parameters and ':' between
+/// sub-parameters. Inside CSI_Param each is an event without a transition.
+///
+/// The three classes are one contiguous range, '0' (0x30) to ';' (0x3B), with ':' between '9' and
+/// ';', so a single unsigned compare classifies a byte.
+[[nodiscard]] constexpr bool isCsiParameterByte(char ch) noexcept
+{
+    return static_cast<unsigned char>(ch - '0') <= ';' - '0';
+}
 
-    return { ProcessKind::ContinueBulk, byteCount };
+/// The bytes that end a control sequence, 0x40 ('@') to 0x7E ('~'). From CSI_Entry and CSI_Param
+/// each dispatches the sequence and returns to Ground.
+[[nodiscard]] constexpr bool isCsiFinalByte(char ch) noexcept
+{
+    return static_cast<unsigned char>(ch - '@') <= '~' - '@';
+}
+
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
+auto Parser<EventListener, TraceStateChanges>::parseBulkCsiParameters(char const* begin,
+                                                                      char const* end) noexcept -> size_t
+{
+    // VT52 mode routes every byte through processVT52() before the table. Leave that path untouched.
+    if (_vt52Mode)
+        return 0;
+
+    // CSI_Entry sends a leading ':' to CSI_Ignore, so there only a digit or ';' may open the run.
+    if (_state == State::CSI_Entry && *begin == ':')
+        return 0;
+
+    auto byteCount = size_t { 0 };
+    if (isCsiParameterByte(*begin))
+    {
+        // From CSI_Entry this is the transition the table makes on the run's first byte. CSI_Entry
+        // has no exit action and CSI_Param no entry action, so the assignment is all of it.
+        _state = State::CSI_Param;
+
+        // One pass scans and dispatches: the run ends at the first byte that is not a parameter
+        // byte, and its length is the number of bytes dispatched.
+        for (auto const ch: std::string_view { begin, end } | std::views::take_while(isCsiParameterByte))
+        {
+            switch (ch)
+            {
+                case ';': _eventListener.paramSeparator(); break;
+                case ':': _eventListener.paramSubSeparator(); break;
+                default: _eventListener.paramDigit(ch); break;
+            }
+            ++byteCount;
+        }
+    }
+
+    // Most sequences end right after their parameters. The final byte goes through the state
+    // machine as it would have, but from here rather than after one more empty scan.
+    if (auto const* const next = begin + byteCount; next != end && isCsiFinalByte(*next))
+    {
+        processOnceViaStateMachine(static_cast<uint8_t>(*next));
+        ++byteCount;
+    }
+    return byteCount;
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
@@ -597,35 +673,48 @@ bool Parser<EventListener, TraceStateChanges>::processVT52(uint8_t ch)
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
-auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
-    -> std::tuple<ProcessKind, size_t>
+auto Parser<EventListener, TraceStateChanges>::fallBackToStateMachineAfterScan() noexcept -> size_t
 {
+    // parseBulkText() only scans from an idle decoder, and the state machine re-decodes from the
+    // first byte the scan did not hand on as text. Whatever partial character the scan left in the
+    // decoder is therefore the state machine's to decode, from the same idle state.
+    _scanState.utf8 = {};
+    return 0;
+}
+
+template <ParserEventsConcept EventListener, bool TraceStateChanges>
+auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
+    -> size_t
+{
+    assert(_state == State::Ground); // parseFragment() routes no other state here
     auto const* input = begin;
-    if (_state != State::Ground)
-        return { ProcessKind::FallbackToFSM, 0 };
 
     // In VT52 mode, once an ESC has been seen the following byte(s) form a VT52 command, not text, so
     // they must go through the state machine (processVT52) rather than the bulk text scanner.
     if (_vt52State != Vt52State::Ground)
-        return { ProcessKind::FallbackToFSM, 0 };
+        return 0;
 
     // If we have pending incomplete UTF-8 from a previous parse call, fall back to FSM.
     // This is necessary because unicode::scan_text assumes contiguous memory when
     // continuing an incomplete sequence, but parse calls can span different buffers.
     // The FSM's printUtf8Byte function correctly handles cross-buffer UTF-8 sequences.
-    if (_scanState.utf8.expectedLength != 0)
-        return { ProcessKind::FallbackToFSM, 0 };
+    if (!isDecoderIdle(_scanState.utf8))
+        return 0;
 
     // A leading 8-bit C1 control (0x80..0x9F) is not text: the bulk scanner would consume it as an
     // invalid UTF-8 byte and print U+FFFD, so route it through the state machine, where printUtf8Byte
     // recognises it as the control it is. (It cannot be a UTF-8 continuation byte here -- we are in the
     // Ground state with no pending sequence.)
-    if (auto const first = static_cast<uint8_t>(*input); first >= 0x80 && first <= 0x9F)
-        return { ProcessKind::FallbackToFSM, 0 };
+    //
+    // A leading C0 control or ESC (below 0x20) is not text either: scan_text() would stop at it
+    // having consumed nothing. Every control sequence starts here, so this test saves asking the
+    // listener for its bulk width and calling the scanner just to learn that.
+    if (auto const first = static_cast<uint8_t>(*input); first < 0x20 || (first >= 0x80 && first <= 0x9F))
+        return 0;
 
     auto const maxCharCount = _eventListener.maxBulkTextSequenceWidth();
     if (!maxCharCount)
-        return { ProcessKind::FallbackToFSM, 0 };
+        return 0;
 
     _scanState.next = nullptr;
     // scan_text() stops at a mid-run 8-bit C1 control and leaves it for the state machine (libunicode
@@ -634,7 +723,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     auto const [cellCount, subStart, subEnd] = unicode::scan_text(_scanState, chunk, maxCharCount);
 
     if (_scanState.next == input)
-        return { ProcessKind::FallbackToFSM, 0 };
+        return fallBackToStateMachineAfterScan();
 
     // We do not test on cellCount>0 because the scan could contain only a ZWJ (zero width
     // joiner), and that would be misleading.
@@ -642,7 +731,13 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     assert(subStart <= subEnd);
     auto const byteCount = static_cast<size_t>(std::distance(subStart, subEnd));
     if (byteCount == 0)
-        return { ProcessKind::FallbackToFSM, 0 };
+    {
+        // The scan consumed bytes but completed no text: a partial character at the end of the read,
+        // possibly after an invalid byte. Its decoder state already holds that partial character, and
+        // the state machine decoding the same bytes on top of it would decode them twice and print
+        // U+FFFD.
+        return fallBackToStateMachineAfterScan();
+    }
 
     assert(cellCount <= maxCharCount);
     assert(subEnd <= chunk.data() + chunk.size());
@@ -666,7 +761,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
             _scanState.lastCodepointHint = static_cast<char32_t>(lastByte);
     }
 
-    if (_scanState.utf8.expectedLength == 0)
+    if (isDecoderIdle(_scanState.utf8))
     {
         // Process trailing C0 control characters inline, bypassing the FSM.
         // This handles the common (TEXT C0)+ pattern (e.g. text followed by LF, HT, CR)
@@ -692,8 +787,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
         _scanState.next = current;
     }
 
-    auto const count = static_cast<size_t>(std::distance(input, _scanState.next));
-    return { ProcessKind::ContinueBulk, count };
+    return static_cast<size_t>(std::distance(input, _scanState.next));
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
@@ -707,22 +801,19 @@ void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
     // before from_utf8() would fold them to U+FFFD. A C1 control is exactly ESC followed by
     // (byte - 0x40), so replay that pair through the state machine: this reuses every bit of the 7-bit
     // ESC handling (CSI/DCS/OSC entry, single dispatch, string collection) with no duplication.
-    if (_scanState.utf8.expectedLength == 0 && byte >= 0x80 && byte <= 0x9F)
+    if (isDecoderIdle(_scanState.utf8) && byte >= 0x80 && byte <= 0x9F)
     {
         processOnceViaStateMachine(0x1B);                              // ESC
         processOnceViaStateMachine(static_cast<uint8_t>(byte - 0x40)); // the equivalent 7-bit byte
         return;
     }
 
-    unicode::ConvertResult const r = unicode::from_utf8(_scanState.utf8, byte);
-    if (std::holds_alternative<unicode::Incomplete>(r))
+    auto const codepoint = decodeUtf8Byte(_scanState.utf8, byte);
+    if (!codepoint)
         return;
 
-    auto constexpr ReplacementCharacter = char32_t { 0xFFFD };
-    auto const codepoint = std::holds_alternative<unicode::Success>(r) ? std::get<unicode::Success>(r).value
-                                                                       : ReplacementCharacter;
-    _eventListener.print(codepoint);
-    _scanState.lastCodepointHint = codepoint;
+    _eventListener.print(*codepoint);
+    _scanState.lastCodepointHint = *codepoint;
 }
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>

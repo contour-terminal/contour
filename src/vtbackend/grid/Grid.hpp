@@ -1041,6 +1041,12 @@ class Grid
     /// and never the guarantee, and is the price of not re-walking the scrollback per line.
     void clampHistory();
 
+    /// Resets the bottom @p count lines of the page, which a scroll just rotated in from the top of a
+    /// full ring, keeping their storage for the write that follows. @see Line::recycle
+    /// @param count             How many lines were evicted into the page.
+    /// @param defaultAttributes The fill attributes their blank cells appear to have.
+    void recycleEvictedLines(LineCount count, GraphicsAttributes const& defaultAttributes) noexcept;
+
     // {{{ buffer helpers
     void resizeBuffers(PageSize newSize)
     {

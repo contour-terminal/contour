@@ -4,6 +4,7 @@
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/display/ContentScale.hpp>
+#include <contour/display/RedrawCoalescer.hpp>
 #include <contour/display/RenderState.hpp>
 #include <contour/display/TerminalRenderNode.hpp>
 #include <contour/display/WindowHost.hpp>
@@ -572,6 +573,9 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     QScreen* _hookedScreen = nullptr;
     // update() timer used to animate the blinking cursor.
     QTimer _updateTimer;
+    /// Keeps at most one redraw queued on the GUI thread: scheduleRedraw() is called after every parsed
+    /// batch, and one queued redraw draws every change made before it starts. @see RedrawCoalescer.
+    RedrawCoalescer _redrawCoalescer;
 
     // {{{ Auto-scroll state for drag-selection outside window
     QTimer _autoScrollTimer;

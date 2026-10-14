@@ -21,7 +21,7 @@
 /// bookkeeping `Screen` normally performs, so every write goes through the narrowest engine
 /// primitive that maintains it rather than at the arrays underneath:
 ///
-///  - cells through `applyWireLine`/`writeCellToSoA` (the `trivial` render fast-path flag, the
+///  - cells through `applyWireLine`/`writeCellToSoA` (the line's shape the fast paths read, the
 ///    grapheme-cluster pool, image-fragment replacement),
 ///  - scrolling through `Screen::scrollUp` (cursor iterator, plus `onBufferScrolled` for the
 ///    viewport, the Vi cursor and any live selection),

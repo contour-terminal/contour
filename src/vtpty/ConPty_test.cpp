@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ConPty.hpp>
 
+#include <crispy/BufferObject.hpp>
+
 #include <catch2/catch_test_macros.hpp>
+
+#include <cerrno>
+#include <chrono>
+#include <future>
+#include <optional>
+#include <ranges>
 
 using vtpty::ColumnCount;
 using vtpty::ConPty;
@@ -80,4 +88,65 @@ TEST_CASE("ConPty.resizeScreen.afterRepeatedClose", "[vtpty][conpty]")
     pty.resizeScreen(pageSize(20, 10));
 
     CHECK(pty.pageSize() == pageSize(20, 10));
+}
+
+// Terminal::processInputOnce() reads ahead with a zero timeout while the render thread holds the
+// terminal. A zero-timeout read that parked in ReadFile there would hold back output already read
+// until the child wrote again -- forever, for a child sitting at a prompt.
+TEST_CASE("ConPty.read.aZeroTimeoutNeverBlocks", "[vtpty][conpty]")
+{
+    using namespace std::chrono_literals;
+    auto pty = ConPty { pageSize(80, 24) };
+    REQUIRE(pty.start().has_value());
+
+    // Whatever the pseudoconsole announces on start is read first; once nothing is waiting, a
+    // zero-timeout read must come back empty-handed at once, saying EAGAIN.
+    auto reader = std::async(std::launch::async, [&pty]() -> int {
+        auto pool = crispy::BufferObjectPool<char> { 4096 };
+        for ([[maybe_unused]] auto const attempt: std::views::iota(0, 100))
+        {
+            auto const storage = pool.allocateBufferObject();
+            if (!pty.read(*storage, std::chrono::milliseconds::zero(), 4096))
+                return errno;
+        }
+        return 0;
+    });
+
+    auto const finished = reader.wait_for(5s) == std::future_status::ready;
+    pty.close(); // breaks the pipe, so a ReadFile that wrongly parked returns and the test can end
+    CHECK(finished);
+    CHECK(reader.get() == EAGAIN);
+}
+
+// Terminal::processInputOnce() takes EAGAIN and EINTR for "nothing yet" and reads again. A zero-timeout
+// read leaves EAGAIN behind, so a read that fails once the child is gone must not leave it standing: the
+// parser thread would read again, fail again at once, and spin.
+TEST_CASE("ConPty.read.aFailedReadSaysTheDeviceIsGone", "[vtpty][conpty]")
+{
+    auto pty = ConPty { pageSize(80, 24) };
+    REQUIRE(pty.start().has_value());
+    auto pool = crispy::BufferObjectPool<char> { 4096 };
+
+    // Whatever the pseudoconsole announces on start is read first, until a zero-timeout read finds
+    // nothing waiting.
+    auto const nothingWaiting = [&]() {
+        for ([[maybe_unused]] auto const attempt: std::views::iota(0, 100))
+        {
+            auto const storage = pool.allocateBufferObject();
+            if (!pty.read(*storage, std::chrono::milliseconds::zero(), 4096))
+                return true;
+        }
+        return false;
+    }();
+    REQUIRE(nothingWaiting);
+    REQUIRE(errno == EAGAIN);
+
+    pty.close();
+    auto const storage = pool.allocateBufferObject();
+    auto const result = pty.read(*storage, std::nullopt, 4096);
+    auto const error = errno;
+
+    CHECK_FALSE(result.has_value());
+    CHECK(error != EAGAIN);
+    CHECK(error != EINTR);
 }

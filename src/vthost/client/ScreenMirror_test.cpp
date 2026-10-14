@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/core/TextScale.hpp>
+#include <vtbackend/grid/CellProxy.hpp>
+#include <vtbackend/grid/LineSoA.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <vtpty/MockPty.hpp>
@@ -1307,6 +1310,28 @@ TEST_CASE("wide characters and scaled text reproduce in the mirror", "[vthost][m
     }(&h, session);
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+TEST_CASE("a fractionally scaled wire cell takes its mirrored line off the batched path", "[vthost][mirror]")
+{
+    // `OSC 66 ; n=1:d=2:w=1` sizes a cell without widening it: scale 1, one column, no continuation.
+    // applyWireCell restores the sizing over what writeCellToSoA reset, so the restore must degrade the
+    // line as CellProxy::setTextScale does. Left Uniform, the line renders batched, at full size.
+    auto const fraction = vtbackend::CellScale { .numerator = 1, .denominator = 2 };
+
+    auto mirrored = vtbackend::LineSoA {};
+    vtbackend::initializeLineSoA(mirrored, vtbackend::ColumnCount(4));
+    auto cell = vthost::wireCellOf(vtbackend::GraphicsAttributes {}); // the pen the line's cells wear
+    cell.codepoint = U'x';
+    cell.textScaleExtras = vtbackend::packTextScaleExtras(fraction);
+    vthost::applyWireCell(mirrored, 1, cell, vtbackend::HyperlinkId {});
+    CHECK(mirrored.shape >= vtbackend::shapeImpliedByCells(mirrored));
+
+    auto written = vtbackend::LineSoA {};
+    vtbackend::initializeLineSoA(written, vtbackend::ColumnCount(4));
+    vtbackend::CellProxy(written, 1).write(vtbackend::GraphicsAttributes {}, U'x', 1);
+    vtbackend::CellProxy(written, 1).setTextScale(fraction);
+    CHECK(mirrored.shape == written.shape);
 }
 
 TEST_CASE("input-relevant DEC modes mirror into the local terminal", "[vthost][mirror]")

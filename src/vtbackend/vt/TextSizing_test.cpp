@@ -11,6 +11,7 @@
 #include <format>
 #include <ranges>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace std::string_view_literals;
@@ -154,27 +155,32 @@ TEST_CASE("TextSizing.plain_ascii_over_a_block_leaves_no_orphan", "[textsizing]"
     // Writing over any part of a block must destroy the WHOLE block. The bulk ASCII fast path in
     // Screen::writeText() carries no such logic -- it clears only the cells it writes -- so the
     // invariant depends on that path never running over a line that carries a block. It cannot:
-    // writing a block inflates every row it claims (useCellAt), and the bulk path is gated on
-    // Terminal::maxBulkTextSequenceWidth(), which returns 0 for a non-trivial line. This test pins
-    // that reasoning to observable behaviour, so that widening the fast path later cannot quietly
-    // reintroduce orphans.
+    // writing a block makes every row it claims Spanning, and the bulk path is gated on
+    // Terminal::maxBulkTextSequenceWidth(), which returns 0 for a line holding a spanning cell. This
+    // test pins that reasoning to observable behaviour, on both screens, so that widening the fast
+    // path later cannot quietly reintroduce orphans.
     auto const pageSize = PageSize { LineCount(3), ColumnCount(20) };
-    auto mock = MockTerm<vtpty::MockPty> { pageSize };
-    auto const& screen = mock.terminal.primaryScreen();
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+    {
+        INFO((screenSelect.empty() ? "primary" : "alternate"));
+        auto mock = MockTerm<vtpty::MockPty> { pageSize };
+        mock.writeToScreen(screenSelect);
+        auto const& screen = std::as_const(mock.terminal).currentScreen();
 
-    // A 4-column, 2-row block at the origin: head at (0,0), continuations across (1,0)..(1,3).
-    mock.writeToScreen("\033]66;s=2:w=2;W\a"sv);
-    REQUIRE(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 2);
-    REQUIRE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+        // A 4-column, 2-row block at the origin: head at (0,0), continuations across (1,0)..(1,3).
+        mock.writeToScreen("\033]66;s=2:w=2;W\a"sv);
+        REQUIRE(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 2);
+        REQUIRE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
 
-    // Pure ASCII, insert mode off, full margins, USASCII -- everything the fast path asks for.
-    mock.writeToScreen("\033[1;1H"sv);
-    mock.writeToScreen("hello"sv);
+        // Pure ASCII, insert mode off, full margins, USASCII -- everything the fast path asks for.
+        mock.writeToScreen("\033[1;1H"sv);
+        mock.writeToScreen("hello"sv);
 
-    CHECK(orphanedContinuations(screen, pageSize).empty());
-    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"h");
-    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 1);
-    CHECK_FALSE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+        CHECK(orphanedContinuations(screen, pageSize).empty());
+        CHECK(screen.at(LineOffset(0), ColumnOffset(0)).codepoints() == U"h");
+        CHECK(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 1);
+        CHECK_FALSE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+    }
 }
 
 TEST_CASE("TextSizing.plain_ascii_on_a_blocks_continuation_row_leaves_no_orphan", "[textsizing]")
@@ -183,19 +189,24 @@ TEST_CASE("TextSizing.plain_ascii_on_a_blocks_continuation_row_leaves_no_orphan"
     // Clearing the continuations while the head above kept its scale would leave the block glyph
     // drawn across the freshly written text.
     auto const pageSize = PageSize { LineCount(3), ColumnCount(20) };
-    auto mock = MockTerm<vtpty::MockPty> { pageSize };
-    auto const& screen = mock.terminal.primaryScreen();
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+    {
+        INFO((screenSelect.empty() ? "primary" : "alternate"));
+        auto mock = MockTerm<vtpty::MockPty> { pageSize };
+        mock.writeToScreen(screenSelect);
+        auto const& screen = std::as_const(mock.terminal).currentScreen();
 
-    mock.writeToScreen("\033]66;s=2:w=2;W\a"sv);
-    REQUIRE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
+        mock.writeToScreen("\033]66;s=2:w=2;W\a"sv);
+        REQUIRE(screen.at(LineOffset(1), ColumnOffset(0)).isFlagEnabled(CellFlag::MulticellContinuation));
 
-    mock.writeToScreen("\033[2;1H"sv); // second row: nothing but this block's continuations
-    mock.writeToScreen("hello"sv);
+        mock.writeToScreen("\033[2;1H"sv); // second row: nothing but this block's continuations
+        mock.writeToScreen("hello"sv);
 
-    CHECK(orphanedContinuations(screen, pageSize).empty());
-    CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"h");
-    // The head is gone too -- half a glyph is not a thing that can be drawn.
-    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 1);
+        CHECK(orphanedContinuations(screen, pageSize).empty());
+        CHECK(screen.at(LineOffset(1), ColumnOffset(0)).codepoints() == U"h");
+        // The head is gone too -- half a glyph is not a thing that can be drawn.
+        CHECK(screen.at(LineOffset(0), ColumnOffset(0)).scale() == 1);
+    }
 }
 
 TEST_CASE("TextSizing.width_advances_scale_times_width", "[textsizing]")

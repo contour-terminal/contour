@@ -315,10 +315,10 @@ class Sequence
     /// @returns the raw VT-sequence string.
     [[nodiscard]] std::string raw() const;
 
-    [[nodiscard]] Function const* functionDefinition(
-        gsl::span<Function const> availableDefinitions) const noexcept
+    /// @return The active definition this sequence names in @p sequences, or nullptr.
+    [[nodiscard]] Function const* functionDefinition(SupportedSequences const& sequences) const noexcept
     {
-        return select(selector(), availableDefinitions);
+        return sequences.select(selector());
     }
 
     /// Converts a FunctionSpinto a FunctionSelector, applicable for finding the corresponding
