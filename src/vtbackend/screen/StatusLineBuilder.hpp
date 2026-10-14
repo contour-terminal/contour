@@ -7,6 +7,7 @@
 #include <vtbackend/core/TerminalContext.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -30,13 +31,20 @@ namespace StatusLineDefinitions
         std::string textRight;
     };
 
+    /// How often a {Command} item re-runs when its template names no Interval.
+    inline constexpr auto DefaultCommandInterval = std::chrono::seconds { 10 };
+
     // clang-format off
     struct Title: Styles {};
     struct CellSGR: Styles {};
     struct CellTextUtf32: Styles {};
     struct CellTextUtf8: Styles {};
     struct Clock: Styles {};
-    struct Command: Styles { std::string command; };
+    struct Command: Styles
+    {
+        std::string command;                                    ///< Shell command line, UTF-8.
+        std::chrono::seconds interval = DefaultCommandInterval; ///< How often it re-runs.
+    };
     struct HistoryLineCount: Styles {};
     struct Hyperlink: Styles {};
     struct InputMode: Styles {};

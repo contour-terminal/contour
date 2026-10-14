@@ -169,6 +169,7 @@ Terminal::Terminal(Events& eventListener,
                    core::Environment const& env,
                    std::unique_ptr<vtpty::Pty> pty,
                    Settings factorySettings,
+                   optional<StatusLineCommandServices> commandServices,
                    chrono::steady_clock::time_point now):
     _eventListener { eventListener },
     _homeDirectory { env.get("HOME").value_or("") },
@@ -227,7 +228,13 @@ Terminal::Terminal(Events& eventListener,
     _parser { std::ref(_sequenceBuilder) },
     _viCommands { *this },
     _inputHandler { _viCommands, ViMode::Insert },
-    _shellIntegration { std::make_unique<NullShellIntegration>() }
+    _shellIntegration { std::make_unique<NullShellIntegration>() },
+    _statusLineCommands { commandServices ? std::make_unique<StatusLineCommandCache>(
+                                                *commandServices,
+                                                [this](StatusLineCommandOutput output) {
+                                                    onStatusLineCommandCompleted(output);
+                                                })
+                                          : nullptr }
 {
     // Through setTerminalId, so the three pieces of state derived from the identity are derived in
     // ONE place. Seeding _terminalId/_operatingLevel in the member list and stopping there left the
@@ -467,6 +474,29 @@ void Terminal::breakLoopAndRefreshRenderBuffer()
     //     return;
 
     _pty->wakeupReader();
+}
+
+void Terminal::onStatusLineCommandCompleted(StatusLineCommandOutput output)
+{
+    // Runs on a core::async executor thread with the cache's mutex held and Terminal::_stateMutex NOT
+    // held, so it must stay off terminal state:
+    //  - Changed: breakLoopAndRefreshRenderBuffer(). _changes and _renderBuffer.state are atomics, and
+    //    Pty::wakeupReader() is the cross-thread wake-up (the GUI thread calls it too).
+    //  - Unchanged: renderBufferUpdated() only, so the display re-arms its wakeup from nextRender()
+    //    without dirtying the buffer. This is only as thread-safe as the Events implementation:
+    //    see Events::renderBufferUpdated().
+    switch (output)
+    {
+        case StatusLineCommandOutput::Unchanged: _eventListener.renderBufferUpdated(); break;
+        case StatusLineCommandOutput::Changed: breakLoopAndRefreshRenderBuffer(); break;
+    }
+}
+
+std::string Terminal::statusLineCommandOutput(StatusLineDefinitions::Command const& item) const
+{
+    // The cache is internally synchronised, so the const accessor may call it through the pointer.
+    return _statusLineCommands ? _statusLineCommands->output(item.command, item.interval, _currentTime)
+                               : std::string {};
 }
 
 bool Terminal::refreshRenderBuffer(bool locked)
@@ -1225,6 +1255,8 @@ void Terminal::updateSelectionMatches()
 void Terminal::setStatusLineDefinition(StatusLineDefinition&& definition)
 {
     _indicatorStatusLineDefinition = std::move(definition);
+    if (_statusLineCommands)
+        _statusLineCommands->forgetRequests();
     updateIndicatorStatusLine();
 }
 
@@ -1233,6 +1265,8 @@ void Terminal::resetStatusLineDefinition()
     _indicatorStatusLineDefinition = parseStatusLineDefinition(_settings.indicatorStatusLine.left,
                                                                _settings.indicatorStatusLine.middle,
                                                                _settings.indicatorStatusLine.right);
+    if (_statusLineCommands)
+        _statusLineCommands->forgetRequests();
     updateIndicatorStatusLine();
 }
 
@@ -1880,6 +1914,12 @@ optional<chrono::milliseconds> Terminal::nextRender() const
         auto const millisUntilNextMinute =
             chrono::duration_cast<chrono::milliseconds>(chrono::seconds(60 - currentSecond));
         nextWakeup = std::min(nextWakeup, millisUntilNextMinute);
+
+        // While synchronized output suppresses rendering the status line is not rebuilt, so an overdue
+        // command would keep reporting 0 ms and spin the display; the end of the sync triggers a refresh.
+        if (_statusLineCommands && !isRenderingSuppressed())
+            if (auto const due = _statusLineCommands->nextDue(_currentTime))
+                nextWakeup = std::min(nextWakeup, *due);
     }
 
     // Screen transition animation scheduling at display refresh rate.

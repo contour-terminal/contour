@@ -68,6 +68,7 @@ set(vtbackend_HEADERS
     graphics/SixelParser.hpp
     grid/SoAClusterWriter.hpp
     screen/StatusLineBuilder.hpp
+    screen/StatusLineCommandCache.hpp
     screen/Terminal.hpp
     screen/TerminalTestFixtures.hpp
     testing/TestHelpers.hpp
@@ -131,6 +132,7 @@ set(vtbackend_SOURCES
     graphics/regis/ReGISTextRasterizer.cpp
     graphics/regis/ReGISParser.cpp
     screen/StatusLineBuilder.cpp
+    screen/StatusLineCommandCache.cpp
     screen/Terminal.cpp
     vt/VTType.cpp
     vt/VTWriter.cpp
@@ -163,6 +165,7 @@ target_link_libraries(vtbackend PUBLIC
     boxed-cpp::boxed-cpp
     Threads::Threads
     contour::tracy
+    core::async
     core::base
     core::cli
     core::log
@@ -234,6 +237,7 @@ if(LIBTERMINAL_TESTING)
         core/Search_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp
+        screen/StatusLineCommandCache_test.cpp
         core/WindowSizeStack_test.cpp
         screen/Terminal_test.cpp
         screen/Terminal_scroll_test.cpp

@@ -18,6 +18,7 @@
 #include <vtbackend/screen/Cursor.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
+#include <vtbackend/screen/StatusLineCommandCache.hpp>
 #include <vtbackend/screen/Viewport.hpp>
 #include <vtbackend/shell/Folding.hpp>
 #include <vtbackend/shell/MarkArbiter.hpp>
@@ -304,6 +305,11 @@ class Terminal
         virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
+        /// The render buffer is stale, or the next wakeup (@see Terminal::nextRender) changed.
+        /// May be called from ANY thread, including a core::async executor thread with the
+        /// status-line command cache's mutex held. Implementations must not take the terminal's state
+        /// mutex, must not read terminal state, and must not call nextRender() or refreshRenderBuffer()
+        /// synchronously; hand the work to the thread that owns it instead.
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
         virtual FontDef getFontDef() { return {}; }
@@ -462,11 +468,16 @@ class Terminal
     ///                        session was launched, so it is resolved once, at construction.
     /// @param pty             The pseudo-terminal this drives.
     /// @param factorySettings The settings a hard reset (RIS) restores.
+    /// @param commandServices Who runs `{Command}` status-line items, and where; nullopt for a host
+    ///                        that runs none (such items then render empty). The lifetime rules are
+    ///                        those of StatusLineCommandServices: the capture must outlive in-flight
+    ///                        runs, so the executor is joined before the capture is destroyed.
     /// @param now             The current time, as the caller's clock reads it.
     Terminal(Events& eventListener,
              core::Environment const& env,
              std::unique_ptr<vtpty::Pty> pty,
              Settings factorySettings,
+             std::optional<StatusLineCommandServices> commandServices,
              std::chrono::steady_clock::time_point now /* = std::chrono::steady_clock::now()*/);
     ~Terminal() = default;
 
@@ -841,6 +852,11 @@ class Terminal
 
     /// Retrieves the time point this terminal instance has been spawned.
     [[nodiscard]] std::chrono::steady_clock::time_point currentTime() const noexcept { return _currentTime; }
+
+    /// The last output of a `{Command}` status-line item; never blocks (the cache refreshes it off thread).
+    /// @param item The status-line command item.
+    /// @return Its last displayed text; empty before the first result, or without command services.
+    [[nodiscard]] std::string statusLineCommandOutput(StatusLineDefinitions::Command const& item) const;
 
     /// Retrieves reference to the underlying PTY device.
     [[nodiscard]] vtpty::Pty& device() noexcept { return *_pty; }
@@ -2285,6 +2301,10 @@ class Terminal
     TabsNamingMode getTabsNamingMode() const noexcept { return _settings.tabNamingMode; }
 
   private:
+    /// Reacts to a finished status-line command run; called from an executor thread.
+    /// @param output Whether the displayed text changed.
+    void onStatusLineCommandCompleted(StatusLineCommandOutput output);
+
     /// Scroll the viewport to the bottom if `settings().autoScrollOnUpdate` is enabled.
     /// Intended for PTY/app-caused code paths only (e.g. key/char forwarding,
     /// scrollback clears). User-initiated transitions should call
@@ -3014,6 +3034,12 @@ class Terminal
     // }}}
 
     DesktopNotificationManager _desktopNotificationManager;
+
+    /// Runs the indicator's `{Command}` items off thread; null without command services. Keep this the
+    /// LAST data member: its refresh callback touches _eventListener, _pty, _changes and _renderBuffer,
+    /// and being destroyed first guarantees no callback fires once the members declared before it are gone
+    /// (runs still in flight keep their own state alive and merely find nobody to notify).
+    std::unique_ptr<StatusLineCommandCache> _statusLineCommands;
 };
 
 } // namespace vtbackend

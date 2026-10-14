@@ -19,5 +19,7 @@ auto inline const vtTraceSequenceLog =
 #endif
 
 auto inline const renderBufferLog = core::log::Category("vt.renderbuffer", "Render Buffer Objects");
+auto inline const statusLineLog =
+    core::log::Category("vt.statusline", "Logs indicator status-line command runs.");
 
 } // namespace vtbackend

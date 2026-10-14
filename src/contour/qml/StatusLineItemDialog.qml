@@ -47,6 +47,9 @@ Popup {
     property string itemLabel: ""
     property string itemText: ""
     property string itemCommand: ""
+    // Seconds between runs of a Command item. No control edits it yet; it is carried so that applying
+    // the dialog does not reset a hand-written Interval= to the default.
+    property int itemInterval: 0
     property bool hasColor: false
     property string colorHex: ""
     property bool hasBgColor: false
@@ -91,6 +94,7 @@ Popup {
         root.itemLabel = item.label !== undefined ? item.label : root.itemType
         root.itemText = item.text !== undefined ? item.text : ""
         root.itemCommand = item.command !== undefined ? item.command : ""
+        root.itemInterval = item.interval !== undefined ? item.interval : 0
         root.hasColor = item.hasColor === true
         root.colorHex = item.color !== undefined ? item.color : ""
         root.hasBgColor = item.hasBgColor === true
@@ -135,6 +139,7 @@ Popup {
         }
         if (root.isCommand) {
             item.command = root.itemCommand
+            item.interval = root.itemInterval
             item.displayName = root.itemCommand.length > 0 ? root.itemCommand : root.itemLabel
         }
         if (root.isTabs) {

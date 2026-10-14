@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <format>
@@ -1899,6 +1900,8 @@ QVariantList SettingsController::parseIndicatorSegment(QString const& templateSt
                 else if constexpr (std::same_as<T, Command>)
                 {
                     row[QStringLiteral("command")] = QString::fromStdString(v.command);
+                    // Seconds. No control for it yet, but carried so an edit of the segment keeps it.
+                    row[QStringLiteral("interval")] = static_cast<int>(v.interval.count());
                     row[QStringLiteral("displayName")] = v.command.empty()
                                                              ? toQString(ItemTraits<T>::Label)
                                                              : QString::fromStdString(v.command);
@@ -1959,8 +1962,13 @@ QString SettingsController::serializeIndicatorSegment(QVariantList const& items)
                 segment.emplace_back(
                     Text { styles, row.value(QStringLiteral("text")).toString().toStdString() });
             else if constexpr (std::same_as<T, Command>)
-                segment.emplace_back(
-                    Command { styles, row.value(QStringLiteral("command")).toString().toStdString() });
+            {
+                auto item = Command { styles, row.value(QStringLiteral("command")).toString().toStdString() };
+                // A missing or non-positive interval (e.g. a row QML built without one) keeps the default.
+                if (auto const seconds = row.value(QStringLiteral("interval")).toInt(); seconds > 0)
+                    item.interval = std::chrono::seconds { seconds };
+                segment.emplace_back(std::move(item));
+            }
             else if constexpr (std::same_as<T, Tabs>)
             {
                 auto const separator = row.value(QStringLiteral("separator")).toString();

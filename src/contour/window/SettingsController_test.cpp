@@ -785,6 +785,41 @@ TEST_CASE("SettingsController: the indicator bridge exposes every flag the templ
     CHECK(after.value("CrossedOut").toBool());
 }
 
+TEST_CASE("SettingsController: the indicator bridge keeps a Command's Interval and comma commands",
+          "[settings]")
+{
+    // An Interval= has no control in the page, so the only way it survives an edit is by being carried
+    // through the row; and a command containing a comma is only expressible as the {Command:<raw>}
+    // shorthand, which the serializer has to choose for it.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+
+    auto items = fx.controller->parseIndicatorSegment("{Command:Program=x,Interval=30} {Clock}");
+    REQUIRE(items.size() == 3);
+    auto const command = items.first().toMap();
+    CHECK(command.value("command").toString() == "x");
+    CHECK(command.value("interval").toInt() == 30);
+
+    // An unrelated edit, the way the editor does it: the rows are copied, one moves, the segment is
+    // serialized again.
+    items.move(0, 2);
+    auto const edited = fx.controller->serializeIndicatorSegment(items);
+    CHECK(edited.contains("Interval=30"));
+    auto const reread = fx.controller->parseIndicatorSegment(edited);
+    REQUIRE(reread.size() == 3);
+    CHECK(reread.last().toMap().value("command").toString() == "x");
+    CHECK(reread.last().toMap().value("interval").toInt() == 30);
+
+    auto const withComma = fx.controller->parseIndicatorSegment("{Command:git log -1 --format=%h,%s}");
+    REQUIRE(withComma.size() == 1);
+    CHECK(withComma.first().toMap().value("command").toString() == "git log -1 --format=%h,%s");
+    auto const once = fx.controller->serializeIndicatorSegment(withComma);
+    auto const again = fx.controller->parseIndicatorSegment(once);
+    REQUIRE(again.size() == 1);
+    CHECK(again.first().toMap().value("command").toString() == "git log -1 --format=%h,%s");
+    CHECK(fx.controller->serializeIndicatorSegment(again) == once);
+}
+
 TEST_CASE("SettingsController: the indicator placeholder catalog matches what parsing produces", "[settings]")
 {
     auto fx = Fixture(BasicConfig);

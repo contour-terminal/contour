@@ -321,3 +321,92 @@ TEST_CASE("parseStatusLineSegment.commandWithoutProgramIsNotAnItem", "[statuslin
     REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(segment[0]));
     CHECK(std::get<StatusLineDefinitions::Text>(segment[0]).text == "{Command}");
 }
+
+TEST_CASE("parseStatusLineSegment.commandInterval", "[statusline]")
+{
+    using StatusLineDefinitions::Command;
+    auto const segment = parseStatusLineSegment("{Command:Program=git status,Interval=30}");
+    REQUIRE(segment.size() == 1);
+    REQUIRE(std::holds_alternative<Command>(segment[0]));
+    CHECK(std::get<Command>(segment[0]).command == "git status");
+    CHECK(std::get<Command>(segment[0]).interval == std::chrono::seconds { 30 });
+}
+
+TEST_CASE("parseStatusLineSegment.commandIntervalDefaultsWhenAbsentOrInvalid", "[statusline]")
+{
+    using StatusLineDefinitions::Command;
+    for (auto const* text: { "{Command:Program=date}",
+                             "{Command:Program=date,Interval=0}",
+                             "{Command:Program=date,Interval=-3}",
+                             "{Command:Program=date,Interval=soon}" })
+    {
+        CAPTURE(text);
+        auto const segment = parseStatusLineSegment(text);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<Command>(segment[0]));
+        CHECK(std::get<Command>(segment[0]).interval == StatusLineDefinitions::DefaultCommandInterval);
+    }
+}
+
+TEST_CASE("parseStatusLineSegment.commandShorthand", "[statusline]")
+{
+    using StatusLineDefinitions::Command;
+    auto const segment = parseStatusLineSegment("[{Command:git log -1 --format=%h,%s}]");
+    REQUIRE(segment.size() == 3);
+    REQUIRE(std::holds_alternative<Command>(segment[1]));
+    auto const& command = std::get<Command>(segment[1]);
+    CHECK(command.command == "git log -1 --format=%h,%s");
+    CHECK(command.interval == StatusLineDefinitions::DefaultCommandInterval);
+    CHECK(command.flags == CellFlags {});
+}
+
+TEST_CASE("parseStatusLineSegment.commandIntervalWithoutProgramIsNotAnItem", "[statusline]")
+{
+    auto const segment = parseStatusLineSegment("{Command:Interval=5}");
+    REQUIRE(segment.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(segment[0]));
+    CHECK(std::get<StatusLineDefinitions::Text>(segment[0]).text == "{Command:Interval=5}");
+}
+
+TEST_CASE("serializeStatusLineSegment.commandInterval", "[statusline]")
+{
+    CHECK(serializeStatusLineSegment(parseStatusLineSegment("{Command:Program=date}"))
+          == "{Command:Program=date}");
+    CHECK(serializeStatusLineSegment(parseStatusLineSegment("{Command:Program=date,Interval=30}"))
+          == "{Command:Program=date,Interval=30}");
+    CHECK(serializeStatusLineSegment(parseStatusLineSegment("{Command:date}")) == "{Command:Program=date}");
+}
+
+TEST_CASE("serializeStatusLineSegment.commandWithCommaRoundTripsAsShorthand", "[statusline]")
+{
+    using StatusLineDefinitions::Command;
+    auto const segment = parseStatusLineSegment("{Command:git log -1 --format=%h,%s}");
+    REQUIRE(segment.size() == 1);
+    REQUIRE(std::holds_alternative<Command>(segment[0]));
+
+    auto const text = serializeStatusLineSegment(segment);
+    CHECK(text == "{Command:git log -1 --format=%h,%s}");
+
+    auto const readBack = parseStatusLineSegment(text);
+    REQUIRE(readBack.size() == 1);
+    REQUIRE(std::holds_alternative<Command>(readBack[0]));
+    CHECK(std::get<Command>(readBack[0]).command == "git log -1 --format=%h,%s");
+    CHECK(std::get<Command>(readBack[0]).interval == StatusLineDefinitions::DefaultCommandInterval);
+}
+
+TEST_CASE("serializeStatusLineSegment.commandWithCommaAndIntervalStaysProgramForm", "[statusline]")
+{
+    // The shorthand cannot carry an interval, so a non-default one keeps the Program= form (lossy for the
+    // comma, as before the shorthand existed).
+    auto item = StatusLineDefinitions::Command { StatusLineDefinitions::Styles {}, "a,b" };
+    item.interval = std::chrono::seconds { 30 };
+    CHECK(serializeStatusLineSegment({ item }) == "{Command:Program=a,b,Interval=30}");
+}
+
+TEST_CASE("parseStatusLineSegment.commandShorthandWhitespaceOnlyIsNotAnItem", "[statusline]")
+{
+    auto const segment = parseStatusLineSegment("{Command: }");
+    REQUIRE(segment.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(segment[0]));
+    CHECK(std::get<StatusLineDefinitions::Text>(segment[0]).text == "{Command: }");
+}

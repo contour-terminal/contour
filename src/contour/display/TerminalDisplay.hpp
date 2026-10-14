@@ -585,8 +585,6 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     bool _doDumpState = false;
     std::optional<std::variant<std::filesystem::path, std::monostate>> _saveScreenshot { std::nullopt };
 
-    vtbackend::LineCount _lastHistoryLineCount = vtbackend::LineCount(0);
-
     // ======================================================================
 
 #ifdef CONTOUR_PERF_STATS

@@ -438,9 +438,8 @@ static int benchKeyPressLatency(KeyPressBenchOptions const& options, core::Envir
     settings.pageSize = pageSize;
     settings.ptyReadBufferSize = options.ptyReadSize;
     auto events = vtbackend::Terminal::NullEvents {};
-    auto terminal = vtbackend::Terminal {
-        events, env, std::move(ownedProcess), settings, std::chrono::steady_clock::now()
-    };
+    auto terminal = vtbackend::Terminal { events,   env,          std::move(ownedProcess),
+                                          settings, std::nullopt, std::chrono::steady_clock::now() };
 
     if (auto const started = terminal.device().start(); !started)
     {

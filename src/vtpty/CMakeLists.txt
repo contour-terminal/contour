@@ -18,10 +18,13 @@ if(NOT LINUX OR EXISTS "/.flatpak-info")
     set(CONTOUR_WITH_SYSTEMD OFF)
 endif()
 
-set(vtpty_LIBRARIES core::base core::log core::platform crispy::core Microsoft.GSL::GSL boxed-cpp::boxed-cpp)
+set(vtpty_LIBRARIES core::base core::log core::platform crispy::core Microsoft.GSL::GSL boxed-cpp::boxed-cpp core::async)
 
 set(vtpty_SOURCES
     ChannelPty.cpp
+    CommandCapture.cpp
+    CommandCapture${PLATFORM_SUFFIX}.cpp
+    CommandCaptureStop.hpp # private: shared by the platform implementations only
     EnvironmentBlock.cpp
     MockPty.cpp
     MockViewPty.cpp
@@ -36,6 +39,7 @@ set(vtpty_SOURCES
 
 set(vtpty_HEADERS
     ChannelPty.hpp
+    CommandCapture.hpp
     EnvironmentBlock.hpp
     ImageSize.hpp
     MockPty.hpp
@@ -141,6 +145,7 @@ if(VTPTY_TESTING)
     add_executable(vtpty_test
         test_main.cpp
         ChannelPty_test.cpp
+        CommandCapture_test.cpp
         EnvironmentBlock_test.cpp
         ImageSize_test.cpp
         PlacementBreaker_test.cpp

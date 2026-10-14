@@ -11,6 +11,9 @@
 
 #include <libunicode/convert.h>
 
+#include <concepts>
+#include <optional>
+
 namespace vtbackend
 {
 
@@ -20,15 +23,22 @@ class MockTerm: public Terminal::NullEvents
   public:
     MockTerm(ColumnCount columns, LineCount lines): MockTerm { PageSize { lines, columns } } {}
 
-    explicit MockTerm(PageSize size, HistoryLimits historyLimits = {}, size_t ptyReadBufferSize = 1024);
+    /// @param commandServices Who runs `{Command}` status-line items; nullopt renders them empty.
+    explicit MockTerm(PageSize size,
+                      HistoryLimits historyLimits = {},
+                      size_t ptyReadBufferSize = 1024,
+                      std::optional<StatusLineCommandServices> commandServices = std::nullopt);
 
     /// A scrollback with no headroom, which is what a bare line count has always meant here.
-    MockTerm(PageSize size, MaxHistoryLineCount maxHistoryLineCount, size_t ptyReadBufferSize = 1024):
-        MockTerm { size, HistoryLimits::plain(maxHistoryLineCount), ptyReadBufferSize }
+    MockTerm(PageSize size,
+             MaxHistoryLineCount maxHistoryLineCount,
+             size_t ptyReadBufferSize = 1024,
+             std::optional<StatusLineCommandServices> commandServices = std::nullopt):
+        MockTerm { size, HistoryLimits::plain(maxHistoryLineCount), ptyReadBufferSize, commandServices }
     {
     }
 
-    template <typename Init>
+    template <std::invocable<MockTerm&> Init>
     MockTerm(
         PageSize size, MaxHistoryLineCount hist, size_t ptyReadBufferSize, Init init = [](MockTerm&) {}):
         MockTerm { size, HistoryLimits::plain(hist), ptyReadBufferSize }
@@ -36,7 +46,7 @@ class MockTerm: public Terminal::NullEvents
         init(*this);
     }
 
-    template <typename Init>
+    template <std::invocable<MockTerm&> Init>
     MockTerm(
         PageSize size, HistoryLimits hist, size_t ptyReadBufferSize, Init init = [](MockTerm&) {}):
         MockTerm { size, hist, ptyReadBufferSize }
@@ -285,11 +295,13 @@ class MockTerm: public Terminal::NullEvents
 template <typename PtyDevice>
 inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
                                      HistoryLimits historyLimits,
-                                     size_t ptyReadBufferSize):
+                                     size_t ptyReadBufferSize,
+                                     std::optional<StatusLineCommandServices> commandServices):
     terminal { *this,
                core::defaultEnvironment(),
                std::make_unique<PtyDevice>(pageSize),
                createSettings(pageSize, historyLimits, ptyReadBufferSize),
+               commandServices,
                std::chrono::steady_clock::time_point() } // explicitly start with empty timepoint
 {
     if (auto const logFilterString = core::defaultEnvironment().get("LOG"))

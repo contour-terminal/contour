@@ -14,8 +14,14 @@
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 
+#include <vtbackend/screen/StatusLineCommandCache.hpp>
+
+#include <vtpty/CommandCapture.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/SshSession.hpp>
+
+#include <core/async/StopToken.hpp>
+#include <core/async/ThreadPoolExecutor.hpp>
 
 #include <QtCore/QPointer>
 #include <QtDBus/QDBusVariant>
@@ -263,6 +269,15 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     session::TerminalSessionManager& sessionsManager() noexcept { return _sessionManager; }
 
+    /// The shared capture and pool every session's status-line commands run on. Sessions are never
+    /// destroyed in production, so nothing here is torn down under a terminal; at quit the destructor
+    /// stops the shutdown token, which cancels every run, and the pool then drains quickly.
+    /// @return References valid for the app's lifetime.
+    [[nodiscard]] vtbackend::StatusLineCommandServices statusLineCommandServices() noexcept
+    {
+        return { .capture = _commandCapture, .executor = _commandExecutor };
+    }
+
     [[nodiscard]] std::chrono::seconds earlyExitThreshold() const;
 
     /// The path the process was launched as (argv[0]), used to re-spawn contour for a new
@@ -381,6 +396,15 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::optional<uint64_t> _pendingAttachWindow;
 
     config::Config _config;
+    // Sessions are heap-allocated with C++ ownership and never destroyed in production, so their command
+    // caches outlive these members and never cancel their own runs. ~ContourGuiApp() therefore stops
+    // _commandShutdown first, which cancels every run in flight and makes later ones return at once, so
+    // ~ThreadPoolExecutor drains and joins quickly. Declared in this order: the source before the capture
+    // that holds its token; the executor after the capture, so it is destroyed (and joins) first and the
+    // capture outlives every run.
+    core::async::StopSource _commandShutdown;
+    vtpty::SystemCommandCapture _commandCapture;
+    core::async::ThreadPoolExecutor _commandExecutor;
     // Declared before _sessionManager: the manager holds a reference to the factory.
     // Always a RoutingSessionFactory wrapping the injected/default factory,
     // so attach mode can switch the route without touching the manager.
