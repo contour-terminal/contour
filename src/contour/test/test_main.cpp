@@ -8,15 +8,48 @@
 
 #include <core/testing/SuppressWindowsDialogs.hpp>
 
+#include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
 #include <QtCore/QStringList>
 #include <QtGui/QGuiApplication>
 
+#include <cstdint>
 #include <iostream>
 
 #include <QtQuickControls2/QQuickStyle>
 
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
+
+namespace
+{
+
+/// Deletes what a test run left to deleteLater() once that run is over.
+///
+/// Tearing down QML hands much of the work to the event loop: a Loader, a Repeater releasing its
+/// delegates and a Menu all delete their items with deleteLater(). A test that drives a page and
+/// returns without spinning the loop again leaves those deletions queued, and QCoreApplication drops
+/// the queue at exit without deleting a single receiver. Everything those objects still hold, the
+/// font engines their texts shaped with among it, then outlives the run, and LeakSanitizer reports
+/// what it can no longer reach. In a long run the next test's event processing hides this; run alone,
+/// the test leaks. The application itself never stops spinning its loop, so it has no such queue.
+class DeferredDeletionDrain final: public Catch::EventListenerBase
+{
+  public:
+    using Catch::EventListenerBase::EventListenerBase;
+
+    /// Runs the deletions queued by one run of a test case, after its locals are gone.
+    void testCasePartialEnded(Catch::TestCaseStats const& /*stats*/, std::uint64_t /*partNumber*/) override
+    {
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    }
+};
+
+} // namespace
+
+CATCH_REGISTER_LISTENER(DeferredDeletionDrain)
 
 int main(int argc, char* argv[])
 {
