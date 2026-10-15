@@ -2,9 +2,11 @@
 #
 #// SPDX-License-Identifier: Apache-2.0
 
-# Escapes are written as \033, not \e: tcsh's builtin echo understands the octal form but not the GNU \e
-# extension, and silently prints the latter as literal text. (That is why this file used to emit the
-# characters "\e[?2028l..." into the terminal rather than the sequences it meant.)
+# What precmd and postcmd echo carries the ESC and BEL bytes themselves, made once below, rather than
+# \033 for tcsh's builtin echo to expand: echo expands escapes only where echo_style is "both" or "sysv",
+# as Linux builds of tcsh set it, and prints them as literal text where it is "bsd", as macOS's tcsh is
+# built. A byte held in a variable reads the same under every style. For the same reason the sequences
+# echo writes end in BEL rather than ST, whose backslash an expanding echo would read as an escape.
 #
 # precmd emits, in order:
 #   OSC 133;D  -- the previous command finished, with its exit status,
@@ -29,8 +31,11 @@
 # all; run in the C locale, awk counts bytes rather than characters.
 set __contour_osc7 = 'BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i; path = ENVIRON["PWD"]; printf "\033]7;file://%s", ENVIRON["HOST"]; for (i = 1; i <= length(path); i++) { c = substr(path, i, 1); if (c ~ /[A-Za-z0-9\/._~-]/) printf "%s", c; else printf "%%%02X", ord[c] } printf "\033\\" }'
 
-alias precmd 'echo -n "\033]133;D;$status\033\\\033[?2028l"; env LC_ALL=C awk "$__contour_osc7"; echo -n "\033]133;A\033\\"; set __contour_prompted'
-alias postcmd 'if ( $?__contour_prompted ) echo -n "\033[?2028h\033]133;C\033\\"'
+set __contour_esc = "`printf '\033'`"
+set __contour_bel = "`printf '\007'`"
+
+alias precmd 'echo -n "${__contour_esc}]133;D;${status}${__contour_bel}${__contour_esc}[?2028l"; env LC_ALL=C awk "$__contour_osc7"; echo -n "${__contour_esc}]133;A${__contour_bel}"; set __contour_prompted'
+alias postcmd 'if ( $?__contour_prompted ) echo -n "${__contour_esc}[?2028h${__contour_esc}]133;C${__contour_bel}"'
 
 # OSC 133;B, as a %{...%} literal at the end of the prompt.
 #
