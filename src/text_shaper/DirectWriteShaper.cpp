@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <iostream> // DEBUGGING ONLY
+#include <limits>
+#include <ranges>
 #include <string>
 #include <string_view>
 
@@ -49,6 +51,10 @@ namespace
     {
         auto const width = textureBounds.right - textureBounds.left;
         auto const height = textureBounds.bottom - textureBounds.top;
+
+        // Spaces and other glyphs without ink have valid empty bounds and need no alpha texture.
+        if (width == 0 || height == 0)
+            return true;
 
         std::vector<uint8_t> tmp;
         tmp.resize(height * width * 3);
@@ -118,8 +124,9 @@ struct DxFontInfo
     FontMetrics metrics;
     int fontUnitsPerEm;
 
-    // Owning pointer
-    IDWriteFontFace5* fontFace;
+    ComPtr<IDWriteFontFace5> fontFace;
+    FontPath source;
+    FontSourceList fallbacks;
 };
 
 struct DirectWriteShaper::Private
@@ -134,6 +141,7 @@ struct DirectWriteShaper::Private
     std::unordered_map<FontKey, bool> fontsHasColor;
 
     FontKey nextFontKey;
+    int fallbackLimit = 16;
 
     Private(DPI initialDPI, FontLocator& fontLocator): locator { &fontLocator }, dpi { initialDPI }
     {
@@ -167,6 +175,12 @@ struct DirectWriteShaper::Private
 
         auto const& sourcePath = std::get<FontPath>(source);
 
+        for (auto const& [fontKey, fontInfo]: fonts)
+            if (description == fontInfo.description && size.pt == fontInfo.size.pt
+                && sourcePath.value == fontInfo.source.value
+                && sourcePath.collectionIndex == fontInfo.source.collectionIndex)
+                return fontKey;
+
         auto const wSourcePath = core::toUtf16(sourcePath.value);
         if (!wSourcePath)
             return nullopt; // names no file
@@ -182,55 +196,25 @@ struct DirectWriteShaper::Private
         DWRITE_FONT_FILE_TYPE fileType {};
         DWRITE_FONT_FACE_TYPE fontFaceType {};
         UINT32 numFaces {};
-        IDWriteFontFace* fontFace {};
-        fontFile->Analyze(&isSupported, &fileType, &fontFaceType, &numFaces);
-        hr = factory->CreateFontFace(
-            fontFaceType, 1, fontFile.GetAddressOf(), 0, DWRITE_FONT_SIMULATIONS_NONE, &fontFace);
+        ComPtr<IDWriteFontFace> fontFace;
+        hr = fontFile->Analyze(&isSupported, &fileType, &fontFaceType, &numFaces);
+        if (FAILED(hr) || !isSupported || sourcePath.collectionIndex < 0
+            || static_cast<UINT32>(sourcePath.collectionIndex) >= numFaces)
+            return nullopt;
+        hr = factory->CreateFontFace(fontFaceType,
+                                     1,
+                                     fontFile.GetAddressOf(),
+                                     static_cast<UINT32>(sourcePath.collectionIndex),
+                                     DWRITE_FONT_SIMULATIONS_NONE,
+                                     &fontFace);
         if (FAILED(hr))
         {
             return nullopt;
         }
 
-        IDWriteFontFace3* fontFace3 {};
-        fontFace->QueryInterface(&fontFace3);
-
-        ComPtr<IDWriteLocalizedStrings> familyNames {};
-        fontFace3->GetFamilyNames(&familyNames);
-
-        BOOL localeExists = FALSE;
-        unsigned index {};
-        familyNames->FindLocaleName(userLocale.c_str(), &index, &localeExists);
-
-        if (!localeExists)
-        {
-            // Fallback to en-US
-            wchar_t const* localeName = L"en-US";
-            familyNames->FindLocaleName(localeName, &index, &localeExists);
-        }
-
-        if (!localeExists)
-        {
-            // Fallback to locale where index = 0
-            index = 0;
-
-            std::wstring localeName {};
-            UINT32 length = 0;
-            familyNames->GetLocaleNameLength(index, &length);
-            localeName.resize(length);
-            familyNames->FindLocaleName(localeName.c_str(), &index, &localeExists);
-        }
-
-        UINT32 length = 0;
-        familyNames->GetStringLength(index, &length);
-
-        std::wstring resolvedFamilyName {};
-        resolvedFamilyName.resize(length);
-
-        familyNames->GetString(index, resolvedFamilyName.data(), length + 1);
-
-        for (auto&& [fontKey, fontInfo]: fonts)
-            if (description == fontInfo.description && fontInfo.fontFace->Equals(fontFace))
-                return fontKey;
+        ComPtr<IDWriteFontFace3> fontFace3;
+        if (FAILED(fontFace.As(&fontFace3)))
+            return nullopt;
 
         auto dwMetrics = DWRITE_FONT_METRICS {};
         fontFace3->GetMetrics(&dwMetrics);
@@ -240,17 +224,17 @@ struct DirectWriteShaper::Private
 
         DxFontInfo fontInfo {};
         fontInfo.description = description;
-        fontInfo.description.familyName = core::toUtf8(resolvedFamilyName);
-        fontInfo.description.wFamilyName = resolvedFamilyName;
+        fontInfo.source = sourcePath;
         fontInfo.size = size;
         fontInfo.metrics.lineHeight = int(ceil(lineHeight * dipScalar));
         fontInfo.metrics.ascender = int(ceil(dwMetrics.ascent * dipScalar));
         fontInfo.metrics.descender = int(ceil(dwMetrics.descent * dipScalar));
         fontInfo.metrics.underlinePosition = int(ceil(dwMetrics.underlinePosition * dipScalar));
         fontInfo.metrics.underlineThickness = int(ceil(dwMetrics.underlineThickness * dipScalar));
-        fontInfo.metrics.advance = int(ceil(computeAverageAdvance(fontFace) * dipScalar));
+        fontInfo.metrics.advance = int(ceil(computeAverageAdvance(fontFace.Get()) * dipScalar));
 
-        fontFace->QueryInterface(&fontInfo.fontFace);
+        if (FAILED(fontFace.As(&fontInfo.fontFace)))
+            return nullopt;
 
         auto key = createFontKey();
         fonts.emplace(pair { key, std::move(fontInfo) });
@@ -299,6 +283,7 @@ optional<FontKey> DirectWriteShaper::loadFont(FontDescription const& description
     if (!fontKeyOpt.has_value())
         return nullopt;
 
+    _d->fonts.at(*fontKeyOpt).fallbacks = FontSourceList(sources.begin() + 1, sources.end());
     return fontKeyOpt;
 }
 
@@ -311,16 +296,122 @@ FontMetrics DirectWriteShaper::metrics(FontKey key) const
 void DirectWriteShaper::shape(FontKey font,
                               std::u32string_view text,
                               gsl::span<unsigned> clusters,
-                              unicode::Script script,
+                              unicode::Script /*script*/,
                               unicode::PresentationStyle presentation,
                               ShapeResult& result)
 {
+    if (text.empty() || text.size() != clusters.size())
+        return;
+    auto const& primary = _d->fonts.at(font);
+    auto const limit = _d->fallbackLimit < 0
+                           ? primary.fallbacks.size()
+                           : std::min(primary.fallbacks.size(), static_cast<size_t>(_d->fallbackLimit));
+    auto const canFallback =
+        _d->fallbackLimit != 0 && !std::holds_alternative<FontFallbackNone>(primary.description.fontFallback);
+    enum class Pass : uint8_t
+    {
+        Preferred,
+        Alternate
+    };
+    struct Cursor
+    {
+        size_t index = 0;
+        Pass pass = Pass::Preferred;
+        bool hasTriedCoverage = false;
+    };
+    auto const nextFont = [&](Cursor& cursor) -> std::optional<FontKey> {
+        if (!canFallback)
+            return std::nullopt;
+        while (true)
+        {
+            if (cursor.index >= limit)
+            {
+                if (cursor.pass == Pass::Alternate || primary.description.strictSpacing)
+                    return std::nullopt;
+                cursor = Cursor { .pass = Pass::Alternate };
+                continue;
+            }
+            auto const candidate =
+                _d->addFont(primary.fallbacks[cursor.index++], primary.description, primary.size);
+            if (!candidate || *candidate == font)
+                continue;
+            auto const spacingMatches = (_d->fonts.at(*candidate).fontFace->IsMonospacedFont() != FALSE)
+                                        == (primary.description.spacing == FontSpacing::Mono);
+            if (spacingMatches == (cursor.pass == Pass::Preferred))
+                return candidate;
+        }
+    };
+    auto const shapeSpan = [&](auto const& self,
+                               FontKey current,
+                               std::u32string_view input,
+                               std::span<unsigned const> cells,
+                               Cursor cursor) -> void {
+        auto glyphs = ShapeResult {};
+        auto refs = std::vector<ShapedGlyphRef> {};
+        shapeWithFont(current, input, cells, presentation, glyphs, refs);
+        if (std::ranges::none_of(refs, [](auto const& ref) { return ref.missing; }))
+        {
+            result.insert(result.end(), glyphs.begin(), glyphs.end());
+            return;
+        }
+        for (auto const& segment: fallbackSegments(refs, cells))
+        {
+            auto position = cursor;
+            auto fallback = std::optional<FontKey> {};
+            auto const count = segment.codepointEnd - segment.codepointBegin;
+            auto const missing = input.substr(segment.codepointBegin, count);
+            if (segment.missing && !segment.empty())
+            {
+                fallback = nextFont(position);
+                if (!fallback && canFallback && !position.hasTriedCoverage)
+                {
+                    position.hasTriedCoverage = true;
+                    for (auto const& source: _d->locator->resolve(gsl::span(missing.data(), missing.size())))
+                    {
+                        auto const candidate = _d->addFont(source, primary.description, primary.size);
+                        if (candidate && *candidate != current && *candidate != font)
+                        {
+                            fallback = candidate;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (fallback)
+                self(self, *fallback, missing, cells.subspan(segment.codepointBegin, count), position);
+            else
+                for (auto const i: std::views::iota(segment.glyphBegin, segment.glyphEnd))
+                {
+                    auto glyph = glyphs[i];
+                    if (glyph.glyph.index.value == 0)
+                        glyph.glyph.font = font;
+                    result.emplace_back(std::move(glyph));
+                }
+        }
+    };
+    shapeSpan(shapeSpan, font, text, std::span<unsigned const>(clusters.data(), clusters.size()), Cursor {});
+}
+void DirectWriteShaper::shapeWithFont(FontKey font,
+                                      std::u32string_view text,
+                                      std::span<unsigned const> clusters,
+                                      unicode::PresentationStyle presentation,
+                                      ShapeResult& result,
+                                      std::vector<ShapedGlyphRef>& refs)
+{
+    if (text.empty() || text.size() != clusters.size())
+        return;
     auto const wText = unicode::convert_to<wchar_t>(text);
-
+    auto utf16Clusters = std::vector<unsigned> {};
+    utf16Clusters.reserve(wText.size());
+    for (auto const i: std::views::iota(size_t { 0 }, text.size()))
+        utf16Clusters.insert(utf16Clusters.end(), text[i] > 0xFFFF ? 2 : 1, clusters[i]);
+    if (wText.empty() || wText.size() != utf16Clusters.size()
+        || wText.size() > std::numeric_limits<UINT16>::max())
+        return;
     WCHAR const* textString = wText.c_str();
     UINT32 textLength = wText.size();
-    DxFontInfo fontInfo = _d->fonts.at(font);
-    IDWriteFontFace5* fontFace = fontInfo.fontFace;
+    auto const& fontInfo = _d->fonts.at(font);
+    IDWriteFontFace5* fontFace = fontInfo.fontFace.Get();
 
     vector<UINT16> glyphIndices;
     vector<INT32> glyphDesignUnitAdvances;
@@ -336,7 +427,8 @@ void DirectWriteShaper::shape(FontKey font,
     _d->textAnalyzer->GetTextComplexity(
         textString, textLength, fontFace, &isTextSimple, &uiLengthRead, &glyphIndices.at(glyphStart));
 
-    BOOL isEntireTextSimple = isTextSimple && uiLengthRead == textLength;
+    BOOL isEntireTextSimple = isTextSimple && uiLengthRead == textLength
+                              && std::ranges::none_of(glyphIndices, [](auto glyph) { return glyph == 0; });
     // Note that some fonts won't report isTextSimple even for ASCII only strings, due to the existence of
     // "locl" table.
     if (isEntireTextSimple)
@@ -352,8 +444,9 @@ void DirectWriteShaper::shape(FontKey font,
         fontFace->GetDesignGlyphAdvances(
             textLength, &glyphIndices.at(glyphStart), &glyphDesignUnitAdvances.at(glyphStart), false);
 
-        for (size_t i = glyphStart; i < textLength; i++)
+        for (auto const i: std::views::iota(size_t { 0 }, size_t { textLength }))
         {
+            glyphClusters[i] = static_cast<UINT16>(i);
             auto const cellWidth = static_cast<double>((float) glyphDesignUnitAdvances.at(i))
                                    / designUnitsPerEm * ptToEm(fontInfo.size.pt) * _d->pixelPerDip();
             GlyphPosition gpos {};
@@ -373,13 +466,12 @@ void DirectWriteShaper::shape(FontKey font,
         _d->textAnalyzer->AnalyzeScript(&analysisWrapper, 0, wText.size(), &analysisWrapper);
 
         UINT32 actualGlyphCount = 0;
-        UINT32 maxGlyphCount = textLength;
+        UINT32 maxGlyphCount = std::min<UINT32>(textLength * 3 / 2 + 16, std::numeric_limits<UINT16>::max());
         vector<DWRITE_SHAPING_TEXT_PROPERTIES> textProps(textLength);
-        vector<DWRITE_SHAPING_GLYPH_PROPERTIES> glyphProps(textLength);
+        vector<DWRITE_SHAPING_GLYPH_PROPERTIES> glyphProps(maxGlyphCount);
 
-        uint8_t attempt = 0;
-
-        do
+        glyphIndices.resize(maxGlyphCount);
+        while (true)
         {
             auto hr = _d->textAnalyzer->GetGlyphs(&wText.at(textStart),
                                                   textLength,
@@ -398,41 +490,24 @@ void DirectWriteShaper::shape(FontKey font,
                                                   &glyphIndices.at(glyphStart),
                                                   &glyphProps.at(0),
                                                   &actualGlyphCount);
-            attempt++;
-
-            if (SUCCEEDED(hr) && std::find(glyphIndices.begin(), glyphIndices.end(), 0) != glyphIndices.end())
+            if (hr != HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) && hr != E_NOT_SUFFICIENT_BUFFER)
             {
-                // glyphIndices contains 0 means some glyphs are missing from the current font.
-                // Need to perform fallback analysis.
-                FontSourceList sources = _d->locator->resolve(gsl::span(text.data(), text.size()));
-                if (sources.size() > 0)
+                if (FAILED(hr))
                 {
-                    optional<FontKey> fontKeyOpt =
-                        _d->addFont(sources[0], fontInfo.description, fontInfo.size);
-                    if (fontKeyOpt.has_value())
-                    {
-                        font = fontKeyOpt.value();
-                        fontInfo = _d->fonts.at(font);
-                        fontFace = fontInfo.fontFace;
-                    }
+                    errorLog()("directwrite: GetGlyphs failed.");
+                    return;
                 }
-                continue;
-            }
-            else if (hr == E_NOT_SUFFICIENT_BUFFER)
-            {
-                // Using a larger buffer.
-                maxGlyphCount *= 2;
-                UINT32 const totalGlyphsArrayCount = glyphStart + maxGlyphCount;
-
-                glyphProps.resize(maxGlyphCount);
-                glyphIndices.resize(totalGlyphsArrayCount);
-            }
-            else
-            {
                 break;
             }
-        } while (attempt < 3);
-
+            if (maxGlyphCount == std::numeric_limits<UINT16>::max())
+                return;
+            maxGlyphCount = std::min<UINT32>(maxGlyphCount * 2, std::numeric_limits<UINT16>::max());
+            glyphProps.resize(maxGlyphCount);
+            glyphIndices.resize(maxGlyphCount);
+        }
+        glyphIndices.resize(actualGlyphCount);
+        if (actualGlyphCount == 0)
+            return;
         vector<float> glyphAdvances(actualGlyphCount);
         vector<DWRITE_GLYPH_OFFSET> glyphOffsets(actualGlyphCount);
 
@@ -465,10 +540,11 @@ void DirectWriteShaper::shape(FontKey font,
             return;
         }
 
-        for (size_t i = glyphStart; i < actualGlyphCount; i++)
+        for (auto const i: std::views::iota(size_t { 0 }, size_t { actualGlyphCount }))
         {
             GlyphPosition gpos {};
             gpos.glyph = GlyphKey { fontInfo.size, font, GlyphIndex { glyphIndices.at(i) } };
+            gpos.presentation = presentation;
             gpos.offset.x = static_cast<int>(glyphOffsets.at(i).advanceOffset);
             // gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
 
@@ -477,6 +553,28 @@ void DirectWriteShaper::shape(FontKey font,
             result.emplace_back(gpos);
         }
     }
+    // DirectWrite maps UTF-16 units to the first glyph of a shaping cluster. Translate that map
+    // into the cell clusters consumed by the shared fallbackSegments() helper. Surrogate halves
+    // share one cell; expanded glyphs inherit their cluster's first glyph.
+    refs.resize(result.size(), { std::numeric_limits<unsigned>::max(), false });
+    for (auto const i: std::views::iota(size_t { 0 }, glyphClusters.size()))
+    {
+        if (glyphClusters[i] >= refs.size())
+        {
+            result.clear();
+            refs.clear();
+            return;
+        }
+        auto& cluster = refs[glyphClusters[i]].cluster;
+        cluster = std::min(cluster, utf16Clusters[i]);
+    }
+    auto cluster = clusters.front();
+    for (auto const i: std::views::iota(size_t { 0 }, refs.size()))
+    {
+        if (refs[i].cluster != std::numeric_limits<unsigned>::max())
+            cluster = refs[i].cluster;
+        refs[i] = { .cluster = cluster, .missing = result[i].glyph.index.value == 0 };
+    }
 }
 
 std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
@@ -484,7 +582,7 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
                                                             float /*outlineThickness*/)
 {
     DxFontInfo const& fontInfo = _d->fonts.at(glyph.font);
-    IDWriteFontFace5* fontFace = fontInfo.fontFace;
+    IDWriteFontFace5* fontFace = fontInfo.fontFace.Get();
     float const fontEmSize = static_cast<float>(ptToEm(glyph.size.pt));
 
     UINT16 const glyphIndex = static_cast<UINT16>(glyph.index.value);
@@ -677,9 +775,9 @@ void DirectWriteShaper::clearCache()
     // TODO: clear the cache
 }
 
-void DirectWriteShaper::setFontFallbackLimit([[maybe_unused]] int limit)
+void DirectWriteShaper::setFontFallbackLimit(int limit)
 {
-    // DirectWrite manages font fallback internally.
+    _d->fallbackLimit = limit;
 }
 
 optional<GlyphPosition> DirectWriteShaper::shape(FontKey font, char32_t codepoint)
