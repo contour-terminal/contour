@@ -3,8 +3,11 @@
 
 #include <vtpty/SshSession.hpp>
 
+#include <cstddef>
+#include <expected>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #include <libssh2.h>
 
@@ -29,6 +32,13 @@ class SshKnownHosts
         std::string key; ///< The key known for the host, base64; empty where none is.
     };
 
+    /// A line of a known_hosts file that libssh2 cannot parse, which readFromFile() passed over.
+    struct SkippedLine
+    {
+        std::size_t number; ///< Its line number, counting from 1.
+        std::string reason; ///< Why libssh2 refused it, in its own words.
+    };
+
     /// @param session The session whose hosts these are; it must outlive this object.
     explicit SshKnownHosts(LIBSSH2_SESSION* session);
     ~SshKnownHosts();
@@ -38,19 +48,27 @@ class SshKnownHosts
     SshKnownHosts(SshKnownHosts&&) = delete;
     SshKnownHosts& operator=(SshKnownHosts&&) = delete;
 
-    /// Adds every host the OpenSSH known_hosts file @p path names.
-    /// @return LIBSSH2_ERROR_NONE; LIBSSH2_ERROR_FILE where the file cannot be read, or libssh2's error for
-    ///         the first line it cannot read.
-    [[nodiscard]] int readFromFile(std::filesystem::path const& path);
+    /// Adds every host the OpenSSH known_hosts file @p path names. A line libssh2 cannot parse is passed
+    /// over, so the hosts on the lines after it are still known.
+    /// @return The lines passed over, or why the file could not be read.
+    [[nodiscard]] std::expected<std::vector<SkippedLine>, std::string> readFromFile(
+        std::filesystem::path const& path);
 
     /// Looks @p hostkey up for @p host among the hosts read.
     [[nodiscard]] Check checkHostkey(SshHostConfig const& host, SshHostkey const& hostkey) const;
 
-    /// Adds @p hostkey for @p host, then writes every host known to @p host's knownHostsFile.
-    /// @return LIBSSH2_ERROR_NONE; LIBSSH2_ERROR_FILE where the file cannot be written, or libssh2's error.
-    [[nodiscard]] int addToFile(SshHostConfig const& host, SshHostkey const& hostkey) const;
+    /// Adds @p hostkey for @p host, and appends its line to @p host's knownHostsFile, as OpenSSH does: the
+    /// file is never rewritten, so every line it had is kept, those libssh2 cannot parse among them. The
+    /// file is created where it is not there.
+    /// @return Nothing once the line is written, or why it was not.
+    [[nodiscard]] std::expected<void, std::string> appendToFile(SshHostConfig const& host,
+                                                                SshHostkey const& hostkey);
 
   private:
+    /// @return What libssh2 last reported going wrong in the session.
+    [[nodiscard]] std::string lastError() const;
+
+    LIBSSH2_SESSION* _session;
     LIBSSH2_KNOWNHOSTS* _handle;
 };
 

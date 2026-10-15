@@ -8,9 +8,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <sstream>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <libssh2.h>
@@ -24,6 +29,29 @@ namespace
     auto blob = std::string { "\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20", 19 };
     blob.append(32, fill);
     return { blob.begin(), blob.end() };
+}
+
+/// @return The line an OpenSSH known_hosts file names @p key for @p hostname with, its line feed included.
+[[nodiscard]] std::string knownHostLine(std::string_view hostname, vtpty::SshHostkey const& key)
+{
+    return std::format("{} ssh-ed25519 {}\n",
+                       hostname,
+                       core::base64::encode(std::string { key.data.begin(), key.data.end() }));
+}
+
+/// @return What the file at @p path holds, read as text.
+[[nodiscard]] std::string contentsOf(std::filesystem::path const& path)
+{
+    return (std::ostringstream {} << std::ifstream { path }.rdbuf()).str();
+}
+
+/// @return @p hostname, as a host whose known_hosts file is @p knownHostsFile.
+[[nodiscard]] vtpty::SshHostConfig hostNamed(std::string hostname, std::filesystem::path knownHostsFile)
+{
+    auto host = vtpty::SshHostConfig {};
+    host.hostname = std::move(hostname);
+    host.knownHostsFile = std::move(knownHostsFile);
+    return host;
 }
 
 /// A libssh2 session that connects nowhere: all known_hosts handling needs of one.
@@ -52,6 +80,10 @@ class OfflineSession
     LIBSSH2_SESSION* _session;
 };
 
+/// A line of a known_hosts file that libssh2 cannot parse: a host with its key cut off, as an interrupted
+/// write leaves one.
+constexpr auto TruncatedLine = std::string_view { "truncated.example ssh-ed25519\n" };
+
 } // namespace
 
 TEST_CASE("SshKnownHosts reads and writes a known_hosts file under a directory beyond ASCII", "[ssh]")
@@ -63,12 +95,8 @@ TEST_CASE("SshKnownHosts reads and writes a known_hosts file under a directory b
     std::filesystem::create_directory(directory);
 
     auto const known = vtpty::SshHostkey { .type = LIBSSH2_HOSTKEY_TYPE_ED25519, .data = ed25519Key('k') };
-    auto host = vtpty::SshHostConfig {};
-    host.hostname = "known.example";
-    host.knownHostsFile = directory / "known_hosts";
-    std::ofstream { host.knownHostsFile }
-        << "known.example ssh-ed25519 "
-        << core::base64::encode(std::string { known.data.begin(), known.data.end() }) << '\n';
+    auto const host = hostNamed("known.example", directory / "known_hosts");
+    std::ofstream { host.knownHostsFile } << knownHostLine(host.hostname, known);
 
     auto const session = OfflineSession {};
     REQUIRE(session.get() != nullptr);
@@ -76,22 +104,18 @@ TEST_CASE("SshKnownHosts reads and writes a known_hosts file under a directory b
     SECTION("a host it names is known")
     {
         auto hosts = vtpty::SshKnownHosts { session.get() };
-        REQUIRE(hosts.readFromFile(host.knownHostsFile) == LIBSSH2_ERROR_NONE);
+        REQUIRE(hosts.readFromFile(host.knownHostsFile).has_value());
         CHECK(hosts.checkHostkey(host, known).status == LIBSSH2_KNOWNHOST_CHECK_MATCH);
     }
 
     SECTION("a host added is written beside the ones it had")
     {
-        auto added = host;
-        added.hostname = "added.example";
+        auto const added = hostNamed("added.example", host.knownHostsFile);
         auto const key = vtpty::SshHostkey { .type = LIBSSH2_HOSTKEY_TYPE_ED25519, .data = ed25519Key('a') };
-        {
-            auto hosts = vtpty::SshKnownHosts { session.get() };
-            REQUIRE(hosts.readFromFile(host.knownHostsFile) == LIBSSH2_ERROR_NONE);
-            REQUIRE(hosts.addToFile(added, key) == LIBSSH2_ERROR_NONE);
-        }
+        REQUIRE(vtpty::SshKnownHosts { session.get() }.appendToFile(added, key).has_value());
+
         auto reread = vtpty::SshKnownHosts { session.get() };
-        REQUIRE(reread.readFromFile(host.knownHostsFile) == LIBSSH2_ERROR_NONE);
+        REQUIRE(reread.readFromFile(host.knownHostsFile).has_value());
         CHECK(reread.checkHostkey(host, known).status == LIBSSH2_KNOWNHOST_CHECK_MATCH);
         CHECK(reread.checkHostkey(added, key).status == LIBSSH2_KNOWNHOST_CHECK_MATCH);
     }
@@ -99,6 +123,99 @@ TEST_CASE("SshKnownHosts reads and writes a known_hosts file under a directory b
     SECTION("a file that is not there")
     {
         auto hosts = vtpty::SshKnownHosts { session.get() };
-        CHECK(hosts.readFromFile(directory / "missing") == LIBSSH2_ERROR_FILE);
+        auto const read = hosts.readFromFile(directory / "missing");
+        REQUIRE_FALSE(read.has_value());
+        CHECK(read.error().contains("missing"));
+    }
+}
+
+TEST_CASE("SshKnownHosts reads on past a line libssh2 cannot parse", "[ssh]")
+{
+    // libssh2_knownhost_readfile() stops at such a line, and every host after it went unknown.
+    auto const temp = core::testing::ScopedTempDir { "contour-known-hosts" };
+    auto const first = vtpty::SshHostkey { .type = LIBSSH2_HOSTKEY_TYPE_ED25519, .data = ed25519Key('f') };
+    auto const second = vtpty::SshHostkey { .type = LIBSSH2_HOSTKEY_TYPE_ED25519, .data = ed25519Key('s') };
+    auto const firstHost = hostNamed("first.example", temp.path() / "known_hosts");
+    auto const secondHost = hostNamed("second.example", firstHost.knownHostsFile);
+    std::ofstream { firstHost.knownHostsFile } << knownHostLine(firstHost.hostname, first) << TruncatedLine
+                                               << knownHostLine(secondHost.hostname, second);
+
+    auto const session = OfflineSession {};
+    REQUIRE(session.get() != nullptr);
+    auto hosts = vtpty::SshKnownHosts { session.get() };
+    auto const read = hosts.readFromFile(firstHost.knownHostsFile);
+
+    REQUIRE(read.has_value());
+    REQUIRE(read->size() == 1);
+    CHECK(read->front().number == 2);
+    CHECK_FALSE(read->front().reason.empty());
+    CHECK(hosts.checkHostkey(firstHost, first).status == LIBSSH2_KNOWNHOST_CHECK_MATCH);
+    CHECK(hosts.checkHostkey(secondHost, second).status == LIBSSH2_KNOWNHOST_CHECK_MATCH);
+}
+
+TEST_CASE("SshKnownHosts appends a host, and keeps every line the file had", "[ssh]")
+{
+    // Accepting a host key used to rewrite the file from the hosts libssh2 had read, which lost the line it
+    // could not parse and, with the read stopped there, every line after it.
+    auto const temp = core::testing::ScopedTempDir { "contour-known-hosts" };
+    auto const first = vtpty::SshHostkey { .type = LIBSSH2_HOSTKEY_TYPE_ED25519, .data = ed25519Key('f') };
+    auto const second = vtpty::SshHostkey { .type = LIBSSH2_HOSTKEY_TYPE_ED25519, .data = ed25519Key('s') };
+    auto const key = vtpty::SshHostkey { .type = LIBSSH2_HOSTKEY_TYPE_ED25519, .data = ed25519Key('a') };
+    auto const firstHost = hostNamed("first.example", temp.path() / "known_hosts");
+    auto const secondHost = hostNamed("second.example", firstHost.knownHostsFile);
+    auto const added = hostNamed("added.example", firstHost.knownHostsFile);
+
+    auto const session = OfflineSession {};
+    REQUIRE(session.get() != nullptr);
+
+    SECTION("past a line libssh2 cannot parse")
+    {
+        auto const original = knownHostLine(firstHost.hostname, first) + std::string { TruncatedLine }
+                              + knownHostLine(secondHost.hostname, second);
+        std::ofstream { firstHost.knownHostsFile } << original;
+
+        REQUIRE(vtpty::SshKnownHosts { session.get() }.appendToFile(added, key).has_value());
+
+        auto const contents = contentsOf(firstHost.knownHostsFile);
+        CHECK(contents.starts_with(original));
+        CHECK(std::ranges::count(contents, '\n') == 4);
+        auto reread = vtpty::SshKnownHosts { session.get() };
+        REQUIRE(reread.readFromFile(firstHost.knownHostsFile).has_value());
+        CHECK(reread.checkHostkey(firstHost, first).status == LIBSSH2_KNOWNHOST_CHECK_MATCH);
+        CHECK(reread.checkHostkey(secondHost, second).status == LIBSSH2_KNOWNHOST_CHECK_MATCH);
+        CHECK(reread.checkHostkey(added, key).status == LIBSSH2_KNOWNHOST_CHECK_MATCH);
+    }
+
+    SECTION("after a last line without a line feed")
+    {
+        // OpenSSH ends that line first, so that the two do not run together.
+        auto original = knownHostLine(firstHost.hostname, first);
+        original.pop_back();
+        std::ofstream { firstHost.knownHostsFile } << original;
+
+        REQUIRE(vtpty::SshKnownHosts { session.get() }.appendToFile(added, key).has_value());
+
+        CHECK(contentsOf(firstHost.knownHostsFile).starts_with(original + '\n'));
+        auto reread = vtpty::SshKnownHosts { session.get() };
+        REQUIRE(reread.readFromFile(firstHost.knownHostsFile).has_value());
+        CHECK(reread.checkHostkey(firstHost, first).status == LIBSSH2_KNOWNHOST_CHECK_MATCH);
+        CHECK(reread.checkHostkey(added, key).status == LIBSSH2_KNOWNHOST_CHECK_MATCH);
+    }
+
+    SECTION("to a file that is not there")
+    {
+        REQUIRE(vtpty::SshKnownHosts { session.get() }.appendToFile(added, key).has_value());
+
+        auto const contents = contentsOf(firstHost.knownHostsFile);
+        CHECK(contents.starts_with("added.example ssh-ed25519 "));
+        CHECK(std::ranges::count(contents, '\n') == 1);
+    }
+
+    SECTION("to a file that cannot be opened")
+    {
+        auto const unwritable = hostNamed("added.example", temp.path() / "no-such-directory" / "known_hosts");
+        auto const appended = vtpty::SshKnownHosts { session.get() }.appendToFile(unwritable, key);
+        REQUIRE_FALSE(appended.has_value());
+        CHECK(appended.error().contains("no-such-directory"));
     }
 }

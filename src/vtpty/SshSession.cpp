@@ -2,7 +2,6 @@
 
 // clang-format off
 #include <system_error>
-#include <tuple>
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <winsock2.h>
@@ -1329,8 +1328,17 @@ SshSession::HostkeyVerificationStatus SshSession::verifyHostkey()
 
     auto knownhostFile = SshKnownHosts { _p->sshSession };
 
-    if (knownhostFile.readFromFile(_config.knownHostsFile) != LIBSSH2_ERROR_NONE)
+    auto const read = knownhostFile.readFromFile(_config.knownHostsFile);
+    if (!read)
+    {
+        logError("{}", read.error());
         return HostkeyVerificationStatus::FailedToReadKnownHosts;
+    }
+    for (auto const& [number, reason]: *read)
+        logError("Skipped line {} of known_hosts file \"{}\". {}",
+                 number,
+                 core::pathToUtf8(_config.knownHostsFile),
+                 reason);
 
     auto const hostkey = getHostkey(_p->sshSession);
 
@@ -1383,15 +1391,13 @@ void SshSession::hostkeyVerificationResultCallback(bool accepted)
     _hostkeyVerified = accepted;
     if (accepted)
     {
+        // Appended, as OpenSSH adds a host: nothing is read, and no line the file has is touched. A file
+        // that is not there yet is what a first connection creates.
         auto knownhostsFile = SshKnownHosts { _p->sshSession };
-        // A file that is not there yet is what a first connection creates.
-        std::ignore = knownhostsFile.readFromFile(_config.knownHostsFile);
         auto const hostkey = getHostkey(_p->sshSession);
-        auto const rc = knownhostsFile.addToFile(_config, hostkey);
-
-        if (rc != LIBSSH2_ERROR_NONE)
+        if (auto const appended = knownhostsFile.appendToFile(_config, hostkey); !appended)
         {
-            logErrorWithDetails(rc, "Failed to write known_hosts file");
+            logError("Failed to write known_hosts file. {}", appended.error());
             logInfoWithInject("Host key verified, but failed to write known_hosts file.");
         }
         else
