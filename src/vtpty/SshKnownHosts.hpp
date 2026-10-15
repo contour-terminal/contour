@@ -49,8 +49,9 @@ class SshKnownHosts
     SshKnownHosts& operator=(SshKnownHosts&&) = delete;
 
     /// Adds every host the OpenSSH known_hosts file @p path names. A line libssh2 cannot parse is passed
-    /// over, so the hosts on the lines after it are still known.
-    /// @return The lines passed over, or why the file could not be read.
+    /// over, so the hosts on the lines after it are still known. A file that is not there names no host,
+    /// as OpenSSH reads one.
+    /// @return The lines passed over, or why a file that is there could not be read.
     [[nodiscard]] std::expected<std::vector<SkippedLine>, std::string> readFromFile(
         std::filesystem::path const& path);
 
@@ -58,8 +59,9 @@ class SshKnownHosts
     [[nodiscard]] Check checkHostkey(SshHostConfig const& host, SshHostkey const& hostkey) const;
 
     /// Adds @p hostkey for @p host, and appends its line to @p host's knownHostsFile, as OpenSSH does: the
-    /// file is never rewritten, so every line it had is kept, those libssh2 cannot parse among them. The
-    /// file is created where it is not there.
+    /// file is never rewritten, so every line it had is kept, those libssh2 cannot parse among them. Where
+    /// the file is not there it is made, the user's alone (0600), and so is the directory it is in (0700)
+    /// where that is not there either -- that one, and none above it, as OpenSSH makes ~/.ssh.
     /// @return Nothing once the line is written, or why it was not.
     [[nodiscard]] std::expected<void, std::string> appendToFile(SshHostConfig const& host,
                                                                 SshHostkey const& hostkey);

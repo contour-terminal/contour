@@ -12,6 +12,7 @@
 #include <ios>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 using namespace std::string_view_literals;
@@ -30,6 +31,31 @@ namespace
             return false;
         file.seekg(-1, std::ios::end);
         return file.get() != '\n';
+    }
+
+    /// @return Whether nothing is at @p path: no file, and no directory either.
+    [[nodiscard]] bool isAbsent(std::filesystem::path const& path)
+    {
+        auto error = std::error_code {};
+        return std::filesystem::status(path, error).type() == std::filesystem::file_type::not_found;
+    }
+
+    /// Makes the directory @p file is to be in, where it is not there yet: the user's alone (0700), as
+    /// OpenSSH's hostfile_create_user_ssh_dir() makes ~/.ssh before it adds the first host. Only that one
+    /// directory, as OpenSSH makes none above it.
+    /// @return Nothing once the directory is there, or why it is not.
+    [[nodiscard]] std::expected<void, std::string> makeDirectoryOf(std::filesystem::path const& file)
+    {
+        auto const directory = file.parent_path();
+        if (directory.empty() || !isAbsent(directory))
+            return {};
+        auto error = std::error_code {};
+        if (std::filesystem::create_directory(directory, error))
+            std::filesystem::permissions(directory, std::filesystem::perms::owner_all, error);
+        if (error)
+            return std::unexpected { std::format(
+                "Cannot create \"{}\": {}", core::pathToUtf8(directory), error.message()) };
+        return {};
     }
 } // namespace
 
@@ -75,9 +101,17 @@ std::expected<std::vector<SshKnownHosts::SkippedLine>, std::string> SshKnownHost
 {
     // Text, as libssh2 reads it, and a line at a time, as libssh2 does -- but on past a line it cannot
     // parse, where libssh2_knownhost_readfile() stops and forgets the hosts after it.
+    // A directory is no file to read, though POSIX opens one as a stream, which libc++ then reads as empty.
+    auto error = std::error_code {};
     auto file = std::ifstream { path };
-    if (!file)
+    if (!file || std::filesystem::is_directory(path, error))
+    {
+        // One that is not there knows no host yet, as OpenSSH's load_hostkeys() reads it: the host is then
+        // unknown, and the user is asked whether to trust its key.
+        if (isAbsent(path))
+            return std::vector<SkippedLine> {};
         return std::unexpected { std::format("Cannot open \"{}\".", core::pathToUtf8(path)) };
+    }
     auto skipped = std::vector<SkippedLine> {};
     auto line = std::string {};
     auto number = std::size_t { 0 };
@@ -139,12 +173,28 @@ std::expected<void, std::string> SshKnownHosts::appendToFile(SshHostConfig const
         < 0)
         return std::unexpected { lastError() };
 
-    // Appended as OpenSSH's add_host_to_hostfile() appends it: after a line feed where the file's last
-    // line has none, so that the two do not run together. Text, as libssh2 writes it.
+    // Appended as OpenSSH's add_host_to_hostfile() appends it: in a directory it makes where there is none,
+    // and after a line feed where the file's last line has none, so that the two do not run together.
+    // Text, as libssh2 writes it.
+    if (auto const made = makeDirectoryOf(host.knownHostsFile); !made)
+        return std::unexpected { made.error() };
     auto const separator = endsMidLine(host.knownHostsFile) ? "\n"sv : ""sv;
+    auto const isNew = isAbsent(host.knownHostsFile);
     auto file = std::ofstream { host.knownHostsFile, std::ios::app };
     if (!file)
         return std::unexpected { std::format("Cannot open \"{}\".", core::pathToUtf8(host.knownHostsFile)) };
+    if (isNew)
+    {
+        // A file made here is the user's alone (0600), as the one ssh-keygen rewrites is, before anything is
+        // in it. One that was there keeps the permissions it has.
+        auto error = std::error_code {};
+        std::filesystem::permissions(host.knownHostsFile,
+                                     std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                                     error);
+        if (error)
+            return std::unexpected { std::format(
+                "Cannot restrict \"{}\": {}", core::pathToUtf8(host.knownHostsFile), error.message()) };
+    }
     file << separator;
     file.write(line.data(), static_cast<std::streamsize>(written));
     file.flush();
