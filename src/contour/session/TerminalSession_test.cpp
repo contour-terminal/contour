@@ -3050,21 +3050,19 @@ TEST_CASE("TerminalSession: output evicting collapsed folds races no scrollbar r
     auto const oldest = terminal.foldRanges().back().headStableId;
     REQUIRE(terminal.foldState().isCollapsed(oldest));
 
-    {
-        auto const block = vtbackend::test::commandRun("x", numberedOutput(2), 0);
-        auto const writer = vtbackend::test::writeOnOwnThread([&] { terminal.writeToScreen(block); });
-
-        // The GUI thread refreshes as fast as it can rather than once a frame, so the prunes meet the parser
-        // thread's screen updates as often as possible, and collapses whatever arrived before each, so every
-        // eviction has folds to take.
-        auto constexpr RoundCount = 500;
-        for ([[maybe_unused]] auto const round: std::views::iota(0, RoundCount))
-        {
-            std::ignore = (*pane)(contour::actions::CollapseAllFolds {});
-            pane->refreshScrollbarMarks();
-            QCoreApplication::processEvents();
-        }
-    }
+    // The GUI thread refreshes as fast as it can rather than once a frame, so the prunes meet the parser
+    // thread's screen updates as often as possible, and collapses whatever arrived before each, so every
+    // eviction has folds to take. It does so for as long as the writer writes its rounds rather than for a
+    // count of its own: each refresh takes the lock, and where that lock is not fair -- on macOS -- five
+    // hundred of them ran before the writer had written enough to evict anything.
+    auto const block = vtbackend::test::commandRun("x", numberedOutput(2), 0);
+    std::ignore = vtbackend::test::runWhileWriting([&] { terminal.writeToScreen(block); },
+                                                   [&] {
+                                                       std::ignore =
+                                                           (*pane)(contour::actions::CollapseAllFolds {});
+                                                       pane->refreshScrollbarMarks();
+                                                       QCoreApplication::processEvents();
+                                                   });
 
     pane->refreshScrollbarMarks();
     REQUIRE(terminal.primaryScreen().grid().stableRangeFloor() > oldest);
@@ -6204,22 +6202,24 @@ TEST_CASE("TerminalSession: Ctrl over output the parser thread is writing reads 
     TestApp testApp;
     auto session = makeSessionWithSurface(testApp.app());
 
-    {
-        // Stands in for the parser thread: writeToScreen() takes the terminal lock around the parse.
-        auto const writer = vtbackend::test::writeOnOwnThread([&] {
+    // The writer stands in for the parser thread: writeToScreen() takes the terminal lock around the parse.
+    // The pointer moves for as long as it writes its rounds rather than for a count of its own, so that a
+    // lock that is not fair cannot let every move run before the first block is written.
+    auto const ctrl = vtbackend::Modifiers { vtbackend::Modifier::Control };
+    auto move = 0;
+    std::ignore = vtbackend::test::runWhileWriting(
+        [&] {
             session->terminal().writeToScreen(
                 "\033]133;A\033\\$ make\r\n\033]133;C\033\\src/main.cpp\r\n\033]133;D;0\033\\");
-        });
-
-        auto constexpr MoveCount = 2000;
-        auto const ctrl = vtbackend::Modifiers { vtbackend::Modifier::Control };
-        for (auto const move: std::views::iota(0, MoveCount))
+        },
+        [&] {
             session->sendMouseMoveEvent(
                 ctrl,
                 vtbackend::CellLocation { .line = vtbackend::LineOffset(move % 20),
                                           .column = vtbackend::ColumnOffset(move % 3) },
                 vtbackend::PixelCoordinate {});
-    }
+            ++move;
+        });
     CHECK(session->terminal().commandBlocks().size() > 0);
 }
 
