@@ -4,6 +4,7 @@
 
 #include <libunicode/convert.h>
 
+#include <algorithm>
 #include <format>
 #include <string>
 
@@ -33,20 +34,42 @@ namespace
     /// restating it — the only thing that differs between them is which member of ShortcutInput the
     /// binding's `input` lands in, and the variant absorbs that.
     template <typename Input>
+    void indexBinding(vtbackend::InputBinding<Input, config::ActionList> const& binding,
+                      std::unordered_map<std::string, std::string>& target)
+    {
+        // A chord that fires several actions is not "the" shortcut for any one of them: pressing it
+        // would do all of the others too, so advertising it next to a single command would be a lie.
+        if (binding.binding.size() != 1)
+            return;
+
+        // First binding wins, so a command bound twice renders under its first (config-order)
+        // shortcut rather than flip-flopping between them.
+        target.try_emplace(commandId(binding.binding.front()),
+                           shortcutText(binding.modifiers, ShortcutInput { binding.input }));
+    }
+
+    template <typename Input>
     void indexBindings(std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& bindings,
                        std::unordered_map<std::string, std::string>& target)
     {
         for (auto const& binding: bindings)
-        {
-            // A chord that fires several actions is not "the" shortcut for any one of them: pressing it
-            // would do all of the others too, so advertising it next to a single command would be a lie.
-            if (binding.binding.size() != 1)
-                continue;
+            indexBinding(binding, target);
+    }
 
-            // First binding wins, so a command bound twice renders under its first (config-order)
-            // shortcut rather than flip-flopping between them.
-            target.try_emplace(commandId(binding.binding.front()),
-                               shortcutText(binding.modifiers, ShortcutInput { binding.input }));
+    /// Indexes the enabled built-in rows of one table whose chord @p userBindings leaves unbound.
+    template <typename Input>
+    void indexFallbacks(std::vector<config::FallbackMapping<Input>> const& rows,
+                        std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& userBindings,
+                        config::Config const& config,
+                        std::unordered_map<std::string, std::string>& target)
+    {
+        for (auto const& row: rows)
+        {
+            auto const shadowed = std::ranges::any_of(userBindings, [&row](auto const& binding) {
+                return binding.modifiers == row.mapping.modifiers && binding.input == row.mapping.input;
+            });
+            if (row.enabled(config) && !shadowed)
+                indexBinding(row.mapping, target);
         }
     }
 } // namespace
@@ -76,6 +99,15 @@ std::unordered_map<std::string, std::string> shortcutIndex(config::InputMappings
     indexBindings(mappings.keyMappings, result);
     indexBindings(mappings.charMappings, result);
 
+    return result;
+}
+
+std::unordered_map<std::string, std::string> shortcutIndex(config::Config const& config)
+{
+    auto const& mappings = config.inputMappings.value();
+    auto result = shortcutIndex(mappings);
+    indexFallbacks(config::builtinFallbackKeyMappings(), mappings.keyMappings, config, result);
+    indexFallbacks(config::builtinFallbackCharMappings(), mappings.charMappings, config, result);
     return result;
 }
 

@@ -78,9 +78,10 @@ echo "notification-nonblocking: wedged bus at $bus_address (pid $bus_pid)"
 # SECONDS is bash's own wall-clock counter, so no date(1) parsing and no subshell.
 SECONDS=0
 set +e
-# CONTOUR_TEST_NOTIFICATION_SEND opts the "real D-Bus transport" case into actually sending. It is
-# off by default so a developer running the suite on their own desktop is not shown a stray
-# notification; here nothing is listening, so there is nothing to show.
+# CONTOUR_TEST_NOTIFICATION_SEND tells the suite its session bus is this private one: only here do the
+# cases that drive a real transport run, and only here may a test reach a bus at all. Elsewhere the
+# suite fails a run that reaches one, so a developer running it on their own desktop is never shown a
+# stray notification; here nothing is listening, so there is nothing to show.
 DBUS_SESSION_BUS_ADDRESS="$bus_address" CONTOUR_TEST_NOTIFICATION_SEND=1 \
     "$TEST_BINARY" "[notification]"
 readonly test_status=$?

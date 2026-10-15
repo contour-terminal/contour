@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/command/Command.hpp>
+#include <contour/config/BlockActionEnums.hpp>
 
 #include <vtbackend/core/Color.hpp>
 
@@ -35,6 +36,57 @@ namespace
         if (crispy::ascii::isLower(previous))
             return true;
         return crispy::ascii::isUpper(previous) && crispy::ascii::isLower(next);
+    }
+
+    /// What a block action's own arguments add to its identity, beside the block it addresses.
+    struct OwnArguments
+    {
+        std::string id;      ///< Appended to the id.
+        std::string name;    ///< Put before the title's parenthesis, e.g. ": wl-copy".
+        std::string details; ///< Appended inside the title's parenthesis, e.g. ", tab".
+    };
+
+    /// A block action's own arguments: none, for most.
+    template <actions::CommandBlockActionConcept BlockAction>
+    [[nodiscard]] OwnArguments ownArguments(BlockAction const& /*action*/)
+    {
+        return {};
+    }
+
+    /// OpenCommandOutput's program, placement and format: every one changes what runs, or what it shows,
+    /// so none of them may collapse two rows.
+    [[nodiscard]] OwnArguments ownArguments(actions::OpenCommandOutput const& action)
+    {
+        auto const placement = config::configEnumToken(action.placement);
+        return { .id = std::format(":{}:{}:{}",
+                                   placement,
+                                   action.format ? config::configEnumToken(*action.format)
+                                                 : std::string_view {},
+                                   action.program),
+                 .name = action.program.empty() ? std::string {} : std::format(": {}", action.program),
+                 .details = std::format(", {}", placement) };
+    }
+
+    /// What a block action adds to its command identity: nothing for its defaults, else every argument --
+    /// a pinned row and an unpinned one are different commands.
+    /// @param action The action.
+    /// @return The id and title suffixes; both empty for the defaults.
+    template <actions::CommandBlockActionConcept BlockAction>
+    [[nodiscard]] CommandArguments blockArguments(BlockAction const& action)
+    {
+        if (action == BlockAction {})
+            return {};
+        auto const own = ownArguments(action);
+        auto address = std::string { config::configEnumToken(action.target) };
+        auto details = address;
+        if constexpr (requires { action.part; })
+        {
+            auto const part = config::configEnumToken(action.part);
+            address = std::format("{}:{}", address, part);
+            details = std::format("{}, {}", part, details);
+        }
+        return { .id = std::format("{}:{}{}", address, action.block.value, own.id),
+                 .title = std::format("{} ({}{})", own.name, details, own.details) };
     }
 } // namespace
 
@@ -120,10 +172,17 @@ CommandArguments commandArguments(actions::Action const& action)
             // default, so the plain "PasteClipboard" id — and any MRU entry already written under it —
             // stays stable, while "PasteClipboard:strip" remains a distinct command.
             [](CopySelection const& a) -> CommandArguments {
-                if (a.format == CopyFormat::Text)
-                    return {};
-                return { .id = std::format("{}", a.format), .title = std::format(" as {}", a.format) };
+                auto const defaults = CopySelection {};
+                if (a.fallback == defaults.fallback)
+                {
+                    if (a.format == defaults.format)
+                        return {};
+                    return { .id = std::format("{}", a.format), .title = std::format(" as {}", a.format) };
+                }
+                return { .id = std::format("{}:{}", a.format, config::configEnumToken(a.fallback)),
+                         .title = std::format(" as {}, else the last output", a.format) };
             },
+            [](CommandBlockActionConcept auto const& a) -> CommandArguments { return blockArguments(a); },
             [](PasteClipboard const& a) -> CommandArguments {
                 if (!a.strip)
                     return {};

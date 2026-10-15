@@ -242,6 +242,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/ContextMenuModel.hpp
         ContourGuiApp.hpp
         session/ExitCode.hpp
+        session/HostedOperation.hpp
         config/LayoutBuilder.hpp
         config/LayoutStore.hpp
         session/PaneProxy.hpp
@@ -340,6 +341,7 @@ if(CONTOUR_FRONTEND_GUI)
     set(_qml_files
         qml/Main.qml
         qml/BellSound.qml
+        qml/DeferredBell.qml
         qml/RequestPermission.qml
         qml/SearchBar.qml
         qml/SessionChrome.qml
@@ -465,6 +467,27 @@ source_group(Headers FILES ${_header_files})
 source_group(Resources FILES ${_qt_resources})
 source_group(QML FILES ${_qml_files})
 
+# {{{ contour_command_output: the private files that hand a command's output to a pager
+# Qt-free, like config/, command/ and cli/, so that its tests run in a build without the GUI frontend too.
+add_library(contour_command_output STATIC
+    session/CommandOutputFiles.cpp
+    session/CommandOutputFiles.hpp
+)
+target_link_libraries(contour_command_output PUBLIC core::base core::log core::platform vtpty)
+target_include_directories(contour_command_output PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# }}}
+
+# {{{ contour_block_tooltip: what the gutter's block tooltip says about a command
+# Qt-free for the same reason, and tested in contour_test rather than contour_gui_test: what proves it
+# needs no Qt is a test binary that has none.
+add_library(contour_block_tooltip STATIC
+    session/CommandBlockTooltip.cpp
+    session/CommandBlockTooltip.hpp
+)
+target_link_libraries(contour_block_tooltip PUBLIC vtbackend)
+target_include_directories(contour_block_tooltip PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# }}}
+
 # {{{ contour_core: the reusable object library (everything but main.cpp)
 add_library(contour_core OBJECT)
 target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources})
@@ -488,6 +511,22 @@ else()
 endif()
 target_sources(contour PRIVATE ${_main_source_files})
 target_link_libraries(contour PRIVATE contour_core)
+
+# LLVM 22's ThreadSanitizer runtime does not intercept glibc's pthread_clockjoin_np, the only join Qt
+# 6.10's QThread::wait() uses on Linux, so it takes every waited-for QThread to be still running and
+# aborts once glibc reuses its descriptor: platform/ThreadSanitizerJoin.cpp explains it and forwards the
+# join to one the runtime sees. One object library for both executables that load Qt, this one and
+# contour_gui_test, built only with ThreadSanitizer against glibc. The definition must be exported for
+# the dynamic linker to bind Qt's call to it.
+if(CONTOUR_FRONTEND_GUI AND CONTOUR_SANITIZE STREQUAL "thread")
+    include(CheckSymbolExists)
+    check_symbol_exists(__GLIBC__ "features.h" CONTOUR_HAVE_GLIBC)
+    if(CONTOUR_HAVE_GLIBC)
+        add_library(contour_tsan_thread_join OBJECT platform/ThreadSanitizerJoin.cpp)
+        target_link_options(contour_tsan_thread_join INTERFACE "LINKER:--export-dynamic-symbol=pthread_clockjoin_np")
+        target_link_libraries(contour PRIVATE contour_tsan_thread_join)
+    endif()
+endif()
 
 # Everything Qt about these two targets, in one place. moc and rcc are Qt tools and without the GUI
 # frontend there is nothing for either to do: every Q_OBJECT in this directory belongs to a GUI-only
@@ -577,16 +616,20 @@ endif()
 target_link_libraries(contour_core
     PUBLIC
     contour::tracy
+    contour_block_tooltip
     contour_command
+    contour_command_output
     contour_cli
     vtworkspace
-    # remote/ runs the daemon client on core-cpp's event loop, and main.cpp suppresses the Windows
-    # error dialogs through core::testing, as the test binaries do.
+    # remote/ runs the daemon client on core-cpp's event loop, session/ writes command output through
+    # core::platform's filesystem, and main.cpp suppresses the Windows error dialogs through
+    # core::testing, as the test binaries do.
     core::async
     core::base
     core::cli
     core::log
     core::net
+    core::platform
     core::testing
     PRIVATE
     vthost
@@ -662,11 +705,13 @@ if(CONTOUR_FRONTEND_GUI)
             display/TerminalAccessible_test.cpp
             session/SessionInput_test.cpp
             session/HyperlinkTooltip_test.cpp
+            session/FontControl_test.cpp
             input/HorizontalWheelGesture_test.cpp
             display/ImeQueryRect_test.cpp
             display/ViewportTextIndex_test.cpp
             session/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
+            test/MainWindowControllerMock.hpp
             session/FocusRouting_test.cpp
             window/MultiWindow_test.cpp
             platform/FreeDesktopNotifier_test.cpp
@@ -678,10 +723,12 @@ if(CONTOUR_FRONTEND_GUI)
             platform/TaskbarProgressRouter_test.cpp
             platform/NativeWindowFrame_test.cpp
             platform/PopupShadow_test.cpp
+            platform/QtInvoke_test.cpp
             platform/WindowShadowController_test.cpp
             platform/WindowShadowGeometry_test.cpp
             platform/WindowShadowTiles_test.cpp
             test/QmlDiagnosticPredicate_test.cpp
+            test/ThreadJoin_test.cpp
             display/RenderingBackendSelection_test.cpp
             display/FirstFrameWatchdog_test.cpp
             display/GpuSelection_test.cpp
@@ -722,6 +769,11 @@ if(CONTOUR_FRONTEND_GUI)
             target_compile_options(contour_gui_test PRIVATE -Wno-c2y-extensions)
         endif()
 
+        # The QThread join forwarding, as for the executable itself (see contour_tsan_thread_join).
+        if(TARGET contour_tsan_thread_join)
+            target_link_libraries(contour_gui_test PRIVATE contour_tsan_thread_join)
+        endif()
+
         # Windows found neither Qt6Test, the one Qt library `contour` does not link, nor the
         # offscreen QPA the registration below selects, so windeployqt's staging for the application
         # covers neither and the suite died in the loader before main(). The Windows plugin as well,
@@ -744,9 +796,44 @@ if(CONTOUR_FRONTEND_GUI)
         # report is freetype/Qt-internal with ZERO first-party frames, and it fires after Catch2 has
         # already reported the suite green -- so it turns a passing run into a failing test. ASan proper
         # (use-after-free, overflow) stays fully enabled; the Qt-free unit suites keep leak checking.
+        #
+        # A QML disk cache of this build tree's own. Qt's default is one per user and application name,
+        # so every contour_gui_test on the machine -- across worktrees and build types -- shares one
+        # cache, and a debug Qt has been seen to trip a V4 interpreter assert on the first run after a
+        # fresh build (QTBUG-111385). And stderr for Qt's messages: on Windows they otherwise go to the
+        # debugger, so a Qt assert that aborts a run under ctest names nothing.
+        set(CONTOUR_QML_TEST_ENVIRONMENT
+            "QML_DISK_CACHE_PATH=${CMAKE_CURRENT_BINARY_DIR}/qmlcache;QT_FORCE_STDERR_LOGGING=1")
         set_tests_properties(contour_gui_test
             PROPERTIES
-                ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0")
+                ENVIRONMENT
+                    "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;${CONTOUR_QML_TEST_ENVIRONMENT}")
+
+        # Under ThreadSanitizer, ignore_noninstrumented_modules=1, for this suite only.
+        #
+        # Why: the distro Qt (and the glib and libdbus under it) is not instrumented, so its allocator and
+        # teardown traffic shows as races the sanitizer cannot order. Qt hands memory between its threads
+        # through synchronization it cannot see -- the futex-based QMutex and QSemaphore, QObject's
+        # connection locks -- so a QDBusConnection hooking a receiver's destroyed() from its own thread,
+        # the QML type loader's thread, the thread pool and QPainter's parallel span fills all read as
+        # races. The option drops the memory accesses of interceptors those libraries call (malloc, free,
+        # memcpy, ...) and keeps their mutex and condition-variable synchronization; Contour's own
+        # accesses stay checked, in QThread::run(), QThreadPool tasks and queued slots alike.
+        #
+        # The blind spot: code that runs inside an interceptor called from uninstrumented code runs
+        # unchecked -- the bodies of std::call_once and std::async through libstdc++, pthread_once and
+        # qsort callbacks. A race planted in a std::call_once body or a std::async task goes unreported
+        # here; one planted in QThread::run(), a QThreadPool task or a queued slot does not.
+        #
+        # So src/contour must not lean on this suite alone for races in such code: threaded logic that
+        # runs in such bodies -- FontLocatorProvider's and SystemdScopePlacement's std::call_once, the
+        # libssh2 initialisation in SshSession -- must have its races tested in an unsilenced module suite
+        # (text_shaper_test, vtpty_test), not through contour_gui_test.
+        set(CONTOUR_QML_TEST_TSAN_OPTIONS "TSAN_OPTIONS=string_append: ignore_noninstrumented_modules=1")
+        if(CONTOUR_SANITIZE STREQUAL "thread")
+            set_property(TEST contour_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION
+                         "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
+        endif()
 
         # The notification suite again, but against a session bus whose org.freedesktop.Notifications
         # is activatable and never answers -- a desktop with its notification daemon disabled, which
@@ -764,9 +851,14 @@ if(CONTOUR_FRONTEND_GUI)
                              $<TARGET_FILE:contour_gui_test>)
             set_tests_properties(contour_notification_nonblocking
                 PROPERTIES
-                    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0"
+                    ENVIRONMENT
+                        "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;${CONTOUR_QML_TEST_ENVIRONMENT}"
                     TIMEOUT 120
                     LABELS e2e)
+            if(CONTOUR_SANITIZE STREQUAL "thread")
+                set_property(TEST contour_notification_nonblocking APPEND PROPERTY ENVIRONMENT_MODIFICATION
+                             "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
+            endif()
         else()
             message(STATUS "dbus-daemon not found: skipping contour_notification_nonblocking test")
         endif()
@@ -839,6 +931,19 @@ if(CONTOUR_FRONTEND_GUI)
             # Also selectable with the daemon suites: `ctest -L daemon` must cover the feature
             # end to end, not just its unit layers.
             set_property(TEST contour_e2e_daemon APPEND PROPERTY LABELS daemon)
+
+            # Under ThreadSanitizer, the same ignore_noninstrumented_modules=1 as contour_gui_test, and
+            # for the same reason: the application loads the same uninstrumented Qt, glib and libdbus,
+            # plus Qt Multimedia's PulseAudio, whose allocator and teardown traffic between their own
+            # threads shows as races the sanitizer cannot order. Contour's own accesses stay checked.
+            # The same blind spot applies -- std::call_once and std::async bodies through libstdc++,
+            # pthread_once and qsort callbacks run unchecked -- with the same consequence: threaded logic
+            # in such bodies has its races tested in an unsilenced module suite, not through these runs.
+            if(CONTOUR_SANITIZE STREQUAL "thread")
+                set_property(TEST contour_e2e_lifecycle contour_e2e_vt_stream contour_e2e_custom_config
+                                  contour_e2e_cli contour_e2e_daemon
+                             APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
+            endif()
         endif()
         # }}}
     endif()
@@ -858,6 +963,7 @@ if(CONTOUR_TESTING)
     add_executable(contour_test
         test/core_test_main.cpp
         config/Actions_test.cpp
+        config/GlobalOverrides_test.cpp
         config/LayoutBuilder_test.cpp
         config/PtyReadBufferSize_test.cpp
         config/UiStyle_test.cpp
@@ -869,18 +975,31 @@ if(CONTOUR_TESTING)
         command/Shortcut_test.cpp
         command/TitleBarContextMenu_test.cpp
         cli/CaptureScreen_test.cpp
+        cli/ContourApp_test.cpp
         cli/CatImageArgs_test.cpp
         cli/ShellIntegration_test.cpp
         cli/ShellIntegrationShells_test.cpp
         display/RedrawCoalescer_test.cpp
         session/SearchStatus_test.cpp
         session/ScreenshotFile_test.cpp
+        session/CommandOutputFiles_test.cpp
+        session/CommandBlockTooltip_test.cpp
+        platform/FinishNotification_test.cpp
+        platform/NotificationOccasion_test.cpp
+        platform/SessionVisibility_test.cpp
     )
-    # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally, and
-    # ScreenshotFile one over its Screen; testing them HERE rather than in contour_gui_test is what proves
-    # they need no Qt to reach.
-    # vthost for resolveExecutablePath(), the PATH walk the shell-integration tests find their shells with.
-    target_link_libraries(contour_test PRIVATE contour_command contour_cli vtbackend vthost core::testing Catch2::Catch2)
+    # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally,
+    # ScreenshotFile one over its Screen, and FinishNotification one over its CommandBlockSummary; testing
+    # them HERE rather than in contour_gui_test is what proves they need no Qt to reach.
+    target_link_libraries(contour_test
+        PRIVATE
+        contour_block_tooltip
+        contour_command
+        contour_command_output
+        contour_cli
+        vtbackend
+        core::testing
+        Catch2::Catch2)
     target_include_directories(contour_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.

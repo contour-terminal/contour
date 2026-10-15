@@ -303,12 +303,84 @@ TEST_CASE("FreeDesktopNotifier closes only what is live", "[contour][notificatio
     CHECK(transport->closedServerIds.size() == 1);
 }
 
+TEST_CASE("FreeDesktopNotifier withdraws a notification closed before the reply arrived",
+          "[contour][notification]")
+{
+    // notify() and close() are both posted, and the server id arrives only with the Notify reply.
+    // The close runs first here, as it does when a command finishes and the next one starts within
+    // one round trip; dropped, it would leave the popup on the desktop for good.
+    auto const [notifier, transport] = makeNotifier();
+
+    notifier->notify(aNotification("osc-1"));
+    notifier->close("osc-1");
+    pump();
+    REQUIRE(transport->notifyCalls.size() == 1);
+    CHECK(transport->closedServerIds.empty()); // Nothing to name yet.
+
+    transport->completeNotify(0, 31);
+
+    REQUIRE(transport->closedServerIds.size() == 1);
+    CHECK(transport->closedServerIds[0] == 31);
+
+    // Withdrawn, so neither its close event nor a click on it is reported as ours.
+    auto reported = 0;
+    QObject::connect(notifier.get(), &contour::platform::Notifier::notificationClosed, [&] { ++reported; });
+    QObject::connect(notifier.get(), &contour::platform::Notifier::actionInvoked, [&] { ++reported; });
+    transport->emitClosed(31, /*reason*/ 3);
+    transport->emitActivated(31);
+    CHECK(reported == 0);
+}
+
+TEST_CASE("FreeDesktopNotifier withdraws the first of two notifications sent within one round trip",
+          "[contour][notification]")
+{
+    auto const [notifier, transport] = makeNotifier();
+
+    auto activated = std::vector<QString> {};
+    QObject::connect(notifier.get(),
+                     &contour::platform::Notifier::actionInvoked,
+                     [&](QString const& identifier) { activated.push_back(identifier); });
+
+    // The second send cannot name the first as the one it replaces: it has no id yet. So the server
+    // shows both, and the first must be withdrawn once the second's reply arrives.
+    notifier->notify(aNotification("osc-1"));
+    notifier->notify(aNotification("osc-1"));
+    pump();
+    REQUIRE(transport->notifyCalls.size() == 2);
+    CHECK(transport->notifyCalls[1].replacesId == 0);
+
+    transport->completeNotify(0, 41);
+    CHECK(transport->closedServerIds.empty());
+
+    transport->completeNotify(1, 42);
+    REQUIRE(transport->closedServerIds.size() == 1);
+    CHECK(transport->closedServerIds[0] == 41);
+
+    SECTION("a click on the one left on screen still maps back")
+    {
+        transport->emitActivated(42);
+        REQUIRE(activated.size() == 1);
+        CHECK(activated[0] == QStringLiteral("osc-1"));
+    }
+
+    SECTION("and the one left on screen can still be closed")
+    {
+        notifier->close("osc-1");
+        pump();
+        REQUIRE(transport->closedServerIds.size() == 2);
+        CHECK(transport->closedServerIds[1] == 42);
+    }
+}
+
 TEST_CASE("FreeDesktopNotifier drives the real D-Bus transport without waiting",
           "[contour][notification][dbus]")
 {
-    // Built exactly as production does, against whatever session bus is there. @see
+    // Built exactly as production does, against the session bus -- the wedged one
+    // test/e2e/notification-nonblocking.sh stands up, never the machine's own. @see
     // contour::test::checkReturnsWithoutWaiting for what this is guarding and why the bound is what
     // it is.
+    if (!contour::test::onPrivateSessionBus())
+        SKIP("reaches the session bus: runs under test/e2e/notification-nonblocking.sh");
     auto notifier = contour::platform::makeDesktopNotifier(std::chrono::milliseconds { 10000 });
     REQUIRE(notifier != nullptr);
 

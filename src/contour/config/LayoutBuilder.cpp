@@ -3,6 +3,8 @@
 
 #include <vtbackend/core/Color.hpp>
 
+#include <core/platform/PathUtils.hpp>
+
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
@@ -58,10 +60,10 @@ namespace
         if (pane.isLeaf())
         {
             // An engaged-but-empty command means "the profile's default shell" — nothing to persist.
+            // As the pane was started with it: the reload reads it back as the spawn read it, a program or
+            // the command line it spells -- quoting it would make "npm run dev" one program name.
             if (pane.command && !pane.command->empty())
-                // shellQuote so a program path containing spaces is not re-split by shellSplit() on reload.
-                out << YAML::Key << "command" << YAML::Value
-                    << escapeVariableMarkers(config::shellQuote(*pane.command));
+                out << YAML::Key << "command" << YAML::Value << escapeVariableMarkers(*pane.command);
             if (!pane.arguments.empty())
             {
                 out << YAML::Key << "arguments" << YAML::Value << YAML::Flow << YAML::BeginSeq;
@@ -70,9 +72,10 @@ namespace
                 out << YAML::EndSeq;
             }
             if (pane.directory)
-                // generic_string() (forward slashes) so a Windows path never carries a literal
-                // backslash into the emitted YAML in the first place.
-                out << YAML::Key << "directory" << YAML::Value << pane.directory->generic_string();
+                // Forward slashes, so a Windows path never carries a literal backslash into the emitted
+                // YAML in the first place, and UTF-8, as the file is.
+                out << YAML::Key << "directory" << YAML::Value
+                    << core::platform::normalizePath(*pane.directory);
             if (pane.profile)
                 out << YAML::Key << "profile" << YAML::Value << *pane.profile;
             return;

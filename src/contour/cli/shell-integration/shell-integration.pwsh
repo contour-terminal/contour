@@ -1,0 +1,150 @@
+# vim:et:ts=4:sw=4
+#
+#// SPDX-License-Identifier: Apache-2.0
+#
+# Contour shell integration for PowerShell 7 (pwsh).
+#
+# PowerShell runs a script file only when its name ends in .ps1, so write it to one, and dot-source that
+# from your profile ($PROFILE) after anything that sets up your prompt (oh-my-posh, starship):
+#
+#     contour generate integration shell pwsh to "$(Split-Path $PROFILE)/contour-integration.ps1"
+#     . "$(Split-Path $PROFILE)/contour-integration.ps1"
+#
+# The prompt reports, in order:
+#   OSC 133;D    -- the command that just ran has finished, with its exit status,
+#   DECRST 2028  -- text reflow off for the prompt,
+#   OSC 7        -- the working directory as a file:// URL, when the location is a file-system path,
+#   OSC 133;A    -- a new prompt starts on this line,
+#   ...your own prompt...,
+#   OSC 133;B    -- the prompt ends here and typed input begins.
+# PSReadLine's PSConsoleHostReadLine is wrapped so that once a line is accepted -- and PSReadLine has
+# moved on to the next line -- DECSET 2028 and OSC 133;C go out, C with the command line,
+# percent-encoded as kitty's cmdline_url=. VS Code's shellIntegration.ps1 hooks in at the same place. An
+# Enter key handler would be too early: it runs before PSReadLine writes the newline, and would mark the
+# prompt line as the command's output. Without PSReadLine there is no C, and so no D either.
+
+# Installed once per session: dot-sourcing this again would wrap the wrappers.
+if ($null -ne $Global:__ContourState) {
+    return
+}
+
+$Global:__ContourState = @{
+    OriginalPrompt   = $function:prompt
+    OriginalReadLine = $null
+    CommandRunning   = $false
+    # The machine the working directory is on, as the terminal names it: the DNS host name.
+    # $env:COMPUTERNAME is the NetBIOS name, which is cut at 15 characters.
+    HostName = [System.Net.Dns]::GetHostName()
+    # The longest command line sent, in bytes: a little more than vtbackend::MaxRecordedCommandLineBytes.
+    MaxCommandLineBytes = 4100
+    # The last working directory reported, and its file:// URL: encoded once per directory.
+    FileUrlPath = $null
+    FileUrl     = $null
+}
+
+function Global:__Contour-Osc([string]$payload) {
+    # OSC <payload> ST.
+    "$([char]0x1b)]$payload$([char]0x1b)\"
+}
+
+function Global:__Contour-PercentEncode([string]$text, [int]$maxBytes = [int]::MaxValue) {
+    # The first $maxBytes bytes of $text's UTF-8, byte by byte as kitty's cmdline_url= (A-Z a-z 0-9 / . _
+    # ~ - kept). EscapeDataString keeps the same bytes but '/', and spells a lone surrogate as U+FFFD, as
+    # GetBytes does; it is used for all but a text it would have to cut.
+    if ([System.Text.Encoding]::UTF8.GetByteCount($text) -le $maxBytes) {
+        return [Uri]::EscapeDataString($text).Replace('%2F', '/')
+    }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
+    $encoded = [System.Text.StringBuilder]::new()
+    foreach ($octet in $bytes[0..($maxBytes - 1)]) {
+        if ([string][char]$octet -cmatch '^[A-Za-z0-9/._~-]$') {
+            [void]$encoded.Append([char]$octet)
+        } else {
+            [void]$encoded.Append('%').Append($octet.ToString('X2'))
+        }
+    }
+    $encoded.ToString()
+}
+
+function Global:__Contour-FileUrl([string]$path) {
+    # file://host/C:/Users/me: forward slashes, and every byte percent-encoded as a command line's are --
+    # so that no ESC or BEL in a directory name ends OSC 7 early -- but a drive letter's colon, by which
+    # the terminal tells a Windows path. A '\' is a separator only where the system says so.
+    $path = $path.Replace([string][System.IO.Path]::DirectorySeparatorChar, '/')
+    $drive = ''
+    if ($path -match '^[A-Za-z]:') {
+        $drive = '/' + $path.Substring(0, 2)
+        $path = $path.Substring(2)
+    }
+    "file://$($Global:__ContourState.HostName)$drive$(__Contour-PercentEncode $path)"
+}
+
+function Global:__Contour-ExitCode([bool]$succeeded, $nativeExitCode) {
+    if ($succeeded) {
+        return 0
+    }
+    $lastHistoryEntry = Get-History -Count 1
+    # $? is false after a native program that exited non-zero and after a PowerShell error alike. An
+    # error recorded against the command that just ran is the latter, and $LASTEXITCODE -- whatever the
+    # last native program left behind -- says nothing about it.
+    $isPowerShellError = $null -ne $lastHistoryEntry -and $Error.Count -gt 0 -and
+        $Error[0].InvocationInfo.HistoryId -eq $lastHistoryEntry.Id
+    if ($isPowerShellError -or -not $nativeExitCode) {
+        return 1
+    }
+    return $nativeExitCode
+}
+
+function Global:prompt {
+    # First, before anything overwrites them: how the command that just finished went.
+    $succeeded = $global:?
+    $nativeExitCode = $global:LASTEXITCODE
+    Set-StrictMode -Off
+    $state = $Global:__ContourState
+
+    # Written rather than returned, ahead of the prompt: PowerShell takes every DECSET and DECRST out of
+    # a prompt it renders as plain text -- under NO_COLOR, or $PSStyle.OutputRendering = 'PlainText' --
+    # as it takes out colours.
+    $marks = ''
+    if ($state.CommandRunning) {
+        $state.CommandRunning = $false
+        $exitCode = __Contour-ExitCode $succeeded $nativeExitCode
+        $marks += __Contour-Osc "133;D;$exitCode"
+    }
+    $marks += "$([char]0x1b)[?2028l"
+    $location = $executionContext.SessionState.Path.CurrentLocation
+    if ($location.Provider.Name -eq 'FileSystem') {
+        if ($state.FileUrlPath -cne $location.ProviderPath) {
+            $state.FileUrl = __Contour-FileUrl $location.ProviderPath
+            $state.FileUrlPath = $location.ProviderPath
+        }
+        $marks += __Contour-Osc "7;$($state.FileUrl)"
+    }
+    [Console]::Write($marks)
+    $out = __Contour-Osc '133;A'
+
+    # The original prompt sees the $? it would have seen without this wrapper: nothing may run between
+    # the failure made up here and the original prompt.
+    if (-not $succeeded) {
+        Write-Error 'failure' -ErrorAction Ignore
+    }
+    $out += & $state.OriginalPrompt
+    $out += __Contour-Osc '133;B'
+    $out
+}
+
+if (Get-Module -Name PSReadLine) {
+    $Global:__ContourState.OriginalReadLine = $function:PSConsoleHostReadLine
+
+    function Global:PSConsoleHostReadLine {
+        $line = & $Global:__ContourState.OriginalReadLine
+        # PSReadLine has drawn the accepted line and moved to the next one: the command's output starts
+        # where the cursor is now. An empty line runs nothing, so it starts no output either.
+        if (-not [string]::IsNullOrWhiteSpace($line)) {
+            $Global:__ContourState.CommandRunning = $true
+            $commandLine = __Contour-PercentEncode $line $Global:__ContourState.MaxCommandLineBytes
+            [Console]::Write("$([char]0x1b)[?2028h" + (__Contour-Osc "133;C;cmdline_url=$commandLine"))
+        }
+        $line
+    }
+}

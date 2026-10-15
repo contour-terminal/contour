@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/platform/Notifier.hpp>
+#include <contour/session/HostedOperation.hpp>
+
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
@@ -10,6 +13,7 @@
     #include <vtpty/SshSession.hpp>
 #endif
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -52,6 +56,14 @@ namespace contour::session
     return commandOverride.has_value() && !commandOverride->program.empty();
 }
 
+/// Where the sessions a SessionFactory makes run their programs.
+enum class SessionHosting : uint8_t
+{
+    Local = 0, ///< On this machine: a new session runs its profile's shell, or the command it is given.
+    Remote,    ///< On a daemon or a tmux server (attach mode): a new pane is bound to a session the
+               ///< remote end hosts, and a command given for it is dropped.
+};
+
 class SessionFactory
 {
   public:
@@ -63,6 +75,19 @@ class SessionFactory
     /// entry points (new tab, split, layout) no-op while this is false, so a
     /// "+" click inside a mirror window cannot spawn a stray local shell.
     [[nodiscard]] virtual bool canCreateSession() const noexcept { return true; }
+
+    /// Where the sessions this factory makes run. canCreateSession() cannot answer whether a pane may
+    /// run a given program: an attach-mode factory that can make a session at all makes it for a pane
+    /// the remote end announced, so a pager asked for in that moment would take that pane's place.
+    /// @return Local for a factory that spawns here (the default); Remote for an attach-mode one.
+    [[nodiscard]] virtual SessionHosting hosting() const noexcept { return SessionHosting::Local; }
+
+    /// The notifier a new session raises its notifications through.
+    ///
+    /// A seam rather than a choice: production takes the one the platform offers, and a test hands in
+    /// one that records what was raised and plays the desktop's events back.
+    /// @return The notifier, or null for the platform's own (the default).
+    [[nodiscard]] virtual std::unique_ptr<platform::Notifier> createNotifier() { return nullptr; }
 
     /// Creates a PTY for a new session, optionally inheriting @p cwd as its working directory and
     /// @p pageSize as its initial grid size.
@@ -146,6 +171,21 @@ class SessionFactory
     /// SessionEnd). A local factory does nothing — destroying the pty ends its process.
     /// @param pty The pty backing the session to end.
     virtual void requestRemoteClose(vtpty::Pty const* /*pty*/) {}
+
+    /// Decides where an operation on the engine of the session backed by @p pty runs, and sends it to the
+    /// remote end when that is where it runs.
+    ///
+    /// An attach-mode pane's terminal mirrors one the remote end hosts, so an action that changes engine
+    /// state has to change THAT terminal, or the next update undoes it (@see HostedOperation.hpp). A local
+    /// factory runs every operation here.
+    /// @param pty The pty backing the acting session.
+    /// @param request The operation, with its text.
+    /// @return Where it runs: RunHere for a local factory and a pty not of this factory's making.
+    [[nodiscard]] virtual HostedOperationRoute requestHostedOperation(
+        vtpty::Pty const* /*pty*/, HostedOperationRequest const& /*request*/)
+    {
+        return HostedOperationRoute::RunHere;
+    }
 
     /// Announces the terminal that was built around a pty this factory handed out.
     ///

@@ -11,7 +11,7 @@
 #
 # Set in the parent scope as well, because the parent's e2e test registration asserts that
 # `contour generate integration` emits exactly these shells' scripts.
-set(CONTOUR_SHELL_INTEGRATION_SHELLS bash fish tcsh zsh)
+set(CONTOUR_SHELL_INTEGRATION_SHELLS bash fish pwsh tcsh zsh)
 set(CONTOUR_SHELL_INTEGRATION_SHELLS "${CONTOUR_SHELL_INTEGRATION_SHELLS}" PARENT_SCOPE)
 
 list(TRANSFORM CONTOUR_SHELL_INTEGRATION_SHELLS

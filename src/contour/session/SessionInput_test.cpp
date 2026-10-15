@@ -152,7 +152,7 @@ namespace
 {
     auto pty =
         std::make_unique<vtpty::MockPty>(vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) });
-    return std::make_unique<contour::session::TerminalSession>(&app.sessionsManager(), std::move(pty), app);
+    return contour::test::makeTestSession(&app.sessionsManager(), std::move(pty), app);
 }
 
 /// The layout for every test that is not about layouts: passthrough leaves the native key
@@ -445,6 +445,30 @@ TEST_CASE("the browser tab-switch chords are claimed before the terminal encodes
     CHECK(reachedThePty(Qt::Key_PageDown, Qt::NoModifier));
 }
 
+TEST_CASE("a declined Ctrl+Shift+G does not reach the shell as ^G", "[session][input][semanticblocks]")
+{
+    contour::test::TestApp app;
+    auto session = makeSession(app.app());
+    auto& pty = mockPtyOf(*session);
+
+    auto const reachedThePty = [&](Qt::KeyboardModifiers modifiers, vtbackend::KeyboardEventType type) {
+        QKeyEvent ev(QEvent::KeyPress, Qt::Key_G, modifiers, QStringLiteral("\x07"));
+        pty.stdinBuffer().clear();
+        contour::session::sendKeyEvent(&ev, type, *session, passthroughLayout());
+        return pty.stdinBuffer();
+    };
+
+    // No command has finished, so there is nothing to open. A ^G would abort the line readline is editing.
+    auto const ctrlShift = Qt::ControlModifier | Qt::ShiftModifier;
+    CHECK(reachedThePty(ctrlShift, vtbackend::KeyboardEventType::Press).empty());
+    CHECK(reachedThePty(ctrlShift, vtbackend::KeyboardEventType::Repeat).empty());
+
+    // Ctrl+G is the shell's, and an alternate-screen application keeps the chord.
+    CHECK_FALSE(reachedThePty(Qt::ControlModifier, vtbackend::KeyboardEventType::Press).empty());
+    session->terminal().writeToScreen("\033[?1049h");
+    CHECK_FALSE(reachedThePty(ctrlShift, vtbackend::KeyboardEventType::Press).empty());
+}
+
 TEST_CASE("sendKeyEvent covers the whole special-key mapping table", "[session][input]")
 {
     contour::test::TestApp app;
@@ -553,39 +577,38 @@ TEST_CASE("wheel and mouse event helpers route through the session", "[session][
     SUCCEED("display-less mouse/wheel routing is crash-free");
 }
 
-TEST_CASE("buildSpawnTerminalCommand assembles arguments and resolves the working directory URL",
+TEST_CASE("buildSpawnTerminalCommand assembles arguments and forwards the working directory",
           "[helper][spawn]")
 {
-    // Full set: config + profile + a local-host cwd URL all forwarded, in order.
+    // Full set: config + profile + the working directory, in order.
     {
-        auto const cmd = contour::session::buildSpawnTerminalCommand(
-            "/usr/bin/contour", "/tmp/c.yml", "main", "file:///tmp", "fedora");
+        auto const cmd =
+            contour::session::buildSpawnTerminalCommand("/usr/bin/contour", "/tmp/c.yml", "main", "/tmp");
         CHECK(cmd.program == "/usr/bin/contour");
         CHECK(cmd.arguments
               == QStringList { "config", "/tmp/c.yml", "profile", "main", "working-directory", "/tmp" });
     }
 
-    // Empty config + empty profile omit those flags; a non-local host drops the working directory.
+    // Empty config, profile and working directory omit those flags.
     {
-        auto const cmd = contour::session::buildSpawnTerminalCommand(
-            "/usr/bin/contour", "", "", "file://not-this-host.invalid/somewhere", "fedora");
+        auto const cmd = contour::session::buildSpawnTerminalCommand("/usr/bin/contour", "", "", "");
         CHECK(cmd.program == "/usr/bin/contour");
         CHECK(cmd.arguments.isEmpty());
     }
 
-    // A bare (host-less) path URL is forwarded as the working directory.
+    // The directory is a path the session already resolved, forwarded as it is: nothing in it is an escape,
+    // a query or a fragment, and a drive letter is no scheme.
     {
-        auto const cmd = contour::session::buildSpawnTerminalCommand(
-            "/usr/bin/contour", "", "work", "file:///home/x", "fedora");
-        CHECK(cmd.arguments == QStringList { "profile", "work", "working-directory", "/home/x" });
-    }
-
-    // A fully-qualified authority is still THIS machine, and used to be rejected. The full set of
-    // spellings is owned by vtbackend's FileUrl_test; this only pins that the wiring reaches it.
-    {
-        auto const cmd = contour::session::buildSpawnTerminalCommand(
-            "/usr/bin/contour", "", "", "file://fedora.corp.example/home/x", "fedora");
-        CHECK(cmd.arguments == QStringList { "working-directory", "/home/x" });
+        auto const cmd =
+            contour::session::buildSpawnTerminalCommand("/usr/bin/contour", "", "work", "/home/x/50%41#a?b");
+        CHECK(cmd.arguments == QStringList { "profile", "work", "working-directory", "/home/x/50%41#a?b" });
+        auto const drive =
+            contour::session::buildSpawnTerminalCommand("/usr/bin/contour", "", "", "C:/Users/x");
+        CHECK(drive.arguments == QStringList { "working-directory", "C:/Users/x" });
+        // Nor is a relative directory whose first component happens to be "file:" a URL.
+        auto const odd =
+            contour::session::buildSpawnTerminalCommand("/usr/bin/contour", "", "", "file://x/y");
+        CHECK(odd.arguments == QStringList { "working-directory", "file://x/y" });
     }
 }
 

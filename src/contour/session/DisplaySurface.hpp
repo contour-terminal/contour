@@ -125,6 +125,12 @@ class DisplaySurface
     /// direction), issuing the resulting @c resizeScreen()/SIGWINCH to the child.
     virtual void resizeTerminalToDisplaySize() = 0;
 
+    /// Something the page is fitted around changed within the same pixels -- the cell size, the gutter, the
+    /// margins: refits the page, as @ref resizeTerminalToDisplaySize does, and re-derives the window's size
+    /// hints, which reserve the same frame. One call for both, so the page and the hints the window manager
+    /// sizes the window by cannot be left disagreeing.
+    virtual void refitPage() = 0;
+
     /// Requests a window resize so the page becomes @p lineCount x @p columnCount (DECSLPP / CSI 8 t).
     /// Relayed to the window layer, which owns window geometry; the WM is free to refuse.
     virtual void resizeWindow(vtbackend::LineCount lineCount, vtbackend::ColumnCount columnCount) = 0;

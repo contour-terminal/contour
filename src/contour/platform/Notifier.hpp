@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -37,8 +38,8 @@ class Notifier: public QObject
 
     /// Raises @p notification on the desktop, replacing an earlier one with the same identifier.
     ///
-    /// Must not block: this is called from the terminal thread with the terminal's state mutex
-    /// held. @see https://github.com/contour-terminal/contour/issues/2051
+    /// Must not block: it is called on the GUI thread, which a wait on the desktop would freeze.
+    /// @see https://github.com/contour-terminal/contour/issues/2051
     virtual void notify(vtbackend::DesktopNotification const& notification) = 0;
 
     /// Asks the desktop to withdraw the notification carrying @p identifier. Must not block either.
@@ -60,9 +61,9 @@ class Notifier: public QObject
 
 /// A Notifier that raises nothing.
 ///
-/// The default wherever no desktop notification service exists -- every platform but Linux, where
-/// notifications go through the QML tray icon instead -- so call sites never have to ask whether
-/// notifying is possible. The same role NullAnnouncer plays for announcements.
+/// What there is wherever no desktop notification service exists and nothing else was offered to
+/// raise a notification through, so call sites never have to ask whether notifying is possible. The
+/// same role NullAnnouncer plays for announcements.
 class NullNotifier final: public Notifier
 {
     Q_OBJECT
@@ -70,6 +71,40 @@ class NullNotifier final: public Notifier
   public:
     void notify(vtbackend::DesktopNotification const& /*notification*/) override {}
     void close(std::string const& /*identifier*/) override {}
+};
+
+/// A Notifier that hands each notification to a window's tray, as a message.
+///
+/// Where there is no desktop notification service -- every platform but Linux -- a session's notices and
+/// its applications' notifications go to the tray of the window hosting it, so a pane in a background
+/// tab, which has no chrome on screen to show anything, is heard from all the same. A tray message cannot
+/// be withdrawn, so close() does nothing and no close is ever reported. A click on it is reported as the
+/// notification's activation, by whoever shows the message telling it when one happens.
+class TrayNotifier final: public Notifier
+{
+    Q_OBJECT
+
+  public:
+    /// How a message reaches a tray: its title, its body, and what a click on it does.
+    using ShowMessage =
+        std::function<void(QString const& title, QString const& body, std::function<void()> onClicked)>;
+
+    /// @param showMessage How a message reaches the tray.
+    /// @param parent      Qt ownership, or nullptr.
+    explicit TrayNotifier(ShowMessage showMessage, QObject* parent = nullptr):
+        Notifier(parent), _showMessage { std::move(showMessage) }
+    {
+    }
+
+    /// Shows @p notification as a tray message. A tray message shows no sender, so an application's is
+    /// titled as one, and cannot pass for a notice of Contour's own.
+    /// @param notification The notification.
+    void notify(vtbackend::DesktopNotification const& notification) override;
+
+    void close(std::string const& /*identifier*/) override {}
+
+  private:
+    ShowMessage _showMessage;
 };
 
 /// Which service a notifier should talk to.
@@ -109,7 +144,8 @@ enum class NotificationBackend : uint8_t
 /// on other platforms this is always the null transport.
 ///
 /// @param backend Which service to talk to.
-/// @param closeDelay Passed to a backend that cannot observe a close; ignored by one that can.
+/// @param closeDelay Passed to a backend that cannot observe a close, for a notification that asked to
+///                   hear of it; ignored by one that can.
 /// @return The transport; never null.
 [[nodiscard]] std::unique_ptr<NotificationTransport> makeNotificationTransport(
     NotificationBackend backend, std::chrono::milliseconds closeDelay);
@@ -121,9 +157,21 @@ enum class NotificationBackend : uint8_t
 /// the platform split lives here, so nothing above this layer needs an #ifdef to hold a notifier.
 ///
 /// @param closeDelay How long a backend that cannot observe a close should wait before assuming
-///                   one. Zero never assumes. Ignored by backends that can observe it.
+///                   one, for a notification that asked to hear of it (OSC 99 `c=1`); any other is
+///                   never assumed closed. Zero never assumes. Ignored by backends that can observe it.
 /// @return The notifier; never null.
 [[nodiscard]] std::unique_ptr<Notifier> makeDesktopNotifier(std::chrono::milliseconds closeDelay);
+
+/// The notifier this platform can offer, or where it offers none, one that shows a tray message.
+///
+/// makeDesktopNotifier() on Linux, and a TrayNotifier everywhere else: the platform split of a
+/// session's notices lives here too, so the session raises every notice through its notifier alike.
+///
+/// @param closeDelay      Passed to makeDesktopNotifier().
+/// @param showTrayMessage How a message reaches the tray, where there is no desktop to raise it on.
+/// @return The notifier; never null.
+[[nodiscard]] std::unique_ptr<Notifier> makeDesktopNotifier(std::chrono::milliseconds closeDelay,
+                                                            TrayNotifier::ShowMessage const& showTrayMessage);
 
 } // namespace contour::platform
 

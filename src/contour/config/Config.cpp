@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/GlobalOverrides.hpp>
 #include <contour/config/ModifierNames.hpp>
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/input/ClickCounter.hpp>
+#include <vtbackend/screen/GutterSettings.hpp>
 
 #include <vtpty/ImageSize.hpp>
 
@@ -14,6 +17,9 @@
 
 #include <core/Environment.hpp>
 #include <core/Escape.hpp>
+#include <core/Utf8Path.hpp>
+#include <core/Utils.hpp>
+#include <core/platform/PathUtils.hpp>
 
 #include <libunicode/convert.h>
 
@@ -21,6 +27,7 @@
 
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <cstdlib>
 #include <expected>
 #include <fstream>
@@ -65,6 +72,12 @@ namespace fs = std::filesystem;
 namespace contour::config
 {
 
+namespace
+{
+    /// The modes of a built-in row that acts on command blocks, which exist on the primary screen only.
+    constexpr auto PrimaryScreenOnly = vtbackend::MatchModes { 0, vtbackend::MatchModes::AlternateScreen };
+} // namespace
+
 std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings()
 {
     // These are fallbacks rather than defaults (see the declaration for why): every contour.yml written
@@ -77,6 +90,11 @@ std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings()
     // modifier has been stripped, so Shift+Right opens the menu and Shift+wheel switches tabs even then.
     // That is the same gate that already decides whether the user may select cells with the mouse —
     // reused, not restated.
+    //
+    // A row naming a click count is looked up earlier, by the claimant TerminalSession hands the terminal
+    // with each press: it stands in for the terminal's own multi-click selection, so it is decided before
+    // that selection acts. It is held to the same gate all the same -- the terminal offers a press to the
+    // claimant only when its own selection would have seen it.
     //
     // The horizontal-wheel rows match Modifiers{None} deliberately: sendWheelEvent() transposes the wheel
     // axes while Alt is held (see helper.cpp, transposed()), so Alt+vertical wheel arrives here on the
@@ -101,6 +119,17 @@ std::vector<FallbackMouseMapping> const& builtinFallbackMouseMappings()
                          .binding = { { actions::SwitchToTabRight {} } } },
             .enabled =
                 [](Config const& config) noexcept { return config.tabSwitchOnHorizontalWheel.value(); } },
+        // Ctrl+triple-click selects the output of the command under the pointer, where the terminal would
+        // have selected an extended word. On the primary screen only: the alternate screen has no blocks,
+        // so there the row would claim the click only to refuse it, and the extended word would be lost.
+        FallbackMouseMapping {
+            .mapping = { .modes { PrimaryScreenOnly },
+                         .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
+                         .input = vtbackend::MouseButton::Left,
+                         .binding = { { actions::SelectCommandBlock {
+                             .target = vtbackend::CommandBlockTarget::Pointer,
+                             .part = vtbackend::CommandBlockPart::Output } } },
+                         .clickCount = uint8_t { 3 } } },
     };
     return mappings;
 }
@@ -145,33 +174,71 @@ std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings()
     return mappings;
 }
 
+std::vector<FallbackCharMapping> const& builtinFallbackCharMappings()
+{
+    // Fallbacks rather than defaults for the reason the key table gives. Ctrl+Shift+G was checked to be
+    // bound nowhere in the defaults, on any platform, when it was added; it is kitty's binding for the
+    // same thing.
+    //
+    // Consumed when it declines (nothing finished, blank output, an attached session), as kitty does: the
+    // shell would read it as ^G, which makes readline drop the line being typed. On the primary screen
+    // only, where the blocks are; an alternate-screen application keeps the chord.
+    static auto const mappings = std::vector<FallbackCharMapping> {
+        FallbackCharMapping { .mapping = { .modes { PrimaryScreenOnly },
+                                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                               vtbackend::Modifier::Shift } },
+                                           .input = U'G',
+                                           .binding = { { actions::OpenCommandOutput {} } } },
+                              .declined = DeclinedInput::Consume },
+    };
+    return mappings;
+}
+
 namespace
 {
-    /// Matches @p input against the enabled rows of @p table.
+    /// The first enabled row of @p table that matches @p input.
     ///
-    /// Shared by both applyBuiltinFallback overloads so the gating pipeline -- filter by the row's
-    /// predicate, then match -- exists once rather than once per input kind.
+    /// Shared by every built-in lookup so the gating pipeline -- filter by the row's predicate, then
+    /// match -- exists once rather than once per input kind.
+    template <typename Input>
+    [[nodiscard]] FallbackMapping<Input> const* matchFallbackTable(
+        std::vector<FallbackMapping<Input>> const& table,
+        Config const& config,
+        Input input,
+        vtbackend::Modifiers modifiers,
+        uint8_t actualModeFlags,
+        std::optional<uint8_t> clickCount)
+    {
+        for (auto const& row: table)
+            if (row.enabled(config)
+                && apply(std::span { &row.mapping, 1 }, input, modifiers, actualModeFlags, clickCount)
+                       != nullptr)
+                return &row;
+        return nullptr;
+    }
+
+    /// The actions of the first enabled row of @p table that matches @p input.
     template <typename Input>
     [[nodiscard]] ActionList const* applyFallbackTable(std::vector<FallbackMapping<Input>> const& table,
                                                        Config const& config,
                                                        Input input,
                                                        vtbackend::Modifiers modifiers,
-                                                       uint8_t actualModeFlags)
+                                                       uint8_t actualModeFlags,
+                                                       std::optional<uint8_t> clickCount)
     {
-        auto enabledMappings =
-            table
-            | std::views::filter([&config](FallbackMapping<Input> const& row) { return row.enabled(config); })
-            | std::views::transform(&FallbackMapping<Input>::mapping);
-        return apply(enabledMappings, input, modifiers, actualModeFlags);
+        auto const* row = matchFallbackTable(table, config, input, modifiers, actualModeFlags, clickCount);
+        return row != nullptr ? &row->mapping.binding : nullptr;
     }
 } // namespace
 
 ActionList const* applyBuiltinFallback(Config const& config,
                                        vtbackend::MouseButton button,
                                        vtbackend::Modifiers modifiers,
-                                       uint8_t actualModeFlags)
+                                       uint8_t actualModeFlags,
+                                       std::optional<uint8_t> clickCount)
 {
-    return applyFallbackTable(builtinFallbackMouseMappings(), config, button, modifiers, actualModeFlags);
+    return applyFallbackTable(
+        builtinFallbackMouseMappings(), config, button, modifiers, actualModeFlags, clickCount);
 }
 
 ActionList const* applyBuiltinFallback(Config const& config,
@@ -179,7 +246,35 @@ ActionList const* applyBuiltinFallback(Config const& config,
                                        vtbackend::Modifiers modifiers,
                                        uint8_t actualModeFlags)
 {
-    return applyFallbackTable(builtinFallbackKeyMappings(), config, key, modifiers, actualModeFlags);
+    return applyFallbackTable(
+        builtinFallbackKeyMappings(), config, key, modifiers, actualModeFlags, std::nullopt);
+}
+
+ActionList const* applyBuiltinFallback(Config const& config,
+                                       char32_t codepoint,
+                                       vtbackend::Modifiers modifiers,
+                                       uint8_t actualModeFlags)
+{
+    return applyFallbackTable(
+        builtinFallbackCharMappings(), config, codepoint, modifiers, actualModeFlags, std::nullopt);
+}
+
+FallbackKeyMapping const* builtinFallbackRow(Config const& config,
+                                             vtbackend::Key key,
+                                             vtbackend::Modifiers modifiers,
+                                             uint8_t actualModeFlags)
+{
+    return matchFallbackTable(
+        builtinFallbackKeyMappings(), config, key, modifiers, actualModeFlags, std::nullopt);
+}
+
+FallbackCharMapping const* builtinFallbackRow(Config const& config,
+                                              char32_t codepoint,
+                                              vtbackend::Modifiers modifiers,
+                                              uint8_t actualModeFlags)
+{
+    return matchFallbackTable(
+        builtinFallbackCharMappings(), config, codepoint, modifiers, actualModeFlags, std::nullopt);
 }
 
 namespace
@@ -206,17 +301,15 @@ namespace
         return instance;
     }
 
-#ifndef _WIN32
     /// Reads an environment variable, treating "unset" and "empty" alike.
     ///
     /// @param name Name of the variable to read.
     /// @param env Environment to read from.
-    /// @return The variable's value as raw bytes, or an empty string if it is unset.
+    /// @return The variable's value as raw bytes -- UTF-8 on Windows -- or an empty string if it is unset.
     [[nodiscard]] std::string environmentBytes(std::string_view name, core::Environment const& env)
     {
         return env.get(name).value_or("");
     }
-#endif
 
     /// Parses a resize/direction keyword ("Left"/"Right"/"Up"/"Down", case-insensitive) into the
     /// action-layer Direction enum.
@@ -259,7 +352,8 @@ namespace
     [[nodiscard]] std::string describeInputMappingRow(YAML::Node const& row)
     {
         using namespace std::string_view_literals;
-        static constexpr auto Fields = std::array { "action"sv, "key"sv, "mouse"sv, "mods"sv, "mode"sv };
+        static constexpr auto Fields =
+            std::array { "action"sv, "key"sv, "mouse"sv, "clicks"sv, "mods"sv, "mode"sv };
 
         auto described = std::vector<std::string> {};
         for (auto const field: Fields)
@@ -269,6 +363,35 @@ namespace
         if (described.empty())
             return "<empty>";
         return described | core::views::joinWith(", ");
+    }
+
+    /// The buttons a `clicks:` binding may name, for a diagnostic: "Left, Middle and Right".
+    [[nodiscard]] std::string countedButtonNames()
+    {
+        auto names = std::ranges::to<std::vector>(
+            vtbackend::ClickCounter::CountedButtons
+            | std::views::transform([](auto button) { return std::format("{}", button); }));
+        auto const last = std::move(names.back());
+        names.pop_back();
+        return std::format("{} and {}", names | core::views::joinWith(", "), last);
+    }
+
+    /// The `clicks:` field of an input_mapping row: the multi-click count its mouse button fires on.
+    /// @param row The mapping node.
+    /// @return No count when the row names none, the count when it is 1..MaxClickCount, and otherwise
+    ///         what a diagnostic says about the field.
+    [[nodiscard]] std::expected<std::optional<uint8_t>, std::string> parseClickCount(YAML::Node const& row)
+    {
+        auto const node = row["clicks"];
+        if (!node)
+            return std::optional<uint8_t> {};
+
+        auto const count =
+            core::toInteger<10, uint8_t>(node.IsScalar() ? node.as<std::string>() : std::string {});
+        if (!count || *count < 1 || *count > vtbackend::ClickCounter::MaxClickCount)
+            return std::unexpected(
+                std::format("clicks (expected 1 to {})", vtbackend::ClickCounter::MaxClickCount));
+        return count;
     }
 
     optional<std::string> readFile(fs::path const& path)
@@ -317,8 +440,9 @@ namespace
     {
         if (!fs::is_regular_file(path))
             if (auto const ec = createDefaultConfig(path); ec)
-                throw runtime_error { std::format(
-                    "Could not create directory {}. {}", path.parent_path().string(), ec.message()) };
+                throw runtime_error { std::format("Could not create directory {}. {}",
+                                                  core::pathToUtf8(path.parent_path()),
+                                                  ec.message()) };
     }
 
 #ifndef _WIN32
@@ -391,14 +515,9 @@ fs::path configHome(string const& programName)
 #endif
 
 #ifdef _WIN32
-    DWORD const size = GetEnvironmentVariableA("LOCALAPPDATA", nullptr, 0);
-    if (size)
-    {
-        std::vector<char> buf;
-        buf.resize(size);
-        GetEnvironmentVariableA("LOCALAPPDATA", buf.data(), size);
-        return fs::path { buf.data() } / programName;
-    }
+    if (auto const home = core::pathFromUtf8(environmentBytes("LOCALAPPDATA", configEnvironment()));
+        home && !home->empty())
+        return *home / programName;
     throw runtime_error { "Could not find config home folder." };
 #endif
 }
@@ -431,7 +550,7 @@ error_code createDefaultConfig(fs::path const& path)
             return ec;
     }
 
-    ofstream { path.string(), ios::binary | ios::trunc } << defaultConfigString();
+    ofstream { path, ios::binary | ios::trunc } << defaultConfigString();
 
     return error_code {};
 }
@@ -448,12 +567,13 @@ std::string documentationProfileConfig()
 
 std::string defaultConfigFilePath()
 {
-    return (configHome() / "contour.yml").string();
+    // UTF-8, as a command line naming a configuration file is read (@see loadConfigNamed).
+    return core::pathToUtf8(configHome() / "contour.yml");
 }
 
 Config loadConfig()
 {
-    return loadConfigFromFile(defaultConfigFilePath());
+    return loadConfigFromFile(configHome() / "contour.yml");
 }
 
 Config loadConfigFromFile(fs::path const& fileName)
@@ -465,15 +585,61 @@ Config loadConfigFromFile(fs::path const& fileName)
     return config;
 }
 
+std::expected<Config, std::string> tryLoadConfigFromFile(fs::path const& fileName)
+{
+    try
+    {
+        return loadConfigFromFile(fileName);
+    }
+    catch (std::exception const& e)
+    {
+        return std::unexpected { std::format("cannot load config: {}", e.what()) };
+    }
+}
+
+fs::path sideFileName(std::string_view name)
+{
+    return core::pathFromUtf8(std::format("{}.yml", name)).value_or(fs::path {});
+}
+
+std::string spelledWorkingDirectory(fs::path const& workingDirectory)
+{
+    if (workingDirectory.empty() || workingDirectory == homeResolvedPath("~", Process::homeDirectory()))
+        return std::string { "\"~\"" };
+    return core::pathToUtf8(workingDirectory);
+}
+
+namespace
+{
+    /// The configuration file a command line names, or the default one when it names none.
+    /// @param configPath The file, UTF-8 as the command line is read; empty for the default one.
+    /// @return The file to load.
+    [[nodiscard]] fs::path configFileNamed(std::string_view configPath)
+    {
+        if (configPath.empty())
+            return configHome() / "contour.yml";
+        return core::pathFromUtf8(configPath).value_or(fs::path {});
+    }
+} // namespace
+
+Config loadConfigNamed(std::string_view configPath)
+{
+    return loadConfigFromFile(configFileNamed(configPath));
+}
+
 vtbackend::Settings emulationSettings(Config const& config, TerminalProfile const& profile)
 {
     auto settings = vtbackend::Settings {};
     settings.pageSize = profile.terminalSize.value();
     settings.historyLimits = profile.history.value().limits();
     auto const& folding = config.folding.value();
-    settings.foldMarkers = folding.markersVisible();
-    settings.autoCollapseFoldOnNewCommand = folding.enabled && folding.autoCollapseOnNewCommand;
+    // Through the one conversion the window geometry reserves the strip's width from.
+    settings.gutter = gutterSettingsFor(config);
+    settings.autoCollapseFoldOnNewCommand = folding.autoCollapseOnNewCommand;
     settings.foldJumpBehavior = folding.onJumpIntoFold;
+    settings.foldingAvailability = folding.availability();
+    settings.commandBlockLimits =
+        vtbackend::CommandBlockStoreLimits { .maxRecords = config.commandBlocks.value().maxRecords };
 
     // `enabled` travels as itself rather than being conjoined into the two policies below: the engine
     // honours it where the sequence arrives, which is what makes it gate the ancestry -- and with it
@@ -489,14 +655,57 @@ vtbackend::Settings emulationSettings(Config const& config, TerminalProfile cons
     settings.frozenModes = profile.frozenModes.value();
     settings.maxImageRegisterCount = config.images.value().maxImageColorRegisters;
     settings.goodImageProtocol = config.images.value().goodImageProtocol;
+    settings.sixelScrolling = config.images.value().sixelScrolling ? vtbackend::SixelScrolling::Enabled
+                                                                   : vtbackend::SixelScrolling::Disabled;
     settings.primaryScreen.allowReflowOnResize = config.reflowOnResize.value();
     settings.graphemeClustering = config.graphemeClustering.value();
     settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters.value());
     return settings;
 }
 
+vtbackend::GutterSettings gutterSettingsFor(Config const& config)
+{
+    auto const& gutter = config.gutter.value();
+    return vtbackend::GutterSettings {
+        .foldMarkers = config.folding.value().markersVisible(),
+        .exitStatus = gutter.exitStatus,
+        .userMarks = gutter.userMarks,
+        .lineNumbers = gutter.lineNumbers,
+        .lineNumberWidth = gutter.lineNumberWidth,
+        .timestamps = gutter.timestamps,
+        .timestampFormat = gutter.timestampFormat,
+    };
+}
+
 namespace
 {
+    /// A profile, with the name it was found under.
+    struct NamedProfile
+    {
+        std::string name; ///< The name actually resolved (the config's default, if none was asked for).
+        TerminalProfile const* profile = nullptr;
+    };
+
+    /// The resolve-refuse half every profile lookup by a user-given name shares: @p profileName within
+    /// @p config, or the configuration's default one when @p profileName is empty.
+    ///
+    /// One place, so a daemon, the client that attaches to it and the client's own new sessions cannot
+    /// come to refuse a profile differently.
+    /// @return The profile, or a human-readable reason it could not be resolved. An unknown profile is a
+    ///         failure rather than a fall back to the default one: hosting sessions under a profile the
+    ///         user did not name is a misconfiguration they would discover only much later, through the
+    ///         wrong scrollback depth or the wrong reported terminal.
+    [[nodiscard]] std::expected<NamedProfile, std::string> findNamedProfile(Config const& config,
+                                                                            std::string const& profileName)
+    {
+        auto name = profileName.empty() ? config.defaultProfileName.value() : profileName;
+        auto const* const profile = config.findProfile(name);
+        if (profile == nullptr)
+            return std::unexpected { std::format(
+                "unknown profile '{}' in '{}'", name, core::pathToUtf8(config.configFile)) };
+        return NamedProfile { .name = std::move(name), .profile = profile };
+    }
+
     /// A config loaded from disk together with the one profile @p profileName resolved to.
     struct LoadedProfile
     {
@@ -505,51 +714,38 @@ namespace
         TerminalProfile const* profile = nullptr;
     };
 
-    /// The load-resolve-refuse sequence @ref resolveEmulationSettings and @ref resolveSessionConfig
-    /// both need: load @p configPath (or the default location, if empty), then resolve @p
-    /// profileName (or the configuration's default, if empty) within it.
-    ///
-    /// One place for both, so a daemon and the client that attaches to it -- which each go through
-    /// one of the two callers -- cannot come to load or refuse configuration differently.
-    /// @return The loaded config and resolved profile, or a human-readable reason it could not be
-    ///         resolved. An unknown profile is a failure rather than a fall back to the default one:
-    ///         hosting sessions under a profile the user did not name is a misconfiguration they
-    ///         would discover only much later, through the wrong scrollback depth or the wrong
-    ///         reported terminal.
+    /// The load-resolve-refuse sequence @ref resolveSessionConfig needs: load @p configPath (or the default
+    /// location, if empty), then resolve @p profileName within it (@see findNamedProfile).
+    /// @return The loaded config and resolved profile, or a human-readable reason it could not be resolved.
     [[nodiscard]] std::expected<LoadedProfile, std::string> loadAndFindProfile(std::string const& configPath,
                                                                                std::string const& profileName)
     {
-        auto loaded = Config {};
-        try
-        {
-            // The same two-overload split every other verb uses: empty means the default location,
-            // which loadConfig() resolves (and creates, if absent).
-            loaded = configPath.empty() ? loadConfig() : loadConfigFromFile(configPath);
-        }
-        catch (std::exception const& e)
-        {
-            return std::unexpected { std::format("cannot load config: {}", e.what()) };
-        }
-
-        auto name = profileName.empty() ? loaded.defaultProfileName.value() : profileName;
-        auto const* const profile = loaded.findProfile(name);
-        if (profile == nullptr)
-            return std::unexpected { std::format(
-                "unknown profile '{}' in '{}'", name, loaded.configFile.string()) };
-
-        return LoadedProfile {
-            .config = std::move(loaded),
-            .profileName = std::move(name),
-            .profile = profile,
-        };
+        return tryLoadConfigFromFile(configFileNamed(configPath)).and_then([&](Config&& loaded) {
+            return findNamedProfile(loaded, profileName).transform([&](NamedProfile found) {
+                // The profile lives in the map's node, which the move hands over rather than copies.
+                return LoadedProfile {
+                    .config = std::move(loaded),
+                    .profileName = std::move(found.name),
+                    .profile = found.profile,
+                };
+            });
+        });
     }
 } // namespace
+
+std::expected<vtbackend::Settings, std::string> emulationSettingsFor(Config const& config,
+                                                                     std::string const& profileName)
+{
+    return findNamedProfile(config, profileName).transform([&](NamedProfile const& found) {
+        return emulationSettings(config, *found.profile);
+    });
+}
 
 std::expected<vtbackend::Settings, std::string> resolveEmulationSettings(std::string const& configPath,
                                                                          std::string const& profileName)
 {
-    return loadAndFindProfile(configPath, profileName).transform([](LoadedProfile const& loaded) {
-        return emulationSettings(loaded.config, *loaded.profile);
+    return tryLoadConfigFromFile(configFileNamed(configPath)).and_then([&](Config const& loaded) {
+        return emulationSettingsFor(loaded, profileName);
     });
 }
 
@@ -593,6 +789,9 @@ vtbackend::Settings sessionSettings(Config const& config,
     // split pane, a daemon-hosted session before any client attaches) would otherwise render an
     // active cursor and withhold the DECSET 1004 focus-out its application is due.
     settings.focused = false;
+    // The session's read loop writes what the GUI thread types and pastes, so that the GUI thread never parks
+    // on a write a program leaves unread.
+    settings.inputWriter = vtbackend::InputWriter::ReaderThread;
     settings.ptyBufferObjectSize = config.ptyBufferObjectSize.value();
     settings.ptyReadBufferSize = config.ptyReadBufferSize.value();
     settings.mouseWheelScrollMultiplier = profile.history.value().historyScrollMultiplier;
@@ -642,8 +841,10 @@ vtbackend::Settings sessionSettings(Config const& config,
         profile.statusLine.value().syncWindowTitleWithHostWritableStatusDisplay;
     if (auto const* p = preferredColorPalette(profile.colors.value(), colorPreference))
         settings.colorPalette = *p;
-    settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord.value();
+    settings.visualizeSelectedWord = profile.highlightDoubleClickedWord.value();
+    settings.isInsertAfterYank = profile.insertAfterYank.value();
     settings.highlightTimeout = profile.highlightTimeout.value();
+    settings.stickyHeader = profile.stickyHeader.value().settings();
 
     return settings;
 }
@@ -715,7 +916,7 @@ void compareEntries(Config& config, auto const& output)
 {
     // compare entries in config and default config and log differences
     auto defaultConfig = YAML::Load(defaultConfigString());
-    auto userConfig = YAML::LoadFile(config.configFile.string());
+    auto userConfig = YAML::Load(readFile(config.configFile).value_or(std::string {}));
 
     std::vector<std::string> existingEntries;
     std::vector<std::string> userEntries;
@@ -770,6 +971,48 @@ static void recordMainConfigOrigins(Config& config, YAMLConfigReader const& read
         }
 }
 
+/// settings.yml's document. Nothing saved yet is no error: that is an empty document.
+/// @param path The `settings.yml` path, beside contour.yml.
+/// @return The document, or why there is none.
+[[nodiscard]] static std::expected<YAML::Node, std::string> parseGuiSettingsFile(fs::path const& path)
+{
+    std::error_code ec;
+    if (!fs::exists(path, ec) || ec)
+        return YAML::Node {};
+    return YAMLConfigReader::parseSideFile(path);
+}
+
+/// The GUI-owned settings a parsed settings.yml holds.
+/// @param document The parsed settings.yml.
+/// @return Its default profile and its global overrides.
+[[nodiscard]] static GuiManagedSettings guiSettingsFrom(YAML::Node const& document)
+{
+    auto settings = GuiManagedSettings {};
+    if (auto const node = document["default_profile"]; node && node.IsScalar())
+        settings.defaultProfile = node.as<std::string>();
+
+    // Every other top-level scalar is a GUI global override, kept as its YAML scalar text so it can be
+    // re-emitted verbatim and re-applied through the typed per-key loader on the next load.
+    if (document.IsMap())
+        for (auto const& entry: document)
+        {
+            if (!entry.first.IsScalar())
+                continue; // a complex YAML key cannot name a setting
+            auto const key = entry.first.as<std::string>();
+            if (key == "default_profile")
+                continue;
+            if (entry.second.IsScalar())
+                settings.globalOverrides[key] = entry.second.as<std::string>();
+            else if (entry.second.IsMap())
+                for (auto const& child: entry.second)
+                    if (child.first.IsScalar() && child.second.IsScalar())
+                        settings.globalOverrides[key + '.' + child.first.as<std::string>()] =
+                            child.second.as<std::string>();
+        }
+
+    return settings;
+}
+
 /// Merges the GUI-managed side files over the just-parsed configuration, mirroring the layouts.yml
 /// merge: the freshest (GUI) content wins, and a broken file is logged and skipped rather than taking
 /// the whole configuration down. Color scheme side files (colorschemes/<name>.yml) are already
@@ -800,34 +1043,28 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
 
         for (auto const& path: files)
         {
-            auto const name = path.stem().string();
-            auto const contents = readFile(path);
-            if (!contents)
+            auto const name = core::pathToUtf8(path.stem());
+            auto const root = YAMLConfigReader::parseSideFile(path);
+            if (!root)
             {
-                configLog()("Skipping unreadable profile side file: {}", path.string());
-                continue;
-            }
-            auto root = YAML::Node {};
-            try
-            {
-                root = YAML::Load(*contents);
-            }
-            catch (std::exception const& e)
-            {
-                configLog()("Skipping malformed profile side file {}: {}", path.string(), e.what());
+                configLog()("Skipping the profile side file {}", root.error());
                 continue;
             }
             auto profile = base; // inherit the default profile's values, then overlay the file's keys
-            reader.loadProfileBody(root, profile);
+            // The file's root is the profile's body, so a malformed entry is reported as `<file>: <key>`;
+            // the key alone would name neither the file nor the profile.
+            reader.readSideFile(path, *root, [&]() { reader.loadProfileBody(*root, profile); });
             config.profiles.value()[name] = std::move(profile);
             config.profileOrigins[name] = SettingsOrigin::SideFile;
         }
     }
 
     // settings.yml — GUI-owned globals. Applied last so a default_profile can name a profile the scan
-    // above just introduced.
+    // above just introduced. Read and parsed once: the overrides applied are the ones listed, even when
+    // the settings page saves the file in between.
     auto const settingsPath = dir / "settings.yml";
-    if (auto loaded = loadGuiSettingsFile(settingsPath))
+    auto const settingsDocument = parseGuiSettingsFile(settingsPath);
+    if (auto loaded = settingsDocument.transform(guiSettingsFrom))
     {
         config.guiManagedSettings = *loaded;
         if (auto const& defaultProfile = loaded->defaultProfile)
@@ -842,48 +1079,30 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
 
         // Apply any GUI global overrides present in settings.yml through the SAME typed per-key loaders
         // contour.yml uses (an absent key is a no-op), so the GUI never needs its own parse logic and a
-        // new overridable global is just another loadFromEntry line here.
-        std::error_code ec;
-        if (!loaded->globalOverrides.empty() && std::filesystem::exists(settingsPath, ec) && !ec)
+        // new overridable global is just another row of globalOverrides().
+        if (!loaded->globalOverrides.empty())
         {
-            auto overrides = YAMLConfigReader(settingsPath.string(), configLog, configEnvironment());
-            overrides.loadFromEntry("word_delimiters", config.wordDelimiters);
-            overrides.loadFromEntry("read_buffer_size", config.ptyReadBufferSize);
-            overrides.loadFromEntry("pty_buffer_size", config.ptyBufferObjectSize);
-            overrides.loadFromEntry("command_palette_recent_count", config.commandPaletteRecentCount);
-            overrides.loadFromEntry("spawn_new_process", config.spawnNewProcess);
-            overrides.loadFromEntry("reflow_on_resize", config.reflowOnResize);
-            overrides.loadFromEntry("tab_switch_on_horizontal_wheel", config.tabSwitchOnHorizontalWheel);
-            overrides.loadFromEntry("accessibility_announcements", config.accessibilityAnnouncements);
-            overrides.loadFromEntry("accessibility_caret_reporting", config.accessibilityCaretReporting);
-            overrides.loadFromEntry("hyperlink_hover_tooltip", config.hyperlinkHoverTooltip);
-            overrides.loadFromEntry("progress_timeout", config.progressTimeout);
-            overrides.loadFromEntry("notification_close_timeout", config.notificationCloseTimeout);
-            overrides.loadFromEntry("tab_bar_position", config.tabBarPosition);
-            overrides.loadFromEntry("tab_bar_visibility", config.tabBarVisibility);
-            overrides.loadFromEntry("theme", config.theme);
-            overrides.loadFromEntry("ui_style", config.uiStyle);
-            overrides.loadFromEntry("window_control_style", config.windowControlStyle);
-            overrides.loadFromEntry("ui_font_family", config.uiFontFamily);
-            overrides.loadFromEntry("ui_font_size", config.uiFontSize);
-            overrides.loadFromEntry("early_exit_threshold", config.earlyExitThreshold);
-            // Nested sections: the section loader touches only the keys settings.yml actually has. It runs
-            // only when the nested form is present, so a hand-edited scalar `renderer: foo` is ignored
-            // instead of being subscripted (which would throw and abort startup).
-            // The renderer loaders expect the shapes contour.yml documents; settings.yml is hand-editable,
-            // and a malformed entry there must cost that section, never startup.
-            if (std::ranges::any_of(loaded->globalOverrides | std::views::keys,
-                                    [](std::string const& key) { return key.starts_with("renderer."); }))
-            {
-                try
-                {
-                    overrides.loadFromEntry("renderer", config.renderer);
-                }
-                catch (std::exception const& e)
-                {
-                    errorLog()("settings.yml: ignoring the malformed renderer section: {}", e.what());
-                }
-            }
+            auto overrides =
+                YAMLConfigReader(settingsPath, *settingsDocument, configLog, configEnvironment());
+            // Nested sections: the section loader touches only the keys settings.yml actually has, so an
+            // override of gutter.line_numbers leaves a gutter.timestamps from contour.yml as it was. It runs
+            // only when settings.yml overrides a leaf of the section, so a hand-edited scalar `renderer: foo`
+            // is ignored instead of being subscripted.
+            // The section loaders expect the shapes contour.yml documents; settings.yml is hand-editable,
+            // and a malformed entry there must cost that leaf, never startup. loadFromEntry() reads a
+            // ConfigEntry under loadGuarded(), which puts it back as it was and logs it, and a section's
+            // loader reads each of its leaves under a guard of its own the same way.
+            // The keys and their loaders are the rows of globalOverrides(). A scalar's runs whether or not
+            // settings.yml has its key: the loader skips an absent one and reports one of the wrong shape.
+            // Read as the side file it is: settings.yml spells its keys as contour.yml does, so a malformed
+            // entry is reported as `<settings.yml>: <key>`, not as if contour.yml held it.
+            overrides.readSideFile(settingsPath, overrides.doc, [&]() {
+                for (auto const& row: globalOverrides())
+                    if (row.shape == GlobalOverrideShape::Scalar
+                        || std::ranges::any_of(loaded->globalOverrides | std::views::keys,
+                                               [&row](std::string const& key) { return row.covers(key); }))
+                        row.apply(overrides, config, std::string { row.key });
+            });
         }
     }
     else
@@ -896,11 +1115,11 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
 void loadConfigFromFile(Config& config, fs::path const& fileName)
 {
     auto logger = configLog;
-    logger()("Loading configuration from file: {} ", fileName.string());
+    logger()("Loading configuration from file: {} ", core::pathToUtf8(fileName));
     config.configFile = fileName;
     createFileIfNotExists(config.configFile);
 
-    // A live reload reuses the same Config object rather than a fresh one (see reloadAllSessions), so the
+    // A caller may reload into a Config object it already loaded rather than a fresh one, so the
     // collections rebuilt wholesale from the file plus the GUI side-file scan below must be reset to their
     // default-constructed starting state first. Otherwise a profile or color scheme that was deleted from
     // disk (e.g. a GUI entity removed in the settings page) would linger from the previous load, and its
@@ -912,7 +1131,7 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     config.profileOrigins.clear();
     config.colorSchemeOrigins.clear();
 
-    auto yamlVisitor = YAMLConfigReader(config.configFile.string(), logger, configEnvironment());
+    auto yamlVisitor = YAMLConfigReader(config.configFile, logger, configEnvironment());
     yamlVisitor.load(config);
 
     // Merge the machine-managed sibling layouts.yml (written by SaveLayout). Its entries override
@@ -947,16 +1166,20 @@ std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsF
     // (by design, for the main config's "load defaults instead" path), but SaveLayout must NOT
     // mistake an unreadable file for an empty one — rewriting it would destroy every layout it
     // failed to read.
+    auto document = YAML::Node {};
     try
     {
-        YAML::LoadFile(path.string());
+        auto const contents = readFile(path);
+        if (!contents)
+            return std::unexpected(std::format("cannot read {}", core::pathToUtf8(path)));
+        document = YAML::Load(*contents);
     }
     catch (std::exception const& e)
     {
         return std::unexpected(std::string(e.what()));
     }
 
-    auto reader = YAMLConfigReader(path.string(), configLog, configEnvironment());
+    auto reader = YAMLConfigReader(path, document, configLog, configEnvironment());
     reader.loadLayoutsInto(layouts);
     return layouts;
 }
@@ -970,11 +1193,48 @@ optional<std::string> readConfigFile(std::string const& filename)
     return nullopt;
 }
 
-YAMLConfigReader::YAMLConfigReader(std::string const& filename,
+namespace
+{
+    /// @return The document in @p file; an empty one, the reason logged, where it cannot be read or parsed.
+    [[nodiscard]] YAML::Node documentOrNone(fs::path const& file)
+    {
+        try
+        {
+            // Read through readFile (binary + CRLF->LF normalization) rather than YAML::LoadFile, so every
+            // config document — contour.yml, the settings.yml global-override reader, and the color-scheme
+            // files — is parsed identically regardless of how it was saved. YAML::LoadFile is CRLF-safe
+            // only on Windows (its text-mode ifstream strips '\r' at the OS layer); a CRLF file synced onto
+            // Linux/macOS would otherwise leave a trailing '\r' on plain scalar values and fail typed
+            // conversion. This is the same normalization the GUI profile side files already rely on.
+            if (auto const contents = readFile(file))
+                return YAML::Load(*contents);
+            errorLog()("Configuration file could not be read.\nDefault config will be loaded.");
+        }
+        catch (std::exception const& e)
+        {
+            errorLog()("Configuration file is corrupted. {}\nDefault config will be loaded.", e.what());
+        }
+        return {};
+    }
+} // namespace
+
+YAMLConfigReader::YAMLConfigReader(fs::path const& filename,
                                    core::log::Category const& log,
                                    core::Environment const& env,
                                    VariableReplacer replacer):
-    configFile(filename), logger { log }, variableReplacer { std::move(replacer) }
+    YAMLConfigReader(filename, documentOrNone(filename), log, env, std::move(replacer))
+{
+}
+
+YAMLConfigReader::YAMLConfigReader(fs::path filename,
+                                   YAML::Node const& document,
+                                   core::log::Category const& log,
+                                   core::Environment const& env,
+                                   VariableReplacer replacer):
+    configFile(std::move(filename)),
+    doc { document },
+    logger { log },
+    variableReplacer { std::move(replacer) }
 {
     if (!variableReplacer)
     {
@@ -985,23 +1245,6 @@ YAMLConfigReader::YAMLConfigReader(std::string const& filename,
             return {};
         };
     }
-    try
-    {
-        // Read through readFile (binary + CRLF->LF normalization) rather than YAML::LoadFile, so every
-        // config document — contour.yml, the settings.yml global-override reader, and the color-scheme
-        // files — is parsed identically regardless of how it was saved. YAML::LoadFile is CRLF-safe only
-        // on Windows (its text-mode ifstream strips '\r' at the OS layer); a CRLF file synced onto
-        // Linux/macOS would otherwise leave a trailing '\r' on plain scalar values and fail typed
-        // conversion. This is the same normalization the GUI profile side files already rely on.
-        if (auto const contents = readFile(configFile))
-            doc = YAML::Load(*contents);
-        else
-            errorLog()("Configuration file could not be read.\nDefault config will be loaded.");
-    }
-    catch (std::exception const& e)
-    {
-        errorLog()("Configuration file is corrupted. {}\nDefault config will be loaded.", e.what());
-    }
 }
 
 std::string YAMLConfigReader::resolveVariables(std::string const& input) const
@@ -1011,7 +1254,14 @@ std::string YAMLConfigReader::resolveVariables(std::string const& input) const
 
 std::filesystem::path YAMLConfigReader::resolvedPath(std::string const& input) const
 {
-    return homeResolvedPath(resolveVariables(input), vtpty::Process::homeDirectory());
+    auto const text = resolveVariables(input);
+    auto path = homeResolvedPath(text, vtpty::Process::homeDirectory());
+    if (!path)
+    {
+        errorLog()("Ignoring the path '{}': {}", core::escape(text), path.error().message());
+        return {};
+    }
+    return std::move(*path);
 }
 
 // NOLINTBEGIN(readability-convert-member-functions-to-static)
@@ -1098,7 +1348,9 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("pty_buffer_size", c.ptyBufferObjectSize);
         loadFromEntry("images", c.images);
         loadFromEntry("folding", c.folding);
+        loadFromEntry("gutter", c.gutter);
         loadFromEntry("osc_context", c.oscContext);
+        loadFromEntry("command_blocks", c.commandBlocks);
         loadFromEntry("live_config", c.live);
         loadFromEntry("early_exit_threshold", c.earlyExitThreshold);
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
@@ -1140,6 +1392,69 @@ void YAMLConfigReader::load(Config& c)
         errorLog()("Something went wrong during config file loading, check `contour debug config` output "
                    "for more info");
     }
+}
+
+std::expected<YAML::Node, std::string> YAMLConfigReader::parseSideFile(fs::path const& file)
+{
+    // Through readFile, which reads in binary and drops each CR, so a file saved with Windows line endings
+    // parses as it does everywhere else: YAML::LoadFile would keep the CR on every scalar off Windows.
+    auto const contents = readFile(file);
+    if (!contents)
+        return std::unexpected(std::format("{}: the file cannot be read", core::pathToUtf8(file)));
+
+    try
+    {
+        // A side file holds a map of settings, or nothing yet. A bare word or a list parses too, but names
+        // no setting, and subscripting a bare word throws.
+        auto document = YAML::Load(*contents);
+        if (!document.IsMap() && !document.IsNull())
+            return std::unexpected(
+                std::format("{}: the document is not a map of settings", core::pathToUtf8(file)));
+        return document;
+    }
+    catch (std::exception const& e)
+    {
+        return std::unexpected(std::format("{}: {}", core::pathToUtf8(file), e.what()));
+    }
+}
+
+std::string YAMLConfigReader::keyPathTo(YAML::Node const& node, std::string_view entry) const
+{
+    auto path = std::string {};
+    auto joiner = std::string_view {};
+    for (auto const& step: _keyPath)
+    {
+        path += joiner;
+        path += step.entry;
+        joiner = step.kind == KeyStepKind::File ? ": " : ".";
+    }
+
+    // The key a guarded read is on is its last step already; a key read inside its value is one more.
+    auto const isLastStep =
+        !_keyPath.empty() && _keyPath.back().entry == entry && _keyPath.back().container.is(node);
+    if (!isLastStep)
+    {
+        path += joiner;
+        path += entry;
+    }
+    return path;
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, CursorConfig& where)
+{
+    if (auto const child = node[entry])
+    {
+        loadFromEntry(child, "shape", where.cursorShape);
+        loadFromEntry(child, "blinking", where.cursorDisplay);
+        loadFromEntry(child, "blinking_interval", where.cursorBlinkInterval);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, InputModeConfig& where)
+{
+    // Subscripted here, under this entry's own guard: a mode given a scalar is that mode's fault.
+    if (auto const child = node[entry]; child && child["cursor"])
+        loadGuarded(child, "cursor", where.cursor);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TerminalProfile& where)
@@ -1185,6 +1500,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "search_case_sensitivity", where.searchCaseSensitivity);
         loadFromEntry(child, "insert_after_yank", where.insertAfterYank);
         loadFromEntry(child, "bell", where.bell);
+        loadFromEntry(child, "notify_on_command_finish", where.notifyOnCommandFinish);
         loadFromEntry(child, "wm_class", where.wmClass);
         loadFromEntry(child, "tab_label", where.tabLabel);
         loadFromEntry(child, "pixel_reporting", where.pixelReporting);
@@ -1198,6 +1514,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "terminal_size", where.terminalSize);
         loadFromEntry(child, "history", where.history);
         loadFromEntry(child, "scrollbar", where.scrollbar);
+        loadFromEntry(child, "sticky_header", where.stickyHeader);
         loadFromEntry(child, "mouse", where.mouse);
         loadFromEntry(child, "permissions", where.permissions);
         loadFromEntry(child, "input_method_editor", where.inputMethodEditor);
@@ -1208,36 +1525,11 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "screen_transition", where.screenTransitionStyle);
         loadFromEntry(child, "screen_transition_duration", where.screenTransitionDuration);
         loadFromEntry(child, "cursor_motion_animation_duration", where.cursorMotionAnimationDuration);
-        if (child["cursor"])
-        {
-            loadFromEntry(child["cursor"], "shape", where.modeInsert.value().cursor.cursorShape);
-            loadFromEntry(child["cursor"], "blinking", where.modeInsert.value().cursor.cursorDisplay);
-            loadFromEntry(
-                child["cursor"], "blinking_interval", where.modeInsert.value().cursor.cursorBlinkInterval);
-        }
-        if (child["normal_mode"] && child["normal_mode"]["cursor"])
-        {
-            loadFromEntry(
-                child["normal_mode"]["cursor"], "shape", where.modeNormal.value().cursor.cursorShape);
-            loadFromEntry(
-                child["normal_mode"]["cursor"], "blinking", where.modeNormal.value().cursor.cursorDisplay);
-            loadFromEntry(child["normal_mode"]["cursor"],
-                          "blinking_interval",
-                          where.modeNormal.value().cursor.cursorBlinkInterval);
-        }
-        if (child["visual_mode"] && child["visual_mode"]["cursor"])
-        {
-            loadFromEntry(
-                child["visual_mode"]["cursor"], "shape", where.modeVisual.value().cursor.cursorShape);
-            loadFromEntry(
-                child["visual_mode"]["cursor"], "blinking", where.modeVisual.value().cursor.cursorDisplay);
-            loadFromEntry(child["visual_mode"]["cursor"],
-                          "blinking_interval",
-                          where.modeVisual.value().cursor.cursorBlinkInterval);
-            loadFromEntry(child["visual_mode"]["cursor"],
-                          "blinking_interval",
-                          where.modeVisual.value().cursor.cursorBlinkInterval);
-        }
+        // Maps that are no config entries of their own, each guarded on its own: a value of the wrong
+        // shape costs that key, not the whole profile.
+        loadGuarded(child, "cursor", where.modeInsert.value().cursor);
+        loadGuarded(child, "normal_mode", where.modeNormal.value());
+        loadGuarded(child, "visual_mode", where.modeVisual.value());
         loadFromEntry(child, "vi_mode_highlight_timeout", where.highlightTimeout);
         loadFromEntry(child, "vi_mode_scrolloff", where.modalCursorScrollOff);
         loadFromEntry(child, "status_line", where.statusLine);
@@ -1258,87 +1550,6 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "hint_patterns", where.hintPatterns);
         loadFromEntry(child, "hint_scrollback_lines", where.hintScrollbackLines);
     }
-}
-
-std::vector<std::string> shellSplit(std::string_view commandLine)
-{
-    auto tokens = std::vector<std::string> {};
-    auto current = std::string {};
-    auto inToken = false;
-
-    // Consumes the quoted run whose opening quote is at rest.front(), appending its content to
-    // `current`. Single quotes are literal; inside double quotes, \" and \\ are escapes. An
-    // unterminated quote simply consumes the remainder.
-    auto const consumeQuoted = [&current](std::string_view& rest, char const quote) {
-        rest.remove_prefix(1); // the opening quote
-        while (!rest.empty() && rest.front() != quote)
-        {
-            if (quote == '"' && rest.front() == '\\' && rest.size() >= 2
-                && (rest[1] == '"' || rest[1] == '\\'))
-                rest.remove_prefix(1); // drop the backslash, take the escaped character below
-            current.push_back(rest.front());
-            rest.remove_prefix(1);
-        }
-        if (!rest.empty())
-            rest.remove_prefix(1); // the closing quote
-    };
-
-    auto const endToken = [&] {
-        if (!inToken)
-            return;
-        tokens.push_back(std::move(current));
-        current.clear();
-        inToken = false;
-    };
-
-    for (auto rest = commandLine; !rest.empty();)
-    {
-        auto const c = rest.front();
-        if (c == '\'' || c == '"')
-        {
-            inToken = true;
-            consumeQuoted(rest, c);
-        }
-        else if (c == '\\' && rest.size() >= 2)
-        {
-            // Outside quotes, a backslash escapes the next character (e.g. `a\ b` is one token).
-            inToken = true;
-            current.push_back(rest[1]);
-            rest.remove_prefix(2);
-        }
-        else if (c == ' ' || c == '\t')
-        {
-            endToken();
-            rest.remove_prefix(1);
-        }
-        else
-        {
-            inToken = true;
-            current.push_back(c);
-            rest.remove_prefix(1);
-        }
-    }
-    endToken();
-    return tokens;
-}
-
-std::string shellQuote(std::string_view token)
-{
-    auto const needsQuoting = token.empty() || std::ranges::any_of(token, [](char c) {
-                                  return c == ' ' || c == '\t' || c == '\'' || c == '"' || c == '\\';
-                              });
-    if (!needsQuoting)
-        return std::string { token };
-    std::string out = "'";
-    for (char const c: token)
-    {
-        if (c == '\'')
-            out += "'\\''"; // close quote, escaped literal ', reopen quote
-        else
-            out.push_back(c);
-    }
-    out += '\'';
-    return out;
 }
 
 void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPane& where)
@@ -1390,15 +1601,12 @@ void YAMLConfigReader::parseLayoutPane(YAML::Node const& node, config::LayoutPan
 
     if (auto const command = node["command"]; command && command.IsScalar())
     {
-        // A command may be written as a full command line ("emacs -nw"): shell-split it into the program
-        // (the first token) and its arguments. Any explicit `arguments:` entries are appended after these.
-        auto tokens = shellSplit(resolveVariables(command.as<std::string>()));
-        if (!tokens.empty())
-        {
-            where.command = std::move(tokens.front());
-            for (auto& token: tokens | std::views::drop(1))
-                where.arguments.push_back(std::move(token));
-        }
+        // Kept as written: the spawn reads it as it reads a profile's `shell:` -- a program, or, where it
+        // names none but holds whitespace ("emacs -nw"), the command line it spells, by this platform's
+        // rules -- with any `arguments:` after it. A blank one names nothing, and leaves the shell to run.
+        auto text = resolveVariables(command.as<std::string>());
+        if (text.find_first_not_of(" \t") != std::string::npos)
+            where.command = std::move(text);
     }
     if (auto const args = node["arguments"]; args && args.IsSequence())
         for (auto const& argNode: args)
@@ -1497,79 +1705,108 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         logger()(
             "color paletter not found inside config file, checking colorschemes directory for {}.yml file",
             entry);
-        auto const filePath = configFile.remove_filename() / "colorschemes" / (entry + ".yml");
-        auto fileContents = readFile(filePath);
-        if (!fileContents)
+        auto const filePath = configFile.remove_filename() / "colorschemes" / sideFileName(entry);
+        std::error_code ec;
+        if (!std::filesystem::exists(filePath, ec))
         {
             logger()("color palette loading failed {} ", entry);
             return;
         }
-        logger()("color palette loading from file {}", filePath.string());
-        try
+        // A scheme file that is there but does not parse is the user's to fix, so it is reported where
+        // every malformed entry is; the palette keeps what it has.
+        auto const scheme = parseSideFile(filePath);
+        if (!scheme)
         {
-            loadFromEntry(YAML::Load(fileContents.value()), where);
+            errorLog()("Ignoring the color scheme file {}", scheme.error());
             return;
         }
-        catch (std::exception const& e)
-        {
-            logger()("Something went wrong: {}", e.what());
-        }
+        logger()("color palette loading from file {}", core::pathToUtf8(filePath));
+        // Read as a document of its own, so a malformed map of it is reported by the file and its key
+        // path there -- `<file>: <map>` -- rather than by the profile entry that named the scheme.
+        readSideFile(filePath, *scheme, [&]() { loadFromEntry(*scheme, where); });
+        return;
     }
 
+    // Read where the document defines it, so a malformed map of it is reported by the key path it has
+    // there -- `color_schemes.<name>.<map>` -- rather than by the profile entry that named the scheme.
+    auto profilePath = std::exchange(_keyPath,
+                                     std::vector { KeyStep { .container = doc, .entry = "color_schemes" },
+                                                   KeyStep { .container = node, .entry = entry } });
+    auto const restore = core::Finally { [&]() { _keyPath = std::move(profilePath); } };
     loadFromEntry(child, where);
 }
 
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPalette& where)
+namespace
 {
-    auto child = node;
-    if (child["default"])
-    {
-        logger()("*** loading default colors");
-        loadFromEntry(child["default"], "background", where.defaultBackground);
-        loadFromEntry(child["default"], "foreground", where.defaultForeground);
-        loadFromEntry(child["default"], "bright_foreground", where.defaultForegroundBright);
-        loadFromEntry(child["default"], "dimmed_foreground", where.defaultForegroundDimmed);
-    }
-
-    if (child["background_image"] && child["background_image"]["path"]) // ensure that path exist
-    {
-        logger()("*** loading background_image");
-        where.backgroundImage = std::make_shared<vtbackend::BackgroundImage>();
-        loadFromEntry(child, "background_image", where.backgroundImage);
-    }
-
-    if (child["hyperlink_decoration"])
-    {
-        logger()("*** loading hyperlink_decoration");
-        loadFromEntry(child["hyperlink_decoration"], "normal", where.hyperlinkDecoration.normal);
-        loadFromEntry(child["hyperlink_decoration"], "hover", where.hyperlinkDecoration.hover);
-    }
-
-    auto loadWithLog = [&](auto& entry, auto& where) {
-        logger()("*** loading {}", entry);
-        loadFromEntry(child, entry, where);
+    /// A colour scheme's `block_status` keys and the outcomes they colour. One table for the reader and
+    /// the writer, so the two cannot come to spell a key differently, and a fourth status is one row here.
+    constexpr auto BlockStatusKeys = std::array {
+        std::pair { "success"sv, vtbackend::CommandBlockOutcome::Success },
+        std::pair { "failure"sv, vtbackend::CommandBlockOutcome::Failure },
+        std::pair { "running"sv, vtbackend::CommandBlockOutcome::Running },
     };
 
-    loadWithLog("cursor", where.cursor);
-    loadWithLog("vi_mode_highlight", where.yankHighlight);
-    loadWithLog("vi_mode_cursorline", where.normalModeCursorline);
-    loadWithLog("selection", where.selection);
-    loadWithLog("search_highlight", where.searchHighlight);
-    loadWithLog("search_highlight_focused", where.searchHighlightFocused);
-    loadWithLog("word_highlight_current", where.wordHighlightCurrent);
-    loadWithLog("word_highlight_other", where.wordHighlight);
-    loadWithLog("hint_label", where.hintLabel);
-    loadWithLog("hint_match", where.hintMatch);
-    loadWithLog("input_method_editor", where.inputMethodEditor);
+    /// A colour scheme's `sticky_header` keys and the palette slots they set, for BlockStatusKeys' reason:
+    /// one table for the reader and the writer, so a third slot is a row here and a member of the palette.
+    constexpr auto StickyHeaderColorSlots = std::array {
+        std::pair { "background"sv, &vtbackend::ColorPalette::stickyHeaderBackground },
+        std::pair { "separator"sv, &vtbackend::ColorPalette::stickyHeaderSeparator },
+    };
+} // namespace
 
-    if (child["indicator_statusline"])
-    {
-        logger()("*** loading indicator_statusline");
-        if (child["indicator_statusline"]["default"])
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPalette& where)
+{
+    // Every map of a scheme is read under a guard of its own, as a profile's entries are: a map of the wrong
+    // shape costs that map, which keeps its default, and is reported by its key path and its place in the
+    // file, while the rest of the scheme still loads. Without a key, a map is not read at all.
+    auto const loadMap = [&](std::string const& key, auto const& read) {
+        auto const map = node[key];
+        if (!map)
+            return;
+        logger()("*** loading {}", key);
+        readGuarded(node, key, where, [&]() { read(map); });
+    };
+
+    loadMap("default", [&](YAML::Node const& map) {
+        loadFromEntry(map, "background", where.defaultBackground);
+        loadFromEntry(map, "foreground", where.defaultForeground);
+        loadFromEntry(map, "bright_foreground", where.defaultForegroundBright);
+        loadFromEntry(map, "dimmed_foreground", where.defaultForegroundDimmed);
+    });
+
+    loadMap("background_image", [&](YAML::Node const& map) {
+        if (!map["path"]) // ensure that path exist
+            return;
+        where.backgroundImage = std::make_shared<vtbackend::BackgroundImage>();
+        loadFromEntry(node, "background_image", where.backgroundImage);
+    });
+
+    loadMap("hyperlink_decoration", [&](YAML::Node const& map) {
+        loadFromEntry(map, "normal", where.hyperlinkDecoration.normal);
+        loadFromEntry(map, "hover", where.hyperlinkDecoration.hover);
+    });
+
+    auto const loadEntry = [&](std::string const& key, auto& slot) {
+        loadMap(key, [&](YAML::Node const&) { loadFromEntry(node, key, slot); });
+    };
+    loadEntry("cursor", where.cursor);
+    loadEntry("vi_mode_highlight", where.yankHighlight);
+    loadEntry("vi_mode_cursorline", where.normalModeCursorline);
+    loadEntry("selection", where.selection);
+    loadEntry("search_highlight", where.searchHighlight);
+    loadEntry("search_highlight_focused", where.searchHighlightFocused);
+    loadEntry("word_highlight_current", where.wordHighlightCurrent);
+    loadEntry("word_highlight_other", where.wordHighlight);
+    loadEntry("hint_label", where.hintLabel);
+    loadEntry("hint_match", where.hintMatch);
+    loadEntry("input_method_editor", where.inputMethodEditor);
+
+    loadMap("indicator_statusline", [&](YAML::Node const& map) {
+        if (map["default"])
         {
             logger()("*** loading default indicator_statusline");
             vtbackend::RGBColorPair defaultIndicatorStatusLine;
-            loadFromEntry(child["indicator_statusline"], "default", defaultIndicatorStatusLine);
+            loadFromEntry(map, "default", defaultIndicatorStatusLine);
             where.indicatorStatusLineInactive = defaultIndicatorStatusLine;
             where.indicatorStatusLineInsertMode = defaultIndicatorStatusLine;
             where.indicatorStatusLineNormalMode = defaultIndicatorStatusLine;
@@ -1581,49 +1818,51 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
                pair { "normal_mode", &where.indicatorStatusLineNormalMode },
                pair { "visual_mode", &where.indicatorStatusLineVisualMode } })
         {
-            if (child["indicator_statusline"][name])
+            if (map[name])
             {
                 logger()("*** loading {} indicator_statusline", name);
-                loadFromEntry(child["indicator_statusline"], name, *defaultColor);
+                loadFromEntry(map, name, *defaultColor);
             }
         }
-    }
+    });
+
     // The fold column, left unset unless the scheme says otherwise: vtbackend then derives it from the
     // palette's own foreground and background, so a scheme that has never heard of folding still draws
     // a legible column rather than one hard-coded colour that happens to vanish on half the themes.
-    if (auto const folding = child["fold_marker"])
-    {
-        logger()("*** loading fold_marker");
-        auto const loadPair = [&](std::string const& key, std::optional<vtbackend::RGBColorPair>& target) {
-            if (!folding[key])
-                return;
-            auto colors = vtbackend::RGBColorPair {};
-            loadFromEntry(folding, key, colors);
-            target = colors;
-        };
-        loadPair("default", where.foldMarker);
-        loadPair("hover", where.foldMarkerHover);
-    }
+    loadMap("fold_marker", [&](YAML::Node const& map) {
+        loadOptional(map, "default", where.foldMarker);
+        loadOptional(map, "hover", where.foldMarkerHover);
+    });
 
-    if (auto const tints = child["tint"])
-    {
-        logger()("*** loading tint");
-        // Driven by ContextTypeList, so a thirteenth context type is one row in vtbackend and nothing
-        // here. Lenient in the same way the sequence parser is: an unknown key is skipped and every
-        // other entry still loads.
+    // The block column's status colours and the gutter's text colour, each left unset unless the scheme
+    // says otherwise, for the fold column's reason: vtbackend derives them from the palette
+    // (ColorPalette::blockStatusColor, gutterTextColor), so a scheme that has never heard of them still
+    // shows them.
+    loadMap("block_status", [&](YAML::Node const& map) {
+        for (auto const& [key, outcome]: BlockStatusKeys)
+            loadOptional(map, key, where.blockStatus[static_cast<size_t>(outcome)]);
+    });
+    loadMap("gutter_text", [&](YAML::Node const&) { loadOptional(node, "gutter_text", where.gutterText); });
+
+    // The sticky header's band and the line along its bottom edge, each left unset unless the scheme says
+    // otherwise, for the fold column's reason (ColorPalette::stickyHeaderBackgroundColor,
+    // stickyHeaderSeparatorColor).
+    loadMap("sticky_header", [&](YAML::Node const& map) {
+        for (auto const& [key, slot]: StickyHeaderColorSlots)
+            loadOptional(map, key, where.*slot);
+    });
+
+    // Driven by ContextTypeList, so a thirteenth context type is one row in vtbackend and nothing here.
+    // Lenient in the same way the sequence parser is: an unknown key is skipped and every other entry still
+    // loads.
+    loadMap("tint", [&](YAML::Node const& map) {
         for (auto const type: vtbackend::ContextTypeList)
-        {
-            auto const key = std::string { vtbackend::contextTypeName(type) };
-            if (!tints[key])
-                continue;
-            auto color = vtbackend::RGBColor {};
-            loadFromEntry(tints, key, color);
-            where.contextTints[static_cast<size_t>(type)] = color;
-        }
-    }
+            loadOptional(
+                map, vtbackend::contextTypeName(type), where.contextTints[static_cast<size_t>(type)]);
+    });
 
     logger()("*** loading palette");
-    loadFromEntry(child, "", where.palette);
+    loadFromEntry(node, "", where.palette);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -1635,48 +1874,47 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         if (!node)
             return false;
 
+        // One spelling rule for both forms: `#rrggbb`, or `0xrrggbb` as a number.
+        auto const assignColor = [&](size_t index, YAML::Node const& nodeValue) {
+            if (auto const value = nodeValue.as<std::string>(); !value.empty())
+            {
+                if (value[0] == '#')
+                    colors[offset + index] = value;
+                else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
+                    colors[offset + index] = vtbackend::RGBColor { nodeValue.as<uint32_t>() };
+            }
+        };
+
         if (node.IsMap())
         {
-            auto const assignColor = [&](size_t index, std::string const& name) {
-                if (auto nodeValue = node[name]; nodeValue)
-                {
-                    if (auto const value = nodeValue.as<std::string>(); !value.empty())
-                    {
-                        if (value[0] == '#')
-                            colors[offset + index] = value;
-                        else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
-                            colors[offset + index] = vtbackend::RGBColor { nodeValue.as<uint32_t>() };
-                    }
-                }
-            };
-            assignColor(0, "black");
-            assignColor(1, "red");
-            assignColor(2, "green");
-            assignColor(3, "yellow");
-            assignColor(4, "blue");
-            assignColor(5, "magenta");
-            assignColor(6, "cyan");
-            assignColor(7, "white");
+            for (auto const [index, name]: core::views::enumerate(
+                     std::array { "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white" }))
+                if (auto const nodeValue = node[name])
+                    assignColor(static_cast<size_t>(index), nodeValue);
             return true;
         }
-        else if (node.IsSequence())
+        if (node.IsSequence())
         {
-            for (size_t i = 0; i < node.size() && i < 8; ++i)
-                if (node[i].IsScalar())
-                    colors[i] = vtbackend::RGBColor { node[i].as<uint32_t>() };
-                else
-                    colors[i] = vtbackend::RGBColor { node[i].as<std::string>() };
+            for (auto const index: std::views::iota(size_t { 0 }, std::min(node.size(), size_t { 8 })))
+                assignColor(index, node[index]);
             return true;
         }
         return false;
     };
 
+    // Each map under a guard of its own, as the scheme's other maps are.
+    auto const loadGuardedColorMap = [&](std::string const& key, size_t offset) {
+        auto loaded = false;
+        readGuarded(node, key, colors, [&]() { loaded = loadColorMap(node, key, offset); });
+        return loaded;
+    };
+
     logger()("*** loading normal color map");
-    loadColorMap(node, "normal", 0);
+    loadGuardedColorMap("normal", 0);
     logger()("*** loading bright color map");
-    loadColorMap(node, "bright", 8);
+    loadGuardedColorMap("bright", 8);
     logger()("*** loading dim color map");
-    if (!loadColorMap(node, "dim", 256))
+    if (!loadGuardedColorMap("dim", 256))
     {
         // calculate dim colors based on normal colors
         for (unsigned i = 0; i < 8; ++i)
@@ -1772,7 +2010,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         loadFromEntry(child, "blur", where->blur);
         auto const resolved = resolvedPath(filename);
         where->location = resolved;
-        where->hash = crispy::StrongHash::compute(resolved.string());
+        where->hash = crispy::StrongHash::compute(core::pathToUtf8(resolved));
     }
 }
 
@@ -1907,8 +2145,11 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     }
     else
     {
+        // In UTF-8, which homeResolvedPath() reads: generic_string() would spell it in the ANSI code page on
+        // Windows.
         where.workingDirectory =
-            homeResolvedPath(where.workingDirectory.generic_string(), Process::homeDirectory());
+            homeResolvedPath(core::platform::normalizePath(where.workingDirectory), Process::homeDirectory())
+                .value_or(where.workingDirectory);
     }
 }
 
@@ -2060,6 +2301,15 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 namespace
 {
+    /// Where @p node stands in its file, as yaml-cpp's own errors say it: one-based.
+    /// @param node A node parsed from a file.
+    /// @return `line L, column C`.
+    [[nodiscard]] std::string placeOf(YAML::Node const& node)
+    {
+        auto const mark = node.Mark();
+        return std::format("line {}, column {}", mark.line + 1, mark.column + 1);
+    }
+
     /// Reads a configuration enum spelled as one of the tokens its parser accepts.
     ///
     /// Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
@@ -2069,6 +2319,7 @@ namespace
     ///
     /// @param node   The mapping to read from.
     /// @param entry  The key within @p node.
+    /// @param shownAs What a diagnostic calls @p entry: its key path from the document's root.
     /// @param where  Receives the value, and is left untouched when it is not recognized.
     /// @param logger The reader's trace category, passed in because it is a member of the reader.
     /// @param parse  Maps a spelling to a value. Defaults to the ConfigEnum.hpp token table; the
@@ -2079,6 +2330,7 @@ namespace
     template <typename Enum, typename Parser = decltype(&configEnumFromToken<Enum>)>
     bool loadConfigEnum(YAML::Node const& node,
                         std::string const& entry,
+                        std::string const& shownAs,
                         Enum& where,
                         core::log::Category const& logger,
                         Parser parse = configEnumFromToken<Enum>)
@@ -2087,6 +2339,18 @@ namespace
         if (!child)
             return false;
 
+        // Diagnosed here rather than left to as<std::string>() to throw, so that only this value is
+        // lost and not the siblings read after it.
+        if (child.IsSequence() || child.IsMap())
+        {
+            errorLog()("{} ({}) takes a single word, not a {}; keeping {}.",
+                       shownAs,
+                       placeOf(child),
+                       child.IsMap() ? "map" : "list",
+                       where);
+            return false;
+        }
+
         auto const rawValue = child.as<std::string>();
         logger()("Loading entry: {}, value {}", entry, rawValue);
         if (auto const value = parse(rawValue))
@@ -2094,10 +2358,16 @@ namespace
             where = *value;
             return true;
         }
-        errorLog()("Unknown value for {}: '{}'; keeping {}.", entry, rawValue, where);
+        errorLog()("Unknown value for {} ({}): '{}'; keeping {}.", shownAs, placeOf(child), rawValue, where);
         return false;
     }
 } // namespace
+
+template <ConfigEnumConcept Enum>
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, Enum& where)
+{
+    (void) loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger);
+}
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontSize& where)
 {
@@ -2132,14 +2402,14 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         return;
     }
 
-    loadConfigEnum(node, entry, where, logger, text::makeFontSlant);
+    loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, text::makeFontSlant);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      text::FontWeight& where)
 {
-    loadConfigEnum(node, entry, where, logger, text::makeFontWeight);
+    loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, text::makeFontWeight);
 }
 // NOLINTEND(readability-convert-member-functions-to-static)
 
@@ -2182,14 +2452,16 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where)
 {
+    // Each leaf under its own guard, as in every section settings.yml overrides: a leaf of the wrong type
+    // costs itself, not the leaves set beside it.
     auto const child = node[entry];
     if (child)
     {
-        loadFromEntry(child, "tile_direct_mapping", where.textureAtlasDirectMapping);
-        loadFromEntry(child, "tile_hashtable_slots", where.textureAtlasHashtableSlots);
-        loadFromEntry(child, "tile_cache_count", where.textureAtlasTileCount);
-        loadFromEntry(child, "backend", where.renderingBackend);
-        loadFromEntry(child, "gpu", where.gpu);
+        loadGuarded(child, "tile_direct_mapping", where.textureAtlasDirectMapping);
+        loadGuarded(child, "tile_hashtable_slots", where.textureAtlasHashtableSlots);
+        loadGuarded(child, "tile_cache_count", where.textureAtlasTileCount);
+        loadGuarded(child, "backend", where.renderingBackend);
+        loadGuarded(child, "gpu", where.gpu);
     }
 }
 
@@ -2234,13 +2506,57 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, FoldingConfig& where)
 {
+    // Each leaf under its own guard, for the renderer section's reason.
     auto const child = node[entry];
     if (child)
     {
-        loadFromEntry(child, "enabled", where.enabled);
-        loadFromEntry(child, "show_markers", where.showMarkers);
-        loadFromEntry(child, "auto_collapse_on_new_command", where.autoCollapseOnNewCommand);
-        loadFromEntry(child, "on_jump_into_fold", where.onJumpIntoFold);
+        loadGuarded(child, "enabled", where.enabled);
+        loadGuarded(child, "show_markers", where.showMarkers);
+        loadGuarded(child, "auto_collapse_on_new_command", where.autoCollapseOnNewCommand);
+        loadGuarded(child, "on_jump_into_fold", where.onJumpIntoFold);
+    }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, GutterConfig& where)
+{
+    // Only the children present are written: an override of one key must leave its siblings as they were.
+    // Each under its own guard, for the renderer section's reason.
+    auto const child = node[entry];
+    if (!child)
+        return;
+
+    loadGuarded(child, "exit_status", where.exitStatus);
+    loadGuarded(child, "user_marks", where.userMarks);
+    loadGuarded(child, "line_numbers", where.lineNumbers);
+    loadGuarded(child, "timestamps", where.timestamps);
+
+    // Validated rather than clamped or trusted: a width out of range and a format the gutter cannot draw
+    // are typos, and either taken as written would resize the page or blank the column.
+    if (child["line_number_width"])
+    {
+        auto width = where.lineNumberWidth;
+        loadGuarded(child, "line_number_width", width);
+        if (width >= vtbackend::MinLineNumberWidth && width <= vtbackend::MaxLineNumberWidth)
+            where.lineNumberWidth = width;
+        else
+            errorLog()("gutter.line_number_width must be between {} and {}, not {}; keeping {}.",
+                       vtbackend::MinLineNumberWidth,
+                       vtbackend::MaxLineNumberWidth,
+                       width,
+                       where.lineNumberWidth);
+    }
+
+    if (child["timestamp_format"])
+    {
+        auto spec = where.timestampFormat;
+        loadGuarded(child, "timestamp_format", spec);
+        if (auto const measured = vtbackend::measureTimestampFormat(spec); measured)
+            where.timestampFormat = std::move(spec);
+        else
+            errorLog()("gutter.timestamp_format '{}' cannot be used: {}; keeping '{}'.",
+                       spec,
+                       vtbackend::timestampFormatErrorText(measured.error()),
+                       where.timestampFormat);
     }
 }
 
@@ -2267,26 +2583,20 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     vtbackend::ContextMarkPolicy& where)
+                                     CommandBlocksConfig& where)
 {
-    (void) loadConfigEnum(node, entry, where, logger);
-}
+    // Each leaf under its own guard, for the renderer section's reason.
+    auto const child = node[entry];
+    if (!child)
+        return;
 
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
-                                     std::string const& entry,
-                                     vtbackend::ContextTintScope& where)
-{
-    (void) loadConfigEnum(node, entry, where, logger);
-}
-
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
-                                     std::string const& entry,
-                                     vtbackend::FoldJumpBehavior& where)
-{
-    // Through the shared token table rather than an if-chain of spellings: the settings page builds
-    // its combo box from the very same rows (@see configEnumValues), so a value this reader accepts
-    // is by construction a value the UI can offer and the writer can spell back.
-    (void) loadConfigEnum(node, entry, where, logger);
+    // Read as a signed number and clamped, rather than parsed straight into size_t: a negative value would
+    // otherwise make yaml-cpp throw, or wrap around to an effectively unbounded store.
+    auto requested = static_cast<int64_t>(where.maxRecords);
+    loadGuarded(child, "max_records", requested);
+    where.maxRecords = static_cast<size_t>(std::clamp<int64_t>(requested, 1, MaxCommandBlockRecords));
+    loadGuarded(child, "pager", where.pager);
+    loadGuarded(child, "pager_format", where.pagerFormat);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarConfig& where)
@@ -2296,7 +2606,63 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     {
         loadFromEntry(child, "position", where.position);
         loadFromEntry(child, "hide_in_alt_screen", where.hideScrollbarInAltScreen);
+        loadFromEntry(child, "marks", where.marks);
     }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtbackend::ScrollbarMarkSources& where)
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+
+    // A LIST of tokens, each naming one group of marks. `[]` is a deliberate "none", not a missing key, so an
+    // empty list replaces the default rather than leaving it in place.
+    if (!child.IsSequence())
+    {
+        errorLog()("{} ({}) takes a list, such as {}; keeping {}.",
+                   keyPathTo(node, entry),
+                   placeOf(child),
+                   Writer::format(vtbackend::AllScrollbarMarkSources),
+                   Writer::format(where));
+        return;
+    }
+
+    auto sources = vtbackend::ScrollbarMarkSources {};
+    for (auto const& item: child)
+    {
+        if (!item.IsScalar())
+        {
+            errorLog()(
+                "{} ({}) lists something other than a word; ignored.", keyPathTo(node, entry), placeOf(item));
+            continue;
+        }
+
+        auto const token = item.as<std::string>();
+        logger()("Loading entry: {}, value {}", entry, token);
+        // Through the token table the writer spells the list from, so what it writes reads back.
+        if (auto const source = configEnumFromToken<vtbackend::ScrollbarMarkSource>(token))
+            sources.enable(*source);
+        else
+            errorLog()(
+                "Unknown value in {} ({}): '{}'; ignored.", keyPathTo(node, entry), placeOf(item), token);
+    }
+    where = sources;
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     StickyHeaderConfig& where)
+{
+    // Only the children present are written: an override of one key must leave its sibling as it was.
+    auto const child = node[entry];
+    if (!child)
+        return;
+
+    loadFromEntry(child, "mode", where.mode);
+    loadFromEntry(child, "show_evicted", where.showEvicted);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -2445,7 +2811,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         return std::nullopt;
     };
 
-    loadConfigEnum(node, entry, where, logger, parseEngine);
+    loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, parseEngine);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -2470,14 +2836,14 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         return std::nullopt;
     };
 
-    loadConfigEnum(node, entry, where, logger, parseLocator);
+    loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, parseLocator);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      text::RenderMode& where)
 {
-    loadConfigEnum(node, entry, where, logger, text::makeRenderMode);
+    loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, text::makeRenderMode);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -2646,40 +3012,51 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
     }
 }
 
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where)
+namespace
 {
-    loadConfigEnum(node, entry, where, logger);
-}
+    /// Reads a floor written as a whole number of seconds.
+    ///
+    /// A negative count reads as zero: "every command" is all a floor below zero could mean.
+    /// @param node The value to read.
+    /// @return The duration, or nullopt when @p node is not a whole number.
+    [[nodiscard]] optional<chrono::seconds> wholeSecondsFloor(YAML::Node const& node)
+    {
+        if (!node.IsScalar())
+            return nullopt;
+
+        auto const text = string_view { node.Scalar() };
+        auto const negative = text.starts_with('-');
+        auto const count = core::toInteger<10, chrono::seconds::rep>(negative ? text.substr(1) : text);
+        if (!count)
+            return nullopt;
+        return negative ? chrono::seconds::zero() : chrono::seconds { *count };
+    }
+} // namespace
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     TabBarVisibility& where)
+                                     FinishNotificationConfig& where)
 {
-    loadConfigEnum(node, entry, where, logger);
-}
+    // Only the children present are written: an override of one key must leave its siblings as they were.
+    auto const child = node[entry];
+    if (!child)
+        return;
 
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, ShadowSize& where)
-{
-    loadConfigEnum(node, entry, where, logger);
-}
-
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
-                                     std::string const& entry,
-                                     vtbackend::SearchCaseSensitivity& where)
-{
-    loadConfigEnum(node, entry, where, logger);
-}
-
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, UiStyle& where)
-{
-    loadConfigEnum(node, entry, where, logger);
-}
-
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
-                                     std::string const& entry,
-                                     WindowControlStyle& where)
-{
-    loadConfigEnum(node, entry, where, logger);
+    loadFromEntry(child, "when", where.when);
+    // Not read with as<int>(): a value that is no number would throw, and the keys after it would go unread.
+    if (auto const minDuration = child["min_duration"])
+    {
+        if (auto const parsed = wholeSecondsFloor(minDuration))
+            where.minDuration = *parsed;
+        else
+            errorLog()("{}.min_duration must be a whole number of seconds, not '{}'; keeping {}.",
+                       entry,
+                       YAML::Dump(minDuration),
+                       where.minDuration.count());
+    }
+    loadFromEntry(child, "outcome", where.outcome);
+    loadFromEntry(child, "action", where.action);
+    loadFromEntry(child, "clear_on", where.clearOn);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -2743,9 +3120,26 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                 auto action = parseAction(mapping);
                 auto mods = parseModifier(mapping);
                 auto mode = parseMatchModes(mapping);
-                if (action && mods && mode)
+                auto const clicks = parseClickCount(mapping);
+
+                // A count belongs to a button the click counter counts: a key has no clicks, and every
+                // step of a wheel is a first one. Bound anyway, the count would never come -- or, on a row
+                // that also names a key, be dropped in silence.
+                auto const countsClicks = [&]() {
+                    auto const button = parseMouseButton(mapping["mouse"]);
+                    return !mapping["key"] && button && vtbackend::ClickCounter::countsClicks(*button);
+                };
+
+                if (action && mods && mode && clicks)
                 {
-                    if (tryAddKey(where, *mode, *mods, mapping["key"], *action))
+                    if (clicks->has_value() && !countsClicks())
+                    {
+                        errorLog()("Dropping input_mapping entry [{}]: 'clicks' applies to the {} mouse "
+                                   "buttons only.",
+                                   describeInputMappingRow(mapping),
+                                   countedButtonNames());
+                    }
+                    else if (tryAddKey(where, *mode, *mods, mapping["key"], *action))
                     {
                         logger()("Adding input mapping: mods: {:<20} modifiers: {:<20} key: {:<20} "
                                  "action: {:<20}",
@@ -2754,13 +3148,15 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                                  mapping["key"].as<std::string>(),
                                  *action);
                     }
-                    else if (tryAddMouse(where.mouseMappings, *mode, *mods, mapping["mouse"], *action))
+                    else if (tryAddMouse(
+                                 where.mouseMappings, *mode, *mods, mapping["mouse"], *action, *clicks))
                     {
-                        logger()("Adding input mapping: mods: {:<20} modifiers: {:<20} mouse: {:<18} action: "
-                                 "{:<20}",
+                        logger()("Adding input mapping: mods: {:<20} modifiers: {:<20} mouse: {:<18} clicks: "
+                                 "{:<3} action: {:<20}",
                                  *mods,
                                  *mode,
                                  mapping["mouse"].as<std::string>(),
+                                 clicks->has_value() ? std::format("{}", **clicks) : std::string { "-" },
                                  *action);
                     }
                     else
@@ -2782,6 +3178,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                         unparsed.emplace_back("mods");
                     if (!mode)
                         unparsed.emplace_back("mode");
+                    if (!clicks)
+                        unparsed.emplace_back(clicks.error());
                     errorLog()("Dropping input_mapping entry [{}]: could not parse its {}.",
                                describeInputMappingRow(mapping),
                                unparsed | core::views::joinWith(", "));
@@ -2905,13 +3303,14 @@ bool YAMLConfigReader::tryAddMouse(std::vector<MouseInputMapping>& bindings,
                                    vtbackend::MatchModes modes,
                                    vtbackend::Modifiers modifier,
                                    YAML::Node const& node,
-                                   actions::Action action)
+                                   actions::Action action,
+                                   std::optional<uint8_t> clickCount)
 {
     auto mouseButton = parseMouseButton(node);
     if (!mouseButton)
         return false;
 
-    appendOrCreateBinding(bindings, modes, modifier, *mouseButton, std::move(action));
+    appendOrCreateBinding(bindings, modes, modifier, *mouseButton, std::move(action), clickCount);
     return true;
 }
 
@@ -3045,7 +3444,7 @@ std::optional<std::variant<vtbackend::Key, char32_t>> YAMLConfigReader::parseKey
     auto constexpr NamedChars =
         std::array { std::pair { "LESS"sv, '<' },          std::pair { "GREATER"sv, '>' },
                      std::pair { "PLUS"sv, '+' },          std::pair { "APOSTROPHE"sv, '\'' },
-                     std::pair { "ADD"sv, '+' },           std::pair { "BACKSLASH"sv, 'x' },
+                     std::pair { "ADD"sv, '+' },           std::pair { "BACKSLASH"sv, '\\' },
                      std::pair { "COMMA"sv, ',' },         std::pair { "DECIMAL"sv, '.' },
                      std::pair { "DIVIDE"sv, '/' },        std::pair { "EQUAL"sv, '=' },
                      std::pair { "LEFT_BRACKET"sv, '[' },  std::pair { "MINUS"sv, '-' },
@@ -3253,6 +3652,144 @@ std::optional<vtbackend::Modifiers> YAMLConfigReader::parseModifierKey(std::stri
     return std::nullopt;
 }
 
+namespace
+{
+    /// The argument @p key of an action, read from its scalar text by @p parse.
+    ///
+    /// A present argument that does not parse drops the binding instead of falling back: a typo must not
+    /// quietly turn the action into a different one.
+    /// @param node The action's YAML map.
+    /// @param key The argument's key.
+    /// @param fallback What an absent key means.
+    /// @param parse Maps the argument's text to a value, or to nullopt when it names none.
+    /// @return The value, or nullopt (logged) when the key is present but is no scalar @p parse accepts.
+    template <typename T, typename Parser>
+    [[nodiscard]] std::optional<T> actionArgument(YAML::Node const& node,
+                                                  char const* key,
+                                                  T fallback,
+                                                  Parser parse)
+    {
+        auto const value = node[key];
+        if (!value)
+            return fallback;
+        auto const token = value.IsScalar() ? value.as<std::string>() : std::string {};
+        if (auto const parsed = parse(token))
+            return parsed;
+        errorLog()("Invalid {} '{}' in action '{}'; ignoring the binding.",
+                   key,
+                   token,
+                   node["action"].as<std::string>());
+        return std::nullopt;
+    }
+
+    /// The enum-valued argument @p key of an action, read through its ConfigEnum token table.
+    /// @param node The action's YAML map.
+    /// @param key The argument's key.
+    /// @param fallback What an absent key means.
+    /// @return The value, or nullopt (logged) when the key names no value of @p Enum.
+    template <typename Enum>
+    [[nodiscard]] std::optional<Enum> enumActionArgument(YAML::Node const& node,
+                                                         char const* key,
+                                                         Enum fallback)
+    {
+        return actionArgument(node, key, fallback, configEnumFromToken<Enum>);
+    }
+
+    /// A command block id written as decimal digits, and nothing else: no sign, no other base.
+    /// @param text The argument's text.
+    /// @return The id, or nullopt when @p text is not such a number or lies past the id's range.
+    [[nodiscard]] std::optional<vtbackend::CommandBlockId> parseCommandBlockId(std::string_view text) noexcept
+    {
+        return core::toInteger<10, uint32_t>(text).transform(
+            [](uint32_t value) { return vtbackend::CommandBlockId(value); });
+    }
+
+    /// Whether an action's own arguments all named a value.
+    enum class ArgumentsRead : uint8_t
+    {
+        Valid = 0, ///< Each was absent or named a value.
+        Invalid,   ///< At least one named none, and was logged.
+    };
+
+    /// Reads the arguments a block action has beside the ones that address its block: none, for most.
+    /// @return Valid.
+    template <actions::CommandBlockActionConcept BlockAction>
+    [[nodiscard]] ArgumentsRead readOwnArguments(YAML::Node const& /*node*/, BlockAction& /*action*/)
+    {
+        return ArgumentsRead::Valid;
+    }
+
+    /// Reads OpenCommandOutput's program, placement and format into @p action. An empty program, or one
+    /// that is no scalar, is no program: running the configured pager instead would be a guess. An absent
+    /// format stays absent, so the program's own format applies (see outputFormatFor).
+    /// @param node The action's YAML map.
+    /// @param action The action, with its defaults; receives every argument that named a value.
+    /// @return Invalid (logged) when one of them named none.
+    [[nodiscard]] ArgumentsRead readOwnArguments(YAML::Node const& node, actions::OpenCommandOutput& action)
+    {
+        auto const placement = enumActionArgument(node, "placement", action.placement);
+        auto const format = actionArgument(node, "format", action.format, [](std::string const& text) {
+            return configEnumFromToken<actions::OutputFormat>(text).transform(
+                [](actions::OutputFormat value) { return std::optional { value }; });
+        });
+        auto program = actionArgument(node, "program", action.program, [](std::string const& text) {
+            return text.empty() ? std::nullopt : std::optional { text };
+        });
+        if (!placement || !format || !program)
+            return ArgumentsRead::Invalid;
+        action.placement = *placement;
+        action.format = *format;
+        action.program = std::move(*program);
+        return ArgumentsRead::Valid;
+    }
+
+    /// The arguments of a block action: `target:`, `part:` where it has a part, the pinning `block:`, and
+    /// the action's own, each defaulting to what @p action already holds.
+    /// @param node The action's YAML map.
+    /// @param action The action, with its defaults.
+    /// @return The action with its arguments, or nullopt (logged) when one of them names no value.
+    template <actions::CommandBlockActionConcept BlockAction>
+    [[nodiscard]] std::optional<BlockAction> commandBlockAction(YAML::Node const& node, BlockAction action)
+    {
+        // Every argument is read before any is judged, so each misspelt one is logged.
+        auto const target = enumActionArgument(node, "target", action.target);
+        auto const block = actionArgument(node, "block", action.block, parseCommandBlockId);
+        auto const own = readOwnArguments(node, action);
+        if constexpr (requires { action.part; })
+        {
+            auto const part = enumActionArgument(node, "part", action.part);
+            if (!part)
+                return std::nullopt;
+            action.part = *part;
+        }
+        if (!target || !block || own != ArgumentsRead::Valid)
+            return std::nullopt;
+        action.target = *target;
+        action.block = *block;
+        return action;
+    }
+
+    /// Reads the arguments of a block action, for any action.
+    /// @see commandBlockAction
+    /// @param node The action's YAML map.
+    /// @param action The action, with its defaults.
+    /// @return The action with its arguments, or nullopt (logged) when one of them names no value. Any
+    ///         other action comes back unchanged: it addresses no block.
+    [[nodiscard]] std::optional<actions::Action> withCommandBlockArguments(YAML::Node const& node,
+                                                                           actions::Action const& action)
+    {
+        return std::visit(core::Overloaded {
+                              [&](actions::CommandBlockActionConcept auto const& blockAction) {
+                                  return commandBlockAction(node, blockAction).transform([](auto read) {
+                                      return actions::Action { std::move(read) };
+                                  });
+                              },
+                              [&](auto const&) { return std::optional { action }; },
+                          },
+                          action);
+    }
+} // namespace
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& node)
 {
@@ -3405,29 +3942,24 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::CopySelection>(action))
         {
+            // Unlike a misspelt format, which has always meant text, a misspelt fallback drops the binding:
+            // guessing would either empty the clipboard or fill it with output the user did not ask for.
+            auto const defaults = actions::CopySelection {};
+            auto const fallback = enumActionArgument(node, "fallback", defaults.fallback);
+            if (!fallback)
+                return std::nullopt;
+
+            auto format = defaults.format;
             if (auto nodeFormat = node["format"]; nodeFormat && nodeFormat.IsScalar())
             {
-                auto const formatString = core::toUpper(nodeFormat.as<std::string>());
-                static auto constexpr Mappings =
-                    std::array<std::pair<std::string_view, actions::CopyFormat>, 4> { {
-                        { "TEXT", actions::CopyFormat::Text },
-                        { "HTML", actions::CopyFormat::HTML },
-                        { "PNG", actions::CopyFormat::PNG },
-                        { "VT", actions::CopyFormat::VT },
-                    } };
-                // NOLINTNEXTLINE(readability-qualified-auto)
-                if (auto const p =
-                        std::ranges::find_if(Mappings,
-
-                                             [&](auto const& t) { return t.first == formatString; });
-                    p != Mappings.end())
-                {
-                    return actions::CopySelection { p->second };
-                }
-                logger()("Invalid format '{}' in CopySelection action. Defaulting to 'text'.",
-                         nodeFormat.as<std::string>());
-                return actions::CopySelection { actions::CopyFormat::Text };
+                if (auto const parsed =
+                        configEnumFromToken<actions::CopyFormat>(nodeFormat.as<std::string>()))
+                    format = *parsed;
+                else
+                    logger()("Invalid format '{}' in CopySelection action. Defaulting to 'text'.",
+                             nodeFormat.as<std::string>());
             }
+            return actions::CopySelection { .format = format, .fallback = *fallback };
         }
 
         if (holds_alternative<actions::PasteClipboard>(action))
@@ -3549,7 +4081,8 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
                                        .scope = scope };
         }
 
-        return action;
+        // The block actions read their arguments through one visit; any other action is complete as named.
+        return withCommandBlockArguments(node, action);
     }
     return std::nullopt;
 }
@@ -3749,7 +4282,7 @@ static std::string createForGlobal(Config const& c)
             contour::config::ConfigEntry<
                 T,
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
-            doc.append(writer.process(writer.whichDoc(v), name, v.value()));
+            doc.append(writer.processEntry(writer.whichDoc(v), name, v.value()));
         };
 
     auto const processConfigEntryWithEscape =
@@ -3758,7 +4291,7 @@ static std::string createForGlobal(Config const& c)
             contour::config::ConfigEntry<
                 std::string,
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
-            doc.append(writer.process(writer.whichDoc(v), name, escapeSequence(v.value())));
+            doc.append(writer.processEntry(writer.whichDoc(v), name, escapeSequence(v.value())));
         };
 
     auto completeOverload = core::Overloaded {
@@ -3804,7 +4337,7 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
             contour::config::ConfigEntry<
                 T,
                 contour::config::documentation::DocumentationEntry<ConfigDoc, WebDoc>> const& v) {
-            doc.append(writer.process(writer.whichDoc(v), name, v.value()));
+            doc.append(writer.processEntry(writer.whichDoc(v), name, v.value()));
         };
 
     // Something is wrong for vtpty::Process::ExecInfo formatting for static build
@@ -3820,13 +4353,8 @@ static void emitProfileBody(Writer& writer, std::string& doc, TerminalProfile co
             args.append(v.arguments | core::views::joinWith(", "sv));
             args.append("]");
 
-            doc.append(writer.process(writer.whichDoc(vEntry), name, v.program, args, [&]() -> std::string {
-                auto fromConfig = v.workingDirectory.string();
-                if (fromConfig.empty()
-                    || fromConfig == core::homeResolvedPath("~", vtpty::Process::homeDirectory()))
-                    return std::string { "\"~\"" };
-                return fromConfig;
-            }()));
+            doc.append(writer.processEntry(
+                writer.whichDoc(vEntry), name, v.program, args, spelledWorkingDirectory(v.workingDirectory)));
         };
 
     auto completeOverload = core::Overloaded {
@@ -3974,16 +4502,44 @@ static void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::Co
     else
         processWithDoc(documentation::FoldMarker {});
 
-    // Same rule, same reason: only what the scheme actually set, and the commented example otherwise.
-    if (entry.hasContextTints())
-    {
-        processWithDoc(documentation::ContextTintHeader {});
-        for (auto const type: vtbackend::ContextTypeList)
-            if (auto const& color = entry.contextTints[static_cast<size_t>(type)])
-                processWithDoc(documentation::ContextTintEntry {}, vtbackend::contextTypeName(type), *color);
-    }
+    // A map of optional colours, by the same rule for the same reason: under its header only the keys the
+    // scheme set, and the commented example when it set none.
+    auto const emitOptionalColorMap = [&](auto header, auto example, auto const& rows) {
+        if (std::ranges::none_of(rows, [](auto const& row) { return row.second.has_value(); }))
+        {
+            processWithDoc(example);
+            return;
+        }
+        processWithDoc(header);
+        for (auto const& [key, color]: rows)
+            if (color)
+                processWithDoc(documentation::IndentedEntry {}, key, *color);
+    };
+
+    emitOptionalColorMap(documentation::BlockStatusHeader {},
+                         documentation::BlockStatus {},
+                         BlockStatusKeys | std::views::transform([&](auto const& row) {
+                             return std::pair { row.first,
+                                                entry.blockStatus[static_cast<size_t>(row.second)] };
+                         }));
+
+    if (entry.gutterText)
+        processWithDoc(documentation::GutterTextSet {}, *entry.gutterText);
     else
-        processWithDoc(documentation::ContextTint {});
+        processWithDoc(documentation::GutterText {});
+
+    emitOptionalColorMap(documentation::StickyHeaderColorsHeader {},
+                         documentation::StickyHeaderColors {},
+                         StickyHeaderColorSlots | std::views::transform([&](auto const& row) {
+                             return std::pair { row.first, entry.*row.second };
+                         }));
+
+    emitOptionalColorMap(documentation::ContextTintHeader {},
+                         documentation::ContextTint {},
+                         vtbackend::ContextTypeList | std::views::transform([&](auto const type) {
+                             return std::pair { vtbackend::contextTypeName(type),
+                                                entry.contextTints[static_cast<size_t>(type)] };
+                         }));
 
     processWithDoc(documentation::InputMethodEditor {},
                    entry.inputMethodEditor.foreground,
@@ -4134,72 +4690,30 @@ std::string emitGuiSettingsYaml(GuiManagedSettings const& settings)
 
 std::optional<vtbackend::ColorPalette> loadColorSchemeFile(std::filesystem::path const& path)
 {
-    auto const contents = readFile(path);
-    if (!contents)
+    auto const document = YAMLConfigReader::parseSideFile(path);
+    if (!document)
+    {
+        configLog()("Could not read color scheme {}", document.error());
         return std::nullopt;
+    }
 
     try
     {
-        auto reader = YAMLConfigReader(path.string(), configLog, configEnvironment());
+        auto reader = YAMLConfigReader(path, *document, configLog, configEnvironment());
         auto palette = vtbackend::ColorPalette {};
-        reader.loadFromEntry(YAML::Load(*contents), palette);
+        reader.loadFromEntry(*document, palette);
         return palette;
     }
     catch (std::exception const& e)
     {
-        configLog()("Could not read color scheme {}: {}", path.string(), e.what());
+        configLog()("Could not read color scheme {}: {}", core::pathToUtf8(path), e.what());
         return std::nullopt;
     }
 }
 
 std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesystem::path const& path)
 {
-    auto settings = GuiManagedSettings {};
-
-    std::error_code ec;
-    if (!std::filesystem::exists(path, ec) || ec)
-        return settings; // nothing saved yet is not an error
-
-    // Read through readFile (binary + CRLF->LF normalization) so a settings.yml saved with Windows line
-    // endings parses identically on every platform — matching the profile side files, and closing the
-    // cross-platform CRLF gap YAML::LoadFile leaves open off Windows.
-    auto const contents = readFile(path);
-    if (!contents)
-        return std::unexpected(std::string("Could not read settings file: ") + path.string());
-
-    auto doc = YAML::Node {};
-    try
-    {
-        doc = YAML::Load(*contents);
-    }
-    catch (std::exception const& e)
-    {
-        return std::unexpected(std::string(e.what()));
-    }
-
-    if (auto const node = doc["default_profile"]; node && node.IsScalar())
-        settings.defaultProfile = node.as<std::string>();
-
-    // Every other top-level scalar is a GUI global override, kept as its YAML scalar text so it can be
-    // re-emitted verbatim and re-applied through the typed per-key loader on the next load.
-    if (doc.IsMap())
-        for (auto const& entry: doc)
-        {
-            if (!entry.first.IsScalar())
-                continue; // a complex YAML key cannot name a setting
-            auto const key = entry.first.as<std::string>();
-            if (key == "default_profile")
-                continue;
-            if (entry.second.IsScalar())
-                settings.globalOverrides[key] = entry.second.as<std::string>();
-            else if (entry.second.IsMap())
-                for (auto const& child: entry.second)
-                    if (child.first.IsScalar() && child.second.IsScalar())
-                        settings.globalOverrides[key + '.' + child.first.as<std::string>()] =
-                            child.second.as<std::string>();
-        }
-
-    return settings;
+    return parseGuiSettingsFile(path).transform(guiSettingsFrom);
 }
 
 } // namespace contour::config

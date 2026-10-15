@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/BlockActionEnums.hpp>
+#include <contour/config/SingleQuoted.hpp>
 #include <contour/config/TabBarMode.hpp>
 
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/input/vi/HintModeHandler.hpp>
 
 #include <core/Assert.hpp>
@@ -20,22 +23,6 @@
 
 namespace contour::actions
 {
-
-// Defines the format to use when extracting a selection range from the terminal.
-enum class CopyFormat : uint8_t
-{
-    // Copies purely the text (with their whitespaces, and newlines, but no formatting).
-    Text,
-
-    // Copies the selection in HTML format.
-    HTML,
-
-    // Copies the selection in escaped VT sequence format.
-    VT,
-
-    // Copies the selection as PNG image.
-    PNG,
-};
 
 /// A cardinal direction for directional pane actions (resize).
 ///
@@ -55,7 +42,7 @@ struct CancelSelection{};
 struct ChangeProfile{ std::string name; };
 struct ClearHistoryAndReset{};
 struct CopyPreviousMarkRange{};
-struct CopySelection{ CopyFormat format = CopyFormat::Text; };
+struct CopySelection{ CopyFormat format = CopyFormat::Text; CopyFallback fallback = CopyFallback::None; };
 struct CreateDebugDump{};
 struct CreateSelection{ std::string delimiters; };
 struct DecreaseFontSize{};
@@ -156,6 +143,15 @@ struct SpeakSelection{}; // read the selected text aloud through the OS speech s
 struct StopSpeaking{};   // stop reading aloud
 struct SetTabBarVisibility{ config::TabBarVisibility mode = config::TabBarVisibility::Always; };
 struct SetTabBarPosition{ config::TabBarPosition position = config::TabBarPosition::Top; };
+// OSC 133: select one part of a command block; a non-zero block pins it (a context-menu row), else target picks it
+struct SelectCommandBlock{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; vtbackend::CommandBlockPart part = vtbackend::CommandBlockPart::Output; vtbackend::CommandBlockId block {}; bool operator==(SelectCommandBlock const&) const = default; };
+// OSC 133: copy one part of a command block as plain text; a non-zero block pins it
+struct CopyCommandBlock{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; vtbackend::CommandBlockPart part = vtbackend::CommandBlockPart::Output; vtbackend::CommandBlockId block {}; bool operator==(CopyCommandBlock const&) const = default; };
+// OSC 133: copy a block's command line, made safe to paste; a non-zero block pins it
+struct CopyCommandLine{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; vtbackend::CommandBlockId block {}; bool operator==(CopyCommandLine const&) const = default; };
+struct ClearToPrompt{}; // OSC 133: drop every row above the current prompt, scrollback and page alike
+// OSC 133: show a block's output in a pager (a split or a tab over a private file), or pipe it into a program
+struct OpenCommandOutput{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; std::string program {}; OutputPlacement placement = OutputPlacement::Split; std::optional<OutputFormat> format {}; vtbackend::CommandBlockId block {}; bool operator==(OpenCommandOutput const&) const = default; };
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -261,7 +257,25 @@ using Action = std::variant<CancelSelection,
                             SetTabBarVisibility,
                             SetTabBarPosition,
                             SpeakSelection,
-                            StopSpeaking>;
+                            StopSpeaking,
+                            SelectCommandBlock,
+                            CopyCommandBlock,
+                            CopyCommandLine,
+                            ClearToPrompt,
+                            OpenCommandOutput>;
+
+/// Actions that act on one command block, which they all address the same way: a `target` (pointer, cursor
+/// or last), a `block` that pins one regardless of the target (a context-menu row's), and -- where the
+/// action has parts to choose from -- a `part`. Arguments of an action's own (OpenCommandOutput's program,
+/// placement and format) sit beside them.
+///
+/// The config reader, the config writer and the command palette's identity handle the addressing once,
+/// for every member, plus each member's own arguments: an action that addresses a block the same way
+/// joins by being named here. A default-constructed member compares equal to its defaults, which is how
+/// the writer and the palette tell a bare binding from a configured one.
+template <typename T>
+concept CommandBlockActionConcept =
+    core::oneOf<T, SelectCommandBlock, CopyCommandBlock, CopyCommandLine, OpenCommandOutput>;
 
 /// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
 ///
@@ -274,31 +288,40 @@ using Action = std::variant<CancelSelection,
 /// Opening the command palette joins them because it is a one-shot UI gesture: the popup is already
 /// up (and holding the terminal's keyboard focus) by the second repeat, so re-firing could only ever
 /// re-open what is open.
+/// Every command block action joins them, and so do ClearToPrompt and the CopyLastCommand* actions: each
+/// fire walks the blocks and builds text, sets the clipboard or drops rows, and a repeat adds nothing
+/// the first press did not do. OpenCommandOutput has the splits' reason too: each fire forks a pager
+/// pane.
 /// The keyboard dispatch (handleAction) consults this concept to filter such actions out of
 /// KeyboardEventType::Repeat events.
 template <typename T>
-concept NonRepeatableActionConcept = core::oneOf<T,
-                                                 CreateNewTab,
-                                                 CloseTab,
-                                                 CloseAllTabs,
-                                                 ClosePane,
-                                                 OpenCommandPalette,
-                                                 OpenContextMenu,
-                                                 SetTabColor,
-                                                 SplitVertical,
-                                                 SplitHorizontal,
-                                                 SwapPaneLeft,
-                                                 SwapPaneRight,
-                                                 SwapPaneUp,
-                                                 SwapPaneDown,
-                                                 MovePaneLeft,
-                                                 MovePaneRight,
-                                                 MovePaneUp,
-                                                 MovePaneDown,
-                                                 ToggleSplitOrientation,
-                                                 TogglePaneZoom,
-                                                 LaunchLayout,
-                                                 SaveLayout>;
+concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
+                                     || core::oneOf<T,
+                                                    CreateNewTab,
+                                                    CloseTab,
+                                                    CloseAllTabs,
+                                                    ClosePane,
+                                                    OpenCommandPalette,
+                                                    OpenContextMenu,
+                                                    SetTabColor,
+                                                    SplitVertical,
+                                                    SplitHorizontal,
+                                                    SwapPaneLeft,
+                                                    SwapPaneRight,
+                                                    SwapPaneUp,
+                                                    SwapPaneDown,
+                                                    MovePaneLeft,
+                                                    MovePaneRight,
+                                                    MovePaneUp,
+                                                    MovePaneDown,
+                                                    ToggleSplitOrientation,
+                                                    TogglePaneZoom,
+                                                    LaunchLayout,
+                                                    SaveLayout,
+                                                    ClearToPrompt,
+                                                    CopyLastCommandPrompt,
+                                                    CopyLastCommandOutput,
+                                                    CopyLastCommandBlock>;
 
 /// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
 /// member), false otherwise.
@@ -382,7 +405,9 @@ namespace documentation
         "Copies the most recent range that is delimited by vertical line marks into clipboard."
     };
     constexpr inline std::string_view CopySelection {
-        "Copies the current selection into the clipboard buffer."
+        "Copies the current selection into the clipboard buffer. With `fallback: last_command_output` and "
+        "nothing selected, copies what the last command printed instead (requires a shell that emits "
+        "OSC 133 marks)."
     };
     constexpr inline std::string_view CreateSelection {
         "Creates selection with custom delimiters configured via `delimiters` member."
@@ -620,6 +645,33 @@ namespace documentation
     constexpr inline std::string_view CopyHyperlink {
         "Copies the URI of the hyperlink under the mouse cursor into the clipboard."
     };
+    constexpr inline std::string_view SelectCommandBlock {
+        "Selects one part of a command block as whole lines (target: pointer, cursor or last; part: "
+        "output, input or all). Requires a shell that emits OSC 133 marks."
+    };
+    constexpr inline std::string_view CopyCommandBlock {
+        "Copies one part of a command block into the clipboard as plain text (target: pointer, cursor or "
+        "last; part: output, input or all). Requires a shell that emits OSC 133 marks."
+    };
+    constexpr inline std::string_view CopyCommandLine {
+        "Copies the command line of a command block into the clipboard, with the control characters that "
+        "would be unsafe to paste removed (target: pointer, cursor or last). Requires a shell that reports "
+        "its command lines (OSC 133;C cmdline_url)."
+    };
+    constexpr inline std::string_view ClearToPrompt {
+        "Clears the scrollback and the screen above the current prompt. A prompt on the screen moves to its "
+        "top, with a running command's output; one in the scrollback becomes the oldest line kept. Requires "
+        "a "
+        "shell that emits OSC 133 marks."
+    };
+    constexpr inline std::string_view OpenCommandOutput {
+        "Opens a command's output in a pager (target: pointer, cursor or last; program: the pager, read "
+        "as command_blocks.pager is, which it replaces when given; placement: split, tab or detached; "
+        "format: sgr or plain, by default command_blocks.pager_format for the configured pager and sgr "
+        "for a named program). "
+        "Detached pipes plain text into the program's standard input instead of opening a pane, and is the "
+        "one placement a daemon-attached session offers. Requires a shell that emits OSC 133 marks."
+    };
 } // namespace documentation
 
 /// One row of the action catalog: everything that is generically known about an action.
@@ -796,6 +848,15 @@ struct ActionCatalogEntry
             "SetTabBarPosition", Action { SetTabBarPosition {} }, documentation::SetTabBarPosition },
         ActionCatalogEntry { "SpeakSelection", Action { SpeakSelection {} }, documentation::SpeakSelection },
         ActionCatalogEntry { "StopSpeaking", Action { StopSpeaking {} }, documentation::StopSpeaking },
+        ActionCatalogEntry {
+            "SelectCommandBlock", Action { SelectCommandBlock {} }, documentation::SelectCommandBlock },
+        ActionCatalogEntry {
+            "CopyCommandBlock", Action { CopyCommandBlock {} }, documentation::CopyCommandBlock },
+        ActionCatalogEntry {
+            "CopyCommandLine", Action { CopyCommandLine {} }, documentation::CopyCommandLine },
+        ActionCatalogEntry { "ClearToPrompt", Action { ClearToPrompt {} }, documentation::ClearToPrompt },
+        ActionCatalogEntry {
+            "OpenCommandOutput", Action { OpenCommandOutput {} }, documentation::OpenCommandOutput },
     };
     return catalog;
 }
@@ -864,6 +925,47 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
     }
 };
 
+/// The sibling keys of a block action's own arguments, beside the ones that address its block: none for
+/// most.
+/// @return The keys, ready to append.
+template <contour::actions::CommandBlockActionConcept BlockAction>
+[[nodiscard]] std::string formatOwnArguments(BlockAction const& /*action*/)
+{
+    return {};
+}
+
+/// OpenCommandOutput's own sibling keys: the program only when the binding names one (without, the
+/// configured pager runs), then the placement, then the format only when the binding names one (without,
+/// the program's own format applies).
+/// @param action The action.
+/// @return The keys, ready to append.
+[[nodiscard]] inline std::string formatOwnArguments(contour::actions::OpenCommandOutput const& action)
+{
+    auto arguments = action.program == contour::actions::OpenCommandOutput {}.program
+                         ? std::string {}
+                         : std::format(", program: {}", contour::config::SingleQuoted { action.program });
+    arguments += std::format(", placement: {}", contour::config::configEnumToken(action.placement));
+    if (action.format)
+        arguments += std::format(", format: {}", contour::config::configEnumToken(*action.format));
+    return arguments;
+}
+
+/// The sibling keys of a block action: `, target: T`, then `, part: P` where it has a part, then the
+/// pinned `, block: N`, then the action's own. The target and the part are written even at their
+/// defaults; the block only when one is pinned.
+/// @param action The action.
+/// @return The keys, ready to append.
+template <contour::actions::CommandBlockActionConcept BlockAction>
+[[nodiscard]] std::string formatCommandBlockArguments(BlockAction const& action)
+{
+    auto arguments = std::format(", target: {}", contour::config::configEnumToken(action.target));
+    if constexpr (requires { action.part; })
+        arguments += std::format(", part: {}", contour::config::configEnumToken(action.part));
+    if (action.block != BlockAction {}.block)
+        arguments += std::format(", block: {}", action.block.value);
+    return arguments + formatOwnArguments(action);
+}
+
 /// Renders the arguments @p action carries as YAML sibling keys, e.g. ", position: 3".
 ///
 /// A FLAT sibling-key form, deliberately: a serialized binding must stay a valid YAML flow map
@@ -895,7 +997,18 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
                 // A profile-less CreateNewTab opens the default profile, so it has no argument to write.
                 return a.profileName ? std::format(", profile: '{}'", *a.profileName) : std::string {};
             },
-            // Both render the token their ConfigEnum.h row carries, so what is written back is by
+            [](CopySelection const& a) {
+                // Each argument is written only when it is not the default, so a plain CopySelection stays
+                // plain.
+                auto const defaults = CopySelection {};
+                auto arguments = std::string {};
+                if (a.format != defaults.format)
+                    arguments += std::format(", format: {}", a.format);
+                if (a.fallback != defaults.fallback)
+                    arguments += std::format(", fallback: {}", contour::config::configEnumToken(a.fallback));
+                return arguments;
+            },
+            // These render the tokens their ConfigEnum rows carry, so what is written back is by
             // construction what the reader accepts.
             [](SetTabBarVisibility const& a) {
                 return std::format(", mode: {}", contour::config::configEnumToken(a.mode));
@@ -903,6 +1016,7 @@ struct std::formatter<contour::actions::Direction>: std::formatter<std::string_v
             [](SetTabBarPosition const& a) {
                 return std::format(", position: {}", contour::config::configEnumToken(a.position));
             },
+            [](CommandBlockActionConcept auto const& a) { return formatCommandBlockArguments(a); },
             [](SetTabColor const& a) {
                 // A colorless SetTabColor opens the picker, so it has no argument to write. The color
                 // needs no hand-quoting: std::formatter<RGBColor> already renders it as '#RRGGBB', and
@@ -927,23 +1041,6 @@ struct std::formatter<contour::actions::Action>: std::formatter<std::string>
     {
         return formatter<string>::format(
             std::format("{}{}", contour::actions::name(action), formatActionArguments(action)), ctx);
-    }
-};
-
-template <>
-struct std::formatter<contour::actions::CopyFormat>: std::formatter<std::string_view>
-{
-    auto format(contour::actions::CopyFormat value, auto& ctx) const
-    {
-        string_view output;
-        switch (value)
-        {
-            case contour::actions::CopyFormat::Text: output = "Text"; break;
-            case contour::actions::CopyFormat::HTML: output = "HTML"; break;
-            case contour::actions::CopyFormat::PNG: output = "PNG"; break;
-            case contour::actions::CopyFormat::VT: output = "VT"; break;
-        }
-        return formatter<string_view>::format(output, ctx);
     }
 };
 

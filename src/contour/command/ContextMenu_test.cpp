@@ -56,6 +56,9 @@ namespace
         .hasSplits = true,
         .hyperlinkUnderCursor = "https://contour-terminal.org/",
         .foldLine = vtbackend::LineOffset(7),
+        .blockUnderCursor = PointedBlock { .id = vtbackend::CommandBlockId(5),
+                                           .output = OutputPresence::Present,
+                                           .commandLine = CommandLinePresence::Present },
         .activeProfile = "dark",
         .profileNames = { "dark", "light", "work" },
     };
@@ -175,7 +178,7 @@ TEST_CASE("ContextMenu.toggleFold.grayedRatherThanHiddenWithoutAFold", "[context
 TEST_CASE("ContextMenu.openCurrentFolder.requiresLocalWorkingDirectory", "[contextmenu]")
 {
     // Grayed out unless the cwd is on this host: a remote (SSH) working directory cannot be opened by the
-    // local file manager, so resolving it to a local path is what gates the row (see localWorkingDirectory).
+    // local file manager, so resolving it to a local path is what gates the row (see localPathOfFileUrl).
     auto state = fullyEnabledState();
 
     state.hasLocalWorkingDirectory = false;
@@ -371,4 +374,126 @@ TEST_CASE("ContextMenu.separators.neverLeadingTrailingOrDoubled", "[contextmenu]
                                 });
                             CHECK(doubled == menu.end());
                         }
+}
+
+TEST_CASE("ContextMenu.blockRows.pinTheRightClickedBlock", "[contextmenu][semanticblocks]")
+{
+    // Pinned by id, as the fold row pins its line: by the time a row is picked the pointer has left
+    // the block for the menu itself.
+    auto const menu = buildContextMenu(fullyEnabledState());
+    auto const pinned = vtbackend::CommandBlockId(5);
+
+    auto const* select = find(menu, "Select Output");
+    REQUIRE(select != nullptr);
+    CHECK(select->enabled);
+    REQUIRE(std::holds_alternative<actions::SelectCommandBlock>(select->action));
+    CHECK(std::get<actions::SelectCommandBlock>(select->action).block == pinned);
+    CHECK(std::get<actions::SelectCommandBlock>(select->action).part == vtbackend::CommandBlockPart::Output);
+
+    auto const* copy = find(menu, "Copy Output");
+    REQUIRE(copy != nullptr);
+    REQUIRE(std::holds_alternative<actions::CopyCommandBlock>(copy->action));
+    CHECK(std::get<actions::CopyCommandBlock>(copy->action).block == pinned);
+    CHECK(std::get<actions::CopyCommandBlock>(copy->action).part == vtbackend::CommandBlockPart::Output);
+
+    auto const* command = find(menu, "Copy Command");
+    REQUIRE(command != nullptr);
+    CHECK(command->enabled);
+    REQUIRE(std::holds_alternative<actions::CopyCommandLine>(command->action));
+    CHECK(std::get<actions::CopyCommandLine>(command->action).block == pinned);
+
+    auto const* pager = find(menu, "Open Output in Pager");
+    REQUIRE(pager != nullptr);
+    REQUIRE(std::holds_alternative<actions::OpenCommandOutput>(pager->action));
+    CHECK(std::get<actions::OpenCommandOutput>(pager->action).block == pinned);
+    CHECK(std::get<actions::OpenCommandOutput>(pager->action).placement == actions::OutputPlacement::Split);
+    // No format of its own: the configured pager's applies.
+    CHECK_FALSE(std::get<actions::OpenCommandOutput>(pager->action).format.has_value());
+    CHECK(std::get<actions::OpenCommandOutput>(pager->action).program.empty());
+
+    // Each row is a command of its own: an identity that dropped the block would merge it with the same
+    // action unpinned, which acts on whatever block the pointer is over when it runs.
+    for (auto const* row: { select, copy, command, pager })
+    {
+        INFO(row->title);
+        auto unpinned = row->action;
+        std::visit(
+            [](auto& action) {
+                if constexpr (requires { action.block; })
+                    action.block = {};
+            },
+            unpinned);
+        CHECK(commandId(row->action) != commandId(unpinned));
+    }
+}
+
+TEST_CASE("ContextMenu.blockRows.grayedOffABlock", "[contextmenu][semanticblocks]")
+{
+    // Grayed, not hidden, for the reason the fold row is: the menu must not change shape with where
+    // the click landed.
+    auto state = fullyEnabledState();
+    state.blockUnderCursor = std::nullopt;
+    auto const offBlock = buildContextMenu(state);
+    for (auto const* title: { "Select Output", "Copy Output", "Copy Command", "Open Output in Pager" })
+    {
+        INFO(title);
+        auto const* row = find(offBlock, title);
+        REQUIRE(row != nullptr);
+        CHECK_FALSE(row->enabled);
+    }
+
+    // A block whose command line is not known has output, but no command to copy.
+    state = fullyEnabledState();
+    state.blockUnderCursor->commandLine = CommandLinePresence::Absent;
+    auto const noCommandLine = buildContextMenu(state);
+    CHECK_FALSE(find(noCommandLine, "Copy Command")->enabled);
+    CHECK(find(noCommandLine, "Copy Output")->enabled);
+}
+
+TEST_CASE("ContextMenu.blockRows.outputRowsGrayedAtAPrompt", "[contextmenu][semanticblocks]")
+{
+    // A block still at its prompt has no output yet: its output rows would only decline into the log.
+    auto state = fullyEnabledState();
+    state.blockUnderCursor->output = OutputPresence::Absent;
+    auto const menu = buildContextMenu(state);
+    for (auto const* title: { "Select Output", "Copy Output", "Open Output in Pager" })
+    {
+        INFO(title);
+        auto const* row = find(menu, title);
+        REQUIRE(row != nullptr);
+        CHECK_FALSE(row->enabled);
+    }
+    CHECK(find(menu, "Copy Command")->enabled);
+}
+
+TEST_CASE("ContextMenu.blockRows.shownOnABlockBeforeAnyCommandFinished", "[contextmenu][semanticblocks]")
+{
+    // The first command still running, or the prompt ClearToPrompt left: no command has finished, but
+    // the click landed on a block's row, so its rows act on it.
+    auto state = fullyEnabledState();
+    state.hasLastCommand = false;
+    auto const menu = buildContextMenu(state);
+    for (auto const* title: { "Select Output", "Copy Output", "Copy Command", "Open Output in Pager" })
+    {
+        INFO(title);
+        auto const* row = find(menu, title);
+        REQUIRE(row != nullptr);
+        CHECK(row->enabled);
+    }
+
+    // The rows about the last finished command keep their own gate.
+    CHECK(find(menu, "Copy Last Command Output") == nullptr);
+}
+
+TEST_CASE("ContextMenu.blockRows.hiddenWithoutShellIntegration", "[contextmenu][semanticblocks]")
+{
+    auto state = fullyEnabledState();
+    state.hasLastCommand = false;
+    state.blockUnderCursor = std::nullopt;
+    auto const menu = buildContextMenu(state);
+    for (auto const* title: { "Select Output", "Copy Output", "Copy Command", "Open Output in Pager" })
+    {
+        INFO(title);
+        CHECK(find(menu, title) == nullptr);
+    }
 }

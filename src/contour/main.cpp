@@ -29,12 +29,16 @@
 #include <string_view>
 
 #ifdef _WIN32
-    #include <cstdio>
+    #include <core/WideString.hpp>
+
     #include <iostream>
+    #include <span>
+    #include <vector>
 
     #include <Windows.h>
     #include <fcntl.h>
     #include <io.h>
+    #include <shellapi.h>
 #endif
 
 using namespace std;
@@ -79,6 +83,23 @@ template <typename... Ts>
 void clearAll(Ts&&... streams)
 {
     (streams.clear(), ...);
+}
+
+/// The command line as UTF-8, which every string here is spelled in: the narrow argv main() is given is
+/// in the ANSI code page, which spells most of Unicode not at all -- "C:\Users\李\x.yml" arrives as
+/// "C:\Users\?\x.yml", and one it can spell arrives as bytes no UTF-8 reader understands.
+/// @return Each argument, as CommandLineToArgvW() splits the command line; empty should that fail.
+[[nodiscard]] std::vector<std::string> utf8Arguments()
+{
+    auto count = 0;
+    auto* const wide = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (wide == nullptr)
+        return {};
+    auto arguments = std::vector<std::string> {};
+    for (wchar_t const* const argument: std::span { wide, static_cast<std::size_t>(count) })
+        arguments.push_back(core::toUtf8(argument));
+    LocalFree(static_cast<HLOCAL>(wide));
+    return arguments;
 }
 
 void tryAttachConsole()
@@ -152,6 +173,17 @@ void qtCustomMessageOutput(QtMsgType type, QMessageLogContext const& context, QS
 int main(int argc, char const* argv[])
 {
 #ifdef _WIN32
+    // Ahead of the app, which keeps argv for as long as it lives.
+    auto const arguments = utf8Arguments();
+    auto argumentPointers = std::vector<char const*> {};
+    for (auto const& argument: arguments)
+        argumentPointers.push_back(argument.c_str());
+    if (!argumentPointers.empty())
+    {
+        argc = static_cast<int>(argumentPointers.size());
+        argv = argumentPointers.data();
+    }
+
     tryAttachConsole();
 
     // Route CRT assert/abort/crash reporting to stderr instead of a modal dialog when no debugger is

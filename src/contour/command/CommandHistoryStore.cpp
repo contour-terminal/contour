@@ -2,6 +2,8 @@
 #include <contour/command/CommandHistoryStore.hpp>
 #include <contour/config/AtomicFileWrite.hpp>
 
+#include <core/Utils.hpp>
+
 #include <yaml-cpp/yaml.h>
 
 #include <exception>
@@ -22,7 +24,9 @@ std::expected<std::vector<std::string>, std::string> FileCommandHistoryStore::lo
 
     try
     {
-        auto const doc = YAML::LoadFile(path.string());
+        // Read through the path itself: narrowed, it is spelled in the ANSI code page on Windows, which
+        // cannot spell a profile directory such as C:\Users\李, and throws.
+        auto const doc = YAML::Load(core::readFileAsString(path));
         auto const recent = doc["recent"];
         if (!recent || !recent.IsSequence())
             return ids; // a file without a `recent:` sequence simply remembers nothing

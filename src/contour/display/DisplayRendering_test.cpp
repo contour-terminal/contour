@@ -20,13 +20,18 @@
 #include <contour/config/Actions.hpp>
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/geometry/WindowGeometry.hpp>
 #include <contour/input/MouseMapping.hpp>
+#include <contour/session/FontControl.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/DisplayHarness.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/screen/GutterSettings.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <vtpty/ChannelPty.hpp>
 
@@ -49,7 +54,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <span>
 #include <string>
@@ -64,6 +71,8 @@
 
 using namespace std::string_view_literals;
 using namespace std::chrono_literals;
+using contour::test::DisplayHarness;
+using contour::test::HarnessWindow;
 
 namespace
 {
@@ -108,118 +117,6 @@ struct AccessibleEventProbe
     }
 };
 
-/// Whether the harness stands the display up inside a shown QQuickWindow.
-///
-/// Windowless is a real production state, not a degenerate one: a closed pane and an invalidated scene
-/// graph both leave a live display with no window, hence no render target. Needs no display server, so
-/// cases built on it run UNGATED.
-enum class HarnessWindow : uint8_t
-{
-    None,
-    Shown,
-};
-
-/// One live rendering session: app + session (vtpty::ChannelPty) + display item, in a shown window
-/// unless @ref HarnessWindow::None says otherwise.
-///
-/// Construction wires everything the production QML path would (setSession attaches the display,
-/// starts the session's read loop, and creates the renderer on the first sync); pump() forces real
-/// frames synchronously via grabWindow(). Destruction replays the production teardown order:
-/// terminate the session (closes the PTY, unblocking the reader), destroy the display item while
-/// the session still exists (~TerminalDisplay detaches cleanly), then the session, then the window.
-struct DisplayHarness
-{
-    contour::test::TestApp testApp;
-    vtpty::ChannelPty* pty = nullptr; // owned by the session's terminal
-    std::unique_ptr<contour::session::TerminalSession> session;
-    std::unique_ptr<QQuickWindow> window;                    // null under HarnessWindow::None
-    contour::display::TerminalDisplay* display = nullptr;    // manually deleted in teardown
-    contour::window::WindowController* controller = nullptr; // manager-owned; removed in teardown
-
-    explicit DisplayHarness(HarnessWindow windowMode = HarnessWindow::Shown):
-        display(new contour::display::TerminalDisplay())
-    {
-        auto ptyOwned = std::make_unique<vtpty::ChannelPty>(
-            vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
-        pty = ptyOwned.get();
-        session = std::make_unique<contour::session::TerminalSession>(
-            &testApp.app().sessionsManager(), std::move(ptyOwned), testApp.app());
-
-        if (windowMode == HarnessWindow::Shown)
-        {
-            window = std::make_unique<QQuickWindow>();
-            window->resize(800, 600);
-            // Match production: Main.qml makes the ApplicationWindow transparent so the terminal paints
-            // its own (dark) background. A bare QQuickWindow otherwise clears to Qt's default WHITE,
-            // which both mismatches the real app and weakens the pixel-change assertions (white margins
-            // swamp the grid). Clear to black so grabbed frames reflect what a user actually sees.
-            window->setColor(QColor(Qt::black));
-            display->setParentItem(window->contentItem());
-        }
-
-        display->setSize(QSizeF(800, 600));
-        display->setSession(session.get());
-
-        if (window)
-            window->show();
-        pump();
-    }
-
-    /// Binds a real WindowController to this window, so display paths that route through the
-    /// controller (window-geometry authority: size hints, show-modes, content-driven resize,
-    /// fullscreen) resolve via windowController() exactly as in production. Opt-in because most
-    /// display tests don't need it; call it right after construction.
-    contour::window::WindowController& bindController()
-    {
-        controller = testApp.app().sessionsManager().createWindowController();
-        controller->bindWindow(window.get());
-        // Focus the display in so the manager records it as the controller's active display.
-        testApp.app().sessionsManager().focusOnDisplay(display);
-        return *controller;
-    }
-
-    /// Forces one synchronous frame (scene-graph sync + render) and returns the grabbed image.
-    ///
-    /// Windowless there is no scene graph to drive, so this only drains the GUI queue (what the posted
-    /// display/session lambdas need) and returns a null image; pixel assertions are all display-gated.
-    QImage pump() const
-    {
-        QCoreApplication::processEvents();
-        auto image = window ? window->grabWindow() : QImage {};
-        QCoreApplication::processEvents();
-        return image;
-    }
-
-    /// Feeds VT output and pumps frames until the read loop consumed it (bounded).
-    void feedAndSettle(std::string_view vt) const
-    {
-        pty->feed(vt);
-        for (int i = 0; i < 50 && pty->isStdoutPending(); ++i)
-            QTest::qWait(10);
-        pump();
-    }
-
-    ~DisplayHarness()
-    {
-        session->terminate(); // closes the PTY; the blocked reader wakes and winds down
-        QCoreApplication::processEvents();
-        // Drop the controller (if bound) before its window: it holds an eventFilter/connection on
-        // the QQuickWindow. removeWindowController deleteLater()s it; drain that below.
-        if (controller != nullptr)
-        {
-            testApp.app().sessionsManager().removeWindowController(controller->windowId());
-            controller = nullptr;
-        }
-        delete display; // while the session still lives: ~contour::display::TerminalDisplay detaches from it
-        display = nullptr;
-        QCoreApplication::processEvents();
-        session.reset(); // joins the session threads (PTY already closed)
-        window.reset();
-        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        QCoreApplication::processEvents();
-    }
-};
-
 /// Removes @p path once nothing holds it open any more, giving up after about two seconds: on Windows a
 /// file still open elsewhere -- by a writer on another thread, say -- cannot be removed.
 /// @param path The file.
@@ -257,7 +154,7 @@ TEST_CASE("display: the display's PNG image decoder handles PNG, non-PNG and inv
     // path). Invoke it directly through the terminal's decoder accessor: a valid PNG decodes to RGBA
     // pixels with the right size, a non-PNG format is declined, and invalid PNG bytes return nullopt.
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
 
     auto const& decoder = h.session->terminal().imageDecoder();
     REQUIRE(decoder != nullptr);
@@ -385,7 +282,7 @@ TEST_CASE("display: a scaled block draws at its full height", "[display][render]
 TEST_CASE("display: a scaled block is selected over its whole height", "[display][render][textsizing]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
 
     h.feedAndSettle("\033[?25l\033[2J\033[999;1H"sv);
     auto const blank = h.pump();
@@ -459,7 +356,7 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
                       Qt::NoModifier,
                       Qt::NoScrollPhase,
                       false);
-    QCoreApplication::sendEvent(h.display, &wheel);
+    QCoreApplication::sendEvent(h.display.get(), &wheel);
     // The glide decays on real wall-clock time (tick() reads steady_clock), advanced by the
     // _updateTimer. Bound the wait by elapsed time, not iteration count: a bare pump() loop can burn
     // 60 iterations in well under the ~300ms the glide needs on a fast host, firing the timer too
@@ -485,14 +382,14 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
                            Qt::AltModifier,
                            phase,
                            false);
-        QCoreApplication::sendEvent(h.display, &phased);
+        QCoreApplication::sendEvent(h.display.get(), &phased);
         h.pump();
     }
 
     // A hover-move event routes through helper's QHoverEvent overload (cell + pixel mapping).
     QHoverEvent hover(
         QEvent::HoverMove, QPointF(120, 120), QPointF(120, 120), QPointF(110, 110), Qt::NoModifier);
-    QCoreApplication::sendEvent(h.display, &hover);
+    QCoreApplication::sendEvent(h.display.get(), &hover);
     h.pump();
 
     // A press-drag-release inside the grid exercises the mouse move + auto-scroll info path.
@@ -532,7 +429,7 @@ TEST_CASE("display: a phase-less wheel notch that cannot arm a glide falls throu
                       Qt::NoModifier,
                       Qt::NoScrollPhase,
                       false);
-    QCoreApplication::sendEvent(h.display, &wheel);
+    QCoreApplication::sendEvent(h.display.get(), &wheel);
 
     // The notch did not arm a glide (alt screen) and must instead have produced a mouse report.
     CHECK_FALSE(h.session->terminal().isMomentumScrollActive());
@@ -560,6 +457,58 @@ TEST_CASE("display: window resize reflows the grid through the real render loop"
     CHECK(h.session->terminal().pageSize() != pageBefore);
 }
 
+TEST_CASE("display: the page leaves the configured gutter's columns left of the grid",
+          "[display][geometry][gutter]")
+{
+    // Line numbers six columns wide beside the block column: a gutter of seven cells, where the fold
+    // markers alone took one. Fitted around any other width, the grid would be drawn across the numbers,
+    // or a blank strip away from them.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness const h { HarnessWindow::Shown, [](contour::config::Config& config) {
+                                config.gutter.value().lineNumbers = vtbackend::LineNumberMode::Absolute;
+                            } };
+    h.pump();
+
+    auto const metrics = h.display->gridMetrics();
+    auto const cellWidth = unbox<int>(metrics.cellSize.width);
+    auto const margins =
+        contour::geometry::scaled(contour::session::toGeometryMargins(h.session->profile().margins.value()),
+                                  h.display->devicePixelRatio());
+    CHECK(metrics.pageMargin.left == margins.horizontal + (7 * cellWidth));
+
+    // And the extent the window is told the page needs counts the same seven cells.
+    auto const columns = unbox<int>(h.session->terminal().totalPageSize().columns);
+    CHECK(unbox<int>(h.display->pixelSize().width) == (2 * margins.horizontal) + ((7 + columns) * cellWidth));
+}
+
+TEST_CASE("display: a reload that widens the gutter widens the window's minimum with the page",
+          "[display][geometry][gutter]")
+{
+    // The page is refitted around a reloaded gutter, and the window's size hints reserve the same frame. A
+    // refit that left the hints behind let the window shrink to the old minimum, six cells too narrow for
+    // the page the terminal still needed them for.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    auto& controller = h.bindController();
+    h.pump();
+    controller.updateSizeHintsFor(*h.display, contour::window::WindowController::HintApplyMode::Full);
+    auto const minimumBefore = h.window->minimumSize();
+
+    contour::test::TempDir const configDir;
+    REQUIRE(configDir.isValid());
+    auto& config = h.testApp.app().config();
+    config.configFile = configDir.path() / "contour.yml";
+    contour::test::writeConfigFile(
+        config.configFile,
+        contour::test::profileConfigYaml(h.session->profileName(), "gutter:\n    line_numbers: absolute\n"));
+    REQUIRE((*h.session)(contour::actions::ReloadConfig {}));
+    h.pump();
+
+    // The minimum is the one hint every platform applies (geometry::sizeHintsFor).
+    CHECK(h.window->minimumSize().width() > minimumBefore.width());
+    CHECK(h.window->minimumSize().height() == minimumBefore.height());
+}
+
 TEST_CASE("display: FollowHyperlink over a hovered OSC-8 link opens it via the launcher",
           "[display][launcher]")
 {
@@ -576,7 +525,7 @@ TEST_CASE("display: FollowHyperlink over a hovered OSC-8 link opens it via the l
 
     // Hover the top-left cell (where the link text begins) via a real mouse move + render.
     QTest::mouseMove(h.window.get(), QPoint(6, 6));
-    QCoreApplication::sendEvent(h.display, [] {
+    QCoreApplication::sendEvent(h.display.get(), [] {
         static QHoverEvent ev(QEvent::HoverMove, QPointF(6, 6), QPointF(6, 6), QPointF(0, 0), Qt::NoModifier);
         return &ev;
     }());
@@ -614,7 +563,7 @@ TEST_CASE("display: the deferred screenshot readback delivers a real image", "[d
     // wayland compositor the QPA clipboard retains that image in its own data source until platform
     // teardown — after LeakSanitizer runs — so the clipboard sink reports a spurious leak at exit.
     auto const shotPath =
-        std::filesystem::path(QDir::tempPath().toStdString()) / "contour-e2e-screenshot.png";
+        std::filesystem::path(QDir::tempPath().toStdU16String()) / "contour-e2e-screenshot.png";
     std::filesystem::remove(shotPath);
 
     // CopyScreenshot arms the deferred RHI readback; keep frames flowing until it delivers. A frame is
@@ -681,7 +630,7 @@ TEST_CASE("display: screenshot and debug-dump actions run through the live displ
 TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "[display][permissions]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
 
     // ChangeFont rides the display's GUI queue: setFontDef posts requestPermission(ChangeFont). The
     // default profile says "ask", so the request surfaces as the permission signal; answering with
@@ -825,10 +774,40 @@ TEST_CASE("display: font zoom keeps the window fixed and changes the page size i
     CHECK(h.session->terminal().pageSize().columns >= pageAfter.columns);
 }
 
+TEST_CASE("display: a font-size change with resize reports echoed locally does not deadlock",
+          "[display][fonts]")
+{
+    // The page a new font fits is applied under the terminal lock, and with in-band resize reports on (DECSET
+    // 2048) the resize reports it. With SRM reset the report is echoed, which parses and takes that lock
+    // again: the report goes out once the lock is released.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    h.feedAndSettle("\033[12l\033[?2048h");
+    auto const pageBefore = h.session->terminal().pageSize();
+    auto const reportsBefore = h.pty->stdinSnapshot().size();
+
+    vtbackend::test::failOnDeadlock(10s, [&] {
+        REQUIRE(h.display->setFontSize(text::FontSize { 24.0 }));
+        for ([[maybe_unused]] auto const round: std::views::iota(0, 50))
+        {
+            if (h.session->terminal().pageSize() != pageBefore)
+                break;
+            QTest::qWait(10);
+            h.pump();
+        }
+    });
+
+    auto const page = h.session->terminal().pageSize();
+    REQUIRE(page != pageBefore);
+    CHECK(h.pty->stdinSnapshot()
+              .substr(reportsBefore)
+              .contains(std::format("\033[48;{};{};", page.lines.value, page.columns.value)));
+}
+
 TEST_CASE("display: font-size and opacity actions run through the live display", "[display][actions]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
     namespace actions = contour::actions;
 
     // Font-size actions mutate the renderer + reflow geometry against the live render target (the
@@ -868,7 +847,7 @@ TEST_CASE("display: a font-size change on one session does not leak to another o
     // Session B is a "second tab": a distinct session bound onto the SAME display.
     auto secondPty = std::make_unique<vtpty::ChannelPty>(
         vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
-    auto sessionB = std::make_unique<contour::session::TerminalSession>(
+    auto sessionB = contour::test::makeTestSession(
         &h.testApp.app().sessionsManager(), std::move(secondPty), h.testApp.app());
 
     // Switch to B, then increase B's font. The renderer now shows B's larger font.
@@ -901,7 +880,7 @@ TEST_CASE("display: a font-size change on one session does not leak to another o
 TEST_CASE("display: selection, clipboard and mark actions run through the live display", "[display][actions]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
     namespace actions = contour::actions;
 
     h.feedAndSettle("alpha beta gamma\r\ndelta epsilon\r\n"sv);
@@ -926,7 +905,7 @@ TEST_CASE("display: selection, clipboard and mark actions run through the live d
 TEST_CASE("display: search and vi-mode paths render through the live display", "[display][actions]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
     namespace actions = contour::actions;
 
     h.feedAndSettle("needle in a haystack\r\nanother needle here\r\n"sv);
@@ -944,7 +923,7 @@ TEST_CASE("display: search and vi-mode paths render through the live display", "
 TEST_CASE("display: title and color-preference updates repaint the live display", "[display][state]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
 
     // OSC 0 sets the window title; the resolved title must reflect it and the change reaches the
     // display's title signal.
@@ -963,7 +942,7 @@ TEST_CASE("display: title and color-preference updates repaint the live display"
 TEST_CASE("display: alt-screen switches drive bufferChanged through the live display", "[display][state]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
 
     // Entering/leaving the alternate screen (DECSET/DECRST 1049) flips the terminal's active screen
     // type, which the terminal reports via TerminalSession::bufferChanged -> the posted display
@@ -1113,12 +1092,12 @@ TEST_CASE("display: input-method events compose and query on the live display", 
     // and the committed text must reach the PTY.
     {
         QInputMethodEvent preedit; // preedit-only (empty commit string): the composition branch
-        QCoreApplication::sendEvent(h.display, &preedit);
+        QCoreApplication::sendEvent(h.display.get(), &preedit);
     }
     {
         QInputMethodEvent commit;
         commit.setCommitString(QStringLiteral("Z"));
-        QCoreApplication::sendEvent(h.display, &commit);
+        QCoreApplication::sendEvent(h.display.get(), &commit);
     }
     for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains('Z'); ++i)
         QTest::qWait(10);
@@ -1143,7 +1122,7 @@ TEST_CASE("display: the accessibility interface reports the caret", "[display][a
 
     contour::display::TerminalAccessible::installFactory();
 
-    auto* accessible = QAccessible::queryAccessibleInterface(h.display);
+    auto* accessible = QAccessible::queryAccessibleInterface(h.display.get());
     REQUIRE(accessible != nullptr);
     CHECK(accessible->role() == QAccessible::Terminal);
     CHECK(accessible->isValid());
@@ -1182,7 +1161,7 @@ TEST_CASE("display: the accessibility text interface reads the viewport column-a
     DisplayHarness h;
 
     contour::display::TerminalAccessible::installFactory();
-    auto* accessible = QAccessible::queryAccessibleInterface(h.display);
+    auto* accessible = QAccessible::queryAccessibleInterface(h.display.get());
     REQUIRE(accessible != nullptr);
     auto* text =
         static_cast<QAccessibleTextInterface*>(accessible->interface_cast(QAccessible::TextInterface));
@@ -1248,8 +1227,8 @@ TEST_CASE("display: every event a caret report emits is one Qt will deliver", "[
     contour::display::TerminalAccessible::installFactory();
     h.display->forceActiveFocus();
 
-    auto* accessible =
-        dynamic_cast<contour::display::TerminalAccessible*>(QAccessible::queryAccessibleInterface(h.display));
+    auto* accessible = dynamic_cast<contour::display::TerminalAccessible*>(
+        QAccessible::queryAccessibleInterface(h.display.get()));
     REQUIRE(accessible != nullptr);
 
     AccessibleEventProbe::reset();
@@ -1295,7 +1274,7 @@ TEST_CASE("display: the prompt interface leaves Qt's accessibility cache with it
     harness->feedAndSettle("\033]133;A\033\\$ \033]133;B\033\\"sv);
 
     auto* accessible = dynamic_cast<contour::display::TerminalAccessible*>(
-        QAccessible::queryAccessibleInterface(harness->display));
+        QAccessible::queryAccessibleInterface(harness->display.get()));
     REQUIRE(accessible != nullptr);
 
     // Driven directly: reportAccessibleCaret() gates on an attached assistive client, and neither the
@@ -1325,7 +1304,7 @@ TEST_CASE("display: mouse press/move drive selection and the cursor shape on the
     // mouse-cursor-shape updates (I-beam over text) — the display-coupled mouse path.
     auto const press = [&](QEvent::Type type, QPointF pos, Qt::MouseButton btn) {
         QMouseEvent ev(type, pos, h.display->mapToGlobal(pos), btn, btn, Qt::NoModifier);
-        QCoreApplication::sendEvent(h.display, &ev);
+        QCoreApplication::sendEvent(h.display.get(), &ev);
     };
     press(QEvent::MouseButtonPress, QPointF(20, 20), Qt::LeftButton);
     press(QEvent::MouseMove, QPointF(120, 20), Qt::LeftButton);
@@ -1424,13 +1403,14 @@ TEST_CASE("display: a mouse drag spanning multiple lines selects the exact cell 
     // to stay faithful to it, not because the press needs it: sendMousePressEvent now anchors at the
     // cell it was given. The bare-press case, which a fast click really does produce, is covered by
     // its own test rather than by omitting the move here.
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, from.line, from.column));
+    sendMouse(h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, from.line, from.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, from.line, from.column));
+    sendMouse(
+        h.display.get(), QEvent::MouseButtonPress, logicalCellCenter(*h.display, from.line, from.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, to.line, to.column));
+    sendMouse(h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, to.line, to.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, to.line, to.column));
+    sendMouse(h.display.get(), QEvent::MouseButtonRelease, logicalCellCenter(*h.display, to.line, to.column));
     h.pump();
 
     REQUIRE(h.session->terminal().selectionAvailable());
@@ -1442,6 +1422,47 @@ TEST_CASE("display: a mouse drag spanning multiple lines selects the exact cell 
           == "3456789\n"
              "ABCDEFGHIJ\n"
              "abcde");
+}
+
+TEST_CASE("display: a press beside the line numbers is the gutter's, and one on the block column folds",
+          "[display][mouse][gutter]")
+{
+    // Through the real hit-test: the pixel names a gutter column, and the configured layout names the
+    // segment that column belongs to -- six columns of line numbers, then the block column.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness const h { HarnessWindow::Shown, [](contour::config::Config& config) {
+                                config.gutter.value().lineNumbers = vtbackend::LineNumberMode::Absolute;
+                            } };
+    h.display->forceActiveFocus();
+    h.feedAndSettle("\033]133;A\033\\$ \033]133;B\033\\make\r\n\033]133;C\033\\boom\r\n\033]133;D;2\033\\");
+    auto const& terminal = h.session->terminal();
+
+    // The centre of gutter column @p column beside the first row, in the item's logical pixels. The
+    // gutter ends where the grid begins, so it starts seven cells before that.
+    auto const metrics = h.display->gridMetrics();
+    auto const dpr = h.display->devicePixelRatio();
+    auto const cellWidth = unbox<int>(metrics.cellSize.width);
+    auto const gutterColumnCentre = [&](int column) {
+        auto const x = metrics.pageMargin.left - (7 * cellWidth) + (column * cellWidth) + (cellWidth / 2);
+        auto const y = metrics.pageMargin.top + (unbox<int>(metrics.cellSize.height) / 2);
+        return QPointF { double(x) / dpr, double(y) / dpr };
+    };
+
+    // On the line numbers the press acts on nothing, and the drag into the grid that follows selects
+    // nothing either: its press never reached the grid.
+    auto const inGrid = logicalCellCenter(*h.display, vtbackend::LineOffset(1), vtbackend::ColumnOffset(3));
+    sendMouse(h.display.get(), QEvent::MouseButtonPress, gutterColumnCentre(2));
+    sendMouse(h.display.get(), QEvent::MouseMove, inGrid);
+    sendMouse(h.display.get(), QEvent::MouseButtonRelease, inGrid);
+    h.pump();
+    CHECK(terminal.foldState().empty());
+    CHECK_FALSE(terminal.selectionAvailable());
+
+    // The block column keeps its fold control.
+    sendMouse(h.display.get(), QEvent::MouseButtonPress, gutterColumnCentre(6));
+    sendMouse(h.display.get(), QEvent::MouseButtonRelease, gutterColumnCentre(6));
+    h.pump();
+    CHECK_FALSE(terminal.foldState().empty());
 }
 
 TEST_CASE("display: dragging a double-clicked word past its line freezes the search highlight",
@@ -1464,20 +1485,24 @@ TEST_CASE("display: dragging a double-clicked word past its line freezes the sea
                     "third here\r\n");
 
     // Double-click on "hello" (column 2, line 0): press, release, then a second press at the same
-    // spot within the terminal's 1000ms speed-click window.
+    // spot within the terminal's 1000ms multi-click window (Terminal::_clickCounter).
     auto const wordPos =
         vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(2) };
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, wordPos.line, wordPos.column));
-    h.pump();
     sendMouse(
-        h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, wordPos.line, wordPos.column));
+        h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, wordPos.line, wordPos.column));
     h.pump();
-    sendMouse(
-        h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, wordPos.line, wordPos.column));
+    sendMouse(h.display.get(),
+              QEvent::MouseButtonPress,
+              logicalCellCenter(*h.display, wordPos.line, wordPos.column));
+    h.pump();
+    sendMouse(h.display.get(),
+              QEvent::MouseButtonRelease,
+              logicalCellCenter(*h.display, wordPos.line, wordPos.column));
     h.pump();
     QTest::qWait(100);
-    sendMouse(
-        h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, wordPos.line, wordPos.column));
+    sendMouse(h.display.get(),
+              QEvent::MouseButtonPress,
+              logicalCellCenter(*h.display, wordPos.line, wordPos.column));
     h.pump();
 
     REQUIRE(h.session->terminal().extractSelectionText() == "hello");
@@ -1487,7 +1512,7 @@ TEST_CASE("display: dragging a double-clicked word past its line freezes the sea
     // Drag across two further line boundaries (in one jump, as a fast drag would deliver it).
     auto const dragTo =
         vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(3) };
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, dragTo.line, dragTo.column));
+    sendMouse(h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, dragTo.line, dragTo.column));
     h.pump();
 
     // The selected text keeps growing normally...
@@ -1498,8 +1523,9 @@ TEST_CASE("display: dragging a double-clicked word past its line freezes the sea
     // ...but the search pattern must have frozen at the original single-line word, not followed it.
     CHECK(h.session->terminal().search().pattern == patternAfterDoubleClick);
 
-    sendMouse(
-        h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, dragTo.line, dragTo.column));
+    sendMouse(h.display.get(),
+              QEvent::MouseButtonRelease,
+              logicalCellCenter(*h.display, dragTo.line, dragTo.column));
     h.pump();
 }
 
@@ -1535,17 +1561,18 @@ TEST_CASE("display: a press with no fresh preceding move still anchors at the pr
     // Leave the pointer's last-known position somewhere else entirely (no press here -- this only
     // updates the hover-tracked _currentMousePosition, mirroring the pointer idling after a previous,
     // unrelated interaction).
-    sendMouse(h.display,
+    sendMouse(h.display.get(),
               QEvent::MouseMove,
               logicalCellCenter(*h.display, stalePosition.line, stalePosition.column));
     h.pump();
 
     // Press directly at `from` with NO intervening MouseMove there -- the gap a fast flick leaves.
-    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, from.line, from.column));
+    sendMouse(
+        h.display.get(), QEvent::MouseButtonPress, logicalCellCenter(*h.display, from.line, from.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, to.line, to.column));
+    sendMouse(h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, to.line, to.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, to.line, to.column));
+    sendMouse(h.display.get(), QEvent::MouseButtonRelease, logicalCellCenter(*h.display, to.line, to.column));
     h.pump();
 
     // The drag must run from the ACTUAL press position (from) to `to`, not from the stale hover
@@ -1581,39 +1608,43 @@ TEST_CASE("display: dragging upward across lines selects the same range as dragg
     // before a button event fires. (The press itself now also anchors at the cell it landed on, so
     // this sequence no longer DEPENDS on the preceding move; it stays because it is the realistic
     // event order, and the bare-press case has its own test above.)
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, top.line, top.column));
+    sendMouse(h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, top.line, top.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, top.line, top.column));
+    sendMouse(h.display.get(), QEvent::MouseButtonPress, logicalCellCenter(*h.display, top.line, top.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, bottom.line, bottom.column));
+    sendMouse(h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, bottom.line, bottom.column));
     h.pump();
-    sendMouse(
-        h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, bottom.line, bottom.column));
+    sendMouse(h.display.get(),
+              QEvent::MouseButtonRelease,
+              logicalCellCenter(*h.display, bottom.line, bottom.column));
     h.pump();
     auto const downward = h.session->terminal().extractSelectionText();
 
-    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, top.line, top.column));
+    sendMouse(h.display.get(), QEvent::MouseButtonPress, logicalCellCenter(*h.display, top.line, top.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, top.line, top.column));
+    sendMouse(
+        h.display.get(), QEvent::MouseButtonRelease, logicalCellCenter(*h.display, top.line, top.column));
     h.pump();
     REQUIRE(h.session->terminal().extractSelectionText().empty()); // plain click cleared it
 
-    // The terminal's own click-speed counter (_speedClicks in Terminal::handleMouseSelection) counts
-    // presses within 1s of REAL elapsed time (Terminal::_currentTime, advanced from steady_clock by the
-    // live display's render loop -- unlike the headless MockTerm tests, which advance a simulated clock
-    // explicitly). Without a real pause here, this press lands within that window of the deselect click
-    // above and the one before it, so it reads as a double/triple-click and selects a word or a whole
-    // line instead of starting a plain drag.
+    // The terminal's multi-click counter (Terminal::_clickCounter, a ClickCounter on the terminal's
+    // injected steady clock) counts presses within 1s of REAL elapsed time here: this session runs on
+    // TerminalClocks::system(), unlike the headless MockTerm tests, whose manual clock moves only when a
+    // test advances it. Without a real pause here, this press lands within that window of the deselect
+    // click above and the one before it, so it reads as a double/triple-click and selects a word or a
+    // whole line instead of starting a plain drag.
     QTest::qWait(1100);
 
     // Upward: press at bottom, release at top.
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, bottom.line, bottom.column));
+    sendMouse(h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, bottom.line, bottom.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, bottom.line, bottom.column));
+    sendMouse(
+        h.display.get(), QEvent::MouseButtonPress, logicalCellCenter(*h.display, bottom.line, bottom.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, top.line, top.column));
+    sendMouse(h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, top.line, top.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, top.line, top.column));
+    sendMouse(
+        h.display.get(), QEvent::MouseButtonRelease, logicalCellCenter(*h.display, top.line, top.column));
     h.pump();
     auto const upward = h.session->terminal().extractSelectionText();
 
@@ -1639,20 +1670,21 @@ TEST_CASE("display: a multi-line drag selection extends and shrinks live as the 
 
     auto const anchor =
         vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(0) };
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, anchor.line, anchor.column));
+    sendMouse(h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, anchor.line, anchor.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, anchor.line, anchor.column));
+    sendMouse(
+        h.display.get(), QEvent::MouseButtonPress, logicalCellCenter(*h.display, anchor.line, anchor.column));
     h.pump();
 
     // Still on line 0: single-line partial selection.
-    sendMouse(h.display,
+    sendMouse(h.display.get(),
               QEvent::MouseMove,
               logicalCellCenter(*h.display, vtbackend::LineOffset(0), vtbackend::ColumnOffset(4)));
     h.pump();
     CHECK(h.session->terminal().extractSelectionText() == "first");
 
     // Extends onto line 1: two-line selection, first line taken whole to its right margin.
-    sendMouse(h.display,
+    sendMouse(h.display.get(),
               QEvent::MouseMove,
               logicalCellCenter(*h.display, vtbackend::LineOffset(1), vtbackend::ColumnOffset(5)));
     h.pump();
@@ -1662,7 +1694,7 @@ TEST_CASE("display: a multi-line drag selection extends and shrinks live as the 
 
     // Extends onto line 2: three-line selection -- first and second line each taken whole, third
     // partial. This is the "middle line(s) rendered full" branch of Selector.cpp's ranges().
-    sendMouse(h.display,
+    sendMouse(h.display.get(),
               QEvent::MouseMove,
               logicalCellCenter(*h.display, vtbackend::LineOffset(2), vtbackend::ColumnOffset(4)));
     h.pump();
@@ -1672,7 +1704,7 @@ TEST_CASE("display: a multi-line drag selection extends and shrinks live as the 
              "third");
 
     // Retracting back onto line 1 must shrink the selection again, not merely stop growing it.
-    sendMouse(h.display,
+    sendMouse(h.display.get(),
               QEvent::MouseMove,
               logicalCellCenter(*h.display, vtbackend::LineOffset(1), vtbackend::ColumnOffset(2)));
     h.pump();
@@ -1680,7 +1712,7 @@ TEST_CASE("display: a multi-line drag selection extends and shrinks live as the 
           == "first line\n"
              "sec");
 
-    sendMouse(h.display,
+    sendMouse(h.display.get(),
               QEvent::MouseButtonRelease,
               logicalCellCenter(*h.display, vtbackend::LineOffset(1), vtbackend::ColumnOffset(2)));
     h.pump();
@@ -1738,13 +1770,14 @@ TEST_CASE("display: a multi-line drag selecting a wrapped logical line copies it
     auto const to =
         vtbackend::CellLocation { .line = vtbackend::LineOffset(1), .column = vtbackend::ColumnOffset(1) };
 
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, from.line, from.column));
+    sendMouse(h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, from.line, from.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseButtonPress, logicalCellCenter(*h.display, from.line, from.column));
+    sendMouse(
+        h.display.get(), QEvent::MouseButtonPress, logicalCellCenter(*h.display, from.line, from.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseMove, logicalCellCenter(*h.display, to.line, to.column));
+    sendMouse(h.display.get(), QEvent::MouseMove, logicalCellCenter(*h.display, to.line, to.column));
     h.pump();
-    sendMouse(h.display, QEvent::MouseButtonRelease, logicalCellCenter(*h.display, to.line, to.column));
+    sendMouse(h.display.get(), QEvent::MouseButtonRelease, logicalCellCenter(*h.display, to.line, to.column));
     h.pump();
 
     // No newline at the wrap point: the tail of row 0 ("xyz", its last 3 columns) concatenates
@@ -1765,7 +1798,7 @@ TEST_CASE("display: focus in/out toggle the terminal's focus state on the live d
     REQUIRE_FALSE(h.session->terminal().focused());
 
     QFocusEvent focusIn(QEvent::FocusIn);
-    QCoreApplication::sendEvent(h.display, &focusIn);
+    QCoreApplication::sendEvent(h.display.get(), &focusIn);
     h.pump();
     // A Qt focus-in on a display routes through the manager, which is the single VT-focus authority:
     // it focuses this session AND records the display's window as the focus owner.
@@ -1773,7 +1806,7 @@ TEST_CASE("display: focus in/out toggle the terminal's focus state on the live d
     CHECK(manager.focusedWindow() == controller.windowId());
 
     QFocusEvent focusOut(QEvent::FocusOut);
-    QCoreApplication::sendEvent(h.display, &focusOut);
+    QCoreApplication::sendEvent(h.display.get(), &focusOut);
     h.pump();
     CHECK_FALSE(h.session->terminal().focused());
 
@@ -1794,7 +1827,7 @@ TEST_CASE("display: revoking the window's focus ownership leaves its live sessio
 
     // Focus the session the way production does, through a Qt focus-in on its display.
     QFocusEvent focusIn(QEvent::FocusIn);
-    QCoreApplication::sendEvent(h.display, &focusIn);
+    QCoreApplication::sendEvent(h.display.get(), &focusIn);
     h.pump();
     REQUIRE(h.session->terminal().focused());
     REQUIRE(manager.focusedWindow() == controller.windowId());
@@ -1827,7 +1860,7 @@ TEST_CASE("display: blur-behind and programmatic resize route through the live d
 TEST_CASE("display: display-coupled session actions run against a live display", "[display][actions]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
     namespace actions = contour::actions;
 
     // These actions forward to the attached display (fullscreen/title-bar/IME toggles) — with a real
@@ -1982,7 +2015,7 @@ TEST_CASE("display: releaseSession detaches the live session and clears the back
     // Rebinding the display's session to null routes through releaseSession(): it disconnects the
     // title signal, clears the session's _display back-pointer (since it still names this display),
     // and nulls the display's own session. The session object stays alive (owned by the harness).
-    REQUIRE(h.session->display() == h.display);
+    REQUIRE(h.session->display() == h.display.get());
     h.display->setSession(nullptr);
     h.pump();
     CHECK(h.session->display() == nullptr);
@@ -2022,7 +2055,7 @@ TEST_CASE("display: a session re-bound onto a resized display adopts the live gr
     // produce for a brand-new window — deliberately NOT pre-sized to the resized display.
     auto const birthSize = vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) };
     auto secondPty = std::make_unique<vtpty::ChannelPty>(birthSize);
-    auto second = std::make_unique<contour::session::TerminalSession>(
+    auto second = contour::test::makeTestSession(
         &h.testApp.app().sessionsManager(), std::move(secondPty), h.testApp.app());
     REQUIRE(second->terminal().totalPageSize() == birthSize);
 
@@ -2082,7 +2115,7 @@ TEST_CASE("display: attaching a display to an already-closed session does not re
     h.pump();
 
     // Attached, and no geometry was pushed into the closed device.
-    CHECK(h.session->display() == h.display);
+    CHECK(h.session->display() == h.display.get());
     CHECK(h.pty->resizesAfterClose() == resizesBeforeReattach);
 }
 
@@ -2105,20 +2138,6 @@ TEST_CASE("display: IME cursor-position and surrounding-text queries read the li
     CHECK(h.display->inputMethodQuery(Qt::ImCurrentSelection).toString().isEmpty());
 }
 
-TEST_CASE("display: the scrollbar value slot scrolls the viewport on the live display", "[display][scroll]")
-{
-    REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
-    // Seed scrollback so there is somewhere to scroll to.
-    for (int i = 0; i < 60; ++i)
-        h.feedAndSettle(std::string_view(std::format("line {}\r\n", i)));
-
-    // The scrollbar's valueChanged slot scrolls the viewport and schedules a redraw.
-    CHECK_NOTHROW(h.display->onScrollBarValueChanged(5));
-    h.pump();
-    CHECK(h.session->terminal().viewport().scrollOffset() != vtbackend::ScrollOffset(0));
-}
-
 TEST_CASE("display: a Close event closes the PTY and emits terminated on the live display",
           "[display][close]")
 {
@@ -2130,12 +2149,13 @@ TEST_CASE("display: a Close event closes the PTY and emits terminated on the liv
     // Scope the connection to this test: the display outlives the stack `terminated` flag (harness
     // teardown emits terminated() again via closeDisplay()), so the connection MUST be severed before
     // the flag goes out of scope.
-    auto const conn = QObject::connect(
-        h.display, &contour::display::TerminalDisplay::terminated, [&terminated]() { terminated = true; });
+    auto const conn = QObject::connect(h.display.get(),
+                                       &contour::display::TerminalDisplay::terminated,
+                                       [&terminated]() { terminated = true; });
 
     // A QCloseEvent routed to the display closes the backing PTY and emits terminated().
     QCloseEvent closeEvent;
-    QCoreApplication::sendEvent(h.display, &closeEvent);
+    QCoreApplication::sendEvent(h.display.get(), &closeEvent);
     CHECK(terminated);
 
     QObject::disconnect(conn);
@@ -2159,7 +2179,7 @@ TEST_CASE("display: a Close event closes the PTY and emits terminated on the liv
 TEST_CASE("display: a font change approved with no render target is deferred, not fatal",
           "[display][font][teardown]")
 {
-    DisplayHarness h { HarnessWindow::None };
+    DisplayHarness const h { HarnessWindow::None };
     REQUIRE(h.display->hasSession());
     REQUIRE_FALSE(h.display->hasRenderTarget()); // never had a window, so never had one
 
@@ -2197,11 +2217,10 @@ TEST_CASE("display: a session destroyed before its display leaves no dangling ba
     // the frame path's guards pass it through. Built by hand: the harness deletes the display first.
     contour::test::TestApp testApp;
     auto display = std::make_unique<contour::display::TerminalDisplay>();
-    auto session = std::make_unique<contour::session::TerminalSession>(
-        &testApp.app().sessionsManager(),
-        std::make_unique<vtpty::ChannelPty>(
-            vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) }),
-        testApp.app());
+    auto session = contour::test::makeTestSession(&testApp.app().sessionsManager(),
+                                                  std::make_unique<vtpty::ChannelPty>(vtbackend::PageSize {
+                                                      vtbackend::LineCount(25), vtbackend::ColumnCount(80) }),
+                                                  testApp.app());
 
     display->setSize(QSizeF(800, 600));
     display->setSession(session.get());
@@ -2226,7 +2245,7 @@ TEST_CASE("display: a font change approved across a render-target teardown still
     // The gated half of the first case: the render target really goes and comes back. fontSize() reads
     // the *published* descriptions, so this is the only place the deferral is observable end-to-end.
     REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
+    DisplayHarness const h;
     h.pump();
     REQUIRE(h.display->hasRenderTarget());
     auto const sizeBefore = h.display->fontSize().pt;
@@ -2237,7 +2256,7 @@ TEST_CASE("display: a font change approved across a render-target teardown still
     // Destroy it the way a scene-graph invalidation does: on the render thread, where RHI resources
     // must be freed.
     QSemaphore released;
-    h.window->scheduleRenderJob(QRunnable::create([display = h.display, &released]() {
+    h.window->scheduleRenderJob(QRunnable::create([display = h.display.get(), &released]() {
                                     display->releaseRenderResources();
                                     released.release();
                                 }),
@@ -2275,7 +2294,7 @@ TEST_CASE("display: rebinding the session under live frames does not tear a fram
     auto secondPty = std::make_unique<vtpty::ChannelPty>(
         vtbackend::PageSize { vtbackend::LineCount(25), vtbackend::ColumnCount(80) });
     auto* second = secondPty.get();
-    auto secondSession = std::make_unique<contour::session::TerminalSession>(
+    auto secondSession = contour::test::makeTestSession(
         &h.testApp.app().sessionsManager(), std::move(secondPty), h.testApp.app());
 
     for (auto round = 0; round < 10; ++round)
@@ -2292,7 +2311,7 @@ TEST_CASE("display: rebinding the session under live frames does not tear a fram
     h.pump();
 
     // Both terminals survived, and the display ended up bound to the one it last refit.
-    CHECK(h.session->display() == h.display);
+    CHECK(h.session->display() == h.display.get());
     CHECK(h.session->terminal().totalPageSize().lines > vtbackend::LineCount(0));
     CHECK(secondSession->terminal().totalPageSize().lines > vtbackend::LineCount(0));
 
@@ -2360,7 +2379,7 @@ TEST_CASE("display: a redraw whose queued call was dropped does not block the ne
     h.display->installEventFilter(&counter);
 
     h.display->scheduleRedraw();
-    QCoreApplication::removePostedEvents(h.display, QEvent::MetaCall); // the queued redraw is dropped
+    QCoreApplication::removePostedEvents(h.display.get(), QEvent::MetaCall); // the queued redraw is dropped
     h.display->setSession(nullptr);
     h.display->setSession(h.session.get());
     QCoreApplication::processEvents(); // whatever re-attaching posted

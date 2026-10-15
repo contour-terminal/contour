@@ -191,6 +191,12 @@ ApplicationWindow
         anchors.left: parent.left
         anchors.right: parent.right
 
+        // Every tooltip is an attached one, and the engine shares one instance among them, built by the
+        // style in use. Fusion's (`ui_style: native`) reads its text as AutoText, which renders a link's URI,
+        // a tab title or a command line as rich text whenever its first line looks like markup -- an
+        // `<img src=...>` fetched on hover. Set here, on an Item, as the attached property requires.
+        Component.onCompleted: ToolTip.toolTip.contentItem.textFormat = Text.PlainText
+
         // The terminal content. Kept ACTIVE (so the pane tree and its PTYs keep running) even while the
         // settings page is shown, just hidden — flipping back is instant and nothing is torn down.
         Loader {
@@ -265,6 +271,18 @@ ApplicationWindow
         function onSaveLayoutRequested() { saveLayoutDialog.open(); }
         function onContextMenuRequested() { terminalContextMenu.popup(); }
         function onTitleBarContextMenuRequested() { titleBarContextMenu.popup(); }
+        // Attention on behalf of a session that may have no pane on screen -- a command finishing in a
+        // background tab. Such a session has no SessionChrome, so the window carries the request.
+        function onNotificationRequested(title, body) { appWindow.showTrayMessage(title, body); }
+        function onBellRequested(source, volume) { windowBell.play(source, volume); }
+        function onAlertRequested() { appWindow.alert(0); }
+    }
+
+    // The bell the window plays for a session without a SessionChrome of its own, deferred exactly as
+    // SessionChrome's is until multimedia is ready.
+    DeferredBell {
+        id: windowBell
+        objectName: "windowBell" // so offscreen tests can findChild() it
     }
 
     // Frameless windows need their own edge/corner resize handles. With the native frame
@@ -302,25 +320,55 @@ ApplicationWindow
             appWindow.win.closeWindow();
     }
 
+    // A notice a pane on screen relays from its session: a paste too large, a screenshot taken. Through the
+    // window, which so knows what the tray's next click is on.
     function showNotification(title, content) {
-        // "OSC 777 ; notify ; <TITLE> ; <CONTENT> ST"
-        // Example: printf "\033]777;notify;Hello Title;Hello Content\033\\"
+        let message = "Application Message: %1".arg(title);
+        if (appWindow.win)
+            appWindow.win.requestNotification(message, content);
+        else
+            showTrayMessage(message, content);
+    }
+
+    // One tray message. What a session's notifier raises -- a command finishing, or an application's
+    // OSC 777, OSC 9 or OSC 99 from any tab -- comes here directly, already titled.
+    function showTrayMessage(title, content) {
         console.debug(windowLog, "main: notification [%1] %2".arg(title).arg(content));
         if (trayIcon.supportsMessages)
         {
             trayIcon.show();
-            trayIcon.showMessage("Application Message: %1".arg(title),
-                                 "%1".arg(content),
-                                 60 * 1000);
+            trayIcon.showMessage(title, "%1".arg(content), appWindow.trayMessageTimeout);
+            trayIconTimer.restart();
         }
         else
             console.warn("main: Notification system not supported!");
+    }
+
+    // How long a tray message stays up, in milliseconds -- and so how long its icon stays in the tray.
+    readonly property int trayMessageTimeout: 60 * 1000
+
+    // The tray icon exists only to carry a message, so it leaves once the message is over: timed out,
+    // clicked, or made moot by the user coming back to the window. Without this, every window that
+    // ever announced a background build would keep an icon in the tray for good.
+    Timer {
+        id: trayIconTimer
+        objectName: "trayIconTimer" // so offscreen tests can findChild() it
+        interval: appWindow.trayMessageTimeout
+        onTriggered: trayIcon.hide()
+    }
+
+    onActiveChanged: {
+        if (active) {
+            trayIconTimer.stop();
+            trayIcon.hide();
+        }
     }
 
     // NB: This requires Qt 5.12+
     // See https://doc.qt.io/qt-5/qml-qt-labs-platform-systemtrayicon.html#availability for details.
     SystemTrayIcon {
         id: trayIcon
+        objectName: "trayIcon" // so offscreen tests can findChild() it
         visible: false
         icon.source: "qrc:/contour/logo-256.png"
         icon.name: "Contour Terminal"
@@ -332,6 +380,9 @@ ApplicationWindow
             }
         }
 
-        onMessageClicked: hide()
+        // A click brings the window forward and does what the message asked of it, such as revealing the
+        // session it is about. The click carries no identity of the message: the window takes it for one
+        // on the last message shown.
+        onMessageClicked: { hide(); if (appWindow.win) appWindow.win.trayMessageClicked(); }
     }
 }

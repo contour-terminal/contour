@@ -27,13 +27,16 @@ namespace contour::test
     return notification;
 }
 
-/// Whether this run may put a notification on a real bus.
+/// Whether this run's session bus is the private one test/e2e/notification-nonblocking.sh stands up,
+/// rather than the machine's own.
 ///
-/// Gated so a run on a developer's own desktop does not pop a notification up at them and leave it
-/// there. The wedged-bus harness sets it, and there by construction nothing can be displayed -- so
-/// the send path is covered exactly where covering it is harmless.
-/// @return Whether to send.
-[[nodiscard]] inline bool notificationSendingEnabled()
+/// Only there may a test reach a bus at all, or put a notification on it: on a developer's own desktop
+/// a notification would pop up at them and stay there, and a suite that talks to whatever bus the
+/// machine has depends on it. The wedged-bus harness sets the variable, and there by construction
+/// nothing can be displayed -- so the real transports are covered exactly where covering them is
+/// harmless. test_main.cpp fails a run that reaches a bus anywhere else.
+/// @return Whether the session bus is the harness's.
+[[nodiscard]] inline bool onPrivateSessionBus()
 {
     return qEnvironmentVariableIsSet("CONTOUR_TEST_NOTIFICATION_SEND");
 }
@@ -62,7 +65,7 @@ void checkReturnsWithoutWaiting(Exercise exercise)
 {
     auto const startedAt = std::chrono::steady_clock::now();
 
-    if (notificationSendingEnabled())
+    if (onPrivateSessionBus())
         exercise();
     QCoreApplication::processEvents();
 

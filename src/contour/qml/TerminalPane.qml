@@ -5,7 +5,7 @@
 // This is instantiated once per leaf of the split tree (by PaneNode.qml). Clicking the pane makes
 // it the active pane of its tab (emitted via `activated`).
 //
-// The per-session wiring (permission-wall dialogs, bell, window alert, OSC-777 notifications, and the
+// The per-session wiring (permission-wall dialogs, bell, window alert, the session's notices, and the
 // bidirectional scrollbar binding) is shared with the single-pane Terminal.qml via SessionChrome.qml;
 // this file only adds the pane-specific background and active-pane focus border. Without SessionChrome,
 // terminals in a split pane would silently lose all of those (permission requests never shown, mute

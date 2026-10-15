@@ -6,10 +6,13 @@
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserEvents.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 
 #include <chrono>
 #include <cstdlib>
+#include <expected>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
@@ -111,6 +114,28 @@ namespace
     }
 #endif
 
+#ifdef _WIN32
+    /// The console standard input is.
+    class StdinConsole final: public ConsoleInput
+    {
+      public:
+        [[nodiscard]] std::optional<unsigned long> mode() const override
+        {
+            auto modes = DWORD {};
+            if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &modes) == 0)
+                return std::nullopt;
+            return modes;
+        }
+
+        [[nodiscard]] std::expected<void, unsigned long> setMode(unsigned long mode) override
+        {
+            if (SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), mode) == 0)
+                return std::unexpected(GetLastError());
+            return {};
+        }
+    };
+#endif
+
     struct TTY final: CaptureTransport
     {
         bool configured = false;
@@ -126,8 +151,10 @@ namespace
 #ifndef _WIN32
             tcsetattr(fd, TCSANOW, &savedModes);
 #else
-            auto stdinHandle = GetStdHandle(STD_INPUT_HANDLE);
-            SetConsoleMode(stdinHandle, savedModes);
+            if (!configured)
+                return;
+            auto console = StdinConsole {};
+            leaveCaptureInputMode(console, savedModes, cerr);
 #endif
         }
 
@@ -155,16 +182,12 @@ namespace
 
             configured = true;
 #else
-            auto stdinHandle = GetStdHandle(STD_INPUT_HANDLE);
-
-            GetConsoleMode(stdinHandle, &savedModes);
-
-            DWORD modes = savedModes;
-            modes |= ENABLE_VIRTUAL_TERMINAL_INPUT;
-            modes &= ~ENABLE_LINE_INPUT;
-            modes &= ~ENABLE_ECHO_INPUT;
-
-            configured = SetConsoleMode(stdinHandle, modes) != 0;
+            auto console = StdinConsole {};
+            if (auto const saved = enterCaptureInputMode(console))
+            {
+                savedModes = *saved;
+                configured = true;
+            }
 #endif
         }
 
@@ -306,6 +329,32 @@ namespace
     }
 } // namespace
 
+#ifdef _WIN32
+std::optional<unsigned long> enterCaptureInputMode(ConsoleInput& console)
+{
+    auto const saved = console.mode();
+    if (!saved)
+        return nullopt;
+
+    auto modes = *saved;
+    modes |= ENABLE_VIRTUAL_TERMINAL_INPUT;
+    modes &= ~static_cast<unsigned long>(ENABLE_LINE_INPUT);
+    modes &= ~static_cast<unsigned long>(ENABLE_ECHO_INPUT);
+    if (!console.setMode(modes))
+        return nullopt;
+    return saved;
+}
+
+void leaveCaptureInputMode(ConsoleInput& console, unsigned long saved, ostream& diagnostics)
+{
+    if (auto const restored = console.setMode(saved); !restored)
+        diagnostics << std::format(
+            "Could not restore the console's input mode (error {}): it is left without line editing or "
+            "echo.\r\n",
+            restored.error());
+}
+#endif
+
 bool captureScreen(CaptureSettings const& settings, CaptureTransport& transport, ostream& output)
 {
     auto timeout = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -352,7 +401,8 @@ bool captureScreen(CaptureSettings const& settings)
     unique_ptr<ostream> customOutput;
     if (settings.outputFile != "-"sv)
     {
-        customOutput = make_unique<ofstream>(settings.outputFile.data(), std::ios::trunc);
+        customOutput = make_unique<ofstream>(
+            core::pathFromUtf8(settings.outputFile).value_or(std::filesystem::path {}), std::ios::trunc);
         output = *customOutput;
     }
 

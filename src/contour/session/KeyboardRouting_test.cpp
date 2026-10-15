@@ -16,6 +16,7 @@
 // stand-in that mirrors the real display's focus behavior (ItemIsFocusScope) and its silent-drop
 // failure mode.
 
+#include <contour/test/MainWindowControllerMock.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 
@@ -196,7 +197,7 @@ class RoutingMockPane: public QObject
 /// SETTABLE activeTabRootPane/activeTabIndex so a test can replay the production event sequence of
 /// a tab creation or switch: repoint the root proxy, then announce the active-index change (which
 /// is what fires Main.qml's restoreTerminalFocus()).
-class RoutingMockController: public QAbstractListModel
+class RoutingMockController: public contour::test::MainWindowControllerMock
 {
     Q_OBJECT
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
@@ -357,11 +358,8 @@ class RoutingMockController: public QAbstractListModel
   signals:
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
-    void commandPaletteRequested();
     void contextMenuModelChanged();
-    void contextMenuRequested();
     void titleBarContextMenuModelChanged();
-    void titleBarContextMenuRequested();
     void tabBarPositionChanged();
     void tabBarShouldShowChanged();
     void chromeHeightChanged();
@@ -369,9 +367,6 @@ class RoutingMockController: public QAbstractListModel
     void tabTitleEditRequested(int /*index*/);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
     void tabColorPickRequested(int /*index*/);
-    // Matches Main.qml's Connections handler for the save-layout prompt; a missing signal here is a QML
-    // warning the run-wide gate turns into a suite failure.
-    void saveLayoutRequested();
 
   private:
     int _chromeHeight = 0;

@@ -333,7 +333,7 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
         // mouse hit-test maps through it, and a zero origin under a configured margin reports the cell
         // the user clicked minus that margin.
         //
-        // WITHOUT the fold gutter, and unavoidably: the gutter is a fraction of the cell, and the cell
+        // WITHOUT the gutter, and unavoidably: the gutter is a fraction of the cell, and the cell
         // size is the renderer's own answer -- there is none to ask until the object being constructed
         // here exists. The first applyResize() folds it in, which is before any pointer event reaches a
         // window that has been shown.
@@ -932,7 +932,7 @@ void TerminalDisplay::createRenderer()
             gridMetrics().cellSize,
             marginsDevicePx,
             [this](auto page) { return _session->terminal().clampedTotalPageSize(page); },
-            session::gutterWidthFor(_session->config().folding.value(), gridMetrics().cellSize));
+            session::configuredGutterWidth(_session->config(), gridMetrics().cellSize));
         _renderer->reserveAtlasForPage(fit.pageSize);
     }
 
@@ -1396,6 +1396,13 @@ void TerminalDisplay::mouseReleaseEvent(QMouseEvent* event)
     session::sendMouseReleaseEvent(event, *_session);
 }
 
+void TerminalDisplay::mouseUngrabEvent()
+{
+    QQuickItem::mouseUngrabEvent();
+    if (_session)
+        _session->dropOwedRelease();
+}
+
 void TerminalDisplay::focusInEvent(QFocusEvent* event)
 {
     QQuickItem::focusInEvent(event);
@@ -1542,12 +1549,6 @@ bool TerminalDisplay::event(QEvent* event)
 // }}}
 
 // {{{ helpers
-void TerminalDisplay::onScrollBarValueChanged(int value)
-{
-    terminal().viewport().scrollTo(vtbackend::ScrollOffset::cast_from(value));
-    scheduleRedraw();
-}
-
 double TerminalDisplay::devicePixelRatio() const
 {
     return devicePixelRatioForWindow(window());
@@ -1622,7 +1623,7 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
         _session->terminal().totalPageSize(),
         cellSize,
         geometry::scaled(session::toGeometryMargins(_session->profile().margins.value()), devicePixelRatio()),
-        session::gutterWidthFor(_session->config().folding.value(), cellSize));
+        session::configuredGutterWidth(_session->config(), cellSize));
 }
 
 vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize totalPageSize) const
@@ -1756,7 +1757,7 @@ vtbackend::FontDef TerminalDisplay::getFontDef()
 void TerminalDisplay::inspect()
 {
     // Ensure we're invoked on GUI thread when calling doDumpState().
-    QMetaObject::invokeMethod(this, &TerminalDisplay::doDumpState, Qt::QueuedConnection);
+    platform::postToObject(this, [this] { doDumpState(); });
 }
 
 void TerminalDisplay::doDumpState()
@@ -1950,6 +1951,11 @@ void TerminalDisplay::recomputeGeometryAfterFontReconfig()
     // resizeScreen()/SIGWINCH to the child) and the WM size hints. Callers must ensure the display is
     // fully alive (live _session, _renderer and window()).
     Require(_session && _renderer && window());
+    refitPage();
+}
+
+void TerminalDisplay::refitPage()
+{
     resizeTerminalToDisplaySize();
     notifyCellGeometryChanged();
 }

@@ -13,10 +13,19 @@
 
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
+#include <expected>
+#include <format>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
+
+#ifdef _WIN32
+    #include <Windows.h>
+#endif
 
 using namespace std::string_view_literals;
 
@@ -197,3 +206,88 @@ TEST_CASE("captureScreen: verbose mode logs the screen size and still captures",
     CHECK(contour::cli::captureScreen(settings, transport, out));
     CHECK(out.str() == "verbose payload\n");
 }
+
+#ifdef _WIN32
+namespace
+{
+
+/// What a FakeConsole answers a mode it is set to.
+enum class SetModeAnswer : std::uint8_t
+{
+    Refuses,
+    Accepts,
+};
+
+/// A console that answers with what the test gave it, and remembers the modes it was set to.
+class FakeConsole final: public contour::cli::ConsoleInput
+{
+  public:
+    FakeConsole(std::optional<unsigned long> mode, SetModeAnswer answer): _mode { mode }, _answer { answer }
+    {
+    }
+
+    [[nodiscard]] std::optional<unsigned long> mode() const override { return _mode; }
+
+    [[nodiscard]] std::expected<void, unsigned long> setMode(unsigned long mode) override
+    {
+        setTo.push_back(mode);
+        if (_answer == SetModeAnswer::Refuses)
+            return std::unexpected(static_cast<unsigned long>(ERROR_ACCESS_DENIED));
+        return {};
+    }
+
+    std::vector<unsigned long> setTo;
+
+  private:
+    std::optional<unsigned long> _mode;
+    SetModeAnswer _answer;
+};
+
+/// The console's default input mode: line editing, echo, processed input.
+constexpr auto CookedMode =
+    static_cast<unsigned long>(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
+
+} // namespace
+
+TEST_CASE("enterCaptureInputMode switches the console to raw virtual-terminal input", "[capture]")
+{
+    auto console = FakeConsole { CookedMode, SetModeAnswer::Accepts };
+    CHECK(contour::cli::enterCaptureInputMode(console) == CookedMode); // the mode to put back
+    REQUIRE(console.setTo.size() == 1);
+    CHECK(console.setTo[0]
+          == static_cast<unsigned long>(ENABLE_PROCESSED_INPUT | ENABLE_VIRTUAL_TERMINAL_INPUT));
+}
+
+TEST_CASE("enterCaptureInputMode reports a console that refuses the mode", "[capture]")
+{
+    // A console that kept its line editing hands a capture no reply until Enter: not configured.
+    auto refusing = FakeConsole { CookedMode, SetModeAnswer::Refuses };
+    CHECK_FALSE(contour::cli::enterCaptureInputMode(refusing).has_value());
+
+    // Standard input that is no console has no mode to switch, nor to put back.
+    auto none = FakeConsole { std::nullopt, SetModeAnswer::Accepts };
+    CHECK_FALSE(contour::cli::enterCaptureInputMode(none).has_value());
+    CHECK(none.setTo.empty());
+}
+
+TEST_CASE("leaveCaptureInputMode puts the console's mode back", "[capture]")
+{
+    auto console = FakeConsole { CookedMode, SetModeAnswer::Accepts };
+    auto diagnostics = std::ostringstream {};
+    contour::cli::leaveCaptureInputMode(console, CookedMode, diagnostics);
+    CHECK(console.setTo == std::vector { CookedMode });
+    CHECK(diagnostics.str().empty());
+}
+
+TEST_CASE("leaveCaptureInputMode reports a console that refuses its mode back", "[capture]")
+{
+    // A console left in raw input echoes nothing the user types and edits no line: they are told why, and
+    // with the error the console gave.
+    auto console = FakeConsole { CookedMode, SetModeAnswer::Refuses };
+    auto diagnostics = std::ostringstream {};
+    contour::cli::leaveCaptureInputMode(console, CookedMode, diagnostics);
+    CHECK(console.setTo == std::vector { CookedMode });
+    CHECK(diagnostics.str().contains("input mode"));
+    CHECK(diagnostics.str().contains(std::format("error {}", ERROR_ACCESS_DENIED)));
+}
+#endif

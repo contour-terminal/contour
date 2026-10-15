@@ -11,6 +11,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <format>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -50,6 +51,19 @@ TEST_CASE("actions::isNonRepeatable flags the structural actions", "[actions][re
     // Resizing by holding the key to grow a pane is desirable, so it stays repeatable.
     CHECK_FALSE(
         actions::isNonRepeatable(actions::Action { actions::ResizePane { actions::Direction::Right } }));
+}
+
+TEST_CASE("actions: a held key runs a command block action once", "[actions][repeat][semanticblocks]")
+{
+    // Each fire walks the blocks, builds the text and sets the clipboard (or drops rows); a repeat adds
+    // nothing the first press did not do.
+    CHECK(actions::isNonRepeatable(actions::Action { actions::SelectCommandBlock {} }));
+    CHECK(actions::isNonRepeatable(actions::Action { actions::CopyCommandBlock {} }));
+    CHECK(actions::isNonRepeatable(actions::Action { actions::CopyCommandLine {} }));
+    CHECK(actions::isNonRepeatable(actions::Action { actions::ClearToPrompt {} }));
+    CHECK(actions::isNonRepeatable(actions::Action { actions::CopyLastCommandPrompt {} }));
+    CHECK(actions::isNonRepeatable(actions::Action { actions::CopyLastCommandOutput {} }));
+    CHECK(actions::isNonRepeatable(actions::Action { actions::CopyLastCommandBlock {} }));
 }
 
 TEST_CASE("actions::fromString round-trips the new pane actions", "[actions][parse]")
@@ -243,4 +257,90 @@ TEST_CASE("actions: opening the command palette is not repeated by a held key", 
     // could only ever re-open what is already open.
     CHECK(contour::actions::isNonRepeatable(
         contour::actions::Action { contour::actions::OpenCommandPalette {} }));
+}
+
+TEST_CASE("actions: SelectCommandBlock writes its arguments as config tokens", "[actions][semanticblocks]")
+{
+    CHECK(std::format("{}", actions::Action { actions::SelectCommandBlock {} })
+          == "SelectCommandBlock, target: last, part: output");
+    CHECK(std::format("{}",
+                      actions::Action {
+                          actions::SelectCommandBlock { .target = vtbackend::CommandBlockTarget::Cursor,
+                                                        .part = vtbackend::CommandBlockPart::PromptAndOutput,
+                                                        .block = vtbackend::CommandBlockId(7) } })
+          == "SelectCommandBlock, target: cursor, part: all, block: 7");
+    CHECK(std::format("{}",
+                      actions::Action {
+                          actions::SelectCommandBlock { .target = vtbackend::CommandBlockTarget::Pointer,
+                                                        .part = vtbackend::CommandBlockPart::Prompt } })
+          == "SelectCommandBlock, target: pointer, part: input");
+    CHECK_FALSE(actions::isParameterized(actions::Action { actions::SelectCommandBlock {} }));
+}
+
+TEST_CASE("actions: the block copy actions write their arguments as config tokens",
+          "[actions][semanticblocks]")
+{
+    CHECK(std::format("{}", actions::Action { actions::CopyCommandBlock {} })
+          == "CopyCommandBlock, target: last, part: output");
+    CHECK(std::format(
+              "{}",
+              actions::Action { actions::CopyCommandBlock { .target = vtbackend::CommandBlockTarget::Pointer,
+                                                            .part = vtbackend::CommandBlockPart::Prompt,
+                                                            .block = vtbackend::CommandBlockId(4) } })
+          == "CopyCommandBlock, target: pointer, part: input, block: 4");
+    CHECK(std::format("{}", actions::Action { actions::CopyCommandLine {} })
+          == "CopyCommandLine, target: last");
+    CHECK(std::format(
+              "{}",
+              actions::Action { actions::CopyCommandLine { .target = vtbackend::CommandBlockTarget::Cursor,
+                                                           .block = vtbackend::CommandBlockId(2) } })
+          == "CopyCommandLine, target: cursor, block: 2");
+}
+
+TEST_CASE("actions: CopySelection writes the arguments it carries", "[actions][semanticblocks]")
+{
+    CHECK(std::format("{}", actions::Action { actions::CopySelection {} }) == "CopySelection");
+    CHECK(
+        std::format("{}", actions::Action { actions::CopySelection { .format = actions::CopyFormat::HTML } })
+        == "CopySelection, format: HTML");
+    CHECK(std::format("{}",
+                      actions::Action {
+                          actions::CopySelection { .fallback = actions::CopyFallback::LastCommandOutput } })
+          == "CopySelection, fallback: last_command_output");
+    CHECK(std::format("{}",
+                      actions::Action {
+                          actions::CopySelection { .format = actions::CopyFormat::HTML,
+                                                   .fallback = actions::CopyFallback::LastCommandOutput } })
+          == "CopySelection, format: HTML, fallback: last_command_output");
+}
+
+TEST_CASE("actions: ClearToPrompt is bound by its name and carries nothing", "[actions][semanticblocks]")
+{
+    auto const parsed = actions::fromString("ClearToPrompt");
+    REQUIRE(parsed.has_value());
+    CHECK(std::holds_alternative<actions::ClearToPrompt>(*parsed));
+    CHECK(std::format("{}", actions::Action { actions::ClearToPrompt {} }) == "ClearToPrompt");
+    CHECK_FALSE(actions::isParameterized(actions::Action { actions::ClearToPrompt {} }));
+}
+
+TEST_CASE("actions: OpenCommandOutput writes its arguments and is not repeated", "[actions][semanticblocks]")
+{
+    CHECK(std::format("{}", actions::Action { actions::OpenCommandOutput {} })
+          == "OpenCommandOutput, target: last, placement: split");
+    CHECK(std::format(
+              "{}",
+              actions::Action { actions::OpenCommandOutput { .target = vtbackend::CommandBlockTarget::Pointer,
+                                                             .program = "wl-copy",
+                                                             .placement = actions::OutputPlacement::Detached,
+                                                             .format = actions::OutputFormat::Plain,
+                                                             .block = vtbackend::CommandBlockId(9) } })
+          == "OpenCommandOutput, target: pointer, block: 9, program: 'wl-copy', placement: detached, "
+             "format: plain");
+
+    // A pager's own quoting survives being written into a single-quoted scalar.
+    CHECK(std::format("{}", actions::Action { actions::OpenCommandOutput { .program = "less --prompt='x'" } })
+          == "OpenCommandOutput, target: last, program: 'less --prompt=''x''', placement: split");
+
+    // Every fire forks a pager pane, as a split does: a held key must not open a burst of them.
+    CHECK(actions::isNonRepeatable(actions::Action { actions::OpenCommandOutput {} }));
 }

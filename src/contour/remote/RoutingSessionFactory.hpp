@@ -46,6 +46,16 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
 
     [[nodiscard]] bool canCreateSession() const noexcept override { return active().canCreateSession(); }
 
+    [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
+    {
+        return active().hosting();
+    }
+
+    [[nodiscard]] std::unique_ptr<contour::platform::Notifier> createNotifier() override
+    {
+        return active().createNotifier();
+    }
+
     [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty) override
     {
         return active().requestRemoteTab(actingPty);
@@ -64,6 +74,12 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
     [[nodiscard]] bool requestRemoteWindow() override { return active().requestRemoteWindow(); }
 
     void requestRemoteClose(vtpty::Pty const* pty) override { active().requestRemoteClose(pty); }
+
+    [[nodiscard]] contour::session::HostedOperationRoute requestHostedOperation(
+        vtpty::Pty const* pty, contour::session::HostedOperationRequest const& request) override
+    {
+        return active().requestHostedOperation(pty, request);
+    }
 
     void bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal) override
     {

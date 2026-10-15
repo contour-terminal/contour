@@ -1,8 +1,12 @@
 # Contour shell integration for bash.
 #
-# Source it from ~/.bashrc. It carries its own copy of bash-preexec
-# (https://github.com/rcaloras/bash-preexec), vendored verbatim at the end of this file, for the
-# preexec/precmd hooks that bash itself does not have.
+# Source it at the END of ~/.bashrc, after anything that sets PROMPT_COMMAND. bash-preexec installs
+# itself by appending to PROMPT_COMMAND, so a later `PROMPT_COMMAND=...` throws the install away: no
+# marks at all, and no error. bash-preexec's own header asks the same.
+#
+# It carries its own copy of bash-preexec
+# (https://github.com/rcaloras/bash-preexec), vendored at the end of this file, for the preexec/precmd
+# hooks that bash itself does not have: verbatim, but for one change, marked "Contour:".
 #
 # Contour's hooks come FIRST and bash-preexec last. bash-preexec's duplicate-inclusion guard returns
 # from the whole sourced file, so with the hooks after it, a bash-preexec loaded earlier by something
@@ -16,33 +20,32 @@ if [ -z "${BASH_VERSION-}" ]; then
     return 1
 fi
 
-# The longest command line sent as cmdline_url=, in bytes: a little more than the terminal keeps
-# (vtbackend::MaxRecordedCommandLineBytes, 4096), so that it still sees a longer one was cut.
+# The longest command line sent, in bytes: a little more than vtbackend::MaxRecordedCommandLineBytes.
 __contour_cmdline_max_bytes=4100
 
 # OSC 133;B as it sits at the end of PS1: \[ \] tell readline it takes no room on the line.
 __contour_prompt_end_mark='\[\e]133;B\e\\\]'
 
-# Prints $1 percent-encoded byte by byte, as kitty's cmdline_url= wants it: every byte but
-# A-Z a-z 0-9 / . _ ~ - (what fish's own encoder leaves alone, too) becomes %XX. That keeps ';', which
-# separates OSC 133's parameters, and the ESC and BEL that would end the sequence out of it.
-# Call it in a subshell: it switches the locale.
+# Percent-encodes $1 -- at most $2 bytes of it, when given -- into __contour_encoded, byte by byte as
+# kitty's cmdline_url= (A-Z a-z 0-9 / . _ ~ - kept). In-process: no subshell on the prompt's path.
 __contour_percent_encode() {
-    # Bytes, not characters: in the C locale ${#text} and ${text:i:1} count bytes, so a multibyte
-    # character becomes one %XX per UTF-8 byte.
-    LC_ALL=C
-    local text=${1:0:__contour_cmdline_max_bytes} byte code i
-    for (( i = 0; i < ${#text}; i++ )); do
-        byte=${text:i:1}
-        case $byte in
-            [A-Za-z0-9/._~-]) printf '%s' "$byte" ;;
-            *)
-                # "'x" is the byte's code in the C locale -- or, in musl's, 0xDF00 plus the byte for one
-                # above 0x7F. Its low eight bits are the byte either way.
-                printf -v code '%d' "'$byte"
-                printf '%%%02X' $(( code & 255 ))
-                ;;
-        esac
+    # Bytes, not characters: in the C locale, which ends with this function, expansions count bytes.
+    local LC_ALL=C
+    local text=$1 kept code
+    [[ -n ${2-} ]] && text=${text:0:$2}
+    __contour_encoded=
+    while [[ -n $text ]]; do
+        # A run of bytes kept as they are, in one step; then the byte that ended it, as %XX.
+        kept=${text%%[!A-Za-z0-9/._~-]*}
+        __contour_encoded+=$kept
+        text=${text:${#kept}}
+        [[ -n $text ]] || break
+        # "'x" is the byte's code in the C locale -- or, in musl's, 0xDF00 plus the byte for one above
+        # 0x7F. Its low eight bits are the byte either way.
+        printf -v code '%d' "'${text:0:1}"
+        printf -v code '%%%02X' $(( code & 255 ))
+        __contour_encoded+=$code
+        text=${text:1}
     done
 }
 
@@ -51,8 +54,16 @@ __contour_preexec() {
     printf '\e[?2028h'
 
     # OSC 133;C -- the command's output begins on the line the cursor is on now -- with the command
-    # line, which bash-preexec hands over as $1, exactly as history recorded it.
-    printf '\e]133;C;cmdline_url=%s\e\\' "$(__contour_percent_encode "$1")"
+    # line, which bash-preexec hands over as $1: the last one history holds. That is this command's only
+    # if history recorded it, which HISTIGNORE, HISTCONTROL, `set +o history` and HISTSIZE=0 each
+    # prevent: history then still ends where it did at the prompt, and C goes out without a command
+    # line, which the terminal then reads off the screen. (So does a command typed twice in a row.)
+    if [[ -n $1 && $1 != "${__contour_history_at_prompt-}" ]]; then
+        __contour_percent_encode "$1" "$__contour_cmdline_max_bytes"
+        printf '\e]133;C;cmdline_url=%s\e\\' "$__contour_encoded"
+    else
+        printf '\e]133;C\e\\'
+    fi
 
     __contour_command_running=1
 }
@@ -69,9 +80,20 @@ __contour_precmd() {
         unset __contour_command_running
     fi
 
-    # Text reflow off for the prompt; the working directory (OSC 7); OSC 133;A -- a new prompt starts
-    # on this line.
-    printf '\e[?2028l\e]7;%s\e\\\e]133;A\e\\' "$PWD"
+    # The last command history holds, as bash-preexec will read it for the next one -- whose own it is
+    # only if history has moved on by then.
+    __contour_history_at_prompt=$(HISTTIMEFORMAT='' builtin history 1)
+    __contour_history_at_prompt=${__contour_history_at_prompt#*[0-9][* ] }
+
+    # Text reflow off for the prompt; the working directory (OSC 7) as a file:// URL, its path encoded
+    # as a command line is -- so that no ESC or BEL in a directory name ends the sequence early -- once
+    # per directory; OSC 133;A -- a new prompt starts on this line.
+    if [[ $PWD != "${__contour_encoded_pwd_of-}" ]]; then
+        __contour_percent_encode "$PWD"
+        __contour_encoded_pwd=$__contour_encoded
+        __contour_encoded_pwd_of=$PWD
+    fi
+    printf '\e[?2028l\e]7;file://%s%s\e\\\e]133;A\e\\' "$HOSTNAME" "$__contour_encoded_pwd"
 
     # Keep the prompt-end mark the LAST precmd hook, so that a prompt framework which registered a
     # PS1-building hook of its own after this file was sourced (starship, oh-my-bash) cannot build over
@@ -354,10 +376,8 @@ __bp_preexec_invoke_exec() {
         HISTTIMEFORMAT='' builtin history 1 | sed '1 s/^ *[0-9][0-9]*[* ] //'
     )
 
-    # Sanity check to make sure we have something to invoke our function with.
-    if [[ -z "$this_command" ]]; then
-        return
-    fi
+    # Contour: with nothing in the history (HISTSIZE=0) preexec still runs, with an empty command line, as
+    # zsh's does while its history is off. Upstream returns here: no preexec, and so no OSC 133;C or D.
 
     # Invoke every function defined in our function array.
     local preexec_function

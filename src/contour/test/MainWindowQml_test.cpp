@@ -15,17 +15,22 @@
 // without PTYs or displays. activeTabRootPane stays null, so the pane tree (which would need a real
 // TerminalDisplay) never instantiates — exactly the pre-first-session state.
 
+#include <contour/test/MainWindowControllerMock.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
+#include <QtCore/QFile>
 #include <QtCore/QStringList>
+#include <QtCore/QTemporaryDir>
+#include <QtCore/QUrl>
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
+#include <QtQml/QQmlExpression>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
@@ -34,6 +39,7 @@
 #include <cstdint>
 #include <memory>
 
+#include <QtTest/QTest>
 #include <vtworkspace/PaneLayout.hpp>
 
 namespace
@@ -70,11 +76,13 @@ class StubContourTerminal: public QQuickItem
 /// Manager + WindowController in one mock: `terminalSessions` context property AND the object
 /// Main.qml assigns to `win` (createWindowController returns this). The QAbstractListModel rows
 /// feed the TitleBar's TabStrip like the production WindowController's model does.
-class MockMainController: public QAbstractListModel
+class MockMainController: public contour::test::MainWindowControllerMock
 {
     Q_OBJECT
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
-    Q_PROPERTY(bool multimediaReady READ multimediaReady CONSTANT)
+    // Writable here so a test can let multimedia become ready after the window loaded, as it does in
+    // production once the background probe finishes.
+    Q_PROPERTY(bool multimediaReady READ multimediaReady NOTIFY multimediaReadyChanged)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
     // Tab-strip placement + resolved visibility, mirroring the production WindowController properties
     // Main.qml binds. Writable here so a test can flip them and re-load Main.qml to assert the layout.
@@ -114,7 +122,15 @@ class MockMainController: public QAbstractListModel
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return 0; }
-    [[nodiscard]] bool multimediaReady() const noexcept { return false; }
+    [[nodiscard]] bool multimediaReady() const noexcept { return _multimediaReady; }
+    void setMultimediaReady(bool ready)
+    {
+        if (_multimediaReady != ready)
+        {
+            _multimediaReady = ready;
+            emit multimediaReadyChanged();
+        }
+    }
     [[nodiscard]] bool titleBarVisible() const noexcept { return false; } // frameless CSD (default)
 
     [[nodiscard]] int tabBarPosition() const noexcept { return _tabBarPosition; }
@@ -262,25 +278,21 @@ class MockMainController: public QAbstractListModel
   signals:
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
-    void commandPaletteRequested();
     void contextMenuModelChanged();
-    void contextMenuRequested();
     void titleBarContextMenuModelChanged();
-    void titleBarContextMenuRequested();
     void tabBarPositionChanged();
     void tabBarShouldShowChanged();
     void chromeHeightChanged();
+    void multimediaReadyChanged();
     void tabTitleEditRequested(int /*index*/);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
     void tabColorPickRequested(int /*index*/);
-    // Matches Main.qml's Connections handler for the save-layout prompt; a missing signal here is a QML
-    // warning, and the run-wide gate turns that into a failure of the whole suite.
-    void saveLayoutRequested();
 
   private:
     int _chromeHeight = 0;
     int _tabBarPosition = 0;       // 0 = Top (default), 1 = Bottom
     bool _tabBarShouldShow = true; // strip shown by default
+    bool _multimediaReady = false; // the background probe has not finished
 };
 
 /// Loads Main.qml offscreen against @p controller and returns the created root object: registers the
@@ -442,6 +454,177 @@ TEST_CASE("Main.qml tab strip: position flips the title-bar / content stacking (
         CHECK(titleBarY == content->height()); // strip sits just past the content's bottom edge
         CHECK(controller.chromeHeight() == 34);
     }
+}
+
+TEST_CASE("Main.qml window attention: each request reaches what acts on it (offscreen)",
+          "[contour][gui][qml][mainwindow][notification]")
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+
+    auto* trayIcon = root->findChild<QObject*>(QStringLiteral("trayIcon"));
+    REQUIRE(trayIcon != nullptr);
+
+    SECTION("a notification goes to the tray")
+    {
+        emit controller.notificationRequested(QStringLiteral("make finished"), QStringLiteral("took 12s"));
+        QCoreApplication::processEvents();
+
+        // Where the platform's tray shows messages, the icon carries this one; where it has none
+        // (offscreen, usually), the window says so instead. Either way the tray path ran.
+        if (trayIcon->property("supportsMessages").toBool())
+        {
+            CHECK(trayIcon->property("visible").toBool());
+            auto const* timer = root->findChild<QObject*>(QStringLiteral("trayIconTimer"));
+            REQUIRE(timer != nullptr);
+            CHECK(timer->property("running").toBool());
+        }
+        else
+        {
+            CHECK(warnings.count([](QString const& message) {
+                return message.contains(QStringLiteral("Notification system not supported"));
+            }) == 1);
+        }
+    }
+
+    SECTION("a bell goes to the window's bell, kept until multimedia is ready")
+    {
+        emit controller.bellRequested(QStringLiteral("qrc:/contour/bell.wav"), 0.5);
+        QCoreApplication::processEvents();
+
+        auto const* bell = root->findChild<QObject*>(QStringLiteral("windowBell"));
+        REQUIRE(bell != nullptr);
+        CHECK(bell->property("pendingSource").toString() == QStringLiteral("qrc:/contour/bell.wav"));
+        CHECK(bell->property("pendingVolume").toDouble() == 0.5);
+    }
+
+    SECTION("a click on a tray message reaches the window")
+    {
+        REQUIRE(QMetaObject::invokeMethod(trayIcon, "messageClicked"));
+        QCoreApplication::processEvents();
+        CHECK(controller.trayClickCount == 1);
+    }
+
+    SECTION("an alert runs")
+    {
+        emit controller.alertRequested();
+        QCoreApplication::processEvents();
+    }
+
+    for (auto const& w: warnings.messages())
+        UNSCOPED_INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Main.qml window bell: a bell rung before multimedia is ready plays once it is (offscreen)",
+          "[contour][gui][qml][mainwindow][notification]")
+{
+    // A stand-in for BellSound.qml that counts its plays, so the deferral is observable without
+    // QtMultimedia probing the host's audio drivers.
+    QTemporaryDir const playerDir;
+    REQUIRE(playerDir.isValid());
+    auto const playerPath = playerDir.filePath(QStringLiteral("CountingBell.qml"));
+    {
+        QFile player(playerPath);
+        REQUIRE(player.open(QIODevice::WriteOnly | QIODevice::Text));
+        player.write("import QtQuick\n"
+                     "Item {\n"
+                     "    objectName: \"countingBell\"\n"
+                     "    property string source: \"\"\n"
+                     "    property int playCount: 0\n"
+                     "    property real lastVolume: -1\n"
+                     "    function play(volume) { playCount += 1; lastVolume = volume; }\n"
+                     "}\n");
+    }
+
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+
+    auto* bell = root->findChild<QObject*>(QStringLiteral("windowBell"));
+    REQUIRE(bell != nullptr);
+    bell->setProperty("playerSource", QUrl::fromLocalFile(playerPath));
+
+    emit controller.bellRequested(QStringLiteral("qrc:/contour/bell.wav"), 0.5);
+    QCoreApplication::processEvents();
+    CHECK(bell->property("pendingVolume").toDouble() == 0.5);
+    CHECK(root->findChild<QObject*>(QStringLiteral("countingBell")) == nullptr); // nothing loaded yet
+
+    controller.setMultimediaReady(true);
+    QCoreApplication::processEvents();
+
+    auto const* player = root->findChild<QObject*>(QStringLiteral("countingBell"));
+    REQUIRE(player != nullptr);
+    CHECK(player->property("playCount").toInt() == 1);
+    CHECK(player->property("source").toString() == QStringLiteral("qrc:/contour/bell.wav"));
+    CHECK(player->property("lastVolume").toDouble() == 0.5);
+    CHECK(bell->property("pendingVolume").toDouble() < 0);
+
+    // Once ready, a bell plays at once.
+    emit controller.bellRequested(QStringLiteral("qrc:/contour/bell.wav"), 0.25);
+    CHECK(player->property("playCount").toInt() == 2);
+    CHECK(player->property("lastVolume").toDouble() == 0.25);
+
+    for (auto const& w: warnings.messages())
+        UNSCOPED_INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Main.qml tray icon: it leaves the tray once its message is over (offscreen)",
+          "[contour][gui][qml][mainwindow][notification]")
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+
+    auto* trayIcon = root->findChild<QObject*>(QStringLiteral("trayIcon"));
+    REQUIRE(trayIcon != nullptr);
+
+    SECTION("the icon stays exactly as long as the message it shows")
+    {
+        auto const* timer = root->findChild<QObject*>(QStringLiteral("trayIconTimer"));
+        REQUIRE(timer != nullptr);
+        CHECK(timer->property("interval").toInt() == root->property("trayMessageTimeout").toInt());
+        CHECK(root->property("trayMessageTimeout").toInt() > 0);
+    }
+
+    SECTION("the user coming back to the window makes the message moot")
+    {
+        trayIcon->setProperty("visible", true);
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+        REQUIRE(window != nullptr);
+        window->show();
+        window->requestActivate();
+        REQUIRE(QTest::qWaitForWindowActive(window));
+        CHECK_FALSE(trayIcon->property("visible").toBool());
+    }
+}
+
+TEST_CASE("Main.qml tooltips: every attached tooltip shows its text as written (offscreen)",
+          "[contour][gui][qml][mainwindow]")
+{
+    // Every tooltip in the application is an attached one, and an engine shares one instance among them,
+    // built by the style in use: Fusion's by default, whose text is AutoText. A link's URI holding
+    // `<img src=...>`, a tab title or a command line would render as rich text, the image fetched on hover.
+    // This binary pins Fusion, as `ui_style: native` does.
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+
+    // Read through an Item, as the attached property must be: the window itself is none.
+    auto* content = root->findChild<QQuickItem*>(QStringLiteral("content"));
+    REQUIRE(content != nullptr);
+    auto expression = QQmlExpression(
+        qmlContext(content), content, QStringLiteral("ToolTip.toolTip.contentItem.textFormat"));
+    auto const textFormat = expression.evaluate();
+    INFO("error: " << expression.error().toString().toStdString());
+    REQUIRE_FALSE(expression.hasError());
+    CHECK(textFormat.toInt() == Qt::PlainText);
 }
 
 #include <MainWindowQml_test.moc>

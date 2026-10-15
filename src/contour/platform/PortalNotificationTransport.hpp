@@ -12,7 +12,6 @@
     #include <QtCore/QObject>
     #include <QtCore/QVariantList>
     #include <QtCore/QVariantMap>
-    #include <QtDBus/QDBusConnection>
 
     #include <chrono>
     #include <cstdint>
@@ -102,8 +101,12 @@ using DelayScheduler =
 ///     nothing, so the ServerId every layer above deals in is minted HERE, as a counter, and mapped
 ///     to the portal's string. That keeps NotificationRouter and the notifier unchanged.
 ///  2. **It has no NotificationClosed signal.** Nothing can report that the desktop retired a
-///     popup, so a close is ASSUMED once the resolved delay elapses and reported as
-///     CloseReport::Untracked -- never as an observation. A delay of zero reports nothing at all.
+///     popup, so for a notification that asked for a close report a close is ASSUMED once the
+///     resolved delay elapses, and reported as CloseReport::Untracked -- never as an observation.
+///     A delay of zero reports nothing at all, and neither does a notification that asked for no
+///     report: it stays withdrawable and clickable for as long as the desktop keeps it, and
+///     NotificationIdMap::Capacity newer ones have not pushed it out.
+///     @see NotificationRouter::assumedCloseDelay().
 ///  3. **Its ActionInvoked is broadcast**, and carries only (id, action, parameter) -- the app id
 ///     the portal matched on is dropped before the signal reaches us. A bare "1" would therefore
 ///     collide with another sandboxed application's notification, so portal ids are namespaced with
@@ -113,16 +116,19 @@ class PortalNotificationTransport final: public QObject, public NotificationTran
     Q_OBJECT
 
   public:
-    /// @param closeDelay How long to wait before assuming a notification closed, where the
-    ///                   notification itself does not say (OSC 99 `w=`). Zero never assumes.
+    /// @param closeDelay How long to wait before assuming a notification that asked for a close
+    ///                   report closed, where the notification itself does not say (OSC 99 `w=`).
+    ///                   Zero never assumes.
     /// @param idPrefix   Namespace for this process's portal ids. @see the class doc, point 3.
     /// @param scheduler  How a delayed action is run; required, so a test can drive it by hand.
     /// @param caller     How a portal method call is issued; required, for the same reason.
+    /// @param subscriber How the portal's signals are subscribed to; required, for the same reason.
     /// @param parent     Qt ownership, or nullptr.
     explicit PortalNotificationTransport(std::chrono::milliseconds closeDelay,
                                          std::string idPrefix,
                                          DelayScheduler scheduler,
                                          PortalCaller caller,
+                                         DBusSignalSubscriber subscriber,
                                          QObject* parent = nullptr);
 
     void notify(vtbackend::DesktopNotification const& notification,
@@ -148,9 +154,6 @@ class PortalNotificationTransport final: public QObject, public NotificationTran
     void onActionInvoked(QString const& identifier, QString const& action, QVariantList const& parameters);
 
   private:
-    /// The session bus, held rather than fetched per call. @see DBusNotificationTransport.
-    QDBusConnection _bus;
-
     /// How long before a close is assumed, where the notification itself does not say.
     std::chrono::milliseconds _closeDelay;
 
@@ -162,6 +165,9 @@ class PortalNotificationTransport final: public QObject, public NotificationTran
 
     /// How a portal method call is issued.
     PortalCaller _call;
+
+    /// How the portal's signals are subscribed to.
+    DBusSignalSubscriber _subscribe;
 
     /// The last minted ServerId. Zero is never handed out: it is freedesktop's "this is a new
     /// notification" sentinel, and NotificationRouter::replacementFor() returns it to mean exactly

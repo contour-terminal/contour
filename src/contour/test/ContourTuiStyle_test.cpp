@@ -183,6 +183,30 @@ TEST_CASE("Every ContourTui popup surface declares an overlay scrim", "[contour]
     }
 }
 
+TEST_CASE("A ContourTui tooltip shows its text as written", "[contour][gui][style]")
+{
+    // A tooltip's text may be what an application wrote: an OSC 8 link's URI, a tab title, a command line.
+    // Read as AutoText, it becomes rich text whenever its first line looks like markup -- a URI holding
+    // `<img src=...>` rendered the image, fetching it on hover. The style fixes the format once, for every
+    // tooltip, rather than leaving each to what its first line happens to hold.
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine, contour::config::UiStyle::Terminal);
+
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/ContourTui/ToolTip.qml")));
+    INFO("ToolTip errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+
+    std::unique_ptr<QObject> tip(component.create());
+    REQUIRE(tip != nullptr);
+    auto const uri = QStringLiteral(R"(http://a/<img src="http://t/p.png">)");
+    tip->setProperty("text", uri);
+
+    auto const* content = tip->property("contentItem").value<QQuickItem*>();
+    REQUIRE(content != nullptr);
+    CHECK(content->property("textFormat").toInt() == Qt::PlainText);
+    CHECK(content->property("text").toString() == uri);
+}
+
 TEST_CASE("A ContourTui text field shows its placeholder", "[contour][gui][style]")
 {
     // T.TextField carries `placeholderText` but draws nothing for it -- rendering it is the style's

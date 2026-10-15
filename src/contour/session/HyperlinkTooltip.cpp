@@ -2,8 +2,7 @@
 #include <contour/session/HyperlinkTooltip.hpp>
 
 #include <vtbackend/core/FileUrl.hpp>
-
-#include <core/Utils.hpp>
+#include <vtbackend/shell/CommandLineSanitizer.hpp>
 
 #include <optional>
 #include <ranges>
@@ -38,15 +37,16 @@ namespace
     }
 
     /// The path a file:// URI names on THIS host, decoded for reading, or nullopt when it names anything
-    /// else. A truncated or malformed escape is left as written rather than dropped: showing the user what
-    /// the application actually sent beats silently swallowing it (@see core::unescapeURL).
-    [[nodiscard]] std::optional<std::string> localFilePath(std::string_view uri, std::string_view localHost)
+    /// else -- or when no file:// URI names a path here (@p localHost nullopt). A truncated or malformed
+    /// escape is left as written rather than dropped: showing the user what the application actually sent
+    /// beats silently swallowing it (@see vtbackend::parseFileUrl).
+    [[nodiscard]] std::optional<std::string> localFilePath(std::string_view uri,
+                                                           std::optional<std::string_view> localHost)
     {
-        if (!uri.starts_with("file://"))
+        if (!uri.starts_with("file://") || !localHost)
             return std::nullopt;
 
-        return vtbackend::localWorkingDirectory(std::string { uri }, localHost)
-            .transform([](std::string const& path) { return core::unescapeURL(path); });
+        return vtbackend::localPathOfFileUrl(std::string { uri }, *localHost);
     }
 } // namespace
 
@@ -71,12 +71,19 @@ std::string elideMiddle(std::string_view text, size_t maxLength)
     return out;
 }
 
-std::string hyperlinkTooltipText(std::string_view uri, std::string_view localHost, size_t maxLength)
+std::string hyperlinkTooltipText(std::string_view uri,
+                                 std::optional<std::string_view> localHost,
+                                 size_t maxLength)
 {
     if (uri.empty())
         return {};
 
-    return elideMiddle(localFilePath(uri, localHost).value_or(std::string { uri }), maxLength);
+    // Shown, so made safe to show: a decoded path, or the target itself, may hold a line feed or a bidi
+    // override, which would add a line to the tooltip or reverse what follows it.
+    return elideMiddle(
+        vtbackend::sanitizeCommandLine(localFilePath(uri, localHost).value_or(std::string { uri }),
+                                       vtbackend::SanitizePurpose::Display),
+        maxLength);
 }
 
 HyperlinkHoverTracker::Change HyperlinkHoverTracker::update(std::string_view uri,
@@ -93,7 +100,7 @@ HyperlinkHoverTracker::Change HyperlinkHoverTracker::update(std::string_view uri
 
     _uri = std::string { uri };
     _anchor = cell;
-    return { .changed = true, .text = hyperlinkTooltipText(uri, _localHost, maxLength), .anchor = _anchor };
+    return { .changed = true, .text = hyperlinkTooltipText(uri, _localHost(), maxLength), .anchor = _anchor };
 }
 
 HyperlinkHoverTracker::Change HyperlinkHoverTracker::clear()

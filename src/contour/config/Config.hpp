@@ -3,7 +3,10 @@
 
 #include <contour/config/Actions.hpp>
 #include <contour/config/ConfigDocumentation.hpp>
+#include <contour/config/ConfigEnum.hpp>
+#include <contour/config/FinishNotificationConfig.hpp>
 #include <contour/config/GpuSelector.hpp>
+#include <contour/config/SingleQuoted.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
@@ -16,8 +19,11 @@
 #include <vtbackend/input/InputBinding.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/MatchModes.hpp>
+#include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/shell/MarkArbiter.hpp>
+#include <vtbackend/shell/ScrollbarMarks.hpp>
+#include <vtbackend/shell/StickyHeader.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/VTType.hpp>
 
@@ -41,8 +47,11 @@
 #include <core/Assert.hpp>
 #include <core/Environment.hpp>
 #include <core/Flags.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/log/LogStore.hpp>
+
+#include <libunicode/convert.h>
 
 #include <yaml-cpp/emitter.h>
 #include <yaml-cpp/node/detail/iterator_fwd.h>
@@ -71,6 +80,7 @@
 #include <unordered_map>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include <reflection-cpp/reflection.hpp>
 #include <vtworkspace/LayoutTree.hpp> // layout tree structs (LayoutPane, LayoutTab, Layout)
@@ -150,6 +160,13 @@ struct Config;
     return true;
 }
 
+/// What becomes of an input whose built-in binding matched, but whose actions all declined to run.
+enum class DeclinedInput : uint8_t
+{
+    PassThrough = 0, ///< The input reaches the application, as if nothing were bound to it.
+    Consume,         ///< The input is dropped, so a chord the application reads differently does no harm.
+};
+
 /// A built-in fallback binding, together with the global-config predicate that enables it.
 ///
 /// The predicate is a COLUMN rather than an `if` at the consultation site: a default that only applies
@@ -164,10 +181,13 @@ struct FallbackMapping
     /// A plain function pointer, not std::function: it keeps the table a `static const` literal with
     /// no allocation, on a path walked for every input the application did not claim.
     bool (*enabled)(Config const&) noexcept = alwaysEnabled;
+    /// What a declined press does: pass through to the application (the default), or be consumed.
+    DeclinedInput declined = DeclinedInput::PassThrough;
 };
 
 using FallbackMouseMapping = FallbackMapping<vtbackend::MouseButton>;
 using FallbackKeyMapping = FallbackMapping<vtbackend::Key>;
+using FallbackCharMapping = FallbackMapping<char32_t>;
 
 /// Bindings that apply when the user's `input_mapping:` does not claim the input itself.
 ///
@@ -183,6 +203,11 @@ using FallbackKeyMapping = FallbackMapping<vtbackend::Key>;
 
 /// @copydoc builtinFallbackMouseMappings
 [[nodiscard]] std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings();
+
+/// @copydoc builtinFallbackMouseMappings
+/// Characters, stored folded upper-case as a parsed binding is: a Ctrl+Shift+letter chord arrives as one.
+/// @see foldedBindingCodepoint
+[[nodiscard]] std::vector<FallbackCharMapping> const& builtinFallbackCharMappings();
 
 namespace helper
 {
@@ -249,18 +274,24 @@ namespace helper
 /// @p mappings is any range of bindings, not just a vector, so a filtered view over a gated table can
 /// be matched without materialising it. The returned pointer aliases an element of @p mappings, so
 /// that range must outlive the result — which it does for the static tables all callers pass.
+///
+/// @param clickCount The press's multi-click count for a click-count lookup; nullopt for an ordinary one.
 template <typename Input, std::ranges::input_range Mappings>
     requires std::same_as<std::ranges::range_value_t<Mappings>, vtbackend::InputBinding<Input, ActionList>>
 std::vector<actions::Action> const* apply(Mappings&& mappings,
                                           Input input,
                                           vtbackend::Modifiers modifiers,
-                                          uint8_t actualModeFlags)
+                                          uint8_t actualModeFlags,
+                                          std::optional<uint8_t> clickCount = std::nullopt)
 {
     // Forwarded rather than taken by const&: std::views::filter is not const-iterable, so a filtered
     // view over the gated fallback table could not be walked through a const reference.
+    //
+    // The click count must match exactly: an ordinary press never reaches a `clicks:` row, and a
+    // click-count lookup (TerminalSession's claimant) never reaches a plain one.
     for (vtbackend::InputBinding<Input, ActionList> const& mapping: std::forward<Mappings>(mappings))
     {
-        if (mapping.modifiers == modifiers && mapping.input == input
+        if (mapping.modifiers == modifiers && mapping.input == input && mapping.clickCount == clickCount
             && helper::testMatchMode(actualModeFlags, mapping.modes))
         {
             return &mapping.binding;
@@ -272,20 +303,43 @@ std::vector<actions::Action> const* apply(Mappings&& mappings,
 /// Matches @p button against the built-in fallback rows that @p config enables.
 ///
 /// The counterpart to apply() for @ref builtinFallbackMouseMappings: the caller states *what* was
-/// pressed, never *which* defaults are currently switched on.
+/// pressed, never *which* defaults are currently switched on. A mouse lookup may also state the press's
+/// click count, @p clickCount, which matches as it does for apply().
 ///
 /// @return The bound actions, or nullptr when no enabled row matches.
 [[nodiscard]] ActionList const* applyBuiltinFallback(Config const& config,
                                                      vtbackend::MouseButton button,
                                                      vtbackend::Modifiers modifiers,
-                                                     uint8_t actualModeFlags);
+                                                     uint8_t actualModeFlags,
+                                                     std::optional<uint8_t> clickCount = std::nullopt);
 
 /// @copydoc applyBuiltinFallback
-/// An overload rather than a differently-named function, so both consultation sites read alike.
+/// An overload rather than a differently-named function, so every consultation site reads alike.
 [[nodiscard]] ActionList const* applyBuiltinFallback(Config const& config,
                                                      vtbackend::Key key,
                                                      vtbackend::Modifiers modifiers,
                                                      uint8_t actualModeFlags);
+
+/// @copydoc applyBuiltinFallback
+/// @p codepoint is matched as given, so the caller folds it first (@ref foldedBindingCodepoint).
+[[nodiscard]] ActionList const* applyBuiltinFallback(Config const& config,
+                                                     char32_t codepoint,
+                                                     vtbackend::Modifiers modifiers,
+                                                     uint8_t actualModeFlags);
+
+/// The enabled built-in row matching @p key, for a caller that also honours what a declined press does.
+/// @return The row, or nullptr when no enabled row matches.
+[[nodiscard]] FallbackKeyMapping const* builtinFallbackRow(Config const& config,
+                                                           vtbackend::Key key,
+                                                           vtbackend::Modifiers modifiers,
+                                                           uint8_t actualModeFlags);
+
+/// @copydoc builtinFallbackRow
+/// @p codepoint is matched as given, so the caller folds it first (@ref foldedBindingCodepoint).
+[[nodiscard]] FallbackCharMapping const* builtinFallbackRow(Config const& config,
+                                                            char32_t codepoint,
+                                                            vtbackend::Modifiers modifiers,
+                                                            uint8_t actualModeFlags);
 
 struct CursorConfig
 {
@@ -344,21 +398,57 @@ struct HistoryConfig
 struct FoldingConfig
 {
     bool enabled { true };                   ///< Whether folding is available at all.
-    bool showMarkers { true };               ///< Reserve a gutter column and draw a marker in it.
+    bool showMarkers { true };               ///< Draw fold markers in the gutter's block column.
     bool autoCollapseOnNewCommand { false }; ///< Collapse a command as soon as the next prompt starts.
 
     /// What a targeted Vi-mode jump does when its target sits inside a collapsed fold.
     vtbackend::FoldJumpBehavior onJumpIntoFold { vtbackend::FoldJumpBehavior::Expand };
 
-    /// Whether the fold gutter is drawn, and therefore whether a column must be reserved for it.
+    /// Whether the gutter's block column draws fold markers.
     ///
-    /// Spelled once because two independent layers ask it: the renderer, deciding whether to draw a
-    /// marker, and the window geometry, deciding whether to reserve the column one would occupy. They
-    /// must always agree -- a marker drawn into a column nobody reserved lands on top of the grid --
-    /// and a third condition added to only one of them is a silent desync.
+    /// Read by gutterSettingsFor() alone, which both the terminal and the window geometry take the
+    /// gutter from, so the two cannot disagree about whether the markers -- and with them, possibly, the
+    /// column they are drawn in -- are there.
     ///
     /// @return Whether markers are shown.
     [[nodiscard]] constexpr bool markersVisible() const noexcept { return enabled && showMarkers; }
+
+    /// `enabled`, as the engine reads it.
+    /// @see vtbackend::Settings::foldingAvailability
+    /// @return Whether folding is available.
+    [[nodiscard]] constexpr vtbackend::FoldingAvailability availability() const noexcept
+    {
+        return enabled ? vtbackend::FoldingAvailability::Enabled : vtbackend::FoldingAvailability::Disabled;
+    }
+};
+
+/// The gutter left of the grid: what its block column shows, its line numbers and its timestamps.
+///
+/// GLOBAL for FoldingConfig's reason: it describes how the user reads output, not how one shell writes
+/// it. Plain bools and an int because these are YAML schema fields, converted at the boundary by
+/// gutterSettingsFor() -- the documented carve-out in AGENT.md. Whether the block column draws fold
+/// controls stays where it always was, `folding.show_markers`.
+struct GutterConfig
+{
+    /// Colour the block column by outcome, and draw ▸ and ●.
+    bool exitStatus { true };
+
+    /// Draw ◆ beside rows marked with vi `mm`.
+    bool userMarks { true };
+
+    /// Which line numbers, if any.
+    vtbackend::LineNumberMode lineNumbers { vtbackend::LineNumberMode::Off };
+
+    /// The columns the line numbers take, MinLineNumberWidth..MaxLineNumberWidth.
+    int lineNumberWidth { 6 };
+
+    /// Show the time each row was first reached.
+    bool timestamps { false };
+
+    /// A std::format chrono specification, without the braces, spelled in local time.
+    std::string timestampFormat { vtbackend::DefaultTimestampFormat };
+
+    bool operator==(GutterConfig const&) const = default;
 };
 
 /// OSC 3008 (UAPI.15) hierarchical context signalling: the nested stack of contexts a shell, `run0`,
@@ -407,10 +497,98 @@ struct OscContextConfig
     vtbackend::ContextTintScope tinting { vtbackend::ContextTintScope::Boundaries };
 };
 
+/// The pager OpenCommandOutput runs when its binding names no program: `less -R`, which keeps the
+/// colours an `sgr` capture carries, wherever there is one; `more` on Windows, where there is not.
+/// @return The default of `command_blocks.pager`.
+[[nodiscard]] constexpr std::string_view defaultCommandOutputPager() noexcept
+{
+#ifdef _WIN32
+    return "more";
+#else
+    return "less -R";
+#endif
+}
+
+/// What the terminal remembers about each shell command block it saw run: command line, exit status,
+/// duration, start time and working directory, kept even after the block's rows have scrolled away.
+///
+/// GLOBAL rather than per-profile, for the reason FoldingConfig is: it describes how the terminal reads
+/// the protocol a shell speaks (OSC 133, OSC 3008), not how one pane looks.
+struct CommandBlocksConfig
+{
+    /// How many blocks one session remembers; the oldest are forgotten first. Bounds what a flood of OSC
+    /// 133 sequences -- a `cat` of a recorded session -- can cost. Applies to sessions opened afterwards.
+    size_t maxRecords { 1000 };
+
+    /// The program OpenCommandOutput opens a block's output with when its binding names none. Read as a
+    /// profile's `shell:` is: a string naming a program runs as it is; otherwise its first word is the
+    /// program and the rest its arguments, on Windows passed on as written. The output file is appended
+    /// as its last argument.
+    std::string pager { defaultCommandOutputPager() };
+
+    /// Whether @ref pager renders SGR, so the file written for it keeps the output's colours. The same
+    /// on every platform: `less -R` does, and so does Windows `more` running in the pane's ConPTY, which
+    /// interprets the sequences itself.
+    actions::OutputFormat pagerFormat { actions::OutputFormat::Sgr };
+};
+
+/// The format OpenCommandOutput writes a block's output in: the binding's own when it names one, else
+/// the format of the program it runs -- `command_blocks.pager_format` for the configured pager, SGR for a
+/// program the binding names.
+/// @param action The action.
+/// @param commandBlocks The configured pager and its format.
+/// @return The format.
+[[nodiscard]] constexpr actions::OutputFormat outputFormatFor(
+    actions::OpenCommandOutput const& action, CommandBlocksConfig const& commandBlocks) noexcept
+{
+    if (action.format)
+        return *action.format;
+    return action.program.empty() ? commandBlocks.pagerFormat : actions::OutputFormat::Sgr;
+}
+
+/// The largest `command_blocks.max_records` the reader accepts; a larger value is clamped to it.
+constexpr inline int64_t MaxCommandBlockRecords = 1'000'000;
+
 struct ScrollBarConfig
 {
-    ScrollBarPosition position { ScrollBarPosition::Hidden };
+    /// Which edge the scrollbar floats against, or Hidden for none (`scrollbar.position`).
+    ///
+    /// Right by default, so the command marks (@ref marks) are visible out of the box. The bar is an overlay
+    /// (SessionChrome.qml): it takes no column from the page, shows only while there is history to scroll
+    /// through, and stays off the alternate screen while @ref hideScrollbarInAltScreen is on.
+    ScrollBarPosition position { ScrollBarPosition::Right };
     bool hideScrollbarInAltScreen { true };
+
+    /// Which marks the scrollbar draws as ticks (`scrollbar.marks`: a YAML list of `failures`, `commands`,
+    /// `user_marks`; `[]` draws none).
+    ///
+    /// Read by TerminalSession, which filters the terminal's marks with it. The terminal itself reports
+    /// every mark and never consults this, so it is not mapped into vtbackend::Settings.
+    vtbackend::ScrollbarMarkSources marks { vtbackend::AllScrollbarMarkSources };
+};
+
+/// The sticky command header: the command of the block being read, pinned over the top row once it has
+/// scrolled out of view above its own output (profile key `sticky_header`).
+///
+/// A plain bool for `showEvicted` because it is a YAML schema field, converted at the boundary by
+/// settings() -- the documented carve-out in AGENT.md. `mode` is not a bool in disguise: it names three
+/// outcomes.
+struct StickyHeaderConfig
+{
+    vtbackend::StickyHeaderMode mode { vtbackend::StickyHeaderMode::Scrolled }; ///< When the header shows.
+    bool showEvicted { true }; ///< Whether the evicted-output placeholder may stand in for an evicted prompt.
+
+    /// The terminal's view of this configuration; what sessionSettings() hands the terminal.
+    /// @return `mode` as it is, and `showEvicted` as the placeholder's enum.
+    [[nodiscard]] constexpr vtbackend::StickyHeaderSettings settings() const noexcept
+    {
+        return vtbackend::StickyHeaderSettings { .mode = mode,
+                                                 .evictedPlaceholder =
+                                                     showEvicted ? vtbackend::EvictedPlaceholder::Shown
+                                                                 : vtbackend::EvictedPlaceholder::Hidden };
+    }
+
+    bool operator==(StickyHeaderConfig const&) const = default;
 };
 
 struct MouseConfig
@@ -565,6 +743,9 @@ struct WindowMargins
 {
     HorizontalMargin horizontal { 0 };
     VerticalMargin vertical { 0 };
+
+    /// Member-wise equality: both axes alike.
+    [[nodiscard]] constexpr bool operator==(WindowMargins const&) const noexcept = default;
 };
 
 template <typename... T>
@@ -719,6 +900,7 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::Maximized> maximized { false };
     ConfigEntry<bool, documentation::InsertAfterYank> insertAfterYank { false };
     ConfigEntry<Bell, documentation::Bell> bell { { .sound = "default", .alert = true, .volume = 1.0f } };
+    ConfigEntry<FinishNotificationConfig, documentation::NotifyOnCommandFinish> notifyOnCommandFinish {};
     ConfigEntry<vtbackend::VTType, documentation::TerminalId> terminalId { vtbackend::VTType::VT525 };
     ConfigEntry<PixelReporting, documentation::PixelReporting> pixelReporting { PixelReporting::Device };
     ConfigEntry<std::map<vtbackend::DECMode, bool>, documentation::FrozenDecMode> frozenModes {};
@@ -733,6 +915,7 @@ struct TerminalProfile
                                                                    .vertical = VerticalMargin { 0u } } };
     ConfigEntry<HistoryConfig, documentation::History> history {};
     ConfigEntry<ScrollBarConfig, documentation::Scrollbar> scrollbar {};
+    ConfigEntry<StickyHeaderConfig, documentation::StickyHeader> stickyHeader {};
     ConfigEntry<MouseConfig, documentation::Mouse> mouse { true };
     ConfigEntry<PermissionsConfig, documentation::Permissions> permissions {};
     ConfigEntry<bool, documentation::InputMethodEditorSupport> inputMethodEditor { true };
@@ -1251,10 +1434,11 @@ struct Config
         std::chrono::milliseconds { 0 }
     };
 
-    /// How long after showing a desktop notification the terminal assumes it was closed, where the
-    /// desktop cannot say. Only the portal backend a sandboxed Contour must use is in that
-    /// position; on the session bus a close is observed and this is never consulted. A
-    /// notification's own OSC 99 `w=` wins where it states one, and zero reports nothing at all.
+    /// How long after showing a desktop notification that asked to hear of its close (OSC 99 `c=1`)
+    /// the terminal assumes it was closed, where the desktop cannot say. Only the portal backend a
+    /// sandboxed Contour must use is in that position; on the session bus a close is observed and
+    /// this is never consulted. A notification's own OSC 99 `w=` wins where it states one, and zero
+    /// reports nothing at all. A notification that asked for no close report is never assumed closed.
     ConfigEntry<std::chrono::milliseconds, documentation::NotificationCloseTimeout> notificationCloseTimeout {
         std::chrono::milliseconds { 10000 }
     };
@@ -1304,7 +1488,9 @@ struct Config
     ConfigEntry<std::set<std::string>, documentation::ExperimentalFeatures> experimentalFeatures {};
     ConfigEntry<ImagesConfig, documentation::Images> images {};
     ConfigEntry<FoldingConfig, documentation::Folding> folding {};
+    ConfigEntry<GutterConfig, documentation::Gutter> gutter {};
     ConfigEntry<OscContextConfig, documentation::OscContext> oscContext {};
+    ConfigEntry<CommandBlocksConfig, documentation::CommandBlocks> commandBlocks {};
 
     ConfigEntry<std::unordered_map<std::string, TerminalProfile>, documentation::Profiles> profiles {
         { { "main", TerminalProfile {} } }
@@ -1407,7 +1593,21 @@ struct YAMLConfigReader
     /// @param env      The environment `${VAR}` expands against. It must outlive this reader: the
     ///                 default replacer holds a reference to it.
     /// @param replacer An expansion policy of the caller's own; the default one reads @p env.
-    YAMLConfigReader(std::string const& filename,
+    YAMLConfigReader(std::filesystem::path const& filename,
+                     core::log::Category const& log,
+                     core::Environment const& env,
+                     VariableReplacer replacer = {});
+
+    /// Reads a document the caller has parsed already, so that a file it has to parse anyway, to tell
+    /// a broken one from an empty one, is not read and parsed a second time.
+    /// @param filename Where @p document came from.
+    /// @param document The parsed document.
+    /// @param log      Where diagnostics go.
+    /// @param env      The environment `${VAR}` expands against. It must outlive this reader: the
+    ///                 default replacer holds a reference to it.
+    /// @param replacer An expansion policy of the caller's own; the default one reads @p env.
+    YAMLConfigReader(std::filesystem::path filename,
+                     YAML::Node const& document,
                      core::log::Category const& log,
                      core::Environment const& env,
                      VariableReplacer replacer = {});
@@ -1421,19 +1621,85 @@ struct YAMLConfigReader
     /// Parses a single pane node. A node is a LEAF unless it carries a `split:` mapping.
     void parseLayoutPane(YAML::Node const& node, LayoutPane& where);
 
+    /// Loads @p entry of @p node into @p where, so that a value of the wrong shape costs that entry alone.
+    ///
+    /// yaml-cpp throws when a value has another shape than its reader expects: a scalar where a map
+    /// belongs, a list where one word belongs. Uncaught, that throw would end the whole load, and every
+    /// entry read after it would keep its default without a word. Instead @p where is put back as it
+    /// was, the entry is reported by its whole key path, and loading goes on. A reader subscripts its
+    /// own value under its own guard, so a value of the wrong shape is blamed on its own key.
+    /// @param node  The mapping to read from.
+    /// @param entry The key within @p node.
+    /// @param where Receives the value; unchanged when the entry cannot be read.
+    /// @param args  Passed on to the reader of @p where.
+    template <typename T, typename... Args>
+    void loadGuarded(YAML::Node const& node, std::string const& entry, T& where, Args&&... args)
+    {
+        readGuarded(
+            node, entry, where, [&]() { loadFromEntry(node, entry, where, std::forward<Args>(args)...); });
+    }
+
+    /// Runs @p read, which reads @p entry of @p node into @p where, under loadGuarded()'s guard: for an
+    /// entry whose reader is no loadFromEntry() overload of its own, such as one map of a colour scheme.
+    /// @param node  The mapping @p entry is read from.
+    /// @param entry The key within @p node.
+    /// @param where What @p read may change; put back as it was when @p read throws.
+    /// @param read  Reads the entry.
+    template <typename T, typename Reader>
+    void readGuarded(YAML::Node const& node, std::string const& entry, T& where, Reader const& read)
+    {
+        auto fallback = where;
+        _keyPath.push_back(KeyStep { .container = node, .entry = entry });
+        auto const leave = core::Finally { [this]() { _keyPath.pop_back(); } };
+        try
+        {
+            read();
+        }
+        catch (std::exception const& e)
+        {
+            where = std::move(fallback);
+            errorLog()("Ignoring the malformed config entry {}: {}", keyPathTo(node, entry), e.what());
+        }
+    }
+
+    /// Runs @p read with every key path it reports rooted at side file @p file -- `<file>: <key>` --
+    /// rather than at the document this reader began with: a side file's entry is found in that file,
+    /// not where the configuration names it, and settings.yml spells its keys as contour.yml does.
+    /// @param file     The side file @p document was parsed from.
+    /// @param document The side file's root.
+    /// @param read     Reads from @p document.
+    template <typename Reader>
+    void readSideFile(std::filesystem::path const& file, YAML::Node const& document, Reader const& read)
+    {
+        auto outerPath = std::exchange(_keyPath,
+                                       std::vector { KeyStep { .container = document,
+                                                               .entry = core::pathToUtf8(file),
+                                                               .kind = KeyStepKind::File } });
+        auto const restore = core::Finally { [&]() { _keyPath = std::move(outerPath); } };
+        read();
+    }
+
+    /// Reads and parses side file @p file -- settings.yml, a profile's file or a colour scheme's -- once,
+    /// for readSideFile() to read from.
+    /// @param file The side file.
+    /// @return Its document, a map or empty, or why there is none: `<file>: <reason>`, a missing file and
+    ///         a document of another shape included.
+    [[nodiscard]] static std::expected<YAML::Node, std::string> parseSideFile(
+        std::filesystem::path const& file);
+
+    /// @p entry of @p node, spelled out from the document's root as loadGuarded() descended to it:
+    /// `profiles.main.cursor`.
+    /// @param node  The mapping @p entry is read from.
+    /// @param entry The key within @p node.
+    /// @return The key path.
+    [[nodiscard]] std::string keyPathTo(YAML::Node const& node, std::string_view entry) const;
+
     template <typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
     void loadFromEntry(YAML::Node const& node,
                        std::string const& entry,
                        ConfigEntry<T, documentation::DocumentationEntry<ConfigDoc, WebDoc>>& where)
     {
-        try
-        {
-            loadFromEntry(node, entry, where.value());
-        }
-        catch (std::exception const& e)
-        {
-            logger()("Failed, default value will be used");
-        }
+        loadGuarded(node, entry, where.value());
     }
 
     template <typename T,
@@ -1444,11 +1710,11 @@ struct YAMLConfigReader
                        ConfigEntry<T, documentation::DocumentationEntry<ConfigDoc, WebDoc>>& where,
                        Args&&... args)
     {
-        loadFromEntry(doc, entry, where.value(), std::forward<Args>(args)...);
+        loadGuarded(doc, entry, where.value(), std::forward<Args>(args)...);
     }
 
     template <typename T>
-        requires std::is_scalar_v<T>
+        requires(std::is_scalar_v<T> && !ConfigEnumConcept<T>)
     void loadFromEntry(YAML::Node const& node, std::string const& entry, T& where)
     {
         auto const child = node[entry];
@@ -1456,6 +1722,17 @@ struct YAMLConfigReader
             where = child.as<T>();
         logger()("Loading entry: {}, value {}", entry, where);
     }
+
+    /// Reads an enum that has a configuration table, through that table.
+    ///
+    /// The settings page builds its combo box from the very same rows (@see configEnumValues), so a
+    /// value this reader accepts is by construction one the settings page can offer and the writer
+    /// can spell back. An unknown word, a list or a map is reported and leaves @p where as it was.
+    /// @param node  The mapping to read from.
+    /// @param entry The key within @p node.
+    /// @param where Receives the value.
+    template <ConfigEnumConcept Enum>
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, Enum& where);
 
     template <typename V, typename T>
     void loadFromEntry(YAML::Node const& node, std::string const& entry, boxed::boxed<V, T>& where)
@@ -1474,7 +1751,8 @@ struct YAMLConfigReader
         if (auto const child = node[entry]; child && child.IsMap())
         {
             logger()("Loading default profile: {}", defaultProfileName);
-            loadFromEntry(child, defaultProfileName, where[defaultProfileName]);
+            // Guarded one profile at a time, so a profile that is not a map costs no other profile.
+            loadGuarded(child, defaultProfileName, where[defaultProfileName]);
             for (auto entry: child)
             {
                 auto const name = entry.first.as<std::string>();
@@ -1482,7 +1760,7 @@ struct YAMLConfigReader
                     continue;
                 logger()("Loading map with entry: {}", name);
                 where[name] = where[defaultProfileName]; // inherit from default
-                loadFromEntry(child, entry.first.as<std::string>(), where[name]);
+                loadGuarded(child, name, where[name]);
             }
         }
     }
@@ -1510,7 +1788,7 @@ struct YAMLConfigReader
             {
                 auto const name = entry.first.as<std::string>();
                 logger()("Loading map with entry: {}", name);
-                loadFromEntry(child, entry.first.as<std::string>(), where[name]);
+                loadGuarded(child, name, where[name]);
             }
         }
     }
@@ -1527,11 +1805,12 @@ struct YAMLConfigReader
                                vtbackend::MatchModes modes,
                                vtbackend::Modifiers modifier,
                                Input input,
-                               actions::Action action)
+                               actions::Action action,
+                               std::optional<uint8_t> clickCount = std::nullopt)
     {
         for (auto& binding: bindings)
         {
-            if (match(binding, modes, modifier, input))
+            if (match(binding, modes, modifier, input, clickCount))
             {
                 binding.binding.emplace_back(std::move(action));
                 return;
@@ -1539,7 +1818,7 @@ struct YAMLConfigReader
         }
 
         bindings.emplace_back(vtbackend::InputBinding<Input, ActionList> {
-            modes, modifier, input, ActionList { std::move(action) } });
+            modes, modifier, input, ActionList { std::move(action) }, clickCount });
     }
 
     // clang-format off
@@ -1553,9 +1832,6 @@ struct YAMLConfigReader
                        std::string const& entry,
                        vtrasterizer::GlyphScalingMethod& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorDisplay& where);
-    void loadFromEntry(YAML::Node const& node,
-                       std::string const& entry,
-                       vtbackend::SearchCaseSensitivity& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::BlinkStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ScreenTransitionStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::Modifiers& where);
@@ -1569,11 +1845,6 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarPosition& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PixelReporting& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, GuiTheme& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarPosition& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, ShadowSize& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, TabBarVisibility& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, UiStyle& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, WindowControlStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::FontDescriptions& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, text::RenderMode& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::TextOutlineConfig& where);
@@ -1595,6 +1866,7 @@ struct YAMLConfigReader
                        vtpty::Process::ExecInfo& where) const;
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtpty::SshHostConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, Bell& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, FinishNotificationConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, std::map<vtbackend::DECMode, bool>& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::Decorator& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::Opacity& where);
@@ -1611,6 +1883,37 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, vtbackend::ColorPalette& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, TerminalProfile& where);
 
+    /// Reads a mode's `cursor:` map -- its shape, blinking and blinking interval.
+    /// @param node  The mapping to read from.
+    /// @param entry The key within @p node.
+    /// @param where Receives what the map states.
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, CursorConfig& where);
+
+    /// Reads a Vi mode's map (`normal_mode:`, `visual_mode:`), its `cursor:` guarded on its own.
+    /// @param node  The mapping to read from.
+    /// @param entry The key within @p node.
+    /// @param where Receives what the map states.
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, InputModeConfig& where);
+
+    /// Loads @p entry of @p node into @p where if the key is there, and leaves @p where as it is if not:
+    /// for a value whose absence means "derive it", such as a colour scheme's fold column.
+    ///
+    /// The key is a view, so the tables that spell a colour scheme's keys -- block_status, sticky_header,
+    /// tint -- hand theirs over as they are.
+    /// @param node The mapping to read.
+    /// @param entry The key.
+    /// @param where Set to the value read; untouched without the key.
+    template <typename T>
+    void loadOptional(YAML::Node const& node, std::string_view entry, std::optional<T>& where)
+    {
+        auto const key = std::string { entry };
+        if (!node[key])
+            return;
+        auto value = T {};
+        loadFromEntry(node, key, value);
+        where = value;
+    }
+
     /// Parses a profile body map (a profile's `shell`, `font`, `colors`, ... keys) directly into
     /// @p where. This is the shared core of profile parsing: the `loadFromEntry(node, entry, profile)`
     /// overload above resolves `node[entry]` to the body and delegates here, and the GUI side-file
@@ -1623,13 +1926,22 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, FoldingConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, GutterConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, OscContextConfig& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ContextMarkPolicy& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ContextTintScope& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, CommandBlocksConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarConfig& where);
+
+    /// Loads @p entry as a YAML list of scrollbar mark sources, replacing @p where whole: `[]` is a
+    /// deliberate "none". Left unchanged when absent or not a list; a list item that names no source is
+    /// reported and skipped.
+    /// @param node The mapping that holds @p entry.
+    /// @param entry The key to read (`marks`).
+    /// @param where The sources to fill.
     void loadFromEntry(YAML::Node const& node,
                        std::string const& entry,
-                       vtbackend::FoldJumpBehavior& where);
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, ScrollBarConfig& where);
+                       vtbackend::ScrollbarMarkSources& where);
+
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, StickyHeaderConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, MouseConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, StatusLineConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, BackgroundConfig& where);
@@ -1672,8 +1984,33 @@ struct YAMLConfigReader
                      vtbackend::MatchModes modes,
                      vtbackend::Modifiers modifier,
                      YAML::Node const& node,
-                     actions::Action action);
+                     actions::Action action,
+                     std::optional<uint8_t> clickCount);
+
+  private:
+    /// What one step of the key path names, which says how the next step is joined to it.
+    enum class KeyStepKind : uint8_t
+    {
+        Key = 0, ///< A key of its mapping; a dot joins the key read within it.
+        File,    ///< A side file, whose own key path follows it after a colon: `<file>: <map>`.
+    };
+
+    /// One key loadGuarded() is reading, and the mapping it is read from.
+    struct KeyStep
+    {
+        YAML::Node container;                ///< The mapping the key is read from.
+        std::string entry;                   ///< The key, or the side file's path.
+        KeyStepKind kind = KeyStepKind::Key; ///< What @ref entry names.
+    };
+
+    /// The keys from the document's root down to the one loadGuarded() is reading.
+    std::vector<KeyStep> _keyPath;
 };
+
+/// How a configuration file spells a shell's initial working directory.
+/// @param workingDirectory The directory; empty for the home directory.
+/// @return "~" quoted for the home directory, else the directory in UTF-8, as the file is written.
+[[nodiscard]] std::string spelledWorkingDirectory(std::filesystem::path const& workingDirectory);
 
 struct Writer
 {
@@ -1701,39 +2038,47 @@ struct Writer
         return std::vformat(replaceCommentPlaceholder(std::string(doc)), std::make_format_args(args...));
     }
 
-    [[nodiscard]] std::string format(KeyInputMapping v)
+    [[nodiscard]] std::string format(KeyInputMapping const& v)
     {
-        auto actionAndModes = format(" action: {} }}", v.binding[0]);
-        if (v.modes.any())
-        {
-            actionAndModes = format(" action: {}, mode: '{}' }}", v.binding[0], v.modes);
-        }
-        return format("{:<30},{:<30},{:<30}\n",
-                      format("- {{ mods: [{}]", format(v.modifiers)),
-                      format(" key: '{}'", v.input),
-                      actionAndModes);
+        return formatKeyBinding(v, std::format("{}", v.input));
     }
 
-    [[nodiscard]] std::string format(CharInputMapping v)
+    [[nodiscard]] std::string format(CharInputMapping const& v)
     {
-        auto actionAndModes = format(" action: {} }}", v.binding[0]);
-        if (v.modes.any())
-        {
-            actionAndModes = format(" action: {}, mode: '{}' }}", v.binding[0], v.modes);
-        }
+        // As UTF-8, which is how the reader takes a one-character key back.
+        return formatKeyBinding(v, unicode::convert_to<char>(v.input));
+    }
+
+    /// One `key:` binding row.
+    /// @param v The binding.
+    /// @param key How the binding's key is spelled, unquoted.
+    /// @return The row, ending in a newline.
+    template <typename Binding>
+    [[nodiscard]] std::string formatKeyBinding(Binding const& v, std::string_view key)
+    {
         return format("{:<30},{:<30},{:<30}\n",
                       format("- {{ mods: [{}]", format(v.modifiers)),
-                      format(" key: '{}'", static_cast<char>(v.input)),
-                      actionAndModes);
+                      format(" key: {}", SingleQuoted { key }),
+                      formatActionAndModes(v));
+    }
+
+    /// The tail of a binding row: its action, then its `mode:` when it names one, closing the map.
+    template <typename Binding>
+    [[nodiscard]] std::string formatActionAndModes(Binding const& v)
+    {
+        if (!v.modes.any())
+            return format(" action: {} }}", v.binding[0]);
+        return format(" action: {}, mode: {} }}", v.binding[0], SingleQuoted { std::format("{}", v.modes) });
     }
 
     [[nodiscard]] std::string format(MouseInputMapping v)
     {
-        auto actionAndModes = format(" action: {} }}", v.binding[0]);
+        auto button = v.clickCount ? format(" mouse: {}, clicks: {}", v.input, *v.clickCount)
+                                   : format(" mouse: {}", v.input);
         return format("{:<30},{:<30},{:<30}\n",
                       format("- {{ mods: [{}]", format(v.modifiers)),
-                      format(" mouse: {}", v.input),
-                      actionAndModes);
+                      button,
+                      formatActionAndModes(v));
     }
 
     [[nodiscard]] std::string static format(std::vector<text::FontFeature> const& v)
@@ -1798,13 +2143,7 @@ struct Writer
         auto args = std::string { "[" };
         args.append(v.arguments | core::views::joinWith(std::string_view(", ")));
         args.append("]");
-        return format(doc, v.program, args, [&]() -> std::string {
-            auto fromConfig = v.workingDirectory.string();
-            if (fromConfig.empty()
-                || fromConfig == core::homeResolvedPath("~", vtpty::Process::homeDirectory()))
-                return std::string { "\"~\"" };
-            return fromConfig;
-        }());
+        return format(doc, v.program, args, spelledWorkingDirectory(v.workingDirectory));
     }
 
     [[nodiscard]] std::string format(std::string_view doc, std::map<vtbackend::DECMode, bool> const& mods)
@@ -1851,29 +2190,27 @@ struct Writer
             }
             result += indent + "hint_patterns:\n";
             for (auto const& p: patterns)
-            {
-                // Escape single quotes for YAML single-quoted scalars by doubling them.
-                auto escapedRegex = p.regex;
-                for (auto pos = escapedRegex.find('\''); pos != std::string::npos;
-                     pos = escapedRegex.find('\'', pos + 2))
-                    escapedRegex.insert(pos, 1, '\'');
-
-                result += std::format(
-                    "{}    - name: {}\n{}      regex: '{}'\n", indent, p.name, indent, escapedRegex);
-            }
+                result += std::format("{}    - name: {}\n{}      regex: {}\n",
+                                      indent,
+                                      SingleQuoted { p.name },
+                                      indent,
+                                      SingleQuoted { p.regex });
         }
         return result;
     }
 
     [[nodiscard]] std::string static format(vtbackend::CellRGBColor const& v)
     {
-        if (std::holds_alternative<vtbackend::RGBColor>(v))
-            return std::format("'{}'", v);
+        if (auto const* const color = std::get_if<vtbackend::RGBColor>(&v))
+            return format(*color);
 
         return std::format("{}", v);
     }
 
-    [[nodiscard]] std::string static format(vtbackend::RGBColor const& v) { return std::format("'{}'", v); }
+    [[nodiscard]] std::string static format(vtbackend::RGBColor const& v)
+    {
+        return std::format("{}", SingleQuoted { std::format("{}", v) });
+    }
 
     [[nodiscard]] std::string format(std::string_view doc, vtbackend::ImageSize v)
     {
@@ -1907,6 +2244,11 @@ struct Writer
         return format(doc, v.sound, v.volume, v.alert);
     }
 
+    [[nodiscard]] std::string format(std::string_view doc, FinishNotificationConfig const& v)
+    {
+        return format(doc, v.when, v.minDuration.count(), v.outcome, v.action, v.clearOn);
+    }
+
     [[nodiscard]] std::string format(std::string_view doc, RendererConfig const& v)
     {
         return format(doc,
@@ -1932,9 +2274,26 @@ struct Writer
         return format(doc, v.enabled, v.showMarkers, v.autoCollapseOnNewCommand, v.onJumpIntoFold);
     }
 
+    [[nodiscard]] std::string format(std::string_view doc, GutterConfig const& v)
+    {
+        // Single-quoted: a plain YAML scalar cannot begin with `%`.
+        return format(doc,
+                      v.exitStatus,
+                      v.userMarks,
+                      v.lineNumbers,
+                      v.lineNumberWidth,
+                      v.timestamps,
+                      SingleQuoted { v.timestampFormat });
+    }
+
     [[nodiscard]] std::string format(std::string_view doc, OscContextConfig const& v)
     {
         return format(doc, v.enabled, v.maxDepth, v.maxRetained, v.deriveMarkers, v.tinting);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, CommandBlocksConfig const& v)
+    {
+        return format(doc, v.maxRecords, SingleQuoted { v.pager }, v.pagerFormat);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, HistoryConfig const& v)
@@ -1955,7 +2314,25 @@ struct Writer
 
     [[nodiscard]] std::string format(std::string_view doc, ScrollBarConfig const& v)
     {
-        return format(doc, v.position, v.hideScrollbarInAltScreen);
+        return format(doc, v.position, v.hideScrollbarInAltScreen, format(v.marks));
+    }
+
+    /// `scrollbar.marks` as the YAML flow list the reader accepts, spelled from the same token table.
+    /// @param sources The configured sources.
+    /// @return E.g. `[failures, commands, user_marks]`, or `[]`.
+    [[nodiscard]] static std::string format(vtbackend::ScrollbarMarkSources sources)
+    {
+        using Info = ConfigEnumInfo<vtbackend::ScrollbarMarkSource>;
+        auto const tokens = std::ranges::to<std::vector>(
+            configEnumValues<vtbackend::ScrollbarMarkSource>()
+            | std::views::filter([sources](Info const& info) { return sources.test(info.value); })
+            | std::views::transform(&Info::token));
+        return std::format("[{}]", tokens | core::views::joinWith(std::string_view(", ")));
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, StickyHeaderConfig const& v)
+    {
+        return format(doc, v.mode, v.showEvicted);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, MouseConfig const& v)
@@ -2105,12 +2482,19 @@ struct YAMLConfigWriter: Writer
                       val...);
     }
 
+    /// Writes the configuration entry a reflection walk reached under @p name, which is dropped: @p doc
+    /// already spells the entry's key.
+    ///
+    /// A function of its own, not an overload of process(): one taking the name first also takes a row
+    /// whose first value is a std::string_view -- a tint's context type -- and drops that value instead.
+    /// @param doc The entry's documentation, with a placeholder per value.
+    /// @param name The entry's member name.
+    /// @param val The entry's values.
+    /// @return @p doc, indented and filled in.
     template <typename... T>
-    std::string process(std::string_view doc, [[maybe_unused]] std::string_view name, T const&... val)
+    std::string processEntry(std::string_view doc, [[maybe_unused]] std::string_view name, T const&... val)
     {
-        return format(addOffset(replaceCommentPlaceholder(std::string { doc }),
-                                static_cast<size_t>(Offset::Levels) * OneOffset),
-                      val...);
+        return process(doc, val...);
     }
 
     template <typename T, documentation::StringLiteral ConfigDoc, documentation::StringLiteral WebDoc>
@@ -2147,11 +2531,17 @@ struct DocumentationWriter: Writer
     template <typename... T>
     std::string process(std::string_view doc, T const&... val)
     {
-        return process(doc, std::string_view { "" }, val...);
+        return processEntry(doc, std::string_view { "" }, val...);
     }
 
+    /// Writes the configuration entry a reflection walk reached, headed by @p name in snake_case.
+    /// @see YAMLConfigWriter::processEntry for why this is not an overload of process().
+    /// @param doc The entry's documentation, with a placeholder per value.
+    /// @param name The entry's member name.
+    /// @param val The entry's values.
+    /// @return The heading, then @p doc filled in.
     template <typename... T>
-    std::string process(std::string_view doc, std::string_view name, T const&... val)
+    std::string processEntry(std::string_view doc, std::string_view name, T const&... val)
     {
         return format(
             "### `{}`\n"
@@ -2219,6 +2609,18 @@ std::optional<std::string> readConfigFile(std::string const& filename);
 void loadConfigFromFile(Config& config, std::filesystem::path const& fileName);
 Config loadConfigFromFile(std::filesystem::path const& fileName);
 Config loadConfig();
+
+/// Loads @p fileName into a configuration of its own, so a file that fails to load leaves every other
+/// configuration as it was.
+/// @param fileName The configuration file.
+/// @return The configuration, or a human-readable reason it could not be loaded.
+[[nodiscard]] std::expected<Config, std::string> tryLoadConfigFromFile(std::filesystem::path const& fileName);
+
+/// Loads the configuration file a command line names, or the default one.
+/// @param configPath The file, UTF-8 as the command line is read on every platform; empty for the
+///                   default one (@see loadConfig).
+/// @return The configuration loaded.
+[[nodiscard]] Config loadConfigNamed(std::string_view configPath);
 void compareEntries(Config& config, auto const& output);
 
 /// The VT-EMULATION half of a profile's terminal settings — everything that decides what
@@ -2236,6 +2638,27 @@ void compareEntries(Config& config, auto const& output);
 /// @param profile The resolved profile.
 /// @return Settings with the emulation fields applied over the vtbackend defaults.
 [[nodiscard]] vtbackend::Settings emulationSettings(Config const& config, TerminalProfile const& profile);
+
+/// What the terminal's gutter shows under @p config: the `gutter` section, with the fold switch taken from
+/// `folding`.
+///
+/// Whatever configures a terminal's gutter and whatever reserves the gutter's width must both take it
+/// from here, or the strip reserved and the strip drawn can disagree.
+/// @see FoldingConfig::markersVisible
+/// @param config The loaded configuration.
+/// @return The gutter settings vtbackend draws with.
+[[nodiscard]] vtbackend::GutterSettings gutterSettingsFor(Config const& config);
+
+/// One profile's @ref emulationSettings, from a configuration already loaded: what @ref
+/// resolveEmulationSettings does once it has read the file, for a caller that holds its configuration in
+/// memory -- `contour client`, whose new sessions follow the configuration as a reload left it.
+///
+/// @param config The loaded configuration.
+/// @param profileName Profile to resolve; empty selects the configuration's default.
+/// @return The settings, or a human-readable reason they could not be resolved; an unknown profile is
+///         refused, as @ref resolveEmulationSettings refuses it.
+[[nodiscard]] std::expected<vtbackend::Settings, std::string> emulationSettingsFor(
+    Config const& config, std::string const& profileName);
 
 /// Loads a configuration and resolves one profile's @ref emulationSettings from it.
 ///
@@ -2353,6 +2776,11 @@ struct ResolvedSessionConfig
 std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsFile(
     std::filesystem::path const& path);
 
+/// The file a GUI side file named for @p name is kept in, beside the others of its kind: `<name>.yml`.
+/// @param name A profile's or a color scheme's name, in UTF-8.
+/// @return The file name, without a directory.
+[[nodiscard]] std::filesystem::path sideFileName(std::string_view name);
+
 /// Serializes a single profile's body as the exact text written to a `profiles/<name>.yml` GUI side
 /// file: a bare top-level map of the profile's fields (no `profiles:`/name wrapper), so the same
 /// reader that parses an inline profile parses it back. Produced by the reflection-driven config
@@ -2387,19 +2815,6 @@ std::expected<std::unordered_map<std::string, Layout>, std::string> loadLayoutsF
 /// @return The parsed overrides, or a human-readable parse error.
 [[nodiscard]] std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(
     std::filesystem::path const& path);
-
-/// Splits a command line into tokens the way a shell would: whitespace separates tokens; single quotes
-/// ('...') quote a run literally; double quotes ("...") quote a run allowing \" and \\ escapes; a
-/// backslash outside quotes escapes the next character. Used so a layout `command:` may be written as a
-/// full command line ("emacs -nw") rather than requiring a separate `arguments:` list. Returns an empty
-/// vector for an empty/whitespace-only input.
-[[nodiscard]] std::vector<std::string> shellSplit(std::string_view commandLine);
-
-/// The inverse of shellSplit for a single token: returns @p token single-quoted when it contains
-/// whitespace or a shell-significant character (or is empty), so that shellSplit() reconstructs it as
-/// one token; embedded single quotes use the '\'' idiom. Used when serializing a layout's `command`
-/// program so a program path containing spaces survives the save/reload round-trip.
-[[nodiscard]] std::string shellQuote(std::string_view token);
 
 std::string defaultConfigString();
 std::error_code createDefaultConfig(std::filesystem::path const& path);
@@ -2467,7 +2882,7 @@ struct std::formatter<vtbackend::BackgroundImage>: formatter<std::string_view>
     auto format(vtbackend::BackgroundImage value, auto& ctx) const
     {
         if (auto* loc = std::get_if<std::filesystem::path>(&value.location))
-            return formatter<string_view>::format(loc->string(), ctx);
+            return formatter<string_view>::format(core::pathToUtf8(*loc), ctx);
         return formatter<string_view>::format("Image", ctx);
     }
 };
@@ -2554,65 +2969,6 @@ struct std::formatter<contour::config::PixelReporting>: formatter<std::string_vi
             case contour::config::PixelReporting::Device: name = "Device"; break;
         }
         return formatter<std::string_view>::format(name, ctx);
-    }
-};
-
-// Both tab bar modes render as the configuration token their table row carries, so what is written
-// back is by construction what the reader accepts -- see contour/ConfigEnum.h.
-template <>
-struct std::formatter<contour::config::TabBarPosition>: formatter<std::string_view>
-{
-    auto format(contour::config::TabBarPosition value, auto& ctx) const
-    {
-        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
-    }
-};
-
-// vtbackend owns the enum, but the TOKEN is a configuration fact, so the formatter lives here with
-// the others and delegates to the same table the reader uses. Spelling it in vtbackend instead would
-// put the written spelling out of reach of the table that defines the accepted one.
-template <>
-struct std::formatter<vtbackend::SearchCaseSensitivity>: formatter<std::string_view>
-{
-    auto format(vtbackend::SearchCaseSensitivity value, auto& ctx) const
-    {
-        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
-    }
-};
-
-template <>
-struct std::formatter<contour::config::ShadowSize>: formatter<std::string_view>
-{
-    auto format(contour::config::ShadowSize value, auto& ctx) const
-    {
-        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
-    }
-};
-
-template <>
-struct std::formatter<contour::config::TabBarVisibility>: formatter<std::string_view>
-{
-    auto format(contour::config::TabBarVisibility value, auto& ctx) const
-    {
-        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
-    }
-};
-
-template <>
-struct std::formatter<contour::config::UiStyle>: formatter<std::string_view>
-{
-    auto format(contour::config::UiStyle value, auto& ctx) const
-    {
-        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
-    }
-};
-
-template <>
-struct std::formatter<contour::config::WindowControlStyle>: formatter<std::string_view>
-{
-    auto format(contour::config::WindowControlStyle value, auto& ctx) const
-    {
-        return formatter<std::string_view>::format(contour::config::configEnumToken(value), ctx);
     }
 };
 

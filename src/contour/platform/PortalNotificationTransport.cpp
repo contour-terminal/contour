@@ -90,13 +90,14 @@ PortalNotificationTransport::PortalNotificationTransport(std::chrono::millisecon
                                                          std::string idPrefix,
                                                          DelayScheduler scheduler,
                                                          PortalCaller caller,
+                                                         DBusSignalSubscriber subscriber,
                                                          QObject* parent):
     QObject(parent),
-    _bus { QDBusConnection::sessionBus() },
     _closeDelay { closeDelay },
     _idPrefix { std::move(idPrefix) },
     _schedule { std::move(scheduler) },
-    _call { std::move(caller) }
+    _call { std::move(caller) },
+    _subscribe { std::move(subscriber) }
 {
 }
 
@@ -111,7 +112,7 @@ void PortalNotificationTransport::notify(vtbackend::DesktopNotification const& n
 {
     auto const portalId = portalIdFor(notification.identifier);
     auto const serverId = ++_lastServerId;
-    auto const closeDelay = NotificationRouter::resolveCloseDelay(notification.timeout, _closeDelay);
+    auto const closeDelay = NotificationRouter::assumedCloseDelay(notification, _closeDelay);
 
     _call(
         this,
@@ -167,7 +168,7 @@ void PortalNotificationTransport::subscribe(ClosedHandler onClosed, ActivatedHan
 
     // Only the activation signal exists to subscribe to; the portal has no close signal at all, so
     // _onClosed is driven by the timer instead.
-    _subscription = subscribeToDBusSignals(_bus, PortalSource, this, signalSubscriptions());
+    _subscription = _subscribe(PortalSource, this, signalSubscriptions());
 }
 
 void PortalNotificationTransport::onActionInvoked(QString const& identifier,

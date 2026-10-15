@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/platform/QtInvoke.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 
@@ -8,6 +9,8 @@
 #include <algorithm>
 #include <ranges>
 #include <utility>
+
+#include <vthost/HostIdentity.hpp>
 
 namespace contour::remote
 {
@@ -21,9 +24,34 @@ namespace
 } // namespace
 
 NativeController::NativeController(vthost::AttachEndpoint endpoint,
-                                   std::optional<vtbackend::Settings> sessionSettings):
-    _endpoint(std::move(endpoint)), _sessionSettings(std::move(sessionSettings))
+                                   std::optional<vtbackend::Settings> attachSettings,
+                                   SessionSettingsSource sessionSettings):
+    _endpoint(std::move(endpoint)),
+    _attachSettings(std::move(attachSettings)),
+    _sessionSettings(std::move(sessionSettings))
 {
+}
+
+void NativeController::postSessionCreation(std::function<void(NativeClient&)> create)
+{
+    // Resolved here, on the GUI thread, for every creation rather than once at attach: a session the
+    // user creates after a configuration reload must get the reloaded profile. NativeClient sends the
+    // restatement only when it differs from what the daemon already has.
+    auto settings = std::optional<vthost::proto::WireSessionSettings> {};
+    if (_sessionSettings)
+    {
+        if (auto resolved = _sessionSettings(); resolved)
+            settings = vthost::toWireSessionSettings(*resolved);
+        else
+            errorLog()("attach: keeping the session settings last stated: {}", resolved.error());
+    }
+    _reactor.post([this, settings = std::move(settings), create = std::move(create)] {
+        if (_client == nullptr)
+            return;
+        if (settings)
+            _client->restateSessionSettings(settings);
+        create(*_client);
+    });
 }
 
 NativeController::~NativeController()
@@ -55,12 +83,15 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
         std::move(*socket),
         NativeClient::HandshakeOptions {
             .token = token,
-            // Stated once, at the handshake: the daemon applies it to the sessions THIS connection
-            // goes on to create, and to nothing that already exists.
-            .sessionSettings = _sessionSettings
-                                   ? std::optional { vthost::toWireSessionSettings(*_sessionSettings) }
-                                   : std::nullopt,
+            // The daemon applies it to the sessions THIS connection goes on to create, and to nothing
+            // that already exists; postSessionCreation() restates it when the configuration changed.
+            .sessionSettings =
+                _attachSettings.transform([](auto const& s) { return vthost::toWireSessionSettings(s); }),
         },
+        // What the panes' own stores keep (`command_blocks.max_records`), resolved from the same
+        // configuration: a mirror holds no more records than the terminal it feeds.
+        _attachSettings.transform([](auto const& s) { return s.commandBlockLimits; })
+            .value_or(vtbackend::CommandBlockStoreLimits {}),
         NativeClient::UpdateHandler { [this](RemoteScreen const& screen, vthost::proto::Delta const& delta) {
             onUpdate(screen, delta);
         } },
@@ -122,8 +153,8 @@ void NativeController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta
     // only a never-seen session is adopted as a new tab.
     if (auto const binding = _bindings.find(screen.session); binding != _bindings.end())
     {
-        // The mirror is absent only in the window between createPty() and bindTerminal(); the
-        // priming replay in bindTerminal() picks the session up from whatever arrived meanwhile.
+        // The mirror is absent only in the window between createPty() and the priming bindTerminal()
+        // posts; that replay picks the session up from whatever arrived meanwhile.
         if (binding->second.mirror)
             binding->second.mirror->apply(screen, delta);
         return;
@@ -252,18 +283,12 @@ void NativeController::requestCreateTab(vtpty::Pty const* actingPty)
     // unbound (or null) pty resolves to 0, which is exactly that fallback.
     auto const beside = actingPty != nullptr ? sessionForPty(actingPty).value_or(0) : 0;
     // The client's send verbs must run on the reactor thread that owns it.
-    _reactor.post([this, beside] {
-        if (_client != nullptr)
-            _client->createTab(beside);
-    });
+    postSessionCreation([beside](NativeClient& client) { client.createTab(beside); });
 }
 
 void NativeController::requestCreateWindow()
 {
-    _reactor.post([this] {
-        if (_client != nullptr)
-            _client->createWindow();
-    });
+    postSessionCreation([](NativeClient& client) { client.createWindow(); });
 }
 
 void NativeController::requestSplitPane(vtpty::Pty const* actingPty, bool vertical)
@@ -278,9 +303,8 @@ void NativeController::requestSplitPane(vtpty::Pty const* actingPty, bool vertic
     // the only ones carrying a ratio — return above without reaching here. A divider the user then
     // MOVES is a separate verb (ResizeSplit); thread a ratio through here only once a caller varies it.
     constexpr uint16_t EvenSplitRatio = 5000;
-    _reactor.post([this, session = *session, orientation] {
-        if (_client != nullptr)
-            _client->splitPane(session, orientation, EvenSplitRatio);
+    postSessionCreation([session = *session, orientation, ratio = EvenSplitRatio](NativeClient& client) {
+        client.splitPane(session, orientation, ratio);
     });
 }
 
@@ -324,7 +348,7 @@ void NativeController::reportPaneGeometry(uint64_t session, vtpty::PageSize cell
     // Queued onto the GUI thread: it coalesces every pane resized in this layout pass into one
     // report, and it is what makes the sink safe to call from the parser thread (DECCOLM resizes
     // there). A metacall posted to a QObject is dropped if the object dies first.
-    QMetaObject::invokeMethod(this, [this] { flushGeometry(); }, Qt::QueuedConnection);
+    platform::postToObject(this, [this] { flushGeometry(); });
 }
 
 void NativeController::flushGeometry()
@@ -402,13 +426,20 @@ void NativeController::primeBinding(uint64_t session)
 {
     if (_client == nullptr)
         return;
-    auto const screen = _client->screens().find(session);
-    if (screen == _client->screens().end())
-        return;
 
     auto const lock = std::lock_guard { _mutex };
     auto const binding = _bindings.find(session);
-    if (binding == _bindings.end() || !binding->second.mirror)
+    if (binding == _bindings.end() || binding->second.terminal == nullptr || binding->second.mirror)
+        return;
+    // Judged once, here: the ServerHello that named the daemon's machine preceded every session the
+    // connection mirrors, and the verdict holds for the connection's life.
+    auto& terminal = *binding->second.terminal;
+    binding->second.mirror = std::make_unique<vthost::client::ScreenMirror>(
+        terminal, vthost::daemonMachineOf(_client->daemonIdentity(), terminal.localIdentity()));
+
+    // The daemon may already have described this session before its pane existed.
+    auto const screen = _client->screens().find(session);
+    if (screen == _client->screens().end())
         return;
     // Discard: this pane's mirror terminal is brand new, so there is no local
     // scrollback of its own to preserve.
@@ -426,10 +457,9 @@ void NativeController::bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& 
         auto const binding = _bindings.find(*session);
         if (binding == _bindings.end())
             return;
-        binding->second.mirror = std::make_unique<vthost::client::ScreenMirror>(terminal);
+        binding->second.terminal = &terminal;
     }
-    // The daemon may already have described this session before its pane existed, so the priming
-    // replay runs on the reactor (where _client lives) rather than reading it from here.
+    // The mirror is built and primed on the reactor, where _client lives, rather than from here.
     _reactor.post([this, id = *session] { primeBinding(id); });
 }
 
@@ -461,6 +491,53 @@ void NativeController::requestRemoteClose(vtpty::Pty const* pty)
         _closedSessions.insert(*session);
     }
     requestClosePane(*session);
+}
+
+contour::session::HostedOperationRoute NativeController::requestHostedOperation(
+    vtpty::Pty const* pty, contour::session::HostedOperationRequest const& request)
+{
+    using contour::session::HostedOperationRoute;
+    // First, and for every pty: each pane this factory made mirrors a daemon session, and a mirror whose
+    // daemon is out of reach has nowhere to run the operation that would stick.
+    if (!isConnected())
+        return HostedOperationRoute::Unreachable;
+    auto const session = sessionForPty(pty);
+    if (!session)
+        return HostedOperationRoute::RunHere; // not one of ours
+    auto const route = contour::session::routeOf(request.operation, contour::session::RemoteHostKind::Daemon);
+    if (route == HostedOperationRoute::RunOnHost)
+        _reactor.post([this, session = *session, request] {
+            if (_client == nullptr)
+                return;
+            auto operation = vthost::proto::PerformOperation {
+                .session = session, .operation = toWireOperation(request.operation), .text = request.text
+            };
+            if (request.row)
+            {
+                // Named on the reactor, where the mirror is applied: only it knows which daemon row a row of
+                // its own holds, and the answer stands only until its next update.
+                auto const row = hostRowOf(session, *request.row);
+                if (!row)
+                {
+                    attachLog()("Did not {}: the row is not one the daemon can be told of.",
+                                contour::session::describe(request.operation));
+                    return;
+                }
+                operation.row = *row;
+            }
+            _client->performOperation(std::move(operation));
+        });
+    return route;
+}
+
+std::optional<vthost::proto::RowAddress> NativeController::hostRowOf(uint64_t session,
+                                                                     contour::session::HostedRow row) const
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const binding = _bindings.find(session);
+    if (binding == _bindings.end() || !binding->second.mirror)
+        return std::nullopt;
+    return binding->second.mirror->hostRowOf(row.stableId, row.generation);
 }
 
 void NativeController::unbind(uint64_t session)

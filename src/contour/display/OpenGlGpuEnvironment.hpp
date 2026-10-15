@@ -123,7 +123,8 @@ inline constexpr std::string_view GpuFallbackEnvironmentName = "CONTOUR_GPU_FALL
         inherited,
         std::map<std::string, std::string> {
             { std::string(GpuFallbackEnvironmentName), std::string(failedTitle) } },
-        selfSet);
+        selfSet,
+        vtpty::PlatformEnvironmentNames);
 }
 
 /// The title of the GPU the system renders on when Contour does not intervene: the one driving the

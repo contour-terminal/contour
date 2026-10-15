@@ -37,6 +37,34 @@ Item {
     // Emitted when the user commits a change; the page forwards it to SettingsController.setProfileField.
     signal edited(string key, var value)
 
+    /// The text a text editor shows for `value`; @p fallback stands in for no value at all.
+    function valueText(fallback) {
+        return root.value !== null && root.value !== undefined ? String(root.value) : fallback
+    }
+
+    /// Commits @p committed from text editor @p field -- undefined for text that is no value -- and then
+    /// shows the row's value again instead of the typed text. The page answers a refused value, or one it
+    /// adjusted (a negative duration is stored as zero), with the value it stored; when that leaves its
+    /// model as it was, nothing rebuilds the row, so only this takes the typed text back out of the field.
+    /// A value equal to the row's is not committed: leaving a field after Return finishes editing again.
+    function commitText(field, committed, fallback) {
+        if (committed !== undefined && committed !== root.value)
+            root.edited(root.fieldKey, committed)
+        field.text = Qt.binding(() => root.valueText(fallback))
+    }
+
+    /// Drops what was typed into text editor @p field: it shows the row's value again and gives up the
+    /// focus, so no later focus change commits the typed text.
+    function cancelText(field, fallback) {
+        field.text = Qt.binding(() => root.valueText(fallback))
+        field.focus = false
+    }
+
+    /// The entry an enum editor shows for `value`: the first one when `value` is none of them.
+    function optionIndex() {
+        return Math.max(0, root.options.indexOf(root.value))
+    }
+
     implicitHeight: rowLayout.implicitHeight + (root.flat ? 16 : 24)
     implicitWidth: rowLayout.implicitWidth + 32
 
@@ -130,8 +158,15 @@ Item {
             Layout.fillWidth: true
             enabled: root.editable
             model: root.optionLabels.length > 0 ? root.optionLabels : root.options
-            currentIndex: Math.max(0, root.options.indexOf(root.value))
-            onActivated: root.edited(root.fieldKey, root.options[currentIndex])
+            currentIndex: root.optionIndex()
+            // The entry already shown is no change, as for commitText. Shows `value` again afterwards, for
+            // commitText's reason too: a change the page cannot save leaves `value` as it was, and nothing
+            // rebuilds the row to take the chosen entry back out.
+            onActivated: {
+                if (root.options[currentIndex] !== root.value)
+                    root.edited(root.fieldKey, root.options[currentIndex])
+                currentIndex = Qt.binding(() => root.optionIndex())
+            }
             // Sized to the widest entry, not the current one; the popup follows the box's width.
             implicitContentWidthPolicy: ComboBox.WidestText
             // Elided only where the 60% cap above bites, with the full text on hover.
@@ -158,7 +193,11 @@ Item {
             Accessible.description: root.help
             checked: root.value === true
             enabled: root.editable
-            onToggled: root.edited(root.fieldKey, checked)
+            // Shows `value` again afterwards, as the combo box above does.
+            onToggled: {
+                root.edited(root.fieldKey, checked)
+                checked = Qt.binding(() => root.value === true)
+            }
         }
     }
 
@@ -167,6 +206,12 @@ Item {
     // non-empty: clear it and `editingFinished` still fires, parse still yields NaN, and QVariant turns
     // NaN into 0 — so clearing the field would silently persist zero. Restoring reads as "that was not a
     // number" and leaves the setting alone.
+    //
+    // Neither validator follows the locale. A field shows `value` as JavaScript spells it, with a decimal
+    // point, and reads the typed text back with parseFloat or parseInt, which know no locale either. A
+    // locale's validator takes the point for a group separator where the locale writes a decimal comma --
+    // so leaving a field that showed 0.5 stored 5 -- and accepts a group separator parseInt stops at, so
+    // 1.000 or 1,000 stored 1.
     Component {
         id: doubleEditor
         TextField {
@@ -174,18 +219,16 @@ Item {
             Accessible.name: root.label
             Accessible.description: root.help
             Layout.fillWidth: true
-            text: root.value !== null && root.value !== undefined ? String(root.value) : ""
+            text: root.valueText("")
             enabled: root.editable
             selectByMouse: true
-            validator: DoubleValidator {}
+            // A decimal point, or a comma for a user whose locale writes one.
+            validator: RegularExpressionValidator { regularExpression: /-?[0-9]*[.,]?[0-9]*/ }
             onEditingFinished: {
-                var parsed = parseFloat(doubleField.text)
-                if (isNaN(parsed)) {
-                    doubleField.text = root.value !== null && root.value !== undefined ? String(root.value) : ""
-                    return
-                }
-                root.edited(root.fieldKey, parsed)
+                var parsed = parseFloat(doubleField.text.replace(",", "."))
+                root.commitText(doubleField, isNaN(parsed) ? undefined : parsed, "")
             }
+            Keys.onEscapePressed: root.cancelText(doubleField, "")
         }
     }
 
@@ -196,38 +239,35 @@ Item {
             Accessible.name: root.label
             Accessible.description: root.help
             Layout.fillWidth: true
-            text: root.value !== null && root.value !== undefined ? String(root.value) : "0"
+            text: root.valueText("0")
             enabled: root.editable
             selectByMouse: true
-            // Full 32-bit signed range: the config fields this drives are plain ints (e.g.
-            // read_buffer_size, which can legitimately exceed a megabyte, and history_max_lines, whose
-            // -1 means unlimited), and a narrower cap would silently clamp such a value on display and
+            // Digits only. The full 32-bit signed range is accepted: the config fields this drives are plain
+            // ints (e.g. read_buffer_size, which can legitimately exceed a megabyte, and history_max_lines,
+            // whose -1 means unlimited), and a narrower cap would silently clamp such a value on display and
             // then persist the clamped number on the next edit.
-            validator: IntValidator {
-                bottom: -2147483647
-                top: 2147483647
-            }
+            validator: RegularExpressionValidator { regularExpression: /-?[0-9]{0,10}/ }
             onEditingFinished: {
                 var parsed = parseInt(intField.text, 10)
-                if (isNaN(parsed)) {
-                    intField.text = root.value !== null && root.value !== undefined ? String(root.value) : "0"
-                    return
-                }
-                root.edited(root.fieldKey, parsed)
+                var representable = !isNaN(parsed) && Math.abs(parsed) <= 2147483647
+                root.commitText(intField, representable ? parsed : undefined, "0")
             }
+            Keys.onEscapePressed: root.cancelText(intField, "0")
         }
     }
 
     Component {
         id: stringEditor
         TextField {
+            id: stringField
             Accessible.name: root.label
             Accessible.description: root.help
             Layout.fillWidth: true
-            text: root.value !== null && root.value !== undefined ? String(root.value) : ""
+            text: root.valueText("")
             enabled: root.editable
             selectByMouse: true
-            onEditingFinished: root.edited(root.fieldKey, text)
+            onEditingFinished: root.commitText(stringField, stringField.text, "")
+            Keys.onEscapePressed: root.cancelText(stringField, "")
         }
     }
 }

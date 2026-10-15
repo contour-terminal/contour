@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/platform/QtInvoke.hpp>
+
 #include <QtCore/QObject>
 #include <QtCore/QString>
 #include <QtGui/QAccessible>
@@ -58,14 +60,11 @@ class QtAnnouncer final: public Announcer
         if (_anchor == nullptr || message.isEmpty())
             return;
 
-        QMetaObject::invokeMethod(
-            _anchor,
-            [anchor = _anchor, message, politeness]() {
-                auto event = QAccessibleAnnouncementEvent(anchor, message);
-                event.setPoliteness(politeness);
-                QAccessible::updateAccessibility(&event);
-            },
-            Qt::QueuedConnection);
+        postToObject(_anchor, [anchor = _anchor, message, politeness]() {
+            auto event = QAccessibleAnnouncementEvent(anchor, message);
+            event.setPoliteness(politeness);
+            QAccessible::updateAccessibility(&event);
+        });
     }
 
   private:

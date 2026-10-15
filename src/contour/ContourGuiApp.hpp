@@ -9,12 +9,15 @@
 #include <contour/display/Logging.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
+#include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 
+#include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
+#include <vtbackend/screen/TerminalClocks.hpp>
 
 #include <vtpty/CommandCapture.hpp>
 #include <vtpty/Process.hpp>
@@ -22,6 +25,7 @@
 
 #include <core/async/StopToken.hpp>
 #include <core/async/ThreadPoolExecutor.hpp>
+#include <core/platform/FileSystem.hpp>
 
 #include <QtCore/QPointer>
 #include <QtDBus/QDBusVariant>
@@ -30,6 +34,7 @@
 #include <QtQml/QQmlApplicationEngine>
 
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -171,13 +176,25 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       (the default) wires the production one; tests pass a
     ///                       NullSpeechSynthesizer, which keeps the suite off the platform's speech
     ///                       service (on Linux that is a speech-dispatcher connection per use).
+    /// @param commandOutputFiles Where OpenCommandOutput writes the files a pager pane shows. Null (the
+    ///                       default) wires the native filesystem under $XDG_RUNTIME_DIR or the system
+    ///                       temporary directory; tests pass one over an in-memory filesystem.
+    /// @param terminalClocks The clocks every session's terminal reads. Borrowed: they must outlive the
+    ///                       app. The default is the system's; tests pass manual ones to drive time.
+    /// @param hostIdentity   This machine, as every session judges a working directory's or a link's
+    ///                       locality by it. Null (the default) reads it once, here: the machine id and
+    ///                       the host name. Tests pass a fixed one, so what counts as this machine does
+    ///                       not depend on the machine they run on.
     /// @param env            The process environment every part of the application reads through.
     explicit ContourGuiApp(core::Environment const& env,
                            std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
                            std::unique_ptr<platform::ExternalLauncher> externalLauncher = nullptr,
                            std::unique_ptr<config::LayoutStore> layoutStore = nullptr,
                            std::unique_ptr<command::CommandHistoryStore> commandHistoryStore = nullptr,
-                           std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer = nullptr);
+                           std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer = nullptr,
+                           std::unique_ptr<session::CommandOutputFiles> commandOutputFiles = nullptr,
+                           vtbackend::TerminalClocks terminalClocks = vtbackend::TerminalClocks::system(),
+                           std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt);
     ~ContourGuiApp() override;
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
@@ -231,6 +248,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     void applyGraphicsDevice(QQuickWindow& window);
 
     [[nodiscard]] std::string profileName() const;
+
+    /// The emulation settings a session created now gets: the app's profile, resolved in the
+    /// configuration this app holds in memory -- what a local new tab is built from, and what a
+    /// configuration reload updates -- never re-read from the file.
+    /// @return The settings, or why the profile is not in the configuration.
+    [[nodiscard]] std::expected<vtbackend::Settings, std::string> currentEmulationSettings() const;
 
     /// The layout to open at startup: `--layout NAME` if given, else config's `default_layout`.
     /// Empty when neither is set (no startup layout).
@@ -299,6 +322,20 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// speaking at once is not a thing the platform can do, and with an engine each, "Stop Speaking"
     /// in one tab could not stop what another tab had started.
     [[nodiscard]] platform::SpeechSynthesizer& speechSynthesizer() noexcept { return *_speechSynthesizer; }
+
+    /// The private files OpenCommandOutput hands to pager panes; one per app, removed at exit.
+    [[nodiscard]] session::CommandOutputFiles& commandOutputFiles() noexcept { return *_commandOutputFiles; }
+
+    /// The clocks every session's terminal reads: multi-click timing, command durations, row times.
+    [[nodiscard]] vtbackend::TerminalClocks const& terminalClocks() const noexcept { return _terminalClocks; }
+
+    /// This machine, as every session judges what is local by it.
+    /// @return The identity read, or handed in, at construction.
+    [[nodiscard]] vtbackend::HostIdentity const& hostIdentity() const noexcept { return _hostIdentity; }
+
+    /// Where every session's terminal looks up the paths printed on its screen.
+    /// @return This machine's filesystem.
+    [[nodiscard]] core::platform::FileSystem const& fileSystem() const noexcept;
 
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
@@ -418,6 +455,16 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::unique_ptr<command::CommandHistoryStore> _commandHistoryStore;
     // Shared by every session, reached via _app; @see speechSynthesizer().
     std::unique_ptr<platform::SpeechSynthesizer> _speechSynthesizer;
+    // Declared before _commandOutputFiles, whose production instance borrows it to tell whose leftover
+    // directories it may remove.
+    session::NativeProcessLiveness _processLiveness;
+    // Declared before _sessionManager: a pager pane's session releases its file here when it closes,
+    // which during teardown happens while the manager is being destroyed.
+    std::unique_ptr<session::CommandOutputFiles> _commandOutputFiles;
+    // Declared before _sessionManager, whose sessions read it as they are built.
+    vtbackend::TerminalClocks _terminalClocks;
+    // Likewise.
+    vtbackend::HostIdentity _hostIdentity;
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI

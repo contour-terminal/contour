@@ -26,6 +26,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <memory>
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
@@ -477,8 +478,7 @@ TEST_CASE("WindowController projects real-session tabs and routes rename/color t
     CHECK(window->activeTabIndex() == 0);
 
     // Clean up the backing sessions.
-    for (int row = window->count() - 1; row >= 0; --row)
-        window->closeTabAtIndex(row);
+    contour::test::closeAllTabs(*window);
 }
 
 TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour][multiwindow][model]")
@@ -531,8 +531,7 @@ TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour
     }
     CHECK(sawRow1TitleChange);
 
-    for (int row = window->count() - 1; row >= 0; --row)
-        window->closeTabAtIndex(row);
+    contour::test::closeAllTabs(*window);
 }
 
 TEST_CASE("setTabColorForSession routes a DECAC frame color to the session's tab",
@@ -566,8 +565,7 @@ TEST_CASE("setTabColorForSession routes a DECAC frame color to the session's tab
     CHECK_NOTHROW(manager.setTabColorForSession(vtworkspace::SessionId { 999999 }, red));
     CHECK_FALSE(tab->color().has_value());
 
-    for (int row = window->count() - 1; row >= 0; --row)
-        window->closeTabAtIndex(row);
+    contour::test::closeAllTabs(*window);
 }
 
 TEST_CASE("setTabTitleForSession routes a tmux %window-renamed to the session's tab",
@@ -601,8 +599,7 @@ TEST_CASE("setTabTitleForSession routes a tmux %window-renamed to the session's 
     CHECK_NOTHROW(manager.setTabTitleForSession(vtworkspace::SessionId { 999999 }, "ghost"));
     CHECK(*tab->runtimeTitle() == "deploy");
 
-    for (int row = window->count() - 1; row >= 0; --row)
-        window->closeTabAtIndex(row);
+    contour::test::closeAllTabs(*window);
 }
 
 TEST_CASE("the SetTabColor / ResetTabColor actions color the acting session's tab",
@@ -655,8 +652,7 @@ TEST_CASE("the SetTabColor / ResetTabColor actions color the acting session's ta
         CHECK_FALSE(tab->color().has_value()); // it asked; it did not decide
     }
 
-    for (int row = window->count() - 1; row >= 0; --row)
-        window->closeTabAtIndex(row);
+    contour::test::closeAllTabs(*window);
 }
 
 TEST_CASE("beginActiveTabColorPick requests the active tab's picker, per window", "[contour][multiwindow]")
@@ -749,8 +745,7 @@ TEST_CASE("the SaveLayout action saves the acting window, and nameless opens the
         CHECK(store->savedPaths.size() == 1);        // still just the one save
     }
 
-    for (int row = window->count() - 1; row >= 0; --row)
-        window->closeTabAtIndex(row);
+    contour::test::closeAllTabs(*window);
 }
 
 TEST_CASE("beginSaveLayoutPrompt requests the save-as prompt, per window", "[contour][multiwindow]")
@@ -816,8 +811,7 @@ TEST_CASE("a user's tab color outranks DECAC and survives a terminal reset", "[c
     manager.resetTabColorForSession(sessionId);
     CHECK_FALSE(tab->color().has_value());
 
-    for (int row = window->count() - 1; row >= 0; --row)
-        window->closeTabAtIndex(row);
+    contour::test::closeAllTabs(*window);
 }
 
 TEST_CASE("WindowController routes bulk-close and move-tab to its own window",
@@ -857,8 +851,7 @@ TEST_CASE("WindowController routes bulk-close and move-tab to its own window",
     }
 
     // Drain remaining sessions.
-    for (int row = window->count() - 1; row >= 0; --row)
-        window->closeTabAtIndex(row);
+    contour::test::closeAllTabs(*window);
 }
 
 TEST_CASE("WindowController owns window-scoped title-bar visibility", "[contour][multiwindow][titlebar]")
@@ -1137,12 +1130,12 @@ TEST_CASE("moving a window's LAST tab into another window closes the now-empty s
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     TestApp app(std::move(factoryOwned));
     auto& manager = app.manager();
-    ScopedController windowA { manager };
+    contour::test::ScopedControllerWithOsWindow const windowA { manager };
     ScopedController windowB { manager };
 
     // Bind a real OS window to A: closeWindow() must close THIS QQuickWindow too, otherwise its title
     // bar / tab strip lingers on screen as a ghost after the last tab is dragged away.
-    QQuickWindow osWindowA;
+    auto& osWindowA = *windowA.osWindow;
     windowA->bindWindow(&osWindowA);
     osWindowA.show();
     QCoreApplication::processEvents();
@@ -1253,8 +1246,7 @@ TEST_CASE("manager tab switching and moving route for the acting session", "[con
     // currentSessionIsTerminated is a logging-only notification: safe at any time.
     manager.currentSessionIsTerminated();
 
-    for (int row = window->count() - 1; row >= 0; --row)
-        window->closeTabAtIndex(row);
+    contour::test::closeAllTabs(*window);
     QCoreApplication::processEvents();
 }
 
@@ -1288,8 +1280,7 @@ TEST_CASE("manager pane split/close/focus operate on the acting session's tab", 
     QCoreApplication::processEvents();
     CHECK_FALSE(tab->hasMultiplePanes());
 
-    for (int row = window->count() - 1; row >= 0; --row)
-        window->closeTabAtIndex(row);
+    contour::test::closeAllTabs(*window);
     QCoreApplication::processEvents();
 }
 
@@ -1313,4 +1304,49 @@ TEST_CASE("manager guards unknown windows and null acting sessions", "[contour][
     CHECK_NOTHROW(manager.splitActivePane(/*vertical*/ true, nullptr));
     CHECK_NOTHROW(manager.focusPane(vtworkspace::FocusDirection::Left, nullptr));
     CHECK_NOTHROW(manager.closeActivePane(nullptr, contour::session::SessionEnd::Destroy));
+}
+
+TEST_CASE("WindowController: minimised state, restoring it, and the attention requests Main.qml acts on",
+          "[contour][window][notification]")
+{
+    TestApp app;
+    contour::test::ScopedControllerWithOsWindow const window { app.manager() };
+
+    SECTION("without an OS window nothing is minimised, and raising is a no-op")
+    {
+        CHECK_FALSE(window->isMinimized());
+        window->raiseAndActivate();
+        CHECK_FALSE(window->isMinimized());
+    }
+
+    SECTION("a minimised window is reported, and raising restores it without losing maximised")
+    {
+        window->bindWindow(window.osWindow.get());
+        window.osWindow->setWindowStates(Qt::WindowMinimized | Qt::WindowMaximized);
+        CHECK(window->isMinimized());
+
+        window->raiseAndActivate();
+        CHECK_FALSE(window->isMinimized());
+        CHECK(window.osWindow->windowStates().testFlag(Qt::WindowMaximized));
+    }
+
+    SECTION("attention requests are re-emitted as signals for the window's QML")
+    {
+        QSignalSpy const notifications(window.controller,
+                                       &contour::window::WindowController::notificationRequested);
+        QSignalSpy const bells(window.controller, &contour::window::WindowController::bellRequested);
+        QSignalSpy const alerts(window.controller, &contour::window::WindowController::alertRequested);
+
+        window->requestNotification(QString::fromUtf8("✓ make finished"), QStringLiteral("took 12s"));
+        window->requestBell(QStringLiteral("qrc:/contour/bell.wav"), 0.5);
+        window->requestAlert();
+
+        REQUIRE(notifications.count() == 1);
+        CHECK(notifications.at(0).at(0).toString() == QString::fromUtf8("✓ make finished"));
+        CHECK(notifications.at(0).at(1).toString() == QStringLiteral("took 12s"));
+        REQUIRE(bells.count() == 1);
+        CHECK(bells.at(0).at(0).toString() == QStringLiteral("qrc:/contour/bell.wav"));
+        CHECK(bells.at(0).at(1).toDouble() == 0.5);
+        CHECK(alerts.count() == 1);
+    }
 }

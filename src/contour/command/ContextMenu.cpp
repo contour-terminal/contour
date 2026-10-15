@@ -3,6 +3,8 @@
 #include <contour/command/ContextMenu.hpp>
 #include <contour/command/ContextMenuTable.hpp>
 
+#include <vtbackend/shell/CommandBlockAddress.hpp>
+
 #include <array>
 #include <span>
 #include <string_view>
@@ -65,6 +67,29 @@ namespace
     {
         return state.foldLine.has_value();
     }
+
+    bool hasBlockUnderCursor(ContextMenuState const& state) noexcept
+    {
+        return state.blockUnderCursor.has_value();
+    }
+
+    /// The block rows show where the shell speaks OSC 133: a command has finished, or the click landed on
+    /// a block -- the first command still running, or the prompt ClearToPrompt left.
+    bool speaksShellIntegration(ContextMenuState const& state) noexcept
+    {
+        return hasLastCommand(state) || hasBlockUnderCursor(state);
+    }
+
+    bool hasOutputUnderCursor(ContextMenuState const& state) noexcept
+    {
+        return hasBlockUnderCursor(state) && state.blockUnderCursor->output == OutputPresence::Present;
+    }
+
+    bool hasCommandLineUnderCursor(ContextMenuState const& state) noexcept
+    {
+        return hasBlockUnderCursor(state)
+               && state.blockUnderCursor->commandLine == CommandLinePresence::Present;
+    }
     // }}}
 
     /// A row acting on the hyperlink that was RIGHT-CLICKED, carried with the row rather than looked up
@@ -76,6 +101,25 @@ namespace
             .shownWhen(hasHyperlinkUnderCursor)
             .actionFrom([](ContextMenuState const& state) -> actions::Action {
                 return HyperlinkAction { .uri = state.hyperlinkUnderCursor };
+            });
+    }
+
+    /// A row acting on the block that was RIGHT-CLICKED, pinned by its id -- shown where the shell
+    /// speaks OSC 133, grayed where the click landed on no block, or on one without what the row acts on.
+    /// @param title The row's text.
+    /// @param enabled When the row can be picked.
+    template <typename BlockAction>
+    [[nodiscard]] Row blockCommand(std::string_view title, Table::Predicate enabled)
+    {
+        return Table::command(BlockAction {}, title)
+            .shownWhen(speaksShellIntegration)
+            .enabledWhen(enabled)
+            .actionFrom([](ContextMenuState const& state) -> actions::Action {
+                auto action = BlockAction {};
+                action.target = vtbackend::CommandBlockTarget::Pointer;
+                action.block =
+                    state.blockUnderCursor ? state.blockUnderCursor->id : vtbackend::CommandBlockId {};
+                return action;
             });
     }
 
@@ -139,8 +183,9 @@ namespace
             // "Prompt", not "Command", and deliberately so: OSC 133 marks LINES, so what there is to copy
             // is the prompt line — prompt chrome, typed command and all ("user@host:~$ ls", or the whole
             // two-line banner of a powerlevel10k). The bare command exists only when the shell sends it
-            // explicitly (OSC 133;C cmdline_url), which none of the bundled integrations do. A row named
-            // "Copy Last Command" that hands back a prompt is a row that lies.
+            // (OSC 133;C cmdline_url, which the bundled bash, zsh, fish and PowerShell integrations do)
+            // or the terminal reads it back from the grid -- and these rows copy lines, not records. A
+            // row named "Copy Last Command" that hands back a prompt is a row that lies.
             Table::command(CopyLastCommandPrompt {}, "Copy Last Prompt").shownWhen(hasLastCommand),
             Table::command(CopyLastCommandOutput {}, "Copy Last Command Output").shownWhen(hasLastCommand),
             Table::command(CopyLastCommandBlock {}, "Copy Last Prompt and Output").shownWhen(hasLastCommand),
@@ -157,6 +202,13 @@ namespace
                 .actionFrom([](ContextMenuState const& state) -> actions::Action {
                     return ToggleFoldAt { .line = state.foldLine ? state.foldLine->value : 0 };
                 }),
+
+            // The block the user right-clicked. Pinned like the fold line above; its output part is
+            // what a user points at, so these are the output rows, with the command line beside them.
+            blockCommand<SelectCommandBlock>("Select Output", hasOutputUnderCursor),
+            blockCommand<CopyCommandBlock>("Copy Output", hasOutputUnderCursor),
+            blockCommand<CopyCommandLine>("Copy Command", hasCommandLineUnderCursor),
+            blockCommand<OpenCommandOutput>("Open Output in Pager", hasOutputUnderCursor),
 
             Table::separator(),
 

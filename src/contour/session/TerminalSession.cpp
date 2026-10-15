@@ -8,19 +8,27 @@
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/Clipboard.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
+#include <contour/platform/FinishNotification.hpp>
+#include <contour/platform/NotificationOccasion.hpp>
 #include <contour/platform/QtInvoke.hpp>
+#include <contour/platform/QtPath.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
+#include <contour/session/CommandBlockTooltip.hpp>
+#include <contour/session/CommandOutputFiles.hpp>
+#include <contour/session/HostedOperation.hpp>
 #include <contour/session/Logging.hpp>
 #include <contour/session/ScreenshotFile.hpp>
 #include <contour/session/SpawnCommand.hpp>
 #include <contour/session/TerminalSession.hpp>
 
 #include <vtbackend/core/FileUrl.hpp>
-#include <vtbackend/input/MatchModes.hpp>
 #include <vtbackend/input/vi/HintModeHandler.hpp>
 #include <vtbackend/input/vi/ViCommands.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/shell/CommandLineSanitizer.hpp>
+#include <vtbackend/shell/CommandLineText.hpp>
 
+#include <vtpty/CommandLine.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/SshSession.hpp>
@@ -28,10 +36,13 @@
 #include <crispy/StackTrace.hpp>
 
 #include <core/Assert.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
+#include <core/platform/PathUtils.hpp>
 
 #include <QtCore/QDeadlineTimer>
 #include <QtCore/QDebug>
+#include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
 #include <QtCore/QMimeData>
@@ -44,18 +55,21 @@
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
-#include <QtNetwork/QHostInfo>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <ranges>
 #include <regex>
 #include <span>
+#include <tuple>
+#include <utility>
 
 #include <tracy/Tracy.hpp>
 
@@ -88,26 +102,6 @@ namespace contour::session
 namespace
 {
 
-    /// This machine's /etc/machine-id, or empty where there is none.
-    ///
-    /// Read once at session construction rather than on every question: it cannot change while the
-    /// process runs, and the callers that need it are on the GUI path. Absent on Windows and on a system
-    /// without systemd, where the host-name comparison carries the locality test alone.
-    [[nodiscard]] std::string readLocalMachineId()
-    {
-        auto file = std::ifstream { "/etc/machine-id" };
-        if (!file)
-            return {};
-        auto value = std::string {};
-        std::getline(file, value);
-        // Trimmed, because trailing whitespace would make every comparison against a wire value fail.
-        return std::string { core::trimRight(value) };
-    }
-    string unhandledExceptionMessage(string_view const& where, exception const& e)
-    {
-        return std::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
-    }
-
     /// Names the calling thread `Terminal.Loop`, as `ps -T` and debuggers show it, where POSIX threads
     /// can be named; Windows names no thread here.
     void nameMainLoopThread()
@@ -119,7 +113,32 @@ namespace
 #endif
     }
 
-#ifdef __linux__
+    /// Connects @p action to @p signal, running it on every emission naming @p identifier: the notifier
+    /// reports on all of a session's notifications through the same signals.
+    ///
+    /// @param notifier   Whose signal to connect to.
+    /// @param context    Whose lifetime the connection is bound to.
+    /// @param signal     The signal, whose first parameter is the identifier emitted.
+    /// @param identifier The notification identifier this connection is about.
+    /// @param action     What to run, taking the signal's remaining parameters.
+    /// @return The connection.
+    template <typename... Args, typename Action>
+    QMetaObject::Connection connectMatching(platform::Notifier* notifier,
+                                            TerminalSession* context,
+                                            void (platform::Notifier::*signal)(QString, Args...),
+                                            std::string const& identifier,
+                                            Action action)
+    {
+        return QObject::connect(notifier,
+                                signal,
+                                context,
+                                [identifier = QString::fromStdString(identifier),
+                                 action = std::move(action)](QString const& emitted, Args... args) {
+                                    if (emitted == identifier)
+                                        action(args...);
+                                });
+    }
+
     /// Connects @p action to @p signal, running it on the first emission naming @p identifier and
     /// breaking the connection there.
     ///
@@ -138,26 +157,18 @@ namespace
     void connectOnceMatching(platform::Notifier* notifier,
                              TerminalSession* context,
                              void (platform::Notifier::*signal)(QString, Args...),
-                             std::string identifier,
+                             std::string const& identifier,
                              Action action)
     {
         // Held indirectly because the handler must be able to break its own connection, which does
         // not exist yet when the handler is built.
         auto const connection = std::make_shared<QMetaObject::Connection>();
-        *connection =
-            QObject::connect(notifier,
-                             signal,
-                             context,
-                             [identifier = std::move(identifier), connection, action = std::move(action)](
-                                 QString const& emitted, Args... args) {
-                                 if (emitted.toStdString() != identifier)
-                                     return;
-
-                                 QObject::disconnect(*connection);
-                                 action(args...);
-                             });
+        *connection = connectMatching(
+            notifier, context, signal, identifier, [connection, action = std::move(action)](Args... args) {
+                QObject::disconnect(*connection);
+                action(args...);
+            });
     }
-#endif
 
     string normalizeCrlf(QString const& text)
     {
@@ -206,6 +217,15 @@ namespace
         return appDefault;
     }
 
+    /// Whether @p actions turns key mappings back on: the one binding executeAllActions() still runs
+    /// while they are toggled off.
+    [[nodiscard]] bool togglesKeyMappings(std::vector<actions::Action> const& actions)
+    {
+        return std::ranges::any_of(actions, [](actions::Action const& action) {
+            return holds_alternative<actions::ToggleAllKeyMaps>(action);
+        });
+    }
+
     class ExitWatcherThread: public QThread
     {
       public:
@@ -224,6 +244,49 @@ namespace
         TerminalSession& _session;
     };
 
+    /// How often the scrollbar's ticks may be rebuilt: one frame at 60 Hz. They summarise the whole
+    /// scrollback, so recomputing them faster than a display can show them buys nothing.
+    constexpr auto ScrollbarMarksFrameInterval = std::chrono::milliseconds { 16 };
+
+    /// @p ticks as QML reads them: one { position, kind, targetLine } map per tick, top first.
+    /// @param ticks The bucketed ticks.
+    /// @param trackPixels The track they were bucketed for; each position is a fraction of it.
+    /// @return The list the scrollbarMarks property reports.
+    [[nodiscard]] QVariantList toScrollbarMarkList(std::span<vtbackend::ScrollbarTick const> ticks,
+                                                   int trackPixels)
+    {
+        auto list = QVariantList {};
+        list.reserve(static_cast<qsizetype>(ticks.size()));
+        for (auto const& tick: ticks)
+            list.append(QVariantMap {
+                { QStringLiteral("position"),
+                  static_cast<double>(tick.pixel) / static_cast<double>(trackPixels) },
+                { QStringLiteral("kind"), static_cast<int>(tick.kind) },
+                { QStringLiteral("targetLine"), static_cast<qint64>(tick.targetStableId) },
+            });
+        return list;
+    }
+
+    /// Each mark kind's colour under @p palette, indexed by kind.
+    [[nodiscard]] std::array<vtbackend::RGBColor, vtbackend::ScrollbarMarkKindList.size()>
+    scrollbarMarkColorsOf(vtbackend::ColorPalette const& palette) noexcept
+    {
+        auto colors = std::array<vtbackend::RGBColor, vtbackend::ScrollbarMarkKindList.size()> {};
+        for (auto const kind: vtbackend::ScrollbarMarkKindList)
+            colors[static_cast<size_t>(kind)] = vtbackend::scrollbarMarkColor(palette, kind);
+        return colors;
+    }
+
+    /// @p colors as the QColor list the scrollbarMarkColors property reports.
+    [[nodiscard]] QVariantList toScrollbarMarkColorList(std::span<vtbackend::RGBColor const> colors)
+    {
+        auto list = QVariantList {};
+        list.reserve(static_cast<qsizetype>(colors.size()));
+        for (auto const color: colors)
+            list.append(QVariant::fromValue(platform::toQColor(color)));
+        return list;
+    }
+
 } // namespace
 
 TerminalSession::TerminalSession(TerminalSessionManager* manager,
@@ -232,7 +295,8 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                                  std::string profileName,
                                  std::optional<vtbackend::PageSize> initialPageSize,
                                  std::optional<vtpty::Process::ExecInfo> launchedCommand,
-                                 std::unique_ptr<platform::Notifier> notifier):
+                                 std::unique_ptr<platform::Notifier> notifier,
+                                 SessionRole role):
     _manager { manager },
     _id { createSessionId() },
     _startTime { steady_clock::now() },
@@ -240,37 +304,40 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _profileName { resolveProfileName(_config, profileName, app.profileName()) },
     _profileOverride { profileName.empty() ? std::optional<std::string> {} : std::optional { profileName } },
     _launchedCommand { std::move(launchedCommand) },
+    _role { role },
     _profile { *_config.profile(_profileName) },
     _app { app },
     _currentColorPreference { app.colorPreference() },
-    _localHostName { QHostInfo::localHostName().toStdString() },
-    _localMachineId { readLocalMachineId() },
+    _localIdentity { app.hostIdentity() },
     _accumulatedPixelScroll {},
     _accumulatedAngleScroll {},
-    _hyperlinkHover { _localHostName },
+    // Asked of the terminal, for a pane bound to another machine's daemon names no path here.
+    _hyperlinkHover { [this] { return _terminal.fileUrlLocalHost(); } },
     _terminal { *this,
                 app.processEnvironment(),
+                app.fileSystem(),
                 std::move(pty),
                 config::sessionSettings(_config, _profile, _currentColorPreference, initialPageSize),
                 app.statusLineCommandServices(),
-                std::chrono::steady_clock::now() },
+                app.terminalClocks(),
+                vtbackend::randomSemanticBlockTokens() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
     // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is
     // fixed for the notifier's life: it decides how a backend that cannot observe a close behaves,
-    // which is configuration, not state.
-    _desktopNotifier { notifier ? std::move(notifier)
-                                : platform::makeDesktopNotifier(_config.notificationCloseTimeout.value()) }
-{
-    if (app.liveConfig())
-    {
-        sessionLog()("Enable live configuration reloading of file {}.", _config.configFile.generic_string());
-        _configFileChangeWatcher = make_unique<QFileSystemWatcher>();
-        _configFileChangeWatcher->addPath(QString::fromStdString(_config.configFile.generic_string()));
-        connect(_configFileChangeWatcher.get(),
-                SIGNAL(fileChanged(QString const&)),
-                this,
-                SLOT(onConfigReload()));
+    // which is configuration, not state. Where there is no desktop to raise a notice on, it goes to the
+    // tray of the window hosting this session, asked of the manager when it is raised.
+    _desktopNotifier {
+        notifier ? std::move(notifier)
+                 : platform::makeDesktopNotifier(
+                       _config.notificationCloseTimeout.value(),
+                       [this](QString const& title, QString const& body, std::function<void()> onClicked) {
+                           if (_manager != nullptr)
+                               _manager->requestWindowNotification(*this, title, body, std::move(onClicked));
+                       })
     }
+{
+    // live_config is watched once, by the manager (TerminalSessionManager::reloadAllSessions), not per
+    // session: one save is one parse, and the app's configuration is updated before the sessions are.
     _musicalNotesBuffer.reserve(16);
 
     // A tally walks the whole scrollback, so it must never run on the render path. Output that keeps
@@ -284,8 +351,15 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
         refreshSearchStatus();
     });
 
-    _profile = *_config.profile(_profileName); // XXX do it again. but we've to be more efficient here
+    // The scrollbar's ticks summarise the whole scrollback, so they are rebuilt at most once per frame
+    // however fast output arrives.
+    // @see requestScrollbarMarksRefresh
+    _scrollbarMarksTimer.setSingleShot(true);
+    _scrollbarMarksTimer.setInterval(ScrollbarMarksFrameInterval);
+    connect(&_scrollbarMarksTimer, &QTimer::timeout, this, &TerminalSession::refreshScrollbarMarks);
+
     configureTerminal();
+    connectFinishNoticeEvents();
 }
 
 TerminalSession::~TerminalSession()
@@ -320,8 +394,9 @@ TerminalSession::~TerminalSession()
         _terminal.device().close();
     _terminal.device().wakeupReader();
 
-    // Bounded, because ConPty::waitForClosed() only notices the close on its next one-second poll.
-    // terminate() stays as the last resort, and is now followed by the wait() it always needed.
+    // Bounded all the same: what a device's waitForClosed() waits on is its own business -- a POSIX
+    // Process waits for its child to end, which the close only asks of it. terminate() stays as the last
+    // resort, and is now followed by the wait() it always needed.
     // wait() on a thread that was never started returns immediately, so the never-started case (a
     // session whose device failed to start) costs nothing.
     if (!_exitWatcherThread->wait(QDeadlineTimer { std::chrono::seconds { 3 } }))
@@ -339,6 +414,10 @@ void TerminalSession::detachDisplay(DisplaySurface& display)
     sessionLog()("Detaching display from session.");
     Require(_display == &display);
     setRenderNotifyTarget(nullptr);
+    // The pointer stood over the display that goes, and nothing else would end its hover: a tab switch
+    // detaches the display and attaches it to another session, and switching back brought the tooltip back
+    // at the cell it had been entered at, wherever the pointer then was.
+    clearHovers();
     _display = nullptr;
 }
 
@@ -385,14 +464,17 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
     // additionally refuses the resize on its own side, since attachDisplay() is not the only caller.
     if (!isClosed())
     {
-        // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
-        auto const l = scoped_lock { _terminal };
-        _terminal.resizeScreen(_terminal.totalPageSize(),
-                               _display->reportedPixelSize(_terminal.totalPageSize()));
-        // refreshRate() dereferences window()->screen(); pre-window (see below) the posted
-        // configureDisplay() sets it once the window exists.
-        if (_display->window() != nullptr)
-            _terminal.setRefreshRate(_display->refreshRate());
+        // NB: Inform connected TTY and local Screen instance about initial cell pixel size. Under the lock,
+        // as the ViNormalMode action resizes: the resize may write a report, sent once the lock is released.
+        {
+            auto const _ = std::scoped_lock { _terminal };
+            _terminal.resizeScreen(_terminal.totalPageSize(),
+                                   _display->reportedPixelSize(_terminal.totalPageSize()));
+            // refreshRate() dereferences window()->screen(); pre-window (see below) the posted
+            // configureDisplay() sets it once the window exists.
+            if (_display->window() != nullptr)
+                _terminal.setRefreshRate(_display->refreshRate());
+        }
     }
 
     // configureDisplay() only runs from createRenderer(), i.e. once for the first session, so the
@@ -411,15 +493,6 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
     // a stale one.
     refreshGuiTabInfoForStatusLine();
 
-    // Similarly, terminal replies (e.g. answers to VT capability queries that shells like fish
-    // send right at startup) that were generated while no display was attached were queued in
-    // the input generator but never flushed: screenUpdated() only posts flushInput() when
-    // _display is set, and the shell may be blocked waiting for the reply, producing no further
-    // PTY output that would trigger another flush. Without this, the shell hangs until the next
-    // focus/input event finally flushes the queue (observed as a multi-second startup stall).
-    if (_terminal.hasInput())
-        _display->post(bind(&TerminalSession::flushInput, this));
-
     // And likewise the pointer shape: an `OSC 22` that arrived while no display was attached has
     // nowhere to go at the time, so the new display starts on its own default and the application's
     // shape is lost for the rest of the session. setDefaultCursor() applies the remembered shape if
@@ -434,6 +507,10 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
     // scrollbar sized for a history it cannot see.
     announceScrollableLineCount(
         core::locked(_terminal, [this] { return _terminal.viewport().scrollableLineCount(); }));
+
+    // And the scrollbar's ticks, for the same reason: a pane that ran commands in the background has none
+    // published for this display's track yet.
+    requestScrollbarMarksRefresh();
 
     scheduleRedraw();
 }
@@ -487,6 +564,8 @@ void TerminalSession::start()
     }
 
     _screenUpdateThread = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
+    // Named before a key can be typed: from now on, only the read loop writes to the PTY.
+    _terminal.setReaderThread(_screenUpdateThread->get_id());
     _exitWatcherThread->start(QThread::LowPriority);
 }
 
@@ -534,10 +613,14 @@ void TerminalSession::mainLoop()
         return sstr.str();
     }());
 
+    // The loop writes what it queued, the replies, and what the GUI thread queued and woke it for: keys,
+    // pastes, the reports a frontend's hold of the lock raised. A write the program leaves unread parks this
+    // thread, never the GUI's. @see vtbackend::InputWriter
     while (!_terminating)
     {
         if (!_terminal.processInputOnce())
             break;
+        _terminal.flushInput();
     }
 
     sessionLog()("Event loop terminating (PTY {}).", _terminal.device().isClosed() ? "closed" : "open");
@@ -625,6 +708,7 @@ void TerminalSession::bufferChanged(vtbackend::ScreenType type)
 
     _currentScreenType = type;
     emit isScrollbarVisibleChanged();
+    requestScrollbarMarksRefresh(); // the alternate screen shows no ticks
     // Re-check _display at dispatch: a tab switch or split collapse may have detached it (via
     // TerminalDisplay::setSession -> detachDisplay) between this post and the GUI thread running it.
     _display->post([this, type]() {
@@ -639,37 +723,18 @@ void TerminalSession::screenUpdated()
     if (!_display)
         return;
 
-    // Emphatically NOT under Terminal's state mutex, however much the fold projection below would like
-    // it: this callback is raised BOTH with that mutex held and without it. Terminal::setMode() ends a
-    // synchronized update (DECRST 2026) by calling synchronizedOutput(), which refreshes the render
-    // buffer on the already-locked path and then raises this -- mid-parse, on the parser thread, with
-    // the mutex held. The mutex is a plain non-recursive std::mutex, so taking it here self-deadlocks on
-    // the very sequence neovim, tmux and every other modern TUI ends each frame with. @see
-    // Events::progressChanged for the same contract, stated.
+    // Emphatically NOT under Terminal's state mutex: this callback is raised BOTH with that mutex held
+    // and without it. Terminal::setMode() ends a synchronized update (DECRST 2026) by calling
+    // synchronizedOutput(), which refreshes the render buffer on the already-locked path and then raises
+    // this -- mid-parse, on the parser thread, with the mutex held. The mutex is a plain non-recursive
+    // std::mutex, so taking it here self-deadlocks on the very sequence neovim, tmux and every other modern
+    // TUI ends each frame with. @see Events::progressChanged for the same contract, stated.
     //
-    // Not while the viewport is parked on something the user went looking for. The Vi-mode test used
-    // to be the whole guard, and it worked only because starting a search forced Normal mode; the bar
-    // deliberately switches no mode, so a search now runs with the mode still Insert. Both
-    // Terminal::search()/searchReverse() and ViCommands::moveCursorTo() reveal their match and then
-    // raise screenUpdated(), so without this the very next statement scrolled the viewport straight
-    // back to the bottom -- no match living in the scrollback could be shown at all, and the ones that
-    // could were yanked away by the next byte of output.
-    //
-    // Two ways to be parked, not one. The bar being open is the obvious one. The other is F3, which
-    // the default bindings gate on the Search match mode -- "a pattern is set", which OUTLIVES the bar
-    // (@see searchBarClosed) -- so stepping through matches with the bar shut is a supported flow that
-    // runs in Insert mode with the bar's flag clear. @see _searchMatchRevealed for how it un-parks.
-    auto const viewportScrolled = _terminal.viewport().scrolled();
-    if (!viewportScrolled)
+    // Which is why the view is not brought down to new output here, but by the terminal, under that mutex,
+    // as it applies the output (@see outputFollowing). What is left here is un-parking: a view back at the
+    // bottom follows the output again. Its position is read as published, which takes no lock.
+    if (!_terminal.viewport().isAwayFromBottom())
         _searchMatchRevealed.store(false, std::memory_order_relaxed);
-
-    if (_profile.history.value().autoScrollOnUpdate && viewportScrolled
-        && _terminal.inputHandler().mode() == ViMode::Insert
-        && !_isSearchBarOpen.load(std::memory_order_relaxed)
-        && !_searchMatchRevealed.load(std::memory_order_relaxed))
-        _terminal.viewport().scrollToBottom();
-
-    auto const scrollable = _terminal.viewport().scrollableLineCount();
 
     // New output can add or remove matches, so the find bar's count goes stale. Re-tallying walks the
     // whole scrollback, so it is neither done here nor once per frame: this only re-arms a timer on
@@ -678,44 +743,68 @@ void TerminalSession::screenUpdated()
     if (_isSearchBarOpen.load(std::memory_order_relaxed)
         && !_searchTallyPostPending.test_and_set(std::memory_order_acq_rel))
     {
-        QMetaObject::invokeMethod(
-            this,
-            // The flag is cleared where the timer FIRES, not here, so exactly one post is made per
-            // 250 ms window. Clearing it here instead let every following screen update post again
-            // while the timer was still running -- one queued call per PTY read chunk, which under
-            // heavy output is thousands a second.
-            [this]() {
-                // Re-checked here: the bar can close between this post and its delivery, and starting
-                // the timer then would fire a tally 250 ms later for a bar that is gone.
-                if (_isSearchBarOpen.load(std::memory_order_relaxed))
-                    _searchTallyTimer.start();
-                else
-                    _searchTallyPostPending.clear(std::memory_order_release);
-            },
-            Qt::QueuedConnection);
+        platform::postToObject(this,
+                               // The flag is cleared where the timer FIRES, not here, so exactly one post is
+                               // made per 250 ms window. Clearing it here instead let every following screen
+                               // update post again while the timer was still running -- one queued call per
+                               // PTY read chunk, which under heavy output is thousands a second.
+                               [this]() {
+                                   // Re-checked here: the bar can close between this post and its delivery,
+                                   // and starting the timer then would fire a tally 250 ms later for a bar
+                                   // that is gone.
+                                   if (_isSearchBarOpen.load(std::memory_order_relaxed))
+                                       _searchTallyTimer.start();
+                                   else
+                                       _searchTallyPostPending.clear(std::memory_order_release);
+                               });
     }
 
-    if (terminal().hasInput())
-        _display->post(bind(&TerminalSession::flushInput, this));
-
-    // The scrollable count rather than the history depth, so that folding a block -- which moves that
-    // count without touching the depth -- resizes the scrollbar too.
-    announceScrollableLineCount(scrollable);
+    // New output can grow the history the scrollbar spans, add blocks, or finish one. Only a request, for
+    // its travel as well as its ticks: the refresh takes the lock, which may be held here. Nor is the
+    // travel counted here while it is not: the count goes through the fold projection, a cache that only
+    // the lock's holder may rebuild.
+    requestScrollbarMarksRefresh();
 
     scheduleRedraw();
 }
 
+void TerminalSession::pageResized()
+{
+    // A window, font or split resize is followed by no output when the program in the pane is quiet, and
+    // the reflow renamed every row a tick points at: without this the old ticks stayed, and every click on
+    // one was refused, until the program next printed. Only a request: the resizer holds the lock.
+    if (_display)
+        requestScrollbarMarksRefresh();
+}
+
 void TerminalSession::flushInput()
 {
+    // Wakes the session's read loop, which writes it, and retries what the PTY has no room for yet.
     terminal().flushInput();
-    if (terminal().hasInput() && _display)
-        _display->post(bind(&TerminalSession::flushInput, this));
 }
 
 void TerminalSession::setRenderNotifyTarget(DisplaySurface* target)
 {
     auto const lock = std::scoped_lock { _renderNotifyMutex };
     _renderNotifyTarget = target;
+}
+
+vtbackend::OutputFollowing TerminalSession::outputFollowing() const noexcept
+{
+    // Not while the viewport is parked on something the user went looking for. The Vi-mode test used to be
+    // the whole guard, and it worked only because starting a search forced Normal mode; the bar deliberately
+    // switches no mode, so a search runs with the mode still Insert, and a match revealed in the scrollback
+    // would be yanked away by the next byte of output.
+    //
+    // Two ways to be parked, not one. The bar being open is the obvious one. The other is F3, which the
+    // default bindings gate on the Search match mode -- "a pattern is set", which OUTLIVES the bar (@see
+    // searchBarClosed) -- so stepping through matches with the bar shut is a supported flow that runs in
+    // Insert mode with the bar's flag clear. @see _searchMatchRevealed for how it un-parks.
+    if (_isSearchBarOpen.load(std::memory_order_relaxed)
+        || _searchMatchRevealed.load(std::memory_order_relaxed))
+        return vtbackend::OutputFollowing::Stay;
+
+    return vtbackend::OutputFollowing::Follow;
 }
 
 void TerminalSession::renderBufferUpdated()
@@ -817,9 +906,14 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
     if (auto const* colorPalette = config::preferredColorPalette(_profile.colors.value(), preference))
     {
         // Under the lock, as configureTerminal() re-seeds it: the parser thread reads the palette for every
-        // colour query and frame, and with mode 2031 set the reset writes a report. The signal is emitted
-        // outside it, because the QML binding it wakes reads back into this session.
-        core::locked(_terminal, [&] { _terminal.resetColorPalette(*colorPalette); });
+        // colour query and frame. With mode 2031 set the reset writes a report, sent once the lock is
+        // released, as with SRM reset it echoes, which parses. The signal is emitted outside it, because the
+        // QML binding it wakes reads back into this session.
+        {
+            auto const _ = std::scoped_lock { _terminal };
+            _terminal.resetColorPalette(*colorPalette);
+        }
+        requestScrollbarMarksRefresh(); // the ticks are drawn in the scheme's colours
 
         emit backgroundColorChanged();
     }
@@ -868,23 +962,26 @@ void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
 
     // Both the grid walk and the reply touch terminal state from the GUI thread, so they take the state
     // mutex like every other GUI-thread access in this file. The parser thread held it while raising the
-    // Events hook and released it with that chunk; by now it may well be inside the next one.
-    auto const l = scoped_lock { _terminal };
-
-    for (auto const& request: requests)
+    // Events hook and released it with that chunk; by now it may well be inside the next one. The replies
+    // are flushed once it is released: with SRM reset the flush echoes them, which parses and takes it again.
     {
-        if (allow)
-            _terminal.primaryScreen().captureBuffer(request.lines, request.logical);
-        else
-            // A refusal is still a reply. The protocol cannot express "no reply is coming", so a client
-            // reading until the empty terminating chunk would otherwise block forever -- which is what
-            // `capture_buffer: deny` would mean if it just returned here.
-            _terminal.primaryScreen().replyCaptureBufferEnd();
+        auto const _ = std::scoped_lock { _terminal };
+        for (auto const& request: requests)
+        {
+            if (allow)
+                _terminal.primaryScreen().captureBuffer(request.lines, request.logical);
+            else
+                // A refusal is still a reply. The protocol cannot express "no reply is coming", so a client
+                // reading until the empty terminating chunk would otherwise block forever -- which is what
+                // `capture_buffer: deny` would mean if it just returned here.
+                _terminal.primaryScreen().replyCaptureBufferEnd();
+        }
     }
 
-    sessionLog()("requestCaptureBuffer: Answered {} request(s) with {}. Waking up I/O thread.",
-                 requests.size(),
-                 allow ? "allow" : "deny");
+    sessionLog()(
+        "requestCaptureBuffer: Answered {} request(s) with {}.", requests.size(), allow ? "allow" : "deny");
+    // The lock's release woke the read loop, which writes the replies, a whole buffer of them perhaps, for as
+    // long as the PTY pushes back.
     flushInput();
 }
 
@@ -898,13 +995,22 @@ void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remembe
     if (remember)
         _rememberedPermissions[GuardedRole::ShowHostWritableStatusLine] = allow;
 
+    // Under the lock: the parser thread reads what the answer leaves behind at DECSASD 0, and draws the
+    // line it puts up. Denied, the line stays hidden, and status_line.sync_to_window_title may show what
+    // the application writes there in the window title instead. Putting the line up resizes the page, which
+    // may write a report, sent once the lock is released. See ViNormalMode.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        _terminal.answerHostWritableStatusLineRequest(allow
+                                                          ? vtbackend::HostWritableStatusLineAnswer::Shown
+                                                          : vtbackend::HostWritableStatusLineAnswer::Denied);
+    }
     if (!allow)
         return;
 
-    _terminal.setStatusDisplay(vtbackend::StatusDisplayType::HostWritable);
-    sessionLog()("Host-writable status line shown. Waking up I/O thread.");
+    sessionLog()("Host-writable status line shown.");
+    // The lock's release woke the read loop, which writes the resize report.
     flushInput();
-    _terminal.setSyncWindowTitleWithHostWritableStatusDisplay(false);
 }
 
 vtbackend::FontDef TerminalSession::getFontDef()
@@ -1079,19 +1185,37 @@ void TerminalSession::inspect()
 
 void TerminalSession::notify(string_view title, string_view content)
 {
-#ifdef __linux__
+    // OSC 777 and OSC 9: a notification with neither an identifier to report on nor an occasion of its own,
+    // decided and raised as an OSC 99 one is.
     auto notification = vtbackend::DesktopNotification {};
     notification.title = std::string(title);
     notification.body = std::string(content);
-    _desktopNotifier->notify(notification);
-#else
-    emit showNotification(QString::fromUtf8(title.data(), static_cast<int>(title.size())),
-                          QString::fromUtf8(content.data(), static_cast<int>(content.size())));
-#endif
+    notification.occasion = platform::UnstatedNotificationOccasion;
+    notification.focusOnActivation = false;
+    showDesktopNotification(notification);
 }
 
 void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification const& notification)
 {
+    // Raised on the parser thread with the terminal's state mutex held, while where the pane is -- which
+    // decides whether it is shown -- is the GUI thread's to say: posted, as a later close of it is.
+    platform::postToObject(this, [this, notification]() { raiseDesktopNotification(notification); });
+}
+
+void TerminalSession::raiseDesktopNotification(vtbackend::DesktopNotification const& notification)
+{
+    // A standalone session is placed nowhere, so nothing puts it in sight.
+    auto const visibility =
+        _manager != nullptr ? _manager->sessionVisibility(*this) : platform::SessionVisibility::Hidden;
+    if (!platform::isNoticeWanted(platform::notifyWhenOf(notification.occasion), visibility))
+    {
+        // Never shown, so not live either: the terminal listed it as it arrived.
+        core::locked(_terminal, [&]() {
+            _terminal.desktopNotificationManager().removeActiveNotification(notification.identifier);
+        });
+        return;
+    }
+
     // Said as well as shown: a desktop notification is a visual popup, and an assistive client that
     // does not read the desktop's own notifications would otherwise miss it entirely.
     announce(notification.title.empty()
@@ -1099,26 +1223,39 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
                  : QStringLiteral("%1: %2").arg(QString::fromStdString(notification.title),
                                                 QString::fromStdString(notification.body)));
 
-#ifdef __linux__
+    // Through the session's notifier on every platform: a pane out of sight has no chrome on screen to pass
+    // it on, and where there is no desktop to raise it on the notifier hands it to the hosting window. A
+    // notifier that cannot report a close or a click simply never fires what is connected below.
     _desktopNotifier->notify(notification);
 
     auto const identifier = notification.identifier;
 
     if (notification.closeEventRequested)
-        connectOnceMatching(_desktopNotifier.get(),
-                            this,
-                            &platform::Notifier::notificationClosed,
-                            identifier,
-                            [this, identifier](uint /*reason*/, vtbackend::CloseReport report) {
-                                _terminal.reply("\033]{}\033\\",
-                                                vtbackend::buildOSC99CloseResponse(identifier, report));
-                                _terminal.desktopNotificationManager().removeActiveNotification(identifier);
-                            });
+        connectOnceMatching(
+            _desktopNotifier.get(),
+            this,
+            &platform::Notifier::notificationClosed,
+            identifier,
+            [this, identifier](uint /*reason*/, vtbackend::CloseReport report) {
+                // Under the terminal's lock: the parser thread lists notifications as they arrive, and
+                // answers in the same reply stream. The answer goes out once the lock is released: raised
+                // here, on the GUI thread, it is in no batch of the parser's, whose end would send it.
+                {
+                    auto const _ = std::scoped_lock { _terminal };
+                    _terminal.reply("\033]{}\033\\", vtbackend::buildOSC99CloseResponse(identifier, report));
+                    _terminal.desktopNotificationManager().removeActiveNotification(identifier);
+                }
+            });
 
     if (notification.reportOnActivation)
         connectOnceMatching(
             _desktopNotifier.get(), this, &platform::Notifier::actionInvoked, identifier, [this, identifier] {
-                _terminal.reply("\033]99;i={}:p=activated;\033\\", identifier);
+                // Under the terminal's lock, and sent once it is released, as the close's answer is: the
+                // reply is phrased by parser state.
+                {
+                    auto const _ = std::scoped_lock { _terminal };
+                    _terminal.reply("\033]99;i={}:p=activated;\033\\", identifier);
+                }
             });
 
     if (notification.focusOnActivation)
@@ -1126,32 +1263,26 @@ void TerminalSession::showDesktopNotification(vtbackend::DesktopNotification con
             _desktopNotifier.get(), this, &platform::Notifier::actionInvoked, identifier, [this] {
                 focusTerminalWindow();
             });
-#else
-    // On non-Linux platforms, fall back to the simple notification mechanism.
-    emit showNotification(QString::fromStdString(notification.title),
-                          QString::fromStdString(notification.body));
-#endif
 }
 
 void TerminalSession::discardDesktopNotification(std::string_view identifier)
 {
-    // No #ifdef: where there is nothing to withdraw a notification from, the notifier is a
-    // NullNotifier and this is a no-op.
-    _desktopNotifier->close(std::string(identifier));
+    // Posted behind the raise it may be about, which waits on the GUI thread for the same reason; issued
+    // at once, the close would reach the notifier first and find nothing to withdraw. No #ifdef: where
+    // there is nothing to withdraw a notification from, the notifier's close is a no-op.
+    platform::postToObject(
+        this, [this, identifier = std::string(identifier)]() { _desktopNotifier->close(identifier); });
 }
 
 void TerminalSession::focusTerminalWindow()
 {
-    if (_display)
-    {
-        _display->post([display = _display]() {
-            if (auto* window = display->window())
-            {
-                window->raise();
-                window->requestActivate();
-            }
-        });
-    }
+    // The session brought forward -- its pane and tab selected, its window raised and restored -- and not
+    // merely the window of a display it may not have: a notification is the case for a pane out of sight.
+    // Posted, for placement is the GUI thread's; a standalone session has no manager to place it.
+    platform::postToObject(this, [this]() {
+        if (_manager != nullptr)
+            _manager->revealSession(*this);
+    });
 }
 
 void TerminalSession::onClosed()
@@ -1216,7 +1347,9 @@ void TerminalSession::onClosed()
         return;
     }
 
-    if (diff < _app.earlyExitThreshold() && !_terminationRequested)
+    // A pager is expected to end at once -- a `q`, or a `more` whose output fits one screen -- so only a
+    // shell's quick end is taken for a failure to start.
+    if (_role == SessionRole::Shell && diff < _app.earlyExitThreshold() && !_terminationRequested)
     {
         // Deliberately do NOT emit sessionClosed here: removeSession() would prune this pane from the
         // model and tear down its QML item, destroying the very screen the message below is shown on
@@ -1492,6 +1625,15 @@ QString TerminalSession::title() const
 #endif
 }
 
+template <typename Change>
+void TerminalSession::postToManager(Change change)
+{
+    if (_manager == nullptr)
+        return;
+    platform::postToObject(_manager,
+                           [manager = _manager, change = std::move(change)]() mutable { change(*manager); });
+}
+
 void TerminalSession::refreshGuiTabInfoForStatusLine()
 {
     // setWindowTitle()/setTabName() are invoked on the parser thread while _stateMutex is held (ESU
@@ -1503,12 +1645,11 @@ void TerminalSession::refreshGuiTabInfoForStatusLine()
     // (unfocused) tab's session has no display attached — the display follows the active tab — so
     // gating on _display would skip the tab-strip label refresh for every unfocused tab, freezing its
     // title until it was next focused. The tab-strip update is a pure model change and does not need a
-    // display. postToObject targets `this`, so Qt auto-cancels the queued call if the session is
-    // destroyed first (e.g. closing a tab while its shell still emits an OSC title change), avoiding a
-    // use-after-free on _manager.
-    platform::postToObject(this, [this]() {
-        _manager->update();                               // indicator status line
-        _manager->refreshTabForSession(modelSessionId()); // GUI tab strip label
+    // display. Queued on the manager and keyed by the session's id, so it outlives neither: a session
+    // closed meanwhile is a tab the manager no longer finds.
+    postToManager([id = modelSessionId()](TerminalSessionManager& manager) {
+        manager.update();                 // indicator status line
+        manager.refreshTabForSession(id); // GUI tab strip label
     });
 }
 
@@ -1536,17 +1677,18 @@ void TerminalSession::setWindowFrameColor(vtbackend::RGBColor color)
     // background. This is invoked on the parser thread while Terminal::_stateMutex is held, so it must
     // NOT touch _manager->model() directly (SessionModel mutation drives the GUI model and
     // updateStatusLine() would re-lock the non-recursive mutex — see refreshGuiTabInfoForStatusLine).
-    // Post the mutation to the GUI thread; postToObject targets `this`, so Qt auto-cancels the queued
-    // call if the session is destroyed first, avoiding a use-after-free on _manager.
-    platform::postToObject(
-        this, [this, color, id = modelSessionId()]() { _manager->setTabColorForSession(id, color); });
+    // Post the mutation to the GUI thread, through postToManager for the reason it gives.
+    postToManager([color, id = modelSessionId()](TerminalSessionManager& manager) {
+        manager.setTabColorForSession(id, color);
+    });
 }
 
 void TerminalSession::resetWindowFrameColor()
 {
     // DECAC item 2 with no colors, or a hard reset (RIS): clear the tab color. Same threading
     // constraint as setWindowFrameColor() above.
-    platform::postToObject(this, [this, id = modelSessionId()]() { _manager->resetTabColorForSession(id); });
+    postToManager(
+        [id = modelSessionId()](TerminalSessionManager& manager) { manager.resetTabColorForSession(id); });
 }
 
 void TerminalSession::progressChanged(vtbackend::Progress /*progress*/)
@@ -1554,11 +1696,213 @@ void TerminalSession::progressChanged(vtbackend::Progress /*progress*/)
     // OSC 9;4. Same threading constraint as setWindowFrameColor() above: this runs on the parser
     // thread with Terminal::_stateMutex held, and the tab-strip refresh reads the terminal back
     // through resolvedProgress(), which takes that same non-recursive mutex. Post it to the GUI
-    // thread; postToObject targets `this`, so Qt cancels the queued call if the session dies first.
+    // thread, through postToManager for the reason it gives.
     // The value itself is not carried across: the refresh reads it back from the terminal, so the
     // strip cannot paint a state older than the one in effect when the posted call finally runs.
-    platform::postToObject(this,
-                           [this, id = modelSessionId()]() { _manager->refreshTabProgressForSession(id); });
+    postToManager([id = modelSessionId()](TerminalSessionManager& manager) {
+        manager.refreshTabProgressForSession(id);
+    });
+}
+
+void TerminalSession::commandBlockFinished(vtbackend::CommandBlockSummary const& summary)
+{
+    // Same threading constraint as progressChanged() above: the parser thread, with the state mutex
+    // held. The summary is a value copy made for exactly this hop; nothing here reads the terminal.
+    // Gathered: a call queued per finish would hold the GUI thread's queue to the length of the input.
+    // postToObject targets `this`, so Qt cancels the queued call if the session dies first.
+    auto const lock = std::scoped_lock { _pendingBlockEventsMutex };
+    if (_pendingBlockEvents.noteFinished(summary, _pendingBlockEventsLimit) == BlockEventsCall::Needed)
+        platform::postToObject(this, [this]() { handlePendingBlockEvents(); });
+}
+
+TerminalSession::BlockEventsCall TerminalSession::PendingBlockEvents::noteFinished(
+    vtbackend::CommandBlockSummary const& summary, size_t limit)
+{
+    auto const call = empty() ? BlockEventsCall::Needed : BlockEventsCall::Queued;
+    if (finished.size() == limit)
+        finished.pop_front(); // as the store forgets its oldest records
+    finished.push_back(summary);
+    return call;
+}
+
+TerminalSession::BlockEventsCall TerminalSession::PendingBlockEvents::noteChanged(
+    vtbackend::CommandBlockChange const& change, size_t limit)
+{
+    auto const call = empty() ? BlockEventsCall::Needed : BlockEventsCall::Queued;
+    lastCommand = change.lastCommand;
+    if (changedRecords == ChangedRecords::Unlisted)
+        return call;
+
+    // Ascending, and nearly always appended: a change is mostly the newest record's.
+    auto const at = std::ranges::lower_bound(changed, change.id);
+    if (at != changed.end() && *at == change.id)
+        return call;
+    if (changed.size() == limit)
+    {
+        changedRecords = ChangedRecords::Unlisted;
+        changed = {};
+        return call;
+    }
+    changed.insert(at, change.id);
+    changedRecords = ChangedRecords::Listed;
+    return call;
+}
+
+void TerminalSession::handlePendingBlockEvents()
+{
+    auto const events = [this]() {
+        auto const lock = std::scoped_lock { _pendingBlockEventsMutex };
+        return std::exchange(_pendingBlockEvents, {});
+    }();
+
+    // By the time a block finished, its own start had told a `next` notice of an older block to go: so it is
+    // here, before the finish raises one in its place.
+    for (auto const& summary: events.finished)
+    {
+        withdrawFinishNoticeIfNextCommandStarted(summary.id);
+        handleCommandBlockFinished(summary);
+    }
+
+    if (events.changedRecords == ChangedRecords::None)
+        return;
+    // The signal has QML read the tooltip's text afresh.
+    if (_hoveredBlock
+        && (events.changedRecords == ChangedRecords::Unlisted
+            || std::ranges::binary_search(events.changed, *_hoveredBlock)))
+        emit commandBlockHoverChanged();
+    withdrawFinishNoticeIfNextCommandStarted(events.lastCommand);
+}
+
+void TerminalSession::handleCommandBlockFinished(vtbackend::CommandBlockSummary const& summary)
+{
+    // A standalone session has no manager to place it on screen, and no window to tell.
+    if (_manager == nullptr)
+        return;
+
+    auto const& policy = _profile.notifyOnCommandFinish.value();
+
+    // Decided before anything is gathered for the words: the floor rejects nearly every command, and the
+    // tab's title is read under its active pane's terminal lock, which that pane's parser may be holding.
+    auto const ending = platform::finishNoticeKind(summary, policy, _manager->sessionVisibility(*this));
+    if (!ending)
+        return;
+
+    // The home is the one the tab tooltip shortens against, so the two never disagree about what `~` is.
+    deliverFinishNotice(
+        summary.id,
+        platform::finishNotificationText(
+            summary, *ending, _manager->tabTitleForSession(*this), _manager->homeDirectory(), policy.action),
+        policy.clearOn);
+}
+
+void TerminalSession::deliverFinishNotice(vtbackend::CommandBlockId block,
+                                          platform::FinishNotificationRequest const& request,
+                                          config::NotifyClearOn clearOn)
+{
+    auto const effects = platform::effectsOf(request.action);
+
+    if (effects.test(platform::FinishEffect::Notification))
+    {
+        // The same identifier every time, so the desktop replaces this session's previous finish
+        // notification rather than stacking a second one under it. Where there is no desktop, the
+        // notifier hands it to the hosting window's tray.
+        auto notification = vtbackend::DesktopNotification {};
+        notification.identifier = platform::finishNotificationIdentifier(_id);
+        notification.title = request.title;
+        notification.body = request.body;
+        _desktopNotifier->notify(notification);
+        _finishNotice = FinishNotice { .block = block, .clearOn = clearOn };
+    }
+
+    if (effects.test(platform::FinishEffect::Bell))
+    {
+        auto const& bell = _profile.bell.value();
+        _manager->requestWindowBell(*this, getBellSource(), static_cast<double>(bell.volume));
+        if (bell.alert)
+            _manager->requestWindowAlert(*this);
+    }
+}
+
+void TerminalSession::withdrawFinishNotice()
+{
+    if (!_finishNotice)
+        return;
+
+    forgetFinishNotice();
+    // Through the notifier on every platform: a tray message cannot be withdrawn, so where the notice
+    // went to a tray this does nothing.
+    _desktopNotifier->close(platform::finishNotificationIdentifier(_id));
+}
+
+void TerminalSession::forgetFinishNotice() noexcept
+{
+    _finishNotice.reset();
+}
+
+bool TerminalSession::finishNoticeClearsOn(config::NotifyClearOn trigger) const noexcept
+{
+    return _finishNotice.has_value() && _finishNotice->clearOn == trigger;
+}
+
+void TerminalSession::withdrawFinishNoticeIfNextCommandStarted(vtbackend::CommandBlockId lastCommand)
+{
+    if (!finishNoticeClearsOn(config::NotifyClearOn::Next))
+        return;
+
+    // The newest record that ran a command -- still running, or finished since, a newer prompt having
+    // closed it without a reported end -- is the notice's own block until a later command starts. A new
+    // prompt alone starts nothing: the user may yet walk away from it. With none at all, a reset forgot the
+    // block since: `reset` itself, say, whose own record went with it.
+    if (lastCommand != _finishNotice->block)
+        withdrawFinishNotice();
+}
+
+void TerminalSession::connectFinishNoticeEvents()
+{
+    // Persistent rather than once per notification, as the OSC 99 handlers connect: every finish
+    // notification of this session carries the same identifier, so one pair of connections serves all of
+    // them, and the OSC 99 handlers sharing these signals filter by their own identifiers.
+    auto const identifier = platform::finishNotificationIdentifier(_id);
+
+    connectMatching(_desktopNotifier.get(), this, &platform::Notifier::actionInvoked, identifier, [this]() {
+        if (!_finishNotice)
+            return;
+        forgetFinishNotice();
+        _manager->revealSession(*this);
+    });
+
+    // Only a close the desktop reported retires it. One a timer merely assumed is no evidence the notice
+    // left the desktop, where it may still be withdrawn and clicked.
+    connectMatching(_desktopNotifier.get(),
+                    this,
+                    &platform::Notifier::notificationClosed,
+                    identifier,
+                    [this](uint /*reason*/, vtbackend::CloseReport report) {
+                        if (report == vtbackend::CloseReport::Observed)
+                            forgetFinishNotice();
+                    });
+
+    // Whatever ends the session -- its shell exiting, its pane or tab closed -- leaves the notice nothing
+    // to wait for: neither clear_on event can happen any more, and a click has no pane to bring forward.
+    // One that would have been withdrawn is withdrawn now; one left to the desktop is forgotten.
+    connect(this, &TerminalSession::sessionClosed, this, [this]() {
+        if (finishNoticeClearsOn(config::NotifyClearOn::Never))
+            forgetFinishNotice();
+        else
+            withdrawFinishNotice();
+    });
+}
+
+void TerminalSession::commandBlockChanged(vtbackend::CommandBlockChange const& change)
+{
+    // Raised on the parser thread with the terminal's state mutex held, like progressChanged() above, and
+    // the hovered block and the finish notification are the GUI thread's: gathered for it, as a finish is.
+    // The newest record that ran a command comes with the change, so nothing here reads the store: a read
+    // re-heads its blocks first, which after a prompt that took the row of the block before can walk the
+    // whole history -- once per change of a flood of them.
+    auto const lock = std::scoped_lock { _pendingBlockEventsMutex };
+    if (_pendingBlockEvents.noteChanged(change, _pendingBlockEventsLimit) == BlockEventsCall::Needed)
+        platform::postToObject(this, [this]() { handlePendingBlockEvents(); });
 }
 
 void TerminalSession::setTerminalProfile(string const& configProfileName)
@@ -1595,12 +1939,29 @@ void TerminalSession::inputModeChanged(vtbackend::ViMode mode)
     }
 }
 
+void TerminalSession::userMarkRequested(vtbackend::UserMarkRequest const& request)
+{
+    platform::postToObject(this, [this, request]() {
+        auto const hosted = HostedOperationRequest {
+            .operation = request.change == UserMarkChange::Added ? HostedOperation::SetUserMark
+                                                                 : HostedOperation::ClearUserMark,
+            .row = HostedRow { .stableId = request.stableId, .generation = request.generation },
+        };
+        if (routeHostedOperation(hosted) != HostedOperationRoute::RunHere)
+            return;
+        core::locked(_terminal, [&]() {
+            _terminal.placeUserMark(request);
+            _terminal.screenUpdated();
+        });
+    });
+}
+
 void TerminalSession::searchPromptRequested()
 {
     // Reached with the terminal's state mutex HELD (SearchReverse takes it, and `/` arrives inside
     // sendCharEvent). A queued connection is therefore mandatory: the find bar reads terminal state as
     // it opens, and a direct call would re-enter that non-recursive mutex on this very thread.
-    QMetaObject::invokeMethod(this, [this]() { emit searchBarRequested(); }, Qt::QueuedConnection);
+    platform::postToObject(this, [this]() { emit searchBarRequested(); });
 }
 
 // {{{ Find bar
@@ -1669,14 +2030,15 @@ void TerminalSession::searchCleared()
     if (auto* display = _display)
         display->scheduleRedraw();
 
-    QMetaObject::invokeMethod(this, &TerminalSession::refreshSearchStatus, Qt::QueuedConnection);
+    platform::postToObject(this, [this] { refreshSearchStatus(); });
 }
 
 void TerminalSession::setSearchPattern(QString const& pattern)
 {
+    // Locked: in a Visual mode the vi cursor following the match extends the selection, whose report is sent
+    // once the lock is released, as SelectAll's is.
     {
-        auto const l = scoped_lock { _terminal };
-
+        auto const _ = std::scoped_lock { _terminal };
         auto text = pattern.toStdU32String();
         if (text.empty())
         {
@@ -1732,9 +2094,9 @@ void TerminalSession::scheduleSearchTally()
 
 void TerminalSession::cycleSearchCaseSensitivity()
 {
+    // Locked, as setSearchPattern() above moves the vi cursor.
     {
-        auto const l = scoped_lock { _terminal };
-
+        auto const _ = std::scoped_lock { _terminal };
         // Unconditional: nextSearchCase() never answers with the policy it was given, so
         // setSearchCaseSensitivity() cannot report "already in effect" here and testing it would only
         // suggest it could.
@@ -1797,22 +2159,27 @@ void TerminalSession::wrapSearchTo(SearchWrapEdge edge)
     // the end of the scrollback is its documented behaviour. So the wrap lives here, where "the last
     // match" means "start over" rather than "there is nothing more". Without it, the bar's own
     // MatchNavigation promise would be a lie at both ends of the list.
-    auto const l = scoped_lock { _terminal };
-    if (_terminal.search().pattern.empty())
-        return;
+    //
+    // Locked, as setSearchPattern() moves the vi cursor.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        if (_terminal.search().pattern.empty())
+            return;
 
-    auto const& screen = _terminal.currentScreen();
-    auto const from =
-        edge == SearchWrapEdge::Top
-            ? CellLocation { .line = -boxed_cast<vtbackend::LineOffset>(screen.historyLineCount()),
-                             .column = vtbackend::ColumnOffset(0) }
-            : CellLocation { .line = boxed_cast<vtbackend::LineOffset>(_terminal.pageSize().lines) - 1,
-                             .column =
-                                 boxed_cast<vtbackend::ColumnOffset>(_terminal.pageSize().columns) - 1 };
+        auto const& screen = _terminal.currentScreen();
+        auto const from =
+            edge == SearchWrapEdge::Top
+                ? CellLocation { .line = -boxed_cast<vtbackend::LineOffset>(screen.historyLineCount()),
+                                 .column = vtbackend::ColumnOffset(0) }
+                : CellLocation { .line = boxed_cast<vtbackend::LineOffset>(_terminal.pageSize().lines) - 1,
+                                 .column =
+                                     boxed_cast<vtbackend::ColumnOffset>(_terminal.pageSize().columns) - 1 };
 
-    auto const match = edge == SearchWrapEdge::Top ? _terminal.search(from) : _terminal.searchReverse(from);
-    if (match)
-        _terminal.moveNormalModeCursorTo(*match);
+        auto const match =
+            edge == SearchWrapEdge::Top ? _terminal.search(from) : _terminal.searchReverse(from);
+        if (match)
+            _terminal.moveNormalModeCursorTo(*match);
+    }
 }
 
 void TerminalSession::refreshSearchStatus()
@@ -1900,31 +2267,74 @@ void TerminalSession::refreshSearchStatusLocked()
 
 void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
 {
-    // The hovered link is recomputed on mouse MOVEMENT only, so scrolling slides a different line under
-    // a stationary pointer with nothing noticing. Hide rather than recompute: the terminal's own hover
-    // state is stale for the same reason, so re-deriving from it here would only show a different wrong
-    // answer. Browsers likewise drop a tooltip on scroll.
-    clearHyperlinkHover();
+    // The hovers are recomputed on mouse MOVEMENT only, so scrolling slides a different line -- another
+    // link, another block -- under a stationary pointer with nothing noticing. Hide rather than recompute:
+    // the terminal's own hover state is stale for the same reason, so re-deriving from it here would only
+    // show a different wrong answer. Browsers likewise drop a tooltip on scroll. Posted, because output that
+    // scrolls a scrolled-back viewport reports the move from the parser thread, and the hover state is the
+    // GUI thread's. postToObject targets `this`, so Qt drops the call if the session dies first.
+    platform::postToObject(this, [this]() { clearHovers(); });
     emit scrollOffsetChanged(unbox(value));
 }
 // }}}
 // {{{ Input Events
 
-static void handleAction(auto const& actions, auto eventType, auto callback)
+namespace
 {
-    if (eventType == KeyboardEventType::Press)
-        callback(*actions);
-    else if (eventType == KeyboardEventType::Repeat)
+    /// What became of a key or character event once its binding was looked up.
+    enum class BindingOutcome : uint8_t
     {
+        PassOn = 0, ///< No binding claimed it: it goes on to the next table, then to the application.
+        Claimed,    ///< A binding ran, or swallowed it.
+    };
+
+    /// Runs @p actions for a press or a repeat, through the repeat filter.
+    ///
+    /// A press whose actions all decline is claimed only when @p declined says so. A repeat whose actions
+    /// were all filtered out is always claimed: the binding owns the chord, so its repeats must not reach
+    /// the application as the chord's own encoding (a held Ctrl+Shift+G would send ^G per repeat).
+    /// @param actions The bound actions; nullptr when nothing is bound.
+    /// @param eventType Press or Repeat.
+    /// @param declined What a press whose actions all declined does.
+    /// @param execute Runs a list of actions, returning how many ran.
+    /// @return Whether the event was claimed.
+    template <typename Execute>
+    [[nodiscard]] BindingOutcome runBinding(config::ActionList const* actions,
+                                            KeyboardEventType eventType,
+                                            config::DeclinedInput declined,
+                                            Execute const& execute)
+    {
+        if (actions == nullptr)
+            return BindingOutcome::PassOn;
+
         // Drop actions that must not fire on auto-repeat (e.g. CloseTab/ClosePane/CreateNewTab). The
         // overwhelmingly common held keys (characters, arrows) bind only repeatable actions, so avoid
         // allocating a filtered copy unless there is actually a non-repeatable action to drop.
-        if (std::ranges::none_of(*actions, actions::isNonRepeatable))
-            callback(*actions);
+        auto executed = 0;
+        if (eventType != KeyboardEventType::Repeat
+            || std::ranges::none_of(*actions, actions::isNonRepeatable))
+            executed = execute(*actions);
+        else if (auto const repeatable = actions::filterRepeatableActions(*actions); repeatable.empty())
+            return BindingOutcome::Claimed;
         else
-            callback(actions::filterRepeatableActions(*actions));
+            executed = execute(repeatable);
+
+        return executed > 0 || declined == config::DeclinedInput::Consume ? BindingOutcome::Claimed
+                                                                          : BindingOutcome::PassOn;
     }
-}
+
+    /// Runs the actions of a built-in row, honouring what the row says a declined press does.
+    /// @param row The matching row; nullptr when none matched.
+    template <typename Input, typename Execute>
+    [[nodiscard]] BindingOutcome runFallbackRow(config::FallbackMapping<Input> const* row,
+                                                KeyboardEventType eventType,
+                                                Execute const& execute)
+    {
+        if (row == nullptr)
+            return BindingOutcome::PassOn;
+        return runBinding(&row->mapping.binding, eventType, row->declined, execute);
+    }
+} // namespace
 
 void TerminalSession::sendKeyEvent(Key key,
                                    KeyboardModifiers modifiers,
@@ -1952,28 +2362,26 @@ void TerminalSession::sendKeyEvent(Key key,
 
     if (eventType != KeyboardEventType::Release)
     {
-        // Runs @p actions (when there are any) through the repeat filter, reporting whether anything
-        // actually ran. Shared by the two lookups below so they differ only in which table they consult.
-        auto const runBinding = [&](auto const* actions) {
-            if (actions == nullptr)
-                return false;
-            auto executionCount = 0;
-            handleAction(actions, eventType, [&](auto const& actions) {
-                executionCount = executeAllActions(actions);
-            });
-            return executionCount > 0;
+        auto const flags = _terminal.bindingModes();
+        auto const execute = [this](auto const& actions) {
+            return executeAllActions(actions);
         };
 
         // Key bindings match on the chord: a latched lock key must not change which shortcut fires.
-        if (runBinding(config::apply(
-                _config.inputMappings.value().keyMappings, key, modifiers.chord, matchModeFlags())))
+        if (runBinding(config::apply(_config.inputMappings.value().keyMappings, key, modifiers.chord, flags),
+                       eventType,
+                       config::DeclinedInput::PassThrough,
+                       execute)
+            == BindingOutcome::Claimed)
             return;
 
         // The user's mappings did not claim this key, so fall back to the built-in ones. They are
         // consulted second on purpose: an explicit binding in the user's config always wins, because it
         // is found first (see builtinFallbackKeyMappings for why a plain default could not reach an
         // existing user at all).
-        if (runBinding(config::applyBuiltinFallback(_config, key, modifiers.chord, matchModeFlags())))
+        if (runFallbackRow(
+                config::builtinFallbackRow(_config, key, modifiers.chord, flags), eventType, execute)
+            == BindingOutcome::Claimed)
             return;
     }
     terminal().sendKeyEvent(key, modifiers, eventType, now);
@@ -2009,9 +2417,11 @@ void TerminalSession::sendCharEvent(char32_t value,
 
     if (eventType != KeyboardEventType::Release)
     {
-        // Find a char binding for this key (ignored while editing the search prompt).
         auto const& charMappings = _config.inputMappings.value().charMappings;
-        auto const flags = matchModeFlags();
+        auto const flags = _terminal.bindingModes();
+        auto const execute = [this](auto const& actions) {
+            return executeAllActions(actions);
+        };
 
         // Bindings are stored folded (see YAMLConfigReader::parseKeyOrChar), because WHICH case a
         // letter arrives in is decided by the route contour::sendKeyEvent() took rather than by the
@@ -2019,28 +2429,34 @@ void TerminalSession::sendCharEvent(char32_t value,
         // otherwise let a latched lock key pick the shortcut. Match in the same folded form.
         // NB: only the *lookup* is folded; `value` itself is forwarded verbatim to the terminal
         // below, so what the application receives is unchanged.
-        auto const folded = config::foldedBindingCodepoint(value);
-        auto const* actions = config::apply(charMappings, folded, modifiers.chord, flags);
-
+        //
         // A shortcut written with the base key label (e.g. `Ctrl+Shift+,`) is stored under the base
         // character, but Qt delivers a Shift+punctuation chord as the *shifted* symbol ('<' here). When
         // the direct lookup misses and Shift is held, retry under the un-shifted base so the binding
         // fires as the user intended. The two normalizations are disjoint — unshiftedCodepoint()
         // rewrites only digits and punctuation, foldedBindingCodepoint() only ASCII letters — so they
-        // compose in either order.
-        if (actions == nullptr && modifiers.chord.test(vtbackend::Modifier::Shift))
-            if (auto const base = input::unshiftedCodepoint(folded); base != folded)
-                actions = config::apply(charMappings, base, modifiers.chord, flags);
+        // compose in either order. Both tables are looked up through this one rule.
+        auto const folded = config::foldedBindingCodepoint(value);
+        auto const lookUp = [&](auto const& find) {
+            auto const* found = find(folded);
+            if (found == nullptr && modifiers.chord.test(vtbackend::Modifier::Shift))
+                if (auto const base = input::unshiftedCodepoint(folded); base != folded)
+                    found = find(base);
+            return found;
+        };
 
-        if (actions != nullptr)
-        {
-            auto executionCount = 0;
-            handleAction(actions, eventType, [&](auto const& actions) {
-                executionCount = executeAllActions(actions);
-            });
-            if (executionCount > 0)
-                return;
-        }
+        auto const* bound =
+            lookUp([&](char32_t ch) { return config::apply(charMappings, ch, modifiers.chord, flags); });
+        if (runBinding(bound, eventType, config::DeclinedInput::PassThrough, execute)
+            == BindingOutcome::Claimed)
+            return;
+
+        // Then the built-in ones, as for keys: an explicit binding of the same chord in the user's config is
+        // found first and wins, and one that declines lets the built-in one try.
+        auto const* row = lookUp(
+            [&](char32_t ch) { return config::builtinFallbackRow(_config, ch, modifiers.chord, flags); });
+        if (runFallbackRow(row, eventType, execute) == BindingOutcome::Claimed)
+            return;
     }
     terminal().sendCharEvent(value, keyIdentity, modifiers, eventType, now);
 }
@@ -2053,19 +2469,44 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
     auto const uiHandledHint = false;
     input::inputLog()("Mouse press received: {} {}\n", modifiers, button);
 
-    terminal().tick(steady_clock::now());
+    auto const sanitizedModifier = bindingModifiers(modifiers);
 
-    if (core::locked(_terminal, [&]() {
-            return _terminal.sendMousePressEvent(modifiers, button, pos, pixelPosition, uiHandledHint);
-        }))
+    // A binding that names a click count is offered the press BEFORE the terminal's own multi-click
+    // selection acts on it -- only the terminal knows the count, and only until it has used it. The
+    // claimant only looks the binding up (it runs under the lock); the actions run once it is released.
+    //
+    // The claimant captures one reference, to this struct, so that it fits std::function's small buffer
+    // everywhere: a press allocates nothing for it.
+    struct PressClaim
+    {
+        TerminalSession const& session;
+        MouseButton button;
+        Modifiers modifiers;
+        config::ActionList const* claimed = nullptr;
+    };
+    auto claim = PressClaim { .session = *this, .button = button, .modifiers = sanitizedModifier };
+    // Through runUnderStateLock(): a press the application tracks is reported, and with SRM reset the report
+    // is echoed, which parses. See ViNormalMode.
+    auto const handledByApp = _terminal.runUnderStateLock([&]() {
+        return _terminal.sendMousePressEvent(
+            modifiers, button, pos, pixelPosition, uiHandledHint, [&claim](uint8_t clickCount) {
+                claim.claimed = claim.session.clickCountBinding(claim.button, claim.modifiers, clickCount);
+                return claim.claimed != nullptr ? vtbackend::MousePressClaim::Claimed
+                                                : vtbackend::MousePressClaim::Unclaimed;
+            });
+    });
+
+    if (claim.claimed != nullptr)
+    {
+        executeAllActions(*claim.claimed);
+        return;
+    }
+
+    if (*handledByApp)
         return;
 
-    auto const sanitizedModifier = modifiers.contains(_config.bypassMouseProtocolModifiers.value())
-                                       ? modifiers.without(_config.bypassMouseProtocolModifiers.value())
-                                       : modifiers;
-
     if (auto const* actions = config::apply(
-            _config.inputMappings.value().mouseMappings, button, sanitizedModifier, matchModeFlags()))
+            _config.inputMappings.value().mouseMappings, button, sanitizedModifier, _terminal.bindingModes()))
     {
         executeAllActions(*actions);
         return;
@@ -2097,19 +2538,57 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
     // second on purpose: an explicit binding in the user's config always wins (see
     // builtinFallbackMouseMappings for why a plain default could not reach an existing user at all).
     if (auto const* actions =
-            config::applyBuiltinFallback(_config, button, sanitizedModifier, matchModeFlags()))
+            config::applyBuiltinFallback(_config, button, sanitizedModifier, _terminal.bindingModes()))
         executeAllActions(*actions);
 }
 
 bool TerminalSession::applyFallbackMouseBinding(MouseButton button)
 {
     auto const noModifiers = Modifiers { vtbackend::Modifier::None };
-    auto const* actions = config::applyBuiltinFallback(_config, button, noModifiers, matchModeFlags());
+    auto const* actions =
+        config::applyBuiltinFallback(_config, button, noModifiers, _terminal.bindingModes());
     if (actions == nullptr)
         return false;
 
     executeAllActions(*actions);
     return true;
+}
+
+vtbackend::Modifiers TerminalSession::bindingModifiers(vtbackend::Modifiers modifiers) const
+{
+    auto const bypass = _config.bypassMouseProtocolModifiers.value();
+    return modifiers.contains(bypass) ? modifiers.without(bypass) : modifiers;
+}
+
+config::ActionList const* TerminalSession::mouseBinding(MouseButton button, Modifiers modifiers) const
+{
+    auto const flags = _terminal.bindingModes();
+    if (auto const* actions =
+            config::apply(_config.inputMappings.value().mouseMappings, button, modifiers, flags))
+        return actions;
+    return config::applyBuiltinFallback(_config, button, modifiers, flags);
+}
+
+config::ActionList const* TerminalSession::clickCountBinding(MouseButton button,
+                                                             Modifiers modifiers,
+                                                             uint8_t clickCount) const
+{
+    // The terminal offers every press, wheel steps included; only a counted button's can match a count.
+    if (!vtbackend::ClickCounter::countsClicks(button))
+        return nullptr;
+
+    auto const flags = _terminal.bindingModes();
+    auto const* actions =
+        config::apply(_config.inputMappings.value().mouseMappings, button, modifiers, flags, clickCount);
+    if (actions == nullptr)
+        actions = config::applyBuiltinFallback(_config, button, modifiers, flags, clickCount);
+
+    // A binding that will not run must not claim: the press would skip the terminal's own selection and
+    // then do nothing at all. While key mappings are toggled off, executeAllActions() runs only the
+    // binding that turns them back on.
+    if (actions != nullptr && !_allowKeyMappings && !togglesKeyMappings(*actions))
+        return nullptr;
+    return actions;
 }
 
 void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
@@ -2119,22 +2598,11 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     // NB: This translation depends on the display's margin, so maybe
     //     the display should provide the translation?
 
-    if (!(pos < terminal().pageSize()))
+    // The main page, read race-free: this runs on the GUI thread, without the terminal lock.
+    if (!(pos < terminal().mainPageSize()))
         return;
 
-    terminal().tick(steady_clock::now());
-
     auto constexpr UiHandledHint = false;
-
-    // The hovered link is read inside the lock the move already takes, rather than asked for again
-    // afterwards. tryGetHoveringHyperlink() re-queries the screen and needs the same non-recursive
-    // mutex, so a second acquisition here would be one more chance to deadlock, and a callback fired
-    // from vtbackend's own hover-state update would run WITH the lock held and self-deadlock outright.
-    auto const hoveredUri = core::locked(_terminal, [&]() -> std::string {
-        _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
-        auto const link = _terminal.tryGetHoveringHyperlink();
-        return link ? link->uri : std::string {};
-    });
 
     // The cursor shape lives on the display; a display-less session (background pane, headless
     // test) has no cursor to change.
@@ -2143,79 +2611,203 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     // the gutter changes the shape behind this decision's back, and leaving it lands the pointer on the
     // cell it came from. The flag is that invalidation: without it the gutter's pointing hand survived
     // over the grid until the pointer happened to cross into another cell.
-    if ((pos != _currentMousePosition || _isPointerShapeStale) && _display != nullptr)
+    auto const decidesPointerShape =
+        (pos != _currentMousePosition || _isPointerShapeStale) && _display != nullptr;
+
+    // The hovered link is read inside the lock the move already takes, rather than asked for again
+    // afterwards. tryGetHoveringHyperlink() re-queries the screen and needs the same non-recursive
+    // mutex, so a second acquisition here would be one more chance to deadlock, and a callback fired
+    // from vtbackend's own hover-state update would run WITH the lock held and self-deadlock outright.
+    // The pointer's shape is decided in there too: whether Ctrl points at a path asks the block store and
+    // the fold cache, which the parser thread changes and the render thread reads.
+    struct Hover
+    {
+        std::string uri;                                    ///< The hovered link's; empty over none.
+        std::optional<input::MouseCursorShape> targetShape; ///< Over something to open; else the default.
+    };
+    // Through runUnderStateLock(): a move the application tracks is reported, as a press is.
+    auto const hover = _terminal.runUnderStateLock([&]() -> Hover {
+        _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
+        auto const link = _terminal.tryGetHoveringHyperlink();
+        auto const pointsAtTarget =
+            decidesPointerShape
+            && (_terminal.isMouseHoveringHyperlink()
+                || (modifiers.contains(vtbackend::Modifier::Control)
+                    && _terminal.localPathAtMousePosition().value_or(std::nullopt).has_value()));
+        return Hover { .uri = link ? link->uri : std::string {},
+                       .targetShape = pointsAtTarget ? std::optional { input::MouseCursorShape::PointingHand }
+                                                     : std::nullopt };
+    });
+
+    if (decidesPointerShape)
     {
         _isPointerShapeStale = false;
         _currentMousePosition = pos;
-        if (terminal().isMouseHoveringHyperlink()
-            || (modifiers.contains(vtbackend::Modifier::Control) && terminal().localPathAtMousePosition()))
-            _display->setMouseCursorShape(input::MouseCursorShape::PointingHand);
+        if (hover.targetShape)
+            _display->setMouseCursorShape(*hover.targetShape);
         else
             setDefaultCursor();
 
-        updateHyperlinkHover(hoveredUri, pos);
+        updateHyperlinkHover(hover.uri, pos);
     }
 }
 
-ConsumedByGutter TerminalSession::sendGutterHoverEvent(std::optional<vtbackend::LineOffset> gridLine)
+namespace
+{
+    /// Whether a pointer over @p segment can act on a fold, for the hover and the press alike.
+    /// @param segment The gutter segment under the pointer.
+    /// @return Whether it is the block column, the one segment that carries fold controls.
+    [[nodiscard]] constexpr bool carriesFoldControls(vtbackend::GutterSegmentKind segment) noexcept
+    {
+        return segment == vtbackend::GutterSegmentKind::BlockColumn;
+    }
+} // namespace
+
+ConsumedByGutter TerminalSession::sendGutterHoverEvent(std::optional<GutterHit> hit)
 {
     // A display-less session has no cursor to change and no gutter to be over.
     if (_display == nullptr)
         return ConsumedByGutter::No;
 
-    // The overwhelmingly common case -- the pointer is over the GRID, and with folding switched off
-    // it is the only case. Answered before taking the terminal lock, because this runs on every
-    // pointer motion and the ordinary move path is about to take that same lock itself.
-    if (!gridLine)
+    // The overwhelmingly common case -- the pointer is over the GRID, and with no gutter configured it
+    // is the only case. Answered before taking the terminal lock, because this runs on every pointer
+    // motion and the ordinary move path is about to take that same lock itself.
+    if (!hit)
     {
         clearGutterHover();
         return ConsumedByGutter::No;
     }
 
     _gutterHovered = true;
-    auto const overFold = core::locked(_terminal, [&] {
-        _terminal.setGutterHoverLine(gridLine);
-        return _terminal.foldContaining(*gridLine).has_value();
+
+    // Beside the timestamps and the line numbers there is nothing to light and nothing to click -- but
+    // the pointer is not over the grid either, so the event is consumed all the same.
+    auto const onControl = carriesFoldControls(hit->segment);
+    auto const [overFold, block] = core::locked(_terminal, [&] {
+        _terminal.setGutterHoverLine(onControl ? std::optional { hit->gridLine } : std::nullopt);
+        // Only the primary page has command blocks. Beside any other -- a full-screen application's -- the
+        // block column is empty, and the primary page's block at the same row is not what is beside it.
+        auto const* record = onControl && _terminal.foldingAppliesToDisplayedPage()
+                                 ? _terminal.commandBlockAt(hit->gridLine)
+                                 : nullptr;
+        return std::pair { onControl && _terminal.foldContaining(hit->gridLine).has_value(),
+                           record != nullptr ? std::optional { record->id } : std::nullopt };
     });
 
-    // Over the gutter but beside a row no fold reaches: still not the grid, so the event is consumed
-    // either way -- only the shape differs, saying whether there is anything here to click.
+    // The tooltip describes a BLOCK, so it follows the block column only, and moves on only when the
+    // pointer reaches another block.
+    updateCommandBlockHover(block, hit->screenRow);
+
+    // Consumed either way -- only the shape differs, saying whether there is anything here to click.
     if (overFold)
         _display->setMouseCursorShape(input::MouseCursorShape::PointingHand);
     else
         setDefaultCursor();
 
     // Leaving the grid ends any hyperlink hover the pointer left behind on its way out.
-    clearHyperlinkHover();
+    leaveGrid();
     return ConsumedByGutter::Yes;
 }
 
-ConsumedByGutter TerminalSession::sendGutterPressEvent(std::optional<vtbackend::LineOffset> gridLine,
+ConsumedByGutter TerminalSession::sendGutterPressEvent(std::optional<GutterHit> hit,
                                                        vtbackend::MouseButton button)
 {
-    // Only a left click acts on a fold; every other button belongs to the application, gutter or not.
-    if (button != vtbackend::MouseButton::Left || !gridLine)
+    // Only a left click acts on the gutter; every other button belongs to the application, gutter or not.
+    if (button != vtbackend::MouseButton::Left || !hit)
         return ConsumedByGutter::No;
 
-    // Through the one gate every folding action passes: it takes the lock, honours the folding setting
-    // and republishes the scrollable count, none of which a click on the column wants to restate.
-    if (!withFolding([&](auto& terminal) { return terminal.toggleFoldContaining(*gridLine); }))
+    // Beside the timestamps or the line numbers there is nothing to act on, but the press is the gutter's:
+    // neither the child nor a selection may see it, nor its release.
+    if (!carriesFoldControls(hit->segment))
+    {
+        _owedRelease = { .owner = PressOwner::Gutter, .button = button };
+        return ConsumedByGutter::Yes;
+    }
+
+    // Through the one path every folding action takes: it takes the lock and republishes the scrollable
+    // count, and the terminal refuses the toggle while folding is off. None of that is the click's to
+    // restate.
+    if (!withScrollableChange([&](auto& terminal) { return terminal.toggleFoldContaining(hit->gridLine); }))
         return ConsumedByGutter::No;
 
     // Remembered here rather than by the caller, so the two halves of the handshake cannot drift: a
     // release reported for a press the child never saw leaves it holding a button down that was never
     // pressed.
-    _gutterClickPending = true;
+    _owedRelease = { .owner = PressOwner::Gutter, .button = button };
     return ConsumedByGutter::Yes;
 }
 
-ConsumedByGutter TerminalSession::sendGutterReleaseEvent()
+PressOwner TerminalSession::sendOwedRelease(vtbackend::MouseButton button)
 {
-    if (!_gutterClickPending)
-        return ConsumedByGutter::No;
+    if (_owedRelease.button != button)
+        return PressOwner::None;
+    return std::exchange(_owedRelease.owner, PressOwner::None);
+}
 
-    _gutterClickPending = false;
-    return ConsumedByGutter::Yes;
+void TerminalSession::dropOwedRelease()
+{
+    _owedRelease.owner = PressOwner::None;
+}
+
+ConsumedByStickyHeader TerminalSession::sendStickyHeaderPressEvent(
+    std::optional<vtbackend::LineOffset> mainPageRow,
+    vtbackend::MouseButton button,
+    vtbackend::Modifiers modifiers)
+{
+    // The header covers row 0 and nothing else.
+    if (mainPageRow != vtbackend::LineOffset(0))
+        return ConsumedByStickyHeader::No;
+
+    // Through the path that takes the lock and announces the scrollable count, which the jump changes when
+    // it expands a collapsed fold. The block is read under that lock, through stickyHeaderBlock(): what the
+    // last frame drew, which is what the user pressed on.
+    auto block = std::optional<vtbackend::CommandBlockId> {};
+    auto const consumed = withScrollableChange([&](vtbackend::Terminal& terminal) {
+        block = terminal.stickyHeaderBlock();
+        if (!block)
+            return false;
+        // An evicted head has nowhere to go: the jump answers HeadEvicted and the viewport stays. The press
+        // is consumed all the same -- the placeholder covers row 0 wherever it shows.
+        if (button == vtbackend::MouseButton::Left)
+            std::ignore = terminal.scrollToCommandBlockHead(*block);
+        return true;
+    });
+
+    if (!consumed)
+        return ConsumedByStickyHeader::No;
+
+    // Owed before any binding runs: a popup it opens takes the release, and ends the grab that says so
+    // (@see dropOwedRelease) while the binding runs.
+    _owedRelease = { .owner = PressOwner::StickyHeader, .button = button };
+
+    // Any other button does what its binding does over the block's own rows, outside the lock as the grid's
+    // bindings run. The header stands for its block, so a context menu describes that block.
+    if (button != vtbackend::MouseButton::Left)
+    {
+        if (auto const* actions = mouseBinding(button, bindingModifiers(modifiers)))
+        {
+            _contextMenuBlock = *block;
+            auto const forget = core::Finally { [this] { _contextMenuBlock = {}; } };
+            executeAllActions(*actions);
+        }
+    }
+    return ConsumedByStickyHeader::Yes;
+}
+
+ConsumedByStickyHeader TerminalSession::sendStickyHeaderHoverEvent(
+    std::optional<vtbackend::LineOffset> mainPageRow)
+{
+    // Row 0 only, so a motion anywhere else pays nothing more; and a display-less session has no pointer.
+    if (_display == nullptr || mainPageRow != vtbackend::LineOffset(0))
+        return ConsumedByStickyHeader::No;
+
+    // The header the frame on screen drew, as the press reads it.
+    if (!core::locked(_terminal, [&] { return _terminal.stickyHeaderBlock().has_value(); }))
+        return ConsumedByStickyHeader::No;
+
+    leaveGrid();
+    _display->setMouseCursorShape(input::MouseCursorShape::Arrow);
+    return ConsumedByStickyHeader::Yes;
 }
 
 void TerminalSession::updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell)
@@ -2254,24 +2846,170 @@ void TerminalSession::clearGutterHover()
     _isPointerShapeStale = true;
 
     core::locked(_terminal, [&] { _terminal.setGutterHoverLine(std::nullopt); });
+    updateCommandBlockHover(std::nullopt, vtbackend::LineOffset(0));
+}
+
+void TerminalSession::updateCommandBlockHover(std::optional<vtbackend::CommandBlockId> block,
+                                              vtbackend::LineOffset screenRow)
+{
+    if (_hoveredBlock == block)
+        return;
+
+    _hoveredBlock = block;
+    // The block column is the gutter's last column, -1, whatever else the gutter shows.
+    _commandBlockTooltipAnchor =
+        block && _display != nullptr
+            ? geometry::cellRectangle(
+                  _display->gridMetrics().pageMargin,
+                  _display->cellSize(),
+                  vtbackend::CellLocation { .line = screenRow, .column = vtbackend::ColumnOffset(-1) },
+                  1,
+                  _display->devicePixelRatio())
+            : QRectF {};
+    emit commandBlockHoverChanged();
+}
+
+QString TerminalSession::commandBlockTooltip() const
+{
+    if (!_hoveredBlock)
+        return {};
+
+    auto const lock = std::scoped_lock { _terminal };
+    auto const* record = _terminal.commandBlocks().find(*_hoveredBlock);
+    if (record == nullptr)
+        return {};
+
+    // When the command started; a block that never reached its command has only its prompt's time, and one
+    // a ;C opened only its command's.
+    auto const startedAt =
+        _terminal.localTimeOf(record->commandStartedAt.or_else([&] { return record->promptStartedAt; })
+                                  .value_or(std::chrono::system_clock::time_point {}));
+    return QString::fromStdString(commandBlockTooltipText(*record, startedAt));
 }
 
 void TerminalSession::announceScrollableLineCount(vtbackend::LineCount scrollable)
 {
-    // One exchange rather than a load and a store: two threads can reach this at once (the parser
-    // thread from screenUpdated(), the GUI thread from a folding action), and only the one that
-    // actually moved the value should announce it.
-    if (_lastHistoryLineCount.exchange(unbox(scrollable), std::memory_order_relaxed) == unbox(scrollable))
+    if (std::exchange(_lastHistoryLineCount, unbox(scrollable)) == unbox(scrollable))
         return;
 
     emit historyLineCountChanged(unbox(scrollable));
 }
 
+void TerminalSession::setScrollbarMarkTrackPixels(int pixels)
+{
+    auto const track = std::max(pixels, 0);
+    if (track == _scrollbarMarkTrackPixels)
+        return;
+
+    _scrollbarMarkTrackPixels = track;
+    requestScrollbarMarksRefresh();
+}
+
+void TerminalSession::requestScrollbarMarksRefresh()
+{
+    if (_scrollbarMarksPostPending.test_and_set(std::memory_order_acq_rel))
+        return;
+
+    // Posted to the session rather than through the display, so a request made while no display is attached
+    // still runs once one is. The timer belongs to the GUI thread, so it is started there; a request made
+    // while it already runs rides on that one, which fires within the frame either way.
+    platform::postToObject(this, [this]() {
+        if (!_scrollbarMarksTimer.isActive())
+            _scrollbarMarksTimer.start();
+    });
+}
+
+void TerminalSession::refreshScrollbarMarks()
+{
+    // Cleared before anything is read, so output arriving during this refresh schedules the next one.
+    _scrollbarMarksPostPending.clear(std::memory_order_release);
+
+    // The ticks belong to the scrollbar: nothing to mark where it is configured away. Read here, on the GUI
+    // thread, which is the only one that swaps the profile.
+    auto const& scrollbar = _profile.scrollbar.value();
+    auto const sources = scrollbar.position == config::ScrollBarPosition::Hidden
+                             ? vtbackend::ScrollbarMarkSources {}
+                             : scrollbar.marks;
+
+    auto scrollable = vtbackend::LineCount(0);
+    auto previousKey = std::optional<ScrollbarMarksKey> {};
+    auto inputs = core::locked(_terminal, [&]() -> std::optional<std::vector<vtbackend::ScrollbarMarkInput>> {
+        // The terminal says when the marks may have moved, whatever moved them; the rest of the key is the
+        // scrollbar's own.
+        auto const marksRevision = _terminal.scrollbarMarksRevision();
+
+        // The scrollbar's travel, read whether or not the ticks moved: output asks for this refresh to
+        // publish it, as screenUpdated() may not count it.
+        scrollable = _terminal.viewport().scrollableLineCount();
+
+        auto const key = ScrollbarMarksKey {
+            .marksRevision = marksRevision,
+            .visibleRowCount = unbox<int64_t>(scrollable) + unbox<int64_t>(_terminal.pageSize().lines),
+            .trackPixels = _scrollbarMarkTrackPixels,
+            .sources = sources,
+            .colors = scrollbarMarkColorsOf(_terminal.colorPalette()),
+        };
+        if (_scrollbarMarksKey == key)
+            return std::nullopt;
+        previousKey = std::exchange(_scrollbarMarksKey, key);
+        _scrollbarTicksGeneration = _terminal.primaryScreen().grid().stableIdGeneration();
+
+        // Nothing would survive the bucketing, so the marks are not copied out only to be dropped.
+        if (key.sources.none() || key.trackPixels <= 0)
+            return std::vector<vtbackend::ScrollbarMarkInput> {};
+        return _terminal.scrollbarMarkInputs();
+    });
+
+    // Outside the lock, as announceScrollableLineCount() requires.
+    announceScrollableLineCount(scrollable);
+    if (!inputs)
+        return;
+
+    // Outside the lock: bucketing reads nothing the parser thread writes, and the signal below wakes QML
+    // bindings that reach back into this session.
+    //
+    // Most moves of the key move no tick: in a deep history a line of output moves every row, while a tick
+    // crosses a pixel only every few dozen lines. So the lists QML reads, and every binding over them, are
+    // rebuilt only for what changed. A tick is a pixel of the track, so a new track height is a new list
+    // even where the pixels came out the same.
+    auto const& key = *_scrollbarMarksKey;
+    auto ticks = vtbackend::scrollbarMarks(*inputs, key.visibleRowCount, key.trackPixels, key.sources);
+    auto const ticksMoved =
+        !previousKey || previousKey->trackPixels != key.trackPixels || ticks != _scrollbarTicks;
+    auto const colorsMoved = !previousKey || previousKey->colors != key.colors;
+    if (!ticksMoved && !colorsMoved)
+        return;
+
+    if (ticksMoved)
+    {
+        _scrollbarMarks = toScrollbarMarkList(ticks, key.trackPixels);
+        _scrollbarTicks = std::move(ticks);
+    }
+    if (colorsMoved)
+        _scrollbarMarkColors = toScrollbarMarkColorList(key.colors);
+    emit scrollbarMarksChanged();
+}
+
 void TerminalSession::onPointerLeft()
+{
+    clearHovers();
+    leaveGrid();
+    setDefaultCursor();
+}
+
+void TerminalSession::clearHovers()
 {
     clearHyperlinkHover();
     clearGutterHover();
-    setDefaultCursor();
+}
+
+void TerminalSession::leaveGrid()
+{
+    clearHyperlinkHover();
+    core::locked(_terminal, [&] { _terminal.sendMouseLeaveEvent(); });
+
+    // The shape is decided per grid CELL, and the way back may land on the very cell the pointer left from.
+    _isPointerShapeStale = true;
 }
 
 void TerminalSession::clearHyperlinkHover()
@@ -2287,19 +3025,23 @@ void TerminalSession::sendMouseReleaseEvent(Modifiers modifiers,
                                             MouseButton button,
                                             PixelCoordinate pixelPosition)
 {
-    terminal().tick(steady_clock::now());
-
-    core::locked(_terminal, [&]() {
+    // Locked: a release the application tracks is reported, as a press is.
+    {
+        auto const _ = std::scoped_lock { _terminal };
         auto const uiHandledHint = false;
         _terminal.sendMouseReleaseEvent(modifiers, button, pixelPosition, uiHandledHint);
-    });
+    }
     scheduleRedraw();
 }
 
 void TerminalSession::performAutoScroll(int direction, vtbackend::LineCount lineCount)
 {
-    terminal().tick(steady_clock::now());
-    core::locked(_terminal, [&]() { _terminal.performAutoScroll(direction, lineCount); });
+    // Locked: the scroll extends the selection, whose report is sent once the lock is released, as
+    // SelectAll's is.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        _terminal.performAutoScroll(direction, lineCount);
+    }
 }
 
 void TerminalSession::sendFocusInEvent()
@@ -2313,7 +3055,15 @@ void TerminalSession::sendFocusInEvent()
     if (_display)
         _display->setBlurBehind(_profile.background.value().blur);
 
+    paneSeen();
+
     scheduleRedraw();
+}
+
+void TerminalSession::paneSeen()
+{
+    if (finishNoticeClearsOn(config::NotifyClearOn::Focus))
+        withdrawFinishNotice();
 }
 
 void TerminalSession::sendFocusOutEvent()
@@ -2382,13 +3132,14 @@ void TerminalSession::cursorPositionChanged()
 bool TerminalSession::operator()(actions::CancelSelection)
 {
     // Locked: the selection is torn down by the parser thread too (a buffer scroll re-extends or drops
-    // it). See ViNormalMode for the rationale.
-    auto const l = scoped_lock { _terminal };
-
-    if (!_terminal.selectionAvailable())
-        return false;
-    _terminal.clearSelection();
-    return true;
+    // it). Through runUnderStateLock(): cancelling a dragged selection returns to Normal mode, which puts the
+    // indicator status line up and so resizes. See ViNormalMode for the rationale.
+    return _terminal.runUnderStateLock([&]() {
+        if (!_terminal.selectionAvailable())
+            return false;
+        _terminal.clearSelection();
+        return true;
+    });
 }
 
 bool TerminalSession::operator()(actions::ChangeProfile const& action)
@@ -2402,13 +3153,69 @@ bool TerminalSession::operator()(actions::ChangeProfile const& action)
     return true;
 }
 
-bool TerminalSession::operator()(actions::ClearHistoryAndReset)
+HostedOperationRoute TerminalSession::routeHostedOperation(HostedOperationRequest const& request)
 {
+    if (_manager == nullptr)
+        return HostedOperationRoute::RunHere;
+    auto const route = _manager->requestHostedOperation(&terminal().device(), request);
+    auto const what = describe(request.operation);
+    auto const refuse = [&](std::string_view reason, QString const& notice) {
+        errorLog()("Did not {}: {}.", what, reason);
+        emit showNotification(
+            tr("Attached Session"),
+            notice.arg(QString::fromUtf8(what.data(), static_cast<qsizetype>(what.size()))));
+    };
+    switch (route)
+    {
+        case HostedOperationRoute::RunHere:
+        case HostedOperationRoute::RunOnHost: break;
+        case HostedOperationRoute::Refused:
+            refuse("this tab's host has no way to", tr("This tab's host cannot %1, so nothing was done."));
+            break;
+        case HostedOperationRoute::Unreachable:
+            refuse("the connection to this tab's host is gone",
+                   tr("The connection to this tab's host is gone, so it could not %1."));
+            break;
+    }
+    return route;
+}
+
+template <typename Action>
+RemoteDispatch TerminalSession::dispatchRemotely(Action const& action)
+{
+    switch (routeHostedOperation(hostedOperationRequest(action)))
+    {
+        case HostedOperationRoute::RunHere: return RemoteDispatch::RunHere;
+        case HostedOperationRoute::RunOnHost: return RemoteDispatch::Performed;
+        case HostedOperationRoute::Refused:
+        case HostedOperationRoute::Unreachable: return RemoteDispatch::Refused;
+    }
+    return RemoteDispatch::Refused;
+}
+
+bool TerminalSession::operator()(actions::ClearHistoryAndReset action)
+{
+    if (auto const dispatch = dispatchRemotely(action); dispatch != RemoteDispatch::RunHere)
+        return dispatch == RemoteDispatch::Performed;
+
     sessionLog()("Clearing history and perform terminal hard reset");
 
-    // Locked, for the reason spelled out at operator()(SoftReset) below.
-    core::locked(_terminal, [&]() { terminal().hardReset(); });
+    // Locked, for the reason spelled out at operator()(SoftReset) below; and through the path that
+    // republishes the scrollbar, whose history and blocks the reset takes, with no output to follow it.
+    withScrollableChange([](vtbackend::Terminal& terminal) {
+        terminal.hardReset();
+        return true;
+    });
     return true;
+}
+
+bool TerminalSession::operator()(actions::ClearToPrompt action)
+{
+    if (auto const dispatch = dispatchRemotely(action); dispatch != RemoteDispatch::RunHere)
+        return dispatch == RemoteDispatch::Performed;
+
+    // It takes rows out of the scrollable range, as folding does, so it takes the path that announces that.
+    return withScrollableChange([](auto& terminal) { return terminal.clearToPrompt().has_value(); });
 }
 
 bool TerminalSession::operator()(actions::CopyPreviousMarkRange)
@@ -2419,7 +3226,12 @@ bool TerminalSession::operator()(actions::CopyPreviousMarkRange)
 
 bool TerminalSession::operator()(actions::SelectAll)
 {
-    core::locked(_terminal, [&]() { terminal().selectAll(); });
+    // Locked: with DECSET 2030 a new selection is reported, and a report raised on the GUI thread is in no
+    // batch of the parser's, whose end would send it. It is sent once the lock is released.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        terminal().selectAll();
+    }
     return true;
 }
 
@@ -2456,28 +3268,60 @@ command::ContextMenuState TerminalSession::contextMenuState()
     // asked the terminal a fresh question per row would be reading a moving target — and a QML binding
     // that reached into the terminal on its own schedule would be a plain data race.
     return core::locked(_terminal, [&]() {
-        auto const block = terminal().lastCommandBlock();
-        auto const hyperlink = terminal().tryGetHoveringHyperlink();
+        // Whether the last-command rows can act: they resolve the store's last finished block, and copy its
+        // rows. A shell that never reports a command's start (OSC 133;C) has finished none -- tcsh's ;D at
+        // its very first prompt included -- and ClearToPrompt keeps a record whose rows it took. Asked
+        // without reading the rows, under the lock the parser waits on.
+        auto const hasLastCommand = terminal().hasCommandBlockRows(vtbackend::CommandBlockTarget::Last);
 
-        // The grid line under the pointer, when a fold reaches it. _currentMousePosition is in MAIN-PAGE
-        // rows -- which is the space translateScreenToGridLine() speaks, so it is fed in unadjusted --
-        // and was last written by the move that necessarily preceded this right-click, so it still names
-        // the clicked cell. Adding mainPageTopRow() here would reintroduce the off-by-a-status-line the
-        // gutter hit-test already had (@see gutterLineAt).
-        auto const foldLine = [&]() -> std::optional<vtbackend::LineOffset> {
-            if (!_config.folding.value().enabled)
+        // The block under the pointer, as an unpinned `target: pointer` action resolves it -- the gutter's
+        // block, and none over an alternate-screen application. Over the sticky header, the block the header
+        // stands for: the menu is the one its rows would open.
+        auto const overStickyHeader = _contextMenuBlock != vtbackend::CommandBlockId {};
+        auto const* const block =
+            terminal().targetedCommandBlock(vtbackend::CommandBlockTarget::Pointer, _contextMenuBlock);
+
+        // The header is no cell, so no link is under it.
+        auto const hyperlink = overStickyHeader ? nullptr : terminal().tryGetHoveringHyperlink();
+
+        // The grid line under the pointer. _currentMousePosition is in MAIN-PAGE rows -- which is the
+        // space translateScreenToGridLine() speaks, so it is fed in unadjusted -- and was last written by
+        // the move that necessarily preceded this right-click, so it still names the clicked cell. Adding
+        // mainPageTopRow() here would reintroduce the off-by-a-status-line the gutter hit-test
+        // (gutterHitAt in SessionInput.cpp) already had. Over the header, a row of its block.
+        auto const pointerLine = [&]() -> std::optional<vtbackend::LineOffset> {
+            if (!overStickyHeader)
+                return terminal().viewport().translateScreenToGridLine(_currentMousePosition.line);
+            if (block == nullptr)
                 return std::nullopt;
-            auto const line = terminal().viewport().translateScreenToGridLine(_currentMousePosition.line);
-            return terminal().foldContaining(line) ? std::optional { line } : std::nullopt;
+            return terminal().commandBlockAnchor(*block);
+        }();
+
+        // ...when a fold reaches it.
+        auto const foldLine = [&]() -> std::optional<vtbackend::LineOffset> {
+            if (!_config.folding.value().enabled || !pointerLine)
+                return std::nullopt;
+            return terminal().foldContaining(*pointerLine) ? pointerLine : std::nullopt;
+        }();
+
+        // ...with what its rows may act on.
+        auto const blockUnderCursor = [&]() -> std::optional<command::PointedBlock> {
+            if (block == nullptr)
+                return std::nullopt;
+            return command::PointedBlock {
+                .id = block->id,
+                .output = block->state == vtbackend::CommandBlockState::Prompting
+                              ? command::OutputPresence::Absent
+                              : command::OutputPresence::Present,
+                .commandLine = block->commandLine.empty() ? command::CommandLinePresence::Absent
+                                                          : command::CommandLinePresence::Present,
+            };
         }();
 
         return command::ContextMenuState {
             .hasSelection = terminal().selectionAvailable(),
             .clipboardHasText = clipboardHasText,
-            // An empty block is no block. A shell that emits OSC 133;D at its very first prompt (tcsh
-            // cannot guard against that in an alias) reports a command that never ran, with no text to
-            // copy — offering the user three rows that would all yield nothing.
-            .hasLastCommand = block.has_value() && !(block->prompt.empty() && block->output.empty()),
+            .hasLastCommand = hasLastCommand,
             // Only a working directory on this host can be opened by the local file manager, and the row
             // and the action behind it go through ONE resolver so they cannot disagree. A remote OSC 7
             // cwd grays it out, and so does an OSC 3008 cwd behind a container boundary or from another
@@ -2500,58 +3344,223 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // Taken now for the same reason the hyperlink is: the row acts on the line that was
             // clicked, and the pointer will have left it by the time the row is picked.
             .foldLine = foldLine,
+            .blockUnderCursor = blockUnderCursor,
             .activeProfile = profileName(),
             .profileNames = std::move(profileNames),
         };
     });
 }
 
-bool TerminalSession::operator()(actions::SoftReset)
+bool TerminalSession::operator()(actions::SoftReset action)
 {
+    if (auto const dispatch = dispatchRemotely(action); dispatch != RemoteDispatch::RunHere)
+        return dispatch == RemoteDispatch::Performed;
+
     sessionLog()("Performing terminal soft reset");
 
     // A soft reset is far from a handful of flags: it re-establishes the margins and drops the status
     // display, which RESIZES the main page. Run bare on the GUI thread, that grid resize races the parser
     // thread's line writes — a corrupted screen at best, a heap-buffer-overflow at worst.
     //
-    // Taking the lock cannot deadlock: DECSTR (CSI ! p) already reaches Terminal::softReset() from the
-    // parser thread, from inside writeToScreen()'s own _stateMutex hold, so every callback the reset makes
-    // is exercised under this very lock every time an application asks for one. This path simply joins it.
-    core::locked(_terminal, [&]() { terminal().softReset(); });
+    // The callbacks the reset raises are safe under the lock: DECSTR (CSI ! p) reaches Terminal::softReset()
+    // from the parser thread too, from inside writeToScreen()'s own _stateMutex hold. A flush is not.
+    // Unlocking the keyboard (KAM) takes down the status line it put up, and the resize may write a report,
+    // which with SRM still reset at that point is echoed, which parses. The parser defers that echo until it
+    // has unwound; here the flush waits for the lock's release.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        terminal().softReset();
+    }
     return true;
 }
 
 bool TerminalSession::operator()(actions::CopyLastCommandPrompt)
 {
-    return copyLastCommandBlock(vtbackend::CommandBlockPart::Prompt);
+    return copyCommandBlock(vtbackend::CommandBlockTarget::Last, vtbackend::CommandBlockPart::Prompt, {})
+        .has_value();
 }
 
 bool TerminalSession::operator()(actions::CopyLastCommandOutput)
 {
-    return copyLastCommandBlock(vtbackend::CommandBlockPart::Output);
+    return copyCommandBlock(vtbackend::CommandBlockTarget::Last, vtbackend::CommandBlockPart::Output, {})
+        .has_value();
 }
 
 bool TerminalSession::operator()(actions::CopyLastCommandBlock)
 {
-    return copyLastCommandBlock(vtbackend::CommandBlockPart::PromptAndOutput);
+    return copyCommandBlock(
+               vtbackend::CommandBlockTarget::Last, vtbackend::CommandBlockPart::PromptAndOutput, {})
+        .has_value();
 }
 
-bool TerminalSession::copyLastCommandBlock(vtbackend::CommandBlockPart part)
+namespace
 {
-    auto const block = core::locked(_terminal, [&]() { return terminal().lastCommandBlock(); });
-    if (!block)
-        return false;
+    /// @p text, unless it is empty: then the part it was taken from is an empty part. A command that printed
+    /// nothing leaves blank rows at most, whose text is "" -- nothing to copy, and nothing to show.
+    /// @param text The text taken from a command block, or why there is none.
+    /// @return The text when it has any; otherwise why there is none.
+    [[nodiscard]] std::expected<std::string, vtbackend::CommandBlockActionError> nonEmpty(
+        std::expected<std::string, vtbackend::CommandBlockActionError> text)
+    {
+        if (text && text->empty())
+            return std::unexpected(vtbackend::CommandBlockActionError::EmptyPart);
+        return text;
+    }
+} // namespace
 
-    // Copying nothing is not a copy — it is the destruction of whatever the user had on the clipboard.
-    // `cd /tmp` prints not one character, and its block's Output is empty; so is the Prompt of a block
-    // whose prompt line has already scrolled out of the history. QClipboard::setText("") would replace the
-    // URL the user copied a minute ago with nothing at all, and the menu row would look like it did
-    // nothing. Refusing leaves the clipboard alone, and tells the caller the row had nothing to give.
-    auto const text = vtbackend::textOf(*block, part);
-    if (text.empty())
-        return false;
+std::expected<void, vtbackend::CommandBlockActionError> TerminalSession::copyCommandBlock(
+    vtbackend::CommandBlockTarget target, vtbackend::CommandBlockPart part, vtbackend::CommandBlockId block)
+{
+    return copyBlockText(core::locked(_terminal, [&]() {
+        return terminal().commandBlockText(target, part, vtbackend::CaptureRendition::PlainText, block);
+    }));
+}
 
-    copyToClipboard(text);
+std::expected<void, vtbackend::CommandBlockActionError> TerminalSession::copyBlockText(
+    std::expected<std::string, vtbackend::CommandBlockActionError> text)
+{
+    // Copying nothing is not a copy -- it is the destruction of whatever the user had on the clipboard.
+    // `cd /tmp` prints not one character, so its block's output is blank rows at most, and its text is
+    // empty. QClipboard::setText("") would replace the URL the user copied a minute ago with nothing at
+    // all, and the menu row would look like it did nothing. Refusing leaves the clipboard alone, and tells
+    // the caller the row had nothing to give.
+    return nonEmpty(std::move(text)).transform([this](std::string const& value) { copyToClipboard(value); });
+}
+
+bool TerminalSession::operator()(actions::SelectCommandBlock const& action)
+{
+    // As with copyCommandBlock(), a block or part that is not there is reported to the caller only; the
+    // terminal leaves the selection as it was.
+    // Through runUnderStateLock(), as SelectAll's selection is reported.
+    return _terminal.runUnderStateLock([&]() {
+        return terminal().selectCommandBlock(action.target, action.part, action.block).has_value();
+    });
+}
+
+bool TerminalSession::operator()(actions::CopyCommandBlock const& action)
+{
+    return copyCommandBlock(action.target, action.part, action.block).has_value();
+}
+
+bool TerminalSession::operator()(actions::CopyCommandLine const& action)
+{
+    // The record belongs to the store, so it is read under the lock; its copy is sanitised outside it.
+    auto const commandLine = core::locked(
+        _terminal, [&]() -> std::expected<vtbackend::CommandLineText, vtbackend::CommandBlockActionError> {
+            auto const* const record = terminal().targetedCommandBlock(action.target, action.block);
+            if (record == nullptr)
+                return std::unexpected(vtbackend::CommandBlockActionError::NoBlock);
+            return record->commandLine;
+        });
+
+    // Copyable, not displayable: the clipboard's next stop is a paste, usually into a shell, bracketed or
+    // not. A raw line may carry ESC [ 201 ~, which ends a bracketed paste early and runs the rest as typed
+    // input, or a line feed, which runs what precedes it as it arrives; the display form would keep both
+    // harmless on screen but put U+FFFD into what the user pastes.
+    return copyBlockText(commandLine.transform(&vtbackend::CommandLineText::copyable)).has_value();
+}
+
+namespace
+{
+    /// The pane OpenCommandOutput opens for @p placement; std::nullopt for none, the program running
+    /// detached.
+    [[nodiscard]] std::optional<CommandPanePlacement> commandPaneFor(actions::OutputPlacement placement)
+    {
+        switch (placement)
+        {
+            case actions::OutputPlacement::Split: return CommandPanePlacement::Split;
+            case actions::OutputPlacement::Tab: return CommandPanePlacement::Tab;
+            case actions::OutputPlacement::Detached: return std::nullopt;
+        }
+        return std::nullopt;
+    }
+} // namespace
+
+void TerminalSession::reportOpenOutputFailure(std::string_view reason)
+{
+    errorLog()("Could not open the command output: {}.", reason);
+    emit showNotification(tr("Open Output"),
+                          tr("Could not open the command output: %1.")
+                              .arg(QString::fromUtf8(reason.data(), static_cast<qsizetype>(reason.size()))));
+}
+
+bool TerminalSession::operator()(actions::OpenCommandOutput const& action)
+{
+    // A program reading its standard input cannot be assumed to interpret SGR, so detached is plain.
+    auto const rendition = action.placement != actions::OutputPlacement::Detached
+                                   && config::outputFormatFor(action, _config.commandBlocks.value())
+                                          == actions::OutputFormat::Sgr
+                               ? vtbackend::CaptureRendition::WithSgr
+                               : vtbackend::CaptureRendition::PlainText;
+    auto const output = nonEmpty(core::locked(_terminal, [&]() {
+        return terminal().commandBlockText(
+            action.target, vtbackend::CommandBlockPart::Output, rendition, action.block);
+    }));
+
+    // No block there, no output yet, or nothing but blank rows: nothing to show, which -- as for the copy
+    // actions -- is no error worth a notice.
+    if (!output)
+    {
+        sessionLog()("OpenCommandOutput: {}.", vtbackend::describe(output.error()));
+        return false;
+    }
+
+    // The program as configured, read as the spawn reads a shell setting (vtpty::invocationToRun): a
+    // program and its arguments where it names no program but holds whitespace, and on Windows by
+    // CreateProcess's rules, so that `C:\Tools\less.exe -R` keeps its backslashes.
+    auto const& program = action.program.empty() ? _config.commandBlocks.value().pager : action.program;
+    if (program.find_first_not_of(" \t\r\n") == std::string::npos)
+    {
+        reportOpenOutputFailure("no program to open it with (program:, else command_blocks.pager)");
+        return false;
+    }
+
+    // Asked before the output is written anywhere: a window that can open no pane need not write a file
+    // only to remove it again.
+    auto const pane = commandPaneFor(action.placement);
+    if (pane)
+        if (auto const refusal = _manager->commandPaneRefusal(this, *pane))
+        {
+            reportOpenOutputFailure(describe(*refusal));
+            return false;
+        }
+
+    auto& files = _app.commandOutputFiles();
+    auto const file = files.create(*output);
+    if (!file)
+    {
+        reportOpenOutputFailure(describe(file.error()));
+        return false;
+    }
+
+    if (!pane)
+    {
+        // Detached: the program is not Contour's, and outlives it. Once it has started, it holds the file
+        // open, so the file is released at once; where the platform will not remove a file a process
+        // holds open, it goes with the private directory at exit instead.
+        auto const started = _app.externalLauncher().runDetachedWithInput(program, *file);
+        files.release(*file);
+        if (!started)
+            reportOpenOutputFailure(platform::describe(started.error()));
+        return started.has_value();
+    }
+
+    // The pager reads the file it is given after whatever the configuration wrote.
+    auto command = vtpty::Process::ExecInfo {};
+    command.program = program;
+    command.arguments = { core::pathToUtf8(*file) };
+
+    auto const opened = _manager->openCommandPane(this, *pane, command);
+    if (!opened)
+    {
+        files.release(*file);
+        reportOpenOutputFailure(describe(opened.error()));
+        return false;
+    }
+
+    // The file lives exactly as long as the pane showing it.
+    QObject::connect(
+        *opened, &TerminalSession::sessionClosed, *opened, [&files, path = *file]() { files.release(path); });
     return true;
 }
 
@@ -2580,10 +3589,21 @@ bool TerminalSession::operator()(actions::CopySelection copySelection)
 
     switch (copySelection.format)
     {
-        case actions::CopyFormat::Text:
+        case actions::CopyFormat::Text: {
             // Copy the selection in pure text, plus whitespaces and newline.
-            core::locked(_terminal, [&]() { copyToClipboard(terminal().extractSelectionText()); });
+            auto const text = core::locked(_terminal, [&]() { return terminal().extractSelectionText(); });
+
+            // Nothing selected: with the fallback, copy what the last command printed instead -- so the copy
+            // chord right after a command does something useful rather than emptying the clipboard.
+            if (text.empty() && copySelection.fallback == actions::CopyFallback::LastCommandOutput)
+                return copyCommandBlock(vtbackend::CommandBlockTarget::Last,
+                                        vtbackend::CommandBlockPart::Output,
+                                        vtbackend::CommandBlockId {})
+                    .has_value();
+
+            copyToClipboard(text);
             break;
+        }
         case actions::CopyFormat::HTML:
             // TODO: This requires walking through each selected cell and construct HTML+CSS for it.
         case actions::CopyFormat::VT:
@@ -2606,10 +3626,12 @@ bool TerminalSession::operator()(actions::CreateDebugDump)
 
 bool TerminalSession::operator()(actions::CreateSelection const& customSelector)
 {
-    // Locked: word-wise selection scans grid cells and installs a selector. See ViNormalMode.
-    auto const l = scoped_lock { _terminal };
-
-    _terminal.triggerWordWiseSelectionWithCustomDelimiters(customSelector.delimiters);
+    // Locked: word-wise selection scans grid cells and installs a selector, which is reported as SelectAll's
+    // selection is. See ViNormalMode.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        _terminal.triggerWordWiseSelectionWithCustomDelimiters(customSelector.delimiters);
+    }
     return true;
 }
 
@@ -2643,47 +3665,67 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
 
 bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 {
-    // Locked: searchNextMatch() walks the grid and the Vi cursor moves with it. See ViNormalMode.
-    auto const l = scoped_lock { _terminal };
+    // Locked: searchNextMatch() walks the grid and the Vi cursor moves with it. See ViNormalMode. Through
+    // runUnderStateLock(): in a Visual mode the cursor extends the selection, whose report is sent once the
+    // lock is released, as SelectAll's is.
+    return _terminal.runUnderStateLock([&]() {
+        // Set BEFORE the step, not after it: searchNextMatch() reveals the match and raises
+        // screenUpdated() from inside, so the guard has to already be up by then. @see _searchMatchRevealed.
+        auto const wasRevealed = _searchMatchRevealed.exchange(true, std::memory_order_relaxed);
 
-    // Set BEFORE the step, not after it: searchNextMatch() reveals the match and raises
-    // screenUpdated() from inside, so the guard has to already be up by then. @see _searchMatchRevealed.
-    auto const wasRevealed = _searchMatchRevealed.exchange(true, std::memory_order_relaxed);
-
-    auto const nextPosition = _terminal.searchNextMatch(_terminal.normalModeCursorPosition());
-    if (!nextPosition)
-    {
-        // RESTORED, not cleared: this step revealed nothing, but a previous one may well have -- F3
-        // at the last match is exactly that case, and storing false there would un-park the very match
-        // the user is standing on, so the next byte of output scrolls it away.
-        _searchMatchRevealed.store(wasRevealed, std::memory_order_relaxed);
-        return false;
-    }
-    _terminal.moveNormalModeCursorTo(nextPosition.value());
-    _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
-    // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToNextMatch not work?
-    return true;
+        auto const nextPosition = _terminal.searchNextMatch(_terminal.normalModeCursorPosition());
+        if (!nextPosition)
+        {
+            // RESTORED, not cleared: this step revealed nothing, but a previous one may well have -- F3
+            // at the last match is exactly that case, and storing false there would un-park the very match
+            // the user is standing on, so the next byte of output scrolls it away.
+            _searchMatchRevealed.store(wasRevealed, std::memory_order_relaxed);
+            return false;
+        }
+        _terminal.moveNormalModeCursorTo(nextPosition.value());
+        _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
+        // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToNextMatch not work?
+        return true;
+    });
 }
 
 bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
 {
-    // Locked for the same reason as FocusNextSearchMatch above, and parked for the same reason.
-    auto const l = scoped_lock { _terminal };
+    // Locked, through runUnderStateLock(), for the same reasons as FocusNextSearchMatch above, and parked for
+    // the same reason.
+    return _terminal.runUnderStateLock([&]() {
+        auto const wasRevealed = _searchMatchRevealed.exchange(true, std::memory_order_relaxed);
 
-    auto const wasRevealed = _searchMatchRevealed.exchange(true, std::memory_order_relaxed);
-
-    auto const nextPosition = _terminal.searchPrevMatch(_terminal.normalModeCursorPosition());
-    if (!nextPosition)
-    {
-        // Restored rather than cleared, for the reason FocusNextSearchMatch above states.
-        _searchMatchRevealed.store(wasRevealed, std::memory_order_relaxed);
-        return false;
-    }
-    _terminal.moveNormalModeCursorTo(nextPosition.value());
-    _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
-    // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToPreviousMatch not work?
-    return true;
+        auto const nextPosition = _terminal.searchPrevMatch(_terminal.normalModeCursorPosition());
+        if (!nextPosition)
+        {
+            // Restored rather than cleared, for the reason FocusNextSearchMatch above states.
+            _searchMatchRevealed.store(wasRevealed, std::memory_order_relaxed);
+            return false;
+        }
+        _terminal.moveNormalModeCursorTo(nextPosition.value());
+        _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
+        // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToPreviousMatch not work?
+        return true;
+    });
 }
+
+namespace
+{
+    /// @param refusal Why a path names no file on this machine.
+    /// @return The reason as the log gives it, after "Not opening ...: ".
+    [[nodiscard]] constexpr std::string_view refusalReason(vtbackend::PathRefusal refusal) noexcept
+    {
+        switch (refusal)
+        {
+            case vtbackend::PathRefusal::RanElsewhere:
+                return "the command that printed it ran on another machine.";
+            case vtbackend::PathRefusal::ReplicaOfAnotherMachine:
+                return "it names a file on the machine the session runs on, not this one.";
+        }
+        return {};
+    }
+} // namespace
 
 bool TerminalSession::operator()(actions::FollowHyperlink const& action)
 {
@@ -2695,17 +3737,39 @@ bool TerminalSession::operator()(actions::FollowHyperlink const& action)
         return true;
     }
 
-    auto const l = scoped_lock { terminal() };
-    if (auto const hyperlink = terminal().tryGetHoveringHyperlink())
+    // Looked up under the lock, and opened once it is released: the desktop's handler is another process, and
+    // an executable link runs one, neither of which the parser thread may wait for.
+    auto hyperlink = std::shared_ptr<vtbackend::HyperlinkInfo const> {};
+    auto path = std::expected<std::optional<std::string>, vtbackend::PathRefusal> {};
+    auto pathText = std::optional<std::string> {};
+    {
+        auto const l = scoped_lock { terminal() };
+        hyperlink = terminal().tryGetHoveringHyperlink();
+        if (!hyperlink)
+        {
+            path = terminal().localPathAtMousePosition();
+            if (!path)
+                pathText = terminal().pathTextAtMousePosition();
+        }
+    }
+
+    if (hyperlink)
     {
         followHyperlink(*hyperlink);
         return true;
     }
-    if (auto const path = terminal().localPathAtMousePosition())
+    if (path && *path)
     {
-        openDocument(*path);
+        openDocument(**path);
         return true;
     }
+    if (path)
+        return false; // no path there, or none that names an existing file
+
+    // The path names a file on another machine: its command ran there, or the pane replicates that machine's
+    // daemon, for the reason followHyperlink() refuses a file:// link there. Said, as that refusal is.
+    if (pathText)
+        errorLog()("Not opening \"{}\": {}", *pathText, refusalReason(path.error()));
     return false;
 }
 
@@ -2728,8 +3792,7 @@ bool TerminalSession::operator()(actions::HintMode const& action)
                 .name = userPattern.name,
                 .regex = std::regex(userPattern.regex,
                                     std::regex_constants::ECMAScript | std::regex_constants::optimize),
-                .validator = {},
-                .transformer = {},
+                .resolve = {},
             };
             auto const it =
                 std::ranges::find_if(patterns, [&](auto const& p) { return p.name == userPattern.name; });
@@ -2772,7 +3835,11 @@ bool TerminalSession::operator()(actions::HintMode const& action)
         .scope = action.scope,
         .scrollbackLimit = profile().hintScrollbackLines.value(),
     };
-    core::locked(terminal(), [&]() { terminal().activateHintMode(std::move(request)); });
+    // Locked: hint mode puts the indicator status line up, which resizes. See ViNormalMode.
+    {
+        auto const _ = std::scoped_lock { terminal() };
+        terminal().activateHintMode(std::move(request));
+    }
     return true;
 }
 
@@ -2832,9 +3899,9 @@ bool TerminalSession::operator()(actions::OpenConfiguration event)
     // fromLocalFile(), not QUrl(path): a bare filesystem path is not a URL. On POSIX it parses as a
     // scheme-less relative reference and on Windows `C:\...` parses with scheme "c", so the desktop
     // was handed something no handler could claim. The two sibling openers here already do this.
-    openExternally(QUrl::fromLocalFile(QString::fromStdString(_config.configFile.string())),
+    openExternally(QUrl::fromLocalFile(platform::toQString(_config.configFile)),
                    "configuration file",
-                   _config.configFile.generic_string());
+                   core::platform::normalizePath(_config.configFile));
 
     return true;
 }
@@ -2864,10 +3931,9 @@ bool TerminalSession::operator()(actions::OpenFileManager)
 
 bool TerminalSession::operator()(actions::OpenSelection)
 {
-    core::locked(_terminal, [&]() {
-        auto const selection = terminal().extractSelectionText();
-        openExternally(QUrl(QString::fromStdString(selection)), "selection", selection);
-    });
+    // Read under the lock, and opened once it is released: the desktop's handler is another process.
+    auto const selection = core::locked(_terminal, [&]() { return terminal().extractSelectionText(); });
+    openExternally(QUrl(QString::fromStdString(selection)), "selection", selection);
     return true;
 }
 
@@ -2884,13 +3950,15 @@ bool TerminalSession::operator()(actions::PasteSelection paste)
         string const text = normalizeCrlf(clipboard->text(QClipboard::Selection));
 
         // Locked around the terminal calls only -- the clipboard read above is Qt's and must not run
-        // with the terminal lock held. See ViNormalMode for the rationale.
-        auto const l = scoped_lock { _terminal };
-
-        if (paste.evaluateInShell)
-            terminal().sendRawInput(string_view { text + "\n" });
-        else
-            terminal().sendPaste(string_view { text });
+        // with the terminal lock held. What is sent is flushed once the lock is released. See ViNormalMode
+        // for the rationale.
+        {
+            auto const _ = std::scoped_lock { _terminal };
+            if (paste.evaluateInShell)
+                terminal().sendRawInput(string_view { text + "\n" });
+            else
+                terminal().sendPaste(string_view { text });
+        }
     }
 
     return true;
@@ -2911,10 +3979,8 @@ bool TerminalSession::operator()(actions::Quit)
 
 bool TerminalSession::operator()(actions::ReloadConfig const& action)
 {
-    if (action.profileName.has_value())
-        reloadConfigWithProfile(action.profileName.value());
-    else
-        reloadConfigWithProfile(_profileName);
+    if (auto const reloaded = reloadAllConfigs(action.profileName.value_or(_profileName)); !reloaded)
+        errorLog()("Failed to load configuration. {}", reloaded.error());
 
     return true;
 }
@@ -2951,11 +4017,12 @@ bool TerminalSession::operator()(actions::SaveScreenshot)
         / fs::path(std::format("contour-screenshot-{:%Y-%m-%d-%H-%M-%S}.png", chrono::system_clock::now()));
 
     _display->setScreenshotOutput(savePath);
-    sessionLog()("Saving screenshot to {}", vtpty::utf8Of(savePath));
+    sessionLog()("Saving screenshot to {}", core::pathToUtf8(savePath));
 
     // The log line and the toast are deliberately separate strings: one is for a developer reading a
     // log in English, the other is shown to the user and therefore goes through tr().
-    auto const notice = tr("Saving screenshot to %1").arg(QString::fromStdString(vtpty::utf8Of(savePath)));
+    auto const notice =
+        tr("Saving screenshot to %1").arg(QDir::toNativeSeparators(platform::toQString(savePath)));
     _display->post([this, notice]() { emit showNotification(tr("Screenshot"), notice); });
     return true;
 }
@@ -2976,32 +4043,35 @@ void TerminalSession::smoothScrollUp(vtbackend::LineCount lineCount)
     // Locked here rather than in each of the six scroll actions that funnel through this helper: the
     // viewport offset and the smooth-scroll state are read and advanced by the parser thread too (a
     // buffer scroll shifts the viewport), so a GUI-thread scroll must not interleave with it. See
-    // ViNormalMode for the full GUI-vs-parser-thread rationale.
-    auto const l = scoped_lock { _terminal };
-
-    if (terminal().settings().smoothScrolling)
+    // ViNormalMode for the full GUI-vs-parser-thread rationale. A scroll during a drag extends the selection,
+    // whose report is sent once the lock is released, as SelectAll's is.
     {
-        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
-        auto const pixels = static_cast<float>(*lineCount) * cellHeight;
-        if (terminal().applySmoothScrollPixelDelta(pixels) == vtbackend::SmoothScrollResult::Applied)
-            return;
+        auto const _ = std::scoped_lock { _terminal };
+        if (terminal().settings().smoothScrolling)
+        {
+            auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
+            auto const pixels = static_cast<float>(*lineCount) * cellHeight;
+            if (terminal().applySmoothScrollPixelDelta(pixels) == vtbackend::SmoothScrollResult::Applied)
+                return;
+        }
+        terminal().viewport().scrollUp(lineCount);
     }
-    terminal().viewport().scrollUp(lineCount);
 }
 
 void TerminalSession::smoothScrollDown(vtbackend::LineCount lineCount)
 {
-    // Locked for the same reason as smoothScrollUp() above.
-    auto const l = scoped_lock { _terminal };
-
-    if (terminal().settings().smoothScrolling)
+    // Locked, for the same reasons as smoothScrollUp() above.
     {
-        auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
-        auto const pixels = -static_cast<float>(*lineCount) * cellHeight;
-        if (terminal().applySmoothScrollPixelDelta(pixels) == vtbackend::SmoothScrollResult::Applied)
-            return;
+        auto const _ = std::scoped_lock { _terminal };
+        if (terminal().settings().smoothScrolling)
+        {
+            auto const cellHeight = static_cast<float>(terminal().cellPixelSize().height.as<int>());
+            auto const pixels = -static_cast<float>(*lineCount) * cellHeight;
+            if (terminal().applySmoothScrollPixelDelta(pixels) == vtbackend::SmoothScrollResult::Applied)
+                return;
+        }
+        terminal().viewport().scrollDown(lineCount);
     }
-    terminal().viewport().scrollDown(lineCount);
 }
 
 bool TerminalSession::operator()(actions::ScrollDown)
@@ -3023,16 +4093,14 @@ namespace
     }
 } // namespace
 
-bool TerminalSession::withFolding(std::invocable<vtbackend::Terminal&> auto&& action, FoldingGate gate)
+bool TerminalSession::withScrollableChange(std::invocable<vtbackend::Terminal&> auto&& action)
 {
     // Locked: the actions walk the grid's marks and mutate fold state the render pass reads. See
-    // ScrollMarkDown.
+    // ScrollMarkDown. A hard reset from 132 columns resizes the page, which with in-band resize reports on
+    // writes a report: the lock holds it back until it is released.
     auto const [handled, scrollable] =
-        core::locked(_terminal, [&]() -> std::pair<bool, vtbackend::LineCount> {
-            // One gate for every folding action rather than one per handler: a seventh action then
-            // cannot be live behind a disabled setting by forgetting to check.
-            auto const ran =
-                (gate == FoldingGate::Always || _config.folding.value().enabled) && action(terminal());
+        _terminal.runUnderStateLock([&]() -> std::pair<bool, vtbackend::LineCount> {
+            auto const ran = action(terminal());
 
             // Read under the same lock that just moved it: folding a block takes its rows out of the
             // scrollable range without touching the history depth, and this is the only moment that is
@@ -3044,31 +4112,49 @@ bool TerminalSession::withFolding(std::invocable<vtbackend::Terminal&> auto&& ac
     // into the session. Announcing a count that did not move is a no-op, so the disabled case needs no
     // second channel to say so.
     announceScrollableLineCount(scrollable);
+
+    // Folding moves every tick below the fold, and ClearToPrompt takes the ticks of the rows it removed.
+    requestScrollbarMarksRefresh();
     return handled;
+}
+
+void TerminalSession::scrollToScrollbarMark(qint64 targetLine)
+{
+    // Only within the stable-id generation the ticks were published in: a reflow since then renamed every
+    // row, and the refresh it scheduled replaces this tick anyway.
+    if (!_scrollbarMarksKey)
+        return;
+    auto const generation = _scrollbarTicksGeneration;
+
+    // Through the path that takes the lock and republishes the scrollable count, which opening a collapsed
+    // block changes.
+    withScrollableChange([&](vtbackend::Terminal& terminal) {
+        return terminal.revealStableLineAtTop(static_cast<int64_t>(targetLine), generation).has_value();
+    });
 }
 
 bool TerminalSession::operator()(actions::CollapseAllFolds)
 {
-    return withFolding([](auto& terminal) { return terminal.collapseAllFolds(); });
+    return withScrollableChange([](auto& terminal) { return terminal.collapseAllFolds(); });
 }
 
 bool TerminalSession::operator()(actions::CollapseLastFold)
 {
-    return withFolding([](auto& terminal) { return terminal.collapseLastFold(); });
+    return withScrollableChange([](auto& terminal) { return terminal.collapseLastFold(); });
 }
 
 bool TerminalSession::operator()(actions::ExpandAllFolds)
 {
-    // Ungated, but still through withFolding(): turning the feature off must let a user undo what they
-    // folded while it was on rather than stranding the output behind a disabled setting -- and the
-    // rows this hands BACK to the scrollable range have to be announced just as the ones a collapse
-    // takes away are, or the scrollbar keeps the travel it had while they were hidden.
-    return withFolding([](auto& terminal) { return terminal.expandAllFolds(); }, FoldingGate::Always);
+    // The terminal never refuses an expand, so turning the feature off still lets a user undo what they
+    // folded while it was on -- and the rows this hands BACK to the scrollable range have to be announced
+    // just as the ones a collapse takes away are, or the scrollbar keeps the travel it had while they were
+    // hidden.
+    return withScrollableChange([](auto& terminal) { return terminal.expandAllFolds(); });
 }
 
 bool TerminalSession::operator()(actions::ToggleFold)
 {
-    return withFolding(
+    return withScrollableChange(
         [](auto& terminal) { return terminal.toggleFoldContaining(foldAnchorLine(terminal)); });
 }
 
@@ -3076,31 +4162,33 @@ bool TerminalSession::operator()(actions::ToggleFoldAt action)
 {
     // The line comes from the context menu, which captured where the user right-clicked -- so this
     // acts on the block they were pointing at, not on whatever the viewport happens to start with.
-    return withFolding([line = action.line](auto& terminal) {
+    return withScrollableChange([line = action.line](auto& terminal) {
         return terminal.toggleFoldContaining(vtbackend::LineOffset(line));
     });
 }
 
 bool TerminalSession::operator()(actions::ToggleLastFold)
 {
-    return withFolding([](auto& terminal) { return terminal.toggleLastFold(); });
+    return withScrollableChange([](auto& terminal) { return terminal.toggleLastFold(); });
 }
 
 bool TerminalSession::operator()(actions::ScrollMarkDown)
 {
-    // Locked: scans the grid for marks and moves the viewport. See ViNormalMode.
-    auto const l = scoped_lock { _terminal };
-
-    terminal().viewport().scrollMarkDown();
+    // Locked: scans the grid for marks and moves the viewport, as smoothScrollUp() does. See ViNormalMode.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        terminal().viewport().scrollMarkDown();
+    }
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollMarkUp)
 {
-    // Locked for the same reason as ScrollMarkDown above.
-    auto const l = scoped_lock { _terminal };
-
-    terminal().viewport().scrollMarkUp();
+    // Locked, for the same reasons as ScrollMarkDown above.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        terminal().viewport().scrollMarkUp();
+    }
     return true;
 }
 
@@ -3118,37 +4206,39 @@ bool TerminalSession::operator()(actions::ScrollOneUp)
 
 bool TerminalSession::operator()(actions::ScrollPageDown)
 {
-    auto const stepSize = terminal().pageSize().lines / LineCount(2);
+    auto const stepSize = terminal().mainPageSize().lines / LineCount(2);
     smoothScrollDown(stepSize);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageUp)
 {
-    auto const stepSize = terminal().pageSize().lines / LineCount(2);
+    auto const stepSize = terminal().mainPageSize().lines / LineCount(2);
     smoothScrollUp(stepSize);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollToBottom)
 {
-    // Locked: mutates the smooth-scroll state and the viewport. See ViNormalMode.
-    auto const l = scoped_lock { _terminal };
-
-    // Snap immediately for ScrollToTop/Bottom (animating large distances is impractical).
-    terminal().resetSmoothScroll();
-    terminal().viewport().scrollToBottom();
+    // Locked: mutates the smooth-scroll state and the viewport, as smoothScrollUp() does. See ViNormalMode.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        // Snap immediately for ScrollToTop/Bottom (animating large distances is impractical).
+        terminal().resetSmoothScroll();
+        terminal().viewport().scrollToBottom();
+    }
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollToTop)
 {
-    // Locked for the same reason as ScrollToBottom above.
-    auto const l = scoped_lock { _terminal };
-
-    // Snap immediately for ScrollToTop/Bottom (animating large distances is impractical).
-    terminal().resetSmoothScroll();
-    terminal().viewport().scrollToTop();
+    // Locked, for the same reasons as ScrollToBottom above.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        // Snap immediately for ScrollToTop/Bottom (animating large distances is impractical).
+        terminal().resetSmoothScroll();
+        terminal().viewport().scrollToTop();
+    }
     return true;
 }
 
@@ -3174,14 +4264,16 @@ bool TerminalSession::operator()(actions::SearchReverse)
 
 bool TerminalSession::operator()(actions::SendChars const& event)
 {
-    // Locked: sendRawInput() appends to the input generator and flushes it, and the parser thread
-    // appends to that same generator whenever a sequence replies. See ViNormalMode.
-    auto const l = scoped_lock { _terminal };
+    // Locked: sendRawInput() appends to the input generator, and the parser thread appends to that same
+    // generator whenever a sequence replies. Its flush waits for the lock's release. See ViNormalMode.
 
     // auto const now = steady_clock::now();
     // for (auto const ch: event.chars)
     //     terminal().sendCharPressEvent(static_cast<char32_t>(ch), vtbackend::Modifiers::None, now);
-    terminal().sendRawInput(event.chars);
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        terminal().sendRawInput(event.chars);
+    }
     return true;
 }
 
@@ -3190,17 +4282,19 @@ bool TerminalSession::operator()(actions::ToggleAllKeyMaps)
     _allowKeyMappings = !_allowKeyMappings;
     input::inputLog()("{} key mappings.", _allowKeyMappings ? "Enabling" : "Disabling");
 
-    // Locked: setStatusDisplay() resizes the page and reflows the grid, exactly as ViNormalMode does.
-    auto const l = scoped_lock { _terminal };
-
-    if (!_allowKeyMappings)
+    // Locked: setStatusDisplay() resizes the page and reflows the grid, exactly as ViNormalMode does, and the
+    // resize may write a report, sent once the lock is released.
     {
-        terminal().setStatusLineDefinition(
-            parseStatusLineDefinition("{}", "{Text:text=key bindings disabled,Left= « ,Right= » }", "{}"));
-        terminal().setStatusDisplay(StatusDisplayType::Indicator);
+        auto const _ = std::scoped_lock { _terminal };
+        if (!_allowKeyMappings)
+        {
+            terminal().setStatusLineDefinition(parseStatusLineDefinition(
+                "{}", "{Text:text=key bindings disabled,Left= « ,Right= » }", "{}"));
+            terminal().setStatusDisplay(StatusDisplayType::Indicator);
+        }
+        else
+            terminal().resetStatusLineDefinition();
     }
-    else
-        terminal().resetStatusLineDefinition();
     return true;
 }
 
@@ -3221,12 +4315,12 @@ bool TerminalSession::operator()(actions::ToggleInputMethodHandling)
 bool TerminalSession::operator()(actions::ToggleInputProtection)
 {
     // Locked around the terminal calls only; announce() below is Qt accessibility and must not run
-    // with the terminal lock held. See ViNormalMode for the rationale.
-    auto const allowInput = [&]() {
-        auto const l = scoped_lock { _terminal };
+    // with the terminal lock held. Through runUnderStateLock(): locking the keyboard (KAM) puts the indicator
+    // status line up, which resizes. See ViNormalMode for the rationale.
+    auto const allowInput = _terminal.runUnderStateLock([&]() {
         terminal().setAllowInput(!terminal().allowInput());
         return terminal().allowInput();
-    }();
+    });
 
     // Assertive: this changes what typing does, so a client mid-sentence should be interrupted rather
     // than tell the user about it after they have already typed into a terminal that ignored them.
@@ -3237,17 +4331,20 @@ bool TerminalSession::operator()(actions::ToggleInputProtection)
 
 bool TerminalSession::operator()(actions::ToggleStatusLine)
 {
-    auto const l = scoped_lock { _terminal };
-    if (terminal().statusDisplayType() != StatusDisplayType::Indicator)
-        terminal().setStatusDisplay(StatusDisplayType::Indicator);
-    else
-        terminal().setStatusDisplay(StatusDisplayType::None);
+    // Locked: the status line resizes the page. See ViNormalMode.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        if (terminal().statusDisplayType() != StatusDisplayType::Indicator)
+            terminal().setStatusDisplay(StatusDisplayType::Indicator);
+        else
+            terminal().setStatusDisplay(StatusDisplayType::None);
 
-    // `savedStatusDisplayType` holds only a value if the application has been overriding
-    // the status display type. But the user now actively requests a given type,
-    // so make sure restoring will not destroy the user's desire.
-    if (terminal().savedStatusDisplayType())
-        terminal().setSavedStatusDisplayType(terminal().statusDisplayType());
+        // `savedStatusDisplayType` holds only a value if the application has been overriding
+        // the status display type. But the user now actively requests a given type,
+        // so make sure restoring will not destroy the user's desire.
+        if (terminal().savedStatusDisplayType())
+            terminal().setSavedStatusDisplayType(terminal().statusDisplayType());
+    }
 
     return true;
 }
@@ -3299,17 +4396,24 @@ bool TerminalSession::operator()(actions::ViNormalMode)
     // verifyState() abort -- and Require() is not compiled out in release builds. That is #1495,
     // which needed a remote tmux only because it keeps the parser thread busy enough to hit the
     // window nearly every time.
-    auto const l = scoped_lock { _terminal };
-
-    if (terminal().inputHandler().mode() == ViMode::Insert)
-        terminal().inputHandler().setMode(ViMode::Normal);
-    else if (terminal().inputHandler().mode() == ViMode::Normal)
-        terminal().inputHandler().setMode(ViMode::Insert);
+    //
+    // With in-band resize reports on, that resize writes a report, and with SRM reset the report is echoed,
+    // which parses and takes this lock again: the report goes out once the lock is released.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        if (terminal().inputHandler().mode() == ViMode::Insert)
+            terminal().inputHandler().setMode(ViMode::Normal);
+        else if (terminal().inputHandler().mode() == ViMode::Normal)
+            terminal().inputHandler().setMode(ViMode::Insert);
+    }
     return true;
 }
 
 bool TerminalSession::operator()(actions::WriteScreen const& event)
 {
+    if (auto const dispatch = dispatchRemotely(event); dispatch != RemoteDispatch::RunHere)
+        return dispatch == RemoteDispatch::Performed;
+
     // Deliberately NOT locked here: Terminal::writeToScreen() takes the terminal lock itself, and
     // _stateMutex is non-recursive -- wrapping this would self-deadlock.
     terminal().writeToScreen(event.chars);
@@ -3632,7 +4736,7 @@ bool TerminalSession::reloadConfig(config::Config newConfig, string const& profi
 {
     // clang-format off
     sessionLog()("Reloading configuration from {} with profile {}",
-                 newConfig.configFile.string(), profileName);
+                 core::pathToUtf8(newConfig.configFile), profileName);
     // clang-format on
 
     _config = std::move(newConfig);
@@ -3655,13 +4759,7 @@ int TerminalSession::executeAllActions(std::vector<actions::Action> const& actio
         return executionCount;
     }
 
-    auto const containsToggleKeybind = [](std::vector<actions::Action> const& actions) {
-        return std::ranges::any_of(actions, [](actions::Action const& action) {
-            return holds_alternative<actions::ToggleAllKeyMaps>(action);
-        });
-    };
-
-    if (containsToggleKeybind(actions))
+    if (togglesKeyMappings(actions))
     {
         bool const ex = executeAction(actions::ToggleAllKeyMaps {});
         scheduleRedraw();
@@ -3697,8 +4795,9 @@ std::optional<vtbackend::ResolvedWorkingDirectory> TerminalSession::resolveWorki
 std::optional<vtbackend::ResolvedWorkingDirectory> TerminalSession::resolveWorkingDirectoryLocked(
     vtbackend::CwdPurpose purpose) const
 {
-    auto const osc7 = _terminal.currentWorkingDirectory();
-    return vtbackend::resolveWorkingDirectory(_terminal.contexts(), osc7, localIdentity(), purpose);
+    // The terminal's own resolution, so a pane that replicates another machine's daemon holds every
+    // directory foreign here (vtbackend::Terminal::bindReplica).
+    return _terminal.resolveWorkingDirectory(purpose);
 }
 
 std::string TerminalSession::workingDirectory() const
@@ -3724,7 +4823,8 @@ std::string TerminalSession::workingDirectory() const
         // tab's CreateProcess() fails, makes Process::start() throw, and -- being reached from a QML
         // `session:` binding write inside a Qt event handler -- aborts the whole process.
         std::error_code ec;
-        if (std::filesystem::is_directory(fs::path(resolved->path), ec))
+        if (auto const directory = core::pathFromUtf8(resolved->path);
+            directory && std::filesystem::is_directory(*directory, ec))
             return resolved->path;
     }
 #endif
@@ -3733,23 +4833,29 @@ std::string TerminalSession::workingDirectory() const
 
 std::string TerminalSession::displayWorkingDirectory() const
 {
-    // The OSC 3008 ancestry first, then OSC 7: both are the shell speaking, so both track a `cd` made
-    // inside a full-screen application, and both can be right for a session that is not on this
-    // machine. NOT filtered for locality, unlike workingDirectory() above -- a container's /app is
-    // exactly what the user is looking at, and a path worth SHOWING need not be one a child could be
-    // spawned in.
-    if (auto const resolved = resolveWorkingDirectory(vtbackend::CwdPurpose::Display))
-        return resolved->path;
+    auto const directory = [this]() -> std::string {
+        // The OSC 3008 ancestry first, then OSC 7: both are the shell speaking, so both track a `cd` made
+        // inside a full-screen application, and both can be right for a session that is not on this
+        // machine. NOT filtered for locality, unlike workingDirectory() above -- a container's /app is
+        // exactly what the user is looking at, and a path worth SHOWING need not be one a child could be
+        // spawned in.
+        if (auto const resolved = resolveWorkingDirectory(vtbackend::CwdPurpose::Display))
+            return resolved->path;
 
-    // Nothing reported (no shell integration, or not yet): fall back to where the session was started.
-    // Unlike workingDirectory() this is NOT filtered for local existence — a path worth SHOWING need not
-    // be one a child could be spawned in.
+        // Nothing reported (no shell integration, or not yet): fall back to where the session was started.
+        // Unlike workingDirectory() this is NOT filtered for local existence — a path worth SHOWING need
+        // not be one a child could be spawned in.
 #ifndef _WIN32
-    if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
-        return ptyProcess->workingDirectory();
+        if (auto const* ptyProcess = dynamic_cast<vtpty::Process const*>(&_terminal.device()))
+            return ptyProcess->workingDirectory();
 #endif
+        return {};
+    }();
 
-    return {};
+    // Shown, so made safe to show: a directory name may hold a line feed or a bidi override, and OSC 7
+    // decodes either from an escape -- raw, the first adds a line of the application's choosing under the
+    // tab title, the second reverses what follows it.
+    return vtbackend::sanitizeCommandLine(directory, vtbackend::SanitizePurpose::Display);
 }
 
 void TerminalSession::spawnNewTerminal(string const& profileName)
@@ -3760,7 +4866,7 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     {
         sessionLog()("spawning new process");
         auto const command = buildSpawnTerminalCommand(
-            _app.programPath(), _config.configFile.generic_string(), profileName, wd, _localHostName);
+            _app.programPath(), core::platform::normalizePath(_config.configFile), profileName, wd);
         if (auto const spawned = _app.externalLauncher().runDetached(command.program, command.arguments);
             !spawned)
             errorLog()("Could not spawn \"{}\": {}.",
@@ -3774,7 +4880,8 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
         if (_app.requestRemoteWindow())
             return;
         sessionLog()("spawning new in-process window");
-        _app.config().profile(_profileName)->shell.value().workingDirectory = fs::path(wd);
+        _app.config().profile(_profileName)->shell.value().workingDirectory =
+            core::pathFromUtf8(wd).value_or(fs::path { "." });
         // The new window mints its own WindowController + first tab in Main.qml's Component.onCompleted,
         // so no session-staging handshake is needed.
         // A window spawned from an existing one should open on that window's screen (the best
@@ -3808,7 +4915,35 @@ void TerminalSession::emitProfileDerivedPropertiesChanged()
 
     for (auto const notify: Notifiers)
         (this->*notify)();
+
+    // scrollbar.marks and the scrollbar's position are profile state too, read by the ticks' refresh.
+    requestScrollbarMarksRefresh();
 }
+
+namespace
+{
+    /// What a page is fitted around besides its cells: the gutter left of the grid and the margins
+    /// around it, both read where the page is fitted (session::applyResize).
+    struct PageFrame
+    {
+        int gutterColumns = 0;            ///< The columns the gutter reserves.
+        config::WindowMargins margins {}; ///< The profile's margins.
+
+        /// Member-wise equality: a frame that differs in either moves the grid.
+        [[nodiscard]] constexpr bool operator==(PageFrame const&) const noexcept = default;
+    };
+
+    /// The frame @p terminal's page is drawn in under @p profile.
+    /// @param terminal The terminal, whose gutter is the one it draws.
+    /// @param profile The profile whose margins surround the page.
+    /// @return The gutter's width in columns and the profile's margins.
+    [[nodiscard]] PageFrame pageFrameOf(vtbackend::Terminal& terminal, config::TerminalProfile const& profile)
+    {
+        auto const gutterColumns = core::locked(
+            terminal, [&] { return vtbackend::gutterLayoutFor(terminal.settings().gutter).totalColumns; });
+        return { .gutterColumns = gutterColumns, .margins = profile.margins.value() };
+    }
+} // namespace
 
 void TerminalSession::activateProfile(string const& newProfileName, ProfileWindowSizePolicy windowSizePolicy)
 {
@@ -3823,9 +4958,22 @@ void TerminalSession::activateProfile(string const& newProfileName, ProfileWindo
     }
 
     sessionLog()("Changing profile to {}.", newProfileName);
+    // Taken before the profile and, inside configureTerminal(), the terminal's gutter are replaced: on a
+    // reload _config already is the new one, so the old gutter survives only as what the terminal draws.
+    auto const fittedFrame = pageFrameOf(_terminal, _profile);
     _profileName = newProfileName;
     _profile = *newProfile;
     configureTerminal();
+
+    // A wider or narrower gutter, or other margins, put the grid somewhere else within the same pixels,
+    // and no resize event is coming to say so: the page is refitted here, once for both, and with it the
+    // window's size hints, which reserve the same frame. A reload that changed neither keeps its page.
+    // _display is re-checked at dispatch: pane rebinding may detach it before the GUI thread runs this.
+    if (pageFrameOf(_terminal, _profile) != fittedFrame && _display != nullptr)
+        _display->post([this]() {
+            if (_display)
+                _display->refitPage();
+        });
 
     // _profile was just replaced, so every QML binding reading a profile-derived property is now stale.
     emitProfileDerivedPropertiesChanged();
@@ -3856,63 +5004,125 @@ void TerminalSession::activateProfile(string const& newProfileName, ProfileWindo
         _manager->refreshAllTabTitles();
 }
 
+namespace
+{
+    /// The settings the engine reads where it uses them, so assigning one is all a reload has to do for
+    /// it. Taken from config::sessionSettings, which the terminal was born from, so a reloaded terminal
+    /// reads each exactly as a new one would. A setting the engine copies out at construction or turns
+    /// into a mode does not belong here: assigning it would change nothing.
+    constexpr auto ReloadedSettings = std::tuple {
+        &vtbackend::Settings::goodImageProtocol,
+        &vtbackend::Settings::gutter,
+        &vtbackend::Settings::autoCollapseFoldOnNewCommand,
+        &vtbackend::Settings::foldJumpBehavior,
+        &vtbackend::Settings::foldingAvailability,
+        &vtbackend::Settings::contextSignalling,
+        &vtbackend::Settings::contextTintScope,
+        &vtbackend::Settings::statusDisplayPosition,
+        &vtbackend::Settings::tabNamingMode,
+        &vtbackend::Settings::indicatorStatusLine,
+        &vtbackend::Settings::syncWindowTitleWithHostWritableStatusDisplay,
+        &vtbackend::Settings::visualizeSelectedWord,
+        &vtbackend::Settings::autoScrollOnUpdate,
+        &vtbackend::Settings::isInsertAfterYank,
+        &vtbackend::Settings::blinkStyle,
+        &vtbackend::Settings::screenTransitionStyle,
+        &vtbackend::Settings::screenTransitionDuration,
+        &vtbackend::Settings::cursorMotionAnimationDuration,
+        &vtbackend::Settings::smoothLineScrolling,
+        &vtbackend::Settings::smoothScrolling,
+        &vtbackend::Settings::momentumScrolling,
+        &vtbackend::Settings::stickyHeader,
+    };
+} // namespace
+
 void TerminalSession::configureTerminal()
 {
-    auto const l = scoped_lock { _terminal };
-    sessionLog()("Configuring terminal.");
+    // Re-read on every application, as everything below is: the terminal is configured as a new one built
+    // now would be. Built before the lock, because it reads only this session's own GUI-thread state, so the
+    // parser need not wait for it. The light/dark preference is re-read too, not through
+    // updateColorPreference(): that re-seeds only when the preference changed, so a reload that changed
+    // the profile's colors kept the old ones.
+    _currentColorPreference = _app.colorPreference();
+    auto configured = config::sessionSettings(_config, _profile, _currentColorPreference, std::nullopt);
 
-    _terminal.setWordDelimiters(_config.wordDelimiters.value());
-    _terminal.setExtendedWordDelimiters(_config.extendedWordDelimiters.value());
-    _terminal.setMouseProtocolBypassModifiers(_config.bypassMouseProtocolModifiers.value());
-    _terminal.setMouseBlockSelectionModifiers(_config.mouseBlockSelectionModifiers.value());
-    _terminal.setLastMarkRangeOffset(_profile.copyLastMarkRangeOffset.value());
+    // Locked: the profile's status line may resize the page, which may write a report, and so may re-seeding
+    // the palette with mode 2031 set. See ViNormalMode.
+    {
+        auto const _ = std::scoped_lock { _terminal };
+        sessionLog()("Configuring terminal.");
 
-    sessionLog()("Setting terminal ID to {}.", _profile.terminalId.value());
-    _terminal.setTerminalId(_profile.terminalId.value());
-    _terminal.setMaxSixelColorRegisters(_config.images.value().maxImageColorRegisters);
-    // NB: the image canvas ceiling is deliberately NOT touched here. It is monitor-derived, and
-    // configureTerminal() runs on every config reload and profile switch -- paths that
-    // configureDisplay() is not on. Re-deriving it needs a window; assigning the config value here
-    // is what used to reset the canvas to 0x0 and make sixel images vanish until the next resize.
-    _terminal.setMode(vtbackend::DECMode::NoSixelScrolling, !_config.images.value().sixelScrolling);
-    _terminal.settings().goodImageProtocol = _config.images.value().goodImageProtocol;
-    _terminal.setStatusDisplay(_profile.statusLine.value().initialType);
-    sessionLog()("imageCanvasCeiling={}, sixelScrolling={}, goodImageProtocol={}",
-                 _terminal.imageCanvasCeiling(),
-                 _config.images.value().sixelScrolling,
-                 _config.images.value().goodImageProtocol);
+        _terminal.setWordDelimiters(_config.wordDelimiters.value());
+        _terminal.setExtendedWordDelimiters(_config.extendedWordDelimiters.value());
+        _terminal.setMouseProtocolBypassModifiers(configured.mouseProtocolBypassModifiers);
+        _terminal.setMouseBlockSelectionModifiers(_config.mouseBlockSelectionModifiers.value());
+        _terminal.setLastMarkRangeOffset(configured.copyLastMarkRangeOffset);
 
-    // XXX
-    // if (!terminalView.renderer().renderTargetAvailable())
-    //     return;
+        sessionLog()("Setting terminal ID to {}.", _profile.terminalId.value());
+        _terminal.setTerminalId(_profile.terminalId.value());
+        _terminal.setMaxSixelColorRegisters(_config.images.value().maxImageColorRegisters);
+        // NB: the image canvas ceiling is deliberately NOT touched here. It is monitor-derived, and
+        // configureTerminal() runs on every config reload and profile switch -- paths that
+        // configureDisplay() is not on. Re-deriving it needs a window; assigning the config value here
+        // is what used to reset the canvas to 0x0 and make sixel images vanish until the next resize.
+        // Re-imposed on every application, and RIS returns to it through the factory settings handed over
+        // below.
+        _terminal.setMode(vtbackend::DECMode::NoSixelScrolling,
+                          configured.sixelScrolling == vtbackend::SixelScrolling::Disabled);
+        _terminal.setStatusDisplay(configured.statusDisplayType);
+        sessionLog()("imageCanvasCeiling={}, sixelScrolling={}, goodImageProtocol={}",
+                     _terminal.imageCanvasCeiling(),
+                     _config.images.value().sixelScrolling,
+                     _config.images.value().goodImageProtocol);
 
-    configureCursor(_profile.modeInsert.value().cursor);
-    updateColorPreference(_app.colorPreference());
-    _terminal.setHistoryLimits(_profile.history.value().limits());
-    _terminal.setMouseWheelScrollMultiplier(_profile.history.value().historyScrollMultiplier);
-    _terminal.settings().autoScrollOnUpdate = _profile.history.value().autoScrollOnUpdate;
-    _terminal.setHighlightTimeout(_profile.highlightTimeout.value());
-    _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
-    // The profile's policy, re-imposed on every profile application -- so a config reload or a
-    // profile switch resets a policy the Aa button had pinned, the same way it resets every other
-    // profile-derived setting here. The notify is what keeps the button honest about it: without one,
-    // an open bar kept showing the lit glyph of a mode the terminal had already stopped using.
-    // Already under this function's own lock (see its first statement) -- taking a second one here
-    // self-deadlocks, because Terminal's state mutex is a plain non-recursive std::mutex.
-    (void) _terminal.setSearchCaseSensitivity(_profile.searchCaseSensitivity.value());
-    refreshSearchStatusLocked();
+        // XXX
+        // if (!terminalView.renderer().renderTargetAvailable())
+        //     return;
 
-    // Posted rather than emitted: this function holds the lock for its whole body, and a QML binding
-    // woken by this signal reads back into the session.
-    QMetaObject::invokeMethod(this, [this]() { emit searchStateChanged(); }, Qt::QueuedConnection);
-    _terminal.settings().isInsertAfterYank = _profile.insertAfterYank.value();
-    _terminal.settings().blinkStyle = _profile.blinkStyle.value();
-    _terminal.settings().screenTransitionStyle = _profile.screenTransitionStyle.value();
-    _terminal.settings().screenTransitionDuration = _profile.screenTransitionDuration.value();
-    _terminal.settings().cursorMotionAnimationDuration = _profile.cursorMotionAnimationDuration.value();
-    _terminal.settings().smoothLineScrolling = _profile.smoothLineScrolling.value();
-    _terminal.settings().smoothScrolling = _profile.smoothScrolling.value();
-    _terminal.settings().momentumScrolling = _profile.momentumScrolling.value();
+        configureCursor(_profile.modeInsert.value().cursor);
+        // Re-seeded on every application. backgroundColorChanged is left to
+        // emitProfileDerivedPropertiesChanged(), which runs outside this lock.
+        if (auto const* colorPalette =
+                config::preferredColorPalette(_profile.colors.value(), _currentColorPreference))
+            _terminal.resetColorPalette(*colorPalette);
+        _terminal.setHistoryLimits(_profile.history.value().limits());
+        _terminal.setMouseWheelScrollMultiplier(configured.mouseWheelScrollMultiplier);
+        _terminal.setHighlightTimeout(configured.highlightTimeout);
+        _terminal.viewport().setScrollOff(_profile.modalCursorScrollOff.value());
+        // The profile's policy, re-imposed on every profile application -- so a config reload or a
+        // profile switch resets a policy the Aa button had pinned, the same way it resets every other
+        // profile-derived setting here. The notify is what keeps the button honest about it: without one,
+        // an open bar kept showing the lit glyph of a mode the terminal had already stopped using.
+        // Already under this function's own lock (see above) -- taking a second one here
+        // self-deadlocks, because Terminal's state mutex is a plain non-recursive std::mutex.
+        (void) _terminal.setSearchCaseSensitivity(_profile.searchCaseSensitivity.value());
+        refreshSearchStatusLocked();
+
+        // Posted rather than emitted: this runs under the lock, and a QML binding woken by this signal
+        // reads back into the session.
+        platform::postToObject(this, [this]() { emit searchStateChanged(); });
+
+        // Assigned as they are, the engine reading each where it uses it -- folding's switch among them,
+        // which every fold verb consults.
+        std::apply(
+            [&](auto const... setting) { ((_terminal.settings().*setting = configured.*setting), ...); },
+            ReloadedSettings);
+
+        // The indicator line is parsed out of its three templates, so the reloaded ones need parsing too --
+        // unless disabled key bindings have put their own line up, which re-enabling them takes down again
+        // through this very call.
+        if (_allowKeyMappings)
+            _terminal.resetStatusLineDefinition();
+
+        // Copied out of the settings when the terminal was built, so assigning the settings would change
+        // nothing: handed over instead. Neither touches the ancestry or who owns the marks.
+        _terminal.contexts().setLimits(configured.contextLimits);
+        _terminal.markArbiter().setPolicy(configured.contextMarkPolicy);
+
+        // What the terminal was just configured as is what its resets return to, so RIS after a reload
+        // restores the reloaded terminal ID rather than the one the session started with.
+        _terminal.reconfigureFactorySettings(std::move(configured));
+    }
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)
@@ -3996,34 +5206,6 @@ void TerminalSession::configureDisplay()
     setWindowTitle(_terminal.resolvedWindowTitle());
 }
 
-uint8_t TerminalSession::matchModeFlags() const
-{
-    uint8_t flags = 0;
-
-    if (_terminal.isAlternateScreen())
-        flags |= static_cast<uint8_t>(MatchModes::Flag::AlternateScreen);
-
-    if (_terminal.applicationCursorKeys())
-        flags |= static_cast<uint8_t>(MatchModes::Flag::AppCursor);
-
-    if (_terminal.applicationKeypad())
-        flags |= static_cast<uint8_t>(MatchModes::Flag::AppKeypad);
-
-    if (_terminal.selectionAvailable())
-        flags |= static_cast<uint8_t>(MatchModes::Flag::Select);
-
-    if (_terminal.inputHandler().mode() == ViMode::Insert)
-        flags |= static_cast<uint8_t>(MatchModes::Flag::Insert);
-
-    if (!_terminal.search().pattern.empty())
-        flags |= static_cast<uint8_t>(MatchModes::Flag::Search);
-
-    if (_terminal.executionMode() != ExecutionMode::Normal)
-        flags |= static_cast<uint8_t>(MatchModes::Flag::Trace);
-
-    return flags;
-}
-
 void TerminalSession::setFontSize(text::FontSize size)
 {
     // No display (a background tab/split pane whose display was detached on the last tab switch):
@@ -4049,35 +5231,31 @@ void TerminalSession::setFontSize(text::FontSize size)
     _profile.fonts.value().size = size;
 }
 
-bool TerminalSession::reloadConfigWithProfile(string const& profileName)
+void TerminalSession::applyReloadedConfig(config::Config const& config, string const& profileName)
 {
-    auto newConfig = config::Config {};
-    auto configFailures = 0;
-
-    try
+    // findProfile() (not profile()): a reloaded file may no longer have the profile this session runs.
+    if (config.findProfile(profileName) == nullptr)
     {
-        loadConfigFromFile(newConfig, _config.configFile.string());
+        errorLog()("Currently active profile with name '{}' gone; keeping the configuration it ran under.",
+                   profileName);
+        return;
     }
-    catch (exception const& e)
-    {
-        // TODO: _logger.error(e.what());
-        errorLog()("Configuration failure. {}", unhandledExceptionMessage(__PRETTY_FUNCTION__, e));
-        ++configFailures;
-    }
+    std::ignore = reloadConfig(config, profileName);
+}
 
-    if (!newConfig.profile(profileName))
-    {
-        errorLog()(std::format("Currently active profile with name '{}' gone.", profileName));
-        ++configFailures;
-    }
+void TerminalSession::followReload(string const& profileName)
+{
+    // The manager reaches the sessions it hosts under their own profiles. This one needs its own call
+    // when the manager does not host it, or when it is to switch profile.
+    if (profileName != _profileName || _manager->sessionForId(modelSessionId()) != this)
+        applyReloadedConfig(_app.config(), profileName);
+}
 
-    if (configFailures)
-    {
-        errorLog()("Failed to load configuration.");
-        return false;
-    }
-
-    return reloadConfig(std::move(newConfig), profileName);
+std::expected<void, std::string> TerminalSession::reloadAllConfigs(string const& profileName)
+{
+    // Through the manager, so the file is read once, the app's configuration -- what the next new tab
+    // is built from -- is updated, and every other open session follows too.
+    return _manager->reloadAllSessions().transform([&] { followReload(profileName); });
 }
 
 bool TerminalSession::resetConfig()
@@ -4086,23 +5264,25 @@ bool TerminalSession::resetConfig()
     if (ec)
     {
         errorLog()("Failed to load default config at {}; ({}) {}",
-                   _config.configFile.string(),
+                   core::pathToUtf8(_config.configFile),
                    ec.category().name(),
                    ec.message());
         return false;
     }
 
-    config::Config const defaultConfig;
-    try
+    // Read back from the user's own path, by the reload every session shares, rather than taken from a
+    // default-constructed Config, whose configFile is empty: every later reload reads the path kept here.
+    // This session moves to the default file's default profile; the others keep theirs where it has them.
+    auto const reloaded = _manager->reloadAllSessions().transform(
+        [this] { followReload(_app.config().defaultProfileName.value()); });
+    if (!reloaded)
     {
-        config::loadConfigFromFile(_config.configFile);
+        errorLog()("Failed to load the default config written to {}: {}",
+                   core::pathToUtf8(_config.configFile),
+                   reloaded.error());
+        return false;
     }
-    catch (exception const& e)
-    {
-        sessionLog()("Failed to load default config: {}", e.what());
-    }
-
-    return reloadConfig(defaultConfig, defaultConfig.defaultProfileName.value());
+    return true;
 }
 
 void TerminalSession::openExternally(QUrl const& url, std::string_view what, std::string_view subject)
@@ -4113,69 +5293,54 @@ void TerminalSession::openExternally(QUrl const& url, std::string_view what, std
 
 void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
 {
-    auto url = QUrl(QString::fromStdString(hyperlink.uri));
-
-    // A file:// URL naming THIS machine is a local path, whichever way the application spelled the
-    // authority (@see vtbackend::isLocalHost). isValid() keeps the openUrl() pass-through below for URIs
-    // Qt cannot parse, such as the non-standard Windows form file://C:/dir.
-    if (hyperlink.isLocal() && url.isValid()
-        && vtbackend::isLocalHost(url.host().toStdString(), _localHostName))
+    // A pane replicating another machine's daemon names paths on THAT machine, whatever authority its
+    // application writes: handed to the desktop, file:///home/u/x would open this machine's file of that
+    // name. Not opened at all, as such a pane's working directory is not (vtbackend::Terminal::bindReplica).
+    auto const localHost = _terminal.fileUrlLocalHost();
+    if (hyperlink.isLocal() && !localHost)
     {
-        // An authority that survives is read by the desktop's URL handler as a network location, so
-        // file://host/tmp is looked up as //host/tmp and does not exist. Drop it, as OpenFileManager does.
-        url.setHost(QString {});
-
-        // Percent-escapes decoded, and the authority already gone: the path as the filesystem spells it.
-        auto const localPath = url.toLocalFile();
-        // qEnvironmentVariable() rather than getenv(): this runs on the GUI thread while the PTY and
-        // render threads are live, and getenv() is not thread safe.
-        auto const editorEnv = qEnvironmentVariable("EDITOR");
-        auto const fileInfo = QFileInfo(localPath);
-
-        // An executable file is run through `contour config <path>`; any other file is handed to $EDITOR
-        // the same way. Anything else -- a directory, a missing path -- goes to the desktop below.
-        if (fileInfo.isFile() && (fileInfo.isExecutable() || !editorEnv.isEmpty()))
-        {
-            auto args = QStringList { "config", QString::fromStdString(_config.configFile.string()) };
-            if (!fileInfo.isExecutable())
-                args << editorEnv;
-            args << localPath;
-            if (auto const ran =
-                    _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
-                !ran)
-                errorLog()("Could not open \"{}\" in an editor: {}.",
-                           localPath.toStdString(),
-                           platform::describe(ran.error()));
-            return;
-        }
+        errorLog()("Not opening \"{}\": it names a file on the machine the session runs on, not this one.",
+                   hyperlink.uri);
+        return;
     }
 
+    // A file:// URL naming THIS machine is a local path, whichever way the application spelled the
+    // authority, and read by the resolver the hover tooltip uses (vtbackend::localPathOfFileUrl): the click
+    // opens the file the tooltip names, the drive-letter form file://C:/dir that Qt cannot parse included.
+    auto const localPath =
+        hyperlink.isLocal() ? vtbackend::localPathOfFileUrl(hyperlink.uri, *localHost) : std::nullopt;
+    if (!localPath)
+    {
+        auto const url = QUrl(QString::fromStdString(hyperlink.uri));
+        openExternally(url, "hyperlink", url.toString().toStdString());
+        return;
+    }
+
+    auto const path = QString::fromStdString(*localPath);
+    // qEnvironmentVariable() rather than getenv(): this runs on the GUI thread while the PTY and render
+    // threads are live, and getenv() is not thread safe.
+    auto const editorEnv = qEnvironmentVariable("EDITOR");
+    auto const fileInfo = QFileInfo(path);
+
+    // An executable file is run through `contour config <path>`; any other file is handed to $EDITOR the
+    // same way. Anything else -- a directory, a missing path -- goes to the desktop, as a plain local file
+    // URL: an authority that survived would be read as a network location, file://host/tmp as //host/tmp.
+    if (fileInfo.isFile() && (fileInfo.isExecutable() || !editorEnv.isEmpty()))
+    {
+        auto args = QStringList { "config", platform::toQString(_config.configFile) };
+        if (!fileInfo.isExecutable())
+            args << editorEnv;
+        args << path;
+        if (auto const ran =
+                _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
+            !ran)
+            errorLog()(
+                "Could not open \"{}\" in an editor: {}.", *localPath, platform::describe(ran.error()));
+        return;
+    }
+
+    auto const url = QUrl::fromLocalFile(path);
     openExternally(url, "hyperlink", url.toString().toStdString());
-}
-
-void TerminalSession::onConfigReload()
-{
-    // reloadAllSessions() fans this out to EVERY session, including background tabs/split panes whose
-    // display was detached on the last tab switch (_display == nullptr) — the same null-_display crash
-    // class the action handlers (e.g. setFontSize) guard against. With a display, hop onto its (GUI)
-    // thread as before. With none, there is no render thread to marshal onto, and reloadConfigWithProfile
-    // is itself display-safe (activateProfile guards its one _display use), so run it directly rather than
-    // skip it — otherwise a background tab would keep serving the pre-reload config until it is
-    // reactivated.
-    if (_display != nullptr)
-        _display->post([this]() { reloadConfigWithProfile(_profileName); });
-    else
-        reloadConfigWithProfile(_profileName);
-
-    // TODO: needed still?
-    // if (setScreenDirty())
-    //     update();
-
-    if (_configFileChangeWatcher)
-        connect(_configFileChangeWatcher.get(),
-                SIGNAL(fileChanged(QString const&)),
-                this,
-                SLOT(onConfigReload()));
 }
 
 // }}}

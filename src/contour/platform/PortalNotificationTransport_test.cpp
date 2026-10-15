@@ -24,6 +24,9 @@
 
     #include <chrono>
     #include <optional>
+    #include <ranges>
+    #include <span>
+    #include <string>
     #include <utility>
     #include <vector>
 
@@ -66,6 +69,17 @@ struct Recorder: contour::test::RecordingPortalCaller
 
     /// Fires the timer at @p index, as the event loop would once the delay elapsed.
     void fireScheduled(size_t index) { scheduled.at(index).action(); }
+
+    /// Subscribes nowhere: the tests deliver the portal's signals to the slot themselves, and a
+    /// subscription would reach the machine's session bus for nothing.
+    [[nodiscard]] static contour::platform::DBusSignalSubscriber subscriber()
+    {
+        return [](contour::platform::DBusSignalSource const& /*source*/,
+                  QObject* /*receiver*/,
+                  std::span<contour::platform::DBusSignalSubscription const> /*subscriptions*/) {
+            return contour::platform::DBusSignalSubscriptionGuard {};
+        };
+    }
 };
 
 /// One close event as the transport reported it.
@@ -86,7 +100,9 @@ struct Fixture
     PortalNotificationTransport transport;
 
     explicit Fixture(std::chrono::milliseconds closeDelay = 10000ms):
-        transport { closeDelay, "contour-test", recorder.scheduler(), recorder.caller() }
+        transport {
+            closeDelay, "contour-test", recorder.scheduler(), recorder.caller(), Recorder::subscriber()
+        }
     {
         transport.subscribe(
             [this](auto serverId, auto reason, auto report) {
@@ -130,6 +146,17 @@ void fireActionInvoked(PortalNotificationTransport& transport, QString const& id
     REQUIRE(invoked);
 }
 
+/// A notification that asked to hear of its close (OSC 99 `c=1`): the only kind this transport
+/// ever assumes closed, and so the kind the timer cases are about.
+/// @param identifier The OSC 99 notification identifier.
+/// @return The notification.
+[[nodiscard]] vtbackend::DesktopNotification aReportedNotification(std::string identifier)
+{
+    auto notification = aNotification(std::move(identifier));
+    notification.closeEventRequested = true;
+    return notification;
+}
+
 } // namespace
 
 TEST_CASE("makePortalIdPrefix hands out a fresh namespace every time", "[contour][notification]")
@@ -156,7 +183,7 @@ TEST_CASE("buildPortalNotificationOptions maps urgency onto the portal priority 
 
 TEST_CASE("buildPortalNotificationOptions builds the AddNotification dictionary", "[contour][notification]")
 {
-    auto notification = aNotification("osc-1");
+    auto notification = aReportedNotification("osc-1");
     notification.urgency = vtbackend::NotificationUrgency::Critical;
 
     auto const options = contour::platform::buildPortalNotificationOptions(notification);
@@ -178,7 +205,7 @@ TEST_CASE("buildPortalNotificationOptions does not export the default action", "
     // portal D-Bus-activates an "app."-prefixed action through org.freedesktop.Application and
     // delivers nothing back to us, while any other name takes the branch that emits ActionInvoked.
     // Prefix this and OSC 99's a=report and a=focus both go silent.
-    auto const options = contour::platform::buildPortalNotificationOptions(aNotification("osc-1"));
+    auto const options = contour::platform::buildPortalNotificationOptions(aReportedNotification("osc-1"));
 
     auto const defaultAction = options["default-action"].toString();
     REQUIRE_FALSE(defaultAction.isEmpty());
@@ -200,7 +227,7 @@ TEST_CASE("PortalNotificationTransport sends AddNotification with the id and opt
 {
     auto fixture = Fixture {};
 
-    fixture.send(aNotification("osc-1"));
+    fixture.send(aReportedNotification("osc-1"));
 
     REQUIRE(fixture.recorder.calls.size() == 1);
     CHECK(fixture.recorder.calls[0].method == QStringLiteral("AddNotification"));
@@ -218,7 +245,7 @@ TEST_CASE("PortalNotificationTransport records nothing when the portal refuses",
 {
     auto fixture = Fixture {};
 
-    fixture.send(aNotification("osc-1"));
+    fixture.send(aReportedNotification("osc-1"));
     fixture.recorder.completeCall(0, CallOutcome::Failed);
 
     REQUIRE(fixture.sent.size() == 1);
@@ -235,7 +262,7 @@ TEST_CASE("PortalNotificationTransport assumes a close once the delay elapses", 
 {
     auto fixture = Fixture { 10000ms };
 
-    auto const serverId = fixture.sendAccepted(aNotification("osc-1"));
+    auto const serverId = fixture.sendAccepted(aReportedNotification("osc-1"));
 
     REQUIRE(fixture.recorder.scheduled.size() == 1);
     CHECK(fixture.recorder.scheduled[0].delay == 10000ms);
@@ -250,12 +277,48 @@ TEST_CASE("PortalNotificationTransport assumes a close once the delay elapses", 
     CHECK(fixture.closed[0].report == CloseReport::Untracked);
 }
 
+TEST_CASE("PortalNotificationTransport never assumes the close of a notification that asked for no report",
+          "[contour][notification]")
+{
+    // The assumed close exists to answer an application's close report. A notification that asked
+    // for none -- a finish notice among them -- is still sitting in the desktop's notification
+    // history long after any delay, and retiring it would leave it both impossible to withdraw and
+    // deaf to a click.
+    auto fixture = Fixture { 10000ms };
+
+    auto const serverId = fixture.sendAccepted(aNotification("osc-1"));
+
+    CHECK(fixture.recorder.scheduled.empty());
+
+    // Whatever was scheduled, the interval is now over.
+    for (auto const index: std::views::iota(size_t { 0 }, fixture.recorder.scheduled.size()))
+        fixture.recorder.fireScheduled(index);
+    CHECK(fixture.closed.empty());
+
+    SECTION("it can still be withdrawn")
+    {
+        fixture.transport.close(serverId);
+
+        REQUIRE(fixture.recorder.calls.size() == 2);
+        CHECK(fixture.recorder.calls[1].method == QStringLiteral("RemoveNotification"));
+        CHECK(fixture.recorder.calls[1].arguments[0].toString() == QStringLiteral("contour-test/osc-1"));
+    }
+
+    SECTION("a click on it is still reported")
+    {
+        fireActionInvoked(fixture.transport, QStringLiteral("contour-test/osc-1"));
+
+        REQUIRE(fixture.activated.size() == 1);
+        CHECK(fixture.activated[0] == serverId);
+    }
+}
+
 TEST_CASE("PortalNotificationTransport honours the notification's own lifetime", "[contour][notification]")
 {
     SECTION("an explicit w= wins over the configured delay")
     {
         auto fixture = Fixture { 10000ms };
-        auto notification = aNotification("osc-1");
+        auto notification = aReportedNotification("osc-1");
         notification.timeout = 4200;
 
         (void) fixture.sendAccepted(notification);
@@ -267,7 +330,7 @@ TEST_CASE("PortalNotificationTransport honours the notification's own lifetime",
     SECTION("w=0 means never auto-close, so nothing is ever assumed")
     {
         auto fixture = Fixture { 10000ms };
-        auto notification = aNotification("osc-1");
+        auto notification = aReportedNotification("osc-1");
         notification.timeout = 0;
 
         (void) fixture.sendAccepted(notification);
@@ -279,7 +342,7 @@ TEST_CASE("PortalNotificationTransport honours the notification's own lifetime",
     {
         auto fixture = Fixture { 0ms };
 
-        (void) fixture.sendAccepted(aNotification("osc-1"));
+        (void) fixture.sendAccepted(aReportedNotification("osc-1"));
 
         CHECK(fixture.recorder.scheduled.empty());
     }
@@ -289,8 +352,8 @@ TEST_CASE("PortalNotificationTransport reuses the portal id to replace in place"
 {
     auto fixture = Fixture {};
 
-    auto const first = fixture.sendAccepted(aNotification("osc-1"));
-    auto const second = fixture.sendAccepted(aNotification("osc-1"), /*replacesId*/ first);
+    auto const first = fixture.sendAccepted(aReportedNotification("osc-1"));
+    auto const second = fixture.sendAccepted(aReportedNotification("osc-1"), /*replacesId*/ first);
 
     // Same portal id both times: the portal's own rule is that reusing an id updates the
     // notification already showing, so replacement needs no replaces_id equivalent.
@@ -318,8 +381,8 @@ TEST_CASE("PortalNotificationTransport survives a second send before the first w
     // on the floor and reporting a close for a popup still on screen.
     auto fixture = Fixture {};
 
-    fixture.send(aNotification("osc-1"));
-    fixture.send(aNotification("osc-1"));
+    fixture.send(aReportedNotification("osc-1"));
+    fixture.send(aReportedNotification("osc-1"));
 
     fixture.recorder.completeCall(0, CallOutcome::Accepted);
     fixture.recorder.completeCall(1, CallOutcome::Accepted);
@@ -346,7 +409,7 @@ TEST_CASE("PortalNotificationTransport withdraws only what is live", "[contour][
     fixture.transport.close(42);
     CHECK(fixture.recorder.calls.empty());
 
-    auto const serverId = fixture.sendAccepted(aNotification("osc-1"));
+    auto const serverId = fixture.sendAccepted(aReportedNotification("osc-1"));
 
     fixture.transport.close(serverId);
     REQUIRE(fixture.recorder.calls.size() == 2);
@@ -372,7 +435,7 @@ TEST_CASE("PortalNotificationTransport reports an activation and retires it", "[
 {
     auto fixture = Fixture {};
 
-    auto const serverId = fixture.sendAccepted(aNotification("osc-1"));
+    auto const serverId = fixture.sendAccepted(aReportedNotification("osc-1"));
 
     fireActionInvoked(fixture.transport, QStringLiteral("contour-test/osc-1"));
 
@@ -401,7 +464,7 @@ TEST_CASE("PortalNotificationTransport ignores another application's notificatio
     // constantly. The prefix is what tells them apart.
     auto fixture = Fixture {};
 
-    (void) fixture.sendAccepted(aNotification("osc-1"));
+    (void) fixture.sendAccepted(aReportedNotification("osc-1"));
 
     fireActionInvoked(fixture.transport, QStringLiteral("some-other-app/1"));
     fireActionInvoked(fixture.transport, QStringLiteral("osc-1"));
@@ -412,18 +475,22 @@ TEST_CASE("PortalNotificationTransport ignores another application's notificatio
 TEST_CASE("PortalNotificationTransport drives the real portal without waiting",
           "[contour][notification][dbus]")
 {
-    // Built exactly as production does, against whatever session bus is there. @see
+    // Built exactly as production does, against the session bus -- the wedged one
+    // test/e2e/notification-nonblocking.sh stands up, never the machine's own. @see
     // contour::test::checkReturnsWithoutWaiting for what this is guarding and why the bound is what
     // it is.
+    if (!contour::test::onPrivateSessionBus())
+        SKIP("reaches the session bus: runs under test/e2e/notification-nonblocking.sh");
     auto transport = PortalNotificationTransport { 10000ms,
                                                    "contour-test",
                                                    contour::platform::qtDelayScheduler(),
                                                    contour::platform::qtPortalCaller(
-                                                       contour::platform::NotificationPortalInterface) };
+                                                       contour::platform::NotificationPortalInterface),
+                                                   contour::platform::sessionBusSubscriber() };
     transport.subscribe([](auto, auto, auto) {}, [](auto) {});
 
     contour::test::checkReturnsWithoutWaiting([&] {
-        transport.notify(aNotification("osc-real"), 0, [](auto) {});
+        transport.notify(aReportedNotification("osc-real"), 0, [](auto) {});
 
         // close() short-circuits on an id it holds no mapping for, and on a bus that never answers
         // no mapping is ever recorded -- so the withdraw path is put on the wire through the caller

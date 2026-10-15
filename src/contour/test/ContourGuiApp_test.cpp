@@ -11,6 +11,11 @@
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/TempDir.hpp>
 
+#include <vtpty/test/NonAsciiSample.hpp>
+
+#include <core/Utf8Path.hpp>
+#include <core/testing/ScopedTempDir.hpp>
+
 #include <QtCore/QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
@@ -80,6 +85,17 @@ TEST_CASE("ContourGuiApp early-exit threshold falls back to the documented defau
     CHECK(threshold == std::chrono::seconds(contour::config::documentation::DefaultEarlyExitThreshold));
 }
 
+TEST_CASE("ContourGuiApp writes command output through the files it was given",
+          "[contour][app][semanticblocks]")
+{
+    TestApp app;
+
+    auto const file = app.app().commandOutputFiles().create("output");
+    REQUIRE(file.has_value());
+    CHECK(file->parent_path() == std::filesystem::path(TestApp::OutputDirectory));
+    CHECK(app.fileSystem().readFile(*file).value_or("") == "output");
+}
+
 TEST_CASE("ContourGuiApp reports no dump-state path by default", "[contour][app]")
 {
     TestApp app;
@@ -95,7 +111,7 @@ TEST_CASE("hasStrandedQmlOverrides only fires on a customization that has actual
 {
     QTemporaryDir const home;
     REQUIRE(home.isValid());
-    auto const configHome = std::filesystem::path(home.path().toStdString());
+    auto const configHome = std::filesystem::path(home.path().toStdU16String());
 
     SECTION("a config directory with no overrides at all")
     {
@@ -158,8 +174,8 @@ TEST_CASE("onExit records no exit status for a non-process session", "[contour][
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     auto* factory = factoryOwned.get();
     TestApp app(std::move(factoryOwned));
-    auto session = std::make_unique<contour::session::TerminalSession>(
-        &app.manager(), factory->createPty(std::nullopt), app.app());
+    auto session =
+        contour::test::makeTestSession(&app.manager(), factory->createPty(std::nullopt), app.app());
     CHECK_NOTHROW(app.app().onExit(*session));
 }
 
@@ -316,16 +332,29 @@ TEST_CASE("classifyVerbatimCommand tells a program from a place to open a shell 
 
     // An executable file runs; a plain file opens the shell where it lives; a directory opens the
     // shell in it. None of the three consults PATH -- what is on disk answers first.
-    CHECK(contour::classifyVerbatimCommand(script.string(), nothingIsReachable).kind
+    CHECK(contour::classifyVerbatimCommand(core::pathToUtf8(script), nothingIsReachable).kind
           == VerbatimCommandKind::Program);
 
-    auto const beside = contour::classifyVerbatimCommand(notes.string(), nothingIsReachable);
+    auto const beside = contour::classifyVerbatimCommand(core::pathToUtf8(notes), nothingIsReachable);
     CHECK(beside.kind == VerbatimCommandKind::WorkingDirectory);
     CHECK(beside.workingDirectory == root);
 
-    auto const directory = contour::classifyVerbatimCommand(root.string(), nothingIsReachable);
+    auto const directory = contour::classifyVerbatimCommand(core::pathToUtf8(root), nothingIsReachable);
     CHECK(directory.kind == VerbatimCommandKind::WorkingDirectory);
     CHECK(directory.workingDirectory == root);
+}
+
+TEST_CASE("classifyVerbatimCommand reads a path beyond ASCII as UTF-8", "[contour][app][cli]")
+{
+    using contour::VerbatimCommandKind;
+
+    auto const tempDir = core::testing::ScopedTempDir { "contour-verbatim" };
+    auto const directory = tempDir.path() / vtpty::testing::NonAsciiName;
+    std::filesystem::create_directory(directory);
+
+    auto const opened = contour::classifyVerbatimCommand(core::pathToUtf8(directory), nothingIsReachable);
+    CHECK(opened.kind == VerbatimCommandKind::WorkingDirectory);
+    CHECK(opened.workingDirectory == directory);
 }
 
 TEST_CASE("classifyVerbatimCommand runs an executable sitting in the current directory",
@@ -344,6 +373,6 @@ TEST_CASE("classifyVerbatimCommand runs an executable sitting in the current dir
     // shell beside this script instead of running it.
     auto const guard = ScopedWorkingDirectory { tempDir.path() };
 
-    CHECK(contour::classifyVerbatimCommand(script.filename().string(), nothingIsReachable).kind
+    CHECK(contour::classifyVerbatimCommand(core::pathToUtf8(script.filename()), nothingIsReachable).kind
           == VerbatimCommandKind::Program);
 }

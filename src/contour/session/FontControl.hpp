@@ -5,6 +5,7 @@
 #include <contour/geometry/WindowGeometry.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/screen/GutterSettings.hpp>
 
 #include <vtrasterizer/FontDescriptions.hpp>
 
@@ -39,23 +40,35 @@ class TerminalSession;
     return { .horizontal = unbox<int>(margins.horizontal), .vertical = unbox<int>(margins.vertical) };
 }
 
-/// The gutter width, in device pixels, a profile asks for.
+/// The gutter width, in device pixels, @p layout reserves.
 ///
-/// THE gutter decision, in one place: every geometry call site reads it from here, because a page fitted
-/// with a gutter and a renderer drawing without one (or vice versa) put the grid in two different places.
-/// One cell wide when fold markers are shown, and nothing at all otherwise -- a gutter costs a column of
-/// terminal width, so a user who does not want markers must not pay for it.
+/// THE gutter decision, in one place: every geometry call site reads it through configuredGutterWidth(),
+/// whose layout is configuredGutterLayout() -- the very gutterSettingsFor() the terminal draws with --
+/// because a page fitted with one gutter and a renderer drawing another put the grid in two places.
 ///
-/// @param folding The profile's folding configuration.
-/// @param cellSizeDevicePx The cell size in device pixels.
-/// @return The gutter width in device pixels; 0 when no gutter is wanted.
-[[nodiscard]] constexpr geometry::GutterWidth gutterWidthFor(config::FoldingConfig const& folding,
-                                                             vtbackend::ImageSize cellSizeDevicePx) noexcept
+/// @param layout The gutter's segments.
+/// @param cellSize The cell size in device pixels.
+/// @return The width in device pixels; 0 when the layout has no columns.
+/// @see vtbackend::gutterLayoutFor
+[[nodiscard]] inline geometry::GutterWidth gutterWidthFor(vtbackend::GutterLayout const& layout,
+                                                          vtbackend::ImageSize cellSize) noexcept
 {
-    if (!folding.markersVisible())
-        return 0;
-    return unbox<int>(cellSizeDevicePx.width);
+    return layout.totalColumns * unbox<int>(cellSize.width);
 }
+
+/// The gutter layout @p config asks for: what the window reserves, what the hit-test reads, and -- through
+/// the same config::gutterSettingsFor() -- what the terminal draws.
+/// @param config The loaded configuration.
+/// @return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config)).
+[[nodiscard]] vtbackend::GutterLayout configuredGutterLayout(config::Config const& config);
+
+/// The gutter width, in device pixels, @p config reserves: what every page fit, window size and size hint
+/// takes off the page.
+/// @param config The loaded configuration.
+/// @param cellSize The cell size in device pixels.
+/// @return gutterWidthFor(configuredGutterLayout(config), cellSize).
+[[nodiscard]] geometry::GutterWidth configuredGutterWidth(config::Config const& config,
+                                                          vtbackend::ImageSize cellSize);
 
 /// Refits the grid to @p newPixelSize and resizes the child PTY accordingly.
 void applyResize(vtbackend::ImageSize newPixelSize,

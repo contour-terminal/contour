@@ -10,15 +10,25 @@
 
 #include <contour/ContourGuiApp.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/geometry/WindowGeometry.hpp>
+#include <contour/session/FontControl.hpp>
+#include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/WindowController.hpp>
+
+#include <vtbackend/screen/GutterSettings.hpp>
+
+#include <vtpty/MockPty.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtGui/QGuiApplication>
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <memory>
 
 #include <QtTest/QSignalSpy>
 #include <vtworkspace/SessionModel.hpp>
@@ -111,6 +121,37 @@ TEST_CASE("updateSizeHintsFor is a displayless no-op and leaves the window untou
                                    contour::window::WindowController::HintApplyMode::RespectWindowState);
     CHECK(window.sizeIncrement() == before);
     CHECK(window.minimumSize() == QSize(0, 0));
+}
+
+TEST_CASE("the size hints reserve the gutter the configuration lays out", "[contour][sizing][gutter]")
+{
+    // Line numbers six columns wide beside the block column: seven cells, where the fold markers alone
+    // took one. A minimum computed from the fold switch would let the window shrink below a page the
+    // terminal still needs those six columns for.
+    TestApp app;
+    app.app().config().gutter.value().lineNumbers = vtbackend::LineNumberMode::Absolute;
+    auto session = contour::test::makeTestSession(&app.app().sessionsManager(),
+                                                  std::make_unique<vtpty::MockPty>(vtbackend::PageSize {
+                                                      vtbackend::LineCount(25), vtbackend::ColumnCount(80) }),
+                                                  app.app());
+    contour::test::FakeDisplaySurface requester;
+    requester.attachedSession = session.get();
+
+    ScopedController controller { app.manager() };
+    QQuickWindow window;
+    controller->bindWindow(&window); // the requester has no window of its own, so the hints land here
+    controller->updateSizeHintsFor(requester,
+                                   contour::window::WindowController::HintApplyMode::RespectWindowState);
+
+    // The minimum is the one hint every platform applies (geometry::sizeHintPolicyFor).
+    auto const gutterDevicePx = 7 * unbox<int>(requester.cellSizeValue.width);
+    auto const expected = contour::geometry::sizeHintsFor(
+        requester.cellSizeValue,
+        contour::session::toGeometryMargins(session->profile().margins.value()),
+        requester.devicePixelRatioValue,
+        contour::geometry::Chrome {},
+        gutterDevicePx);
+    CHECK(window.minimumSize() == QSize(expected.minimum.width, expected.minimum.height));
 }
 
 TEST_CASE("tab switching never touches window geometry", "[contour][sizing]")

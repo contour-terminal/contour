@@ -52,13 +52,17 @@ class SettingsController: public QObject
     /// The name of the current default profile (settings.yml override, else contour.yml).
     Q_PROPERTY(QString defaultProfile READ defaultProfile NOTIFY changed)
 
-    /// The configured key/mouse bindings, read-only: one QVariantMap per binding
-    /// { trigger, action, mode }. Editing bindings stays in contour.yml for now (this is a viewer).
+    /// The key/mouse bindings, read-only: the configured ones, then each enabled built-in fallback that no
+    /// configured binding shadows. One QVariantMap per binding { trigger, action (every action it runs,
+    /// comma-separated), mode, builtIn }. Editing bindings stays in contour.yml for now (this is a viewer).
     Q_PROPERTY(QVariantList keybindings READ keybindings NOTIFY changed)
 
     /// The editable global (application-scope) settings: one QVariantMap per field
     /// { key, label, help, type, value, options, overridden }. Edits are written to settings.yml as
-    /// overrides on contour.yml — the same side-file discipline the rest of the page uses.
+    /// overrides on contour.yml — the same side-file discipline the rest of the page uses. A dotted
+    /// key ("gutter.line_numbers") is a path to one leaf of a contour.yml section, and overrides only
+    /// that leaf. A value the loader would reject is refused with errorOccurred and not written. `overridden`
+    /// says that settings.yml holds an override of the key and that it took.
     Q_PROPERTY(QVariantList globalFields READ globalFields NOTIFY changed)
 
     /// The scalar fields of the profile currently being edited: one QVariantMap per field
@@ -81,7 +85,10 @@ class SettingsController: public QObject
     Q_PROPERTY(QString colorSchemeDark READ colorSchemeDark NOTIFY draftChanged)
 
     /// The colors of the color-scheme draft being edited: one QVariantMap per slot
-    /// { key, label, color ("#rrggbb") }. Empty when no scheme is open for editing.
+    /// { key, label, color ("#rrggbb"), colorSource }. `colorSource` says where the colour shown comes from:
+    /// "scheme" for a slot every scheme sets, "derived" for one the scheme leaves unset so that it follows
+    /// the colours it derives from, and "pinned" for such a slot the scheme sets after all. Empty when no
+    /// scheme is open for editing.
     Q_PROPERTY(QVariantList schemeColors READ schemeColors NOTIFY schemeDraftChanged)
     /// The name of the color-scheme draft being edited ("" for an unsaved new scheme).
     Q_PROPERTY(QString editingScheme READ editingScheme NOTIFY editingSchemeChanged)
@@ -200,7 +207,12 @@ class SettingsController: public QObject
     /// Starts a new color-scheme draft seeded from @p basedOn (or a default palette).
     Q_INVOKABLE void newColorScheme(QString const& basedOn);
     /// Sets one color slot on the scheme draft (see @ref schemeColors for keys). @p color is "#rrggbb".
+    /// A slot whose colour is derived is pinned by any colour committed to it, the one it shows too.
     Q_INVOKABLE void setSchemeColor(QString const& key, QString const& color);
+    /// Lets a pinned slot of the scheme draft follow the colours it derives from again. A no-op for a slot
+    /// the scheme always sets, such as the background.
+    /// @param key The slot (see @ref schemeColors for keys).
+    Q_INVOKABLE void resetSchemeColor(QString const& key);
     /// Persists the scheme draft under @p name (a `colorschemes/<name>.yml` side file). @return success.
     Q_INVOKABLE bool saveColorScheme(QString const& name);
     /// Removes color scheme @p name's side file. @return true on success.

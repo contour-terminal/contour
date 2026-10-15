@@ -14,8 +14,11 @@ namespace contour::platform
 /// call. @see makeExternalLauncher(), and PortalExternalLauncher for why that is not a sandbox-only
 /// concern.
 ///
-/// Its runDetached()/execute() are also what PortalExternalLauncher delegates to: starting a child
-/// process has nothing to do with the portal, and is identical on both paths.
+/// Its runDetached()/execute()/runDetachedWithInput() are also what PortalExternalLauncher delegates to:
+/// starting a child process has nothing to do with the portal, and is identical on both paths.
+///
+/// It keeps no children: every program it starts without waiting is detached, so nothing it started
+/// is ended when it goes.
 class QtExternalLauncher final: public ExternalLauncher
 {
   public:
@@ -24,6 +27,8 @@ class QtExternalLauncher final: public ExternalLauncher
                                                               QStringList const& arguments) override;
     [[nodiscard]] std::expected<int, SpawnError> execute(QString const& program,
                                                          QStringList const& arguments) override;
+    [[nodiscard]] std::expected<void, SpawnError> runDetachedWithInput(
+        std::string const& commandLine, std::filesystem::path const& inputFile) override;
 };
 
 } // namespace contour::platform

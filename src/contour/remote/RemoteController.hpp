@@ -199,6 +199,11 @@ class RemoteController
     /// @param reason What went wrong, verbatim into `_failure`.
     void failConnect(std::string reason);
 
+    /// @return Whether the connection is up: the handshake completed, and neither the remote end nor a
+    ///         stop() has ended it since. Safe from any thread; a request sent on a true answer can still
+    ///         meet a connection that ends before it is written.
+    [[nodiscard]] bool isConnected() const;
+
     using State = MuxConnectPhase;
     ReactorThread _reactor;
     mutable std::mutex _mutex;          ///< Guards the phase/failure AND each controller's registry.

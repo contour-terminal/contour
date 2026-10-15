@@ -3,12 +3,15 @@
 
 #include <QtCore/QFileInfo>
 #include <QtCore/QStandardPaths>
+#include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
 
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace contour::platform
@@ -151,6 +154,26 @@ class ExternalLauncher
     /// @return The process exit code, or why there is none.
     [[nodiscard]] virtual std::expected<int, SpawnError> execute(QString const& program,
                                                                  QStringList const& arguments) = 0;
+
+    /// Starts the program @p commandLine names as a detached process reading @p inputFile as its
+    /// standard input -- for a program that consumes text rather than a file (`wl-copy`, a notes
+    /// script). Its output goes nowhere.
+    ///
+    /// @p commandLine is read as a session's configured program is (vtpty::invocationToRun()): a
+    /// string naming a program runs as it is, and one that names none but holds whitespace is a
+    /// program and its arguments -- on Windows the rest is handed on as written, as CreateProcess
+    /// takes it.
+    ///
+    /// Detached means the child is not this process's to end: it keeps running when Contour exits.
+    /// The report is about starting only, and it is made without waiting on the child.
+    ///
+    /// @param commandLine The program and its arguments, as configured.
+    /// @param inputFile The file its standard input reads. The caller may remove it once this returns:
+    ///                  the child holds it open (on Windows, removing a file a process holds open fails
+    ///                  until that process lets go).
+    /// @return Nothing once started, or why it was not.
+    [[nodiscard]] virtual std::expected<void, SpawnError> runDetachedWithInput(
+        std::string const& commandLine, std::filesystem::path const& inputFile) = 0;
 };
 
 /// The launcher this platform can offer.

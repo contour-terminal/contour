@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <expected>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace contour::cli
@@ -39,5 +40,28 @@ enum class ShellIntegrationError : uint8_t
 /// The supported shell names joined for a human-readable list, e.g. "bash, fish, tcsh, zsh".
 /// @return A view of storage with process lifetime, so callers may hold it.
 [[nodiscard]] std::string_view supportedShellsText();
+
+/// A shell that marks its prompts and commands with OSC 133 by itself, so Contour ships no script for it.
+struct NativeShellIntegrationRow
+{
+    std::string_view name {};        ///< Shell name, as a user would pass it to `generate integration shell`.
+    std::string_view displayName {}; ///< How the shell names itself, e.g. "Nushell".
+    std::string_view howToEnable {}; ///< One sentence on what turns its integration on.
+};
+
+/// Every shell that integrates natively. No name here is also in supportedShells(): a shell given a
+/// script as well would mark every prompt twice.
+/// @return The table.
+[[nodiscard]] std::span<NativeShellIntegrationRow const> nativeShellIntegrations() noexcept;
+
+/// The natively integrating shells for a human-readable list, e.g. "Nushell (nu)".
+/// @return A view of storage with process lifetime, so callers may hold it.
+[[nodiscard]] std::string_view nativeShellsText();
+
+/// What `generate integration` tells a user who asked for a shell it carries no script for.
+/// @param shell The shell name asked for.
+/// @return For a natively integrating shell, how to turn its own integration on; otherwise which
+///         shells are supported. Ends in a newline.
+[[nodiscard]] std::string unsupportedShellMessage(std::string_view shell);
 
 } // namespace contour::cli

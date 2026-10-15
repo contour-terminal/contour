@@ -8,6 +8,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <format>
+#include <optional>
+#include <string_view>
+
 using contour::session::elideMiddle;
 using contour::session::HyperlinkHoverTracker;
 using contour::session::hyperlinkTooltipText;
@@ -104,6 +108,32 @@ TEST_CASE("hyperlinkTooltipText says the useful part of a target", "[contour][hy
         CHECK(hyperlinkTooltipText("file://localhost/tmp/x.log", LocalHost, 64) == "/tmp/x.log");
         CHECK(hyperlinkTooltipText("file:///home/user/my%20file.txt", LocalHost, 64)
               == "/home/user/my file.txt");
+        // Once: an escaped '%' stays a '%', not the start of another escape.
+        CHECK(hyperlinkTooltipText("file:///tmp/50%2541", LocalHost, 64) == "/tmp/50%41");
+    }
+
+    SECTION("what a decoded path or a target holds is shown, not obeyed")
+    {
+        // Decoded, %0A is a line feed and %E2%80%AE a right-to-left override: shown raw, the first would put
+        // a line of the application's choosing under the tooltip, the second reverse what follows it.
+        constexpr auto Fffd = std::string_view { "\xEF\xBF\xBD" };
+        CHECK(hyperlinkTooltipText("file:///tmp/x%0AFake%1B", LocalHost, 64)
+              == std::format("/tmp/x{0}Fake{0}", Fffd));
+        CHECK(hyperlinkTooltipText("file:///tmp/%E2%80%AEtxt.exe", LocalHost, 64)
+              == std::format("/tmp/{}txt.exe", Fffd));
+        // U+202E spliced in byte by byte, rather than written into a literal, where it would be a misleading
+        // bidi character itself.
+        auto const rightToLeftOverride = std::string { '\xE2', '\x80', '\xAE' };
+        CHECK(hyperlinkTooltipText("https://example.com/" + rightToLeftOverride + "gpj.exe", LocalHost, 64)
+              == std::format("https://example.com/{}gpj.exe", Fffd));
+    }
+
+    SECTION("a query or fragment is no part of the path, which is the file a click opens")
+    {
+        CHECK(hyperlinkTooltipText("file:///tmp/x.log#L10", LocalHost, 64) == "/tmp/x.log");
+        CHECK(hyperlinkTooltipText("file:///tmp/x.log?raw=1#top", LocalHost, 64) == "/tmp/x.log");
+        // Escaped, either is part of a name.
+        CHECK(hyperlinkTooltipText("file:///tmp/a%23b%3Fc", LocalHost, 64) == "/tmp/a#b?c");
     }
 
     SECTION("this machine's own name is a local path, however the application spelled it")
@@ -124,11 +154,37 @@ TEST_CASE("hyperlinkTooltipText says the useful part of a target", "[contour][hy
         CHECK(hyperlinkTooltipText("file:///tmp/a%zz", LocalHost, 64) == "/tmp/a%zz");
         CHECK(hyperlinkTooltipText("file:///tmp/trailing%", LocalHost, 64) == "/tmp/trailing%");
     }
+
+    SECTION("where no file:// target names a path here, every one keeps its scheme")
+    {
+        // A pane replicating another machine's daemon: its application's paths are on that machine,
+        // whatever authority it writes, so not even the empty one or "localhost" reads as a path here.
+        CHECK(hyperlinkTooltipText("file:///home/user/notes.txt", std::nullopt, 64)
+              == "file:///home/user/notes.txt");
+        CHECK(hyperlinkTooltipText("file://localhost/tmp/x.log", std::nullopt, 64)
+              == "file://localhost/tmp/x.log");
+        CHECK(hyperlinkTooltipText("https://example.com/x", std::nullopt, 64) == "https://example.com/x");
+    }
+}
+
+TEST_CASE("HyperlinkHoverTracker asks where a file:// target is local at each link it enters",
+          "[contour][hyperlink]")
+{
+    // A pane becomes a replica of another machine's terminal after it is built, so the tracker asks rather
+    // than being told once.
+    auto localHost = std::optional<std::string_view> { "fedora" };
+    auto tracker = HyperlinkHoverTracker { [&] { return localHost; } };
+
+    CHECK(tracker.update("file:///tmp/x.log", cell(0, 0), 64).text == "/tmp/x.log");
+    CHECK(tracker.clear().changed);
+
+    localHost = std::nullopt;
+    CHECK(tracker.update("file:///tmp/x.log", cell(0, 0), 64).text == "file:///tmp/x.log");
 }
 
 TEST_CASE("HyperlinkHoverTracker announces only real transitions", "[contour][hyperlink]")
 {
-    auto tracker = HyperlinkHoverTracker { "fedora" };
+    auto tracker = HyperlinkHoverTracker { [] { return std::optional<std::string_view> { "fedora" }; } };
 
     SECTION("entering a link announces it, anchored where it was entered")
     {

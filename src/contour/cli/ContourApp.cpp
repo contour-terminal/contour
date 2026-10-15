@@ -16,6 +16,7 @@
 #include <crispy/StackTrace.hpp>
 
 #include <core/Base64.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/cli/App.hpp>
 #include <core/cli/CLI.hpp>
@@ -26,6 +27,7 @@
 #include <csignal>
 #include <cstddef>
 #include <cstdio>
+#include <expected>
 #include <format>
 #include <fstream>
 #include <iostream>
@@ -50,11 +52,9 @@
 using std::bind;
 using std::cerr;
 using std::cout;
-using std::make_unique;
 using std::ofstream;
 using std::string;
 using std::string_view;
-using std::unique_ptr;
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
@@ -233,8 +233,10 @@ namespace
     [[nodiscard]] std::string_view integrationShellHelpText()
     {
         static std::string const text =
-            std::format("Shell name to create the integration for. Supported shells: {}",
-                        contour::cli::supportedShellsText());
+            std::format("Shell name to create the integration for. Supported shells: {}. Integrating "
+                        "natively, needing none: {}.",
+                        contour::cli::supportedShellsText(),
+                        contour::cli::nativeShellsText());
         return text;
     }
 
@@ -308,21 +310,66 @@ ContourApp::ContourApp(core::Environment const& env):
     }
 }
 
-template <typename Callback>
-static auto withOutput(core::cli::FlagStore const& flags, std::string const& name, Callback callback)
+namespace
 {
-    std::ostream* out = &cout;
-
-    auto const& outputFileName = flags.get<string>(name); // TODO: support string_view
-    auto ownedOutput = unique_ptr<std::ostream> {};
-    if (outputFileName != "-")
+    /// Why a `generate ... to FILE` verb could not write its output.
+    enum class OutputError : uint8_t
     {
-        ownedOutput = make_unique<std::ofstream>(outputFileName);
-        out = ownedOutput.get();
+        CannotOpen,  ///< The file could not be created: no such directory, no permission, a bad name.
+        CannotWrite, ///< It was opened, and then not all of the output reached it.
+    };
+
+    /// @return What a user is told when @p error kept the output from @p fileName.
+    [[nodiscard]] std::string describe(OutputError error, std::string_view fileName)
+    {
+        switch (error)
+        {
+            case OutputError::CannotOpen: return std::format("Cannot open {} for writing.\n", fileName);
+            case OutputError::CannotWrite: return std::format("Cannot write all of {}.\n", fileName);
+        }
+        return {};
     }
 
-    return callback(*out);
-}
+    /// Writes @p text to @p fileName -- standard output for "-" -- in binary, so that what lands in a file
+    /// is @p text byte for byte, without a CR before each LF on Windows.
+    /// @param fileName The file, in UTF-8, or "-".
+    /// @param text     What to write.
+    /// @return Nothing, or why it could not be written.
+    [[nodiscard]] std::expected<void, OutputError> writeOutput(std::string const& fileName,
+                                                               std::string_view text)
+    {
+        if (fileName == "-")
+        {
+            cout.write(text.data(), static_cast<std::streamsize>(text.size()));
+            cout.flush();
+            return cout ? std::expected<void, OutputError> {} : std::unexpected(OutputError::CannotWrite);
+        }
+
+        auto out = std::ofstream { core::pathFromUtf8(fileName).value_or(std::filesystem::path {}),
+                                   std::ios::binary };
+        if (!out)
+            return std::unexpected(OutputError::CannotOpen);
+        out.write(text.data(), static_cast<std::streamsize>(text.size()));
+        out.close();
+        if (!out)
+            return std::unexpected(OutputError::CannotWrite);
+        return {};
+    }
+
+    /// Writes @p text where the flag @p name of @p flags says, and says on standard error when it could not.
+    /// @return The verb's exit code.
+    [[nodiscard]] int writeOutput(core::cli::FlagStore const& flags,
+                                  std::string const& name,
+                                  std::string_view text)
+    {
+        auto const& fileName = flags.get<string>(name);
+        auto const written = writeOutput(fileName, text);
+        if (written)
+            return EXIT_SUCCESS;
+        cerr << describe(written.error(), fileName);
+        return EXIT_FAILURE;
+    }
+} // namespace
 
 int ContourApp::documentationVT()
 {
@@ -550,37 +597,26 @@ int ContourApp::infoVT()
 
 int ContourApp::integrationAction()
 {
-    return withOutput(parameters(), "contour.generate.integration.to", [&](auto& stream) {
-        auto const shell = parameters().get<string>("contour.generate.integration.shell");
-        auto const script = shellIntegrationScript(shell);
-        if (!script)
-        {
-            std::cerr << std::format(
-                "Cannot generate shell integration for an unsupported shell, {}. Supported shells: {}.\n",
-                shell,
-                supportedShellsText());
-            return EXIT_FAILURE;
-        }
-
-        stream.write(script->data(), static_cast<std::streamsize>(script->size()));
-        return EXIT_SUCCESS;
-    });
+    // Looked up first: a shell with no script gets no file, rather than an empty one to source.
+    auto const shell = parameters().get<string>("contour.generate.integration.shell");
+    auto const script = shellIntegrationScript(shell);
+    if (!script)
+    {
+        std::cerr << unsupportedShellMessage(shell);
+        return EXIT_FAILURE;
+    }
+    return writeOutput(parameters(), "contour.generate.integration.to", *script);
 }
 
 int ContourApp::configAction()
 {
-    withOutput(parameters(), "contour.generate.config.to", [](auto& stream) {
-        stream << config::defaultConfigString();
-    });
-    return EXIT_SUCCESS;
+    return writeOutput(parameters(), "contour.generate.config.to", config::defaultConfigString());
 }
 
 int ContourApp::terminfoAction()
 {
-    withOutput(parameters(), "contour.generate.terminfo.to", [](auto& stream) {
-        stream << vtbackend::capabilities::StaticDatabase {}.terminfo();
-    });
-    return EXIT_SUCCESS;
+    return writeOutput(
+        parameters(), "contour.generate.terminfo.to", vtbackend::capabilities::StaticDatabase {}.terminfo());
 }
 
 int ContourApp::captureAction()
@@ -610,7 +646,7 @@ namespace
     std::vector<uint8_t> readFile(std::filesystem::path const& path,
                                   std::uintmax_t maxSize = std::numeric_limits<std::uintmax_t>::max())
     {
-        auto ifs = std::ifstream(path.string(), std::ios::binary | std::ios::ate);
+        auto ifs = std::ifstream(path, std::ios::binary | std::ios::ate);
         if (!ifs.good())
             return {};
 
@@ -633,7 +669,8 @@ namespace
                       string_view fileName)
     {
         auto constexpr MaxImageFileSize = static_cast<std::uintmax_t>(16 * 1024 * 1024); // GIP body limit
-        auto const data = readFile(std::filesystem::path(string(fileName)), MaxImageFileSize);
+        auto const data =
+            readFile(core::pathFromUtf8(fileName).value_or(std::filesystem::path {}), MaxImageFileSize);
         if (data.empty())
         {
             cerr << std::format("Error: Failed to read file '{}' (not found, unreadable, or exceeds 16 MB)\n",
@@ -805,7 +842,7 @@ int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
     auto logFile = parameters().get<string>("contour.daemon.log-file");
     if (logFile.empty())
     {
-        logFile = vthost::daemonLogPath(socketPath).string();
+        logFile = core::pathToUtf8(vthost::daemonLogPath(socketPath));
         childArgs.push_back(std::format("--log-file={}", logFile));
     }
 
@@ -815,7 +852,8 @@ int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
         return EXIT_FAILURE;
     }
 
-    cout << std::format("contour daemon: serving on {} (logging to {})\n", socketPath.string(), logFile);
+    cout << std::format(
+        "contour daemon: serving on {} (logging to {})\n", core::pathToUtf8(socketPath), logFile);
     return EXIT_SUCCESS;
 }
 
@@ -952,13 +990,14 @@ std::expected<std::vector<std::string>, std::string> ContourApp::daemonServiceCo
 
     auto logFile = parameters().get<string>(prefix + ".log-file");
     if (logFile.empty())
-        logFile = vthost::daemonLogPath(socketPath).string();
+        logFile = core::pathToUtf8(vthost::daemonLogPath(socketPath));
 
     // Through daemonSpawnArgs, which is already the ONE spelling of this flag list — the client's
     // auto-spawn builds its command line the same way, so a daemon option cannot end up forwarded
     // by one path and silently dropped by the other. Persistent, not ExitWhenEmpty: an installed
     // daemon exists precisely to still be there for the next client.
-    return vthost::daemonSpawnArgs(std::filesystem::absolute(commandLine().front()).string(),
+    auto const program = core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {});
+    return vthost::daemonSpawnArgs(core::pathToUtf8(std::filesystem::absolute(program)),
                                    socketPath,
                                    vthost::DaemonSpawnOptions {
                                        .filter = parameters().get<string>(prefix + ".log"),

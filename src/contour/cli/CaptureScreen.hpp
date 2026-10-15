@@ -4,7 +4,9 @@
 #include <vtbackend/core/Primitives.hpp>
 
 #include <chrono>
+#include <expected>
 #include <iosfwd>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -41,6 +43,36 @@ class CaptureTransport
     /// Writes @p chunk to the peer terminal. @return bytes written, or <0 on error.
     virtual int write(std::string_view chunk) = 0;
 };
+
+#ifdef _WIN32
+/// The input mode of a Windows console, which a capture switches to raw input.
+class ConsoleInput
+{
+  public:
+    virtual ~ConsoleInput() = default;
+
+    /// @return The console's input mode (GetConsoleMode()); std::nullopt where it has none to read.
+    [[nodiscard]] virtual std::optional<unsigned long> mode() const = 0;
+
+    /// Sets the console's input mode (SetConsoleMode()).
+    /// @param mode The mode to set.
+    /// @return Nothing once the console took it; else the error it gave (GetLastError()).
+    [[nodiscard]] virtual std::expected<void, unsigned long> setMode(unsigned long mode) = 0;
+};
+
+/// Switches @p console to what a capture reads: virtual-terminal input, neither line editing nor echo.
+/// @return The mode to put back afterwards, once the console took the new one; std::nullopt where it did
+///         not, and a capture cannot read its replies.
+[[nodiscard]] std::optional<unsigned long> enterCaptureInputMode(ConsoleInput& console);
+
+/// Puts @p console back into the input mode a capture found it in, and tells @p diagnostics, with the
+/// console's error, when it refuses: the console is then left without line editing or echo, which the user
+/// has to know.
+/// @param console The console.
+/// @param saved The mode enterCaptureInputMode() returned.
+/// @param diagnostics Where a refusal is reported.
+void leaveCaptureInputMode(ConsoleInput& console, unsigned long saved, std::ostream& diagnostics);
+#endif
 
 /// Runs one capture session over @p transport, writing the captured lines to @p output.
 /// @return true when the peer delivered a complete capture; false on timeout/protocol/IO failure.
