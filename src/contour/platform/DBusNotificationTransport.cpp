@@ -12,7 +12,9 @@
     #include <QtDBus/QDBusPendingCallWatcher>
     #include <QtDBus/QDBusPendingReply>
 
+    #include <algorithm>
     #include <array>
+    #include <string>
     #include <utility>
 
 namespace contour::platform
@@ -44,15 +46,80 @@ namespace
         return QDBusMessage::createMethodCall(
             NotificationsSource.service, NotificationsSource.path, NotificationsSource.interface, method);
     }
+
+    /// A character a markup body must escape, and the entity it becomes.
+    struct MarkupEscape
+    {
+        char16_t character;
+        QLatin1StringView entity;
+    };
+
+    /// Every character the Desktop Notifications Specification's body markup gives a meaning to.
+    constexpr auto MarkupEscapes = std::array {
+        MarkupEscape { .character = u'&', .entity = QLatin1StringView("&amp;") },
+        MarkupEscape { .character = u'<', .entity = QLatin1StringView("&lt;") },
+        MarkupEscape { .character = u'>', .entity = QLatin1StringView("&gt;") },
+    };
+
+    /// @return @p text with each character MarkupEscapes names replaced by its entity.
+    [[nodiscard]] QString escapedForMarkup(QString const& text)
+    {
+        auto escaped = QString {};
+        escaped.reserve(text.size());
+        for (auto const ch: text)
+        {
+            auto const escape = std::ranges::find(MarkupEscapes, ch.unicode(), &MarkupEscape::character);
+            if (escape != MarkupEscapes.end())
+                escaped += escape->entity;
+            else
+                escaped += ch;
+        }
+        return escaped;
+    }
+
+    /// @return @p body as a server reading it as @p format must be handed it to show it as written.
+    [[nodiscard]] QString bodyFor(std::string const& body, NotificationBodyFormat format)
+    {
+        auto text = QString::fromStdString(body);
+        switch (format)
+        {
+            case NotificationBodyFormat::PlainText: return text;
+            case NotificationBodyFormat::Markup: return escapedForMarkup(text);
+        }
+        return text;
+    }
 } // namespace
 
 DBusNotificationTransport::DBusNotificationTransport(QObject* parent):
     QObject(parent), _bus { QDBusConnection::sessionBus() }
 {
+    // Asked once and not waited for, as every call here is: a server that never answers leaves the
+    // markup assumption standing. Parented to this, so a reply after this is gone reaches nothing.
+    auto* const watcher = new QDBusPendingCallWatcher(
+        _bus.asyncCall(notificationCall(QLatin1StringView("GetCapabilities")), DBusCallTimeoutMilliseconds),
+        this);
+    QObject::connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](auto* self) {
+        auto const reply = QDBusPendingReply<QStringList>(*self);
+        self->deleteLater();
+        if (reply.isError())
+        {
+            notifierLog()("Failed to ask the notification server for its capabilities: {}",
+                          reply.error().message().toStdString());
+            return;
+        }
+        _bodyFormat = notificationBodyFormatOf(reply.value());
+    });
+}
+
+NotificationBodyFormat notificationBodyFormatOf(QStringList const& capabilities)
+{
+    return capabilities.contains(QStringLiteral("body-markup")) ? NotificationBodyFormat::Markup
+                                                                : NotificationBodyFormat::PlainText;
 }
 
 QVariantList buildFreedesktopNotifyArguments(vtbackend::DesktopNotification const& notification,
-                                             NotificationTransport::ServerId replacesId)
+                                             NotificationTransport::ServerId replacesId,
+                                             NotificationBodyFormat bodyFormat)
 {
     auto const appName = notification.applicationName.empty()
                              ? QStringLiteral("contour")
@@ -75,7 +142,7 @@ QVariantList buildFreedesktopNotifyArguments(vtbackend::DesktopNotification cons
         QVariant::fromValue(static_cast<quint32>(replacesId)),
         QStringLiteral(""), // app_icon (empty)
         QString::fromStdString(notification.title),
-        QString::fromStdString(notification.body),
+        bodyFor(notification.body, bodyFormat),
         actions,
         hints,
         QVariant::fromValue(static_cast<int>(notification.timeout)),
@@ -87,7 +154,7 @@ void DBusNotificationTransport::notify(vtbackend::DesktopNotification const& not
                                        SentHandler onSent)
 {
     auto message = notificationCall(QLatin1StringView("Notify"));
-    message.setArguments(buildFreedesktopNotifyArguments(notification, replacesId));
+    message.setArguments(buildFreedesktopNotifyArguments(notification, replacesId, _bodyFormat));
 
     // Parented to this, so a transport destroyed with a call in flight takes its watcher with it and
     // the handler -- which reaches back into the notifier that owns us -- is simply never run.

@@ -28,6 +28,7 @@
     #include <vector>
 
 using contour::platform::FreeDesktopNotifier;
+using contour::platform::NotificationBodyFormat;
 using contour::platform::NotificationTransport;
 using contour::platform::toFreedesktopUrgency;
 using contour::test::aNotification;
@@ -157,7 +158,8 @@ TEST_CASE("buildFreedesktopNotifyArguments builds the Notify tuple", "[contour][
     notification.urgency = vtbackend::NotificationUrgency::Critical;
     notification.timeout = 4200;
 
-    auto const arguments = contour::platform::buildFreedesktopNotifyArguments(notification, /*replacesId*/ 0);
+    auto const arguments = contour::platform::buildFreedesktopNotifyArguments(
+        notification, /*replacesId*/ 0, NotificationBodyFormat::Markup);
 
     // Signature susssasa{sv}i, in wire order. The types matter as much as the values: a QVariant
     // built from the wrong integer type marshals as the wrong D-Bus type and the server rejects it.
@@ -177,15 +179,56 @@ TEST_CASE("buildFreedesktopNotifyArguments builds the Notify tuple", "[contour][
     SECTION("an explicit application name wins over the default")
     {
         notification.applicationName = "my-app";
-        auto const named = contour::platform::buildFreedesktopNotifyArguments(notification, 0);
+        auto const named = contour::platform::buildFreedesktopNotifyArguments(
+            notification, 0, NotificationBodyFormat::Markup);
         CHECK(named[0].toString() == QStringLiteral("my-app"));
     }
 
     SECTION("the replaced id is carried as replaces_id")
     {
-        auto const replacing = contour::platform::buildFreedesktopNotifyArguments(notification, 77);
+        auto const replacing = contour::platform::buildFreedesktopNotifyArguments(
+            notification, 77, NotificationBodyFormat::Markup);
         CHECK(replacing[1].value<quint32>() == 77);
     }
+}
+
+TEST_CASE("buildFreedesktopNotifyArguments escapes the body a server reads as markup",
+          "[contour][notification]")
+{
+    // A tab title (OSC 2), an OSC 7 directory or an OSC 99 body is whatever the application wrote. A server
+    // reporting body-markup reads the body as markup, so unescaped, `<a href=...>` would become a link and a
+    // stray `&` would garble the text or the whole body.
+    auto notification = aNotification("osc-1");
+    notification.title = R"(R&D <b>)";
+    notification.body = R"(<a href="https://x">R&D</a> & <img src="https://t/p.png">)";
+
+    SECTION("as markup: &, < and > are escaped")
+    {
+        auto const arguments = contour::platform::buildFreedesktopNotifyArguments(
+            notification, 0, NotificationBodyFormat::Markup);
+        CHECK(arguments[4].toString().toStdString()
+              == R"(&lt;a href="https://x"&gt;R&amp;D&lt;/a&gt; &amp; &lt;img src="https://t/p.png"&gt;)");
+        // The summary is never markup.
+        CHECK(arguments[3].toString().toStdString() == R"(R&D <b>)");
+    }
+
+    SECTION("as plain text: the body as it is, which such a server shows as it is")
+    {
+        auto const arguments = contour::platform::buildFreedesktopNotifyArguments(
+            notification, 0, NotificationBodyFormat::PlainText);
+        CHECK(arguments[4].toString().toStdString() == notification.body);
+    }
+}
+
+TEST_CASE("notificationBodyFormatOf reads the server's capabilities", "[contour][notification]")
+{
+    using contour::platform::notificationBodyFormatOf;
+    CHECK(notificationBodyFormatOf(
+              { QStringLiteral("actions"), QStringLiteral("body"), QStringLiteral("body-markup") })
+          == NotificationBodyFormat::Markup);
+    CHECK(notificationBodyFormatOf({ QStringLiteral("actions"), QStringLiteral("body") })
+          == NotificationBodyFormat::PlainText);
+    CHECK(notificationBodyFormatOf({}) == NotificationBodyFormat::PlainText);
 }
 
 TEST_CASE("FreeDesktopNotifier hands the transport the notification, not a wire tuple",
