@@ -34,6 +34,9 @@ using vim motion keys and then start selecting.
 - Visual: `o` (open current selection into primary clipboard)
 - Normal: `gh` (enter [hint mode](demo/hint-mode.md) — copy selected match to clipboard)
 - Normal: `gH` (enter [hint mode](demo/hint-mode.md) — open selected match)
+- Normal: `mm` (set or clear a [user mark](demo/line-marks.md#bookmarking-a-line-in-vi-normal-mode) on the cursor line)
+- Normal: `za` / `zo` / `zc` (toggle / open / close the [command block](demo/command-blocks.md#folding) under the cursor)
+- Normal: `zM` / `zR` (close / open every command block)
 
 ### Supported motions
 
@@ -53,6 +56,7 @@ the terminal to scroll the view to make that target line visible.
 - `gg`
 - `G`
 - `{` & `}`
+- `[m` & `]m` (previous / next mark: a prompt or a user mark)
 
 ### Supported text objects
 
@@ -66,6 +70,7 @@ the terminal to scroll the view to make that target line visible.
 - `i[`, `a[` - square bracket enclosed string
 - `iw`, `aw` - regular word
 - `iW`, `aW` - space delimited word
+- `im`, `am` - the lines between two marks, without / with the marked lines
 
 ### Opening local files and URLs
 

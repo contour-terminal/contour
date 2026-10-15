@@ -28,9 +28,14 @@ std::optional<vtbackend::LineOffset> renderedCursorLine(vtbackend::RenderBufferR
 
 std::vector<DrawnGlyph> renderedLayout(vtbackend::RenderBufferRef const& buf, vtbackend::LineOffset line)
 {
+    return renderedLayout(buf.get(), line);
+}
+
+std::vector<DrawnGlyph> renderedLayout(vtbackend::RenderBuffer const& buffer, vtbackend::LineOffset line)
+{
     auto result = std::vector<DrawnGlyph> {};
 
-    for (auto const& cell: buf.get().cells)
+    for (auto const& cell: buffer.cells)
         if (cell.position.line == line && !cell.codepoints.empty() && cell.codepoints != U" ")
             result.emplace_back(cell.position.column.value, cell.codepoints, int { cell.width });
 
@@ -39,7 +44,7 @@ std::vector<DrawnGlyph> renderedLayout(vtbackend::RenderBufferRef const& buf, vt
 
     // Batched path: the rasterizer walks the flat text one codepoint per column, advancing by that
     // codepoint's own width. @see vtrasterizer::TextClusterGrouper::renderLine.
-    for (auto const& renderLine: buf.get().lines)
+    for (auto const& renderLine: buffer.lines)
     {
         if (renderLine.lineOffset != line)
             continue;

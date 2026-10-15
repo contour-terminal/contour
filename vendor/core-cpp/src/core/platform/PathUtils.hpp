@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/Utf8Path.hpp>
+
 #include <algorithm>
 #include <cctype>
+#include <expected>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 namespace core::platform
 {
@@ -112,17 +116,24 @@ inline constexpr bool FilesystemCaseInsensitive =
 /// lexical by design: callers resolving thousands of entries cannot afford a syscall each, and
 /// symlinks must not be followed.
 ///
-/// @param path The path to resolve.
-/// @param base Absolute directory to resolve against. Empty returns @p path normalized only,
-///             since there is nothing to resolve against.
-/// @return The resolved, forward-slash normalized path.
-[[nodiscard]] inline auto absolutePath(std::string_view path, std::string_view base) -> std::string
+/// @param path The path to resolve, in UTF-8.
+/// @param base Absolute directory to resolve against, in UTF-8. Empty returns @p path normalized
+///             only, since there is nothing to resolve against.
+/// @return The resolved, forward-slash normalized path, in UTF-8; @c std::errc::illegal_byte_sequence
+///         on Windows where an argument it reads is not UTF-8, as core::pathFromUtf8() reads it.
+[[nodiscard]] inline auto absolutePath(std::string_view path, std::string_view base)
+    -> std::expected<std::string, std::error_code>
 {
-    auto const candidate = std::filesystem::path { path };
-    if (base.empty() || candidate.is_absolute())
-        return normalizePath(candidate.lexically_normal());
-
-    return normalizePath((std::filesystem::path { base } / candidate).lexically_normal());
+    // Read as UTF-8, as normalizePath() spells the result: the narrow constructor reads the ANSI
+    // code page on Windows, so a name beyond ASCII came out spelled differently from how it went in.
+    return core::pathFromUtf8(path).and_then(
+        [base](std::filesystem::path const& candidate) -> std::expected<std::string, std::error_code> {
+            if (base.empty() || candidate.is_absolute())
+                return normalizePath(candidate.lexically_normal());
+            return core::pathFromUtf8(base).transform([&](std::filesystem::path const& directory) {
+                return normalizePath((directory / candidate).lexically_normal());
+            });
+        });
 }
 
 /// @brief Returns a path with its real on-disk capitalization and forward slashes.

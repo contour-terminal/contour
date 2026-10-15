@@ -13,8 +13,10 @@
 /// to the event-loop thread. Session pump threads never touch the model — they
 /// marshal completion (PTY closed) through EventLoop::post().
 
+#include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/screen/TerminalClocks.hpp>
 
 #include <vtpty/PageSize.hpp>
 #include <vtpty/Process.hpp>
@@ -22,11 +24,18 @@
 
 #include <core/Environment.hpp>
 #include <core/net/EventLoop.hpp>
+#include <core/platform/FileSystem.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 
+#include <cstddef>
+#include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -34,6 +43,7 @@
 // with — and any a SessionSpawnRequest carries — are normalized through hostedSessionSettings.
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/SessionSettings.hpp>
+#include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/ModelEvents.hpp>
 #include <vtworkspace/SessionModel.hpp>
@@ -61,6 +71,25 @@ enum class SizeChange : bool
     Unchanged, ///< The grid already had this size; nothing was resized.
     Applied,   ///< The grid moved; mirrors of it are now stale.
 };
+
+/// Why the host performed no engine operation a client asked for.
+enum class OperationError : uint8_t
+{
+    UnknownSession = 0, ///< No hosted session has that id: it exited, or never existed.
+    UnknownOperation,   ///< The operation is not one this host knows, as from a newer client.
+};
+
+/// @param error The failure.
+/// @return A lower-case phrase for a log line.
+[[nodiscard]] constexpr std::string_view describe(OperationError error) noexcept
+{
+    switch (error)
+    {
+        case OperationError::UnknownSession: return "unknown session";
+        case OperationError::UnknownOperation: return "unknown operation";
+    }
+    return "unknown error";
+}
 
 /// Observer of the hosted sessions' output streams. Every callback fires on the loop thread; any
 /// number of observers may subscribe concurrently, so no observer ever silences another by
@@ -101,9 +130,11 @@ class SessionStreamEvents
     virtual void sessionBell(vtworkspace::SessionId /*session*/) {}
 
     /// @p session raised a desktop notification (OSC 9 / OSC 777 / OSC 99).
+    /// @p occasion is what an OSC 99 notification's `o=` stated, or nullopt for OSC 9 / OSC 777.
     virtual void sessionNotify(vtworkspace::SessionId /*session*/,
                                std::string const& /*title*/,
-                               std::string const& /*body*/)
+                               std::string const& /*body*/,
+                               std::optional<vtbackend::DisplayOccasion> /*occasion*/)
     {
     }
 
@@ -113,6 +144,11 @@ class SessionStreamEvents
     virtual void sessionCopyToClipboard(vtworkspace::SessionId /*session*/, std::string const& /*data*/) {}
 };
 
+/// What a hosted session hands a desktop notification on as: its title, its body, and the occasion
+/// an OSC 99 notification stated -- nullopt for OSC 9 / OSC 777, which state none.
+using SessionNotifyCallback =
+    std::function<void(std::string, std::string, std::optional<vtbackend::DisplayOccasion>)>;
+
 /// One hosted session: the terminal (owning its PTY) plus the pump thread
 /// feeding it, mirroring the GUI's TerminalSession::mainLoop.
 class HostedSession
@@ -121,6 +157,10 @@ class HostedSession
     /// @param id The model-side session identity.
     /// @param pty The backing PTY (moved into the terminal).
     /// @param settings The terminal's factory settings.
+    /// @param identity The machine the daemon runs on, which the terminal decides a command's working
+    ///        directory's locality against.
+    /// @param clocks The clocks the terminal reads. Borrowed: they must outlive the session.
+    /// @param fileSystem Where the terminal looks printed paths up. Borrowed: it must outlive the session.
     /// @param onScreenUpdated Invoked on the PUMP thread after each processed
     ///        input batch (the host marshals it onto the loop).
     /// @param onClosed Invoked on the PUMP thread once the PTY closed and the
@@ -130,9 +170,12 @@ class HostedSession
                   core::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
                   vtbackend::Settings settings,
+                  vtbackend::HostIdentity identity,
+                  vtbackend::TerminalClocks clocks,
+                  core::platform::FileSystem const& fileSystem,
                   std::function<void()> onScreenUpdated,
                   std::function<void()> onBell,
-                  std::function<void(std::string, std::string)> onNotify,
+                  SessionNotifyCallback onNotify,
                   std::function<void(std::string)> onCopyToClipboard,
                   std::function<void()> onClosed);
 
@@ -151,21 +194,42 @@ class HostedSession
     /// Closes the PTY device, which ends the pump loop.
     void terminate();
 
+    /// What the pump does with what a client handed a session: writes it to the PTY, or parses it.
+    using Delivery = void (*)(vtbackend::Terminal& terminal, std::string_view bytes);
+
+    /// Hands @p bytes to the pump thread, which delivers them with @p deliver between two reads, after
+    /// everything handed over before them. The loop thread handing them over must neither park on a PTY write
+    /// while the application leaves its input unread nor sleep in a parse (DECSCLM). Without a pump (not
+    /// started), delivered at once, the caller standing in for it.
+    /// @param deliver What the pump does with @p bytes.
+    /// @param bytes What a client handed over.
+    void deliverOnPump(Delivery deliver, std::string_view bytes);
+
+    /// Writes @p bytes, a client's input, to the PTY, through deliverOnPump().
+    /// @param bytes The input, as the client encoded it.
+    void writeInput(std::string_view bytes);
+
+    /// @return How many bytes handed to deliverOnPump() are not yet delivered: queued, or being delivered.
+    [[nodiscard]] std::size_t inputBacklog() const;
+
     [[nodiscard]] vtworkspace::SessionId id() const noexcept { return _id; }
     [[nodiscard]] vtbackend::Terminal& terminal() noexcept { return _terminal; }
 
   private:
     /// The Terminal::Events glue: forwards the terminal events the daemon
     /// mirrors — the per-batch screen update, the bell, desktop notifications
-    /// (OSC 9/777/99) and OSC 52 clipboard writes — to the host's callbacks;
-    /// everything else keeps the Null default. Adding a mirrored event is a
-    /// callback here plus a row in SessionStreamEvents.
+    /// (OSC 9/777/99) and OSC 52 clipboard writes — to the host's callbacks,
+    /// and answers for the host's identity; everything else keeps the Null
+    /// default. Adding a mirrored event is a callback here plus a row in
+    /// SessionStreamEvents.
     struct Events final: vtbackend::Terminal::NullEvents
     {
-        Events(std::function<void()> screenUpdated,
+        Events(vtbackend::HostIdentity hostIdentity,
+               std::function<void()> screenUpdated,
                std::function<void()> bell,
-               std::function<void(std::string, std::string)> notify,
+               SessionNotifyCallback notify,
                std::function<void(std::string)> copyToClipboard):
+            identity(std::move(hostIdentity)),
             onScreenUpdated(std::move(screenUpdated)),
             onBell(std::move(bell)),
             onNotify(std::move(notify)),
@@ -173,9 +237,12 @@ class HostedSession
         {
         }
 
+        /// Set at construction and never reassigned: localIdentity() hands out views into it on the
+        /// parser thread.
+        vtbackend::HostIdentity identity;
         std::function<void()> onScreenUpdated;
         std::function<void()> onBell;
-        std::function<void(std::string, std::string)> onNotify;
+        SessionNotifyCallback onNotify;
         std::function<void(std::string)> onCopyToClipboard;
         /// The app asked to show the host-writable status line (DECSSDT 2); the
         /// daemon honors it by switching the terminal's status display on (the
@@ -195,12 +262,13 @@ class HostedSession
         void notify(std::string_view title, std::string_view body) override
         {
             if (onNotify)
-                onNotify(std::string { title }, std::string { body });
+                onNotify(std::string { title }, std::string { body }, std::nullopt);
         }
         void showDesktopNotification(vtbackend::DesktopNotification const& notification) override
         {
+            // The occasion travels, so the client decides it by the rule a local OSC 99 is decided by.
             if (onNotify)
-                onNotify(notification.title, notification.body);
+                onNotify(notification.title, notification.body, notification.occasion);
         }
         void copyToClipboard(std::string_view data) override
         {
@@ -212,15 +280,37 @@ class HostedSession
             if (onShowHostWritableStatusLine)
                 onShowHostWritableStatusLine();
         }
+        /// The host's identity, as TerminalSession reports the GUI's: a record's working directory is
+        /// local when it names the machine the daemon runs on.
+        [[nodiscard]] vtbackend::LocalIdentity localIdentity() const noexcept override
+        {
+            return identity.view();
+        }
     };
 
     void pumpLoop();
+
+    /// What a client handed over, waiting for the pump. @see deliverOnPump()
+    struct PendingDelivery
+    {
+        Delivery deliver;  ///< What the pump does with @ref bytes.
+        std::string bytes; ///< What it does it with.
+    };
+
+    /// Delivers what deliverOnPump() queued, oldest first, on the pump thread.
+    void deliverPending();
 
     vtworkspace::SessionId _id;
     Events _events; ///< Must outlive _terminal (referenced by it).
     vtbackend::Terminal _terminal;
     std::function<void()> _onClosed;
     std::unique_ptr<std::thread> _pumpThread;
+    /// Guards _pending and _pendingBytes: the loop thread queues, the pump thread delivers.
+    mutable std::mutex _pendingMutex;
+    /// What clients handed over and the pump has not taken yet, oldest first; consecutive bytes delivered
+    /// alike share an entry.
+    std::vector<PendingDelivery> _pending;
+    std::size_t _pendingBytes = 0; ///< What _pending holds, and what the pump took off it and is delivering.
 };
 
 /// What ONE session-creating request overrides about the session it spawns.
@@ -247,6 +337,55 @@ struct SessionSpawnRequest
     std::optional<vtpty::Process::ExecInfo> commandOverride {};
 };
 
+/// Who feeds a hosted session's terminal from its PTY.
+enum class SessionPumping : uint8_t
+{
+    Manual = 0,   ///< Nobody: the caller drives the terminals directly, as tests do.
+    Threaded = 1, ///< Each session runs its own PTY pump thread, as a daemon does.
+};
+
+/// When what clients hand a session -- input for its application, text for its screen -- backs up while the
+/// application leaves its input unread: the connection it comes from is read no further once the session
+/// holds
+/// @ref high bytes of it, and is read again once the session holds no more than @ref low. Backpressure rather
+/// than a refusal: nothing is dropped, and no client but the one filling the session waits.
+struct InputWatermarks
+{
+    std::size_t high = std::size_t { 1024 } * 1024; ///< Where a connection's reads pause.
+    std::size_t low = std::size_t { 256 } * 1024;   ///< Where they resume.
+};
+
+/// How a SessionHost is set up beyond its collaborators. Fixed at construction: two
+/// differently-configured hosts are two different hosts, not one in two states.
+struct SessionHostConfig
+{
+    /// Whether new sessions start their PTY pump thread.
+    SessionPumping pumping = SessionPumping::Threaded;
+    /// How the authoritative client area is resolved when several attached clients report
+    /// different ones.
+    ClientSizePolicy sizePolicy = ClientSizePolicy::Latest;
+    /// The profile's configured startup layout. A pane's `command`/`arguments`/`directory` are
+    /// honored (see @ref SessionSpawnRequest::commandOverride); `profile` is not — the daemon has no
+    /// `Config` object to resolve an arbitrary named profile at startup, so a pane naming one is
+    /// logged and otherwise ignored. Empty `tabs` (the default) keeps today's behavior: the window
+    /// starts with no tab at all.
+    vtworkspace::Layout startupLayout {};
+    /// The machine the daemon runs on, as every session it spawns reports it. The default knows
+    /// nothing, so only an OSC 7 URL with no host counts as local.
+    /// @see vtbackend::readHostIdentity
+    vtbackend::HostIdentity identity {};
+    /// The clocks every session it spawns reads: command durations, record and row times, and the session
+    /// epoch, all of which travel to the clients. Borrowed: they must outlive the host. The default is the
+    /// system's; tests pass manual ones to drive time.
+    vtbackend::TerminalClocks clocks = vtbackend::TerminalClocks::system();
+    /// Where every session it spawns looks up the paths printed on its screen. Borrowed: it must outlive
+    /// the host. The default is the machine's own.
+    std::reference_wrapper<core::platform::FileSystem const> fileSystem =
+        core::platform::NativeFileSystem::instance();
+    /// Where a connection's reads pause while its input backs up in a session, and resume.
+    InputWatermarks inputWatermarks {};
+};
+
 /// Owns every hosted session and the authoritative vtworkspace::SessionModel,
 /// fanning each completed model change out to subscribed observers.
 class SessionHost final: public vtworkspace::ModelEvents
@@ -258,24 +397,14 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///        @ref hostedSessionSettings — so a caller handing over a bare `vtbackend::Settings`
     ///        still gets a host whose sessions can be served, rather than one whose every scrolling
     ///        batch degenerates to a full snapshot.
-    /// @param startPumps Whether new sessions start their PTY pump thread
-    ///        (disabled by tests that drive terminals directly).
-    /// @param sizePolicy How the authoritative client area is resolved when several attached
-    ///        clients report different ones. Fixed at construction: two differently-configured
-    ///        daemons are two different daemons, not one in two states.
     /// @param env The process environment every session this host spawns reads through.
-    /// @param startupLayout The profile's configured startup layout. A pane's
-    ///        `command`/`arguments`/`directory` are honored (see @ref SessionSpawnRequest::commandOverride);
-    ///        `profile` is not — the daemon has no `Config` object to resolve an arbitrary named
-    ///        profile at startup, so a pane naming one is logged and otherwise ignored. Empty
-    ///        `tabs` (the default) keeps today's behavior: the window starts with no tab at all.
+    /// @param config How the host is set up: pumping, the client-area policy, the startup layout
+    ///        and the machine identity.
     SessionHost(core::net::EventLoop& loop,
                 PtyFactory ptyFactory,
                 vtbackend::Settings settings,
                 core::Environment const& env,
-                bool startPumps = true,
-                ClientSizePolicy sizePolicy = ClientSizePolicy::Latest,
-                vtworkspace::Layout const& startupLayout = {});
+                SessionHostConfig config = {});
     ~SessionHost() override;
 
     SessionHost(SessionHost const&) = delete;
@@ -290,6 +419,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         @ref SessionSpawnRequest overrides them. Callers layering a client's stated
     ///         preference onto the daemon's own settings need this as their base.
     [[nodiscard]] vtbackend::Settings const& settings() const noexcept { return _settings; }
+
+    /// @return The machine the daemon runs on, as every session it spawns reports it — and as a
+    ///         snapshot states it, so a client on another machine can tell "local" there from local
+    ///         to itself.
+    [[nodiscard]] vtbackend::HostIdentity const& identity() const noexcept { return _identity; }
 
     /// @return The host's window (the daemon starts with exactly one).
     [[nodiscard]] vtworkspace::WindowId windowId() const noexcept { return _window; }
@@ -361,6 +495,32 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     /// @return The terminal backing @p session, or nullptr if unknown.
     [[nodiscard]] vtbackend::Terminal* terminal(vtworkspace::SessionId session) noexcept;
+
+    /// Hands @p bytes, a client's input, to session @p session's PTY without parking the calling loop thread:
+    /// the session's pump writes them. @see HostedSession::writeInput()
+    /// @param session The session the input is for; an unknown one drops it.
+    /// @param bytes The input, as the client encoded it.
+    void writeInput(vtworkspace::SessionId session, std::string_view bytes);
+
+    /// @param session The session asked about.
+    /// @return How many bytes of a client's input @p session holds unwritten; zero for an unknown one.
+    [[nodiscard]] std::size_t inputBacklog(vtworkspace::SessionId session) const;
+
+    /// @return Where a connection's reads pause while its input backs up, and resume. @see InputWatermarks
+    [[nodiscard]] InputWatermarks const& inputWatermarks() const noexcept { return _inputWatermarks; }
+
+    /// Performs the engine operation a client asked for on the terminal of the session it names, and every
+    /// attached mirror follows through its deltas: one the loop thread performs announces a screen update
+    /// itself, and a write handed to the session's pump raises one as it is parsed, as the application's
+    /// output does.
+    ///
+    /// What each operation does, and on which thread, is one row of a table in the implementation: adding an
+    /// operation is a row there and an enumerator in proto::EngineOperation.
+    /// @param request The session, the operation, and what it acts with: WriteScreen's text, a user
+    ///        mark's row.
+    /// @return Nothing on success; why nothing was performed otherwise.
+    [[nodiscard]] std::expected<void, OperationError> performOperation(
+        proto::PerformOperation const& request);
 
     /// @return The number of live hosted sessions.
     [[nodiscard]] std::size_t sessionCount() const noexcept { return _sessions.size(); }
@@ -494,9 +654,14 @@ class SessionHost final: public vtworkspace::ModelEvents
     PtyFactory _ptyFactory;
     vtbackend::Settings _settings;
     core::Environment const& _environment;
-    vtpty::PageSize _pageSize; ///< The RESOLVED authoritative client area (see pageSize()).
-    bool _startPumps;
+    vtbackend::HostIdentity _identity; ///< Handed to every session this host spawns.
+    vtbackend::TerminalClocks _clocks; ///< Read by every session this host spawns.
+    vtpty::PageSize _pageSize;         ///< The RESOLVED authoritative client area (see pageSize()).
+    SessionPumping _pumping;           ///< Whether new sessions start their PTY pump thread.
+    InputWatermarks _inputWatermarks;  ///< @see SessionHostConfig::inputWatermarks
     ClientSizePolicy _sizePolicy;
+    /// Where every session this host spawns looks up the paths printed on its screen.
+    core::platform::FileSystem const& _fileSystem;
     /// What each attached client reported it can display, keyed by its stream subscription so the
     /// entry lives exactly as long as the client does (@see unsubscribeStream). `_pageSize` is
     /// resolved from these, never assigned from one of them.

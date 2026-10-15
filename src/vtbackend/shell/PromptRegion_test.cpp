@@ -42,7 +42,7 @@ LogicalLineMarks plain()
 
 TEST_CASE("PromptRegion.a fresh prompt the user has not submitted yet", "[promptregion]")
 {
-    // The accessibility case, and the one scanCommandBlocksBackward is blind to: `$ ` has been printed
+    // The accessibility case, and the one a scan for finished blocks is blind to: `$ ` has been printed
     // and the user is typing into it. There is no CommandEnd anywhere, so no finished block exists.
     auto const lines = FakeLines { {
         { .flags = LineFlags { LineFlag::Marked, LineFlag::PromptEnd }, .promptEndOffset = ColumnOffset(2) },
@@ -139,6 +139,38 @@ TEST_CASE("PromptRegion.a prompt sharing a line with the previous command's end"
     CHECK(*region->inputBegin == ColumnOffset(7));
 }
 
+TEST_CASE("PromptRegion.a prompt on the line a silent command ended on", "[promptregion]")
+{
+    // A command that printed nothing (`cd`, `true`) leaves its ;C's OutputStart on the line its ;D and the
+    // next prompt's ;A then share. That OutputStart is the finished command's, not one beneath this prompt.
+    auto const lines = FakeLines { {
+        { .flags =
+              LineFlags {
+                  LineFlag::OutputStart, LineFlag::CommandEnd, LineFlag::Marked, LineFlag::PromptEnd },
+          .promptEndOffset = ColumnOffset(2) },
+    } };
+
+    auto const region = findLivePromptRegion(lines, DefaultScanBudget);
+
+    REQUIRE(region.has_value());
+    CHECK(region->startIndex == 0);
+    REQUIRE(region->inputBegin.has_value());
+    CHECK(*region->inputBegin == ColumnOffset(2));
+
+    SECTION("the next silent command, once started, is running")
+    {
+        auto const running = FakeLines { {
+            { .flags = LineFlags { LineFlag::OutputStart } },
+            { .flags = LineFlags { LineFlag::OutputStart, LineFlag::CommandEnd, LineFlag::Marked } },
+        } };
+
+        auto const next = findLivePromptRegion(running, DefaultScanBudget);
+
+        REQUIRE_FALSE(next.has_value());
+        CHECK(next.error() == PromptRegionError::InCommandOutput);
+    }
+}
+
 TEST_CASE("PromptRegion.only the prompt end closest to the cursor is used", "[promptregion]")
 {
     // An older prompt further up must not overwrite this one's border.
@@ -173,6 +205,22 @@ TEST_CASE("PromptRegion.a shell emitting only ;A still yields a region", "[promp
 TEST_CASE("PromptRegion.a scrollback with no marks reports no integration", "[promptregion]")
 {
     auto const lines = FakeLines { { plain(), plain(), plain() } };
+
+    auto const region = findLivePromptRegion(lines, DefaultScanBudget);
+
+    REQUIRE_FALSE(region.has_value());
+    CHECK(region.error() == PromptRegionError::NoPromptMark);
+}
+
+TEST_CASE("PromptRegion.a user mark alone is not shell integration", "[promptregion][semanticblocks]")
+{
+    // Vi's `mm` is the user's own bookmark, not something a shell emitted: a scrollback holding nothing
+    // else has no integration a caller should keep asking about.
+    auto const lines = FakeLines { {
+        plain(),
+        { .flags = LineFlags { LineFlag::UserMark } },
+        plain(),
+    } };
 
     auto const region = findLivePromptRegion(lines, DefaultScanBudget);
 

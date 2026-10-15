@@ -3,8 +3,10 @@
 
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/StickyHeaderKind.hpp>
 #include <vtbackend/core/TextScale.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/grid/Line.hpp>
@@ -15,6 +17,9 @@
 #include <chrono>
 #include <mutex>
 #include <optional>
+#include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace vtbackend
@@ -89,18 +94,69 @@ struct RenderLine
     LineFlags flags = LineFlag::None;
 };
 
-/// One row's gutter content: the fold marker drawn in the strip left of the grid.
+/// One cell of the gutter: a character drawn in the strip left of the grid.
 ///
-/// A row of its own rather than a RenderCell in @ref RenderBuffer::cells, deliberately: the gutter sits
-/// at a NEGATIVE column, outside the page entirely, and everything that walks the cells -- selection,
+/// A cell of its own rather than a RenderCell in @ref RenderBuffer::cells, deliberately: the gutter sits
+/// at NEGATIVE columns, outside the page entirely, and everything that walks the cells -- selection,
 /// hit-testing, the accessibility bridge, screenshots -- is entitled to assume a column is on the page.
 /// Keeping the two apart means none of them has to learn otherwise.
 struct RenderGutterCell
 {
-    LineOffset lineOffset;       ///< The screen row this marker belongs to.
-    char32_t codepoint {};       ///< The marker glyph.
+    LineOffset lineOffset;       ///< The screen row this cell belongs to.
+    char32_t codepoint {};       ///< The character.
     RenderAttributes attributes; ///< Its colors.
+
+    /// The column it is drawn at, relative to grid column 0: -1 is the cell beside the grid, and a
+    /// gutter N columns wide spans -N .. -1.
+    ColumnOffset column { -1 };
 };
+
+/// The sticky command header drawn over the main page's first row.
+///
+/// Beside @ref RenderBuffer::cells rather than in it, for the reason RenderGutterCell gives: everything
+/// that walks the cells -- selection, hit-testing, the accessibility bridge -- describes the GRID, and
+/// the header repeats a row that is still there, underneath it.
+///
+/// Laid out whole by the terminal, the chip included, so the renderer draws it without deciding anything:
+/// the band, the cells, the chip, the separator.
+///
+/// @see Terminal::fillStickyHeader
+struct RenderStickyHeader
+{
+    StickyHeaderKind kind = StickyHeaderKind::Command; ///< The command's input row, or the placeholder.
+    CommandBlockId block {};                           ///< The block it names; a press on it jumps there.
+    std::vector<RenderCell> cells {}; ///< Its text, already on the row it covers, short of the chip.
+    /// The right-aligned status -- `✓ 3s`, `✗ 2 1m 04s`, `running 12s` -- already in its columns.
+    std::vector<RenderCell> chip {};
+    RGBColor background {}; ///< The band's colour.
+    RGBColor separator {};  ///< The one-pixel line along the band's bottom edge.
+};
+
+/// Lays @p text out as render cells from @p origin rightwards, appended to @p output, for host-drawn text
+/// that has no grid row of its own: the sticky header's chip and placeholder, a collapsed fold's label.
+///
+/// One cell per glyph, as wide as the glyph; a zero-width codepoint (a combining mark, a variation
+/// selector) joins the cell before it. A glyph that would reach @p end is dropped whole, and so is
+/// everything after it. The cells appended form one shaping group.
+///
+/// Appended rather than returned, so a frame lays its overlays out into storage RenderBuffer::clear()
+/// keeps, and a frame like the last allocates nothing.
+///
+/// @param output Where the cells go, after whatever it already holds.
+/// @param text The text to lay out.
+/// @param attributes Every cell's colours and flags.
+/// @param origin Where the first cell goes.
+/// @param end The first column the text may not reach.
+/// @return The first column after the last cell placed; @p origin's column when nothing fits.
+ColumnOffset layoutRenderText(std::vector<RenderCell>& output,
+                              std::u32string_view text,
+                              RenderAttributes const& attributes,
+                              CellLocation origin,
+                              ColumnOffset end);
+
+/// Marks @p cells as one shaping group: the text shaper takes them as a single run, first to last.
+/// @param cells The cells, left to right; none is marked when it is empty.
+void markShapingGroup(std::span<RenderCell> cells) noexcept;
 
 struct RenderCursor
 {
@@ -118,16 +174,49 @@ struct RenderBuffer
     std::vector<RenderCell> cells {};
     std::vector<RenderLine> lines {};
     std::vector<RenderGutterCell> gutter {};
+
+    /// Render-only text the terminal lays over the page -- a collapsed fold's `⋯ 1,234 lines` -- already
+    /// laid out (@see layoutRenderText), one shaping group per annotation.
+    ///
+    /// Not in @ref cells, for the gutter's reason: selection, copying and the accessibility bridge walk
+    /// those, and an annotation is something to read, never something to select.
+    std::vector<RenderCell> annotations {};
+
     std::optional<RenderCursor> cursor {};
+
+    /// The sticky command header covering the main page's first row on this frame, if any.
+    std::optional<RenderStickyHeader> stickyHeader {};
+
     uint64_t frameID {};
+
+    /// Starts this frame's sticky header on the storage the last one left behind, so a header shown frame
+    /// after frame allocates nothing -- as @ref cells, whose capacity clear() keeps, do not.
+    /// @return The header, its cells and chip empty, for the caller to fill in.
+    RenderStickyHeader& showStickyHeader()
+    {
+        auto& header = stickyHeader.emplace(std::move(_retiredStickyHeader));
+        header.cells.clear();
+        header.chip.clear();
+        return header;
+    }
 
     void clear()
     {
         cells.clear();
         lines.clear();
         gutter.clear();
+        annotations.clear();
         cursor.reset();
+        if (stickyHeader)
+        {
+            _retiredStickyHeader = std::move(*stickyHeader);
+            stickyHeader.reset();
+        }
     }
+
+  private:
+    /// The last header clear() took off the frame, kept for its cells' storage (@see showStickyHeader).
+    RenderStickyHeader _retiredStickyHeader {};
 };
 
 /// Lock-guarded handle to a read-only RenderBuffer object.
@@ -172,9 +261,18 @@ struct RenderDoubleBuffer
 {
     std::mutex mutable readerLock;
     std::atomic<size_t> currentBackBufferIndex = 0;
+
+    /// The block the sticky header of the front buffer names; the zero id when that frame drew none.
+    ///
+    /// Published by swapBuffers(), with the frame it describes: a fill that is never swapped in -- one that
+    /// lost the race for the front buffer, or a throwaway rendered for a crossfade -- leaves it alone.
+    std::atomic<CommandBlockId> frontStickyHeaderBlock {};
+
     std::array<RenderBuffer, 2> buffers {};
     std::atomic<RenderBufferState> state = RenderBufferState::WaitingForRefresh;
-    std::chrono::steady_clock::time_point lastUpdate {};
+    /// When the front buffer was last swapped in. Atomic: set by whichever thread swaps, and read without a
+    /// lock as each thread decides whether a frame is due.
+    std::atomic<std::chrono::steady_clock::time_point> lastUpdate {};
 
     RenderBuffer& backBuffer() noexcept { return buffers[currentBackBufferIndex]; }
 

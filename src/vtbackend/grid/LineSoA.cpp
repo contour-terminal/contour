@@ -248,6 +248,24 @@ size_t trimBlankRight(LineSoA const& line, size_t cols)
     return end;
 }
 
+size_t trimBlankRightKeepingWideCharacters(LineSoA const& line, size_t cols)
+{
+    auto end = trimBlankRight(line, cols);
+    while (end < cols && end < line.sgr.size()
+           && line.sgr[end].flags.contains(CellFlag::WideCharContinuation))
+        ++end;
+    return end;
+}
+
+size_t wideCharacterSafeEnd(LineSoA const& line, size_t start, size_t end) noexcept
+{
+    auto head = end;
+    while (head > start && head < line.sgr.size()
+           && line.sgr[head].flags.contains(CellFlag::WideCharContinuation))
+        --head;
+    return head > start ? head : end;
+}
+
 namespace
 {
     /// Highest pool size @c LineSoA::clusterPoolIndex (a uint16_t) can still address.

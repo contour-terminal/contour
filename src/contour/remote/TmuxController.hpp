@@ -75,6 +75,17 @@ namespace contour::remote
 /// @return The control-mode command line.
 [[nodiscard]] std::string tmuxNewWindowCommand();
 
+/// The tmux control-mode command that performs @p operation's server half on pane @p pane, if tmux has
+/// one: the operation's row names it (contour::session::HostedOperationRow::tmuxCommand). Only
+/// ClearHistoryAndReset has one: `clear-history` drops the pane's history on the server, and the local
+/// terminal performs the reset. tmux has no command that clears to a prompt, soft-resets a pane or writes
+/// to its screen.
+/// @param operation The operation a session asks for.
+/// @param pane The tmux pane id.
+/// @return The command line, or std::nullopt when tmux has none.
+[[nodiscard]] std::optional<std::string> tmuxOperationCommand(contour::session::HostedOperation operation,
+                                                              uint64_t pane);
+
 /// A tmux window's binary layout tree converted for realization through
 /// `TerminalSessionManager::applyLayoutToWindow`: a single-tab `vtworkspace::Layout` carrying the split
 /// orientations and ratios, plus the map from each converted leaf pane (by its stable address inside
@@ -144,6 +155,12 @@ class TmuxController final:
 
     [[nodiscard]] bool canCreateSession() const noexcept override;
 
+    /// SessionFactory: every pane this factory makes mirrors a pane on the tmux server.
+    [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
+    {
+        return contour::session::SessionHosting::Remote;
+    }
+
     /// SessionFactory: a GUI split of the pane backed by @p actingPty is authored on tmux
     /// (`split-window`) rather than split locally — tmux's %layout-change re-realizes the new pane
     /// through the mirror. A split issued BY the reconciler itself (while realizing an existing tmux
@@ -168,6 +185,13 @@ class TmuxController final:
     /// not bound to a tmux pane is ignored.
     /// @param pty The pty backing the pane to close.
     void requestRemoteClose(vtpty::Pty const* pty) override;
+
+    /// SessionFactory: where an operation runs on a tmux pane is the tmux column of
+    /// contour::session::HostedOperationTable. Where tmux has a command for it (@ref tmuxOperationCommand)
+    /// that is sent too, and without a connection the operation is Unreachable. A pty that is not bound to
+    /// a tmux pane runs it here.
+    [[nodiscard]] contour::session::HostedOperationRoute requestHostedOperation(
+        vtpty::Pty const* pty, contour::session::HostedOperationRequest const& request) override;
 
     /// Records the extent tmux now reports for @p pane, so a pane not yet realized is born at the
     /// current size rather than its discovery size. Runs on the REACTOR thread (the model's pane

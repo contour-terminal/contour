@@ -8,10 +8,11 @@
 /// so a newer peer's PDU is carried rather than fatal. Adding a PDU is: a struct, a tag in PduType,
 /// one row in each of the encode/decode tables in Pdu.cpp.
 ///
-/// While the protocol is unreleased the catalog is kept CONTIGUOUS and renumbered freely: a retired
-/// tag leaves no gap, because a gap only earns its keep against a deployed peer and there is none
-/// (@see CodecVersion, which is pinned for the same reason). Once the protocol ships, tags become
-/// stable and a retirement must leave its number behind.
+/// While the protocol is experimental the catalog is kept CONTIGUOUS and may be renumbered with a
+/// CodecVersion bump: a retired tag leaves no gap, because the handshake refuses a peer of another
+/// revision before it sends a single other PDU. The two hellos are the exception: their tags are how
+/// two revisions meet at all, so every revision keeps 0.7.0's.
+/// @see CodecVersion
 ///
 /// The structs are deliberately wire-level (raw u32 colors, raw flag words,
 /// std-only types): the codec is shared by the server, the attach client, and
@@ -24,6 +25,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -33,7 +35,7 @@ namespace vthost::proto
 {
 
 /// The wire tag of each PDU (the wire carries it as a varint; the enum's base type only bounds the
-/// catalog, not the protocol). Contiguous, and not yet stable — @see the file comment.
+/// catalog, not the protocol). Contiguous, and stable only for the two hellos, as the file comment says.
 enum class PduType : uint8_t
 {
     Invalid = 0,
@@ -56,7 +58,12 @@ enum class PduType : uint8_t
     NewWindow = 17,
     ResizePane = 18,
     ResizeSplit = 19,
+    SessionSettingsChanged = 20,
+    PerformOperation = 21,
 };
+
+static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
+              "the hellos keep the tags contour 0.7.0 gave them: they are how two revisions meet");
 
 /// The wire encoding of a split's first-child share: a fraction in (0, 1) carried as an integer
 /// per ten-thousand, so a ratio survives the wire without a float format.
@@ -126,6 +133,9 @@ struct WireSessionSettings
     uint8_t graphemeClustering = 1; ///< Whether DEC mode 2027 starts out set.
     uint8_t allowReflowOnResize = 1;
     uint32_t maxImageRegisterCount = 256;
+    /// Whether a sixel image scrolls the page at the bottom margin, as the session starts and as RIS
+    /// returns it: 1 yes (DECSDM reset), 0 no. The configuration's `images.sixel_scrolling`.
+    uint8_t sixelScrolling = 1;
     // Both explicitly default-initialized, so naming a subset of this struct with designated
     // initializers stays clean under -Wmissing-designated-field-initializers.
     std::string wordDelimiters = {}; ///< UTF-8; the client's u32string re-encoded.
@@ -136,6 +146,11 @@ struct WireSessionSettings
 /// Client's first PDU: its codec revision, (for TCP) a preshared auth token, and optionally the
 /// emulation settings it wants the sessions it creates to have. Anything before it is a protocol
 /// error.
+///
+/// On the wire, the version comes first and everything else after it. A hello of another revision is
+/// decoded as far as its version, the one field every revision shares, and the handshake refuses it on
+/// that. The layout after the version is kept readable to contour 0.7.0, whose daemon reads a hello
+/// whole before it checks the version, as the encoder in Pdu.cpp explains.
 struct ClientHello
 {
     uint32_t codecVersion = CodecVersion;
@@ -148,10 +163,25 @@ struct ClientHello
     bool operator==(ClientHello const&) const = default;
 };
 
-/// Server's answer to ClientHello.
+/// Server's answer to ClientHello: its codec revision and, when it accepts the client, the machine it
+/// runs on.
+///
+/// A hello of another revision is decoded as far as its version, as a ClientHello is. One naming no
+/// machine -- every refusal -- is the version alone on the wire: the whole of the ServerHello contour
+/// 0.7.0 reads, so a client of that release learns which revision refused it.
 struct ServerHello
 {
     uint32_t codecVersion = CodecVersion;
+    /// The machine the daemon runs on (vtbackend::HostIdentity), which every WireCommandBlock::locality
+    /// was judged against: "local" there means local to the DAEMON, and a client attached from another
+    /// machine must not take it for its own. Stated once per connection, as a connection never moves to
+    /// another daemon. Each is empty when unknown, and both are empty in the answer to a refused
+    /// ClientHello, which tells a peer nothing about the daemon. They name a machine, so a trace never
+    /// shows them.
+    /// The daemon's machine id derived for this application (vthost::appSpecificMachineId), never
+    /// /etc/machine-id itself; empty where the daemon has none.
+    std::string machineId = {};
+    std::string hostname = {}; ///< The daemon's host name; empty when unknown.
     bool operator==(ServerHello const&) const = default;
 };
 
@@ -234,10 +264,14 @@ struct MouseState
 
 /// The presence bits a context record's `present` field may carry, as the WIRE numbers them.
 ///
-/// Proto-owned rather than taken from vtbackend, because it travels verbatim: a bit this build does
-/// not know is cleared on decode so the field reads that follow stay in step with the sender. The
-/// vtbackend side is pinned against this in vthost/ContextWire.hpp, which is where a renumbering
-/// becomes a build error instead of a silent protocol change.
+/// Proto-owned rather than taken from vtbackend, because it travels verbatim. The vtbackend side is
+/// pinned against this in vthost/ContextWire.hpp, which is where a renumbering becomes a build error
+/// instead of a silent protocol change.
+///
+/// A record naming a bit outside the mask is refused on decode (DecodeError::MalformedPdu), never
+/// masked. The handshake admits only a peer of this CodecVersion, which assigns these bits and no
+/// others, so an unknown one can only come from a broken or hostile peer -- and clearing it would
+/// leave the reads that follow out of step with whatever field that peer wrote for it.
 constexpr inline uint16_t ContextPresentMask = 0x7FFF; // bits 0..14: fifteen fields
 
 /// One OSC 3008 hierarchical context, as the host holds it.
@@ -261,6 +295,8 @@ struct WireContext
     /// Only the fields `present` names carry meaning; the rest are left empty by the encoder.
     std::string user;
     std::string hostname;
+    /// The context's `machineid=` derived for this application (vthost::appSpecificMachineId), as the
+    /// ServerHello's is; never the id as the context named it. Empty for one that is no machine id.
     std::string machineId;
     std::string bootId;
     std::string comm;
@@ -279,6 +315,72 @@ struct WireContext
     uint64_t status = 0;
 
     bool operator==(WireContext const&) const = default;
+};
+
+/// The optional fields a command-block record's `present` byte may name, as the WIRE numbers them.
+///
+/// Proto-owned and frozen for the reason ContextPresentMask is: they travel verbatim. A bit this build
+/// does not assign is refused on decode, as one outside ContextPresentMask is.
+constexpr inline uint8_t CommandBlockHasExitCode = 1U << 0;     ///< `exitCode` travelled.
+constexpr inline uint8_t CommandBlockHasCommandStart = 1U << 1; ///< `commandStartedAt` travelled.
+constexpr inline uint8_t CommandBlockHasDuration = 1U << 2;     ///< `duration` travelled.
+constexpr inline uint8_t CommandBlockHasPromptStart = 1U << 3;  ///< `promptStartedAt` travelled.
+/// The host no longer holds the block's head row: it scrolled out of the host's history, or an erase left the
+/// block no row. Carries no field.
+/// A mirror cannot tell a head that left from one whose row has not arrived yet, so the host says which.
+constexpr inline uint8_t CommandBlockHeadEvicted = 1U << 4;
+constexpr inline uint8_t CommandBlockPresentMask = 0x1F; ///< Every bit this build assigns.
+
+/// One shell command block's record (vtbackend::CommandBlockRecord), as the host holds it.
+///
+/// A row names its block by WireLine::blockId; the record travels beside the rows — stated outright
+/// in a snapshot's SessionState, and in a Delta whenever it changed since this connection last saw
+/// it. The id is the HOST's, and a receiver keeps it as-is.
+///
+/// Deliberately ABSENT: the record's cached head position (`headStableId`, `headIdGeneration`). Those
+/// are stable row ids in the HOST's grid, and a mirror's grid mints its own — carried across they
+/// would name the wrong row, or, once the two generations happened to coincide, a plausible wrong
+/// one. The mirror derives its own from the head rows it writes. Leaving them out also keeps a
+/// resize's head rescan, which touches every record, from re-sending every record. Only whether the
+/// host's head row is gone travels (CommandBlockHeadEvicted), judged as the record is sent.
+///
+/// Also absent: `commandContext`, the OSC 3008 context an end= is matched by. Only the host matches an
+/// end= against its records; the outcome a match produces reaches the mirror in the record's own
+/// outcome fields.
+///
+/// Enum-ish bytes travel raw and are validated by the consumer, which is what keeps this codec free
+/// of vtbackend.
+/// @see vthost/CommandBlockWire.hpp
+struct WireCommandBlock
+{
+    uint32_t id = 0;                   ///< The host's block id.
+    uint8_t state = 0;                 ///< vtbackend::CommandBlockState.
+    uint8_t end = 0;                   ///< vtbackend::CommandBlockEnd.
+    uint8_t commandLineSource = 0;     ///< vtbackend::CommandLineSource.
+    uint8_t locality = 0;              ///< vtbackend::ContextLocality of `workingDirectory`.
+    uint8_t present = 0;               ///< CommandBlockHas* bits.
+    std::string commandLine = {};      ///< RAW, as the host recorded it; sanitized per use, never here.
+    std::string workingDirectory = {}; ///< The directory snapshot taken at OSC 133;C.
+    uint8_t endLocality = 0;           ///< vtbackend::ContextLocality of `endWorkingDirectory`.
+    /// The directory the command left the shell in, snapshot at the next prompt's OSC 133;A; empty until
+    /// then.
+    std::string endWorkingDirectory = {};
+    /// vtbackend::ForeignDirectory: whether a directory on another machine was reported while the block was
+    /// open.
+    uint8_t foreignDirectory = 0;
+    uint8_t outcomeExit = 0;    ///< vtbackend::ContextExit.
+    uint8_t outcomeSignal = 0;  ///< vtbackend::ContextSignal, as a Linux signal number.
+    uint64_t outcomeStatus = 0; ///< `vtbackend::ContextOutcome::status`, verbatim (a varint on the wire).
+    /// The four optionals: meaningful only with their CommandBlockHas* bit, zero otherwise. All
+    /// signed 64-bit so one table drives their encoding; an exit code outside `int` is the
+    /// receiver's to reject.
+    ///
+    /// The prompt's start is absent for a block a ;C opened with no ;A before it.
+    int64_t promptStartedAt = 0; ///< Wall clock, nanoseconds since the Unix epoch (vthost/TimeWire.hpp).
+    int64_t exitCode = 0;
+    int64_t commandStartedAt = 0; ///< Wall clock, nanoseconds since the Unix epoch.
+    int64_t duration = 0;         ///< Steady-clock nanoseconds from OSC 133;C to ;D.
+    bool operator==(WireCommandBlock const&) const = default;
 };
 
 /// Everything renditional a session carries OUTSIDE its grid cells — replayed
@@ -322,6 +424,34 @@ struct SessionState
     /// Kitty-keyboard reset used to get lost.
     std::vector<WireContext> contexts;
     std::vector<uint16_t> contextChain; ///< The ancestry, outermost first; empty when there is none.
+    /// The host terminal's session epoch — the wall-clock instant every WireLine::bornAt counts
+    /// from — as nanoseconds since the Unix epoch (vthost/TimeWire.hpp); 0 = not stated. A mirror
+    /// adopts it, or the stamps it copied would name instants shifted by however much later the
+    /// client terminal was created than the host's.
+    int64_t sessionEpoch = 0;
+    /// The host's wall clock as it built this snapshot, as nanoseconds since the Unix epoch; 0 = not
+    /// stated. The instants a host records -- when a prompt or a command started -- are its own clock's,
+    /// and a mirror on a machine whose clock is set differently measures that difference against this,
+    /// to read them on its own clock. The session epoch cannot say it: it is when the host's terminal
+    /// began, not what its clock reads now.
+    int64_t hostTime = 0;
+    /// How many times the host's command-block ids have started over (vtbackend::CommandBlockStore::idEpoch):
+    /// an id names a block only within its epoch. A receiver holding ids from an older one -- on rows the
+    /// host no longer sends, such as a mirror's deeper scrollback -- forgets them when it moves.
+    uint64_t commandBlockIdEpoch = 0;
+    /// The lowest command-block id this snapshot speaks for: a receiver replaces the records it holds at
+    /// or above it with `commandBlocks`, and keeps the older ones until a Delta retires them. Zero speaks
+    /// for every id, so the stated set becomes the whole table.
+    ///
+    /// A snapshot capped below the host's whole store states the oldest record it carries here. A
+    /// resize resyncs every pane, and a floor of zero would have the client drop the history it already
+    /// holds below the cap, only for the increments to send it all again.
+    uint32_t commandBlocksFloor = 0;
+    /// The command-block records, oldest first, stated outright: the newest of them whose estimated
+    /// size fits the connection's snapshot piece (NativeSession::snapshotPieceBytes, at most
+    /// NativeSession::SnapshotChunkBytes). Any older remainder the receiver lacks follows as
+    /// increments. Replaces what the receiver holds from `commandBlocksFloor` on.
+    std::vector<WireCommandBlock> commandBlocks = {};
     bool operator==(SessionState const&) const = default;
 };
 
@@ -346,7 +476,8 @@ struct WireLine
 {
     int64_t stableId = 0;
     /// Raw `vtbackend::LineFlags` bits — whether the row may reflow and whether it CONTINUES the
-    /// row above it, plus the shell's semantic marks and the DECDWL/DECDHL renditions.
+    /// row above it, plus the semantic marks (the shell's and the user's) and the DECDWL/DECDHL
+    /// renditions.
     ///
     /// The bit values are frozen because they travel verbatim; `vthost/GridWire.cpp` pins them, so
     /// renumbering one is a build break rather than a silent mis-decode against an older peer.
@@ -355,6 +486,16 @@ struct WireLine
     /// snapshot and deltas carry; an id with no record simply resolves to nothing, exactly as an
     /// unmapped hyperlink id does.
     uint16_t contextId = 0;
+    /// The host's CommandBlockId for this row, or 0 for none.
+    ///
+    /// Unlike @ref contextId it is NOT translated by a receiver: a mirror's record store holds only
+    /// the records the host replicated, under the host's own ids, so the number means the same thing
+    /// on both ends.
+    uint32_t blockId = 0;
+    /// When the cursor first reached this row, as seconds since the host's session began, plus one;
+    /// 0 = never stamped. 24 bits of meaning (vtbackend::Line::MaxBornAt) in a 32-bit field, counted
+    /// from the host's session epoch, which travels in SessionState.
+    uint32_t bornAt = 0;
     /// Where the prompt stopped and where the previous command's output stopped, as LOGICAL columns
     /// (they may exceed @ref columns on a row whose logical line wrapped). Both are meaningful only
     /// with the matching flag — `PromptEnd`, `CommandEnd` — set in @ref flags, and both belong to
@@ -461,6 +602,12 @@ struct Delta
     /// no line changes, so the client MUST drop history below it or keep showing
     /// scrollback the real terminal already threw away.
     int64_t stableFloor = 0;
+    /// How many rows have left the server's grid for good since it was created or last reset
+    /// (vtbackend::Grid::evictedRowCount()), so the row at `stableFloor` is the session's row
+    /// number `evictedRowCount + 1`. A client numbers absolute lines from this rather than from
+    /// its own grid's count, which sees neither the rows evicted before it attached, nor a
+    /// server-side reset, and which counts a discarding replay's clear as evictions.
+    uint64_t evictedRowCount = 0;
     int32_t cursorLine = 0;
     int32_t cursorColumn = 0;
     std::vector<WireLine> lines;
@@ -530,6 +677,23 @@ struct Delta
     /// nothing new to say, so a bare `!contexts.empty()` would be a second way to spell the same
     /// thing and hasChanges() below does not need one.
     std::vector<WireContext> contexts;
+    /// The epoch the command-block ids of this delta's rows and records count in, stated on every delta.
+    /// Not one of hasChanges()'s: the ids start over only as the host mints a record, which changes records
+    /// too.
+    /// @see SessionState::commandBlockIdEpoch
+    uint64_t commandBlockIdEpoch = 0;
+    /// The grid's stable-id generation (vtbackend::Grid::stableIdGeneration): the counter a row's stable id
+    /// names that row within, a strict subset of @ref generation's moves -- a change of the line count alone
+    /// leaves every id in place. What a client names a row by when it asks the host to act on one.
+    uint64_t stableIdGeneration = 0;
+    /// Command-block records that changed since this connection last saw them, oldest first, within
+    /// a per-delta byte budget (the rest follow in the next delta). Empty on a snapshot, whose
+    /// records travel in SessionState. Not gated, for the reason @ref contexts is not.
+    /// @see NativeSession::collectCommandBlockDelta
+    std::vector<WireCommandBlock> commandBlocks = {};
+    /// Host ids this connection was told about that the host no longer holds — a prompt discarded by
+    /// the next one, the oldest evicted by the bound, a reset — ascending.
+    std::vector<uint32_t> retiredCommandBlocks = {};
 
     /// Whether this delta says anything about the SESSION at all — a snapshot, changed rows, or any
     /// of the gated fields above.
@@ -548,7 +712,8 @@ struct Delta
         return snapshot != 0 || !lines.empty() || titleChanged != 0 || cursorShapeChanged != 0
                || cwdChanged != 0 || colorsChanged != 0 || statusChanged != 0 || statusLinesChanged != 0
                || kittyKeyboardChanged != 0 || modifyOtherKeysChanged != 0 || mouseChanged != 0
-               || progressChanged != 0 || contextChanged != 0 || !contexts.empty();
+               || progressChanged != 0 || contextChanged != 0 || !contexts.empty() || !commandBlocks.empty()
+               || !retiredCommandBlocks.empty();
     }
 
     /// @return Where this PDU sits in its snapshot, or `Whole` for anything that is not part of a
@@ -607,12 +772,30 @@ struct SessionBell
     bool operator==(SessionBell const&) const = default;
 };
 
+/// When a notification asks to be shown: what OSC 99's `o=` said, or that nothing was said.
+///
+/// OSC 9 and OSC 777 state no occasion, and an OSC 99 notification without `o=` states one, so the two
+/// differ: the client decides an unstated notification by its own rule for those, as it does a local
+/// session's. The codec carries any byte; the client reads one no enumerator names as Unstated
+/// (@see vthost::displayOccasionOf).
+enum class NotifyOccasion : uint8_t
+{
+    Unstated = 0,  ///< OSC 9 / OSC 777: no occasion of its own.
+    Always = 1,    ///< `o=always`, or OSC 99 without `o=`.
+    Unfocused = 2, ///< `o=unfocused`.
+    Invisible = 3, ///< `o=invisible`.
+};
+
 /// A desktop notification a session raised (OSC 9 / OSC 777 / OSC 99).
+///
+/// Only the occasion travels of OSC 99's metadata: its identifier, and with it a close or an activation
+/// reported back to the application, stay on the daemon.
 struct SessionNotify
 {
     uint64_t session = 0;
     std::string title = {};
     std::string body = {};
+    NotifyOccasion occasion = NotifyOccasion::Unstated; ///< When the notification asks to be shown.
     bool operator==(SessionNotify const&) const = default;
 };
 
@@ -738,6 +921,56 @@ struct ResizeSplit
     bool operator==(ResizeSplit const&) const = default;
 };
 
+/// Client→server: replaces the emulation settings the client stated in its ClientHello, for the sessions
+/// it creates from now on — sent when the client's configuration changed, say by a reload.
+///
+/// Sessions that already exist keep theirs, for the reason ClientHello's apply only at creation: an
+/// application that already read DA1 cannot be told its terminal changed identity.
+struct SessionSettingsChanged
+{
+    /// The new preference; absent means "whatever the daemon hosts with" from now on.
+    std::optional<WireSessionSettings> sessionSettings = std::nullopt;
+    bool operator==(SessionSettingsChanged const&) const = default;
+};
+
+/// An operation on a hosted session's terminal engine that a client asks the daemon to perform.
+///
+/// The codec carries any byte: what an operation does, and whether the daemon knows it at all, is the
+/// host's to decide (@see vthost::SessionHost::performOperation), so a value no enumerator names -- from a
+/// newer client -- reaches the host and is refused there rather than failing the frame.
+enum class EngineOperation : uint8_t
+{
+    ClearToPrompt = 0,        ///< Drop every row above the current prompt, scrollback and page alike.
+    ClearHistoryAndReset = 1, ///< Hard reset (RIS), which drops the scrollback.
+    SoftReset = 2,            ///< DECSTR.
+    WriteScreen = 3,          ///< Parse the request's text as if the application had written it.
+    SetUserMark = 4,          ///< Place the user mark (vi `mm`) on the logical line of the request's row.
+    ClearUserMark = 5,        ///< Take the user mark off the logical line of the request's row.
+};
+
+/// A row of a hosted session's primary grid, as the host numbers it: a stable id, which names that row only
+/// within the stable-id generation it was taken in (Delta::stableIdGeneration).
+struct RowAddress
+{
+    int64_t stableId = 0;    ///< The row's stable id.
+    uint64_t generation = 0; ///< The stable-id generation @ref stableId was taken in.
+    bool operator==(RowAddress const&) const = default;
+};
+
+/// Client→server: perform @p operation on the terminal hosting @p session.
+///
+/// A client's terminal is a mirror rebuilt from deltas, so an action that changes the engine's state has
+/// to run where the session lives; the mirror then follows through the Delta stream, as it follows output.
+/// One verb carrying an enum rather than one PDU per action, so the next such action is an enumerator.
+struct PerformOperation
+{
+    uint64_t session = 0;                                       ///< The session to act on.
+    EngineOperation operation = EngineOperation::ClearToPrompt; ///< What to perform.
+    std::string text = {};                                      ///< WriteScreen's text; empty otherwise.
+    RowAddress row = {}; ///< The row SetUserMark and ClearUserMark act on; zero otherwise.
+    bool operator==(PerformOperation const&) const = default;
+};
+
 using DecodedPdu = std::variant<Invalid,
                                 ClientHello,
                                 ServerHello,
@@ -757,7 +990,9 @@ using DecodedPdu = std::variant<Invalid,
                                 ClosePane,
                                 NewWindow,
                                 ResizePane,
-                                ResizeSplit>;
+                                ResizeSplit,
+                                SessionSettingsChanged,
+                                PerformOperation>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.
@@ -776,6 +1011,15 @@ void encodePdu(Writer& sink, uint64_t serial, DecodedPdu const& pdu);
 /// gates: a field added to `encodeCell` has to be remembered here too, and nothing points across
 /// a module boundary to say so. `Pdu_test` pins the two together against a real `Writer`.
 [[nodiscard]] std::size_t estimatedEncodedSize(WireLine const& line) noexcept;
+
+/// @return An upper bound on how many bytes @p block occupies once encoded.
+///
+/// Unlike the row estimate this one is a BOUND, never below the real size, because what it sizes is
+/// not split further: it decides how many records one delta carries and how many a snapshot states,
+/// and an under-count there is a frame larger than the budget it was sized against. `Pdu_test` pins
+/// it against a real `Writer`.
+/// @param block The record to size.
+[[nodiscard]] std::size_t estimatedEncodedSize(WireCommandBlock const& block) noexcept;
 
 /// One piece of a snapshot whose rows did not fit a single frame: an index range plus its
 /// place in the run.

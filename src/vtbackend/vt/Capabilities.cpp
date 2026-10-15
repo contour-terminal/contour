@@ -2,11 +2,14 @@
 #include <vtbackend/vt/Capabilities.hpp>
 
 #include <core/Escape.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <array>
 #include <compare>
+#include <format>
 #include <sstream>
+#include <string>
 #include <vector>
 
 using std::nullopt;
@@ -468,6 +471,34 @@ string StaticDatabase::terminfo() const
                    << ",\n";
 
     return output.str();
+}
+
+namespace
+{
+    /// The reply for the capability @p key names, echoing it as @p hexKey. A value is spelled as xterm
+    /// spells it, each byte as two upper-case hexadecimal digits (core::toHexString()).
+    template <typename Key>
+    std::string capabilityReplyFor(Database const& database, Key key, std::string_view hexKey)
+    {
+        if (database.booleanCapability(key))
+            return std::format("\033P1+r{}\033\\", hexKey);
+        if (auto const value = database.numericCapability(key); value != Database::Npos)
+            return std::format(
+                "\033P1+r{}={}\033\\", hexKey, core::toHexString(std::string_view { std::to_string(value) }));
+        if (auto const value = database.stringCapability(key); !value.empty())
+            return std::format("\033P1+r{}={}\033\\", hexKey, core::toHexString(value));
+        return "\033P0+r\033\\";
+    }
+} // namespace
+
+std::string capabilityReply(Database const& database, std::string_view name)
+{
+    return capabilityReplyFor(database, name, core::toHexString(name));
+}
+
+std::string capabilityReply(Database const& database, Code code)
+{
+    return capabilityReplyFor(database, code, code.hex());
 }
 
 } // namespace vtbackend::capabilities

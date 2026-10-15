@@ -90,7 +90,9 @@ if(DEFINED MSVC)
 endif()
 
 if(APPLE)
-    # add -fexperimental-library option for libc++
+    # Apple's libc++ before 20 (Xcode 16) declares std::jthread and std::stop_token only behind
+    # -fexperimental-library; core-cpp's StopToken uses them when __cpp_lib_jthread says they exist.
+    # Xcode 26 (libc++ 20) declares them without the flag.
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexperimental-library")
 endif()
 

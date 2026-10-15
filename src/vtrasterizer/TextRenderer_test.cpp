@@ -1,5 +1,10 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/core/StickyHeaderKind.hpp>
+#include <vtbackend/render/RenderBuffer.hpp>
+#include <vtbackend/shell/StickyHeader.hpp>
+#include <vtbackend/testing/MockTerm.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <vtrasterizer/FontDescriptions.hpp>
 #include <vtrasterizer/GridMetrics.hpp>
@@ -19,8 +24,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <ranges>
@@ -126,6 +133,17 @@ class RendererTest
     [[nodiscard]] static FontDescriptions const& liveFontDescriptions(Renderer const& renderer)
     {
         return renderer._fontDescriptions;
+    }
+
+    /// Draws @p header as a frame's sticky-header step does, inside one text frame.
+    static void renderStickyHeader(Renderer& renderer,
+                                   vtbackend::RenderStickyHeader const& header,
+                                   vtbackend::LineOffset row,
+                                   vtbackend::ColumnCount columns)
+    {
+        renderer._textRenderer.beginFrame();
+        renderer.renderStickyHeader(header, row, columns);
+        renderer._textRenderer.endFrame();
     }
 };
 } // namespace vtrasterizer
@@ -2100,6 +2118,172 @@ TEST_CASE("Renderer.reconfig.tiles_follow_the_atlas_across_a_rebuild", "[rendere
           == Catch::Approx(unbox<float>(tile->bitmapSize.width)));
     CHECK(normalized.height * unbox<float>(sizeAfterGrow.height)
           == Catch::Approx(unbox<float>(tile->bitmapSize.height)));
+}
+
+TEST_CASE("Renderer.stickyHeader.drawsABandItsCellsTheChipAndASeparator", "[renderer][stickyheader]")
+{
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    auto const& rectangles = fixture.renderTarget.rectangles;
+
+    auto const band = 0x303030_rgb;
+    auto const edge = 0x808080_rgb;
+    auto const cellBackground = 0x204060_rgb;
+    auto header = vtbackend::RenderStickyHeader { .kind = StickyHeaderKind::Command,
+                                                  .block = CommandBlockId { 1 },
+                                                  .cells = {},
+                                                  .chip = {},
+                                                  .background = band,
+                                                  .separator = edge };
+    for (auto const column: std::views::iota(0, 3))
+        header.cells.push_back(vtbackend::RenderCell {
+            .codepoints = {},
+            .image = {},
+            .position = CellLocation { .line = LineOffset(2), .column = ColumnOffset(column) },
+            .attributes = RenderAttributes { .foregroundColor = 0xFFFFFF_rgb,
+                                             .backgroundColor = cellBackground,
+                                             .decorationColor = 0xFFFFFF_rgb,
+                                             .flags = {},
+                                             .lineFlags = LineFlag::None },
+            .width = 1,
+            .sizing = {},
+            .groupStart = column == 0,
+            .groupEnd = column == 2 });
+
+    // Seeded metrics: 10x20 cells, no margin -- so row 2 spans y 40..59, and 80 columns are 800 pixels.
+    RendererTest::renderStickyHeader(fixture.renderer, header, LineOffset(2), ColumnCount(80));
+
+    SECTION("an opaque band first, the separator last, the cells in between")
+    {
+        REQUIRE(rectangles.size() == 5);
+
+        auto const& first = rectangles.front();
+        CHECK(first.x == 0);
+        CHECK(first.y == 40);
+        CHECK(first.width == Width(800));
+        CHECK(first.height == Height(20));
+        CHECK(first.color == RGBAColor(band, 0xFF));
+
+        CHECK(
+            std::ranges::count_if(rectangles, [&](auto const& r) { return r.color.rgb() == cellBackground; })
+            == 3);
+
+        auto const& last = rectangles.back();
+        CHECK(last.x == 0);
+        CHECK(last.y == 59);
+        CHECK(last.width == Width(800));
+        CHECK(last.height == Height(1));
+        CHECK(last.color == RGBAColor(edge, 0xFF));
+    }
+
+    SECTION("the chip is drawn where the terminal laid it out")
+    {
+        // The terminal places the chip (Terminal::fillStickyHeader); the renderer draws its cells as they
+        // are.
+        fixture.renderTarget.rectangles.clear();
+        header.cells.clear();
+        auto const chipAttributes = RenderAttributes { .foregroundColor = 0xFFFFFF_rgb,
+                                                       .backgroundColor = cellBackground,
+                                                       .decorationColor = 0xFFFFFF_rgb,
+                                                       .flags = {},
+                                                       .lineFlags = LineFlag::None };
+        vtbackend::layoutRenderText(header.chip,
+                                    U"✓ 3s",
+                                    chipAttributes,
+                                    CellLocation { .line = LineOffset(2), .column = ColumnOffset(74) },
+                                    ColumnOffset(78));
+        RendererTest::renderStickyHeader(fixture.renderer, header, LineOffset(2), ColumnCount(80));
+
+        auto const chipCell = [&](int x) {
+            return std::ranges::any_of(rectangles, [&](auto const& r) {
+                return r.x == x && r.y == 40 && r.color.rgb() == cellBackground;
+            });
+        };
+        CHECK(chipCell(740));
+        CHECK(chipCell(770));
+        CHECK_FALSE(chipCell(730));
+        CHECK_FALSE(chipCell(780));
+    }
+}
+
+TEST_CASE("Renderer.stickyHeader.coversTheTopRowInAStepAfterThePage", "[renderer][stickyheader]")
+{
+    // One execute() draws every rectangle before any glyph, so a band issued in the page's own step would
+    // sit UNDER row 0's text. The frame must flush the page first and draw the header in a later step.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
+    mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Always;
+    vtbackend::test::startCommand(mc, "make");
+    vtbackend::test::printLines(mc, "out", 20);
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const header = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return buffer.get().stickyHeader;
+    }();
+    REQUIRE(header.has_value());
+
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const band = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.y == 0 && r.width == Width(200) && r.height == Height(20)
+               && r.color == RGBAColor(header->background, 0xFF);
+    });
+    REQUIRE(band != rectangles.end());
+    CHECK(band->step >= 1);
+
+    auto const separator = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.y == 19 && r.height == Height(1) && r.color == RGBAColor(header->separator, 0xFF);
+    });
+    REQUIRE(separator != rectangles.end());
+    CHECK(separator->step == band->step);
+}
+
+TEST_CASE("Renderer.stickyHeader.staysPutWhileThePageScrollsSmoothly", "[renderer][stickyheader]")
+{
+    // With a pixel offset the page is drawn shifted, scissored to the main area. The header is pinned to
+    // the row, not carried by the content: its band and its cells are drawn at the row's own pixels.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
+    mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Always;
+    // The prompt's `$` on a blue background, so the copied cell paints a rectangle of its own.
+    mc.writeToScreen(
+        "\033]133;A\033\\\033[44m$\033[m \033]133;B\033\\make\r\n\033]133;C;cmdline_url=make\033\\");
+    for (auto const i: std::views::iota(0, 20))
+        mc.writeToScreen(std::format("out {}\r\n", i));
+    mc.terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+    REQUIRE(mc.terminal.applySmoothScrollPixelDelta(5.0f) == SmoothScrollResult::Applied);
+    REQUIRE(mc.terminal.smoothScrollPixelOffset() != 0.0f);
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const header = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return buffer.get().stickyHeader;
+    }();
+    REQUIRE(header.has_value());
+
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const band = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.width == Width(200) && r.height == Height(20)
+               && r.color == RGBAColor(header->background, 0xFF);
+    });
+    REQUIRE(band != rectangles.end());
+    CHECK(band->y == 0);
+
+    auto const blue = mc.terminal.colorPalette().normalColor(4);
+    auto const prompt = std::ranges::find_if(
+        rectangles, [&](auto const& r) { return r.step == band->step && r.color.rgb() == blue; });
+    REQUIRE(prompt != rectangles.end());
+    CHECK(prompt->x == 0);
+    CHECK(prompt->y == 0);
 }
 
 int main(int argc, char* argv[])

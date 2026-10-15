@@ -101,6 +101,22 @@ class StaticDatabase: public Database
     [[nodiscard]] std::string terminfo() const override;
 };
 
+/// XTGETTCAP's reply for the capability @p name, as @p database holds it: `DCS 1 + r <name> ST` for a
+/// boolean one, `DCS 1 + r <name> = <value> ST` for a numeric or string one, and `DCS 0 + r ST` for one
+/// @p database does not hold. The name and the value are spelled in hexadecimal, two upper-case digits
+/// per byte, as xterm spells them (ctlseqs.txt, XTGETTCAP): a value's byte past ASCII is two digits too.
+/// @param database The capabilities to answer from.
+/// @param name The capability's terminfo or termcap name, as the request spelled it.
+/// @return The reply.
+[[nodiscard]] std::string capabilityReply(Database const& database, std::string_view name);
+
+/// XTGETTCAP's reply for the capability whose termcap code is @p code, as for its name.
+/// @see capabilityReply(Database const&, std::string_view)
+/// @param database The capabilities to answer from.
+/// @param code The capability's termcap code.
+/// @return The reply.
+[[nodiscard]] std::string capabilityReply(Database const& database, Code code);
+
 } // namespace vtbackend::capabilities
 
 template <>

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/platform/NativeFileSystem.hpp>
 
+#include <core/Escape.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/platform/PathUtils.hpp>
 
 #include <cerrno>
@@ -26,19 +28,6 @@ namespace fs = std::filesystem;
 
 namespace core::platform
 {
-
-namespace
-{
-    /// @param path A path to name in an error message.
-    /// @return @p path in UTF-8, in its native format. Not `path::string()`, which on Windows
-    ///         narrows through the ANSI code page: a name the code page cannot hold was mangled,
-    ///         and MSVC's conversion throws there, so the error path itself threw (core-cpp#26).
-    [[nodiscard]] std::string forMessage(fs::path const& path)
-    {
-        auto const spelled = path.u8string();
-        return std::string { reinterpret_cast<char const*>(spelled.data()), spelled.size() };
-    }
-} // namespace
 
 RenameFunction nativeRename()
 {
@@ -127,12 +116,12 @@ std::expected<std::string, std::string> NativeFileSystem::readFile(fs::path cons
 {
     auto ifs = std::ifstream(path, std::ios::binary);
     if (!ifs)
-        return std::unexpected(std::format("Cannot open file: {}", forMessage(path)));
+        return std::unexpected(std::format("Cannot open file: {}", core::pathToUtf8(path)));
 
     auto oss = std::ostringstream {};
     oss << ifs.rdbuf();
     if (ifs.bad())
-        return std::unexpected(std::format("Error reading file: {}", forMessage(path)));
+        return std::unexpected(std::format("Error reading file: {}", core::pathToUtf8(path)));
     return oss.str();
 }
 
@@ -141,11 +130,11 @@ std::expected<void, std::string> NativeFileSystem::writeFile(fs::path const& pat
 {
     auto ofs = std::ofstream(path, std::ios::binary | std::ios::trunc);
     if (!ofs)
-        return std::unexpected(std::format("Cannot open file for writing: {}", forMessage(path)));
+        return std::unexpected(std::format("Cannot open file for writing: {}", core::pathToUtf8(path)));
 
     ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
     if (!ofs)
-        return std::unexpected(std::format("Error writing file: {}", forMessage(path)));
+        return std::unexpected(std::format("Error writing file: {}", core::pathToUtf8(path)));
     return {};
 }
 
@@ -154,11 +143,11 @@ std::expected<void, std::string> NativeFileSystem::appendFile(fs::path const& pa
 {
     auto ofs = std::ofstream(path, std::ios::binary | std::ios::app);
     if (!ofs)
-        return std::unexpected(std::format("Cannot open file for appending: {}", forMessage(path)));
+        return std::unexpected(std::format("Cannot open file for appending: {}", core::pathToUtf8(path)));
 
     ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
     if (!ofs)
-        return std::unexpected(std::format("Error appending to file: {}", forMessage(path)));
+        return std::unexpected(std::format("Error appending to file: {}", core::pathToUtf8(path)));
     return {};
 }
 
@@ -246,7 +235,8 @@ std::expected<void, std::string> NativeFileSystem::createDirectory(fs::path cons
     // other way this fails, a missing parent -- sends a caller looking in the wrong place.
     if (!ec)
         ec = std::make_error_code(std::errc::file_exists);
-    return std::unexpected(std::format("Cannot create directory '{}': {}", forMessage(path), ec.message()));
+    return std::unexpected(
+        std::format("Cannot create directory '{}': {}", core::pathToUtf8(path), ec.message()));
 }
 
 std::expected<void, std::string> NativeFileSystem::createDirectories(fs::path const& path) const
@@ -255,7 +245,7 @@ std::expected<void, std::string> NativeFileSystem::createDirectories(fs::path co
     fs::create_directories(path, ec);
     if (ec)
         return std::unexpected(
-            std::format("Cannot create directories '{}': {}", forMessage(path), ec.message()));
+            std::format("Cannot create directories '{}': {}", core::pathToUtf8(path), ec.message()));
     return {};
 }
 
@@ -264,7 +254,7 @@ std::expected<bool, std::string> NativeFileSystem::remove(fs::path const& path) 
     std::error_code ec;
     auto const result = fs::remove(path, ec);
     if (ec)
-        return std::unexpected(std::format("Cannot remove '{}': {}", forMessage(path), ec.message()));
+        return std::unexpected(std::format("Cannot remove '{}': {}", core::pathToUtf8(path), ec.message()));
     return result;
 }
 
@@ -273,7 +263,7 @@ std::expected<std::uintmax_t, std::string> NativeFileSystem::removeAll(fs::path 
     std::error_code ec;
     auto const result = fs::remove_all(path, ec);
     if (ec)
-        return std::unexpected(std::format("Cannot remove '{}': {}", forMessage(path), ec.message()));
+        return std::unexpected(std::format("Cannot remove '{}': {}", core::pathToUtf8(path), ec.message()));
     return result;
 }
 
@@ -286,8 +276,8 @@ std::expected<void, std::string> NativeFileSystem::copyFile(fs::path const& from
         policy == OverwritePolicy::Replace ? fs::copy_options::overwrite_existing : fs::copy_options::none;
     fs::copy_file(from, to, opts, ec);
     if (ec)
-        return std::unexpected(
-            std::format("Cannot copy '{}' to '{}': {}", forMessage(from), forMessage(to), ec.message()));
+        return std::unexpected(std::format(
+            "Cannot copy '{}' to '{}': {}", core::pathToUtf8(from), core::pathToUtf8(to), ec.message()));
     return {};
 }
 
@@ -382,16 +372,18 @@ std::expected<void, std::string> NativeFileSystem::rename(fs::path const& from, 
             return {};
         if (!recase.stranded.empty())
             return std::unexpected(std::format("Cannot rename '{}' to '{}': {}; it is now at '{}'",
-                                               forMessage(from),
-                                               forMessage(to),
+                                               core::pathToUtf8(from),
+                                               core::pathToUtf8(to),
                                                recase.error.message(),
-                                               forMessage(recase.stranded)));
-        return std::unexpected(std::format(
-            "Cannot rename '{}' to '{}': {}", forMessage(from), forMessage(to), recase.error.message()));
+                                               core::pathToUtf8(recase.stranded)));
+        return std::unexpected(std::format("Cannot rename '{}' to '{}': {}",
+                                           core::pathToUtf8(from),
+                                           core::pathToUtf8(to),
+                                           recase.error.message()));
     }
 
-    return std::unexpected(
-        std::format("Cannot rename '{}' to '{}': {}", forMessage(from), forMessage(to), ec.message()));
+    return std::unexpected(std::format(
+        "Cannot rename '{}' to '{}': {}", core::pathToUtf8(from), core::pathToUtf8(to), ec.message()));
 }
 
 namespace
@@ -435,7 +427,8 @@ std::expected<std::vector<FileSystem::DirectoryEntry>, std::string> NativeFileSy
         it.increment(ec);
     }
     if (ec)
-        return std::unexpected(std::format("Cannot list directory '{}': {}", forMessage(path), ec.message()));
+        return std::unexpected(
+            std::format("Cannot list directory '{}': {}", core::pathToUtf8(path), ec.message()));
     return entries;
 }
 
@@ -469,7 +462,8 @@ std::expected<std::uintmax_t, std::string> NativeFileSystem::fileSize(fs::path c
     std::error_code ec;
     auto const size = fs::file_size(path, ec);
     if (ec)
-        return std::unexpected(std::format("Cannot get file size '{}': {}", forMessage(path), ec.message()));
+        return std::unexpected(
+            std::format("Cannot get file size '{}': {}", core::pathToUtf8(path), ec.message()));
     return size;
 }
 
@@ -479,7 +473,7 @@ std::expected<fs::file_time_type, std::string> NativeFileSystem::lastWriteTime(f
     auto const time = fs::last_write_time(path, ec);
     if (ec)
         return std::unexpected(
-            std::format("Cannot get last write time '{}': {}", forMessage(path), ec.message()));
+            std::format("Cannot get last write time '{}': {}", core::pathToUtf8(path), ec.message()));
     return time;
 }
 
@@ -489,7 +483,7 @@ std::expected<fs::perms, std::string> NativeFileSystem::permissions(fs::path con
     auto const status = fs::status(path, ec);
     if (ec)
         return std::unexpected(
-            std::format("Cannot get permissions '{}': {}", forMessage(path), ec.message()));
+            std::format("Cannot get permissions '{}': {}", core::pathToUtf8(path), ec.message()));
     return status.permissions();
 }
 
@@ -499,7 +493,7 @@ std::expected<void, std::string> NativeFileSystem::setPermissions(fs::path const
     fs::permissions(path, perms, ec);
     if (ec)
         return std::unexpected(
-            std::format("Cannot set permissions '{}': {}", forMessage(path), ec.message()));
+            std::format("Cannot set permissions '{}': {}", core::pathToUtf8(path), ec.message()));
     return {};
 }
 
@@ -508,9 +502,12 @@ std::expected<fs::path, std::string> NativeFileSystem::createTempFile(std::strin
     // The template is built as a path, not by concatenating path::string(): that narrows to the
     // platform's native narrow encoding, which on Windows is the ANSI code page, and MSVC throws
     // on a temp directory it cannot spell -- a user name outside the code page is enough. The
-    // prefix goes in as UTF-8, which is what every path string in core-cpp is.
-    auto const leaf = std::u8string(prefix.begin(), prefix.end()) + u8"_XXXXXX";
-    auto const templatePath = fs::temp_directory_path() / fs::path(leaf);
+    // prefix goes in as UTF-8, which is what every path string in core-cpp is; one that is not
+    // UTF-8 names no file on Windows.
+    auto const name = core::pathFromUtf8(std::string { prefix } + "_XXXXXX");
+    if (!name)
+        return std::unexpected(std::format("Temporary file prefix is not UTF-8: {}", core::escape(prefix)));
+    auto const templatePath = fs::temp_directory_path() / *name;
 
 #ifdef _WIN32
     // wchar_t end to end, for the same reason: a narrow template handed to _mktemp_s, or to

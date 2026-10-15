@@ -13,6 +13,7 @@
 #include <contour/platform/Announcer.hpp>
 #include <contour/platform/BlurBehind.hpp>
 #include <contour/platform/QtInvoke.hpp>
+#include <contour/platform/QtPath.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/SessionInput.hpp>
 
@@ -25,6 +26,7 @@
 #include <core/Utils.hpp>
 #include <core/cli/App.hpp>
 #include <core/log/LogStore.hpp>
+#include <core/platform/PathUtils.hpp>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
@@ -331,7 +333,7 @@ void TerminalDisplay::setSession(session::TerminalSession* newSession)
         // mouse hit-test maps through it, and a zero origin under a configured margin reports the cell
         // the user clicked minus that margin.
         //
-        // WITHOUT the fold gutter, and unavoidably: the gutter is a fraction of the cell, and the cell
+        // WITHOUT the gutter, and unavoidably: the gutter is a fraction of the cell, and the cell
         // size is the renderer's own answer -- there is none to ask until the object being constructed
         // here exists. The first applyResize() folds it in, which is before any pointer event reaches a
         // window that has been shown.
@@ -930,7 +932,7 @@ void TerminalDisplay::createRenderer()
             gridMetrics().cellSize,
             marginsDevicePx,
             [this](auto page) { return _session->terminal().clampedTotalPageSize(page); },
-            session::gutterWidthFor(_session->config().folding.value(), gridMetrics().cellSize));
+            session::configuredGutterWidth(_session->config(), gridMetrics().cellSize));
         _renderer->reserveAtlasForPage(fit.pageSize);
     }
 
@@ -1182,7 +1184,7 @@ void TerminalDisplay::paint()
             _saveScreenshot = std::nullopt;
             requestScreenshot([destination](QImage const& image) {
                 std::visit(core::Overloaded { [&](std::filesystem::path const& path) {
-                                                 image.save(QString::fromStdString(path.string()));
+                                                 image.save(platform::toQString(path));
                                              },
                                               [&](std::monostate) {
                                                   if (QClipboard* clipboard = QGuiApplication::clipboard();
@@ -1394,6 +1396,13 @@ void TerminalDisplay::mouseReleaseEvent(QMouseEvent* event)
     session::sendMouseReleaseEvent(event, *_session);
 }
 
+void TerminalDisplay::mouseUngrabEvent()
+{
+    QQuickItem::mouseUngrabEvent();
+    if (_session)
+        _session->dropOwedRelease();
+}
+
 void TerminalDisplay::focusInEvent(QFocusEvent* event)
 {
     QQuickItem::focusInEvent(event);
@@ -1540,12 +1549,6 @@ bool TerminalDisplay::event(QEvent* event)
 // }}}
 
 // {{{ helpers
-void TerminalDisplay::onScrollBarValueChanged(int value)
-{
-    terminal().viewport().scrollTo(vtbackend::ScrollOffset::cast_from(value));
-    scheduleRedraw();
-}
-
 double TerminalDisplay::devicePixelRatio() const
 {
     return devicePixelRatioForWindow(window());
@@ -1620,7 +1623,7 @@ vtbackend::ImageSize TerminalDisplay::pixelSize() const
         _session->terminal().totalPageSize(),
         cellSize,
         geometry::scaled(session::toGeometryMargins(_session->profile().margins.value()), devicePixelRatio()),
-        session::gutterWidthFor(_session->config().folding.value(), cellSize));
+        session::configuredGutterWidth(_session->config(), cellSize));
 }
 
 vtbackend::ImageSize TerminalDisplay::reportedPixelSize(vtbackend::PageSize totalPageSize) const
@@ -1754,7 +1757,7 @@ vtbackend::FontDef TerminalDisplay::getFontDef()
 void TerminalDisplay::inspect()
 {
     // Ensure we're invoked on GUI thread when calling doDumpState().
-    QMetaObject::invokeMethod(this, &TerminalDisplay::doDumpState, Qt::QueuedConnection);
+    platform::postToObject(this, [this] { doDumpState(); });
 }
 
 void TerminalDisplay::doDumpState()
@@ -1836,7 +1839,7 @@ void TerminalDisplay::doDumpStateInternal()
 
     fs::create_symlink(workDirName, targetBaseDir / latestDirName);
 
-    displayLog()("Dumping state into directory: {}", targetDir.generic_string());
+    displayLog()("Dumping state into directory: {}", core::platform::normalizePath(targetDir));
 
     // TODO: The above should be done from the outside and the targetDir being passed into this call.
     // TODO: maybe zip this dir in the end.
@@ -1853,7 +1856,7 @@ void TerminalDisplay::doDumpStateInternal()
         std::cout << screenStateDump;
 
         auto const screenStateDumpFilePath = targetDir / "screen-state-dump.vt";
-        auto fs = ofstream { screenStateDumpFilePath.string(), ios::trunc };
+        auto fs = ofstream { screenStateDumpFilePath, ios::trunc };
         fs << screenStateDump;
         fs.close();
     }
@@ -1875,17 +1878,18 @@ void TerminalDisplay::doDumpStateInternal()
 
         vtrasterizer::AtlasTextureScreenshot const& info = infoOpt.value();
         auto const fileName = targetDir / "texture-atlas-rgba.png";
-        displayLog()("Saving image {} to: {}", info.size, fileName.generic_string());
+        displayLog()("Saving image {} to: {}", info.size, core::platform::normalizePath(fileName));
 
         QImage(info.buffer.data(),
                info.size.width.as<int>(),
                info.size.height.as<int>(),
                QImage::Format_RGBA8888)
-            .save(QString::fromStdString(fileName.generic_string()));
+            .save(platform::toQString(fileName));
     } while (0);
 
     auto screenshotFilePath = targetDir / "screenshot.png";
-    displayLog()("Requesting screenshot for state dump: {}", screenshotFilePath.generic_string());
+    displayLog()("Requesting screenshot for state dump: {}",
+                 core::platform::normalizePath(screenshotFilePath));
 
     // Deferred capture: the RHI reads the offscreen render back a frame or two later, so save it when it
     // arrives and only *then* terminate on the at-exit path — terminating now would close the window before
@@ -1897,7 +1901,7 @@ void TerminalDisplay::doDumpStateInternal()
         return;
     }
     requestScreenshot([screenshotFilePath, terminateOnExit](QImage const& image) {
-        image.save(QString::fromStdString(screenshotFilePath.string()));
+        image.save(platform::toQString(screenshotFilePath));
         terminateOnExit();
     });
 }
@@ -1947,6 +1951,11 @@ void TerminalDisplay::recomputeGeometryAfterFontReconfig()
     // resizeScreen()/SIGWINCH to the child) and the WM size hints. Callers must ensure the display is
     // fully alive (live _session, _renderer and window()).
     Require(_session && _renderer && window());
+    refitPage();
+}
+
+void TerminalDisplay::refitPage()
+{
     resizeTerminalToDisplaySize();
     notifyCellGeometryChanged();
 }

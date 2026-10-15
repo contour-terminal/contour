@@ -8,6 +8,7 @@
 #include <vtpty/SandboxInfo.hpp>
 
 #include <core/Environment.hpp>
+#include <core/Utf8Path.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -63,8 +64,10 @@ struct MuxSocketPathInputs
 ///     override, analogous to tmux's `$TMUX` naming the active server's socket);
 ///  3. `<xdgRuntimeDir>/app/<sandboxAppId>/contour/<label>` when sandboxed;
 ///  4. `<xdgRuntimeDir>/contour/<label>`;
-///  5. `<temp>/contour-<user>/<label>` as the fallback when no runtime dir exists
-///     (tmux's `/tmp/tmux-<uid>/<label>` shape).
+///  5. `<temp>/contour-<user>/<label>` as the fallback when no runtime dir exists, or the one set is
+///     relative (tmux's `/tmp/tmux-<uid>/<label>` shape).
+///
+/// Rungs 3 and 4 are vtpty::sharedRuntimeDirectory(), which the pager's private files share.
 ///
 /// Rung 3 exists because inside a Flatpak sandbox `XDG_RUNTIME_DIR` is `/run/user/<uid>` — a
 /// directory created inside the sandbox's own mount namespace, NOT the host's. A socket bound at
@@ -88,21 +91,21 @@ struct MuxSocketPathInputs
 {
     namespace fs = std::filesystem;
 
+    auto const fromUtf8 = [](std::string_view utf8) {
+        return core::pathFromUtf8(utf8).value_or(fs::path {});
+    };
+
     if (!inputs.explicitPath.empty())
-        return fs::path { inputs.explicitPath };
+        return fromUtf8(inputs.explicitPath);
 
     if (inputs.contourMuxEnv && !inputs.contourMuxEnv->empty())
-        return fs::path { *inputs.contourMuxEnv };
+        return fromUtf8(*inputs.contourMuxEnv);
 
-    if (inputs.xdgRuntimeDir && !inputs.xdgRuntimeDir->empty())
-    {
-        auto base = fs::path { *inputs.xdgRuntimeDir };
-        if (!inputs.sandboxAppId.empty())
-            base /= fs::path { "app" } / inputs.sandboxAppId;
-        return base / "contour" / inputs.label;
-    }
+    if (auto const runtime = vtpty::sharedRuntimeDirectory(inputs.xdgRuntimeDir, inputs.sandboxAppId))
+        return *runtime / "contour" / fromUtf8(inputs.label);
 
-    return fs::temp_directory_path() / ("contour-" + std::string { inputs.user }) / inputs.label;
+    return fs::temp_directory_path() / fromUtf8("contour-" + std::string { inputs.user })
+           / fromUtf8(inputs.label);
 }
 
 /// Production entry point: derives the path from a process environment and the sandbox this process

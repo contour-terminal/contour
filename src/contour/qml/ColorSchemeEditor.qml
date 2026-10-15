@@ -1,8 +1,11 @@
 // vim:syntax=qml
-// The color-scheme editor: a scrollable grid of swatch cards (default fg/bg + the 8 normal and 8
-// bright ANSI colors) bound to SettingsController.schemeColors ({ key, label, color }). Each card
-// shows a live swatch and an editable "#rrggbb" field; committing writes the slot back through
-// SettingsController.setSchemeColor. A pinned footer bar carries the scheme name + Save / Delete.
+// The color-scheme editor: a scrollable grid of swatch cards (default fg/bg, the 8 normal and 8
+// bright ANSI colors, and the command-block slots) bound to SettingsController.schemeColors
+// ({ key, label, color, colorSource }). Each card shows a live swatch and an editable "#rrggbb" field;
+// committing writes the slot back through SettingsController.setSchemeColor. A command-block slot the
+// scheme leaves unset shows the colour the palette derives, says that it follows it, and is written only
+// once a colour is committed to it; a slot pinned that way offers to follow again. A pinned footer bar
+// carries the scheme name + Save / Delete.
 //
 // A hex field is used deliberately instead of a native ColorDialog: QtQuick.Dialogs is not guaranteed
 // present on every target, and a hard import of it would break page loading where it is absent.
@@ -82,14 +85,39 @@ Item {
                                 border.width: 1
                                 Layout.alignment: Qt.AlignVCenter
                             }
-                            Label {
-                                text: slot.modelData.label
-                                color: sys.windowText
-                                elide: Text.ElideRight
+                            ColumnLayout {
                                 Layout.fillWidth: true
                                 Layout.alignment: Qt.AlignVCenter
+                                spacing: 0
+                                Label {
+                                    text: slot.modelData.label
+                                    color: sys.windowText
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                Label {
+                                    objectName: "schemeColorFollows"
+                                    visible: slot.modelData.colorSource === "derived"
+                                    text: qsTr("Follows the scheme's other colors")
+                                    color: root.subtleText
+                                    font.pointSize: 8
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                            }
+                            ToolButton {
+                                objectName: "followSchemeColorButton"
+                                visible: slot.modelData.colorSource === "pinned"
+                                enabled: root.controller && !root.controller.locked
+                                text: "↺"
+                                Accessible.name: qsTr("Follow the scheme's other colors again")
+                                ToolTip.visible: hovered
+                                ToolTip.text: Accessible.name
+                                onClicked: if (root.controller) root.controller.resetSchemeColor(slot.modelData.key)
                             }
                             TextField {
+                                id: hexField
+                                objectName: "schemeColorField"
                                 Layout.preferredWidth: 110
                                 Layout.alignment: Qt.AlignVCenter
                                 text: slot.modelData.color
@@ -97,8 +125,20 @@ Item {
                                 selectByMouse: true
                                 font.family: "monospace"
                                 inputMask: "\\#HHHHHH"
-                                onEditingFinished: if (root.controller)
-                                                       root.controller.setSchemeColor(slot.modelData.key, text)
+                                Accessible.name: slot.modelData.label
+
+                                /// Commits the colour the field shows, once all six digits are there.
+                                function commit() {
+                                    if (root.controller && hexField.acceptableInput)
+                                        root.controller.setSchemeColor(slot.modelData.key, hexField.text)
+                                }
+                                // Leaving the field commits a changed colour only, so tabbing through a derived
+                                // swatch pins nothing. Return commits the colour shown, changed or not: that is
+                                // how a derived slot keeps the colour it shows now.
+                                onEditingFinished: if (hexField.text.toLowerCase() !== slot.modelData.color)
+                                                       hexField.commit()
+                                Keys.onReturnPressed: hexField.commit()
+                                Keys.onEnterPressed: hexField.commit()
                             }
                         }
                     }

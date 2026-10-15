@@ -3,14 +3,16 @@
 #include <contour/session/SessionFactory.hpp>
 
 #include <vtpty/Process.hpp>
+
+#include <core/Utf8Path.hpp>
 #ifdef VTPTY_LIBSSH2
     #include <vtpty/SshSession.hpp>
 #endif
 
 #include <algorithm>
-#include <filesystem>
 #include <functional>
 #include <iterator>
+#include <utility>
 
 using std::make_unique;
 using std::nullopt;
@@ -60,7 +62,8 @@ std::unique_ptr<vtpty::Pty> AppSessionFactory::createPty(
     // Variables Contour set to choose its own GPU must not steer the programs run inside it.
     std::ranges::copy(_app.selfOnlyEnvironment(), std::back_inserter(shell.removedEnvironment));
     if (cwd)
-        shell.workingDirectory = std::filesystem::path(cwd.value());
+        if (auto directory = core::pathFromUtf8(*cwd))
+            shell.workingDirectory = *std::move(directory);
     // Spawn the child at the caller's requested grid size when given (a new tab/split inherits the live
     // window's page size), otherwise at the profile's configured terminalSize (a brand-new window). Both
     // are TOTAL page sizes; childPtyPageSize() subtracts the status-line row(s) so the child is born at

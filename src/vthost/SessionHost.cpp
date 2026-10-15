@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/SessionHost.hpp>
 
+#include <core/Overloaded.hpp>
+
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <mutex>
 #include <ranges>
 #include <string_view>
+#include <tuple>
 #include <utility>
+#include <variant>
 
 #include <vthost/Logging.hpp>
 #include <vthost/SessionSettings.hpp>
@@ -31,25 +37,34 @@ HostedSession::HostedSession(SessionId id,
                              core::Environment const& env,
                              std::unique_ptr<vtpty::Pty> pty,
                              vtbackend::Settings settings,
+                             vtbackend::HostIdentity identity,
+                             vtbackend::TerminalClocks clocks,
+                             core::platform::FileSystem const& fileSystem,
                              std::function<void()> onScreenUpdated,
                              std::function<void()> onBell,
-                             std::function<void(std::string, std::string)> onNotify,
+                             SessionNotifyCallback onNotify,
                              std::function<void(std::string)> onCopyToClipboard,
                              std::function<void()> onClosed):
     _id(id),
-    _events(std::move(onScreenUpdated), std::move(onBell), std::move(onNotify), std::move(onCopyToClipboard)),
+    _events(std::move(identity),
+            std::move(onScreenUpdated),
+            std::move(onBell),
+            std::move(onNotify),
+            std::move(onCopyToClipboard)),
     _terminal(_events,
               env,
+              fileSystem,
               std::move(pty),
               std::move(settings),
               std::nullopt, // the daemon never renders an indicator, so it runs no status-line commands
-              std::chrono::steady_clock::now()),
+              clocks,
+              vtbackend::randomSemanticBlockTokens()),
     _onClosed(std::move(onClosed))
 {
     // DECSSDT 2 only REQUESTS the host-writable status line; the frontend decides.
     // The daemon honors it (the GUI does the same), so an app's status line works.
     _events.onShowHostWritableStatusLine = [this] {
-        _terminal.setStatusDisplay(vtbackend::StatusDisplayType::HostWritable);
+        _terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Shown);
     };
 }
 
@@ -74,6 +89,8 @@ void HostedSession::start()
     else if (!started->diagnostic.empty())
         sessionLog()("session {}: {}", _id.value, started->diagnostic);
     _pumpThread = std::make_unique<std::thread>([this] { pumpLoop(); });
+    // Named before the loop can hand it input: from now on, only the pump writes to the PTY.
+    _terminal.setReaderThread(_pumpThread->get_id());
 }
 
 void HostedSession::terminate()
@@ -104,9 +121,68 @@ void HostedSession::pumpLoop()
     // via its own `_terminating` flag; deriving the condition from the device instead keeps
     // one source of truth, since the device is what terminate() actually mutates.
     while (!_terminal.device().isClosed() && _terminal.processInputOnce())
+    {
+        deliverPending();
         _terminal.flushInput();
+    }
     if (_onClosed)
         _onClosed();
+}
+
+void HostedSession::deliverOnPump(Delivery deliver, std::string_view bytes)
+{
+    if (!_pumpThread)
+    {
+        deliver(_terminal, bytes);
+        return;
+    }
+    {
+        auto const _ = std::scoped_lock { _pendingMutex };
+        if (!_pending.empty() && _pending.back().deliver == deliver)
+            _pending.back().bytes.append(bytes);
+        else
+            _pending.push_back(PendingDelivery { .deliver = deliver, .bytes = std::string { bytes } });
+        _pendingBytes += bytes.size();
+    }
+    // Its read returns, and it delivers what was queued before it reads again.
+    _terminal.device().wakeupReader();
+}
+
+namespace
+{
+    /// How the pump delivers a client's input: written to the PTY as the client encoded it.
+    void writeToDevice(vtbackend::Terminal& terminal, std::string_view bytes)
+    {
+        std::ignore = terminal.device().write(bytes);
+    }
+} // namespace
+
+void HostedSession::writeInput(std::string_view bytes)
+{
+    deliverOnPump(writeToDevice, bytes);
+}
+
+void HostedSession::deliverPending()
+{
+    auto pending = std::vector<PendingDelivery> {};
+    {
+        auto const _ = std::scoped_lock { _pendingMutex };
+        pending = std::exchange(_pending, {});
+    }
+    for (auto const& delivery: pending)
+    {
+        delivery.deliver(_terminal, delivery.bytes);
+        // What a parse asked to send goes out ahead of what was handed over after it.
+        _terminal.flushInput();
+        auto const _ = std::scoped_lock { _pendingMutex };
+        _pendingBytes -= delivery.bytes.size();
+    }
+}
+
+std::size_t HostedSession::inputBacklog() const
+{
+    auto const _ = std::scoped_lock { _pendingMutex };
+    return _pendingBytes;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,18 +192,20 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
                          PtyFactory ptyFactory,
                          vtbackend::Settings settings,
                          core::Environment const& env,
-                         bool startPumps,
-                         ClientSizePolicy sizePolicy,
-                         vtworkspace::Layout const& startupLayout):
+                         SessionHostConfig config):
     _loop(loop),
     _ptyFactory(std::move(ptyFactory)),
     // Normalized once, here, so _pageSize and every session that does not override it are derived
     // from settings a host can actually serve.
     _settings(hostedSessionSettings(std::move(settings))),
     _environment(env),
+    _identity(std::move(config.identity)),
+    _clocks(config.clocks),
     _pageSize(_settings.pageSize),
-    _startPumps(startPumps),
-    _sizePolicy(sizePolicy),
+    _pumping(config.pumping),
+    _inputWatermarks(config.inputWatermarks),
+    _sizePolicy(config.sizePolicy),
+    _fileSystem(config.fileSystem.get()),
     _model(*this,
            [this]() -> SessionId {
                // The allocator hand-back half of the pre-mint handshake (the GUI's
@@ -146,7 +224,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     // Realized here, in the BODY: _window is the last member to construct, so this is the
     // earliest point a tab can legally be created on it. Runs before runDaemon() binds any
     // listener, so the layout is in place before a client could possibly attach.
-    realizeStartupLayout(_window, startupLayout);
+    realizeStartupLayout(_window, config.startupLayout);
 }
 
 SessionHost::~SessionHost()
@@ -197,6 +275,9 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
         _environment,
         std::move(tapped),
         std::move(settings),
+        _identity,
+        _clocks,
+        _fileSystem,
         /*onScreenUpdated=*/
         [this, id] {
             // Pump thread -> loop thread; the host may already be gone at
@@ -218,12 +299,12 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
             });
         },
         /*onNotify=*/
-        [this, id](std::string title, std::string body) {
-            _loop.post([this, id, title = std::move(title), body = std::move(body)] {
+        [this, id](std::string title, std::string body, std::optional<vtbackend::DisplayOccasion> occasion) {
+            _loop.post([this, id, title = std::move(title), body = std::move(body), occasion] {
                 if (!_sessions.contains(id.value))
                     return;
                 for (auto* observer: _streamSubscribers)
-                    observer->sessionNotify(id, title, body);
+                    observer->sessionNotify(id, title, body, occasion);
             });
         },
         /*onCopyToClipboard=*/
@@ -238,7 +319,7 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
         /*onClosed=*/
         [this, id] { _loop.post([this, id] { handleSessionExit(id); }); });
 
-    if (_startPumps)
+    if (_pumping == SessionPumping::Threaded)
         session->start();
 
     _sessions.emplace(id.value, std::move(session));
@@ -275,8 +356,7 @@ void SessionHost::realizeStartupLayout(vtworkspace::WindowId window, vtworkspace
             // to belong to. Say so rather than dropping them where nobody can see it: the local path
             // forwards them to a factory that declines an empty program just the same, so the pane
             // is malformed either way -- silence is the only part worth fixing here. An engaged but
-            // EMPTY command (e.g. a quoted `command: "''"` that shellSplit tokenizes to a leading
-            // empty token) is just as program-less as an absent one -- applyCommandOverride declines
+            // EMPTY command is just as program-less as an absent one -- applyCommandOverride declines
             // to overlay program/arguments for either, so both must warn the same way.
             if ((!leaf.command || leaf.command->empty()) && !leaf.arguments.empty())
                 sessionLog()("startup layout: ignoring pane arguments ({}) given without a command.",
@@ -469,6 +549,122 @@ vtbackend::Terminal* SessionHost::terminal(SessionId session) noexcept
 {
     auto const it = _sessions.find(session.value);
     return it != _sessions.end() ? &it->second->terminal() : nullptr;
+}
+
+void SessionHost::writeInput(SessionId session, std::string_view bytes)
+{
+    if (auto const it = _sessions.find(session.value); it != _sessions.end())
+        it->second->writeInput(bytes);
+}
+
+std::size_t SessionHost::inputBacklog(SessionId session) const
+{
+    auto const it = _sessions.find(session.value);
+    return it != _sessions.end() ? it->second->inputBacklog() : 0;
+}
+
+namespace
+{
+    /// Performs an engine operation on the loop thread, with everything its request names, under the terminal
+    /// lock the host takes around the call: the operation mutates the grid the pump thread writes, and
+    /// neither sleeps nor writes to the PTY.
+    using LoopPerform = void (*)(vtbackend::Terminal& terminal, proto::PerformOperation const& request);
+
+    /// What an engine operation does, and so on which thread: the loop thread's (LoopPerform), or the session
+    /// pump's, between two reads, as it parses the application's output (HostedSession::Delivery), handed the
+    /// request's text alone: a parse, which can sleep (DECSCLM) and reply.
+    /// @see HostedSession::deliverOnPump()
+    using OperationPerform = std::variant<LoopPerform, HostedSession::Delivery>;
+
+    /// One engine operation a client may ask the host to perform.
+    struct OperationRow
+    {
+        proto::EngineOperation operation;
+        OperationPerform perform;
+    };
+
+    /// Has @p terminal place or take off the user mark on the row @p request names.
+    /// @param change What to do to the mark.
+    void placeUserMark(vtbackend::Terminal& terminal,
+                       proto::PerformOperation const& request,
+                       vtbackend::UserMarkChange change)
+    {
+        // A row the grid no longer holds, or a generation gone since the client looked, has nothing to mark:
+        // no failure of the request, and nothing the mirror follows.
+        terminal.placeUserMark(vtbackend::UserMarkRequest {
+            .stableId = request.row.stableId, .generation = request.row.generation, .change = change });
+    }
+
+    /// Every operation the host performs, one row each. Each runs as the GUI runs the same action on a
+    /// local session.
+    constexpr auto OperationTable = std::array {
+        OperationRow { .operation = proto::EngineOperation::ClearToPrompt,
+                       // Nothing to clear (no prompt, or one that left the history) is no failure of the
+                       // request: the grid simply stays as it is, and the mirror with it.
+                       .perform =
+                           LoopPerform { [](vtbackend::Terminal& terminal, proto::PerformOperation const&) {
+                               std::ignore = terminal.clearToPrompt();
+                           } } },
+        OperationRow { .operation = proto::EngineOperation::ClearHistoryAndReset,
+                       .perform =
+                           LoopPerform { [](vtbackend::Terminal& terminal, proto::PerformOperation const&) {
+                               terminal.hardReset();
+                           } } },
+        OperationRow { .operation = proto::EngineOperation::SoftReset,
+                       .perform =
+                           LoopPerform { [](vtbackend::Terminal& terminal, proto::PerformOperation const&) {
+                               terminal.softReset();
+                           } } },
+        OperationRow {
+            .operation = proto::EngineOperation::WriteScreen,
+            .perform = HostedSession::Delivery { [](vtbackend::Terminal& terminal, std::string_view text) {
+                terminal.writeToScreen(text);
+            } } },
+        // A mirror's vi marks are the session's, so every client shows them and the host's reflow carries
+        // them.
+        OperationRow { .operation = proto::EngineOperation::SetUserMark,
+                       .perform = LoopPerform { [](vtbackend::Terminal& terminal,
+                                                   proto::PerformOperation const& request) {
+                           placeUserMark(terminal, request, vtbackend::UserMarkChange::Added);
+                       } } },
+        OperationRow { .operation = proto::EngineOperation::ClearUserMark,
+                       .perform = LoopPerform { [](vtbackend::Terminal& terminal,
+                                                   proto::PerformOperation const& request) {
+                           placeUserMark(terminal, request, vtbackend::UserMarkChange::Removed);
+                       } } },
+    };
+} // namespace
+
+std::expected<void, OperationError> SessionHost::performOperation(proto::PerformOperation const& request)
+{
+    auto const session = SessionId { request.session };
+    auto const hosted = _sessions.find(session.value);
+    if (hosted == _sessions.end())
+        return std::unexpected(OperationError::UnknownSession);
+    auto const row = std::ranges::find(OperationTable, request.operation, &OperationRow::operation);
+    if (row == OperationTable.end())
+        return std::unexpected(OperationError::UnknownOperation);
+
+    auto& hostedSession = *hosted->second;
+    std::visit(
+        core::Overloaded {
+            [&](LoopPerform perform) {
+                {
+                    auto& terminal = hostedSession.terminal();
+                    auto const guard = std::lock_guard { terminal };
+                    perform(terminal, request);
+                }
+                // Outside the lock, as a resize is announced: an observer builds the delta under it.
+                // Announced by the host rather than left to the terminal, since only a parse raises a
+                // screen update of its own, and every attached client renders this grid, not only the
+                // one that asked.
+                fanOutStream(&SessionStreamEvents::sessionScreenUpdated, session);
+            },
+            // A parse, which raises a screen update of its own as the application's output does.
+            [&](HostedSession::Delivery deliver) { hostedSession.deliverOnPump(deliver, request.text); },
+        },
+        row->perform);
+    return {};
 }
 
 void SessionHost::subscribe(vtworkspace::ModelEvents* observer)

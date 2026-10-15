@@ -9,6 +9,8 @@
 /// secret can live somewhere with permissions on it instead. Both spellings resolve here, so the
 /// daemon and the client cannot disagree about precedence or about what counts as "no token".
 
+#include <core/Utf8Path.hpp>
+
 #include <expected>
 #include <filesystem>
 #include <fstream>
@@ -34,7 +36,7 @@ namespace vthost
 {
     auto file = std::ifstream { path, std::ios::in | std::ios::binary };
     if (!file.is_open())
-        return std::unexpected(std::string { "cannot open token file '" } + path.string() + "'");
+        return std::unexpected(std::string { "cannot open token file '" } + core::pathToUtf8(path) + "'");
 
     auto token = std::string { std::istreambuf_iterator<char> { file }, {} };
     std::erase(token, '\r');
@@ -42,7 +44,7 @@ namespace vthost
         token.pop_back();
 
     if (token.empty())
-        return std::unexpected(std::string { "token file '" } + path.string() + "' is empty");
+        return std::unexpected(std::string { "token file '" } + core::pathToUtf8(path) + "' is empty");
 
     return token;
 }
@@ -54,7 +56,7 @@ namespace vthost
 /// failure much later.
 ///
 /// @param token The `--token` value, or empty.
-/// @param tokenFile The `--token-file` value, or empty.
+/// @param tokenFile The `--token-file` value, UTF-8 as the command line is read, or empty.
 /// @return The token (empty when neither option was given), or a human-readable error.
 [[nodiscard]] inline std::expected<std::string, std::string> resolveToken(std::string_view token,
                                                                           std::string_view tokenFile)
@@ -63,7 +65,7 @@ namespace vthost
         return std::unexpected(std::string { "pass either --token or --token-file, not both" });
 
     if (!tokenFile.empty())
-        return readTokenFile(std::filesystem::path { tokenFile });
+        return readTokenFile(core::pathFromUtf8(tokenFile).value_or(std::filesystem::path {}));
 
     return std::string { token };
 }

@@ -7,11 +7,23 @@
 // loader), not a mock of it.
 
 #include <contour/config/Config.hpp>
+#include <contour/config/ConfigEnum.hpp>
+#include <contour/config/GlobalOverrides.hpp>
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/display/GpuInventory.hpp>
 #include <contour/window/SettingsController.hpp>
 
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/core/CommandBlockOutcome.hpp>
+#include <vtbackend/screen/GutterSettings.hpp>
+#include <vtbackend/shell/Folding.hpp>
+#include <vtbackend/shell/ScrollbarMarks.hpp>
+#include <vtbackend/shell/StickyHeader.hpp>
+
+#include <vtpty/test/NonAsciiSample.hpp>
+
+#include <yaml-cpp/yaml.h>
 
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>
@@ -19,9 +31,12 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -35,7 +50,7 @@ namespace
 /// Writes @p yaml as the contour.yml inside @p dir and returns its path.
 [[nodiscard]] std::filesystem::path writeConfig(QTemporaryDir& dir, std::string_view yaml)
 {
-    auto const path = std::filesystem::path(dir.path().toStdString()) / "contour.yml";
+    auto const path = std::filesystem::path(dir.path().toStdU16String()) / "contour.yml";
     auto out = std::ofstream(path);
     out << yaml;
     return path;
@@ -76,12 +91,14 @@ struct Fixture
     std::filesystem::path configPath;
     std::shared_ptr<config::FileGuiConfigStore> store;
     std::unique_ptr<SettingsController> controller;
+    QStringList errors; ///< What the controller reported through errorOccurred, in order.
 
     explicit Fixture(std::string_view yaml, std::shared_ptr<display::IGpuInventory const> gpus = nullptr)
     {
         configPath = writeConfig(dir, yaml);
         config::loadConfigFromFile(cfg, configPath);
-        store = std::make_shared<config::FileGuiConfigStore>(std::filesystem::path(dir.path().toStdString()));
+        store =
+            std::make_shared<config::FileGuiConfigStore>(std::filesystem::path(dir.path().toStdU16String()));
         controller = std::make_unique<SettingsController>([this]() -> config::Config const& { return cfg; },
                                                           store,
                                                           [this]() {
@@ -89,6 +106,9 @@ struct Fixture
                                                               config::loadConfigFromFile(cfg, configPath);
                                                           },
                                                           std::move(gpus));
+        QObject::connect(controller.get(),
+                         &SettingsController::errorOccurred,
+                         [this](QString const& message) { errors.push_back(message); });
     }
 };
 
@@ -99,6 +119,12 @@ struct Fixture
         if (row.toMap().value("key").toString() == key)
             return row.toMap();
     return {};
+}
+
+/// "#rrggbb" for @p color, as the scheme editor shows it.
+[[nodiscard]] QString hexOf(vtbackend::RGBColor color)
+{
+    return QString::asprintf("#%02x%02x%02x", color.red, color.green, color.blue);
 }
 
 /// Finds the profile row named @p name in @p rows, or an empty map if absent.
@@ -116,6 +142,40 @@ profiles:
     main:
         show_title_bar: true
 )" };
+
+/// A value for global-field row @p row that differs from the one it shows now, in the type the row's
+/// editor would send.
+[[nodiscard]] QVariant differentValue(QVariantMap const& row)
+{
+    auto const type = row.value("type").toString();
+    auto const current = row.value("value");
+    if (type == "bool")
+        return { !current.toBool() };
+    if (type == "int")
+        return { current.toInt() + 1 };
+    if (type == "double")
+        return { current.toDouble() + 1.0 };
+    if (type == "enum")
+    {
+        for (auto const& option: row.value("options").toStringList())
+            if (option != current.toString())
+                return { option };
+        return row.value("value"); // a single-option enum has no other value to send
+    }
+    // Appended to rather than replaced, so a value that must keep its shape keeps it: a timestamp format
+    // has to begin with a conversion.
+    return { current.toString() + QStringLiteral("x") };
+}
+
+/// The configuration tokens of every value of configuration enum @p Enum, as the page shows them.
+template <typename Enum>
+[[nodiscard]] QStringList tokensOf()
+{
+    auto tokens = QStringList {};
+    for (auto const& info: config::configEnumValues<Enum>())
+        tokens.push_back(QString::fromUtf8(info.token.data(), static_cast<qsizetype>(info.token.size())));
+    return tokens;
+}
 
 } // namespace
 
@@ -146,7 +206,7 @@ TEST_CASE("SettingsController: new profile -> Save As creates an editable side-f
     REQUIRE(fx.controller->saveProfileAs("work"));
 
     // The side file exists and the reloaded config now carries the new profile.
-    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "profiles"
+    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdU16String()) / "profiles"
                                   / "work.yml"));
     auto const* work = fx.cfg.findProfile("work");
     REQUIRE(work != nullptr);
@@ -204,9 +264,9 @@ TEST_CASE("SettingsController: delete removes a side-file profile", "[settings]"
 
     REQUIRE(fx.controller->deleteProfile("work"));
     CHECK(fx.cfg.findProfile("work") == nullptr);
-    CHECK(
-        std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "profiles" / "work.yml")
-        == false);
+    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdU16String()) / "profiles"
+                                  / "work.yml")
+          == false);
 }
 
 TEST_CASE("SettingsController: a contour.yml profile cannot be deleted", "[settings]")
@@ -224,7 +284,7 @@ TEST_CASE("SettingsController: setDefaultProfile persists to settings.yml and ov
     REQUIRE(fx.controller->setDefaultProfile("work"));
     CHECK(fx.cfg.defaultProfileName.value() == "work");
     CHECK(fx.controller->defaultProfile() == "work");
-    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "settings.yml"));
+    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdU16String()) / "settings.yml"));
 }
 
 TEST_CASE("SettingsController: rename moves a side-file profile and follows the default + draft",
@@ -236,7 +296,7 @@ TEST_CASE("SettingsController: rename moves a side-file profile and follows the 
     REQUIRE(fx.controller->setDefaultProfile("work"));
     fx.controller->editProfile("work"); // the profile we are about to rename is the open draft
 
-    auto const dir = std::filesystem::path(fx.dir.path().toStdString());
+    auto const dir = std::filesystem::path(fx.dir.path().toStdU16String());
     REQUIRE(fx.controller->renameProfile("work", "office"));
 
     // The side file moved, and the reloaded config carries the new name only.
@@ -259,7 +319,7 @@ TEST_CASE("SettingsController: rename refuses contour.yml profiles and name coll
 
     CHECK(fx.controller->renameProfile("main", "whatever") == false); // 'main' is from contour.yml
     CHECK(fx.controller->renameProfile("work", "main") == false);     // collides with contour.yml 'main'
-    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "profiles"
+    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdU16String()) / "profiles"
                                   / "work.yml"));
 }
 
@@ -270,7 +330,7 @@ TEST_CASE("SettingsController: rename moves a side-file color scheme with its dr
     fx.controller->setSchemeColor("background", "#101010");
     REQUIRE(fx.controller->saveColorScheme("midnight"));
 
-    auto const dir = std::filesystem::path(fx.dir.path().toStdString());
+    auto const dir = std::filesystem::path(fx.dir.path().toStdU16String());
     REQUIRE(std::filesystem::exists(dir / "colorschemes" / "midnight.yml"));
 
     fx.controller->editColorScheme("midnight");
@@ -278,6 +338,24 @@ TEST_CASE("SettingsController: rename moves a side-file color scheme with its dr
     CHECK(std::filesystem::exists(dir / "colorschemes" / "nightfall.yml"));
     CHECK_FALSE(std::filesystem::exists(dir / "colorschemes" / "midnight.yml"));
     CHECK(fx.controller->editingScheme() == "nightfall");
+}
+
+TEST_CASE("SettingsController: rename keeps the colors of a side-file scheme named beyond ASCII",
+          "[settings]")
+{
+    // A side-file scheme no profile uses is not loaded with the configuration, so the rename reads its colors
+    // from its file.
+    auto fx = Fixture(BasicConfig);
+    auto palette = vtbackend::ColorPalette {};
+    palette.defaultBackground = vtbackend::RGBColor { 0x10, 0x20, 0x30 };
+    auto const name = std::string { vtpty::testing::NonAsciiNameUtf8 };
+    REQUIRE(fx.store->saveColorScheme(name, palette).has_value());
+
+    REQUIRE(fx.controller->renameColorScheme(QString::fromStdString(name), "nightfall"));
+    auto const renamed = config::loadColorSchemeFile(std::filesystem::path(fx.dir.path().toStdU16String())
+                                                     / "colorschemes" / "nightfall.yml");
+    REQUIRE(renamed.has_value());
+    CHECK(renamed->defaultBackground == palette.defaultBackground);
 }
 
 // A contour.yml with an inline color scheme; the settings page must treat that name as read-only, since
@@ -302,7 +380,7 @@ TEST_CASE("SettingsController: saving a color scheme named like a contour.yml sc
     fx.controller->newColorScheme("");
     fx.controller->setSchemeColor("background", "#111111");
     CHECK(fx.controller->saveColorScheme("solarized") == false);
-    CHECK_FALSE(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "colorschemes"
+    CHECK_FALSE(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdU16String()) / "colorschemes"
                                         / "solarized.yml"));
 }
 
@@ -318,7 +396,7 @@ TEST_CASE("SettingsController: renaming a color scheme onto a contour.yml scheme
     // never resolves (the inline node wins); refuse it, and leave the source scheme untouched.
     fx.controller->editColorScheme("midnight");
     CHECK(fx.controller->renameColorScheme("midnight", "solarized") == false);
-    auto const dir = std::filesystem::path(fx.dir.path().toStdString());
+    auto const dir = std::filesystem::path(fx.dir.path().toStdU16String());
     CHECK_FALSE(std::filesystem::exists(dir / "colorschemes" / "solarized.yml"));
     CHECK(std::filesystem::exists(dir / "colorschemes" / "midnight.yml"));
 }
@@ -370,7 +448,7 @@ TEST_CASE("SettingsController: create, edit and reload a color scheme", "[settin
     REQUIRE(fx.controller->saveColorScheme("mono"));
 
     // The side file exists; re-opening it loads the color we set back.
-    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "colorschemes"
+    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdU16String()) / "colorschemes"
                                   / "mono.yml"));
     fx.controller->editColorScheme("mono");
     auto background = QString {};
@@ -380,16 +458,141 @@ TEST_CASE("SettingsController: create, edit and reload a color scheme", "[settin
     CHECK(background == "#123456");
 
     REQUIRE(fx.controller->deleteColorScheme("mono"));
-    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdString()) / "colorschemes"
+    CHECK(std::filesystem::exists(std::filesystem::path(fx.dir.path().toStdU16String()) / "colorschemes"
                                   / "mono.yml")
           == false);
+}
+
+TEST_CASE("SettingsController: the command-block colour slots are editable and stay derived until set",
+          "[settings]")
+{
+    using vtbackend::CommandBlockOutcome;
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newColorScheme("");
+
+    // Each slot shows the colour the palette resolves it to while the scheme leaves it unset.
+    auto const palette = vtbackend::ColorPalette {};
+    auto const colorOf = [&fx](QString const& key) {
+        return rowWithKey(fx.controller->schemeColors(), key).value("color").toString();
+    };
+    CHECK(colorOf("block_status_success") == hexOf(palette.blockStatusColor(CommandBlockOutcome::Success)));
+    CHECK(colorOf("block_status_failure") == hexOf(palette.blockStatusColor(CommandBlockOutcome::Failure)));
+    CHECK(colorOf("block_status_running") == hexOf(palette.blockStatusColor(CommandBlockOutcome::Running)));
+    CHECK(colorOf("gutter_text") == hexOf(palette.gutterTextColor()));
+    CHECK(colorOf("sticky_header_background") == hexOf(palette.stickyHeaderBackgroundColor()));
+    CHECK(colorOf("sticky_header_separator") == hexOf(palette.stickyHeaderSeparatorColor()));
+
+    fx.controller->setSchemeColor("block_status_failure", "#ff0000");
+    fx.controller->setSchemeColor("sticky_header_separator", "#123456");
+    CHECK(colorOf("block_status_failure") == "#ff0000");
+    REQUIRE(fx.controller->saveColorScheme("blocks"));
+
+    auto const saved = config::loadColorSchemeFile(std::filesystem::path(fx.dir.path().toStdU16String())
+                                                   / "colorschemes" / "blocks.yml");
+    REQUIRE(saved.has_value());
+    auto const statusOf = [&saved](CommandBlockOutcome outcome) {
+        return saved->blockStatus.at(static_cast<std::size_t>(outcome));
+    };
+    CHECK(statusOf(CommandBlockOutcome::Failure) == vtbackend::RGBColor { 0xff, 0x00, 0x00 });
+    CHECK(saved->stickyHeaderSeparator == vtbackend::RGBColor { 0x12, 0x34, 0x56 });
+
+    // The slots nobody edited are still unset, so they keep following the colours they derive from.
+    // Seeding the draft with resolved values would have pinned colours the scheme never chose.
+    CHECK_FALSE(statusOf(CommandBlockOutcome::Success).has_value());
+    CHECK_FALSE(statusOf(CommandBlockOutcome::Running).has_value());
+    CHECK_FALSE(saved->gutterText.has_value());
+    CHECK_FALSE(saved->stickyHeaderBackground.has_value());
+}
+
+TEST_CASE("SettingsController: an unset colour slot follows its source, and says so", "[settings]")
+{
+    using vtbackend::CommandBlockOutcome;
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newColorScheme("");
+    auto const rowOf = [&fx](QString const& key) {
+        return rowWithKey(fx.controller->schemeColors(), key);
+    };
+    auto const colorOf = [&rowOf](QString const& key) {
+        return rowOf(key).value("color").toString();
+    };
+    auto const sourceOf = [&rowOf](QString const& key) {
+        return rowOf(key).value("colorSource").toString();
+    };
+
+    CHECK(sourceOf("background") == "scheme");
+    CHECK(sourceOf("normal_red") == "scheme");
+    CHECK(sourceOf("block_status_failure") == "derived");
+    CHECK(sourceOf("sticky_header_background") == "derived");
+
+    // The failure colour derives from red ...
+    auto expected = vtbackend::ColorPalette {};
+    auto const failureBefore = colorOf("block_status_failure");
+    fx.controller->setSchemeColor("normal_red", "#aa1122");
+    expected.palette.at(1) = vtbackend::RGBColor { 0xaa, 0x11, 0x22 };
+    CHECK(colorOf("block_status_failure") == hexOf(expected.blockStatusColor(CommandBlockOutcome::Failure)));
+    CHECK(colorOf("block_status_failure") != failureBefore);
+
+    // ... and the sticky header's band from the background.
+    auto const bandBefore = colorOf("sticky_header_background");
+    fx.controller->setSchemeColor("background", "#203040");
+    expected.defaultBackground = vtbackend::RGBColor { 0x20, 0x30, 0x40 };
+    CHECK(colorOf("sticky_header_background") == hexOf(expected.stickyHeaderBackgroundColor()));
+    CHECK(colorOf("sticky_header_background") != bandBefore);
+    CHECK(sourceOf("sticky_header_background") == "derived");
+}
+
+TEST_CASE("SettingsController: a derived colour is pinned in one edit, and follows again on reset",
+          "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newColorScheme("");
+    auto const rowOf = [&fx](QString const& key) {
+        return rowWithKey(fx.controller->schemeColors(), key);
+    };
+    auto const colorOf = [&rowOf](QString const& key) {
+        return rowOf(key).value("color").toString();
+    };
+    auto const sourceOf = [&rowOf](QString const& key) {
+        return rowOf(key).value("colorSource").toString();
+    };
+    auto const saved = [&fx]() {
+        REQUIRE(fx.controller->saveColorScheme("pinned"));
+        auto palette = config::loadColorSchemeFile(std::filesystem::path(fx.dir.path().toStdU16String())
+                                                   / "colorschemes" / "pinned.yml");
+        REQUIRE(palette.has_value());
+        return *palette;
+    };
+
+    // Committing the colour a derived slot shows keeps that colour, whatever its source does next.
+    auto const shown = colorOf("gutter_text");
+    fx.controller->setSchemeColor("gutter_text", shown);
+    CHECK(sourceOf("gutter_text") == "pinned");
+    fx.controller->setSchemeColor("foreground", "#00ff00");
+    CHECK(colorOf("gutter_text") == shown);
+    auto const pinned = saved();
+    REQUIRE(pinned.gutterText.has_value());
+    CHECK(hexOf(*pinned.gutterText) == shown);
+
+    // Reset lets it follow again.
+    fx.controller->resetSchemeColor("gutter_text");
+    CHECK(sourceOf("gutter_text") == "derived");
+    auto expected = vtbackend::ColorPalette {};
+    expected.defaultForeground = vtbackend::RGBColor { 0x00, 0xff, 0x00 };
+    CHECK(colorOf("gutter_text") == hexOf(expected.gutterTextColor()));
+    CHECK_FALSE(saved().gutterText.has_value());
+
+    // A slot the scheme always sets has nothing to follow.
+    auto const background = colorOf("background");
+    fx.controller->resetSchemeColor("background");
+    CHECK(colorOf("background") == background);
+    CHECK(sourceOf("background") == "scheme");
 }
 
 TEST_CASE("SettingsController: global overrides write settings.yml, apply, and reset", "[settings]")
 {
     auto fx = Fixture("default_profile: main\n"
                       "reflow_on_resize: true\n");
-    auto const configDir = std::filesystem::path(fx.dir.path().toStdString());
+    auto const configDir = std::filesystem::path(fx.dir.path().toStdU16String());
 
     REQUIRE(fx.controller->setGlobalField("reflow_on_resize", false));
     CHECK(fx.cfg.reflowOnResize.value() == false);
@@ -553,6 +756,289 @@ TEST_CASE("SettingsController: the window control style is a global field offeri
     CHECK(fx.cfg.windowControlStyle.value() == config::WindowControlStyle::Auto);
 }
 
+TEST_CASE("SettingsController: every global field's override survives save and reload", "[settings]")
+{
+    // A global row is two halves in two files: the descriptor here, which writes the override, and a
+    // loader line in mergeGuiManagedSideFiles, which applies it. A row whose second half is missing
+    // saves without complaint and then does nothing -- after the reload the page shows the old value,
+    // with a Reset button for a change that never happened. Driving every row through the real store
+    // and the real reload keeps the two halves in step, including for rows added later.
+    auto fx = Fixture(BasicConfig);
+    auto rows = 0;
+    for (auto const& raw: fx.controller->globalFields())
+    {
+        auto const row = raw.toMap();
+        auto const key = row.value("key").toString();
+        auto const wanted = differentValue(row);
+        INFO("global field: " << key.toStdString() << " -> " << wanted.toString().toStdString());
+        REQUIRE(fx.controller->setGlobalField(key, wanted));
+        auto const after = rowWithKey(fx.controller->globalFields(), key);
+        CHECK(after.value("value") == wanted);
+        CHECK(after.value("overridden").toBool());
+        ++rows;
+    }
+    CHECK(rows > 0);
+}
+
+TEST_CASE("SettingsController: the merge of settings.yml applies every global row", "[settings]")
+{
+    // A row whose override settings.yml does not apply would save and then do nothing.
+    auto fx = Fixture(BasicConfig);
+    for (auto const& raw: fx.controller->globalFields())
+    {
+        auto const key = raw.toMap().value("key").toString().toStdString();
+        INFO(key);
+        CHECK(config::globalOverrideFor(key) != nullptr);
+    }
+}
+
+TEST_CASE("SettingsController: an override the loader refused is not shown as overridden", "[settings]")
+{
+    // settings.yml is hand-editable. An override the loader cannot read leaves the value contour.yml gives,
+    // so a Reset button beside it would offer to undo a change that never took.
+    auto fx = Fixture(BasicConfig);
+    {
+        auto out = std::ofstream(std::filesystem::path(fx.dir.path().toStdU16String()) / "settings.yml");
+        out << "reflow_on_resize: maybe\n"
+               "gutter:\n"
+               "    line_numbers: relative\n"
+               "    timestamps: maybe\n"
+               "theme: dark\n";
+    }
+    fx.cfg = config::Config {};
+    config::loadConfigFromFile(fx.cfg, fx.configPath);
+
+    auto const rows = fx.controller->globalFields();
+    auto const overridden = [&rows](QString const& key) {
+        return rowWithKey(rows, key).value("overridden").toBool();
+    };
+    CHECK(fx.cfg.reflowOnResize.value() == true);
+    CHECK_FALSE(overridden("reflow_on_resize"));
+    CHECK(fx.cfg.gutter.value().timestamps == false);
+    CHECK_FALSE(overridden("gutter.timestamps"));
+    // A leaf beside a refused one says whether it took itself: it does where its section's loader reads each
+    // leaf under a guard of its own, and not where the whole section is put back.
+    CHECK(overridden("gutter.line_numbers")
+          == (fx.cfg.gutter.value().lineNumbers == vtbackend::LineNumberMode::Relative));
+    // An override that took is shown as one.
+    CHECK(fx.cfg.theme.value() == config::GuiTheme::Dark);
+    CHECK(overridden("theme"));
+}
+
+TEST_CASE("SettingsController: an override spelled otherwise than the page writes it is shown when it took",
+          "[settings]")
+{
+    // The loader reads a bool, a number or an enum in more than one spelling. One that took is overridden,
+    // whatever its spelling, and offers its Reset.
+    auto fx = Fixture(BasicConfig);
+    {
+        auto out = std::ofstream(std::filesystem::path(fx.dir.path().toStdU16String()) / "settings.yml");
+        out << "reflow_on_resize: False\n"
+               "read_buffer_size: 0x10000\n"
+               "theme: Dark\n"
+               "gutter:\n"
+               "    line_numbers: Relative\n";
+    }
+    fx.cfg = config::Config {};
+    config::loadConfigFromFile(fx.cfg, fx.configPath);
+    REQUIRE(fx.cfg.reflowOnResize.value() == false);
+    REQUIRE(fx.cfg.ptyReadBufferSize.value() == 0x10000);
+    REQUIRE(fx.cfg.theme.value() == config::GuiTheme::Dark);
+    REQUIRE(fx.cfg.gutter.value().lineNumbers == vtbackend::LineNumberMode::Relative);
+
+    auto const rows = fx.controller->globalFields();
+    for (auto const* key: { "reflow_on_resize", "read_buffer_size", "theme", "gutter.line_numbers" })
+    {
+        INFO(key);
+        CHECK(rowWithKey(rows, QString::fromLatin1(key)).value("overridden").toBool());
+    }
+}
+
+TEST_CASE("SettingsController: a dotted global field overrides one leaf of its section", "[settings]")
+{
+    auto fx = Fixture(R"(
+default_profile: main
+gutter:
+    timestamps: true
+    timestamp_format: "%H:%M"
+folding:
+    show_markers: false
+profiles:
+    main:
+        show_title_bar: true
+)");
+    auto const configDir = std::filesystem::path(fx.dir.path().toStdU16String());
+
+    REQUIRE(fx.controller->setGlobalField("gutter.line_numbers", "relative"));
+    REQUIRE(fx.controller->setGlobalField("folding.enabled", false));
+
+    // The overrides took ...
+    CHECK(fx.cfg.gutter.value().lineNumbers == vtbackend::LineNumberMode::Relative);
+    CHECK(fx.cfg.folding.value().enabled == false);
+    // ... and nothing else in either section moved.
+    CHECK(fx.cfg.gutter.value().timestamps == true);
+    CHECK(fx.cfg.gutter.value().timestampFormat == "%H:%M");
+    CHECK(fx.cfg.folding.value().showMarkers == false);
+
+    // settings.yml reads like contour.yml: a section holding the one leaf, never a literal dotted key.
+    // Closed again at once: Windows refuses to replace a file that is open, and Reset below rewrites it.
+    auto const written = [&configDir]() {
+        auto file = std::ifstream(configDir / "settings.yml");
+        return YAML::Load(file);
+    }();
+    REQUIRE(written["gutter"].IsMap());
+    CHECK(written["gutter"]["line_numbers"].as<std::string>() == "relative");
+    CHECK(written["gutter"].size() == std::size_t { 1 });
+    CHECK_FALSE(written["gutter.line_numbers"].IsDefined());
+
+    // Only the overridden row says so, and Reset brings back what contour.yml says (here: the default).
+    CHECK(rowWithKey(fx.controller->globalFields(), "gutter.line_numbers").value("overridden").toBool());
+    CHECK_FALSE(rowWithKey(fx.controller->globalFields(), "gutter.timestamps").value("overridden").toBool());
+    REQUIRE(fx.controller->resetGlobalField("gutter.line_numbers"));
+    CHECK(fx.cfg.gutter.value().lineNumbers == vtbackend::LineNumberMode::Off);
+    CHECK(fx.cfg.gutter.value().timestamps == true);
+}
+
+TEST_CASE("SettingsController: the command-block enum rows offer the loader's own tokens", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    auto const rows = fx.controller->globalFields();
+
+    // Spelled as the configuration spells them, and taken from the table the loader parses with.
+    CHECK(tokensOf<vtbackend::LineNumberMode>() == QStringList { "off", "absolute", "relative", "hybrid" });
+    CHECK(rowWithKey(rows, "gutter.line_numbers").value("options").toStringList()
+          == tokensOf<vtbackend::LineNumberMode>());
+    CHECK(tokensOf<vtbackend::FoldJumpBehavior>() == QStringList { "expand", "skip" });
+    CHECK(rowWithKey(rows, "folding.on_jump_into_fold").value("options").toStringList()
+          == tokensOf<vtbackend::FoldJumpBehavior>());
+
+    // A token the loader would reject is refused rather than written.
+    CHECK_FALSE(fx.controller->setGlobalField("gutter.line_numbers", "sideways"));
+    CHECK_FALSE(
+        rowWithKey(fx.controller->globalFields(), "gutter.line_numbers").value("overridden").toBool());
+}
+
+TEST_CASE("SettingsController: an invalid timestamp format is reported and not saved", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    CHECK_FALSE(fx.controller->setGlobalField("gutter.timestamp_format", "%K"));
+    CHECK_FALSE(fx.controller->setGlobalField("gutter.timestamp_format", "{%H}"));
+    CHECK_FALSE(fx.controller->setGlobalField("gutter.timestamp_format", ""));
+    REQUIRE(fx.errors.size() == qsizetype { 3 });
+    for (auto const& message: fx.errors)
+        CHECK(message.contains("timestamp format"));
+    CHECK(fx.cfg.gutter.value().timestampFormat == "%H:%M:%S");
+    CHECK_FALSE(
+        rowWithKey(fx.controller->globalFields(), "gutter.timestamp_format").value("overridden").toBool());
+
+    REQUIRE(fx.controller->setGlobalField("gutter.timestamp_format", "%H:%M"));
+    CHECK(fx.cfg.gutter.value().timestampFormat == "%H:%M");
+}
+
+TEST_CASE("SettingsController: every global row refuses a value its loader cannot take", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    // A negative size or count wraps where it is used, a negative font size draws nothing, and a word no
+    // option is spelled as is no value at all.
+    for (auto const& [key, value]: std::array {
+             std::pair { "read_buffer_size", QVariant(0) },
+             std::pair { "command_palette_recent_count", QVariant(-1) },
+             std::pair { "ui_font_size", QVariant(-1.0) },
+             std::pair { "theme", QVariant(QStringLiteral("sepia")) },
+             std::pair { "tab_bar_position", QVariant(QStringLiteral("middle")) },
+             std::pair { "text_scaling_method", QVariant(QStringLiteral("blur")) },
+             std::pair { "renderer.gpu", QVariant(QStringLiteral("fastest")) },
+         })
+    {
+        INFO(key);
+        fx.errors.clear();
+        CHECK_FALSE(fx.controller->setGlobalField(QString::fromLatin1(key), value));
+        CHECK(fx.errors.size() == qsizetype { 1 });
+        CHECK_FALSE(
+            rowWithKey(fx.controller->globalFields(), QString::fromLatin1(key)).value("overridden").toBool());
+    }
+
+    // Zero recent commands is a choice: it turns the list off.
+    REQUIRE(fx.controller->setGlobalField("command_palette_recent_count", 0));
+    CHECK(fx.cfg.commandPaletteRecentCount.value() == 0);
+}
+
+TEST_CASE("SettingsController: the numeric command-block rows are range-checked", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    CHECK_FALSE(fx.controller->setGlobalField("gutter.line_number_width", 2));
+    CHECK_FALSE(fx.controller->setGlobalField("gutter.line_number_width", 11));
+    REQUIRE(fx.controller->setGlobalField("gutter.line_number_width", 10));
+    CHECK(fx.cfg.gutter.value().lineNumberWidth == 10);
+
+    CHECK_FALSE(fx.controller->setGlobalField("command_blocks.max_records", 0));
+    // The loader clamps above config::MaxCommandBlockRecords; the page refuses instead of saving a value
+    // that would silently load as something else.
+    CHECK_FALSE(fx.controller->setGlobalField("command_blocks.max_records",
+                                              static_cast<int>(config::MaxCommandBlockRecords) + 1));
+    REQUIRE(fx.controller->setGlobalField("command_blocks.max_records", 1));
+    CHECK(fx.cfg.commandBlocks.value().maxRecords == std::size_t { 1 });
+}
+
+TEST_CASE("SettingsController: the command-block global rows say when and where they apply", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    auto const helpOf = [&fx](QString const& key) {
+        return rowWithKey(fx.controller->globalFields(), key).value("help").toString();
+    };
+
+    // The dot marks every finished command that shows no fold control, which is all of them while the fold
+    // markers are off -- not only one that printed nothing.
+    auto const exitStatus = helpOf("gutter.exit_status");
+    CHECK(exitStatus.startsWith("Color each"));
+    CHECK(exitStatus.contains("shows no fold control"));
+    CHECK(exitStatus.contains("any one while fold markers are off"));
+
+    // A running session keeps the store it was opened with.
+    CHECK(helpOf("command_blocks.max_records").contains("sessions opened afterwards"));
+}
+
+TEST_CASE("SettingsController: a blank pager is refused, and says how to go back to the configured one",
+          "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    auto const configured = fx.cfg.commandBlocks.value().pager;
+
+    // Every OpenCommandOutput without a program of its own would then fail for want of one.
+    CHECK_FALSE(fx.controller->setGlobalField("command_blocks.pager", ""));
+    CHECK_FALSE(fx.controller->setGlobalField("command_blocks.pager", "   "));
+    REQUIRE(fx.errors.size() == qsizetype { 2 });
+    CHECK(fx.errors.first().contains("Reset"));
+    CHECK(fx.cfg.commandBlocks.value().pager == configured);
+    CHECK_FALSE(
+        rowWithKey(fx.controller->globalFields(), "command_blocks.pager").value("overridden").toBool());
+
+    REQUIRE(fx.controller->setGlobalField("command_blocks.pager", "most"));
+    CHECK(fx.cfg.commandBlocks.value().pager == "most");
+}
+
+TEST_CASE("SettingsController: the pager's format is a global row", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    auto const row = rowWithKey(fx.controller->globalFields(), "command_blocks.pager_format");
+    REQUIRE(!row.isEmpty());
+    CHECK(row.value("type").toString() == "enum");
+    CHECK(row.value("options").toStringList() == QStringList { "sgr", "plain" });
+    CHECK(row.value("value").toString() == "sgr");
+    // Each value says what it does to the file the pager is given.
+    auto const help = row.value("help").toString();
+    CHECK(help.contains("renders colors"));
+    CHECK(help.contains("sgr keeps"));
+    CHECK(help.contains("plain writes"));
+
+    REQUIRE(fx.controller->setGlobalField("command_blocks.pager_format", "plain"));
+    CHECK(fx.cfg.commandBlocks.value().pagerFormat == actions::OutputFormat::Plain);
+    CHECK_FALSE(fx.controller->setGlobalField("command_blocks.pager_format", "html"));
+}
+
 TEST_CASE("SettingsController: exposes the configured keybindings read-only", "[settings]")
 {
     auto fx = Fixture(BasicConfig);
@@ -561,6 +1047,160 @@ TEST_CASE("SettingsController: exposes the configured keybindings read-only", "[
     auto const first = bindings.first().toMap();
     CHECK(!first.value("trigger").toString().isEmpty());
     CHECK(!first.value("action").toString().isEmpty());
+}
+
+TEST_CASE("SettingsController: a keybinding's trigger names its click count and its whole character",
+          "[settings][semanticblocks]")
+{
+    // Ctrl+triple-click is bound here, beside the Ctrl+click it extends: the one Contour selects a command's
+    // output with by default is a built-in fallback, never a row of the configuration.
+    auto fx = Fixture(
+        "default_profile: main\n"
+        "profiles:\n"
+        "    main:\n"
+        "        shell: /bin/sh\n"
+        "input_mapping:\n"
+        "    - { mods: [Control], mouse: Left, action: FollowHyperlink }\n"
+        "    - { mods: [Control], mouse: Left, clicks: 3, action: SelectCommandBlock, target: pointer,"
+        " part: output }\n"
+        "    - { mods: [Control], key: '\xF0\x9F\x98\x80', action: ScreenshotVT }\n");
+    auto triggers = QStringList {};
+    for (auto const& row: fx.controller->keybindings())
+        triggers.append(row.toMap().value("trigger").toString());
+    INFO(triggers.join(QStringLiteral(" | ")).toStdString());
+    auto const triggersOf = [&fx](QString const& action) {
+        auto found = QStringList {};
+        for (auto const& raw: fx.controller->keybindings())
+            if (raw.toMap().value("action").toString().startsWith(action))
+                found.append(raw.toMap().value("trigger").toString());
+        return found;
+    };
+
+    // The count is what tells the two mouse rows apart, and it reads " x3": ASCII, as
+    // vtbackend::clickCountSuffix spells it, not a multiplication sign.
+    auto const tripleClick = triggersOf(QStringLiteral("SelectCommandBlock"));
+    REQUIRE(tripleClick.size() == qsizetype { 1 });
+    CHECK(tripleClick.first().endsWith(QStringLiteral("Left x3")));
+    CHECK(triggersOf(QStringLiteral("FollowHyperlink")).contains(tripleClick.first().chopped(3)));
+    // U+1F600, not its low 16 bits.
+    CHECK(std::ranges::any_of(triggers, [](QString const& trigger) {
+        return trigger.endsWith(QString::fromUcs4(U"\U0001F600", 1));
+    }));
+}
+
+TEST_CASE("SettingsController: the bindings viewer lists the built-in bindings no configured row shadows",
+          "[settings][semanticblocks]")
+{
+    /// The rows of the bindings viewer whose trigger is @p trigger.
+    auto const rowsFor = [](SettingsController const& controller, QString const& trigger) {
+        auto found = QVariantList {};
+        for (auto const& raw: controller.keybindings())
+            if (raw.toMap().value("trigger").toString() == trigger)
+                found.push_back(raw);
+        return found;
+    };
+
+    SECTION("a default configuration")
+    {
+        // No configuration lists these, so without the built-in rows the viewer would not show how to select
+        // a command's output at all.
+        auto fx = Fixture(BasicConfig);
+        auto const builtIn = [&](QString const& trigger, QString const& action) {
+            auto const rows = rowsFor(*fx.controller, trigger);
+            INFO(trigger.toStdString());
+            REQUIRE(rows.size() == qsizetype { 1 });
+            CHECK(rows.first().toMap().value("action").toString().startsWith(action));
+            CHECK(rows.first().toMap().value("builtIn").toBool());
+        };
+        builtIn(QStringLiteral("Control+Left x3"), QStringLiteral("SelectCommandBlock"));
+        builtIn(QStringLiteral("Right"), QStringLiteral("OpenContextMenu"));
+        builtIn(QStringLiteral("WheelLeft"), QStringLiteral("SwitchToTabLeft"));
+        builtIn(QStringLiteral("Shift+Control+G"), QStringLiteral("OpenCommandOutput"));
+
+        // The defaults list Ctrl+Tab as well, so its built-in twin is shadowed and the chord is listed once.
+        auto const tab = rowsFor(*fx.controller, QStringLiteral("Control+Tab"));
+        REQUIRE(tab.size() == qsizetype { 1 });
+        CHECK_FALSE(tab.first().toMap().value("builtIn").toBool());
+
+        // What the configuration lists is not marked built-in.
+        auto configured = 0;
+        for (auto const& raw: fx.controller->keybindings())
+            if (!raw.toMap().value("builtIn").toBool())
+                ++configured;
+        CHECK(configured > 0);
+    }
+
+    SECTION("a configured row shadows the built-in one, and a switched-off built-in row is not listed")
+    {
+        auto fx =
+            Fixture("default_profile: main\n"
+                    "tab_switch_on_horizontal_wheel: false\n"
+                    "profiles:\n"
+                    "    main:\n"
+                    "        shell: /bin/sh\n"
+                    "input_mapping:\n"
+                    "    - { mods: [Control], key: Tab, action: ScreenshotVT }\n"
+                    "    - { mods: [Control], mouse: Left, clicks: 3, action: CopySelection }\n"
+                    "    - { mods: [Control], mouse: Left, clicks: 3, action: ClearHistoryAndReset }\n");
+        auto const tab = rowsFor(*fx.controller, QStringLiteral("Control+Tab"));
+        REQUIRE(tab.size() == qsizetype { 1 });
+        CHECK(tab.first().toMap().value("action").toString() == "ScreenshotVT");
+        CHECK_FALSE(tab.first().toMap().value("builtIn").toBool());
+        CHECK(rowsFor(*fx.controller, QStringLiteral("WheelLeft")).isEmpty());
+
+        // A binding that fires two actions shows both, in the order they run.
+        auto const tripleClick = rowsFor(*fx.controller, QStringLiteral("Control+Left x3"));
+        REQUIRE(tripleClick.size() == qsizetype { 1 });
+        CHECK(tripleClick.first().toMap().value("action").toString()
+              == "CopySelection, ClearHistoryAndReset");
+
+        // Ctrl+Shift+Tab is a chord of its own, so its built-in row stays.
+        CHECK(rowsFor(*fx.controller, QStringLiteral("Shift+Control+Tab")).size() == qsizetype { 1 });
+    }
+
+    SECTION("a configured row only for some modes leaves the built-in row for the rest")
+    {
+        auto fx = Fixture("default_profile: main\n"
+                          "profiles:\n"
+                          "    main:\n"
+                          "        shell: /bin/sh\n"
+                          "input_mapping:\n"
+                          "    - { mods: [Control], key: Tab, mode: 'Insert', action: ScreenshotVT }\n");
+        CHECK(rowsFor(*fx.controller, QStringLiteral("Control+Tab")).size() == qsizetype { 2 });
+    }
+
+    SECTION("configured rows that cover every mode only together shadow the built-in row")
+    {
+        // Neither row covers every mode alone: one answers on the alternate screen, the other off it.
+        auto fx = Fixture(
+            "default_profile: main\n"
+            "profiles:\n"
+            "    main:\n"
+            "        shell: /bin/sh\n"
+            "input_mapping:\n"
+            "    - { mods: [Control], key: Tab, mode: 'AltScreen', action: ScreenshotVT }\n"
+            "    - { mods: [Control], key: Tab, mode: '~AltScreen', action: ClearHistoryAndReset }\n");
+        auto const tab = rowsFor(*fx.controller, QStringLiteral("Control+Tab"));
+        CHECK(tab.size() == qsizetype { 2 });
+        CHECK(std::ranges::none_of(
+            tab, [](QVariant const& row) { return row.toMap().value("builtIn").toBool(); }));
+    }
+
+    SECTION("a configured row for the modes the built-in row answers in shadows it")
+    {
+        // The built-in Ctrl+triple-click answers on the primary screen alone, so a row for the primary screen
+        // is all it takes.
+        auto fx = Fixture(
+            "default_profile: main\n"
+            "profiles:\n"
+            "    main:\n"
+            "        shell: /bin/sh\n"
+            "input_mapping:\n"
+            "    - { mods: [Control], mouse: Left, clicks: 3, mode: '~AltScreen', action: CopySelection }\n");
+        auto const tripleClick = rowsFor(*fx.controller, QStringLiteral("Control+Left x3"));
+        REQUIRE(tripleClick.size() == qsizetype { 1 });
+        CHECK_FALSE(tripleClick.first().toMap().value("builtIn").toBool());
+    }
 }
 
 TEST_CASE("SettingsController: gui_config_locked makes the page read-only", "[settings]")
@@ -685,6 +1325,118 @@ TEST_CASE("SettingsController: profile fields are grouped for the settings page"
     CHECK(!keys.contains("status_line_indicator_left"));
     CHECK(!keys.contains("status_line_indicator_middle"));
     CHECK(!keys.contains("status_line_indicator_right"));
+}
+
+TEST_CASE("SettingsController: the command-block profile fields round-trip through a saved profile",
+          "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+
+    fx.controller->setProfileField("scrollbar_marks_commands", false);
+    fx.controller->setProfileField("sticky_header_mode", "always");
+    fx.controller->setProfileField("sticky_header_show_evicted", false);
+    fx.controller->setProfileField("notify_on_command_finish_when", "hidden");
+    fx.controller->setProfileField("notify_on_command_finish_min_duration", 42);
+    fx.controller->setProfileField("notify_on_command_finish_outcome", "failure");
+    fx.controller->setProfileField("notify_on_command_finish_action", "notify_bell");
+    fx.controller->setProfileField("notify_on_command_finish_clear_on", "next");
+    REQUIRE(fx.controller->saveProfileAs("blocks"));
+
+    auto const* blocks = fx.cfg.findProfile("blocks");
+    REQUIRE(blocks != nullptr);
+    using vtbackend::ScrollbarMarkSource;
+    auto const marks = blocks->scrollbar.value().marks;
+    CHECK(marks.test(ScrollbarMarkSource::Failures));
+    CHECK_FALSE(marks.test(ScrollbarMarkSource::Commands));
+    CHECK(marks.test(ScrollbarMarkSource::UserMarks));
+    CHECK(blocks->stickyHeader.value().mode == vtbackend::StickyHeaderMode::Always);
+    CHECK(blocks->stickyHeader.value().showEvicted == false);
+    auto const& notify = blocks->notifyOnCommandFinish.value();
+    CHECK(notify.when == config::NotifyWhen::Hidden);
+    CHECK(notify.minDuration == std::chrono::seconds(42));
+    CHECK(notify.outcome == config::NotifyOutcome::Failure);
+    CHECK(notify.action == config::NotifyAction::NotifyBell);
+    CHECK(notify.clearOn == config::NotifyClearOn::Next);
+
+    // The page reads back what was saved (saveProfileAs re-opens the reloaded profile).
+    auto const fields = fx.controller->profileFields();
+    CHECK(rowWithKey(fields, "scrollbar_marks_commands").value("value").toBool() == false);
+    CHECK(rowWithKey(fields, "sticky_header_mode").value("value").toString() == "always");
+    CHECK(rowWithKey(fields, "sticky_header_show_evicted").value("value").toBool() == false);
+    CHECK(rowWithKey(fields, "notify_on_command_finish_min_duration").value("value").toInt() == 42);
+
+    SECTION("all three scrollbar sources off is an empty list, not the default")
+    {
+        fx.controller->setProfileField("scrollbar_marks_failures", false);
+        fx.controller->setProfileField("scrollbar_marks_user_marks", false);
+        REQUIRE(fx.controller->saveProfile());
+        auto const* saved = fx.cfg.findProfile("blocks");
+        REQUIRE(saved != nullptr);
+        CHECK(saved->scrollbar.value().marks.none());
+    }
+
+    SECTION("a negative minimum duration is stored as zero")
+    {
+        fx.controller->setProfileField("notify_on_command_finish_min_duration", -5);
+        CHECK(rowWithKey(fx.controller->profileFields(), "notify_on_command_finish_min_duration")
+                  .value("value")
+                  .toInt()
+              == 0);
+    }
+}
+
+TEST_CASE("SettingsController: the command-block profile fields form their own group", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+
+    auto keys = QStringList {};
+    for (auto const& raw: fx.controller->profileFields())
+        if (raw.toMap().value("group").toString() == "Command blocks")
+            keys.push_back(raw.toMap().value("key").toString());
+    CHECK(keys
+          == QStringList { "scrollbar_marks_failures",
+                           "scrollbar_marks_commands",
+                           "scrollbar_marks_user_marks",
+                           "sticky_header_mode",
+                           "sticky_header_show_evicted",
+                           "notify_on_command_finish_when",
+                           "notify_on_command_finish_min_duration",
+                           "notify_on_command_finish_outcome",
+                           "notify_on_command_finish_action",
+                           "notify_on_command_finish_clear_on" });
+
+    // The enum rows offer exactly the documented spellings -- which are the loader's tables' tokens, since
+    // the rows read their options from those tables.
+    auto const fields = fx.controller->profileFields();
+    auto const optionsOf = [&fields](QString const& key) {
+        return rowWithKey(fields, key).value("options").toStringList();
+    };
+    CHECK(optionsOf("sticky_header_mode") == QStringList { "never", "scrolled", "always" });
+    CHECK(optionsOf("notify_on_command_finish_when")
+          == QStringList { "never", "unfocused", "hidden", "always" });
+    CHECK(optionsOf("notify_on_command_finish_outcome") == QStringList { "any", "failure" });
+    CHECK(optionsOf("notify_on_command_finish_action") == QStringList { "notify", "bell", "notify_bell" });
+    CHECK(optionsOf("notify_on_command_finish_clear_on") == QStringList { "focus", "next", "never" });
+
+    // The marks are drawn on the scrollbar, so the position row says where it is by default -- and that an
+    // older contour.yml says otherwise -- and that hiding it hides them too.
+    auto const positionHelp = rowWithKey(fields, "scrollbar_position").value("help").toString();
+    CHECK(positionHelp.contains("Right is the default for new configurations"));
+    CHECK(positionHelp.contains("written by an earlier version keeps hidden"));
+    CHECK(positionHelp.contains("Hidden also hides the command marks"));
+
+    // The commands source marks the commands the failures source does not: a failed command has one mark.
+    auto const commandsHelp = rowWithKey(fields, "scrollbar_marks_commands").value("help").toString();
+    CHECK(commandsHelp.contains("did not fail"));
+    CHECK(commandsHelp.contains("still running"));
+
+    // A pane is hidden wherever it is off screen -- behind another tab, a zoomed sibling or a minimised
+    // window -- not only when its tab is not shown.
+    auto const whenHelp = rowWithKey(fields, "notify_on_command_finish_when").value("help").toString();
+    CHECK(whenHelp.contains("off screen"));
+    CHECK(whenHelp.contains("zoomed sibling"));
 }
 
 // }}}

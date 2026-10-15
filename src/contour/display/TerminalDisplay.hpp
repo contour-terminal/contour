@@ -255,6 +255,7 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     [[nodiscard]] double reportedPixelScale() const final;
 
     void resizeTerminalToDisplaySize() final;
+    void refitPage() final;
 
     // (user requested) actions
     vtbackend::FontDef getFontDef() final;
@@ -323,6 +324,9 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     void wheelEvent(QWheelEvent* wheelEvent) override;
     void mousePressEvent(QMouseEvent* mousePressEvent) override;
     void mouseReleaseEvent(QMouseEvent* mouseReleaseEvent) override;
+    /// The pointer grab ended without a release -- a popup, such as the context menu, took it -- so no
+    /// release owed for an earlier press will come (@see session::TerminalSession::dropOwedRelease).
+    void mouseUngrabEvent() override;
     void mouseMoveEvent(QMouseEvent* mouseMoveEvent) override;
     void hoverMoveEvent(QHoverEvent* event) override;
     void hoverLeaveEvent(QHoverEvent* event) override;
@@ -356,7 +360,6 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     void handleWindowChanged(QQuickWindow* newWindow);
     void cleanup();
 
-    void onScrollBarValueChanged(int value);
     void onRefreshRateChanged();
     void applyFontDPI();
     /// (Re)builds the ReGIS text rasterizer from the active profile's font when the font or DPI has
@@ -384,7 +387,7 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     {
         if (!_session)
             return 1;
-        return unbox(terminal().pageSize().lines);
+        return unbox(terminal().mainPageSize().lines);
     }
 
     /// How far the view can be scrolled up, in rows the user can actually reach.
@@ -479,10 +482,10 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     ///         WM size hints refreshed — applyFontDPI() does that unconditionally.
     bool applyStagedFontReconfigNow();
 
-    /// Re-derives the geometry that depends on the cell size after a font/DPI reconfiguration: the
-    /// terminal page size + margin (and the resizeScreen()/SIGWINCH to the child) and the WM size hints.
-    /// Shared by the synchronous (applyStagedFontReconfigNow) and the deferred frame (paint()) reconfig
-    /// paths so the two cannot diverge. Requires a live display.
+    /// Re-derives the geometry that depends on the cell size after a font/DPI reconfiguration, through
+    /// @ref refitPage: the terminal page size + margin (and the resizeScreen()/SIGWINCH to the child) and
+    /// the WM size hints. Shared by the synchronous (applyStagedFontReconfigNow) and the deferred frame
+    /// (paint()) reconfig paths so the two cannot diverge. Requires a live display.
     void recomputeGeometryAfterFontReconfig();
 
     /// This display item's extent in DEVICE PIXELS: the item width/height multiplied by the device pixel

@@ -9,6 +9,7 @@
 
 #include <gsl/pointers>
 
+#include <atomic>
 #include <optional>
 
 namespace vtbackend
@@ -40,6 +41,14 @@ class Viewport
     /// @retval true viewport has been moved/scrolled off its main view position.
     /// @retval false viewport has NOT been moved/scrolled and is still located at its main view position.
     [[nodiscard]] bool scrolled() const noexcept { return _scrollOffset.value != 0; }
+
+    /// Whether the view is away from the bottom -- scrolled back into the history, or by part of a row --
+    /// read without the state lock. A key asks it as it is typed: it brings such a view back down, and must
+    /// not wait for a parse to learn that there is nothing to do.
+    [[nodiscard]] bool isAwayFromBottom() const noexcept
+    {
+        return _isAwayFromBottom.load(std::memory_order_relaxed);
+    }
 
     /// Whether the grid line @p line is currently drawn.
     ///
@@ -88,6 +97,20 @@ class Viewport
     /// @return Whether the viewport moved.
     bool scrollMarkDown();
 
+    /// Scrolls so that grid line @p line is drawn on the viewport's top row, as far as the scrollback
+    /// reaches.
+    ///
+    /// The public face of scrollOffsetForTopLine(), for a caller that names its target rather than
+    /// searching for a mark: a press on the sticky command header jumps to the block's head.
+    /// @param line The grid line to bring to the top.
+    /// @return Whether the viewport moved: not when it already showed @p line as far up as it can, nor
+    ///         while scrolling is disabled.
+    bool scrollLineToTop(LineOffset line);
+
+    /// Whether the viewport may not scroll into the history at all: while the cursor's page is not the
+    /// primary screen's.
+    [[nodiscard]] bool scrollingDisabled() const noexcept;
+
     /// Ensures given line is visible by optionally scrolling the
     /// screen's viewport up or down in order to make that line visible.
     ///
@@ -96,6 +119,33 @@ class Viewport
 
     bool makeVisibleWithinSafeArea(LineOffset line);
     bool makeVisibleWithinSafeArea(LineOffset line, LineCount paddingLines);
+
+    /// The screen rows a line can stand on with context kept around it, first and last inclusive.
+    struct SafeArea
+    {
+        LineOffset top;    ///< The first such row.
+        LineOffset bottom; ///< The last such row.
+    };
+
+    /// The safe area for @p paddingLines of context above and below a line.
+    ///
+    /// Capped as vim caps 'scrolloff': a page too short to hold that much on both sides keeps the line on
+    /// its middle row, the upper one of two. A larger padding would put the area's top below its bottom,
+    /// and every motion would scroll.
+    /// @param paddingLines The rows of context wanted on either side.
+    /// @return The first and the last row of the area, which always holds at least one row.
+    [[nodiscard]] SafeArea safeArea(LineCount paddingLines) const noexcept;
+
+    /// The safe area for the configured scrolloff. @see setScrollOff().
+    [[nodiscard]] SafeArea safeArea() const noexcept { return safeArea(_scrollOff); }
+
+    /// The middle one of the rows the viewport draws lines on, where vim's M goes: the upper of the two on an
+    /// even count, and the row a padding too large for the page leaves as its safe area.
+    ///
+    /// Counts only the rows drawn, as vim counts no row past the end of its buffer: where collapsed folds
+    /// hide more rows than the history can fill in, the page ends in blank rows that show no line.
+    /// @return The middle row, on screen.
+    [[nodiscard]] LineOffset middleRow() const;
 
     /// Brings @p location inside the rows and columns the viewport currently draws.
     ///
@@ -134,13 +184,21 @@ class Viewport
     [[nodiscard]] LineOffset topLine() const { return translateScreenToGridLine(LineOffset(0)); }
 
     /// Returns the sub-cell-height pixel offset for smooth scrolling.
-    [[nodiscard]] float pixelOffset() const noexcept { return _pixelOffset; }
+    [[nodiscard]] float pixelOffset() const noexcept { return _pixelOffset.load(std::memory_order_relaxed); }
 
     /// Sets the sub-cell-height pixel offset for smooth scrolling.
-    void setPixelOffset(float offset) noexcept { _pixelOffset = offset; }
+    void setPixelOffset(float offset) noexcept
+    {
+        _pixelOffset.store(offset, std::memory_order_relaxed);
+        publishPosition();
+    }
 
     /// Resets the pixel offset to zero.
-    void resetPixelOffset() noexcept { _pixelOffset = 0.0f; }
+    void resetPixelOffset() noexcept
+    {
+        _pixelOffset.store(0.0f, std::memory_order_relaxed);
+        publishPosition();
+    }
 
     /// Brings the scroll offset back inside the scrollable range, and reports whether it moved.
     ///
@@ -175,7 +233,12 @@ class Viewport
     [[nodiscard]] LineCount historyLineCount() const noexcept;
 
     [[nodiscard]] LineCount screenLineCount() const noexcept;
-    [[nodiscard]] bool scrollingDisabled() const noexcept;
+
+    /// Publishes isAwayFromBottom() after a change to the scroll offset or the pixel offset.
+    void publishPosition() noexcept
+    {
+        _isAwayFromBottom.store(_scrollOffset.value != 0 || pixelOffset() != 0.0f, std::memory_order_relaxed);
+    }
 
     // private fields
     //
@@ -186,8 +249,13 @@ class Viewport
 
     LineCount _scrollOff = LineCount(8);
 
-    /// Sub-cell-height pixel offset for smooth scrolling.
-    float _pixelOffset = 0.0f;
+    /// Sub-cell-height pixel offset for smooth scrolling. Atomic: the renderer reads it as it draws the frame
+    /// it filled, and the GUI thread as it maps the pointer onto a cell, neither under the state lock that a
+    /// scroll moves it under.
+    std::atomic<float> _pixelOffset = 0.0f;
+
+    /// Whether either offset above is non-zero, as publishPosition() last saw them. @see isAwayFromBottom()
+    std::atomic<bool> _isAwayFromBottom = false;
 };
 
 } // namespace vtbackend

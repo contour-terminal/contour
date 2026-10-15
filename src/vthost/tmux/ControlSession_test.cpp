@@ -188,7 +188,7 @@ struct ControlHarness
                },
                std::move(settings),
                core::defaultEnvironment(),
-               /*startPumps=*/false }
+               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } }
     {
         // A fixed clock so guard timestamps are deterministic.
         session = std::make_unique<ControlSession>(

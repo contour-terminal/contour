@@ -1,33 +1,47 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/shell/SemanticBlockTracker.hpp>
 
+#include <algorithm>
 #include <random>
+#include <ranges>
+#include <utility>
 
 namespace vtbackend
 {
 
-SemanticBlockTracker::SemanticBlockTracker(size_t maxBlocks): _maxBlocks { maxBlocks }
+SemanticBlockTokenSource randomSemanticBlockTokens()
+{
+    return [] {
+        auto device = std::random_device {};
+        return drawSemanticBlockToken(device);
+    };
+}
+
+SemanticBlockTracker::SemanticBlockTracker(SemanticBlockTokenSource tokens): _tokens { std::move(tokens) }
 {
 }
 
-void SemanticBlockTracker::setEnabled(bool enabled)
+void SemanticBlockTracker::enable(CommandBlockStore const& store)
 {
-    _enabled = enabled;
-    if (enabled)
-    {
-        _token = generateToken();
-    }
-    else
-    {
-        _token.reset();
-        _completedBlocks.clear();
-        _currentBlock.reset();
-    }
+    _token = _tokens();
+
+    // A shell enables the mode from its prompt hook, after the prompt's ;A: the command typed at that prompt
+    // starts after the session does, so its block stays visible. Only the newest record can be unfinished,
+    // so every older one is hidden with the rest.
+    auto const* const current = store.current();
+    auto const atPrompt = current && current->state == CommandBlockState::Prompting;
+    _hiddenThrough = atPrompt ? CommandBlockId { unbox(current->id) - 1 } : store.currentId();
+    _hiddenEpoch = store.idEpoch();
+}
+
+void SemanticBlockTracker::disable() noexcept
+{
+    _token.reset();
 }
 
 bool SemanticBlockTracker::isEnabled() const noexcept
 {
-    return _enabled;
+    return _token.has_value();
 }
 
 std::optional<SemanticBlockTracker::Token> const& SemanticBlockTracker::token() const noexcept
@@ -37,68 +51,40 @@ std::optional<SemanticBlockTracker::Token> const& SemanticBlockTracker::token() 
 
 bool SemanticBlockTracker::validateToken(Token const& candidate) const noexcept
 {
-    return _token.has_value() && _token.value() == candidate;
+    return _token.has_value() && *_token == candidate;
 }
 
-SemanticBlockTracker::Token SemanticBlockTracker::generateToken()
+std::vector<CommandBlockRecord const*> SemanticBlockTracker::finishedBlocks(CommandBlockStore const& store,
+                                                                            size_t count) const
 {
-    auto rd = std::random_device {};
-    auto token = Token {};
-    for (auto& part: token)
-        part = static_cast<uint16_t>(rd());
-    return token;
-}
+    auto blocks = std::vector<CommandBlockRecord const*> {};
+    if (!isEnabled())
+        return blocks;
 
-void SemanticBlockTracker::promptStart()
-{
-    if (!_enabled)
-        return;
-
-    // If there's a current block that was finished, push it to completed.
-    // Unfinished blocks (e.g. from Ctrl+C before OSC 133;D) are intentionally
-    // discarded — only commands that ran to completion have reliable metadata.
-    if (_currentBlock && _currentBlock->finished)
+    // Newest first, so the walk ends at the count -- or at the first block this reader may not see: ids
+    // ascend, so nothing older is visible either.
+    blocks.reserve(std::min(count, store.size()));
+    for (auto const& record: store.records() | std::views::reverse)
     {
-        _completedBlocks.push_back(std::move(*_currentBlock));
-        if (_completedBlocks.size() > _maxBlocks)
-            _completedBlocks.pop_front();
+        if (blocks.size() == count || !isVisible(store, record))
+            break;
+        if (record.state == CommandBlockState::Finished && record.end == CommandBlockEnd::Reported)
+            blocks.push_back(&record);
     }
-
-    // Start tracking a new block (replaces any unfinished block).
-    _currentBlock = CommandBlockInfo {};
+    return blocks;
 }
 
-void SemanticBlockTracker::commandOutputStart(std::optional<std::string> const& commandLine)
+CommandBlockRecord const* SemanticBlockTracker::inProgressBlock(CommandBlockStore const& store) const noexcept
 {
-    if (!_enabled)
-        return;
-
-    if (!_currentBlock)
-        _currentBlock = CommandBlockInfo {};
-
-    _currentBlock->commandLine = commandLine;
+    auto const* current = store.current();
+    return (isEnabled() && current && isVisible(store, *current)) ? current : nullptr;
 }
 
-void SemanticBlockTracker::commandFinished(int exitCode)
+bool SemanticBlockTracker::isVisible(CommandBlockStore const& store,
+                                     CommandBlockRecord const& record) const noexcept
 {
-    if (!_enabled)
-        return;
-
-    if (!_currentBlock)
-        _currentBlock = CommandBlockInfo {};
-
-    _currentBlock->exitCode = exitCode;
-    _currentBlock->finished = true;
-}
-
-std::deque<CommandBlockInfo> const& SemanticBlockTracker::completedBlocks() const noexcept
-{
-    return _completedBlocks;
-}
-
-std::optional<CommandBlockInfo> const& SemanticBlockTracker::currentBlock() const noexcept
-{
-    return _currentBlock;
+    // Once the ids have started over, the store holds only blocks minted since: the floor names none of them.
+    return store.idEpoch() != _hiddenEpoch || record.id > _hiddenThrough;
 }
 
 } // namespace vtbackend

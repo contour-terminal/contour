@@ -47,6 +47,12 @@ bool stopMuxReactor(std::mutex& mutex,
     return true;
 }
 
+bool RemoteController::isConnected() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _state == State::Ready && !_stopped;
+}
+
 void RemoteController::failConnect(std::string reason)
 {
     {

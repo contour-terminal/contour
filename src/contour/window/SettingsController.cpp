@@ -1,10 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/GlobalOverrides.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/window/SettingsController.hpp>
 
+#include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/core/CommandBlockOutcome.hpp>
+#include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
+#include <vtbackend/shell/Folding.hpp>
+#include <vtbackend/shell/ScrollbarMarks.hpp>
+#include <vtbackend/shell/StickyHeader.hpp>
 
 #include <text_shaper/Font.hpp>
+
+#include <core/Utf8Path.hpp>
+
+#include <yaml-cpp/yaml.h>
 
 #include <QtCore/QStringList>
 #include <QtGui/QColor>
@@ -13,11 +24,16 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <limits>
+#include <optional>
+#include <ranges>
 #include <set>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -58,7 +74,10 @@ namespace
         std::vector<ProfileFieldDescriptor> fields; //!< The fields shown under it, in order.
     };
 
-    /// Builds a bool profile-field descriptor from a ConfigEntry member accessor.
+    /// Builds a bool profile-field descriptor.
+    /// @param accessor Returns the bool the row edits, of a const and a non-const profile alike: a bool
+    ///                 ConfigEntry's value, or a bool member of a struct-valued one.
+    /// @return The descriptor.
     template <typename Accessor>
     ProfileFieldDescriptor boolField(QString key, QString label, QString help, Accessor accessor)
     {
@@ -66,8 +85,34 @@ namespace
                  std::move(label),
                  std::move(help),
                  "bool",
-                 [accessor](TerminalProfile const& p) { return QVariant(accessor(p).value()); },
+                 [accessor](TerminalProfile const& p) { return QVariant(accessor(p)); },
                  [accessor](TerminalProfile& p, QVariant const& v) { accessor(p) = v.toBool(); } };
+    }
+
+    /// Builds one `scrollbar.marks` source as a checkbox. The YAML list holds the sources that are on,
+    /// so the row is "is this source in the list" -- three checkboxes rather than a list editor, because
+    /// the list is a set of three known values, not free text.
+    /// @param source The source this row switches.
+    /// @return The descriptor.
+    ProfileFieldDescriptor scrollbarMarkField(QString key,
+                                              QString label,
+                                              QString help,
+                                              vtbackend::ScrollbarMarkSource source)
+    {
+        return { std::move(key),
+                 std::move(label),
+                 std::move(help),
+                 "bool",
+                 [source](TerminalProfile const& p) {
+                     return QVariant(p.scrollbar.value().marks.test(source));
+                 },
+                 [source](TerminalProfile& p, QVariant const& v) {
+                     auto& marks = p.scrollbar.value().marks;
+                     if (v.toBool())
+                         marks.enable(source);
+                     else
+                         marks.disable(source);
+                 } };
     }
 
     [[nodiscard]] QString toQString(std::string_view text)
@@ -221,19 +266,19 @@ namespace
                   boolField("show_title_bar",
                             "Show title bar",
                             "Whether the window shows its title bar.",
-                            [](auto& p) -> auto& { return p.showTitleBar; }),
+                            [](auto& p) -> auto& { return p.showTitleBar.value(); }),
                   boolField("maximized",
                             "Start maximized",
                             "Open the window maximized.",
-                            [](auto& p) -> auto& { return p.maximized; }),
+                            [](auto& p) -> auto& { return p.maximized.value(); }),
                   boolField("fullscreen",
                             "Start fullscreen",
                             "Open the window in fullscreen.",
-                            [](auto& p) -> auto& { return p.fullscreen; }),
+                            [](auto& p) -> auto& { return p.fullscreen.value(); }),
                   boolField("size_indicator_on_resize",
                             "Show size on resize",
                             "Briefly show the terminal dimensions when the window is resized.",
-                            [](auto& p) -> auto& { return p.sizeIndicatorOnResize; }),
+                            [](auto& p) -> auto& { return p.sizeIndicatorOnResize.value(); }),
                   { "dim_unfocused",
                     "Dim when unfocused",
                     "How much to dim a pane while it is not focused (0.0 = off, 1.0 = fully dimmed).",
@@ -265,7 +310,7 @@ namespace
                   boolField("draw_bold_text_with_bright_colors",
                             "Bold text uses bright colors",
                             "Render bold text using the bright ANSI colors.",
-                            [](auto& p) -> auto& { return p.drawBoldTextWithBrightColors; }),
+                            [](auto& p) -> auto& { return p.drawBoldTextWithBrightColors.value(); }),
               } },
             { "Scrolling",
               "↕",
@@ -273,11 +318,11 @@ namespace
                   boolField("smooth_scrolling",
                             "Smooth scrolling",
                             "Animate scrolling between lines.",
-                            [](auto& p) -> auto& { return p.smoothScrolling; }),
+                            [](auto& p) -> auto& { return p.smoothScrolling.value(); }),
                   boolField("momentum_scrolling",
                             "Momentum scrolling",
                             "Continue scrolling with momentum.",
-                            [](auto& p) -> auto& { return p.momentumScrolling; }),
+                            [](auto& p) -> auto& { return p.momentumScrolling.value(); }),
                   { "slow_scrolling_time",
                     "Slow scrolling time (ms)",
                     "Duration of one smooth line-scroll step, in milliseconds.",
@@ -313,19 +358,19 @@ namespace
                   boolField("escape_sandbox",
                             "Escape sandbox",
                             "Escape a Flatpak/Snap sandbox when spawning.",
-                            [](auto& p) -> auto& { return p.escapeSandbox; }),
+                            [](auto& p) -> auto& { return p.escapeSandbox.value(); }),
                   boolField("insert_after_yank",
                             "Insert after yank",
                             "Enter insert mode after yanking in Vi mode.",
-                            [](auto& p) -> auto& { return p.insertAfterYank; }),
+                            [](auto& p) -> auto& { return p.insertAfterYank.value(); }),
                   boolField("input_method_editor",
                             "Input method editor",
                             "Enable IME (input method) support.",
-                            [](auto& p) -> auto& { return p.inputMethodEditor; }),
+                            [](auto& p) -> auto& { return p.inputMethodEditor.value(); }),
                   boolField("highlight_word_and_matches_on_double_click",
                             "Highlight word on double-click",
                             "Highlight the double-clicked word and its other occurrences.",
-                            [](auto& p) -> auto& { return p.highlightDoubleClickedWord; }),
+                            [](auto& p) -> auto& { return p.highlightDoubleClickedWord.value(); }),
                   { "vi_mode_highlight_timeout",
                     "Vi highlight timeout (ms)",
                     "How long a Vi-mode yank highlight stays visible, in milliseconds.",
@@ -434,7 +479,7 @@ namespace
                   boolField("option_key_as_alt",
                             "Option key as Alt",
                             "Treat the macOS Option key as Alt modifier.",
-                            [](auto& p) -> auto& { return p.optionKeyAsAlt; }),
+                            [](auto& p) -> auto& { return p.optionKeyAsAlt.value(); }),
                   { "wm_class",
                     "WM class",
                     "The X11 WM_CLASS property string.",
@@ -478,20 +523,16 @@ namespace
                         h.historyScrollMultiplier = vtbackend::LineCount(v.toInt());
                         p.history = h;
                     } },
-                  { "auto_scroll_on_update",
-                    "Auto-scroll on update",
-                    "Scroll to the bottom automatically when new output arrives.",
-                    "bool",
-                    [](TerminalProfile const& p) { return QVariant(p.history.value().autoScrollOnUpdate); },
-                    [](TerminalProfile& p, QVariant const& v) {
-                        auto h = p.history.value();
-                        h.autoScrollOnUpdate = v.toBool();
-                        p.history = h;
-                    } },
+                  boolField("auto_scroll_on_update",
+                            "Auto-scroll on update",
+                            "Scroll to the bottom automatically when new output arrives.",
+                            [](auto& p) -> auto& { return p.history.value().autoScrollOnUpdate; }),
                   enumField(
                       "scrollbar_position",
                       "Scrollbar position",
-                      "Where the scrollbar is shown.",
+                      "Where the scrollbar is shown. Right is the default for new configurations; a "
+                      "contour.yml written by an earlier version keeps hidden. Hidden also hides the "
+                      "command marks.",
                       std::array {
                           std::pair { "hidden"sv, config::ScrollBarPosition::Hidden },
                           std::pair { "left"sv, config::ScrollBarPosition::Left },
@@ -503,32 +544,90 @@ namespace
                           sb.position = v;
                           p.scrollbar = sb;
                       }),
-                  { "hide_scrollbar_in_alt_screen",
-                    "Hide scrollbar in alt screen",
-                    "Automatically hide the scrollbar when the application enters alternate screen mode.",
-                    "bool",
+                  boolField(
+                      "hide_scrollbar_in_alt_screen",
+                      "Hide scrollbar in alt screen",
+                      "Automatically hide the scrollbar when the application enters alternate screen mode.",
+                      [](auto& p) -> auto& { return p.scrollbar.value().hideScrollbarInAltScreen; }),
+              } },
+            { "Command blocks",
+              "❯",
+              {
+                  scrollbarMarkField(
+                      "scrollbar_marks_failures",
+                      "Scrollbar marks: failed commands",
+                      "Mark every command that failed on the scrollbar. Click a mark to jump to it.",
+                      vtbackend::ScrollbarMarkSource::Failures),
+                  scrollbarMarkField("scrollbar_marks_commands",
+                                     "Scrollbar marks: other commands",
+                                     "Mark every command that did not fail on the scrollbar, finished or "
+                                     "still running. A failed command is marked by the row above alone.",
+                                     vtbackend::ScrollbarMarkSource::Commands),
+                  scrollbarMarkField("scrollbar_marks_user_marks",
+                                     "Scrollbar marks: user marks",
+                                     "Mark the lines you marked with Vi mode's mm on the scrollbar.",
+                                     vtbackend::ScrollbarMarkSource::UserMarks),
+                  enumFieldFromTable<vtbackend::StickyHeaderMode>(
+                      "sticky_header_mode",
+                      "Sticky command header",
+                      "Pin the command whose output fills the top of the page above it: never, only while "
+                      "scrolled back into the history (scrolled), or also while following live output "
+                      "(always).",
+                      [](TerminalProfile const& p) { return p.stickyHeader.value().mode; },
+                      [](TerminalProfile& p, auto v) { p.stickyHeader.value().mode = v; }),
+                  boolField("sticky_header_show_evicted",
+                            "Name evicted commands",
+                            "When a command's own line was evicted from the history, name it in the header "
+                            "instead: wherever the header shows, and at the very top of the history even "
+                            "when the sticky header is set to never.",
+                            [](auto& p) -> auto& { return p.stickyHeader.value().showEvicted; }),
+                  enumFieldFromTable<config::NotifyWhen>(
+                      "notify_on_command_finish_when",
+                      "Notify on finish",
+                      "When a finished command raises a notification: never; when its pane is not focused "
+                      "(unfocused); only while its pane is off screen, on another tab, behind a zoomed "
+                      "sibling or in a minimised window (hidden); or always.",
+                      [](TerminalProfile const& p) { return p.notifyOnCommandFinish.value().when; },
+                      [](TerminalProfile& p, auto v) { p.notifyOnCommandFinish.value().when = v; }),
+                  { "notify_on_command_finish_min_duration",
+                    "Notify: minimum duration (s)",
+                    "Commands that finish faster than this never notify.",
+                    "int",
                     [](TerminalProfile const& p) {
-                        return QVariant(p.scrollbar.value().hideScrollbarInAltScreen);
+                        return QVariant(
+                            static_cast<int>(p.notifyOnCommandFinish.value().minDuration.count()));
                     },
                     [](TerminalProfile& p, QVariant const& v) {
-                        auto sb = p.scrollbar.value();
-                        sb.hideScrollbarInAltScreen = v.toBool();
-                        p.scrollbar = sb;
+                        p.notifyOnCommandFinish.value().minDuration =
+                            std::chrono::seconds { std::max(0, v.toInt()) };
                     } },
+                  enumFieldFromTable<config::NotifyOutcome>(
+                      "notify_on_command_finish_outcome",
+                      "Notify: outcome",
+                      "Notify for every command (any), or only for one that failed (failure).",
+                      [](TerminalProfile const& p) { return p.notifyOnCommandFinish.value().outcome; },
+                      [](TerminalProfile& p, auto v) { p.notifyOnCommandFinish.value().outcome = v; }),
+                  enumFieldFromTable<config::NotifyAction>(
+                      "notify_on_command_finish_action",
+                      "Notify: how",
+                      "A desktop notification (notify), the profile's bell (bell), or both (notify_bell).",
+                      [](TerminalProfile const& p) { return p.notifyOnCommandFinish.value().action; },
+                      [](TerminalProfile& p, auto v) { p.notifyOnCommandFinish.value().action = v; }),
+                  enumFieldFromTable<config::NotifyClearOn>(
+                      "notify_on_command_finish_clear_on",
+                      "Notify: withdraw on",
+                      "Withdraw the notification when the pane is focused (focus), when the next command "
+                      "there starts (next), or never.",
+                      [](TerminalProfile const& p) { return p.notifyOnCommandFinish.value().clearOn; },
+                      [](TerminalProfile& p, auto v) { p.notifyOnCommandFinish.value().clearOn = v; }),
               } },
             { "Mouse & permissions",
               "⊙",
               {
-                  { "hide_mouse_while_typing",
-                    "Hide mouse while typing",
-                    "Automatically hide the mouse cursor while typing.",
-                    "bool",
-                    [](TerminalProfile const& p) { return QVariant(p.mouse.value().hideWhileTyping); },
-                    [](TerminalProfile& p, QVariant const& v) {
-                        auto m = p.mouse.value();
-                        m.hideWhileTyping = v.toBool();
-                        p.mouse = m;
-                    } },
+                  boolField("hide_mouse_while_typing",
+                            "Hide mouse while typing",
+                            "Automatically hide the mouse cursor while typing.",
+                            [](auto& p) -> auto& { return p.mouse.value().hideWhileTyping; }),
                   enumField(
                       "permission_capture_buffer",
                       "Capture buffer permission",
@@ -746,16 +845,10 @@ namespace
                         b.sound = v.toString().toStdString();
                         p.bell = b;
                     } },
-                  { "bell_alert",
-                    "Bell flash",
-                    "Flash the terminal window when the bell rings.",
-                    "bool",
-                    [](TerminalProfile const& p) { return QVariant(p.bell.value().alert); },
-                    [](TerminalProfile& p, QVariant const& v) {
-                        auto b = p.bell.value();
-                        b.alert = v.toBool();
-                        p.bell = b;
-                    } },
+                  boolField("bell_alert",
+                            "Bell flash",
+                            "Flash the terminal window when the bell rings.",
+                            [](auto& p) -> auto& { return p.bell.value().alert; }),
                   { "bell_volume",
                     "Bell volume",
                     "Volume of the bell sound (0.0 = silent, 1.0 = full).",
@@ -786,16 +879,11 @@ namespace
                             static_cast<unsigned>(255 * std::clamp(v.toDouble(), 0.0, 1.0)));
                         p.background = bg;
                     } },
-                  { "background_blur",
-                    "Background blur",
-                    "Whether to blur content behind the transparent terminal window (platform dependent).",
-                    "bool",
-                    [](TerminalProfile const& p) { return QVariant(p.background.value().blur); },
-                    [](TerminalProfile& p, QVariant const& v) {
-                        auto bg = p.background.value();
-                        bg.blur = v.toBool();
-                        p.background = bg;
-                    } },
+                  boolField(
+                      "background_blur",
+                      "Background blur",
+                      "Whether to blur content behind the transparent terminal window (platform dependent).",
+                      [](auto& p) -> auto& { return p.background.value().blur; }),
               } },
             { "Hyperlinks",
               "⧉",
@@ -856,63 +944,161 @@ namespace
                           sl.position = v;
                           p.statusLine = sl;
                       }),
-                  { "status_line_sync_window_title",
-                    "Sync window title with status line",
-                    "Synchronize the window title with the host-writable status line content when denied.",
-                    "bool",
-                    [](TerminalProfile const& p) {
-                        return QVariant(p.statusLine.value().syncWindowTitleWithHostWritableStatusDisplay);
-                    },
-                    [](TerminalProfile& p, QVariant const& v) {
-                        auto sl = p.statusLine.value();
-                        sl.syncWindowTitleWithHostWritableStatusDisplay = v.toBool();
-                        p.statusLine = sl;
-                    } },
+                  boolField(
+                      "status_line_sync_window_title",
+                      "Sync window title with status line",
+                      "Synchronize the window title with the host-writable status line content when denied.",
+                      [](auto& p) -> auto& {
+                          return p.statusLine.value().syncWindowTitleWithHostWritableStatusDisplay;
+                      }),
               } },
         };
         return groups;
     }
+
+    /// A colour slot a scheme may leave unset, in which case the palette derives it. The editor row
+    /// shows the colour in effect and writes an explicit one only when edited.
+    struct DerivedColorSlot
+    {
+        std::string_view key;   //!< QML key.
+        std::string_view label; //!< Swatch label.
+        /// The scheme's own colour for the slot; unset while the palette derives it.
+        std::optional<vtbackend::RGBColor> const& (*own)(vtbackend::ColorPalette const&);
+        /// Sets the scheme's own colour, or unsets it so that the palette derives it again.
+        void (*assign)(vtbackend::ColorPalette&, std::optional<vtbackend::RGBColor>);
+        /// The colour in effect: the scheme's own, or the derived one while the slot is unset.
+        vtbackend::RGBColor (*resolve)(vtbackend::ColorPalette const&);
+    };
+
+    /// The slot of the block column's colour for @p Outcome.
+    /// @param key   QML key.
+    /// @param label Swatch label.
+    /// @return The slot, resolved by ColorPalette::blockStatusColor.
+    template <vtbackend::CommandBlockOutcome Outcome>
+    constexpr DerivedColorSlot blockStatusSlot(std::string_view key, std::string_view label)
+    {
+        constexpr auto Index = static_cast<size_t>(Outcome);
+        return { .key = key,
+                 .label = label,
+                 .own = [](vtbackend::ColorPalette const& p) -> auto const& {
+                     return p.blockStatus.at(Index);
+                 },
+                 .assign = [](vtbackend::ColorPalette& p,
+                              std::optional<vtbackend::RGBColor> color) { p.blockStatus.at(Index) = color; },
+                 .resolve = [](vtbackend::ColorPalette const& p) { return p.blockStatusColor(Outcome); } };
+    }
+
+    /// The slot of a colour the palette holds as a member of its own, @p Own, resolved by @p Resolve.
+    /// @param key   QML key.
+    /// @param label Swatch label.
+    /// @return The slot.
+    template <auto Own, auto Resolve>
+    constexpr DerivedColorSlot memberSlot(std::string_view key, std::string_view label)
+    {
+        return { .key = key,
+                 .label = label,
+                 .own = [](vtbackend::ColorPalette const& p) -> auto const& { return p.*Own; },
+                 .assign = [](vtbackend::ColorPalette& p,
+                              std::optional<vtbackend::RGBColor> color) { p.*Own = color; },
+                 .resolve = [](vtbackend::ColorPalette const& p) { return (p.*Resolve)(); } };
+    }
+
+    /// The command-block colour slots, in the order the editor lists them after the ANSI banks. Adding
+    /// a derived slot to the scheme editor is adding a row here.
+    constexpr auto DerivedColorSlots = std::array {
+        blockStatusSlot<vtbackend::CommandBlockOutcome::Success>("block_status_success",
+                                                                 "Block status: success"),
+        blockStatusSlot<vtbackend::CommandBlockOutcome::Failure>("block_status_failure",
+                                                                 "Block status: failure"),
+        blockStatusSlot<vtbackend::CommandBlockOutcome::Running>("block_status_running",
+                                                                 "Block status: running"),
+        memberSlot<&vtbackend::ColorPalette::gutterText, &vtbackend::ColorPalette::gutterTextColor>(
+            "gutter_text", "Gutter text"),
+        memberSlot<&vtbackend::ColorPalette::stickyHeaderBackground,
+                   &vtbackend::ColorPalette::stickyHeaderBackgroundColor>("sticky_header_background",
+                                                                          "Sticky header: background"),
+        memberSlot<&vtbackend::ColorPalette::stickyHeaderSeparator,
+                   &vtbackend::ColorPalette::stickyHeaderSeparatorColor>("sticky_header_separator",
+                                                                         "Sticky header: separator"),
+    };
+
+    /// Where the colour a scheme editor row shows comes from.
+    enum class SchemeColorSource : uint8_t
+    {
+        Scheme,  ///< A slot every scheme sets, such as the background.
+        Derived, ///< A slot the scheme leaves unset, so the palette derives it from other colours.
+        Pinned,  ///< A slot the palette could derive, set by the scheme to a colour of its own.
+    };
+
+    /// The QML-facing token of each SchemeColorSource, indexed by it.
+    constexpr auto SchemeColorSourceTokens = std::array { "scheme"sv, "derived"sv, "pinned"sv };
 
     /// A data-driven descriptor for one editable color slot of a palette.
     struct SchemeColorDescriptor
     {
         QString key;
         QString label;
-        std::function<vtbackend::RGBColor(vtbackend::ColorPalette const&)> get;
-        std::function<void(vtbackend::ColorPalette&, vtbackend::RGBColor)> set;
+        std::function<vtbackend::RGBColor(vtbackend::ColorPalette const&)> get; //!< The colour in effect.
+        std::function<void(vtbackend::ColorPalette&, vtbackend::RGBColor)>
+            set; //!< Makes it the scheme's own.
+        /// How the palette derives the slot while the scheme leaves it unset; none for one every scheme sets.
+        DerivedColorSlot const* derived = nullptr;
+
+        /// Where the colour in effect comes from in @p palette.
+        [[nodiscard]] SchemeColorSource source(vtbackend::ColorPalette const& palette) const
+        {
+            if (derived == nullptr)
+                return SchemeColorSource::Scheme;
+            return derived->own(palette) ? SchemeColorSource::Pinned : SchemeColorSource::Derived;
+        }
     };
 
-    /// The color slots the scheme editor exposes: the default fg/bg plus the 8 normal and 8 bright
-    /// ANSI colors. Generated once from the ANSI names so the two 8-color banks are not hand-listed.
+    /// The color slots the scheme editor exposes: the default fg/bg, the 8 normal and 8 bright ANSI
+    /// colors (generated from the ANSI names so the two banks are not hand-listed), then the derived
+    /// command-block slots of DerivedColorSlots.
     std::vector<SchemeColorDescriptor> const& schemeColorDescriptors()
     {
         static auto const descriptors = [] {
             auto list = std::vector<SchemeColorDescriptor> {};
-            list.push_back({ "background",
-                             "Background",
-                             [](auto const& p) { return p.defaultBackground; },
-                             [](auto& p, auto c) { p.defaultBackground = c; } });
-            list.push_back({ "foreground",
-                             "Foreground",
-                             [](auto const& p) { return p.defaultForeground; },
-                             [](auto& p, auto c) { p.defaultForeground = c; } });
+            list.push_back({ .key = "background",
+                             .label = "Background",
+                             .get = [](auto const& p) { return p.defaultBackground; },
+                             .set = [](auto& p, auto c) { p.defaultBackground = c; } });
+            list.push_back({ .key = "foreground",
+                             .label = "Foreground",
+                             .get = [](auto const& p) { return p.defaultForeground; },
+                             .set = [](auto& p, auto c) { p.defaultForeground = c; } });
             static constexpr auto AnsiNames =
                 std::array<std::string_view, 8> { "black", "red",     "green", "yellow",
                                                   "blue",  "magenta", "cyan",  "white" };
             for (auto const bright: { false, true })
-                for (auto i = size_t { 0 }; i < AnsiNames.size(); ++i)
+                for (auto const i: std::views::iota(size_t { 0 }, AnsiNames.size()))
                 {
                     auto const slot = bright ? i + 8 : i;
-                    list.push_back({ QString::fromStdString((bright ? "bright_" : "normal_")
-                                                            + std::string(AnsiNames[i])),
-                                     QString::fromStdString((bright ? "Bright " : "Normal ")
-                                                            + std::string(AnsiNames[i])),
-                                     [slot](auto const& p) { return p.palette.at(slot); },
-                                     [slot](auto& p, auto c) { p.palette.at(slot) = c; } });
+                    list.push_back({ .key = QString::fromStdString((bright ? "bright_" : "normal_")
+                                                                   + std::string(AnsiNames[i])),
+                                     .label = QString::fromStdString((bright ? "Bright " : "Normal ")
+                                                                     + std::string(AnsiNames[i])),
+                                     .get = [slot](auto const& p) { return p.palette.at(slot); },
+                                     .set = [slot](auto& p, auto c) { p.palette.at(slot) = c; } });
                 }
+            for (auto const& derived: DerivedColorSlots)
+                list.push_back({ .key = toQString(derived.key),
+                                 .label = toQString(derived.label),
+                                 .get = derived.resolve,
+                                 .set = [assign = derived.assign](auto& p, auto c) { assign(p, c); },
+                                 .derived = &derived });
             return list;
         }();
         return descriptors;
+    }
+
+    /// The scheme editor's slot named @p key, or nullptr when there is none.
+    [[nodiscard]] SchemeColorDescriptor const* findSchemeColor(QString const& key)
+    {
+        auto const& descriptors = schemeColorDescriptors();
+        auto const it = std::ranges::find(descriptors, key, &SchemeColorDescriptor::key);
+        return it != descriptors.end() ? &*it : nullptr;
     }
 
     /// One combo-box entry: what is stored, and what is shown.
@@ -950,186 +1136,484 @@ namespace
         return options;
     }
 
+    /// Checks an edited global value before it is written, and says why when it refuses it.
+    using GlobalFieldValidator = std::function<std::expected<void, std::string>(QVariant const&)>;
+
     /// A data-driven descriptor for one editable global (application-scope) setting. `toYaml` turns the
     /// edited value into the YAML scalar written to settings.yml; the load-time merge re-applies it
     /// through the typed per-key loader, so this side needs no parsing.
     struct GlobalFieldDescriptor
     {
-        QString key;
+        QString key; //!< contour.yml key path: "reflow_on_resize", or "gutter.line_numbers" for a leaf.
         QString label;
         QString help;
         QString type;
         std::function<QVariant(config::Config const&)> get;
         std::function<std::string(QVariant const&)> toYaml;
+        /// Reads an override back from settings.yml as the loader reads it, as the row's value: an invalid
+        /// QVariant where the loader would refuse it. A hand-edited override may be spelled otherwise than
+        /// toYaml spells it -- `True`, `0x10`, `Dark` -- and still take.
+        std::function<QVariant(std::string const&)> fromYaml;
         QStringList options {}; //!< For "enum": the allowed values (the combo model + accepted set).
         /// For "enum" rows whose options are only known at runtime; overrides `options` when set.
         std::function<std::vector<EnumOption>(OptionContext const&)> optionsProvider {};
+        GlobalFieldValidator validate {}; //!< Refuses a value the loader would reject; empty accepts all.
     };
 
-    QString boolToYaml(QVariant const& v)
+    /// Reads @p text as the loader reads a scalar of type @p T: through yaml-cpp, which takes `True` for a
+    /// bool and `0x10` for a number.
+    /// @return The value, or an invalid QVariant where the loader would refuse it.
+    template <typename T>
+    [[nodiscard]] QVariant scalarFromYaml(std::string const& text)
     {
-        return v.toBool() ? "true" : "false";
+        auto value = T {};
+        if (YAML::convert<T>::decode(YAML::Node(text), value))
+            return QVariant(value);
+        return {};
     }
 
-    /// The editable global settings. The keys match contour.yml's top-level keys AND the loader lines in
-    /// mergeGuiManagedSideFiles, so an override round-trips as the right type.
+    /// Reads @p text as one of @p options, in any case, as the enum loaders do.
+    /// @return The option, or an invalid QVariant when @p text is none of them.
+    [[nodiscard]] QVariant optionFromYaml(QStringList const& options, std::string const& text)
+    {
+        auto const wanted = QString::fromStdString(text);
+        auto const option = std::ranges::find_if(options, [&wanted](QString const& candidate) {
+            return candidate.compare(wanted, Qt::CaseInsensitive) == 0;
+        });
+        return option != options.end() ? QVariant(*option) : QVariant();
+    }
+
+    /// The refusal of @p token, a word none of the offered values is spelled as.
+    [[nodiscard]] std::unexpected<std::string> notOffered(std::string const& token)
+    {
+        return std::unexpected(std::format("'{}' is not one of the offered values.", token));
+    }
+
+    /// Builds a bool global-field descriptor.
+    /// @param key   The contour.yml key path (see GlobalFieldDescriptor::key).
+    /// @param label Human-readable label.
+    /// @param help  One-line help text.
+    /// @param get   Reads the effective value from the configuration.
+    /// @return The descriptor.
+    GlobalFieldDescriptor globalBoolField(QString key,
+                                          QString label,
+                                          QString help,
+                                          std::function<bool(config::Config const&)> get)
+    {
+        return { .key = std::move(key),
+                 .label = std::move(label),
+                 .help = std::move(help),
+                 .type = "bool",
+                 .get = [get = std::move(get)](config::Config const& c) { return QVariant(get(c)); },
+                 .toYaml = [](QVariant const& v) { return std::string { v.toBool() ? "true" : "false" }; },
+                 .fromYaml = scalarFromYaml<bool> };
+    }
+
+    /// Builds an integer global-field descriptor that refuses values outside [@p lowest, @p highest], so
+    /// the page cannot write a value the loader would clamp or reject.
+    /// @param key     The contour.yml key path (see GlobalFieldDescriptor::key).
+    /// @param label   Human-readable label.
+    /// @param help    One-line help text.
+    /// @param get     Reads the effective value from the configuration.
+    /// @param lowest  The smallest accepted value.
+    /// @param highest The largest accepted value.
+    /// @return The descriptor.
+    GlobalFieldDescriptor globalIntField(QString key,
+                                         QString label,
+                                         QString help,
+                                         std::function<int(config::Config const&)> get,
+                                         int lowest,
+                                         int highest)
+    {
+        return { .key = std::move(key),
+                 .label = std::move(label),
+                 .help = std::move(help),
+                 .type = "int",
+                 .get = [get = std::move(get)](config::Config const& c) { return QVariant(get(c)); },
+                 .toYaml = [](QVariant const& v) { return std::to_string(v.toInt()); },
+                 .fromYaml = scalarFromYaml<int>,
+                 .validate = [lowest, highest](QVariant const& v) -> std::expected<void, std::string> {
+                     auto isNumber = false; // Qt's out-parameter
+                     auto const number = v.toInt(&isNumber);
+                     if (isNumber && number >= lowest && number <= highest)
+                         return {};
+                     if (highest == std::numeric_limits<int>::max())
+                         return std::unexpected(std::format("Enter a whole number of at least {}.", lowest));
+                     return std::unexpected(
+                         std::format("Enter a whole number from {} to {}.", lowest, highest));
+                 } };
+    }
+
+    /// Builds a decimal global-field descriptor that refuses values below @p lowest.
+    /// @param key    The contour.yml key path (see GlobalFieldDescriptor::key).
+    /// @param label  Human-readable label.
+    /// @param help   One-line help text.
+    /// @param get    Reads the effective value from the configuration.
+    /// @param lowest The smallest accepted value.
+    /// @return The descriptor.
+    GlobalFieldDescriptor globalDoubleField(QString key,
+                                            QString label,
+                                            QString help,
+                                            std::function<double(config::Config const&)> get,
+                                            double lowest)
+    {
+        return { .key = std::move(key),
+                 .label = std::move(label),
+                 .help = std::move(help),
+                 .type = "double",
+                 .get = [get = std::move(get)](config::Config const& c) { return QVariant(get(c)); },
+                 .toYaml = [](QVariant const& v) { return std::format("{}", v.toDouble()); },
+                 .fromYaml = scalarFromYaml<double>,
+                 .validate = [lowest](QVariant const& v) -> std::expected<void, std::string> {
+                     auto isNumber = false; // Qt's out-parameter
+                     if (auto const number = v.toDouble(&isNumber); isNumber && number >= lowest)
+                         return {};
+                     return std::unexpected(std::format("Enter a number of at least {}.", lowest));
+                 } };
+    }
+
+    /// Builds a string global-field descriptor, optionally checked by @p validate before it is written.
+    /// @param key      The contour.yml key path (see GlobalFieldDescriptor::key).
+    /// @param label    Human-readable label.
+    /// @param help     One-line help text.
+    /// @param get      Reads the effective value from the configuration.
+    /// @param validate Refuses a value the loader would reject; empty accepts every string.
+    /// @return The descriptor.
+    GlobalFieldDescriptor globalStringField(QString key,
+                                            QString label,
+                                            QString help,
+                                            std::function<std::string(config::Config const&)> get,
+                                            GlobalFieldValidator validate = {})
+    {
+        return { .key = std::move(key),
+                 .label = std::move(label),
+                 .help = std::move(help),
+                 .type = "string",
+                 .get = [get = std::move(get)](
+                            config::Config const& c) { return QVariant(QString::fromStdString(get(c))); },
+                 .toYaml = [](QVariant const& v) { return v.toString().toStdString(); },
+                 .fromYaml = [](std::string const& text) { return QVariant(QString::fromStdString(text)); },
+                 .validate = std::move(validate) };
+    }
+
+    /// Builds an enum global-field descriptor offering @p options.
+    /// @param key      The contour.yml key path (see GlobalFieldDescriptor::key).
+    /// @param label    Human-readable label.
+    /// @param help     One-line help text.
+    /// @param get      Reads the effective value from the configuration, spelled as one of @p options.
+    /// @param options  The values offered, spelled as the loader reads them.
+    /// @param validate Refuses a value the loader would reject; empty accepts @p options alone.
+    /// @return The descriptor.
+    GlobalFieldDescriptor globalEnumField(QString key,
+                                          QString label,
+                                          QString help,
+                                          std::function<std::string(config::Config const&)> get,
+                                          QStringList const& options,
+                                          GlobalFieldValidator validate = {})
+    {
+        if (!validate)
+            validate = [options](QVariant const& v) -> std::expected<void, std::string> {
+                if (options.contains(v.toString()))
+                    return {};
+                return notOffered(v.toString().toStdString());
+            };
+        return { .key = std::move(key),
+                 .label = std::move(label),
+                 .help = std::move(help),
+                 .type = "enum",
+                 .get = [get = std::move(get)](
+                            config::Config const& c) { return QVariant(QString::fromStdString(get(c))); },
+                 .toYaml = [](QVariant const& v) { return v.toString().toStdString(); },
+                 .fromYaml = [options](std::string const& text) { return optionFromYaml(options, text); },
+                 .options = options,
+                 .validate = std::move(validate) };
+    }
+
+    /// Builds an enum global-field descriptor whose options, displayed value and accepted set all come
+    /// from the enum's ConfigEnum table -- the one the loader parses with -- so the page can neither
+    /// offer nor write a token the loader rejects.
+    /// @param key   The contour.yml key path (see GlobalFieldDescriptor::key).
+    /// @param label Human-readable label.
+    /// @param help  One-line help text.
+    /// @param get   Reads the effective value from the configuration.
+    /// @return The descriptor.
+    template <typename Enum>
+    GlobalFieldDescriptor globalEnumFieldFromTable(QString key,
+                                                   QString label,
+                                                   QString help,
+                                                   std::function<Enum(config::Config const&)> get)
+    {
+        return globalEnumField(
+            std::move(key),
+            std::move(label),
+            std::move(help),
+            [get = std::move(get)](config::Config const& c) {
+                return std::string { config::configEnumToken(get(c)) };
+            },
+            configEnumTokens<Enum>(),
+            [](QVariant const& v) -> std::expected<void, std::string> {
+                auto const token = v.toString().toStdString();
+                if (config::configEnumFromToken<Enum>(token))
+                    return {};
+                return notOffered(token);
+            });
+    }
+
+    /// The gutter's own timestamp-format check, vtbackend::measureTimestampFormat() -- the one the
+    /// GutterConfig loader uses -- phrased for the page with vtbackend::timestampFormatErrorText()'s reason.
+    /// @param value The format the user typed.
+    /// @return Nothing when valid, or the message the page shows.
+    [[nodiscard]] std::expected<void, std::string> checkTimestampFormat(QVariant const& value)
+    {
+        return vtbackend::measureTimestampFormat(value.toString().toStdString())
+            .transform([](int /*columns*/) {})
+            .transform_error([](vtbackend::TimestampFormatError error) {
+                return std::format("The gutter's timestamp format cannot be used because {}.",
+                                   vtbackend::timestampFormatErrorText(error));
+            });
+    }
+
+    /// Refuses a GPU the loader cannot parse: one of the three keywords, or a vendor:device id.
+    /// @param value The GPU picked.
+    /// @return Nothing when it parses, or the message the page shows.
+    [[nodiscard]] std::expected<void, std::string> checkGpu(QVariant const& value)
+    {
+        auto const token = value.toString().toStdString();
+        if (config::parseGpuSelector(token))
+            return {};
+        return notOffered(token);
+    }
+
+    /// Refuses a blank pager: every OpenCommandOutput binding without a program of its own would then fail
+    /// for want of one.
+    /// @param value The pager the user typed.
+    /// @return Nothing when it names something, or the message the page shows.
+    [[nodiscard]] std::expected<void, std::string> checkPager(QVariant const& value)
+    {
+        if (!value.toString().trimmed().isEmpty())
+            return {};
+        return std::unexpected(std::string { "Enter the program to open a command's output with. To go "
+                                             "back to the one contour.yml names, use Reset." });
+    }
+
+    /// The editable global settings. A key is a contour.yml key path -- top-level ("reflow_on_resize")
+    /// or one level into a section ("renderer.gpu"), which settings.yml stores nested -- and needs a row
+    /// of config::globalOverrides() that applies it (for a dotted key, its section's), or setGlobalField
+    /// refuses to save it. A leaf of a section that has a row needs nothing more.
     std::vector<GlobalFieldDescriptor> const& globalFieldDescriptors()
     {
         static auto const descriptors = std::vector<GlobalFieldDescriptor> {
-            { "reflow_on_resize",
-              "Reflow on resize",
-              "Reflow lines when the terminal is resized.",
-              "bool",
-              [](config::Config const& c) { return QVariant(c.reflowOnResize.value()); },
-              [](QVariant const& v) { return boolToYaml(v).toStdString(); } },
-            { "tab_switch_on_horizontal_wheel",
-              "Switch tabs on horizontal wheel",
-              "A horizontal wheel tilt or trackpad swipe switches to the previous/next tab.",
-              "bool",
-              [](config::Config const& c) { return QVariant(c.tabSwitchOnHorizontalWheel.value()); },
-              [](QVariant const& v) { return boolToYaml(v).toStdString(); } },
-            { "spawn_new_process",
-              "Spawn new process",
-              "Spawn a separate process for each new terminal window.",
-              "bool",
-              [](config::Config const& c) { return QVariant(c.spawnNewProcess.value()); },
-              [](QVariant const& v) { return boolToYaml(v).toStdString(); } },
-            { "read_buffer_size",
-              "PTY read buffer size",
-              "Most bytes read from the pseudo-terminal and parsed in one go.",
-              "int",
-              [](config::Config const& c) { return QVariant(c.ptyReadBufferSize.value()); },
-              [](QVariant const& v) { return std::to_string(v.toInt()); } },
-            { "command_palette_recent_count",
-              "Recent commands",
-              "How many recently-used commands the command palette lists first.",
-              "int",
-              [](config::Config const& c) { return QVariant(c.commandPaletteRecentCount.value()); },
-              [](QVariant const& v) { return std::to_string(v.toInt()); } },
-            { "word_delimiters",
-              "Word delimiters",
-              "Characters that separate words when selecting by double-click.",
-              "string",
-              [](config::Config const& c) {
-                  return QVariant(QString::fromStdString(c.wordDelimiters.value()));
-              },
-              [](QVariant const& v) { return v.toString().toStdString(); } },
-            { "theme",
-              "GUI theme",
-              "Light/dark appearance of the GUI chrome (menus, tabs, dialogs). The terminal keeps "
-              "following the OS.",
-              "enum",
-              // Reuse the std::formatter<GuiTheme> (the "system"/"dark"/"light" source of truth) rather
-              // than re-switching the enum here, matching the std::format idiom used for modifiers/keys.
-              [](config::Config const& c) {
-                  return QVariant(QString::fromStdString(std::format("{}", c.theme.value())));
-              },
-              [](QVariant const& v) { return v.toString().toStdString(); },
-              { "system", "dark", "light" } },
+            globalBoolField("reflow_on_resize",
+                            "Reflow on resize",
+                            "Reflow lines when the terminal is resized.",
+                            [](config::Config const& c) { return c.reflowOnResize.value(); }),
+            globalBoolField("tab_switch_on_horizontal_wheel",
+                            "Switch tabs on horizontal wheel",
+                            "A horizontal wheel tilt or trackpad swipe switches to the previous/next tab.",
+                            [](config::Config const& c) { return c.tabSwitchOnHorizontalWheel.value(); }),
+            globalBoolField("spawn_new_process",
+                            "Spawn new process",
+                            "Spawn a separate process for each new terminal window.",
+                            [](config::Config const& c) { return c.spawnNewProcess.value(); }),
+            // At least 1 byte: the size reaches the terminal as an unsigned one, where a negative one would
+            // wrap around.
+            globalIntField(
+                "read_buffer_size",
+                "PTY read buffer size",
+                "Most bytes read from the pseudo-terminal and parsed in one go.",
+                [](config::Config const& c) { return c.ptyReadBufferSize.value(); },
+                1,
+                std::numeric_limits<int>::max()),
+            // 0 is a choice: it turns the recently used section off.
+            globalIntField(
+                "command_palette_recent_count",
+                "Recent commands",
+                "How many recently-used commands the command palette lists first.",
+                [](config::Config const& c) { return c.commandPaletteRecentCount.value(); },
+                0,
+                std::numeric_limits<int>::max()),
+            globalStringField("word_delimiters",
+                              "Word delimiters",
+                              "Characters that separate words when selecting by double-click.",
+                              [](config::Config const& c) { return c.wordDelimiters.value(); }),
+            // Reuse the std::formatter<GuiTheme> (the "system"/"dark"/"light" source of truth) rather than
+            // re-switching the enum here, matching the std::format idiom used for modifiers/keys.
+            globalEnumField("theme",
+                            "GUI theme",
+                            "Light/dark appearance of the GUI chrome (menus, tabs, dialogs). The terminal "
+                            "keeps following the OS.",
+                            [](config::Config const& c) { return std::format("{}", c.theme.value()); },
+                            { "system", "dark", "light" }),
             // Both tab bar rows read their options, their rendered value and their accepted set from
             // contour/TabBarMode.h, so the page cannot offer a token the configuration reader would
             // then reject -- and a new mode shows up here with this file untouched.
-            { "tab_bar_position",
-              "Tab bar position",
-              "Where the tab strip sits relative to the terminal content.",
-              "enum",
-              [](config::Config const& c) {
-                  return QVariant(toQString(config::configEnumToken(c.tabBarPosition.value())));
-              },
-              [](QVariant const& v) { return v.toString().toStdString(); },
-              configEnumTokens<config::TabBarPosition>() },
-            { "tab_bar_visibility",
-              "Tab bar visibility",
-              "When the tab strip is shown: always, never, or only once a window has more than one "
-              "tab.",
-              "enum",
-              [](config::Config const& c) {
-                  return QVariant(toQString(config::configEnumToken(c.tabBarVisibility.value())));
-              },
-              [](QVariant const& v) { return v.toString().toStdString(); },
-              configEnumTokens<config::TabBarVisibility>() },
+            globalEnumFieldFromTable<config::TabBarPosition>(
+                "tab_bar_position",
+                "Tab bar position",
+                "Where the tab strip sits relative to the terminal content.",
+                [](config::Config const& c) { return c.tabBarPosition.value(); }),
+            globalEnumFieldFromTable<config::TabBarVisibility>(
+                "tab_bar_visibility",
+                "Tab bar visibility",
+                "When the tab strip is shown: always, never, or only once a window has more than one tab.",
+                [](config::Config const& c) { return c.tabBarVisibility.value(); }),
             // Reads its options and its accepted set from contour/UiStyle.h, like the tab bar rows
             // above. The restart note is part of the help text rather than a separate affordance
             // because the limitation is Qt's: the Quick Controls style is chosen once, before the
             // first control exists (see ContourGuiApp), so there is nothing to apply live.
-            { "ui_style",
-              "Interface style",
-              "Native GUI chrome, or cell-quantized terminal (TUI) chrome drawn in a monospace font. "
-              "Takes effect after restart.",
-              "enum",
-              [](config::Config const& c) {
-                  return QVariant(toQString(config::configEnumToken(c.uiStyle.value())));
-              },
-              [](QVariant const& v) { return v.toString().toStdString(); },
-              configEnumTokens<config::UiStyle>() },
+            globalEnumFieldFromTable<config::UiStyle>(
+                "ui_style",
+                "Interface style",
+                "Native GUI chrome, or cell-quantized terminal (TUI) chrome drawn in a monospace font. "
+                "Takes effect after restart.",
+                [](config::Config const& c) { return c.uiStyle.value(); }),
             // Takes effect after restart for the same reason as ui_style: the GPU is fixed before the
             // first window exists (see ContourGuiApp::applyGraphicsDevice / applyOpenGlGpuSelection).
             // Shown on macOS too, where it does nothing, and the help says so: one row table for every
             // platform beats a platform-gated row whose tests would need the same gate.
-            { "renderer.gpu",
-              "Rendering GPU",
-              "Which GPU draws the terminal. Takes effect after restart. OpenGL honours this on Linux only. "
-              "Has no effect on macOS.",
-              "enum",
-              [](config::Config const& c) {
-                  return QVariant(QString::fromStdString(std::format("{}", c.renderer.value().gpu)));
-              },
-              [](QVariant const& v) { return v.toString().toStdString(); },
-              {},
-              gpuOptions },
+            { .key = "renderer.gpu",
+              .label = "Rendering GPU",
+              .help =
+                  "Which GPU draws the terminal. Takes effect after restart. OpenGL honours this on Linux "
+                  "only. Has no effect on macOS.",
+              .type = "enum",
+              .get =
+                  [](config::Config const& c) {
+                      return QVariant(QString::fromStdString(std::format("{}", c.renderer.value().gpu)));
+                  },
+              .toYaml = [](QVariant const& v) { return v.toString().toStdString(); },
+              .fromYaml =
+                  [](std::string const& text) {
+                      auto const selector = config::parseGpuSelector(text);
+                      return selector ? QVariant(QString::fromStdString(std::format("{}", *selector)))
+                                      : QVariant();
+                  },
+              .optionsProvider = gpuOptions,
+              .validate = checkGpu },
             // No restart note, unlike the three ui_* rows around it: this one IS applied live (see
             // ContourGuiApp::applyWindowControlStyle), because nothing about it is pinned before the
             // first control exists -- it only decides what the title bar draws and where.
-            { "window_control_style",
-              "Window controls",
-              "How the minimize/maximize/close buttons are drawn, and which side they sit on. Only "
-              "applies while the native title bar is hidden.",
-              "enum",
-              [](config::Config const& c) {
-                  return QVariant(toQString(config::configEnumToken(c.windowControlStyle.value())));
-              },
-              [](QVariant const& v) { return v.toString().toStdString(); },
-              configEnumTokens<config::WindowControlStyle>() },
+            globalEnumFieldFromTable<config::WindowControlStyle>(
+                "window_control_style",
+                "Window controls",
+                "How the minimize/maximize/close buttons are drawn, and which side they sit on. Only "
+                "applies while the native title bar is hidden.",
+                [](config::Config const& c) { return c.windowControlStyle.value(); }),
             // Same restart note as ui_style above, and for the same reason: the chrome's design
             // tokens are resolved from this font once, when the provider is built (ContourGuiApp),
             // and every property of it is CONSTANT. Saying so here is the whole difference between
             // "this setting needs a restart" and "this setting is broken".
-            { "ui_font_family",
-              "Interface font",
-              "Font the terminal-style chrome is drawn with. Empty inherits the running profile's "
-              "font, which is what makes the chrome match the terminal grid. Takes effect after "
-              "restart.",
-              "string",
-              [](config::Config const& c) {
-                  return QVariant(QString::fromStdString(c.uiFontFamily.value()));
-              },
-              [](QVariant const& v) { return v.toString().toStdString(); } },
-            { "ui_font_size",
-              "Interface font size",
-              "Size, in points, the terminal-style chrome is drawn with. 0 inherits the running "
-              "profile's font size. Takes effect after restart.",
-              "double",
-              [](config::Config const& c) { return QVariant(c.uiFontSize.value()); },
-              [](QVariant const& v) { return std::format("{}", v.toDouble()); } },
-            { "grapheme_clustering",
-              "Grapheme clustering",
-              "Whether DEC mode 2027 starts out set, letting a codepoint arriving after the first "
-              "revise its grapheme cluster's width. Applications may still toggle it at runtime.",
-              "bool",
-              [](config::Config const& c) { return QVariant(c.graphemeClustering.value()); },
-              [](QVariant const& v) { return v.toBool() ? "true" : "false"; } },
-            { "text_scaling_method",
-              "Scaled text quality",
-              "How a glyph is enlarged when an application asks for scaled text. Stretch is free but "
-              "softens at large sizes; rerasterize stays crisp at the cost of memory and rasterization.",
-              "enum",
-              // Reuse the std::formatter<GlyphScalingMethod>, which formats via nameOf() -- the same
-              // source of truth the config reader parses, so the two cannot drift apart.
-              [](config::Config const& c) {
-                  return QVariant(QString::fromStdString(std::format("{}", c.textScalingMethod.value())));
-              },
-              [](QVariant const& v) { return v.toString().toStdString(); },
-              { "stretch", "rerasterize" } },
+            globalStringField("ui_font_family",
+                              "Interface font",
+                              "Font the terminal-style chrome is drawn with. Empty inherits the running "
+                              "profile's font, which is what makes the chrome match the terminal grid. Takes "
+                              "effect after restart.",
+                              [](config::Config const& c) { return c.uiFontFamily.value(); }),
+            globalDoubleField(
+                "ui_font_size",
+                "Interface font size",
+                "Size, in points, the terminal-style chrome is drawn with. 0 inherits the "
+                "running profile's font size. Takes effect after restart.",
+                [](config::Config const& c) { return c.uiFontSize.value(); },
+                0.0),
+            globalBoolField("grapheme_clustering",
+                            "Grapheme clustering",
+                            "Whether DEC mode 2027 starts out set, letting a codepoint arriving after the "
+                            "first revise its grapheme cluster's width. Applications may still toggle it at "
+                            "runtime.",
+                            [](config::Config const& c) { return c.graphemeClustering.value(); }),
+            // Reuse the std::formatter<GlyphScalingMethod>, which formats via nameOf() -- the same source of
+            // truth the config reader parses, so the two cannot drift apart.
+            globalEnumField(
+                "text_scaling_method",
+                "Scaled text quality",
+                "How a glyph is enlarged when an application asks for scaled text. Stretch is "
+                "free but softens at large sizes; rerasterize stays crisp at the cost of memory "
+                "and rasterization.",
+                [](config::Config const& c) { return std::format("{}", c.textScalingMethod.value()); },
+                { "stretch", "rerasterize" }),
+            // {{{ Command blocks. A dotted key is a path to one leaf of a contour.yml section; settings.yml
+            // stores it nested and the merge applies that leaf alone (see mergeGuiManagedSideFiles), so a
+            // row here never resets its section's other keys.
+            globalBoolField("gutter.exit_status",
+                            "Gutter: exit status",
+                            "Color each command's fold controls by how it ended, draw a triangle beside "
+                            "a running command, and a dot beside a finished one that shows no fold "
+                            "control: one with nothing to fold, or any one while fold markers are off.",
+                            [](config::Config const& c) { return c.gutter.value().exitStatus; }),
+            globalBoolField("gutter.user_marks",
+                            "Gutter: user marks",
+                            "Show the lines you marked with Vi mode's mm in the gutter.",
+                            [](config::Config const& c) { return c.gutter.value().userMarks; }),
+            globalEnumFieldFromTable<vtbackend::LineNumberMode>(
+                "gutter.line_numbers",
+                "Gutter: line numbers",
+                "off, absolute (counted from the session's first line), relative (distance from the "
+                "cursor line) or hybrid (the cursor line absolute, the others relative).",
+                [](config::Config const& c) { return c.gutter.value().lineNumbers; }),
+            globalIntField(
+                "gutter.line_number_width",
+                "Gutter: line number width",
+                QString::fromStdString(std::format("Columns reserved for line numbers, {} to {}. Changing "
+                                                   "it resizes the page.",
+                                                   vtbackend::MinLineNumberWidth,
+                                                   vtbackend::MaxLineNumberWidth)),
+                [](config::Config const& c) { return c.gutter.value().lineNumberWidth; },
+                vtbackend::MinLineNumberWidth,
+                vtbackend::MaxLineNumberWidth),
+            globalBoolField("gutter.timestamps",
+                            "Gutter: timestamps",
+                            "Show beside each line the time it was first written.",
+                            [](config::Config const& c) { return c.gutter.value().timestamps; }),
+            globalStringField(
+                "gutter.timestamp_format",
+                "Gutter: timestamp format",
+                "A std::format chrono format in local time, such as %H:%M:%S. It begins with "
+                "a % conversion, and every character it spells takes one column.",
+                [](config::Config const& c) { return c.gutter.value().timestampFormat; },
+                checkTimestampFormat),
+            globalIntField(
+                "command_blocks.max_records",
+                "Command blocks: records kept",
+                "How many commands are remembered (command line, exit status, times, "
+                "directory), including ones whose output has left the history. A change applies to "
+                "sessions opened afterwards.",
+                [](config::Config const& c) { return static_cast<int>(c.commandBlocks.value().maxRecords); },
+                1,
+                static_cast<int>(config::MaxCommandBlockRecords)),
+            globalStringField(
+                "command_blocks.pager",
+                "Command blocks: pager",
+                "The program a command's output is opened in when an OpenCommandOutput "
+                "binding names none.",
+                [](config::Config const& c) { return c.commandBlocks.value().pager; },
+                checkPager),
+            globalEnumFieldFromTable<actions::OutputFormat>(
+                "command_blocks.pager_format",
+                "Command blocks: pager format",
+                "Whether the pager renders colors: sgr keeps them in the file it is given, plain writes "
+                "text only. A binding's own format wins, and a binding's own program gets sgr.",
+                [](config::Config const& c) { return c.commandBlocks.value().pagerFormat; }),
+            globalBoolField("folding.enabled",
+                            "Folding: enabled",
+                            "Whether a finished command's output can be collapsed to its prompt line.",
+                            [](config::Config const& c) { return c.folding.value().enabled; }),
+            globalBoolField("folding.show_markers",
+                            "Folding: fold markers",
+                            "Draw the fold controls in the gutter's block column.",
+                            [](config::Config const& c) { return c.folding.value().showMarkers; }),
+            globalBoolField(
+                "folding.auto_collapse_on_new_command",
+                "Folding: collapse on next prompt",
+                "Collapse a command's output as soon as the next prompt appears.",
+                [](config::Config const& c) { return c.folding.value().autoCollapseOnNewCommand; }),
+            globalEnumFieldFromTable<vtbackend::FoldJumpBehavior>(
+                "folding.on_jump_into_fold",
+                "Folding: jump into a fold",
+                "What a Vi-mode jump to a line inside a collapsed block does: expand it, or skip to "
+                "its prompt line.",
+                [](config::Config const& c) { return c.folding.value().onJumpIntoFold; }),
+            // }}}
         };
         return descriptors;
     }
@@ -1166,20 +1650,102 @@ namespace
         return parts.join('+');
     }
 
-    /// Builds a read-only display row { trigger, action, mode } for one input binding, or an empty map
-    /// when the binding carries no action.
-    template <typename Binding>
-    QVariantMap keybindingRow(Binding const& binding, QString const& inputLabel)
+    /// Where a row of the bindings viewer comes from.
+    enum class BindingOrigin : uint8_t
+    {
+        Configured, ///< The configuration's `input_mapping:`.
+        BuiltIn,    ///< A built-in fallback the configuration leaves free.
+    };
+
+    /// How the bindings viewer names a key.
+    QString inputLabel(vtbackend::Key key)
+    {
+        return QString::fromStdString(std::format("{}", key));
+    }
+
+    /// How the bindings viewer names a mouse button.
+    QString inputLabel(vtbackend::MouseButton button)
+    {
+        return QString::fromStdString(std::format("{}", button));
+    }
+
+    /// How the bindings viewer names a character: the whole codepoint.
+    QString inputLabel(char32_t codepoint)
+    {
+        return QString::fromUcs4(&codepoint, 1);
+    }
+
+    /// Builds a read-only display row { trigger, action, mode, builtIn } for one input binding, or an empty
+    /// map when the binding carries no action. `action` names every action the binding runs, in order.
+    template <typename Input>
+    QVariantMap keybindingRow(vtbackend::InputBinding<Input, config::ActionList> const& binding,
+                              BindingOrigin origin)
     {
         if (binding.binding.empty())
             return {};
         auto const mods = formatModifiers(binding.modifiers);
         auto row = QVariantMap {};
-        row[QStringLiteral("trigger")] = mods.isEmpty() ? inputLabel : mods + '+' + inputLabel;
-        row[QStringLiteral("action")] = QString::fromStdString(std::format("{}", binding.binding.front()));
+        // The count is part of the trigger: Ctrl+Left x3 is not Ctrl+Left.
+        auto const input = inputLabel(binding.input)
+                           + QString::fromStdString(vtbackend::clickCountSuffix(binding.clickCount));
+        row[QStringLiteral("trigger")] = mods.isEmpty() ? input : mods + '+' + input;
+        auto actions = QStringList {};
+        for (auto const& action: binding.binding)
+            actions.push_back(QString::fromStdString(std::format("{}", action)));
+        row[QStringLiteral("action")] = actions.join(QStringLiteral(", "));
         row[QStringLiteral("mode")] =
             binding.modes.any() ? QString::fromStdString(std::format("{}", binding.modes)) : QString {};
+        row[QStringLiteral("builtIn")] = origin == BindingOrigin::BuiltIn;
         return row;
+    }
+
+    /// Every state the match modes can be in: each combination of the MatchModes flags, Trace the highest.
+    constexpr auto MatchModeStates =
+        std::views::iota(0u, static_cast<unsigned>(vtbackend::MatchModes::Trace) << 1);
+
+    /// Whether a press can still reach @p fallback past @p configured, the configuration's bindings, which
+    /// are looked up first: whether in some state of the match modes the fallback answers and no configured
+    /// binding of the same chord and click count does. Decided on the states, not row by row, so two rows
+    /// that cover the fallback's modes only together -- one on the alternate screen, one off it -- shadow it.
+    template <typename Input>
+    [[nodiscard]] bool reachable(
+        vtbackend::InputBinding<Input, config::ActionList> const& fallback,
+        std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& configured)
+    {
+        return std::ranges::any_of(MatchModeStates, [&](unsigned state) {
+            auto const flags = static_cast<uint8_t>(state);
+            return config::helper::testMatchMode(flags, fallback.modes)
+                   && std::ranges::none_of(configured, [&](auto const& binding) {
+                          return binding.modifiers == fallback.modifiers && binding.input == fallback.input
+                                 && binding.clickCount == fallback.clickCount
+                                 && config::helper::testMatchMode(flags, binding.modes);
+                      });
+        });
+    }
+
+    /// Appends the bindings viewer's row for each of @p bindings, the configuration's own.
+    template <typename Input>
+    void appendConfiguredBindings(
+        QVariantList& rows, std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& bindings)
+    {
+        for (auto const& binding: bindings)
+            if (auto row = keybindingRow(binding, BindingOrigin::Configured); !row.isEmpty())
+                rows.push_back(std::move(row));
+    }
+
+    /// Appends the bindings viewer's row for each built-in fallback of @p fallbacks that @p config switches
+    /// on and a press can reach past its @p configured bindings.
+    template <typename Input>
+    void appendBuiltInBindings(
+        QVariantList& rows,
+        std::vector<config::FallbackMapping<Input>> const& fallbacks,
+        std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& configured,
+        config::Config const& config)
+    {
+        for (auto const& fallback: fallbacks)
+            if (fallback.enabled(config) && reachable(fallback.mapping, configured))
+                if (auto row = keybindingRow(fallback.mapping, BindingOrigin::BuiltIn); !row.isEmpty())
+                    rows.push_back(std::move(row));
     }
 
     /// The QML-facing token for a provenance value.
@@ -1219,7 +1785,7 @@ SettingsOrigin SettingsController::profileOrigin(std::string const& name) const
 bool SettingsController::colorSchemeSideFileExists(std::string const& name) const
 {
     auto ec = std::error_code {};
-    auto const path = _config().configFile.parent_path() / "colorschemes" / (name + ".yml");
+    auto const path = _config().configFile.parent_path() / "colorschemes" / config::sideFileName(name);
     return std::filesystem::exists(path, ec) && !ec;
 }
 
@@ -1276,8 +1842,10 @@ void SettingsController::refresh()
         for (auto const& entry: std::filesystem::directory_iterator(schemesDir, ec))
             if (entry.is_regular_file() && entry.path().extension() == ".yml")
             {
-                schemeNames.insert(entry.path().stem().string());
-                onDisk.insert(entry.path().stem().string());
+                // Its name, read back as sideFileName() spelled it.
+                auto name = core::pathToUtf8(entry.path().stem());
+                schemeNames.insert(name);
+                onDisk.insert(std::move(name));
             }
 
     _colorSchemes.clear();
@@ -1289,21 +1857,16 @@ void SettingsController::refresh()
         _colorSchemes.push_back(row);
     }
 
-    // Keybindings (read-only): key, character and mouse mappings, each as { trigger, action, mode }.
+    // Keybindings (read-only): the configured key, character and mouse mappings, then the built-in ones a
+    // press can still reach, so a binding Contour adds later shows up here without a configuration edit.
     _keybindings.clear();
     auto const& mappings = cfg.inputMappings.value();
-    for (auto const& binding: mappings.keyMappings)
-        if (auto row = keybindingRow(binding, QString::fromStdString(std::format("{}", binding.input)));
-            !row.isEmpty())
-            _keybindings.push_back(row);
-    for (auto const& binding: mappings.charMappings)
-        if (auto row = keybindingRow(binding, QString(QChar(static_cast<char16_t>(binding.input))));
-            !row.isEmpty())
-            _keybindings.push_back(row);
-    for (auto const& binding: mappings.mouseMappings)
-        if (auto row = keybindingRow(binding, QString::fromStdString(std::format("{}", binding.input)));
-            !row.isEmpty())
-            _keybindings.push_back(row);
+    appendConfiguredBindings(_keybindings, mappings.keyMappings);
+    appendConfiguredBindings(_keybindings, mappings.charMappings);
+    appendConfiguredBindings(_keybindings, mappings.mouseMappings);
+    appendBuiltInBindings(_keybindings, config::builtinFallbackKeyMappings(), mappings.keyMappings, cfg);
+    appendBuiltInBindings(_keybindings, config::builtinFallbackCharMappings(), mappings.charMappings, cfg);
+    appendBuiltInBindings(_keybindings, config::builtinFallbackMouseMappings(), mappings.mouseMappings, cfg);
 
     emit changed();
 }
@@ -1606,7 +2169,12 @@ QVariantList SettingsController::globalFields() const
             row[QStringLiteral("options")] = descriptor.options;
             row[QStringLiteral("optionLabels")] = descriptor.options;
         }
-        row[QStringLiteral("overridden")] = overrides.contains(descriptor.key.toStdString());
+        // Overridden is what took: an override the loader refused -- a bool spelled "maybe" -- leaves the
+        // value contour.yml gives, and a Reset beside it would offer to undo a change that never happened.
+        // One that took is the value in effect once read back as the loader reads it.
+        auto const stored = overrides.find(descriptor.key.toStdString());
+        row[QStringLiteral("overridden")] =
+            stored != overrides.end() && descriptor.fromYaml(stored->second) == row[QStringLiteral("value")];
         fields.push_back(row);
     }
     return fields;
@@ -1619,6 +2187,15 @@ bool SettingsController::setGlobalField(QString const& key, QVariant const& valu
     for (auto const& descriptor: globalFieldDescriptors())
         if (descriptor.key == key)
         {
+            // A refused value emits no changed(): the model is as it was, and the editor puts the stored
+            // value back itself (SettingRow.qml's commitText).
+            if (auto const valid =
+                    descriptor.validate ? descriptor.validate(value) : std::expected<void, std::string> {};
+                !valid)
+                return fail(valid.error());
+            // An override the merge of settings.yml does not apply would save and then do nothing.
+            if (config::globalOverrideFor(key.toStdString()) == nullptr)
+                return fail("This setting cannot be saved: settings.yml does not apply it.");
             auto settings = _config().guiManagedSettings;
             settings.globalOverrides[key.toStdString()] = descriptor.toYaml(value);
             if (auto const result = _store->saveGuiSettings(settings); !result)
@@ -1656,6 +2233,8 @@ QVariantList SettingsController::schemeColors() const
         row[QStringLiteral("key")] = descriptor.key;
         row[QStringLiteral("label")] = descriptor.label;
         row[QStringLiteral("color")] = rgbToHex(descriptor.get(_schemeDraft));
+        row[QStringLiteral("colorSource")] =
+            toQString(SchemeColorSourceTokens.at(static_cast<size_t>(descriptor.source(_schemeDraft))));
         colors.push_back(row);
     }
     return colors;
@@ -1669,7 +2248,7 @@ void SettingsController::editColorScheme(QString const& name)
         it != cfg.colorschemes.value().end())
         palette = it->second;
     else if (auto const loaded = config::loadColorSchemeFile(cfg.configFile.parent_path() / "colorschemes"
-                                                             / (name.toStdString() + ".yml")))
+                                                             / config::sideFileName(name.toStdString())))
         palette = *loaded;
 
     _schemeDraft = palette;
@@ -1696,15 +2275,27 @@ void SettingsController::newColorScheme(QString const& basedOn)
 
 void SettingsController::setSchemeColor(QString const& key, QString const& color)
 {
-    if (!_hasSchemeDraft)
+    auto const* descriptor = findSchemeColor(key);
+    if (!_hasSchemeDraft || descriptor == nullptr)
         return;
-    for (auto const& descriptor: schemeColorDescriptors())
-        if (descriptor.key == key)
-        {
-            descriptor.set(_schemeDraft, hexToRgb(color));
-            emit schemeDraftChanged();
-            return;
-        }
+    // A colour equal to the one shown is no edit -- unless the slot is derived: committing the colour it
+    // shows then pins it, so that the colour stays when what it derives from changes.
+    auto const rgb = hexToRgb(color);
+    if (descriptor->source(_schemeDraft) != SchemeColorSource::Derived
+        && descriptor->get(_schemeDraft) == rgb)
+        return;
+    descriptor->set(_schemeDraft, rgb);
+    emit schemeDraftChanged();
+}
+
+void SettingsController::resetSchemeColor(QString const& key)
+{
+    auto const* descriptor = findSchemeColor(key);
+    if (!_hasSchemeDraft || descriptor == nullptr
+        || descriptor->source(_schemeDraft) != SchemeColorSource::Pinned)
+        return;
+    descriptor->derived->assign(_schemeDraft, std::nullopt);
+    emit schemeDraftChanged();
 }
 
 bool SettingsController::renameColorScheme(QString const& oldName, QString const& newName)
@@ -1732,7 +2323,8 @@ bool SettingsController::renameColorScheme(QString const& oldName, QString const
     if (auto const it = _config().colorschemes.value().find(oldName.toStdString());
         it != _config().colorschemes.value().end())
         palette = it->second;
-    else if (auto const loaded = config::loadColorSchemeFile(schemesDir / (oldName.toStdString() + ".yml")))
+    else if (auto const loaded =
+                 config::loadColorSchemeFile(schemesDir / config::sideFileName(oldName.toStdString())))
         palette = *loaded;
 
     if (auto const result = _store->saveColorScheme(trimmed.toStdString(), palette); !result)

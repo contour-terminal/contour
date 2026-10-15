@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/Utf8Path.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/log/LogStore.hpp>
+#include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -244,9 +246,33 @@ class ScopedRedirect
 
 TEST_CASE("parseLogFileSpec maps the standard-error spellings onto nullopt", "[log][logsink]")
 {
-    CHECK_FALSE(core::log::parseLogFileSpec("").has_value());
-    CHECK_FALSE(core::log::parseLogFileSpec("-").has_value());
-    CHECK(core::log::parseLogFileSpec("/tmp/core-cpp.log") == std::filesystem::path { "/tmp/core-cpp.log" });
+    CHECK_FALSE(core::log::parseLogFileSpec("").value().has_value());
+    CHECK_FALSE(core::log::parseLogFileSpec("-").value().has_value());
+    CHECK(core::log::parseLogFileSpec("/tmp/core-cpp.log").value()
+          == std::filesystem::path { "/tmp/core-cpp.log" });
+}
+
+TEST_CASE("parseLogFileSpec reads the value as UTF-8", "[log][logsink]")
+{
+    // What `--log-file` holds under a home directory beyond ASCII. On Windows the narrow
+    // constructor read it in the ANSI code page, where the two bytes of the `ü` are two characters.
+    CHECK(core::log::parseLogFileSpec("C:/Users/J\xC3\xBCrgen/daemon.log").value()
+          == std::filesystem::path { u8"C:/Users/Jürgen/daemon.log" });
+}
+
+TEST_CASE("parseLogFileSpec on a value that is not UTF-8", "[log][logsink]")
+{
+    // "Jürgen" in CP-1252: 0xFC starts no UTF-8 sequence. A command-line value comes from outside
+    // the program, so it is an answer to report, never an exception.
+    constexpr auto Legacy = std::string_view { "C:/Users/J\xFCrgen/daemon.log" };
+    auto const destination = core::log::parseLogFileSpec(Legacy);
+#ifdef _WIN32
+    REQUIRE_FALSE(destination.has_value());
+    CHECK(destination.error() == std::errc::illegal_byte_sequence);
+#else
+    // A POSIX path is bytes, so they are kept as they are.
+    CHECK(destination.value().value().native() == Legacy);
+#endif
 }
 
 TEST_CASE("the standard formatter lays a line out as configured", "[log][logsink]")
@@ -384,6 +410,42 @@ TEST_CASE("ScopedOutput reports an unopenable log file", "[log][logsink]")
     auto const output = core::log::ScopedOutput::create({ .file = std::filesystem::temp_directory_path() });
     REQUIRE_FALSE(output.has_value());
     CHECK(output.error().contains("cannot open log file"));
+}
+
+TEST_CASE("ScopedOutput writes a --log-file under a directory beyond ASCII", "[log][logsink]")
+{
+    // `contour daemon --background` under C:\Users\Jürgen: the option's value is UTF-8, and the
+    // daemon exits when its log cannot be opened. The directory does not exist yet, so create()
+    // makes it, as it makes any parent of a log file.
+    auto const temp = core::testing::ScopedTempDir { "core-cpp-logsink-utf8" };
+    auto category = TestCategory { "test.utf8sink" };
+    auto const spec = core::pathToUtf8(temp.path()) + "/J\xC3\xBCrgen/\xCE\xA9-\xE6\x97\xA5\xE6\x9C\xAC.log";
+
+    {
+        auto output = core::log::ScopedOutput::create({ .file = core::log::parseLogFileSpec(spec).value() });
+        REQUIRE(output.has_value());
+        category.value()("beyond ASCII");
+    }
+
+    // Read back under the names the directory and the file were meant to have.
+    auto stream = std::ifstream { temp.path() / std::filesystem::path { u8"Jürgen" }
+                                  / std::filesystem::path { u8"Ω-日本.log" } };
+    REQUIRE(stream.is_open());
+    CHECK(contentsOf(stream).contains("beyond ASCII"));
+}
+
+TEST_CASE("ScopedOutput names an unopenable log file beyond ASCII in UTF-8", "[log][logsink]")
+{
+    // A directory, refused on every platform as the case above says. CP-1252 cannot spell its
+    // name, and on Windows path::string() threw for it, so the refusal became an exception.
+    auto const temp = core::testing::ScopedTempDir { "core-cpp-logsink-utf8" };
+    auto const directory = temp.path() / std::filesystem::path { u8"Ω-日本" };
+    REQUIRE(std::filesystem::create_directory(directory));
+
+    auto const output = core::log::ScopedOutput::create({ .file = directory });
+    REQUIRE_FALSE(output.has_value());
+    CHECK(output.error().contains("cannot open log file"));
+    CHECK(output.error().contains("\xCE\xA9-\xE6\x97\xA5\xE6\x9C\xAC"));
 }
 
 TEST_CASE("ScopedOutput restores the previous sink", "[log][logsink]")

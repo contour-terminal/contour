@@ -6,15 +6,20 @@
 #include <vtpty/PageSize.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
+#include <array>
 #include <format>
+#include <ranges>
+#include <string>
+#include <utility>
 
 // Checklist
 // =========
 //
 // - [x] [count] |
 // - [ ] [count] h
-// - [ ] [count] j
+// - [x] [count] j
 // - [ ] [count] k
 // - [ ] [count] l
 // - [ ] [count] J
@@ -64,6 +69,23 @@ auto setupMockTerminal(std::string_view text,
     };
 }
 
+// "line 0" to "line <count - 1>", the last without a line feed, so that no blank row is left at the bottom.
+std::string numberedLines(int count)
+{
+    auto text = std::string {};
+    for (auto const i: std::views::iota(0, count))
+        text += std::format("{}line {}", i == 0 ? "" : "\r\n", i);
+    return text;
+}
+
+// The screen row the Vi cursor is drawn on.
+template <typename Mock>
+vtbackend::LineOffset viCursorScreenRow(Mock const& mock)
+{
+    return mock.terminal.viewport().translateGridToScreenCoordinate(
+        mock.terminal.normalModeCursorPosition().line);
+}
+
 } // namespace
 // }}}
 
@@ -99,6 +121,207 @@ TEST_CASE("vi.motions: |", "[vi]")
     mock.sendCharSequence("|");
     CHECK(mock.terminal.normalModeCursorPosition().line.value == 0);
     CHECK(mock.terminal.normalModeCursorPosition().column.value == 0);
+}
+
+TEST_CASE("vi.motions: [count] j", "[vi]")
+{
+    // vim's `j`: down [count] lines, no further than the last one, keeping the column. On a page that has
+    // scrolled by one, so that the history is not empty and the motion cannot lean on the two agreeing.
+    auto mock =
+        setupMockTerminal("line 0\r\nline 1\r\nline 2\r\nline 3\r\nline 4\r\n"
+                          "line 5\r\nline 6\r\nline 7\r\nline 8\r\nline 9\r\nbottom",
+                          vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) },
+                          vtbackend::LineCount(10));
+    REQUIRE(mock.terminal.primaryScreen().historyLineCount() == vtbackend::LineCount(1));
+
+    SECTION("with a count")
+    {
+        mock.sendCharSequence("9j");
+        CHECK(mock.terminal.normalModeCursorPosition() == 9_lineOffset + 0_columnOffset);
+    }
+
+    SECTION("as single steps")
+    {
+        mock.sendCharSequence("jjjjjjjjj");
+        CHECK(mock.terminal.normalModeCursorPosition() == 9_lineOffset + 0_columnOffset);
+    }
+
+    SECTION("keeping the column")
+    {
+        mock.sendCharSequence("3l9j");
+        CHECK(mock.terminal.normalModeCursorPosition() == 9_lineOffset + 3_columnOffset);
+    }
+
+    SECTION("no further than the last line")
+    {
+        mock.sendCharSequence("20j");
+        CHECK(mock.terminal.normalModeCursorPosition() == 9_lineOffset + 0_columnOffset);
+    }
+
+    CHECK(mock.terminal.primaryScreen()
+              .grid()
+              .lineText(mock.terminal.normalModeCursorPosition().line)
+              .starts_with("bottom"));
+}
+
+TEST_CASE("vi.motions: [count] j stops at the last row the status line leaves", "[vi]")
+{
+    // Entering Normal mode shows the indicator status line, which takes a row from the page. With the cursor
+    // above the bottom row, the page gives up that bottom row rather than push its top one into the history:
+    // a shrinking grid cuts below the cursor first, as a shrinking window does. The page is one row shorter
+    // then, so `9j` from its top stops at its new last row, one short of nine.
+    auto mock =
+        vtbackend::MockTerm { vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) },
+                              vtbackend::LineCount(10) };
+    printLines(mock, "line", 10);
+    mock.writeToScreen("bottom\033[H");
+    mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    REQUIRE(mock.terminal.pageSize().lines == vtbackend::LineCount(9));
+
+    mock.sendCharSequence("9j");
+    CHECK(mock.terminal.normalModeCursorPosition() == 8_lineOffset + 0_columnOffset);
+    CHECK(mock.terminal.primaryScreen().grid().lineText(8_lineOffset).starts_with("line 9"));
+
+    // The row is only out of sight: leaving Normal mode takes the status line away, and the row comes back.
+    mock.sendCharSequence("i");
+    CHECK(mock.terminal.pageSize().lines == vtbackend::LineCount(10));
+    CHECK(mock.terminal.primaryScreen().grid().lineText(9_lineOffset).starts_with("bottom"));
+}
+
+TEST_CASE("Viewport.safeArea caps the scrolloff as vim does", "[vi][viewport]")
+{
+    // A padding the page cannot hold on both sides leaves the middle row, the upper one of two: measured
+    // in vim 9.1 with 'scrolloff' 8, whose cursor stays on row 4 of a 9- or a 10-row window.
+    struct Row
+    {
+        int lines;
+        int padding;
+        int top;
+        int bottom;
+    };
+    auto constexpr Rows = std::array {
+        Row { .lines = 1, .padding = 8, .top = 0, .bottom = 0 },
+        Row { .lines = 3, .padding = 8, .top = 1, .bottom = 1 },
+        Row { .lines = 9, .padding = 8, .top = 4, .bottom = 4 },
+        Row { .lines = 10, .padding = 8, .top = 4, .bottom = 4 },
+        Row { .lines = 16, .padding = 8, .top = 7, .bottom = 7 },
+        Row { .lines = 17, .padding = 8, .top = 8, .bottom = 8 },
+        Row { .lines = 20, .padding = 8, .top = 8, .bottom = 11 },
+        Row { .lines = 10, .padding = 2, .top = 2, .bottom = 7 },
+        Row { .lines = 10, .padding = 0, .top = 0, .bottom = 9 },
+    };
+
+    for (auto const& row: Rows)
+    {
+        auto mock = vtbackend::MockTerm { vtbackend::PageSize { vtbackend::LineCount(row.lines),
+                                                                vtbackend::ColumnCount(10) } };
+        auto const area = mock.terminal.viewport().safeArea(vtbackend::LineCount(row.padding));
+        INFO(std::format("{} rows, padding {}", row.lines, row.padding));
+        CHECK(area.top == vtbackend::LineOffset(row.top));
+        CHECK(area.bottom == vtbackend::LineOffset(row.bottom));
+    }
+}
+
+TEST_CASE("vi.motions: a page shorter than its scrolloff keeps the cursor where it moved", "[vi]")
+{
+    // vim caps 'scrolloff' at half the window, and so does the viewport: three rows leave one row of
+    // context on either side of the middle one, whatever the default eight asks for. Uncapped, a step
+    // scrolled the page by up to eight rows, further than it is tall, which pushed the line the cursor
+    // stepped onto off the page -- and the clamp to the page dragged the cursor after it.
+    auto mock = setupMockTerminal(numberedLines(7),
+                                  vtbackend::PageSize { vtbackend::LineCount(3), vtbackend::ColumnCount(40) },
+                                  vtbackend::LineCount(10));
+    REQUIRE(mock.terminal.primaryScreen().historyLineCount() == vtbackend::LineCount(4));
+    REQUIRE(mock.terminal.viewport().scrollOff() == vtbackend::LineCount(8));
+
+    SECTION("down, at the bottom of the scrollback")
+    {
+        mock.sendCharSequence("j");
+        CHECK(mock.terminal.normalModeCursorPosition() == 1_lineOffset + 0_columnOffset);
+        CHECK(mock.terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+    }
+
+    SECTION("up into the history, onto the middle row")
+    {
+        mock.sendCharSequence("k");
+        CHECK(mock.terminal.normalModeCursorPosition() == vtbackend::LineOffset(-1) + 0_columnOffset);
+        CHECK(viCursorScreenRow(mock) == 1_lineOffset);
+    }
+}
+
+TEST_CASE("vi.motions: j on a page shorter than twice its scrolloff keeps the cursor on the middle row",
+          "[vi]")
+{
+    // Nine rows, as a ten-row page has beside the indicator status line, hold four rows of context on either
+    // side of the middle one. Stepping down from the top row with history above, the cursor settles on the
+    // middle row and the page follows it down a row at a time, until it is back at the bottom. Uncapped,
+    // every other step scrolled the page up by several rows and the next one scrolled it back.
+    auto mock = setupMockTerminal(numberedLines(30),
+                                  vtbackend::PageSize { vtbackend::LineCount(9), vtbackend::ColumnCount(40) },
+                                  vtbackend::LineCount(30));
+    REQUIRE(mock.terminal.primaryScreen().historyLineCount() == vtbackend::LineCount(21));
+
+    for (auto const offset: { 3, 2, 1, 0 })
+    {
+        mock.sendCharSequence("j");
+        INFO(std::format("scrolled by {} rows", offset));
+        CHECK(mock.terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(offset));
+        CHECK(viCursorScreenRow(mock) == 4_lineOffset);
+    }
+}
+
+TEST_CASE("vi.motions: j on a page taller than twice its scrolloff keeps all of it", "[vi]")
+{
+    // Twenty rows hold the whole default scrolloff of eight on either side: the first step from the top row
+    // scrolls the history in until eight rows stand above the cursor, and the next one scrolls nothing.
+    auto mock =
+        setupMockTerminal(numberedLines(40),
+                          vtbackend::PageSize { vtbackend::LineCount(20), vtbackend::ColumnCount(40) },
+                          vtbackend::LineCount(40));
+
+    mock.sendCharSequence("j");
+    CHECK(mock.terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(7));
+    CHECK(viCursorScreenRow(mock) == 8_lineOffset);
+
+    mock.sendCharSequence("j");
+    CHECK(mock.terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(7));
+    CHECK(viCursorScreenRow(mock) == 9_lineOffset);
+}
+
+TEST_CASE("vi.motions: H and L on a page shorter than twice its scrolloff", "[vi]")
+{
+    // H and L keep the scrolloff too, so capped they meet on the middle row, as vim's do -- the upper one of
+    // two. Uncapped, H went to the bottom row and L to the top one.
+    auto const rows = GENERATE(9, 10);
+    INFO(std::format("{} rows", rows));
+    auto mock =
+        setupMockTerminal(numberedLines(40),
+                          vtbackend::PageSize { vtbackend::LineCount(rows), vtbackend::ColumnCount(40) },
+                          vtbackend::LineCount(40));
+
+    mock.sendCharSequence("H");
+    CHECK(viCursorScreenRow(mock) == 4_lineOffset);
+    CHECK(mock.terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+
+    mock.sendCharSequence("L");
+    CHECK(viCursorScreenRow(mock) == 4_lineOffset);
+    CHECK(mock.terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+}
+
+TEST_CASE("vi.motions: zz centers on the middle row, the upper one of two", "[vi]")
+{
+    // Where vim's zz puts the line on a window of 9 or 10 rows. zz centers the line and then moves the cursor
+    // onto it, keeping the scrolloff: uncapped, that second step scrolled the line down to the bottom row.
+    auto const rows = GENERATE(9, 10);
+    INFO(std::format("{} rows", rows));
+    auto mock =
+        setupMockTerminal(numberedLines(40),
+                          vtbackend::PageSize { vtbackend::LineCount(rows), vtbackend::ColumnCount(40) },
+                          vtbackend::LineCount(40));
+
+    mock.sendCharSequence("zz");
+    CHECK(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 0_columnOffset);
+    CHECK(viCursorScreenRow(mock) == 4_lineOffset);
 }
 
 TEST_CASE("vi.motions: text objects", "[vi]")
@@ -152,6 +375,47 @@ TEST_CASE("vi.motions: M", "[vi]")
     // running M again won't change anything
     mock.sendCharSequence("M");
     CHECK(mock.terminal.normalModeCursorPosition() == 4_lineOffset + 1_columnOffset);
+}
+
+TEST_CASE("vi.motions: M goes to the middle row, the upper one of two", "[vi]")
+{
+    // Measured in vim 9.1, in a pty: M puts the cursor on row 4 of a 9- and of a 10-row window, row 1 of a
+    // 3-row one, row 9 of a 19-row one and row 0 of a 2-row one -- (rows - 1) / 2 -- and scrolls nothing.
+    auto constexpr Middles = std::array {
+        std::pair { 2, 0 }, std::pair { 3, 1 }, std::pair { 9, 4 }, std::pair { 10, 4 }, std::pair { 19, 9 },
+    };
+    for (auto const& [rows, middle]: Middles)
+    {
+        INFO(std::format("{} rows", rows));
+        auto mock =
+            setupMockTerminal(numberedLines(40),
+                              vtbackend::PageSize { vtbackend::LineCount(rows), vtbackend::ColumnCount(40) },
+                              vtbackend::LineCount(40));
+
+        mock.sendCharSequence("M");
+        CHECK(mock.terminal.normalModeCursorPosition().line == vtbackend::LineOffset(middle));
+        CHECK(mock.terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+    }
+}
+
+TEST_CASE("vi.motions: M counts only the rows drawn when collapsed folds leave the page short",
+          "[vi][folding]")
+{
+    // With no history to fill in for the rows a collapsed block hides, the rows drawn end above the page's
+    // bottom, and blank rows follow, as vim's window shows rows past the end of its buffer. vim's M counts
+    // only the lines drawn: measured in vim 9.1, a 10-row window showing 5 lines puts it on line 3, one
+    // showing 4 on line 2. Here the page draws 4 rows: the block's command, the prompt below it, and two
+    // blank lines.
+    auto mock =
+        setupMockTerminal(commandRun("ls", { "a", "b", "c", "d", "e", "f" }) + std::string(PromptStart),
+                          vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(40) });
+    collapseOnlyFold(mock);
+    REQUIRE(mock.terminal.foldProjection().size() == 4uz);
+
+    mock.sendCharSequence("M");
+    CHECK(mock.terminal.normalModeCursorPosition().line == 7_lineOffset);
+    CHECK(viCursorScreenRow(mock) == 1_lineOffset);
+    CHECK(mock.terminal.primaryScreen().grid().lineText(7_lineOffset).starts_with("$ "));
 }
 
 TEST_CASE("vi.motion: t{char}", "[vi]")
@@ -463,6 +727,35 @@ TEST_CASE("vi.selectAll: honours the Vi layer's selection invariants", "[vi]")
         CHECK_FALSE(mock.terminal.selectionAvailable());
     }
 }
+
+TEST_CASE("vi.selectAll: the next motion extends from where the selection ends", "[vi]")
+{
+    // A selection an action makes in a Visual mode leaves the vi cursor at its end, which the next motion
+    // then moves: the selection keeps its start and grows or shrinks at its end, as one the motions made.
+    using namespace vtbackend;
+    auto mock =
+        setupMockTerminal("x\r\nx\r\nx\r\n" + commandRun("ls", { "a", "b" }) + std::string(PromptStart),
+                          PageSize { LineCount(10), ColumnCount(20) });
+    mock.sendCharEvent(U'V');
+    REQUIRE(mock.terminal.inputHandler().mode() == ViMode::VisualLine);
+
+    SECTION("a block")
+    {
+        REQUIRE(mock.terminal.selectCommandBlock(CommandBlockTarget::Last, CommandBlockPart::PromptAndOutput)
+                    .has_value());
+        mock.sendCharEvent(U'j');
+        CHECK(mock.terminal.selector()->from().line == LineOffset(3));
+        CHECK(mock.terminal.selector()->to().line == LineOffset(6));
+    }
+
+    SECTION("everything")
+    {
+        mock.terminal.selectAll();
+        mock.sendCharEvent(U'k');
+        CHECK(mock.terminal.selector()->from().line == LineOffset(0));
+        CHECK(mock.terminal.selector()->to().line == LineOffset(8));
+    }
+}
 // }}}
 
 // {{{ Line marks belong to the logical line
@@ -482,13 +775,77 @@ TEST_CASE("vi.mark: `mm` marks the LOGICAL line, not the wrapped piece the curso
     mock.sendCharEvent(U'j'); // onto the first continuation
     mock.sendCharSequence("mm");
 
-    CHECK(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::Marked));
-    CHECK_FALSE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(1), vtbackend::LineFlag::Marked));
+    CHECK(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::UserMark));
+    CHECK_FALSE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(1), vtbackend::LineFlag::UserMark));
+    // A bookmark, not a prompt: block-atomic eviction and folding cut at Marked, and must not cut here.
+    CHECK_FALSE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::Marked));
 
     SECTION("and toggles it off again from that same continuation")
     {
         mock.sendCharSequence("mm");
-        CHECK_FALSE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::Marked));
+        CHECK_FALSE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::UserMark));
     }
+}
+
+TEST_CASE("vi.mark: `[m` and `]m` visit user marks and prompt marks alike", "[vi][semanticblocks]")
+{
+    auto mock = setupMockTerminal("0\r\n1\r\n2\r\n3\r\n4\r\n5");
+    auto& screen = mock.terminal.currentScreen();
+    screen.setLogicalLineFlags(vtbackend::LineOffset(1), vtbackend::LineFlag::Marked, true);   // a prompt
+    screen.setLogicalLineFlags(vtbackend::LineOffset(3), vtbackend::LineFlag::UserMark, true); // `mm`
+
+    mock.sendCharSequence("5j");
+    REQUIRE(mock.terminal.normalModeCursorPosition().line == vtbackend::LineOffset(5));
+
+    mock.sendCharSequence("[m");
+    CHECK(mock.terminal.normalModeCursorPosition().line == vtbackend::LineOffset(3));
+    mock.sendCharSequence("[m");
+    CHECK(mock.terminal.normalModeCursorPosition().line == vtbackend::LineOffset(1));
+    mock.sendCharSequence("]m");
+    CHECK(mock.terminal.normalModeCursorPosition().line == vtbackend::LineOffset(3));
+}
+
+TEST_CASE("vi.mark: `vim` spans between a prompt mark and a user mark", "[vi][semanticblocks]")
+{
+    // The text object walks up from the cursor and down from it; each walk stops at either kind of mark.
+    auto mock = setupMockTerminal("0\r\n1\r\n2\r\n3\r\n4\r\n5");
+    auto& screen = mock.terminal.currentScreen();
+
+    SECTION("the prompt mark above, the user mark below")
+    {
+        screen.setLogicalLineFlags(vtbackend::LineOffset(1), vtbackend::LineFlag::Marked, true);
+        screen.setLogicalLineFlags(vtbackend::LineOffset(3), vtbackend::LineFlag::UserMark, true);
+    }
+
+    SECTION("the user mark above, the prompt mark below")
+    {
+        screen.setLogicalLineFlags(vtbackend::LineOffset(1), vtbackend::LineFlag::UserMark, true);
+        screen.setLogicalLineFlags(vtbackend::LineOffset(3), vtbackend::LineFlag::Marked, true);
+    }
+
+    mock.sendCharSequence("2j");
+    mock.sendCharSequence("vim");
+
+    REQUIRE(mock.terminal.selector() != nullptr);
+    CHECK(mock.terminal.selector()->from().line == vtbackend::LineOffset(2));
+    CHECK(mock.terminal.selector()->to().line == vtbackend::LineOffset(2));
+}
+
+TEST_CASE("vi.mark: `mm` on a prompt row toggles the user mark and leaves the prompt mark",
+          "[vi][semanticblocks]")
+{
+    // A row can carry both: the shell's prompt mark and the user's bookmark. `mm` is the user's, so it must
+    // never clear the shell's -- that would take the block it heads out of folding and eviction.
+    auto mock = setupMockTerminal("0\r\n1\r\n2");
+    auto& screen = mock.terminal.currentScreen();
+    screen.setLogicalLineFlags(vtbackend::LineOffset(0), vtbackend::LineFlag::Marked, true);
+
+    mock.sendCharSequence("mm");
+    CHECK(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::UserMark));
+    CHECK(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::Marked));
+
+    mock.sendCharSequence("mm");
+    CHECK_FALSE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::UserMark));
+    CHECK(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::Marked));
 }
 // }}}

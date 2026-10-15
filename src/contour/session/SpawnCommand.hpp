@@ -17,18 +17,16 @@ struct SpawnTerminalCommand
 };
 
 /// Builds the command line for spawning a new detached contour process (pure; no launching), so the
-/// argument assembly (config/profile/working-directory flags and the cwd-URL host filtering) is
-/// unit-testable without starting a process.
+/// argument assembly (config/profile/working-directory flags) is unit-testable without starting a process.
 /// @param programPath The contour executable path.
 /// @param configPath The active config file (added as `config <path>` when non-empty).
 /// @param profileName The profile to open (added as `profile <name>` when non-empty).
-/// @param cwdUrl The working directory as a file URL; only a local-host path is forwarded.
-/// @param localHost This machine's host name, injected so the host filtering stays testable.
+/// @param workingDirectory The directory the new process starts in, already resolved to a path on this
+///                         machine (TerminalSession::workingDirectory()); forwarded as it is when non-empty.
 /// @return The program + arguments to hand to a detached-process launcher.
 [[nodiscard]] SpawnTerminalCommand buildSpawnTerminalCommand(std::string const& programPath,
                                                              std::string const& configPath,
                                                              std::string const& profileName,
-                                                             std::string const& cwdUrl,
-                                                             std::string const& localHost);
+                                                             std::string const& workingDirectory);
 
 } // namespace contour::session

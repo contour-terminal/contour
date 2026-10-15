@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <ranges>
+#include <string>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include <vthost/proto/Pdu.hpp>
+#include <vthost/testing/ShippedCodec.hpp>
 
 using namespace vthost::proto;
 
@@ -28,7 +32,7 @@ DecodedPdu roundTrip(DecodedPdu const& pdu, uint64_t serial = 5)
     return decoded->pdu;
 }
 
-/// A Delta body up to (but excluding) its lines-count varint: the eight fixed
+/// A Delta body up to (but excluding) its lines-count varint: the ten fixed
 /// header fields every Delta opens with. Tests append a (possibly lying) count
 /// to probe the truncation guards without hand-rolling the whole prefix twice.
 Writer deltaHeaderBody()
@@ -38,11 +42,49 @@ Writer deltaHeaderBody()
     body.varint(2);   // generation
     body.varint(1);   // seqno
     body.u8(1);       // snapshot
+    body.u8(0);       // snapshotPart
     body.svarint(0);  // stableViewportBase
     body.svarint(0);  // stableFloor
+    body.varint(0);   // evictedRowCount
     body.svarint(5);  // cursorLine
     body.svarint(10); // cursorColumn
     return body;
+}
+
+/// A command-block record with every optional field present and every scalar off its default, so a
+/// round trip proves each one is written AND read back.
+WireCommandBlock sampleBlock()
+{
+    auto block = WireCommandBlock {};
+    block.id = 0xFFFFFFF0;
+    block.state = 2;             // Finished
+    block.end = 1;               // Implicit
+    block.commandLineSource = 1; // Reported
+    block.locality = 2;          // Foreign
+    block.present = CommandBlockPresentMask;
+    block.commandLine = "make -j8 test";
+    block.workingDirectory = "/home/user/src/contour";
+    block.endLocality = 1; // Local
+    block.endWorkingDirectory = "/home/user/src/contour/build";
+    block.foreignDirectory = 1; // Reported
+    block.outcomeExit = 3;      // Crash
+    block.outcomeSignal = 11;
+    block.outcomeStatus = 139;
+    block.promptStartedAt = 1'700'000'000'123'456'000;
+    block.exitCode = -1; // signed on the wire: the receiver judges the range, not the codec
+    block.commandStartedAt = 1'700'000'002'000'000'000;
+    block.duration = 3'000'000'000;
+    return block;
+}
+
+/// @return How many bytes a Delta carrying @p blocks, and nothing else, encodes to.
+std::size_t encodedDeltaSize(std::vector<WireCommandBlock> blocks)
+{
+    auto delta = Delta {};
+    delta.commandBlocks = std::move(blocks);
+    auto sink = Writer {};
+    encodePdu(sink, 1, DecodedPdu { delta });
+    return sink.size();
 }
 
 } // namespace
@@ -91,6 +133,8 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
         .stableId = -3, // signed: SD/unscroll push ids below the origin
         .flags = 0x01FF,
         .contextId = 3,
+        .blockId = 0xFFFFFFFF, // the whole 32 bits: host ids are never narrowed
+        .bornAt = 0x00FFFFFF,  // vtbackend::Line::MaxBornAt, the saturated stamp
         .columns = 80,
         .cells = { cell },
         .fillForeground = 1,
@@ -111,10 +155,12 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                                           .graphemeClustering = 0,
                                           .allowReflowOnResize = 0,
                                           .maxImageRegisterCount = 1024,
+                                          .sixelScrolling = 0,
                                           .wordDelimiters = " /\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?",
                                           .frozenModes = { WireFrozenMode { .mode = 2027, .frozenAs = 1 },
                                                            WireFrozenMode { .mode = 12, .frozenAs = 0 } } } },
-            ServerHello { .codecVersion = CodecVersion },
+            ServerHello { .codecVersion = CodecVersion, .machineId = "3deb5353d3ba43d08201c136a47ead7b", .hostname = "zeta" },
+            ServerHello {}, // a refusal, which names no machine
             Input { .session = 9, .data = { std::byte { 0x1B }, std::byte { '[' }, std::byte { 'A' } } },
             ResizeRequest { .columns = 120, .lines = 40 },
             ResizePane { .session = 9, .columns = 50, .lines = 30 },
@@ -145,12 +191,18 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                            .progressState = 1,
                            .progressPercentage = 42,
                            .contexts = { context },
-                           .contextChain = { 1, 3 } },
+                           .contextChain = { 1, 3 },
+                           .sessionEpoch = 1'700'000'000'123'456'000,
+                           .hostTime = 1'700'000'040'000'000'000,
+                           .commandBlockIdEpoch = 3,
+                           .commandBlocksFloor = 0xFFFFFFFF,
+                           .commandBlocks = { sampleBlock() } },
             Delta { .session = 9,
                     .generation = 2,
                     .seqno = 1234,
                     .snapshot = 1,
                     .stableFloor = -5,
+                    .evictedRowCount = 0x1'0000'0001,
                     .cursorLine = 5,
                     .cursorColumn = 10,
                     .lines = { line },
@@ -186,7 +238,11 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                     .progressPercentage = 80,
                     .contextChanged = 1,
                     .activeContext = 3,
-                    .contexts = { context } },
+                    .contexts = { context },
+                    .commandBlockIdEpoch = 4,
+                    .stableIdGeneration = 0x1'0000'0002,
+                    .commandBlocks = { sampleBlock() },
+                    .retiredCommandBlocks = { 3, 0xFFFFFFFF } },
         SessionBell { .session = 4 },
         SessionNotify { .session = 4, .title = "Build finished", .body = "3 warnings, 0 errors" },
         SessionClipboard { .session = 4, .selection = "c", .data = "copied text" },
@@ -214,7 +270,20 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
             SplitPane { .session = 5, .orientation = 2, .ratio = 6000 },
             ClosePane { .session = 100 },
             ResizeSplit { .firstSession = 5, .secondSession = 9, .ratio = 7250 },
+            PerformOperation { .session = 5, .operation = EngineOperation::ClearToPrompt, .text = {} },
+            PerformOperation {
+                .session = 6, .operation = EngineOperation::WriteScreen, .text = "\033[2J\033[3J" },
+            // A row's id is signed: rows the host pushed above its origin have negative ones.
+            PerformOperation { .session = 7,
+                               .operation = EngineOperation::SetUserMark,
+                               .row = RowAddress { .stableId = -12, .generation = 0x1'0000'0003 } },
             NewWindow {},
+            SessionSettingsChanged {}, // back to the daemon's own
+            SessionSettingsChanged { .sessionSettings = WireSessionSettings {
+                                         .historyLineCount = -1,
+                                         .terminalId = 1,
+                                         .wordDelimiters = " ./",
+                                         .frozenModes = { WireFrozenMode { .mode = 2026, .frozenAs = 0 } } } },
         };
 
     for (auto const& pdu: pdus)
@@ -292,6 +361,54 @@ TEST_CASE("a SplitPane verb with an out-of-range orientation is malformed", "[vt
         CHECK(encodeThenDecode(1).has_value());
         CHECK(encodeThenDecode(2).has_value());
     }
+}
+
+TEST_CASE("an engine operation this build does not know is carried, not refused", "[vthost][proto]")
+{
+    // What an operation means is the host's to judge, as an unknown PDU is: refusing the frame here would end
+    // the connection over one request a newer client made.
+    auto stream = Writer {};
+    encodePdu(stream,
+              5,
+              DecodedPdu { PerformOperation {
+                  .session = 3, .operation = static_cast<EngineOperation>(200), .text = {} } });
+    auto const decoded = decodePdu(stream.view());
+    REQUIRE(decoded.has_value());
+    auto const* request = std::get_if<PerformOperation>(&decoded->pdu);
+    REQUIRE(request != nullptr);
+    CHECK(std::to_underlying(request->operation) == 200);
+    CHECK(request->session == 3);
+}
+
+TEST_CASE("a notification's occasion survives the wire", "[vthost][proto]")
+{
+    for (auto const occasion: { NotifyOccasion::Unstated,
+                                NotifyOccasion::Always,
+                                NotifyOccasion::Unfocused,
+                                NotifyOccasion::Invisible })
+    {
+        INFO("occasion " << int { std::to_underlying(occasion) });
+        auto const pdu =
+            DecodedPdu { SessionNotify { .session = 4, .title = "t", .body = "b", .occasion = occasion } };
+        CHECK(roundTrip(pdu) == pdu);
+    }
+}
+
+TEST_CASE("a notification occasion this build does not know is carried, not refused", "[vthost][proto]")
+{
+    // What it means is the client's to judge: refusing the frame here would end the connection over one
+    // notification a newer daemon sent.
+    auto stream = Writer {};
+    encodePdu(stream,
+              0,
+              DecodedPdu { SessionNotify {
+                  .session = 3, .title = "t", .body = "b", .occasion = static_cast<NotifyOccasion>(200) } });
+    auto const decoded = decodePdu(stream.view());
+    REQUIRE(decoded.has_value());
+    auto const* notify = std::get_if<SessionNotify>(&decoded->pdu);
+    REQUIRE(notify != nullptr);
+    CHECK(std::to_underlying(notify->occasion) == 200);
+    CHECK(notify->body == "b");
 }
 
 // A split ratio crosses the wire quantized to 1/10000, and a client decides whether to report a
@@ -377,6 +494,116 @@ TEST_CASE("trailing bytes after a known body are a protocol error", "[vthost][pr
     CHECK(decodePdu(stream.view()).error() == DecodeError::TrailingBytes);
 }
 
+// ---------------------------------------------------------------------------------------------
+// The handshake across codec revisions: contour 0.7.0 shipped revision 1, and a daemon of that release
+// keeps running across an upgrade.
+// ---------------------------------------------------------------------------------------------
+
+namespace
+{
+/// @return The body of the one frame @p pdu encodes to.
+std::vector<std::byte> bodyOf(DecodedPdu const& pdu)
+{
+    auto stream = Writer {};
+    encodePdu(stream, 1, pdu);
+    auto const frame = readFrame(stream.view());
+    REQUIRE(frame.has_value());
+    return { frame->body.begin(), frame->body.end() };
+}
+
+/// @return A hello frame of the revision after this one, which says more after its version than this
+///         revision knows how to read.
+std::vector<std::byte> futureHello(PduType tag)
+{
+    auto body = Writer {};
+    body.u32(CodecVersion + 1);
+    body.string("a field this revision has never heard of");
+    body.u8(7);
+    auto stream = Writer {};
+    writeFrame(stream, 1, std::to_underlying(tag), body.view());
+    return stream.take();
+}
+} // namespace
+
+TEST_CASE("a ClientHello reads as one to the daemon of contour 0.7.0", "[vthost][proto][handshake]")
+{
+    // That daemon reads a hello in full before it checks the version, and refuses a byte too many: only a
+    // hello it can read gets its version back, and with it the client's "daemon speaks codec v1".
+    using vthost::testing::shippedClientHelloVersion;
+    CHECK(shippedClientHelloVersion(bodyOf(ClientHello {})) == CodecVersion);
+    CHECK(shippedClientHelloVersion(bodyOf(ClientHello {
+              .token = "s3cr3t",
+              .sessionSettings = WireSessionSettings { .historyLineCount = 5000, .sixelScrolling = 0 } }))
+          == CodecVersion);
+}
+
+TEST_CASE("a refusing ServerHello reads as one to a client of contour 0.7.0", "[vthost][proto][handshake]")
+{
+    // A refusal names no machine, so it is the version alone: what that client reads, and reports.
+    CHECK(vthost::testing::shippedServerHelloVersion(bodyOf(ServerHello {})) == CodecVersion);
+}
+
+TEST_CASE("a hello of another revision decodes as far as its version", "[vthost][proto][handshake]")
+{
+    // The version is the one field every revision's hello shares; what follows it is that revision's own, and
+    // the handshake refuses the peer on the version alone.
+    SECTION("contour 0.7.0's ClientHello, its settings in that release's layout")
+    {
+        auto const decoded = decodePdu(vthost::testing::shippedClientHello(4));
+        REQUIRE(decoded.has_value());
+        CHECK(decoded->pdu
+              == DecodedPdu { ClientHello { .codecVersion = vthost::testing::ShippedCodecVersion } });
+    }
+    SECTION("contour 0.7.0's ServerHello")
+    {
+        auto const decoded = decodePdu(vthost::testing::shippedServerHello(4));
+        REQUIRE(decoded.has_value());
+        CHECK(decoded->pdu
+              == DecodedPdu { ServerHello { .codecVersion = vthost::testing::ShippedCodecVersion } });
+    }
+    SECTION("a later revision's ClientHello")
+    {
+        auto const decoded = decodePdu(futureHello(PduType::ClientHello));
+        REQUIRE(decoded.has_value());
+        CHECK(decoded->pdu == DecodedPdu { ClientHello { .codecVersion = CodecVersion + 1 } });
+    }
+    SECTION("a later revision's ServerHello")
+    {
+        auto const decoded = decodePdu(futureHello(PduType::ServerHello));
+        REQUIRE(decoded.has_value());
+        CHECK(decoded->pdu == DecodedPdu { ServerHello { .codecVersion = CodecVersion + 1 } });
+    }
+}
+
+TEST_CASE("a hello of this revision is still read to its last byte", "[vthost][proto][handshake]")
+{
+    // Leniency is for another revision's fields only: this revision's own hello is held to its layout.
+    auto body = Writer {};
+    auto fields = Writer {};
+    fields.string("s3cr3t");
+    fields.u8(0); // no session settings
+
+    SECTION("a ClientHello whose closing byte is not zero")
+    {
+        body.u32(CodecVersion);
+        body.blob(fields.view());
+        body.u8(1);
+    }
+    SECTION("a ClientHello whose fields run past their blob")
+    {
+        fields.u8(0);
+        body.u32(CodecVersion);
+        body.blob(fields.view());
+        body.u8(0);
+    }
+    auto stream = Writer {};
+    writeFrame(stream, 1, std::to_underlying(PduType::ClientHello), body.view());
+
+    auto const decoded = decodePdu(stream.view());
+    REQUIRE_FALSE(decoded.has_value());
+    CHECK(decoded.error() != DecodeError::NeedMoreData);
+}
+
 TEST_CASE("a complete frame whose body runs short is malformed, not incomplete", "[vthost][proto]")
 {
     // readFrame confirms the whole frame is buffered; a body shorter than the
@@ -457,13 +684,18 @@ TEST_CASE("an announced grid beyond MaxGridExtent is malformed", "[vthost][proto
         body.u8(0);           // modifyOtherKeys
         // Hand-built, so this list must stay in step with encodeBody(Writer&, SessionState const&) —
         // a missing field makes the decode fail here rather than anywhere informative.
-        body.u16(0);    // mouseProtocol
-        body.u8(0);     // mouseTransport
-        body.u8(0);     // mouseWheelMode
-        body.u8(0);     // progressState
-        body.u8(0);     // progressPercentage
-        body.varint(0); // contexts
-        body.varint(0); // contextChain
+        body.u16(0);     // mouseProtocol
+        body.u8(0);      // mouseTransport
+        body.u8(0);      // mouseWheelMode
+        body.u8(0);      // progressState
+        body.u8(0);      // progressPercentage
+        body.varint(0);  // contexts
+        body.varint(0);  // contextChain
+        body.svarint(0); // sessionEpoch
+        body.svarint(0); // hostTime
+        body.varint(0);  // commandBlockIdEpoch
+        body.varint(0);  // commandBlocksFloor
+        body.varint(0);  // commandBlocks
         auto stream = Writer {};
         writeFrame(stream, 1, std::to_underlying(PduType::SessionState), body.view());
         return stream;
@@ -794,4 +1026,140 @@ TEST_CASE("partitionSnapshotRows covers every row exactly once, in order", "[vth
         REQUIRE(spans.size() == 1);
         CHECK(spans.front().count == 0);
     }
+}
+
+TEST_CASE("a row's command-block id and birth stamp survive the wire", "[vthost][proto][blocks]")
+{
+    // Unstamped, the smallest stamp, and the extremes: neither field may be narrowed or dropped, and
+    // zero must stay zero (it means "no block" / "never stamped", not a value).
+    auto const cases = std::vector<std::pair<uint32_t, uint32_t>> {
+        { 0, 0 },
+        { 1, 1 },
+        { std::numeric_limits<uint32_t>::max(), 0x00FFFFFF },
+    };
+    for (auto const& [blockId, bornAt]: cases)
+    {
+        auto line = WireLine {};
+        line.stableId = 4;
+        line.columns = 80;
+        line.blockId = blockId;
+        line.bornAt = bornAt;
+        auto delta = Delta {};
+        delta.lines = { line };
+
+        auto const decoded = roundTrip(DecodedPdu { delta });
+        auto const* const back = std::get_if<Delta>(&decoded);
+        REQUIRE(back != nullptr);
+        REQUIRE(back->lines.size() == 1);
+        CHECK(back->lines.front().blockId == blockId);
+        CHECK(back->lines.front().bornAt == bornAt);
+    }
+}
+
+TEST_CASE("a command-block record's optional fields travel only when present", "[vthost][proto][blocks]")
+{
+    SECTION("an absent field costs nothing on the wire")
+    {
+        // All four optionals zero either way; only the presence bits differ, and each present one
+        // costs exactly its one-byte svarint(0). The evicted-head bit carries no field at all.
+        auto absent = sampleBlock();
+        absent.present = 0;
+        absent.promptStartedAt = 0;
+        absent.exitCode = 0;
+        absent.commandStartedAt = 0;
+        absent.duration = 0;
+        auto present = absent;
+        present.present = CommandBlockPresentMask;
+        CHECK(encodedDeltaSize({ present }) == encodedDeltaSize({ absent }) + 4);
+        // Built by assignment: Delta has members without default initializers, so a designated
+        // initializer naming one field would trip -Wmissing-designated-field-initializers.
+        auto delta = Delta {};
+        delta.commandBlocks = { absent };
+        CHECK(roundTrip(DecodedPdu { delta }) == DecodedPdu { delta });
+    }
+}
+
+TEST_CASE("a record naming a presence bit this build does not assign is malformed", "[vthost][proto][blocks]")
+{
+    // The handshake admits only a peer of this CodecVersion, which assigns no such bit: one comes from a
+    // broken or hostile peer, and whatever it wrote for that bit would put every later read out of step.
+    // The encoder writes the mask as given, and fields only for the bits it knows.
+    auto const decodeOf = [](DecodedPdu const& pdu) {
+        auto stream = Writer {};
+        encodePdu(stream, 1, pdu);
+        return decodePdu(stream.view());
+    };
+
+    SECTION("a command-block record")
+    {
+        auto const bit = GENERATE(uint8_t { 1U << 5 }, uint8_t { 1U << 7 });
+        auto unknown = sampleBlock();
+        unknown.present = static_cast<uint8_t>(CommandBlockPresentMask | bit);
+        auto delta = Delta {};
+        delta.commandBlocks = { unknown, sampleBlock() };
+        auto const decoded = decodeOf(DecodedPdu { delta });
+        REQUIRE_FALSE(decoded.has_value());
+        CHECK(decoded.error() == DecodeError::MalformedPdu);
+    }
+
+    SECTION("a context record")
+    {
+        auto context = WireContext {};
+        context.id = 1;
+        context.present = static_cast<uint16_t>(ContextPresentMask | (1U << 15));
+        auto delta = Delta {};
+        delta.contexts = { context };
+        auto const decoded = decodeOf(DecodedPdu { delta });
+        REQUIRE_FALSE(decoded.has_value());
+        CHECK(decoded.error() == DecodeError::MalformedPdu);
+    }
+
+    SECTION("every bit this build assigns still decodes")
+    {
+        auto context = WireContext {};
+        context.id = 1;
+        context.present = ContextPresentMask;
+        auto delta = Delta {};
+        delta.contexts = { context };
+        delta.commandBlocks = { sampleBlock() };
+        CHECK(roundTrip(DecodedPdu { delta }) == DecodedPdu { delta });
+    }
+}
+
+TEST_CASE("Delta::hasChanges answers for command-block records and retirements", "[vthost][proto][blocks]")
+{
+    auto withBlock = Delta {};
+    withBlock.commandBlocks = { WireCommandBlock {} };
+    CHECK(withBlock.hasChanges());
+
+    auto withRetired = Delta {};
+    withRetired.retiredCommandBlocks = { 7 };
+    CHECK(withRetired.hasChanges());
+}
+
+TEST_CASE("a command-block record's size estimate never under-counts", "[vthost][proto][blocks]")
+{
+    // The estimate budgets a delta's records (NativeSession::CommandBlockDeltaBytes) and caps a
+    // snapshot's; an under-count would let a "bounded" frame exceed what it was sized against.
+    auto const empty = encodedDeltaSize({});
+    // Every scalar at its widest encoding as well, so the bound is held at its edge rather than with
+    // the slack the sample's small values leave.
+    auto widest = sampleBlock();
+    widest.id = std::numeric_limits<uint32_t>::max();
+    widest.outcomeStatus = std::numeric_limits<uint64_t>::max();
+    widest.promptStartedAt = std::numeric_limits<int64_t>::min();
+    widest.exitCode = std::numeric_limits<int64_t>::min();
+    widest.commandStartedAt = std::numeric_limits<int64_t>::min();
+    widest.duration = std::numeric_limits<int64_t>::min();
+    for (auto const& base: { sampleBlock(), widest })
+        for (auto const length: { std::size_t { 0 }, std::size_t { 40 }, std::size_t { 4096 } })
+        {
+            auto block = base;
+            block.commandLine = std::string(length, 'x');
+            block.endWorkingDirectory = std::string(length, 'y');
+            auto const actual = encodedDeltaSize({ block }) - empty;
+            auto const estimate = estimatedEncodedSize(block);
+            CHECK(estimate >= actual);
+            CHECK(actual * 2 >= estimate); // and not so generous that a budget fills with air
+        }
 }

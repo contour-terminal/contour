@@ -22,8 +22,13 @@ UnixPipe::UnixPipe(unsigned flags): pfd { -1, -1 }
     if (pipe(pfd.data()) < 0)
         throw std::runtime_error { "Failed to create PTY pipe. "s + std::generic_category().message(errno) };
     for (auto const fd: pfd)
-        if (!util::setFileFlags(fd, static_cast<int>(flags)))
-            break;
+    {
+        if (auto const applied = util::applyCreationFlags(fd, flags); !applied)
+        {
+            close();
+            throw std::runtime_error { "Failed to configure PTY pipe. "s + applied.error().message() };
+        }
+    }
 #endif
 }
 

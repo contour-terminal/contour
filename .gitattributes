@@ -2,3 +2,10 @@
 # A checkout's line-ending conversion would change the bytes the manifest pins, so git must never
 # touch them. See vendor/README.md.
 vendor/core-cpp/** -text
+
+# Shell scripts are run by a POSIX shell even from a checkout made on Windows (WSL, Git Bash, MSYS), and a CR at
+# the end of every line breaks them: `bash\r: not found`, or a CR glued to every command. Keep them LF in every
+# working tree, whatever the developer's line-ending settings. The embedded copy of the shell-integration scripts
+# is normalized on its own (EmbedShellIntegration.cmake); this covers the installed and directly-run ones.
+*.sh text eol=lf
+src/contour/cli/shell-integration/shell-integration.* text eol=lf

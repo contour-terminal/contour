@@ -9,11 +9,17 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/display/GpuInventory.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/window/SettingsController.hpp>
+#include <contour/window/WindowController.hpp>
 
+#include <core/Utils.hpp>
+
+#include <QtCore/QLocale>
 #include <QtCore/QTemporaryDir>
+#include <QtGui/QAccessible>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlEngine>
 #include <QtQml/QQmlIncubator>
@@ -23,11 +29,16 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <expected>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <tuple>
 
+#include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 
 using namespace contour;
@@ -43,42 +54,337 @@ void clickButton(QObject* object)
     QMetaObject::invokeMethod(object, "clicked");
 }
 
+/// Drives QML object incubation to completion.
+///
+/// A component built by QQmlComponent creates nested objects through the engine's incubator, and
+/// asynchronously while it is itself being created. Asynchronous incubation only progresses when something
+/// drives it, which a bare QQmlEngine has nothing to do; this supplies that.
+///
+/// The page's Repeaters do create their delegates here, with or without a window. A delegate has a parent
+/// item but no QObject parent, though, so findChild() never finds one: walk the visual tree instead
+/// (findDescendant, below). Typing into a delegate's field needs the page in an active window (TestWindow,
+/// below).
+struct IncubationDriver: QQmlIncubationController
+{
+    void settle()
+    {
+        // Bounded, so an incubation that genuinely never finishes fails the test instead of hanging it.
+        for (auto guard = 0; incubatingObjectCount() > 0 && guard < 1000; ++guard)
+            incubateFor(5);
+    }
+};
+
+/// The real SettingsPage.qml over a SettingsController, with every delegate it makes incubated.
+struct SettingsPageView
+{
+    QQmlEngine engine;
+    IncubationDriver incubation;
+    std::unique_ptr<QQmlComponent> component;
+    std::unique_ptr<QObject> page;
+
+    /// @param controller The controller the page binds to. It must outlive the page, which holds a bare
+    ///                   pointer to it.
+    explicit SettingsPageView(window::SettingsController* controller)
+    {
+        contour::test::installChromeStyle(engine);
+        engine.setIncubationController(&incubation);
+        component = std::make_unique<QQmlComponent>(
+            &engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml")));
+        REQUIRE(component->isReady());
+        auto initial = QVariantMap {};
+        initial.insert("controller", QVariant::fromValue(controller));
+        page.reset(component->createWithInitialProperties(initial));
+        REQUIRE(page != nullptr);
+        settle();
+    }
+
+    /// Lets every pending delegate finish incubating. Call after anything that changes a model.
+    void settle() { incubation.settle(); }
+
+    [[nodiscard]] QQuickItem* item() const { return qobject_cast<QQuickItem*>(page.get()); }
+};
+
+/// A SettingsController over a contour.yml of its own, wired as production wires it: side files are written
+/// beside that contour.yml, and a saved change reloads it.
+struct ControllerFixture
+{
+    QTemporaryDir dir;
+    config::Config cfg;
+    std::filesystem::path configDir;
+    std::filesystem::path configPath;
+    std::shared_ptr<config::GuiConfigStore> store;
+    std::unique_ptr<window::SettingsController> controller;
+    QStringList errors; ///< What the controller reported through errorOccurred, in order.
+
+    /// @param yaml       The contour.yml the controller edits.
+    /// @param writeStore Where the controller writes; null writes the side files beside that contour.yml.
+    ControllerFixture(std::string_view yaml, std::shared_ptr<config::GuiConfigStore> writeStore)
+    {
+        configDir = std::filesystem::path(dir.path().toStdU16String());
+        configPath = configDir / "contour.yml";
+        {
+            auto out = std::ofstream(configPath);
+            out << yaml;
+        }
+        config::loadConfigFromFile(cfg, configPath);
+        store = writeStore ? std::move(writeStore) : std::make_shared<config::FileGuiConfigStore>(configDir);
+        controller =
+            std::make_unique<window::SettingsController>([this]() -> config::Config const& { return cfg; },
+                                                         store,
+                                                         [this]() {
+                                                             cfg = config::Config {};
+                                                             config::loadConfigFromFile(cfg, configPath);
+                                                         },
+                                                         nullptr);
+        QObject::connect(controller.get(),
+                         &window::SettingsController::errorOccurred,
+                         [this](QString const& message) { errors.push_back(message); });
+    }
+};
+
+/// A settings page over a contour.yml of its own, ready to drive. The controller outlives the page.
+struct PageFixture: ControllerFixture, SettingsPageView
+{
+    /// @param yaml       The contour.yml the page edits.
+    /// @param writeStore Where the page writes; null writes the side files beside that contour.yml.
+    explicit PageFixture(std::string_view yaml, std::shared_ptr<config::GuiConfigStore> writeStore = nullptr):
+        ControllerFixture { yaml, std::move(writeStore) }, SettingsPageView { controller.get() }
+    {
+    }
+};
+
+constexpr auto OneProfile =
+    std::string_view { "default_profile: main\nprofiles:\n    main:\n        show_title_bar: true\n" };
+
+/// Builds SettingRow.qml rows on their own, as the page's delegates build them.
+struct SettingRowFactory
+{
+    QQmlEngine engine;
+    std::unique_ptr<QQmlComponent> component;
+
+    SettingRowFactory()
+    {
+        contour::test::installChromeStyle(engine);
+        component = std::make_unique<QQmlComponent>(
+            &engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingRow.qml")));
+        REQUIRE(component->isReady());
+    }
+
+    /// A row with the initial @p properties; its field key and label are "key" and "Label" unless given.
+    [[nodiscard]] std::unique_ptr<QQuickItem> make(QVariantMap properties) const
+    {
+        if (!properties.contains("fieldKey"))
+            properties.insert("fieldKey", "key");
+        if (!properties.contains("label"))
+            properties.insert("label", "Label");
+        auto row = std::unique_ptr<QQuickItem>(
+            qobject_cast<QQuickItem*>(component->createWithInitialProperties(properties)));
+        REQUIRE(row != nullptr);
+        return row;
+    }
+};
+
+/// An active window that shows a settings page, or one row of it, as the user sees it, and that takes the
+/// keyboard focus elsewhere when asked.
+class TestWindow
+{
+  public:
+    /// Opens an active window of @p width by @p height pixels.
+    TestWindow(int width, int height)
+    {
+        _window.resize(width, height);
+        _focusSink.setParentItem(_window.contentItem());
+        _window.show();
+        _window.requestActivate();
+        REQUIRE(QTest::qWaitForWindowActive(&_window));
+    }
+
+    /// Shows @p item, as wide and as high as the window.
+    void show(QQuickItem& item)
+    {
+        item.setParentItem(_window.contentItem());
+        item.setSize(QSizeF(_window.size()));
+    }
+
+    /// Gives @p item the keyboard focus, as clicking it would.
+    static void focus(QQuickItem& item)
+    {
+        item.forceActiveFocus();
+        REQUIRE(item.hasActiveFocus());
+    }
+
+    /// Sends @p key to whatever holds the keyboard focus.
+    void press(Qt::Key key) { QTest::keyClick(&_window, key); }
+
+    /// Types @p text key by key, as the user would, without committing it.
+    void type(std::string_view text)
+    {
+        for (auto const ch: text)
+            QTest::keyClick(&_window, ch);
+    }
+
+    /// Types @p text over what @p field shows, and commits it with Return.
+    void typeOver(QQuickItem& field, std::string_view text)
+    {
+        focus(field);
+        QMetaObject::invokeMethod(&field, "selectAll");
+        type(text);
+        press(Qt::Key_Return);
+    }
+
+    /// Takes the keyboard focus out of the field holding it, as clicking elsewhere would.
+    ///
+    /// Not onto the window's content item: that is a focus scope, so focusing it hands the focus straight
+    /// back to the field inside it.
+    void dropFocus() { focus(_focusSink); }
+
+  private:
+    QQuickWindow _window;
+    QQuickItem _focusSink;
+};
+
+/// Finds the first descendant of @p root satisfying @p predicate, in the VISUAL tree: a Repeater's delegate
+/// has a parent item but no QObject parent, so findChild() never sees a row of the page.
+/// @param root      The item to search beneath.
+/// @param predicate What to look for.
+/// @return The item, or nullptr when no descendant satisfies @p predicate.
+[[nodiscard]] QQuickItem* findDescendant(QQuickItem const& root, auto const& predicate)
+{
+    for (auto* child: root.childItems())
+    {
+        if (predicate(*child))
+            return child;
+        if (auto* found = findDescendant(*child, predicate); found != nullptr)
+            return found;
+    }
+    return nullptr;
+}
+
+/// The page's row for field @p key, or nullptr when the page draws none.
+[[nodiscard]] QQuickItem* rowOf(QQuickItem const& page, QString const& key)
+{
+    return findDescendant(
+        page, [&key](QQuickItem const& item) { return item.property("fieldKey").toString() == key; });
+}
+
+/// The editor of Qt Quick type @p type -- "QQuickTextField", "QQuickSwitch", "QQuickComboBox" -- in @p row,
+/// or nullptr when it has none.
+[[nodiscard]] QQuickItem* editorOf(QQuickItem const& row, char const* type)
+{
+    return findDescendant(row, [type](QQuickItem const& item) { return item.inherits(type); });
+}
+
+/// The editor of Qt Quick type @p type in the page's row for field @p key, or nullptr when there is none.
+[[nodiscard]] QQuickItem* editorOf(QQuickItem const& page, QString const& key, char const* type)
+{
+    auto const* row = rowOf(page, key);
+    return row != nullptr ? editorOf(*row, type) : nullptr;
+}
+
+/// @p item, which the test cannot go on without.
+[[nodiscard]] QQuickItem& required(QQuickItem* item)
+{
+    REQUIRE(item != nullptr);
+    return *item;
+}
+
+/// The global row @p key of @p controller, as the settings page's Repeater hands it to a SettingRow.
+[[nodiscard]] QVariantMap globalRow(window::SettingsController const& controller, QString const& key)
+{
+    for (auto const& raw: controller.globalFields())
+        if (raw.toMap().value("key").toString() == key)
+            return raw.toMap();
+    return {};
+}
+
+/// A GPU inventory listing a hybrid laptop's two GPUs, the discrete one under its long pci.ids title.
+class FakeGpuInventory final: public display::IGpuInventory
+{
+  public:
+    [[nodiscard]] std::vector<display::GpuCandidate> list() const override
+    {
+        return {
+            { .title = "Intel integrated GPU",
+              .id = { 0x8086, 0xa788 },
+              .kind = display::GpuKind::Integrated,
+              .output = display::GpuOutput::DrivesDisplay,
+              .driver = "i915" },
+            { .title = "NVIDIA GeForce RTX 4070 Max-Q / Mobile",
+              .id = { 0x10de, 0x2820 },
+              .kind = display::GpuKind::Discrete,
+              .output = display::GpuOutput::Offscreen,
+              .driver = "nouveau" },
+        };
+    }
+};
+
+/// A store that cannot write anything, as one over a configuration directory that is read-only.
+class UnwritableStore final: public config::GuiConfigStore
+{
+  public:
+    /// Why every write fails.
+    static constexpr auto Reason = std::string_view { "The configuration directory is read-only." };
+
+    [[nodiscard]] std::expected<void, std::string> saveProfile(
+        std::string const& /*name*/, config::TerminalProfile const& /*profile*/) override
+    {
+        return refuse();
+    }
+    [[nodiscard]] std::expected<void, std::string> deleteProfile(std::string const& /*name*/) override
+    {
+        return refuse();
+    }
+    [[nodiscard]] std::expected<void, std::string> saveColorScheme(
+        std::string const& /*name*/, vtbackend::ColorPalette const& /*palette*/) override
+    {
+        return refuse();
+    }
+    [[nodiscard]] std::expected<void, std::string> deleteColorScheme(std::string const& /*name*/) override
+    {
+        return refuse();
+    }
+    [[nodiscard]] std::expected<void, std::string> saveGuiSettings(
+        config::GuiManagedSettings const& /*settings*/) override
+    {
+        return refuse();
+    }
+
+  private:
+    [[nodiscard]] static std::expected<void, std::string> refuse()
+    {
+        return std::unexpected(std::string { Reason });
+    }
+};
+
+/// Records the announcements Qt is handed.
+///
+/// Static state because QAccessible::installUpdateHandler takes a plain function pointer, so there is nowhere
+/// to put a capture.
+struct AnnouncementProbe
+{
+    static inline auto Said = QStringList {};
+
+    static void handle(QAccessibleEvent* event)
+    {
+        if (event->type() == QAccessible::Announcement)
+            Said.push_back(static_cast<QAccessibleAnnouncementEvent*>(event)->message());
+    }
+};
+
 } // namespace
 
 TEST_CASE("SettingsPage opens on the global settings pane", "[contour][gui][qml][settings]")
 {
     contour::test::QmlMessageCapture const warnings;
 
-    QTemporaryDir const dir;
-    auto const configDir = std::filesystem::path(dir.path().toStdString());
-    auto const configPath = configDir / "contour.yml";
-    {
-        auto out = std::ofstream(configPath);
-        out << "default_profile: main\nprofiles:\n    main:\n        show_title_bar: true\n";
-    }
-
-    config::Config cfg;
-    config::loadConfigFromFile(cfg, configPath);
-    auto store = std::make_shared<config::FileGuiConfigStore>(configDir);
-    auto controller = contour::window::SettingsController(
-        [&]() -> config::Config const& { return cfg; }, store, [&]() {}, nullptr);
-
-    QQmlEngine engine;
-    contour::test::installChromeStyle(engine);
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml")));
-    REQUIRE(component.isReady());
-
-    auto initial = QVariantMap {};
-    initial.insert("controller", QVariant::fromValue(&controller));
-    std::unique_ptr<QObject> page(component.createWithInitialProperties(initial));
-    REQUIRE(page != nullptr);
-    auto* item = qobject_cast<QQuickItem*>(page.get());
+    auto fx = PageFixture(OneProfile);
+    auto* item = fx.item();
     REQUIRE(item != nullptr);
 
     // The page lands on a pane rather than on a "pick something" placeholder, and the nav rail agrees
     // with the pane it is showing.
-    CHECK(page->property("editorMode").toString() == "globals");
-    CHECK(!page->property("headerTitle").toString().isEmpty());
+    CHECK(fx.page->property("editorMode").toString() == "globals");
+    CHECK(!fx.page->property("headerTitle").toString().isEmpty());
 
     auto* globalsButton = item->findChild<QObject*>("globalSettingsButton");
     REQUIRE(globalsButton != nullptr);
@@ -99,41 +405,14 @@ TEST_CASE("SettingsPage creates a profile through the QML and it lands on disk (
 {
     contour::test::QmlMessageCapture const warnings;
 
-    QTemporaryDir const dir;
-    auto const configDir = std::filesystem::path(dir.path().toStdString());
-    auto const configPath = configDir / "contour.yml";
-    {
-        auto out = std::ofstream(configPath);
-        out << "default_profile: main\nprofiles:\n    main:\n        show_title_bar: true\n";
-    }
-
-    config::Config cfg;
-    config::loadConfigFromFile(cfg, configPath);
-    auto store = std::make_shared<config::FileGuiConfigStore>(configDir);
-    auto controller = contour::window::SettingsController([&]() -> config::Config const& { return cfg; },
-                                                          store,
-                                                          [&]() {
-                                                              cfg = config::Config {};
-                                                              config::loadConfigFromFile(cfg, configPath);
-                                                          },
-                                                          nullptr);
-
-    QQmlEngine engine;
-    contour::test::installChromeStyle(engine);
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml")));
-    REQUIRE(component.isReady());
-
-    auto initial = QVariantMap {};
-    initial.insert("controller", QVariant::fromValue(&controller));
-    std::unique_ptr<QObject> page(component.createWithInitialProperties(initial));
-    REQUIRE(page != nullptr);
-    auto* item = qobject_cast<QQuickItem*>(page.get());
+    auto fx = PageFixture(OneProfile);
+    auto* item = fx.item();
     REQUIRE(item != nullptr);
 
     // Start a new profile through the page's "New profile…" button.
     clickButton(item->findChild<QObject*>("newProfileButton"));
-    CHECK(controller.editingProfile().isEmpty()); // an unsaved new draft
-    CHECK(!controller.profileFields().isEmpty()); // its fields are exposed for editing
+    CHECK(fx.controller->editingProfile().isEmpty()); // an unsaved new draft
+    CHECK(!fx.controller->profileFields().isEmpty()); // its fields are exposed for editing
 
     // Type a name and Save As.
     auto* saveAsField = item->findChild<QObject*>("saveAsField");
@@ -142,97 +421,15 @@ TEST_CASE("SettingsPage creates a profile through the QML and it lands on disk (
     clickButton(item->findChild<QObject*>("saveProfileAsButton"));
 
     // The side file exists, the reloaded config carries it, and the page now edits it.
-    CHECK(std::filesystem::exists(configDir / "profiles" / "work.yml"));
-    CHECK(cfg.findProfile("work") != nullptr);
-    CHECK(controller.editingProfile() == "work");
+    CHECK(std::filesystem::exists(fx.configDir / "profiles" / "work.yml"));
+    CHECK(fx.cfg.findProfile("work") != nullptr);
+    CHECK(fx.controller->editingProfile() == "work");
 
     // No QML binding errors were raised while driving the page.
     CHECK(warnings.count([](QString const& w) {
         return w.contains("TypeError") || w.contains("ReferenceError");
     }) == 0);
 }
-
-namespace
-{
-
-/// Drives QML object incubation to completion.
-///
-/// A component built by QQmlComponent creates nested objects through the engine's incubator, and
-/// asynchronously while it is itself being created. Asynchronous incubation only progresses when something
-/// drives it, which a bare QQmlEngine has nothing to do; this supplies that.
-///
-/// It does NOT make Repeater delegates appear. Nothing available here does: in this harness a Repeater
-/// creates no items at all — even `Repeater { model: 3; delegate: Rectangle {} }` yields none, reporting
-/// the right `count` alongside a null `itemAt(0)`, with or without a QQuickWindow. So a test here can
-/// assert on statically declared objects and on page/controller state, but never on a delegate. Where a
-/// delegate's behaviour matters, drive the signal it would have invoked (see the indicator editor tests)
-/// or cover it in SettingsController_test instead.
-struct IncubationDriver: QQmlIncubationController
-{
-    void settle()
-    {
-        // Bounded, so an incubation that genuinely never finishes fails the test instead of hanging it.
-        for (auto guard = 0; incubatingObjectCount() > 0 && guard < 1000; ++guard)
-            incubateFor(5);
-    }
-};
-
-/// Builds a page over a config with one profile, ready to drive. Keeps the controller alive alongside the
-/// page (the page holds a bare pointer to it).
-struct PageFixture
-{
-    QTemporaryDir dir;
-    config::Config cfg;
-    std::filesystem::path configDir;
-    std::filesystem::path configPath;
-    std::shared_ptr<config::FileGuiConfigStore> store;
-    std::unique_ptr<contour::window::SettingsController> controller;
-    QQmlEngine engine;
-    IncubationDriver incubation;
-    std::unique_ptr<QQmlComponent> component;
-    std::unique_ptr<QObject> page;
-
-    /// Lets every pending delegate finish incubating. Call after anything that changes a model.
-    void settle() { incubation.settle(); }
-
-    explicit PageFixture(std::string_view yaml)
-    {
-        configDir = std::filesystem::path(dir.path().toStdString());
-        configPath = configDir / "contour.yml";
-        {
-            auto out = std::ofstream(configPath);
-            out << yaml;
-        }
-        config::loadConfigFromFile(cfg, configPath);
-        store = std::make_shared<config::FileGuiConfigStore>(configDir);
-        controller = std::make_unique<contour::window::SettingsController>(
-            [this]() -> config::Config const& { return cfg; },
-            store,
-            [this]() {
-                cfg = config::Config {};
-                config::loadConfigFromFile(cfg, configPath);
-            },
-            nullptr);
-
-        contour::test::installChromeStyle(engine);
-        engine.setIncubationController(&incubation);
-        component = std::make_unique<QQmlComponent>(
-            &engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml")));
-        REQUIRE(component->isReady());
-        auto initial = QVariantMap {};
-        initial.insert("controller", QVariant::fromValue(controller.get()));
-        page.reset(component->createWithInitialProperties(initial));
-        REQUIRE(page != nullptr);
-        settle();
-    }
-
-    [[nodiscard]] QQuickItem* item() const { return qobject_cast<QQuickItem*>(page.get()); }
-};
-
-constexpr auto OneProfile =
-    std::string_view { "default_profile: main\nprofiles:\n    main:\n        show_title_bar: true\n" };
-
-} // namespace
 
 TEST_CASE("SettingsPage groups the profile fields into collapsible sections", "[contour][gui][qml][settings]")
 {
@@ -344,13 +541,10 @@ TEST_CASE("SettingsPage filters the fields and reopens what it matched", "[conto
 
 TEST_CASE("SettingsPage's indicator editor is wired to the controller", "[contour][gui][qml][settings]")
 {
-    // NOTE ON WHAT THIS CAN CHECK. Repeater delegates are not instantiated in this harness at all — a bare
-    // `Repeater { model: 3; delegate: Rectangle {} }` yields zero items here, with the right `count` and a
-    // null `itemAt()`, because a QQmlEngine driving a component outside a QML application engine never
-    // creates them. So the chips themselves are unreachable from a test, and this drives the segment rows'
-    // signals directly instead: those are the handlers the chips invoke, so the wiring under test is the
-    // same. What each chip *renders* is covered by StatusLineChip.qml being a pure function of its inputs,
-    // and the editing behaviour itself by SettingsController_test.
+    // NOTE ON WHAT THIS CHECKS. It drives the segment rows' signals rather than the chips: those are the
+    // handlers the chips invoke, so the wiring under test is the same. What each chip *renders* is covered by
+    // StatusLineChip.qml being a pure function of its inputs, and the editing behaviour itself by
+    // SettingsController_test.
     contour::test::QmlMessageCapture const warnings;
 
     auto fx = PageFixture(OneProfile);
@@ -468,50 +662,15 @@ TEST_CASE("SettingsPage's indicator editor is inert on a read-only profile", "[c
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-namespace
-{
-
-/// A GPU inventory listing a hybrid laptop's two GPUs, the discrete one under its long pci.ids title.
-class FakeGpuInventory final: public display::IGpuInventory
-{
-  public:
-    [[nodiscard]] std::vector<display::GpuCandidate> list() const override
-    {
-        return {
-            { .title = "Intel integrated GPU",
-              .id = { 0x8086, 0xa788 },
-              .kind = display::GpuKind::Integrated,
-              .output = display::GpuOutput::DrivesDisplay,
-              .driver = "i915" },
-            { .title = "NVIDIA GeForce RTX 4070 Max-Q / Mobile",
-              .id = { 0x10de, 0x2820 },
-              .kind = display::GpuKind::Discrete,
-              .output = display::GpuOutput::Offscreen,
-              .driver = "nouveau" },
-        };
-    }
-};
-
-/// The global row @p key of @p controller, as the settings page's Repeater hands it to a SettingRow.
-[[nodiscard]] QVariantMap globalRow(contour::window::SettingsController const& controller, QString const& key)
-{
-    for (auto const& raw: controller.globalFields())
-        if (raw.toMap().value("key").toString() == key)
-            return raw.toMap();
-    return {};
-}
-
-} // namespace
-
 TEST_CASE("SettingRow shows the GPU titles in full, and an absent GPU as the current entry",
           "[contour][gui][qml][settings][gpu]")
 {
-    // The page's own rows come from a Repeater, which creates no delegates in this harness (see
-    // IncubationDriver), so the row is built here exactly as that delegate builds it.
+    // Built on its own from the controller's row, exactly as the page's delegate builds it, so the test sets
+    // the row's width directly.
     contour::test::QmlMessageCapture const warnings;
 
     QTemporaryDir const dir;
-    auto const configDir = std::filesystem::path(dir.path().toStdString());
+    auto const configDir = std::filesystem::path(dir.path().toStdU16String());
     auto const configPath = configDir / "contour.yml";
     {
         auto out = std::ofstream(configPath);
@@ -528,55 +687,608 @@ TEST_CASE("SettingRow shows the GPU titles in full, and an absent GPU as the cur
     auto const row = globalRow(controller, "renderer.gpu");
     REQUIRE(!row.isEmpty());
 
-    QQmlEngine engine;
-    contour::test::installChromeStyle(engine);
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingRow.qml")));
-    REQUIRE(component.isReady());
+    auto const rows = SettingRowFactory {};
     auto initial = QVariantMap {};
     for (auto const* const name: { "label", "help", "type", "value", "options", "optionLabels" })
         initial.insert(QString::fromLatin1(name), row.value(QString::fromLatin1(name)));
     initial.insert("fieldKey", row.value("key"));
-    initial.insert("width", 900); // a settings page at a normal window width
-    std::unique_ptr<QObject> const object(component.createWithInitialProperties(initial));
-    auto* const settingRow = qobject_cast<QQuickItem*>(object.get());
-    REQUIRE(settingRow != nullptr);
+    auto const settingRow = rows.make(initial);
 
-    // Laid out for real: the editor's width is the point.
-    auto window = QQuickWindow {};
-    window.resize(900, 200);
-    settingRow->setParentItem(window.contentItem());
-    window.show();
-    REQUIRE(QTest::qWaitForWindowExposed(&window));
+    // Laid out for real, in a settings page at a normal window width: the editor's width is the point.
+    auto window = TestWindow(900, 200);
+    window.show(*settingRow);
 
-    QQuickItem* combo = nullptr;
-    for (auto* const descendant: settingRow->findChildren<QQuickItem*>())
-        if (descendant->inherits("QQuickComboBox"))
-            combo = descendant;
-    REQUIRE(combo != nullptr);
+    auto& combo = required(editorOf(*settingRow, "QQuickComboBox"));
 
     // Titles, never ids, and the configured-but-absent GPU stays the current entry.
     auto const labels = row.value("optionLabels").toStringList();
     CHECK(labels.contains("NVIDIA GeForce RTX 4070 Max-Q / Mobile"));
-    CHECK(combo->property("count").toInt() == labels.size());
-    CHECK(combo->property("currentIndex").toInt() == labels.size() - 1);
-    CHECK(combo->property("currentText").toString() == "Unavailable GPU (1002:7340)");
-    CHECK(combo->property("displayText").toString() == "Unavailable GPU (1002:7340)");
+    CHECK(combo.property("count").toInt() == labels.size());
+    CHECK(combo.property("currentIndex").toInt() == labels.size() - 1);
+    CHECK(combo.property("currentText").toString() == "Unavailable GPU (1002:7340)");
+    CHECK(combo.property("displayText").toString() == "Unavailable GPU (1002:7340)");
 
     // Wide enough for the longest title, so neither the box nor its popup cuts it off. The width
     // follows a layout polish, which is a render-loop pass rather than an event, so this waits for the
     // geometry: a fixed delay is a guess at when the next frame lands, and a loaded runner misses it.
     // 240 is the fixed editor column the box grew past, which cut the RTX title off.
-    CHECK(QTest::qWaitFor([&] { return combo->width() > 240; }, 2000));
-    CHECK(combo->width() >= combo->implicitWidth());
-    INFO("combo width " << combo->width() << ", implicit width " << combo->implicitWidth());
+    CHECK(QTest::qWaitFor([&] { return combo.width() > 240; }, 2000));
+    CHECK(combo.width() >= combo.implicitWidth());
+    INFO("combo width " << combo.width() << ", implicit width " << combo.implicitWidth());
 
     // A row too narrow for the cap: the box elides the long title rather than cutting it off.
     settingRow->setProperty("value", QStringLiteral("10de:2820"));
     settingRow->setWidth(300);
-    CHECK(QTest::qWaitFor([&] { return combo->width() <= 240; }, 2000)); // back to the column's floor
-    INFO("narrow combo width " << combo->width());
-    CHECK(combo->property("currentText").toString() == "NVIDIA GeForce RTX 4070 Max-Q / Mobile");
-    CHECK(combo->property("displayText").toString().endsWith(QChar(0x2026)));
+    CHECK(QTest::qWaitFor([&] { return combo.width() <= 240; }, 2000)); // back to the column's floor
+    INFO("narrow combo width " << combo.width());
+    CHECK(combo.property("currentText").toString() == "NVIDIA GeForce RTX 4070 Max-Q / Mobile");
+    CHECK(combo.property("displayText").toString().endsWith(QChar(0x2026)));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingsPage renders the command-block settings from the descriptors",
+          "[contour][gui][qml][settings]")
+{
+    // No QML knows about these rows: the profile pane groups whatever `group` a row carries, and the
+    // global pane lists whatever globalFields returns. This proves both hold for the new rows.
+    contour::test::QmlMessageCapture const warnings;
+
+    auto fx = PageFixture(OneProfile);
+    auto* item = fx.item();
+    REQUIRE(item != nullptr);
+    clickButton(item->findChild<QObject*>("newProfileButton"));
+    fx.settle();
+
+    // The page draws a row for each key it lists: a model no delegate shows would pass the other checks.
+    auto groupKeys = QStringList {};
+    for (auto const& raw: fx.page->property("profileGroups").toList())
+        if (raw.toMap().value("title").toString() == "Command blocks")
+            for (auto const& field: raw.toMap().value("fields").toList())
+                groupKeys.push_back(field.toMap().value("key").toString());
+    CHECK(groupKeys.size() == qsizetype { 10 });
+    CHECK(groupKeys.contains("sticky_header_mode"));
+    for (auto const& key: groupKeys)
+        CHECK(rowOf(*item, key) != nullptr);
+
+    // A user who knows the YAML path can search for it on the global pane.
+    fx.page->setProperty("filterText", "gutter.");
+    fx.settle();
+    auto globalKeys = QStringList {};
+    for (auto const& raw: fx.page->property("globalFieldsFiltered").toList())
+        globalKeys.push_back(raw.toMap().value("key").toString());
+    for (auto const* key: { "gutter.exit_status",
+                            "gutter.user_marks",
+                            "gutter.line_numbers",
+                            "gutter.line_number_width",
+                            "gutter.timestamps",
+                            "gutter.timestamp_format" })
+        CHECK(globalKeys.contains(QString::fromLatin1(key)));
+    for (auto const& key: globalKeys)
+        CHECK(rowOf(*item, key) != nullptr);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingsPage shows the stored value again when it refuses a typed one",
+          "[contour][gui][qml][settings]")
+{
+    // What the user typed is in the text field, not in the model, and a refused value leaves the model as it
+    // was: re-sending it rebuilds no row, so the field went on showing a value that was never saved. Typed
+    // for real, into the page's own rows, so the whole path -- editor, page, controller and back -- is the
+    // one the user takes.
+    contour::test::QmlMessageCapture const warnings;
+
+    auto fx = PageFixture(OneProfile);
+    auto* page = fx.item();
+    REQUIRE(page != nullptr);
+    auto window = TestWindow(1000, 800);
+    window.show(*page);
+    fx.settle();
+
+    // Looked up again each time: a model that changed rebuilds the rows.
+    auto const shown = [&](QString const& key) {
+        return required(editorOf(*page, key, "QQuickTextField")).property("text").toString().toStdString();
+    };
+    auto const typeInto = [&](QString const& key, std::string_view text) {
+        window.typeOver(required(editorOf(*page, key, "QQuickTextField")), text);
+        fx.settle();
+    };
+
+    SECTION("a global row refuses a width out of range, and says why")
+    {
+        auto const key = QStringLiteral("gutter.line_number_width");
+        auto const stored = shown(key);
+        REQUIRE(stored == std::to_string(fx.cfg.gutter.value().lineNumberWidth));
+
+        typeInto(key, "11");
+        CHECK(shown(key) == stored);
+        REQUIRE(fx.errors.size() == qsizetype { 1 });
+        CHECK(fx.errors.first().contains("from 3 to 10"));
+        CHECK_FALSE(globalRow(*fx.controller, key).value("overridden").toBool());
+
+        // Leaving the field finishes editing once more. What it shows now is the stored value, which is no
+        // change to save: nothing is overridden, and nothing more is reported.
+        window.dropFocus();
+        fx.settle();
+        CHECK(shown(key) == stored);
+        CHECK(fx.errors.size() == qsizetype { 1 });
+        CHECK_FALSE(globalRow(*fx.controller, key).value("overridden").toBool());
+    }
+
+    SECTION("a string row refuses a timestamp format it cannot draw, and says why")
+    {
+        auto const key = QStringLiteral("gutter.timestamp_format");
+        auto const stored = shown(key);
+        REQUIRE(stored == fx.cfg.gutter.value().timestampFormat);
+
+        typeInto(key, "%K");
+        CHECK(shown(key) == stored);
+        REQUIRE(fx.errors.size() == qsizetype { 1 });
+        CHECK(fx.errors.first().contains("timestamp format"));
+        CHECK_FALSE(globalRow(*fx.controller, key).value("overridden").toBool());
+    }
+
+    SECTION("a double row saves what was typed")
+    {
+        auto const key = QStringLiteral("ui_font_size");
+        typeInto(key, "11.5");
+        CHECK(fx.cfg.uiFontSize.value() == 11.5);
+        CHECK(shown(key) == "11.5");
+        CHECK(fx.errors.isEmpty());
+    }
+
+    SECTION("a profile row stores a negative minimum duration as zero, and shows the zero")
+    {
+        clickButton(page->findChild<QObject*>("newProfileButton"));
+        fx.page->setProperty("editorMode", "profile");
+        fx.settle();
+        auto const key = QStringLiteral("notify_on_command_finish_min_duration");
+        REQUIRE(shown(key) == "10");
+
+        typeInto(key, "-5");
+        CHECK(shown(key) == "0");
+        // Again, now that the stored value is already zero: the page re-sends a model that did not change,
+        // and the field must still drop what was typed.
+        typeInto(key, "-5");
+        CHECK(shown(key) == "0");
+        // Zero is what the loader makes of a negative duration too, so this is no refusal to report.
+        CHECK(fx.errors.isEmpty());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingsPage says why it refused a value until the next change it saves",
+          "[contour][gui][qml][settings]")
+{
+    contour::test::QmlMessageCapture const warnings;
+
+    auto fx = PageFixture(OneProfile);
+    auto* page = fx.item();
+    REQUIRE(page != nullptr);
+    auto window = TestWindow(1000, 800);
+    window.show(*page);
+    fx.settle();
+
+    auto* banner = page->findChild<QQuickItem*>("settingsErrorBanner");
+    REQUIRE(banner != nullptr);
+    auto* message = page->findChild<QQuickItem*>("settingsErrorMessage");
+    REQUIRE(message != nullptr);
+    CHECK_FALSE(banner->isVisible());
+
+    auto const typeInto = [&](std::string_view text) {
+        window.typeOver(
+            required(editorOf(*page, QStringLiteral("gutter.line_number_width"), "QQuickTextField")), text);
+        fx.settle();
+    };
+
+    typeInto("11");
+    CHECK(banner->isVisible());
+    auto const shown = message->property("text").toString();
+    CHECK(shown.contains("from 3 to 10"));
+    // A screen reader is told, too: the reason is the message's accessible name, and it reads as an alert.
+    auto* const accessible = QAccessible::queryAccessibleInterface(message);
+    REQUIRE(accessible != nullptr);
+    CHECK(accessible->text(QAccessible::Name) == shown);
+    CHECK(accessible->role() == QAccessible::AlertMessage);
+
+    // The next value the page saves takes the reason away.
+    typeInto("8");
+    CHECK(fx.cfg.gutter.value().lineNumberWidth == 8);
+    CHECK_FALSE(banner->isVisible());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingsPage puts a switch or a combo box back when it cannot save the change",
+          "[contour][gui][qml][settings]")
+{
+    // Neither editor can send a value the page refuses, but a change it cannot write is refused all the same,
+    // and the model is left as it was: nothing rebuilds the row, so only the editor can take the change back.
+    contour::test::QmlMessageCapture const warnings;
+
+    auto fx = PageFixture(OneProfile, std::make_shared<UnwritableStore>());
+    auto* page = fx.item();
+    REQUIRE(page != nullptr);
+    auto window = TestWindow(1000, 800);
+    window.show(*page);
+    fx.settle();
+
+    // Looked up again each time, as a rebuilt row would be.
+    auto const editor = [&page](QString const& key, char const* type) -> QQuickItem& {
+        return required(editorOf(*page, key, type));
+    };
+    auto const press = [&](QQuickItem& item, Qt::Key key) {
+        TestWindow::focus(item);
+        window.press(key);
+        fx.settle();
+    };
+
+    SECTION("a switch")
+    {
+        auto const key = QStringLiteral("reflow_on_resize");
+        auto const stored = fx.cfg.reflowOnResize.value();
+        REQUIRE(editor(key, "QQuickSwitch").property("checked").toBool() == stored);
+
+        press(editor(key, "QQuickSwitch"), Qt::Key_Space);
+        REQUIRE(fx.errors == QStringList { QString::fromUtf8(UnwritableStore::Reason) });
+        CHECK(editor(key, "QQuickSwitch").property("checked").toBool() == stored);
+
+        // ... and goes on following the value, as when a Reset moves it.
+        required(rowOf(*page, key)).setProperty("value", !stored);
+        CHECK(editor(key, "QQuickSwitch").property("checked").toBool() == !stored);
+    }
+
+    SECTION("a combo box")
+    {
+        auto const key = QStringLiteral("gutter.line_numbers");
+        REQUIRE(editor(key, "QQuickComboBox").property("currentText").toString() == "off");
+
+        press(editor(key, "QQuickComboBox"), Qt::Key_Down);
+        REQUIRE(fx.errors == QStringList { QString::fromUtf8(UnwritableStore::Reason) });
+        CHECK(editor(key, "QQuickComboBox").property("currentText").toString() == "off");
+
+        required(rowOf(*page, key)).setProperty("value", "relative");
+        CHECK(editor(key, "QQuickComboBox").property("currentText").toString() == "relative");
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingRow's text field follows its value once an edit is committed",
+          "[contour][gui][qml][settings]")
+{
+    // The host answers an edit through `value`: with the value it stored, or by leaving `value` as it was
+    // when it refused the edit. Either way the field shows `value` afterwards, and keeps following it.
+    contour::test::QmlMessageCapture const warnings;
+
+    auto const rows = SettingRowFactory {};
+    auto const row =
+        rows.make({ { "fieldKey", "width" }, { "label", "Width" }, { "type", "int" }, { "value", 6 } });
+    QSignalSpy const edits(row.get(), SIGNAL(edited(QString, QVariant)));
+    auto window = TestWindow(600, 100);
+    window.show(*row);
+    auto& field = required(editorOf(*row, "QQuickTextField"));
+
+    // Committed, and refused: `value` stays 6, and so does the field.
+    window.typeOver(field, "8");
+    REQUIRE(edits.size() == qsizetype { 1 });
+    CHECK(edits.first().at(1).toInt() == 8);
+    CHECK(field.property("text").toString().toStdString() == "6");
+
+    // Leaving the field finishes editing once more, on the 6 it shows now: that is no edit.
+    window.dropFocus();
+    CHECK_FALSE(field.hasActiveFocus());
+    CHECK(edits.size() == qsizetype { 1 });
+
+    // The value moves later, as a Reset moves it: the field still follows.
+    row->setProperty("value", 4);
+    CHECK(field.property("text").toString().toStdString() == "4");
+
+    // Typing the value the row already holds is no edit.
+    window.typeOver(field, "4");
+    CHECK(edits.size() == qsizetype { 1 });
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingsPage follows a configuration reload while it is open", "[contour][gui][qml][settings]")
+{
+    // A reload -- live_config noticing contour.yml change, or ReloadConfig -- refreshes the settings page of
+    // every window. A row left on the value from before the reload would take typing that value back as no
+    // change, and drop it.
+    contour::test::QmlMessageCapture const warnings;
+
+    auto testApp = contour::test::ConfiguredTestApp {};
+    auto const writeConfig = [&testApp](int lineNumberWidth) {
+        auto out = std::ofstream(testApp.configFile());
+        out << std::format("default_profile: main\n"
+                           "gutter:\n"
+                           "    line_number_width: {}\n"
+                           "profiles:\n"
+                           "    main:\n"
+                           "        show_title_bar: true\n",
+                           lineNumberWidth);
+    };
+    writeConfig(6);
+    REQUIRE(testApp.manager().reloadAllSessions().has_value());
+    auto const windowController = contour::test::ScopedController { testApp.manager() };
+    windowController->openSettings();
+    auto* settings = windowController->settingsController();
+    REQUIRE(settings != nullptr);
+
+    auto view = SettingsPageView { settings };
+    auto* page = view.item();
+    REQUIRE(page != nullptr);
+    auto window = TestWindow(1000, 800);
+    window.show(*page);
+    view.settle();
+
+    auto const key = QStringLiteral("gutter.line_number_width");
+    auto const field = [&page, &key]() -> QQuickItem& {
+        return required(editorOf(*page, key, "QQuickTextField"));
+    };
+    REQUIRE(field().property("text").toString() == "6");
+
+    writeConfig(8);
+    REQUIRE(testApp.manager().reloadAllSessions().has_value());
+    view.settle();
+    CHECK(field().property("text").toString() == "8");
+
+    // Typing the width from before the reload is a change now, and it is saved.
+    window.typeOver(field(), "6");
+    view.settle();
+    CHECK(testApp.app().config().gutter.value().lineNumberWidth == 6);
+    CHECK(globalRow(*settings, key).value("overridden").toBool());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingRow reads a number with a decimal point in every locale", "[contour][gui][qml][settings]")
+{
+    // A number field shows its value as JavaScript spells it and reads the typed text back with parseInt or
+    // parseFloat, so its validator must read the same: a point for the decimals, and no group separator. One
+    // that followed a locale writing a decimal comma took the point for a group separator -- leaving a field
+    // that showed 0.5 stored 5, and 1.000 typed into a whole number stored 1.
+    contour::test::QmlMessageCapture const warnings;
+    auto const previousLocale = QLocale {};
+    QLocale::setDefault(QLocale(QLocale::German, QLocale::Germany));
+    auto const restoreLocale = core::Finally { [&previousLocale] { QLocale::setDefault(previousLocale); } };
+
+    auto const rows = SettingRowFactory {};
+    auto window = TestWindow(600, 100);
+
+    SECTION("a decimal")
+    {
+        auto const row = rows.make({ { "type", "double" }, { "value", 0.5 } });
+        window.show(*row);
+        QSignalSpy const edits(row.get(), SIGNAL(edited(QString, QVariant)));
+        auto& field = required(editorOf(*row, "QQuickTextField"));
+        REQUIRE(field.property("text").toString() == "0.5");
+
+        // Visiting the field is no edit.
+        TestWindow::focus(field);
+        window.dropFocus();
+        CHECK(edits.isEmpty());
+        CHECK(field.property("text").toString() == "0.5");
+
+        window.typeOver(field, "0.75");
+        REQUIRE(edits.size() == qsizetype { 1 });
+        CHECK(edits.at(0).at(1).toDouble() == 0.75);
+
+        // A decimal comma, as the locale writes it, is read the same.
+        window.typeOver(field, "0,25");
+        REQUIRE(edits.size() == qsizetype { 2 });
+        CHECK(edits.at(1).at(1).toDouble() == 0.25);
+    }
+
+    SECTION("a whole number")
+    {
+        auto const row = rows.make({ { "type", "int" }, { "value", 6 } });
+        window.show(*row);
+        QSignalSpy const edits(row.get(), SIGNAL(edited(QString, QVariant)));
+        auto& field = required(editorOf(*row, "QQuickTextField"));
+
+        // Neither separator is a digit, so neither is taken.
+        window.typeOver(field, "1.000");
+        REQUIRE(edits.size() == qsizetype { 1 });
+        CHECK(edits.at(0).at(1).toInt() == 1000);
+        window.typeOver(field, "2,000");
+        REQUIRE(edits.size() == qsizetype { 2 });
+        CHECK(edits.at(1).at(1).toInt() == 2000);
+
+        // A number no setting can hold is no edit, and the field shows the value again.
+        window.typeOver(field, "9999999999");
+        CHECK(edits.size() == qsizetype { 2 });
+        CHECK(field.property("text").toString() == "6");
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingRow sends nothing for a re-picked entry, and Escape puts the stored text back",
+          "[contour][gui][qml][settings]")
+{
+    contour::test::QmlMessageCapture const warnings;
+
+    auto const rows = SettingRowFactory {};
+    auto window = TestWindow(600, 100);
+
+    SECTION("a combo box")
+    {
+        auto const row = rows.make({ { "type", "enum" },
+                                     { "value", "relative" },
+                                     { "options", QStringList { "off", "relative", "hybrid" } } });
+        window.show(*row);
+        QSignalSpy const edits(row.get(), SIGNAL(edited(QString, QVariant)));
+        auto& combo = required(editorOf(*row, "QQuickComboBox"));
+        REQUIRE(combo.property("currentIndex").toInt() == 1);
+
+        // Picking the entry it shows is no change: writing it would override the setting with the value it
+        // already has.
+        QMetaObject::invokeMethod(&combo, "activated", Q_ARG(int, 1));
+        CHECK(edits.isEmpty());
+
+        // Another entry is.
+        combo.setProperty("currentIndex", 2);
+        QMetaObject::invokeMethod(&combo, "activated", Q_ARG(int, 2));
+        REQUIRE(edits.size() == qsizetype { 1 });
+        CHECK(edits.first().at(1).toString() == "hybrid");
+    }
+
+    for (auto const& [type, value, typed]: std::array {
+             std::tuple { "int", QVariant(6), std::string_view { "8" } },
+             std::tuple { "double", QVariant(0.5), std::string_view { "0.75" } },
+             std::tuple { "string", QVariant(QStringLiteral("less")), std::string_view { "more" } },
+         })
+    {
+        DYNAMIC_SECTION("Escape in a " << type << " field")
+        {
+            auto const row = rows.make({ { "type", QString::fromLatin1(type) }, { "value", value } });
+            window.show(*row);
+            QSignalSpy const edits(row.get(), SIGNAL(edited(QString, QVariant)));
+            auto& field = required(editorOf(*row, "QQuickTextField"));
+            auto const stored = field.property("text").toString();
+
+            TestWindow::focus(field);
+            QMetaObject::invokeMethod(&field, "selectAll");
+            window.type(typed);
+            REQUIRE(field.property("text").toString() != stored);
+
+            window.press(Qt::Key_Escape);
+            CHECK(field.property("text").toString() == stored);
+            CHECK_FALSE(field.hasActiveFocus());
+
+            // Nothing typed is left behind for the next focus change to commit, and the field still follows
+            // the value.
+            window.dropFocus();
+            CHECK(edits.isEmpty());
+            row->setProperty("value", value.toString() + "1");
+            CHECK(field.property("text").toString() == value.toString() + "1");
+        }
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingsPage announces each refusal, and drops it with the pane or draft it was about",
+          "[contour][gui][qml][settings]")
+{
+    contour::test::QmlMessageCapture const warnings;
+
+    auto fx = PageFixture(OneProfile);
+    auto* page = fx.item();
+    REQUIRE(page != nullptr);
+    auto window = TestWindow(1000, 800);
+    window.show(*page);
+    fx.settle();
+
+    auto* banner = page->findChild<QQuickItem*>("settingsErrorBanner");
+    REQUIRE(banner != nullptr);
+
+    SECTION("a screen reader hears every refusal, a repeated one too")
+    {
+        AnnouncementProbe::Said.clear();
+        auto* const previous = QAccessible::installUpdateHandler(&AnnouncementProbe::handle);
+        for ([[maybe_unused]] auto const attempt: { 1, 2 })
+        {
+            window.typeOver(
+                required(editorOf(*page, QStringLiteral("gutter.line_number_width"), "QQuickTextField")),
+                "11");
+            fx.settle();
+        }
+        QAccessible::installUpdateHandler(previous);
+        REQUIRE(AnnouncementProbe::Said.size() == qsizetype { 2 });
+        CHECK(AnnouncementProbe::Said.at(0).contains("from 3 to 10"));
+        CHECK(AnnouncementProbe::Said.at(1) == AnnouncementProbe::Said.at(0));
+    }
+
+    SECTION("another pane drops it")
+    {
+        REQUIRE_FALSE(fx.controller->setGlobalField("gutter.line_number_width", 11));
+        REQUIRE(banner->isVisible());
+        fx.page->setProperty("editorMode", "keybindings");
+        CHECK_FALSE(banner->isVisible());
+    }
+
+    SECTION("a change to the profile draft drops it")
+    {
+        fx.controller->newProfile("main");
+        fx.page->setProperty("editorMode", "profile");
+        REQUIRE_FALSE(fx.controller->saveProfileAs(""));
+        REQUIRE(banner->isVisible());
+        fx.controller->setProfileField("maximized", true);
+        CHECK_FALSE(banner->isVisible());
+    }
+
+    SECTION("a change to the colour scheme draft drops it")
+    {
+        fx.controller->newColorScheme("");
+        fx.page->setProperty("editorMode", "scheme");
+        REQUIRE_FALSE(fx.controller->saveColorScheme(""));
+        REQUIRE(banner->isVisible());
+        fx.controller->setSchemeColor("background", "#102030");
+        CHECK_FALSE(banner->isVisible());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("ColorSchemeEditor pins a derived colour on Return only, and lets it follow again",
+          "[contour][gui][qml][settings]")
+{
+    contour::test::QmlMessageCapture const warnings;
+
+    auto fx = PageFixture(OneProfile);
+    auto* page = fx.item();
+    REQUIRE(page != nullptr);
+    auto window = TestWindow(1000, 800);
+    window.show(*page);
+    clickButton(page->findChild<QObject*>("newSchemeButton"));
+    fx.settle();
+
+    auto const key = QStringLiteral("gutter_text");
+    auto const sourceOf = [&fx, &key]() {
+        for (auto const& raw: fx.controller->schemeColors())
+            if (raw.toMap().value("key").toString() == key)
+                return raw.toMap().value("colorSource").toString();
+        return QString {};
+    };
+    // Looked up again each time: a changed draft rebuilds the swatches.
+    auto const partOf = [&page, &key](char const* name) -> QQuickItem& {
+        auto& swatch = required(findDescendant(*page, [&key](QQuickItem const& candidate) {
+            return candidate.property("modelData").toMap().value("key").toString() == key;
+        }));
+        return required(findDescendant(swatch, [name](QQuickItem const& candidate) {
+            return candidate.objectName() == QLatin1String(name);
+        }));
+    };
+    REQUIRE(sourceOf() == "derived");
+    CHECK(partOf("schemeColorFollows").isVisible());
+    CHECK(partOf("schemeColorFollows").property("text").toString() == "Follows the scheme's other colors");
+    CHECK_FALSE(partOf("followSchemeColorButton").isVisible());
+
+    // Passing through the field is no edit.
+    TestWindow::focus(partOf("schemeColorField"));
+    window.dropFocus();
+    fx.settle();
+    CHECK(sourceOf() == "derived");
+
+    // Return commits the colour shown, which keeps it from now on.
+    TestWindow::focus(partOf("schemeColorField"));
+    window.press(Qt::Key_Return);
+    fx.settle();
+    CHECK(sourceOf() == "pinned");
+    CHECK_FALSE(partOf("schemeColorFollows").isVisible());
+    CHECK(partOf("followSchemeColorButton").isVisible());
+    auto* const followAccessible = QAccessible::queryAccessibleInterface(&partOf("followSchemeColorButton"));
+    REQUIRE(followAccessible != nullptr);
+    CHECK(followAccessible->text(QAccessible::Name) == "Follow the scheme's other colors again");
+
+    clickButton(&partOf("followSchemeColorButton"));
+    fx.settle();
+    CHECK(sourceOf() == "derived");
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

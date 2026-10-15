@@ -61,6 +61,8 @@ constexpr auto MaxSessionWordDelimiters = 256U;
 /// - `goodImageProtocol` is forced ON. The knob is maturing toward always-on and non-configurable,
 ///   so daemon mode adopts that end state now — which is also why it is absent from
 ///   @ref proto::WireSessionSettings. A profile setting it false is deliberately overridden.
+/// - `inputWriter` is forced to `ReaderThread`: the daemon's loop thread takes a session's lock, and must
+///   not park on a PTY write as it lets go. The session's pump writes it, after every read.
 /// - Every other field passes through untouched.
 ///
 /// @param settings The settings to normalize (taken by value; the adjusted copy is returned).

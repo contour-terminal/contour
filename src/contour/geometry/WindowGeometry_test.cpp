@@ -574,6 +574,39 @@ TEST_CASE("WindowGeometry.isInGutter.no gutter means nothing is ever in it", "[c
     }
 }
 
+TEST_CASE("WindowGeometry.gutterColumnAt.namesTheColumnFromTheGuttersLeftEdge", "[contour][geometry]")
+{
+    // A three-column gutter of 10 px cells, ending where the grid starts at 35 px.
+    constexpr auto PageMarginLeft = 35;
+    constexpr auto Gutter = 30;
+    constexpr auto Cell = 10;
+
+    CHECK(gutterColumnAt(4, PageMarginLeft, Gutter, Cell) == std::nullopt); // the configured margin
+    CHECK(gutterColumnAt(5, PageMarginLeft, Gutter, Cell) == 0);
+    CHECK(gutterColumnAt(14, PageMarginLeft, Gutter, Cell) == 0);
+    CHECK(gutterColumnAt(15, PageMarginLeft, Gutter, Cell) == 1);
+    CHECK(gutterColumnAt(34, PageMarginLeft, Gutter, Cell) == 2);
+    CHECK(gutterColumnAt(35, PageMarginLeft, Gutter, Cell) == std::nullopt); // column 0 of the grid
+    CHECK(gutterColumnAt(20, PageMarginLeft, 0, Cell) == std::nullopt);      // no gutter at all
+    CHECK(gutterColumnAt(20, PageMarginLeft, Gutter, 0) == std::nullopt);    // no font yet
+}
+
+TEST_CASE("WindowGeometry.pageColumnAt.namesOnlyThePagesOwnColumns", "[contour][geometry]")
+{
+    // Four 10 px columns, starting where a gutter ends at 35 px.
+    constexpr auto PageMarginLeft = 35;
+    constexpr auto Cell = 10;
+    constexpr auto Columns = 4;
+
+    CHECK(pageColumnAt(34, PageMarginLeft, Cell, Columns) == std::nullopt); // the gutter
+    CHECK(pageColumnAt(35, PageMarginLeft, Cell, Columns) == 0);
+    CHECK(pageColumnAt(44, PageMarginLeft, Cell, Columns) == 0);
+    CHECK(pageColumnAt(45, PageMarginLeft, Cell, Columns) == 1);
+    CHECK(pageColumnAt(74, PageMarginLeft, Cell, Columns) == 3);
+    CHECK(pageColumnAt(75, PageMarginLeft, Cell, Columns) == std::nullopt); // the right margin
+    CHECK(pageColumnAt(40, PageMarginLeft, 0, Columns) == std::nullopt);    // no font yet
+}
+
 TEST_CASE("WindowGeometry.gutter.zeroIsExactlyTheUngutteredArithmetic", "[contour][geometry]")
 {
     // The default, and what every existing caller passes: a zero gutter must leave every function

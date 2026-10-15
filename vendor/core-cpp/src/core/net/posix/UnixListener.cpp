@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/net/posix/UnixListener.hpp>
 
+#include <core/net/detail/SocketErrors.hpp>
 #include <core/net/detail/WouldBlock.hpp>
 #include <core/net/posix/AcceptLoop.hpp>
 #include <core/net/posix/FdUtils.hpp>
@@ -60,7 +61,7 @@ namespace
         // stall startup on the connect; a pending connect still proves it is alive.
         auto const fd = ScopedFd { makeStreamSocket(AF_UNIX, 0) };
         if (fd.get() < 0)
-            return std::unexpected(makeNetError(NetErrorCode::SystemError, errno, "probe socket"));
+            return std::unexpected(detail::socketError(errno, "probe socket"));
 
         auto const rc = ::connect(fd.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address));
         auto const err = errno;
@@ -103,7 +104,7 @@ std::expected<void, NetError> ensureOwnedPrivateDirectory(std::filesystem::path 
     return {};
 }
 
-UnixListener::UnixListener(EventLoop& loop, int fd, std::filesystem::path path) noexcept:
+UnixListener::UnixListener(EventLoop& loop, int fd, std::filesystem::path path):
     _loop(loop), _fd(fd), _path(std::move(path))
 {
 }
@@ -113,15 +114,15 @@ UnixListener::~UnixListener()
     // Cancel, not Resume: acceptOne holds `int const* fd` / `bool const* closed`
     // into this object, which is about to stop existing. Unwinding via
     // OperationCancelled returns without ever dereferencing them again.
-    close(FdWakePolicy::Cancel);
+    closeWith(FdWakePolicy::Cancel);
 }
 
-void UnixListener::close() noexcept
+void UnixListener::doClose() noexcept
 {
-    close(FdWakePolicy::Resume);
+    closeWith(FdWakePolicy::Resume);
 }
 
-void UnixListener::close(FdWakePolicy policy) noexcept
+void UnixListener::closeWith(FdWakePolicy policy) noexcept
 {
     if (_closed)
         return;
@@ -178,14 +179,13 @@ std::expected<std::unique_ptr<UnixListener>, NetError> UnixListener::bind(EventL
     // serving". probeSocketOwner right here already creates its socket this way.
     auto const fd = makeStreamSocket(AF_UNIX, 0);
     if (fd < 0)
-        return std::unexpected(makeNetError(NetErrorCode::SystemError, errno, "socket"));
+        return std::unexpected(detail::socketError(errno, "socket"));
 
     if (::bind(fd, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) != 0)
     {
         auto const err = errno;
         ::close(fd);
-        return std::unexpected(makeNetError(
-            err == EADDRINUSE ? NetErrorCode::AddressInUse : NetErrorCode::SystemError, err, "bind"));
+        return std::unexpected(detail::socketError(err, "bind"));
     }
 
     // Owner-only access to the socket itself; the hardened directory is the
@@ -197,7 +197,7 @@ std::expected<std::unique_ptr<UnixListener>, NetError> UnixListener::bind(EventL
         auto const err = errno;
         ::close(fd);
         ::unlink(pathString.c_str());
-        return std::unexpected(makeNetError(NetErrorCode::SystemError, err, "listen"));
+        return std::unexpected(detail::socketError(err, "listen"));
     }
 
     return std::unique_ptr<UnixListener>(new UnixListener(loop, fd, path));

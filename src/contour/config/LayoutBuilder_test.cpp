@@ -3,9 +3,13 @@
 #include <contour/config/LayoutBuilder.hpp>
 #include <contour/test/CoreFixtures.hpp>
 
+#include <vtpty/test/NonAsciiSample.hpp>
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <format>
 #include <string>
 #include <unordered_map>
 
@@ -120,6 +124,26 @@ TEST_CASE("emitLayoutsYaml: escapes embedded double-quotes in a command so it ro
     CHECK(*parsed.tabs[0].root.directory == "/tmp/some dir");
     REQUIRE(parsed.tabs[0].root.profile.has_value());
     CHECK(*parsed.tabs[0].root.profile == "dev-profile");
+}
+
+TEST_CASE("emitLayoutsYaml: a directory beyond ASCII round-trips in UTF-8", "[layout][save]")
+{
+    auto const directory = std::filesystem::path { u8"/tmp/" } / vtpty::testing::NonAsciiName;
+    config::LayoutTab tab;
+    tab.root.directory = directory;
+
+    config::Layout work;
+    work.tabs = { tab };
+    std::unordered_map<std::string, config::Layout> const layouts { { "work", work } };
+    auto const yaml = emitLayoutsYaml(layouts);
+    CHECK(yaml.contains(std::format("/tmp/{}", vtpty::testing::NonAsciiNameUtf8)));
+
+    auto const cfg = loadConfigFromYaml(yaml);
+    REQUIRE(cfg.layouts.value().contains("work"));
+    auto const& parsed = cfg.layouts.value().at("work");
+    REQUIRE(parsed.tabs.size() == 1);
+    REQUIRE(parsed.tabs[0].root.directory.has_value());
+    CHECK(*parsed.tabs[0].root.directory == directory);
 }
 
 TEST_CASE("emitLayoutsYaml: round-trips an asymmetric split ratio through save", "[layout][save]")

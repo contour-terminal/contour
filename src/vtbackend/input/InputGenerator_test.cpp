@@ -132,6 +132,75 @@ TEST_CASE("InputGenerator.consume.overconsume_does_not_truncate_next_sequence")
     CHECK(escape(input.peek()) == escape("\033[I"sv));
 }
 
+TEST_CASE("InputGenerator.paste.bracketed_paste_cannot_be_ended_from_inside", "[input][paste]")
+{
+    // Pasted text is untrusted -- copied output can carry anything -- and an ESC [ 201 ~ inside it would
+    // end the paste early, so the shell would run what follows as typed. Every ESC is dropped inside the
+    // brackets, which leaves the end marker inert text; so do foot, Windows Terminal and Alacritty.
+    auto input = InputGenerator {};
+    input.setBracketedPaste(true);
+    input.generatePaste("ls\033[201~rm -rf ~\033]0;x\007"sv);
+    CHECK(escape(input.peek()) == escape("\033[200~ls[201~rm -rf ~]0;x\007\033[201~"sv));
+}
+
+TEST_CASE("InputGenerator.paste.bracketed_paste_drops_c1_controls", "[input][paste]")
+{
+    // Each C1 control is the 8-bit form of one that starts with ESC -- U+009B CSI, U+009D OSC -- so the
+    // C1 form of the end marker could end the paste as ESC [ 201 ~ would. In UTF-8 each is C2 80..C2 9F,
+    // and the whole two-byte sequence goes.
+    auto input = InputGenerator {};
+    input.setBracketedPaste(true);
+    input.generatePaste("ls\xC2\x9B"
+                        "201~rm -rf ~\xC2\x9D"
+                        "0;x\xC2\x80!"sv);
+    CHECK(escape(input.peek()) == escape("\033[200~ls201~rm -rf ~0;x!\033[201~"sv));
+}
+
+TEST_CASE("InputGenerator.paste.bracketed_paste_keeps_other_two_byte_characters", "[input][paste]")
+{
+    // U+00A0 (C2 A0) shares the C1 controls' lead byte; U+00E9 and U+00C9 do not. All are text.
+    auto input = InputGenerator {};
+    input.setBracketedPaste(true);
+    input.generatePaste("a\xC2\xA0"
+                        "b\xC3\xA9"
+                        "c\xC3\x89"
+                        "d"sv);
+    CHECK(escape(input.peek())
+          == escape("\033[200~a\xC2\xA0"
+                    "b\xC3\xA9"
+                    "c\xC3\x89"
+                    "d\033[201~"sv));
+}
+
+TEST_CASE("InputGenerator.paste.unbracketed_paste_keeps_c1_controls", "[input][paste]")
+{
+    auto input = InputGenerator {};
+    input.generatePaste("a\xC2\x9B"
+                        "b"sv);
+    CHECK(escape(input.peek())
+          == escape("a\xC2\x9B"
+                    "b"sv));
+}
+
+TEST_CASE("InputGenerator.paste.bracketed_paste_keeps_everything_but_esc", "[input][paste]")
+{
+    // TAB, LF, CR and the rest of the text arrive as written: inside the brackets the application reads
+    // them as text, which is what bracketed paste is for.
+    auto input = InputGenerator {};
+    input.setBracketedPaste(true);
+    input.generatePaste("for x in a\tb\r\n do \xc3\xbc; done"sv);
+    CHECK(escape(input.peek()) == escape("\033[200~for x in a\tb\r\n do \xc3\xbc; done\033[201~"sv));
+}
+
+TEST_CASE("InputGenerator.paste.unbracketed_paste_is_sent_as_written", "[input][paste]")
+{
+    // Without the brackets there is no end marker to protect, and the application cannot tell a paste
+    // from typing anyway.
+    auto input = InputGenerator {};
+    input.generatePaste("a\033[201~b"sv);
+    CHECK(escape(input.peek()) == escape("a\033[201~b"sv));
+}
+
 TEST_CASE("InputGenerator.Ctrl+Space", "[terminal,input]")
 {
     auto input = InputGenerator {};
@@ -1090,6 +1159,39 @@ TEST_CASE("InputBinding.match_still_requires_chord_modifiers", "[terminal,input]
     CHECK_FALSE(match(binding, MatchModes {}, KeyboardModifiers { LockKey::NumLock }.chord, Key::Enter));
     // No modifiers should NOT match
     CHECK_FALSE(match(binding, MatchModes {}, Modifiers {}, Key::Enter));
+}
+
+TEST_CASE("InputBinding.click_count_is_part_of_the_chord", "[terminal,input]")
+{
+    auto const ctrl = Modifiers { Modifier::Control };
+    auto const plain = InputBinding<MouseButton, int> {
+        .modes = MatchModes {},
+        .modifiers = ctrl,
+        .input = MouseButton::Left,
+        .binding = 1,
+    };
+    auto const tripleClick = InputBinding<MouseButton, int> {
+        .modes = MatchModes {},
+        .modifiers = ctrl,
+        .input = MouseButton::Left,
+        .binding = 3,
+        .clickCount = uint8_t { 3 },
+    };
+
+    // An ordinary press names no count, and reaches the plain binding only.
+    CHECK(match(plain, MatchModes {}, ctrl, MouseButton::Left));
+    CHECK_FALSE(match(tripleClick, MatchModes {}, ctrl, MouseButton::Left));
+
+    // A press offered with its count reaches the binding naming that count, and no other.
+    CHECK(match(tripleClick, MatchModes {}, ctrl, MouseButton::Left, uint8_t { 3 }));
+    CHECK_FALSE(match(tripleClick, MatchModes {}, ctrl, MouseButton::Left, uint8_t { 2 }));
+    CHECK_FALSE(match(plain, MatchModes {}, ctrl, MouseButton::Left, uint8_t { 3 }));
+
+    // Same chord, different count: two bindings.
+    CHECK(plain != tripleClick);
+
+    // A logged binding says which click it fires on.
+    CHECK(std::format("{}", tripleClick) == std::format("{}", plain) + " x3");
 }
 
 // }}}

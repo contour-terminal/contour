@@ -7,6 +7,7 @@
     #include <QtCore/QObject>
     #include <QtDBus/QDBusConnection>
 
+    #include <functional>
     #include <span>
     #include <utility>
     #include <vector>
@@ -147,6 +148,28 @@ class DBusSignalSubscriptionGuard
             source.service, source.path, source.interface, subscription.name, receiver, subscription.slot);
 
     return DBusSignalSubscriptionGuard { bus, source, receiver, subscriptions };
+}
+
+/// Installs a transport's signal subscriptions, and hands back the guard that removes them.
+///
+/// A seam, as PortalCaller is for method calls: production installs them on the session bus, and a
+/// test, which delivers the signals to the slots itself, installs them nowhere -- and so never reaches
+/// the machine's bus just to be told nothing.
+using DBusSignalSubscriber =
+    std::function<DBusSignalSubscriptionGuard(DBusSignalSource const& source,
+                                              QObject* receiver,
+                                              std::span<DBusSignalSubscription const> subscriptions)>;
+
+/// The production DBusSignalSubscriber: subscribeToDBusSignals() on the session bus.
+/// @return The subscriber.
+[[nodiscard]] inline DBusSignalSubscriber sessionBusSubscriber()
+{
+    return [](DBusSignalSource const& source,
+              QObject* receiver,
+              std::span<DBusSignalSubscription const> subscriptions) {
+        auto bus = QDBusConnection::sessionBus();
+        return subscribeToDBusSignals(bus, source, receiver, subscriptions);
+    };
 }
 
 } // namespace contour::platform

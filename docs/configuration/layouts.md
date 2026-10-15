@@ -64,7 +64,10 @@ Option        | Description
 
 ### Command lines
 
-`command` may be written as a full command line — it is split into the program and its arguments the way a shell would, so both of these are equivalent:
+`command` may be written as a full command line. It is kept as written and read when the pane starts, the
+way a profile's `shell` is read: when it names a program to run — a file at that path, or a name found on
+`PATH` — it runs as it is, spaces and all; otherwise its first word is the program and the rest are its
+arguments. So both of these are equivalent:
 
 ```yaml
 - command: "emacs -nw"
@@ -73,15 +76,26 @@ Option        | Description
   arguments: ["-nw"]
 ```
 
-Splitting rules:
+How the words are read depends on the platform:
 
-- Whitespace separates the program from its arguments (and arguments from each other).
-- Quote a run to keep spaces inside one token: double quotes (`"..."`, allowing `\"` and `\\`) or single quotes (`'...'`, literal). A backslash outside quotes escapes the next character.
-- If the **program's own path** contains spaces, quote it so it is not split — e.g. `command: '"/opt/My App/bin/foo" --flag'`.
-- Any entries in a separate `arguments:` list are appended **after** the arguments parsed from `command`.
-- `${NAME}` inside `command` or `arguments` expands to the environment variable `NAME`. To pass a literal `${...}` through to the program (e.g. for template tooling), escape it as `$${...}`.
+- On Linux, macOS and FreeBSD, as a POSIX shell reads them: whitespace separates words; double quotes
+  (`"..."`, allowing `\"` and `\\`) or single quotes (`'...'`, literal) keep spaces inside one word; a
+  backslash outside quotes escapes the next character.
+- On Windows, as `CreateProcess` reads a command line: the program runs up to the first space at which what
+  precedes it names a program — so `C:\Program Files\Git\bin\bash.exe --login` runs `bash.exe` — or up to
+  its closing double quote, and a backslash separates directories. What follows the program is handed to it
+  as written, for it to split itself: `cmd.exe /s /c ""C:\Tools x\app.exe" --flag"` reaches `cmd.exe`
+  unchanged.
+- A program path with spaces in it that names no file is split like any other command line; quote it to
+  keep it whole — e.g. `command: '"/opt/My App/bin/foo" --flag'`.
+- In the Flatpak build, where a pane runs on the host, Contour cannot see the host's files: a `command`
+  holding whitespace is always read as a command line there, so quote a program path with spaces in it.
+- Any entries in a separate `arguments:` list are passed **after** the words of `command`.
+- `${NAME}` inside `command` or `arguments` expands to the environment variable `NAME`. To pass a literal
+  `${...}` through to the program (e.g. for template tooling), escape it as `$${...}`.
 
-`SaveLayout` (below) writes the program and its arguments back out in the split form (`command:` for the program, `arguments:` for the rest), quoting a space-containing program path — and escaping any literal `${` — so everything round-trips.
+`SaveLayout` (below) writes `command:` back as the pane was started with it, and `arguments:` after it —
+escaping any literal `${` — so everything round-trips.
 
 ### Split panes
 

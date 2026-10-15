@@ -7,14 +7,22 @@
 
 #include <contour/cli/ShellIntegration.hpp>
 
+#include <vtbackend/shell/CommandBlock.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <charconv>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <system_error>
+
+using namespace std::string_view_literals;
 
 namespace
 {
@@ -97,4 +105,71 @@ TEST_CASE("supportedShellsText names exactly the compiled-in shells", "[shell-in
 
     // ...and names nothing else: a joined list has one separator fewer than it has entries.
     CHECK(std::ranges::count(text, ',') == static_cast<std::ptrdiff_t>(shells.size()) - 1);
+}
+
+TEST_CASE("the PowerShell integration is compiled in", "[shell-integration]")
+{
+    // Its own name, pwsh, as the executable is called: `contour generate integration shell pwsh`.
+    auto const script = contour::cli::shellIntegrationScript("pwsh");
+    REQUIRE(script.has_value());
+    CHECK(script->contains("PSConsoleHostReadLine"));
+}
+
+TEST_CASE("natively integrating shells are named, not scripted", "[shell-integration]")
+{
+    auto const natives = contour::cli::nativeShellIntegrations();
+    REQUIRE(!natives.empty());
+    CHECK(std::ranges::contains(natives, "nu"sv, &contour::cli::NativeShellIntegrationRow::name));
+
+    for (auto const& row: natives)
+    {
+        INFO("shell: " << row.name);
+        // Scripted or native, never both: a script for a shell that marks its prompts itself would
+        // mark every one of them twice.
+        CHECK(!contour::cli::shellIntegrationScript(row.name).has_value());
+        CHECK(contour::cli::nativeShellsText().contains(row.displayName));
+
+        auto const message = contour::cli::unsupportedShellMessage(row.name);
+        CHECK(message.contains(row.howToEnable));
+        CHECK(message.ends_with('\n'));
+    }
+}
+
+TEST_CASE("unsupportedShellMessage names the supported shells for an unknown one", "[shell-integration]")
+{
+    auto const message = contour::cli::unsupportedShellMessage("nosuchshell");
+    CHECK(message.contains("unsupported shell, nosuchshell"));
+    CHECK(message.contains(contour::cli::supportedShellsText()));
+    CHECK(message.ends_with('\n'));
+}
+
+TEST_CASE("every script cuts a command line just above what the terminal keeps", "[shell-integration]")
+{
+    // A few bytes over the terminal's own limit, so that it still sees a longer line was cut. The scripts
+    // spell the number out; this keeps each of them on the constant the terminal uses.
+    constexpr auto Margin = size_t { 4 };
+    struct Limit
+    {
+        std::string_view shell;      ///< The script's shell.
+        std::string_view assignment; ///< What precedes the number in the script.
+    };
+    constexpr auto Limits = std::array {
+        Limit { .shell = "bash", .assignment = "\n__contour_cmdline_max_bytes=" },
+        Limit { .shell = "zsh", .assignment = "\ntypeset -g _contour_cmdline_max_bytes=" },
+        Limit { .shell = "pwsh", .assignment = "\n    MaxCommandLineBytes = " },
+    };
+    for (auto const& [shell, assignment]: Limits)
+    {
+        INFO("shell: " << shell);
+        auto const script = contour::cli::shellIntegrationScript(shell);
+        REQUIRE(script.has_value());
+        auto const at = script->find(assignment);
+        REQUIRE(at != std::string_view::npos);
+        auto const number = script->substr(at + assignment.size());
+        auto value = size_t { 0 };
+        auto const [end, error] = std::from_chars(number.data(), number.data() + number.size(), value);
+        REQUIRE(error == std::errc {});
+        CHECK(*end == '\n');
+        CHECK(value == vtbackend::MaxRecordedCommandLineBytes + Margin);
+    }
 }

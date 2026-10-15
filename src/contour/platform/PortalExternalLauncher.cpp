@@ -103,6 +103,12 @@ std::expected<int, SpawnError> PortalExternalLauncher::execute(QString const& pr
     return _processes->execute(program, arguments);
 }
 
+std::expected<void, SpawnError> PortalExternalLauncher::runDetachedWithInput(
+    std::string const& commandLine, std::filesystem::path const& inputFile)
+{
+    return _processes->runDetachedWithInput(commandLine, inputFile);
+}
+
 } // namespace contour::platform
 
 #endif // defined(__linux__)

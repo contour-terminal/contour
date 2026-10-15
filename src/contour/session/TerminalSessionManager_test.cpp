@@ -10,12 +10,21 @@
 // against the Qt-free model. (Per-window tab/pane isolation is covered in SessionModel_test.cpp.)
 
 #include <contour/config/Config.hpp>
+#include <contour/platform/FreeDesktopNotifier.hpp>
+#include <contour/platform/QtInvoke.hpp>
+#include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
 
+#include <vtpty/MockPty.hpp>
+#include <vtpty/test/NonAsciiSample.hpp>
+
+#include <QtCore/QPointer>
 #include <QtCore/QTemporaryDir>
+#include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -23,11 +32,15 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <memory>
+#include <ranges>
 #include <sstream>
+#include <string>
 #include <vector>
 
+#include <QtTest/QSignalSpy>
 #include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/ModelEvents.hpp>
@@ -240,7 +253,7 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
 
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned) };
-    app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
+    app.app().config().configFile = std::filesystem::path(configDir.path().toStdU16String()) / "contour.yml";
     contour::test::ScopedController const win { app.manager() };
 
     // Inject an inline layout (as if hand-written in contour.yml) BEFORE saving a DIFFERENT
@@ -264,7 +277,7 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout writes layouts.yml", "[manag
 
     REQUIRE(app.manager().saveWindowLayout(win.id, "saved"));
 
-    auto const path = std::filesystem::path(configDir.path().toStdString()) / "layouts.yml";
+    auto const path = std::filesystem::path(configDir.path().toStdU16String()) / "layouts.yml";
     REQUIRE(std::filesystem::exists(path));
 
     // Sanity: the written file textually contains the saved layout's name.
@@ -311,10 +324,10 @@ TEST_CASE("TerminalSessionManager: saveWindowLayout refuses to overwrite an unre
 
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned) };
-    app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
+    app.app().config().configFile = std::filesystem::path(configDir.path().toStdU16String()) / "contour.yml";
     contour::test::ScopedController const win { app.manager() };
 
-    auto const layoutsPath = std::filesystem::path(configDir.path().toStdString()) / "layouts.yml";
+    auto const layoutsPath = std::filesystem::path(configDir.path().toStdU16String()) / "layouts.yml";
     auto const garbage = std::string { "layouts:\n  broken: [unterminated\n" };
     // Binary mode on BOTH sides: a text-mode write translates '\n' to "\r\n" on Windows, which the
     // binary read below would then report as a byte-for-byte difference the save never made.
@@ -356,7 +369,7 @@ TEST_CASE("TerminalSessionManager: SaveLayout persists through the injected Layo
 
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned), std::move(storeOwned) };
-    app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
+    app.app().config().configFile = std::filesystem::path(configDir.path().toStdU16String()) / "contour.yml";
     contour::test::ScopedController const win { app.manager() };
 
     contour::config::Layout layout;
@@ -370,7 +383,8 @@ TEST_CASE("TerminalSessionManager: SaveLayout persists through the injected Layo
     // Persisted next to the LOADED CONFIG FILE — the very path loadConfigFromFile merges back from,
     // so a custom `--config` can never strand saves somewhere the loader will not look.
     REQUIRE(store->savedPaths.size() == 1);
-    CHECK(store->savedPaths.front() == std::filesystem::path(configDir.path().toStdString()) / "layouts.yml");
+    CHECK(store->savedPaths.front()
+          == std::filesystem::path(configDir.path().toStdU16String()) / "layouts.yml");
 
     REQUIRE(store->layouts.contains("saved"));
     REQUIRE(store->layouts.at("saved").tabs.size() == 1);
@@ -421,9 +435,6 @@ TEST_CASE("TerminalSessionManager: a directory-only layout pane does not overrid
 
     contour::config::Layout layout;
     contour::config::LayoutTab tab;
-    // Plain string, not std::filesystem::path: LayoutPane::directory is an
-    // optional<string>, and path only converts to string on POSIX (Windows
-    // paths are wide).
     tab.root.directory = "/tmp";
     layout.tabs = { tab };
     REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
@@ -433,6 +444,26 @@ TEST_CASE("TerminalSessionManager: a directory-only layout pane does not overrid
     REQUIRE(factory->requestedCwds.size() == 1);
     REQUIRE(factory->requestedCwds[0].has_value());
     CHECK(*factory->requestedCwds[0] == "/tmp"); // ...but the directory still applies
+}
+
+TEST_CASE("TerminalSessionManager: a layout pane's directory beyond ASCII reaches its session in UTF-8",
+          "[manager][layout]")
+{
+    // Every new session reads its cwd as UTF-8. Narrowed with path::string(), Windows spelled the directory
+    // in the ANSI code page, or threw for one beyond it.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* factory = factoryOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    contour::config::Layout layout;
+    contour::config::LayoutTab tab;
+    tab.root.directory = std::filesystem::path { u8"/tmp/" } / vtpty::testing::NonAsciiName;
+    layout.tabs = { tab };
+    REQUIRE(app.manager().applyLayoutToWindow(win.id, layout));
+
+    REQUIRE(factory->requestedCwds.size() == 1);
+    CHECK(factory->requestedCwds[0] == std::format("/tmp/{}", vtpty::testing::NonAsciiNameUtf8));
 }
 
 TEST_CASE("TerminalSessionManager: consumeDefaultLayout applies the startup layout exactly once",
@@ -534,7 +565,7 @@ TEST_CASE("TerminalSessionManager: running a palette command records and persist
 
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     contour::test::TestApp app { std::move(factoryOwned), nullptr, std::move(historyOwned) };
-    app.app().config().configFile = std::filesystem::path(configDir.path().toStdString()) / "contour.yml";
+    app.app().config().configFile = std::filesystem::path(configDir.path().toStdU16String()) / "contour.yml";
     contour::test::ScopedController const win { app.manager() };
 
     app.manager().recordCommand("SplitVertical");
@@ -544,7 +575,7 @@ TEST_CASE("TerminalSessionManager: running a palette command records and persist
     // the history with it instead of stranding it in the default home.
     REQUIRE_FALSE(history->savedPaths.empty());
     CHECK(history->savedPaths.back()
-          == std::filesystem::path(configDir.path().toStdString()) / "command-history.yml");
+          == std::filesystem::path(configDir.path().toStdU16String()) / "command-history.yml");
 
     // Newest first.
     CHECK(history->ids == std::vector<std::string> { "CreateNewTab", "SplitVertical" });
@@ -628,3 +659,399 @@ TEST_CASE("TerminalSessionManager: recent_count bounds what is remembered", "[ma
     CHECK(recent[0] == "C");
     CHECK(recent[1] == "B");
 }
+
+// ============================================================================================
+// A pane running a given command (OpenCommandOutput's pager): a split beside the acting pane, or a tab.
+// ============================================================================================
+
+TEST_CASE("TerminalSessionManager: openCommandPane runs a command beside the acting pane or in a new tab",
+          "[manager][semanticblocks]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* factory = factoryOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    contour::test::ScopedController const win { app.manager() };
+
+    auto* acting = app.manager().createSession(win.id);
+    REQUIRE(acting != nullptr);
+    REQUIRE(win->count() == 1);
+
+    auto pager = vtpty::Process::ExecInfo {};
+    pager.program = "less";
+    pager.arguments = { "-R", "/run/out.txt" };
+
+    SECTION("a split joins the acting pane's tab, stacked below it")
+    {
+        auto const pane =
+            app.manager().openCommandPane(acting, contour::session::CommandPanePlacement::Split, pager);
+        REQUIRE(pane.has_value());
+        CHECK(*pane != acting);
+        CHECK(win->count() == 1);
+
+        // Output reads top to bottom, so the pager keeps the acting pane's full width.
+        auto const* const root = app.manager().model().window(win.id)->activeTab()->rootPane();
+        CHECK(root->splitState() == SplitState::Horizontal);
+        REQUIRE(root->second() != nullptr);
+        CHECK(root->second()->session() == (*pane)->modelSessionId());
+    }
+
+    SECTION("a tab is a tab of its own")
+    {
+        auto const pane =
+            app.manager().openCommandPane(acting, contour::session::CommandPanePlacement::Tab, pager);
+        REQUIRE(pane.has_value());
+        CHECK(*pane != acting);
+        CHECK(win->count() == 2);
+    }
+
+    REQUIRE(factory->requestedCommandOverrides.back().has_value());
+    CHECK(factory->requestedCommandOverrides.back()->program == "less");
+    CHECK(factory->requestedCommandOverrides.back()->arguments
+          == std::vector<std::string> { "-R", "/run/out.txt" });
+}
+
+TEST_CASE("TerminalSessionManager: openCommandPane needs a tab to act from", "[manager][semanticblocks]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const win { app.manager() };
+
+    auto pager = vtpty::Process::ExecInfo {};
+    pager.program = "less";
+
+    for (auto const placement:
+         { contour::session::CommandPanePlacement::Split, contour::session::CommandPanePlacement::Tab })
+    {
+        auto const pane = app.manager().openCommandPane(nullptr, placement, pager);
+        REQUIRE_FALSE(pane.has_value());
+        CHECK(pane.error() == contour::session::CommandPaneError::NoPane);
+    }
+    CHECK(win->count() == 0);
+}
+
+TEST_CASE("TerminalSessionManager: closing a pane frees its session", "[manager][session][close]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+
+    window->createNewTab();
+    auto* const survivor = window->activeSession();
+    REQUIRE(survivor != nullptr);
+    manager.splitActivePane(/*vertical*/ true, survivor);
+    auto* const closing = window->activeSession();
+    REQUIRE(closing != survivor);
+    auto const watched = QPointer<contour::session::TerminalSession> { closing };
+
+    // Closed as a user closes a pane: the pane leaves the tab, and the session ends once its exit watcher
+    // sees the pty closed -- called here in the watcher's stead.
+    manager.closeActivePane(closing, contour::session::SessionEnd::Destroy);
+    closing->onClosed();
+
+    // Not under the call that ended it, which still runs on after the manager lets the session go; and a
+    // call the session queued for itself, as its threads do, is still waiting.
+    REQUIRE(watched);
+    auto landed = false;
+    contour::platform::postToObject(closing, [&landed]() { landed = true; });
+
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    CHECK(watched.isNull());
+
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+    CHECK_FALSE(landed);
+    CHECK(window->activeSession() == survivor);
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: the sessions a manager made do not outlive it",
+          "[manager][session][close]")
+{
+    auto watched = QPointer<contour::session::TerminalSession> {};
+    auto landed = false;
+    {
+        contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+        contour::test::ScopedController const window { app.manager() };
+        window->createNewTab();
+        watched = window->activeSession();
+        REQUIRE(watched);
+
+        // Left open, with a call queued for itself, as an app that quits leaves one.
+        contour::platform::postToObject(watched.data(), [&landed]() { landed = true; });
+    }
+    CHECK(watched.isNull());
+
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+    CHECK_FALSE(landed);
+}
+
+// {{{ Finish notifications: where a session is, what its tab is called, and bringing it forward
+
+TEST_CASE("TerminalSessionManager: a session's visibility follows focus, tabs, zoom and minimising",
+          "[manager][notification]")
+{
+    using contour::platform::SessionVisibility;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+
+    window->createNewTab();
+    auto* const first = window->activeSession();
+    REQUIRE(first != nullptr);
+    manager.splitActivePane(/*vertical*/ true, first);
+    auto* const second = window->activeSession();
+    REQUIRE(second != nullptr);
+    REQUIRE(first != second);
+
+    SECTION("the focused pane is Focused, and its on-screen sibling VisibleUnfocused")
+    {
+        CHECK(manager.sessionVisibility(*second) == SessionVisibility::Focused);
+        CHECK(manager.sessionVisibility(*first) == SessionVisibility::VisibleUnfocused);
+    }
+
+    SECTION("a window that loses focus leaves its panes on screen")
+    {
+        manager.clearFocusedWindow(window.id);
+        CHECK(manager.sessionVisibility(*second) == SessionVisibility::VisibleUnfocused);
+        CHECK(manager.sessionVisibility(*first) == SessionVisibility::VisibleUnfocused);
+    }
+
+    SECTION("a zoomed pane covers its sibling")
+    {
+        manager.toggleActivePaneZoom(second);
+        CHECK(manager.sessionVisibility(*second) == SessionVisibility::Focused);
+        CHECK(manager.sessionVisibility(*first) == SessionVisibility::Hidden);
+    }
+
+    SECTION("another tab hides both panes")
+    {
+        window->createNewTab();
+        auto* const third = window->activeSession();
+        REQUIRE(third != nullptr);
+        CHECK(manager.sessionVisibility(*third) == SessionVisibility::Focused);
+        CHECK(manager.sessionVisibility(*first) == SessionVisibility::Hidden);
+        CHECK(manager.sessionVisibility(*second) == SessionVisibility::Hidden);
+    }
+
+    SECTION("the settings page covers every pane of its window, until it closes")
+    {
+        window->openSettings();
+        CHECK(manager.sessionVisibility(*second) == SessionVisibility::Hidden);
+        CHECK(manager.sessionVisibility(*first) == SessionVisibility::Hidden);
+
+        window->closeSettings();
+        CHECK(manager.sessionVisibility(*second) == SessionVisibility::Focused);
+        CHECK(manager.sessionVisibility(*first) == SessionVisibility::VisibleUnfocused);
+    }
+
+    SECTION("a minimised window hides even its focused pane")
+    {
+        window->bindWindow(window.osWindow.get());
+        window.osWindow->setWindowStates(Qt::WindowMinimized);
+        CHECK(manager.sessionVisibility(*second) == SessionVisibility::Hidden);
+        CHECK(manager.sessionVisibility(*first) == SessionVisibility::Hidden);
+    }
+
+    SECTION("a session no tab hosts is hidden unless it holds focus")
+    {
+        auto const standalone =
+            contour::test::makeTestSession(&manager,
+                                           std::make_unique<vtpty::MockPty>(vtpty::PageSize {
+                                               vtpty::LineCount(24), vtpty::ColumnCount(80) }),
+                                           app.app(),
+                                           std::string {});
+        CHECK(manager.sessionVisibility(*standalone) == SessionVisibility::Hidden);
+        manager.setFocusedSession(standalone.get());
+        CHECK(manager.sessionVisibility(*standalone) == SessionVisibility::Focused);
+        manager.setFocusedSession(nullptr);
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: revealing a session brings its tab and pane forward",
+          "[manager][notification]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+
+    window->createNewTab();
+    auto* const first = window->activeSession();
+    REQUIRE(first != nullptr);
+    manager.splitActivePane(/*vertical*/ true, first); // the new pane takes focus
+    auto* const second = window->activeSession();
+    REQUIRE(second != first);
+    window->createNewTab(); // and a second tab hides both
+    REQUIRE(window->activeTabIndex() == 1);
+
+    // The tab's previously active pane reports focus changes, as vim would ask it to.
+    second->terminal().setMode(vtbackend::DECMode::FocusTracking, true);
+    contour::test::mockPtyOf(*second).stdinBuffer().clear();
+
+    SECTION("from another tab")
+    {
+        manager.revealSession(*first);
+    }
+
+    SECTION("from behind the settings page")
+    {
+        window->openSettings();
+        manager.revealSession(*first);
+        CHECK_FALSE(window->settingsActive());
+    }
+
+    CHECK(window->activeTabIndex() == 0);
+    CHECK(window->activeSession() == first);
+    CHECK(manager.sessionVisibility(*first) == contour::platform::SessionVisibility::Focused);
+
+    // The pane moves before the tab does, so the pane that was active in the hidden tab never receives
+    // focus on the way: no CSI I, and no CSI O after it.
+    CHECK(contour::test::mockPtyOf(*second).stdinBuffer().empty());
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a session's tab title and attention requests reach its window",
+          "[manager][notification]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+
+    window->createNewTab();
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+
+    // The label the strip shows, read back through it rather than re-derived.
+    manager.setTabTitleForSession(session->modelSessionId(), "build");
+    CHECK(manager.tabTitleForSession(*session) == "build");
+
+    // Each session is named by its own tab's row, whichever tab is shown.
+    window->createNewTab();
+    auto* const other = window->activeSession();
+    REQUIRE(other != nullptr);
+    manager.setTabTitleForSession(other->modelSessionId(), "logs");
+    CHECK(manager.tabTitleForSession(*session) == "build");
+    CHECK(manager.tabTitleForSession(*other) == "logs");
+
+    // Attention goes to the window hosting the session and to no other. What each signal carries is the
+    // window's own business, pinned by its tests.
+    contour::test::ScopedController const elsewhere { manager };
+    struct Spies
+    {
+        QSignalSpy notifications;
+        QSignalSpy bells;
+        QSignalSpy alerts;
+
+        explicit Spies(contour::window::WindowController* controller):
+            notifications(controller, &contour::window::WindowController::notificationRequested),
+            bells(controller, &contour::window::WindowController::bellRequested),
+            alerts(controller, &contour::window::WindowController::alertRequested)
+        {
+        }
+    };
+    Spies const hosting { window.controller };
+    Spies const bystander { elsewhere.controller };
+
+    manager.requestWindowNotification(
+        *session, QStringLiteral("make finished"), QStringLiteral("took 12s"), {});
+    manager.requestWindowBell(*session, QStringLiteral("qrc:/contour/bell.wav"), 0.5);
+    manager.requestWindowAlert(*session);
+
+    CHECK(hosting.notifications.count() == 1);
+    CHECK(hosting.bells.count() == 1);
+    CHECK(hosting.alerts.count() == 1);
+    CHECK(bystander.notifications.count() == 0);
+    CHECK(bystander.bells.count() == 0);
+    CHECK(bystander.alerts.count() == 0);
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: naming a session's tab locks only that tab's terminal",
+          "[manager][notification][threading]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+
+    window->createNewTab();
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    manager.setTabTitleForSession(session->modelSessionId(), "build");
+    window->createNewTab();
+    auto* const busy = window->activeSession();
+    REQUIRE(busy != nullptr);
+
+    // Another tab's parser holds its terminal across a whole write, as `cat huge.log` would.
+    auto title = std::string {};
+    CHECK(
+        contour::test::runWhileHeld(busy->terminal(), [&]() { title = manager.tabTitleForSession(*session); })
+        == contour::test::UnderLock::Finished);
+    CHECK(title == "build");
+
+    contour::test::closeAllTabs(*window);
+}
+
+#ifdef __linux__
+TEST_CASE("TerminalSessionManager: a session the test harness makes reaches no desktop notification service",
+          "[manager][notification]")
+{
+    // The platform's own notifier on Linux is a FreeDesktopNotifier talking to the machine's session bus,
+    // over D-Bus or its portal: a suite that hands every session it makes such a one runs a D-Bus
+    // connection thread, subscribes to the desktop's signals and tears it down again, per session. The
+    // harness stands in for the desktop, so what it makes must not reach it.
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const window { app.manager() };
+
+    window->createNewTab();
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    CHECK(dynamic_cast<contour::platform::FreeDesktopNotifier const*>(&session->notifier()) == nullptr);
+
+    contour::test::closeAllTabs(*window);
+}
+#endif
+
+TEST_CASE("TerminalSessionManager: the tab tooltip shortens a directory against the injected home",
+          "[manager][tabs]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+
+    window->createNewTab();
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+
+    // OSC 7 names a directory beneath the home as file://HOST/PATH; on Windows the path is `C:/...`
+    // and takes a slash before it.
+    auto const& home = manager.homeDirectory();
+    REQUIRE_FALSE(home.empty());
+    auto const path = std::string { home.starts_with('/') ? "" : "/" } + home + "/proj";
+
+    SECTION("on this machine")
+    {
+        session->terminal().setCurrentWorkingDirectory(
+            "file://" + std::string { contour::test::TestApp::HostName } + path);
+        CHECK(window->tabWorkingDirectory(0) == QStringLiteral("~/proj"));
+    }
+
+    SECTION("on another machine, where this machine's home means nothing")
+    {
+        session->terminal().setCurrentWorkingDirectory("file://some-remote-host" + path);
+        CHECK(window->tabWorkingDirectory(0) == QString::fromStdString(home + "/proj"));
+    }
+
+    SECTION("on another machine, still made safe to show")
+    {
+        // OSC 7 is percent-decoded, so %0A arrives as a line feed.
+        session->terminal().setCurrentWorkingDirectory("file://some-remote-host" + path + "%0Ax");
+        CHECK_FALSE(window->tabWorkingDirectory(0).contains(QChar('\n')));
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+// }}}

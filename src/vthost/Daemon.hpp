@@ -221,57 +221,10 @@ struct DaemonSpawnOptions
                                                        DaemonSpawnOptions const& spawnOptions,
                                                        DaemonLifecycle lifecycle);
 
-/// The character separating entries in the PATH environment variable on this platform.
-inline constexpr char PathListSeparator =
-#ifdef _WIN32
-    ';';
-#else
-    ':';
-#endif
-
-/// Resolves @p program to a path `execv` can actually run.
-///
-/// `execv` does NOT search PATH — and a client started as plain `contour` has exactly `contour` as
-/// its argv[0], which is what the spawn inherits. Exec'ing it verbatim then fails with ENOENT, the
-/// child exits, and the parent sits out its whole readiness timeout before reporting that the
-/// daemon did not start: auto-spawn was broken for every invocation not spelled out as a path.
-///
-/// A name that carries a directory is already a path and passes through untouched (execvp's own
-/// rule, so `./contour` and `/usr/bin/contour` keep meaning what they say). Anything else is looked
-/// up in @p searchPath left-to-right, and the first entry for which @p isExecutable holds wins.
-/// The predicate is injected so the search is testable without touching a filesystem — and because
-/// "may this process execute it" is a platform question the search itself has no business knowing.
-///
-/// Resolution happens in the PARENT, before fork: between fork and exec only async-signal-safe
-/// calls are allowed, and a PATH walk allocates.
-/// @param program The binary as named by the caller (typically argv[0]).
-/// @param searchPath The PATH value to search, @ref PathListSeparator separated.
-/// @param isExecutable Whether a candidate path names something this process may execute.
-/// @return The resolved path, or @p program unchanged when nothing matched.
-[[nodiscard]] std::string resolveExecutablePath(
-    std::string_view program,
-    std::string_view searchPath,
-    std::function<bool(std::filesystem::path const&)> const& isExecutable);
-
-/// Joins @p args into a Win32 command line, quoting each argument whole so a path containing
-/// spaces survives CommandLineToArgv — including argv[0], which the hand-rolled formatting this
-/// replaced left bare (breaking `C:\Program Files\...\contour.exe`).
-///
-/// Quoting is the full `CommandLineToArgvW` rule, not a pair of surrounding quotes: a backslash run
-/// immediately before a `"` is halved and the quote it precedes is consumed, so `--config=C:\dir\`
-/// naively wrapped ends its own quote and swallows the rest of the command line into that one
-/// argument. Backslash runs before the closing quote are therefore doubled and embedded quotes
-/// escaped, exactly as Microsoft's parser undoes.
-///
-/// Compiled on every platform, not only Windows, so the quoting is covered by the Linux CI run
-/// rather than solely by a Windows build.
-///
-/// NOTE: `vtpty::Process::start()` (Process_win32.cpp) builds its own command line with weaker
-/// quoting — it quotes only arguments containing a space and never argv[0]. The two are NOT unified
-/// because that one spawns arbitrary shells, where quoting every argument could change how a
-/// program parses its own arguments; unifying them needs a real Windows build to verify.
+/// Joins @p args into the Win32 command line that runs them, args[0] the program: by
+/// vtpty::buildWindowsCommandLine(), as a spawned shell's command line is spelled.
 /// @param args The argv to join.
-/// @return The command line.
+/// @return The command line; empty for no @p args.
 [[nodiscard]] std::string joinCommandLine(std::span<std::string const> args);
 
 /// Ensures a daemon is running at @p endpoint. For Unix sockets, spawns

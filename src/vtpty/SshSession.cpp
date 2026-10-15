@@ -21,15 +21,21 @@
 #include <vtpty/Pty.hpp>
 #include <vtpty/SandboxInfo.hpp>
 #include <vtpty/SshFailureMessage.hpp>
+#include <vtpty/SshKnownHosts.hpp>
 
 #include <core/Escape.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 
+#include <cerrno>
 #include <chrono>
 #include <expected>
 #include <fstream>
+#include <iterator>
 #include <mutex>
+#include <optional>
 #include <ranges>
+#include <utility>
 
 #include <libssh2.h>
 #include <libssh2_publickey.h>
@@ -66,8 +72,6 @@
 // It would be nice to move to NB IO mode, but I didn't have the time to debug it.
 // #define SSH_SESSION_NB_IO /* BUGGY EZ */
 
-using crispy::FileDescriptor;
-
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
@@ -88,6 +92,28 @@ static auto inline sshLog = core::log::Category("ssh", "SSH I/O logger", core::l
 namespace
 {
     constexpr auto MaxPasswordTries = 3;
+
+#ifdef _WIN32
+    /// The address length Winsock's connect() takes.
+    using SocketLength = int;
+#else
+    /// The address length connect() takes.
+    using SocketLength = socklen_t;
+#endif
+
+    /// The length of @p entry's address, in the type the platform's connect() takes.
+    /// @return It, or nullopt when that type cannot hold it: Windows' addrinfo carries a size_t where its
+    ///         connect() takes an int, and a length cut short would describe a different address.
+    [[nodiscard]] std::optional<SocketLength> addressLengthOf(addrinfo const& entry) noexcept
+    {
+#ifdef _WIN32
+        if (!std::in_range<SocketLength>(entry.ai_addrlen))
+            return std::nullopt;
+        return static_cast<SocketLength>(entry.ai_addrlen);
+#else
+        return entry.ai_addrlen;
+#endif
+    }
 
     template <typename T>
     constexpr std::string_view libssl2ErrorString(T rc) noexcept
@@ -160,32 +186,6 @@ namespace
         }
     }
 
-    constexpr int hostkeyTypeToKnownHostType(int type) noexcept
-    {
-        switch (type)
-        {
-#ifdef LIBSSH2_HOSTKEY_TYPE_RSA
-            case LIBSSH2_HOSTKEY_TYPE_RSA: return LIBSSH2_KNOWNHOST_KEY_SSHRSA;
-#endif
-#ifdef LIBSSH2_HOSTKEY_TYPE_DSS
-            case LIBSSH2_HOSTKEY_TYPE_DSS: return LIBSSH2_KNOWNHOST_KEY_SSHDSS;
-#endif
-#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_256
-            case LIBSSH2_HOSTKEY_TYPE_ECDSA_256: return LIBSSH2_KNOWNHOST_KEY_ECDSA_256;
-#endif
-#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_384
-            case LIBSSH2_HOSTKEY_TYPE_ECDSA_384: return LIBSSH2_KNOWNHOST_KEY_ECDSA_384;
-#endif
-#ifdef LIBSSH2_HOSTKEY_TYPE_ECDSA_521
-            case LIBSSH2_HOSTKEY_TYPE_ECDSA_521: return LIBSSH2_KNOWNHOST_KEY_ECDSA_521;
-#endif
-#ifdef LIBSSH2_HOSTKEY_TYPE_ED25519
-            case LIBSSH2_HOSTKEY_TYPE_ED25519: return LIBSSH2_KNOWNHOST_KEY_ED25519;
-#endif
-            default: return LIBSSH2_KNOWNHOST_KEY_UNKNOWN;
-        }
-    }
-
     constexpr std::expected<std::string_view, int> hostkeyTypeToString(int hostkeyType) noexcept
     {
         switch (hostkeyType)
@@ -235,74 +235,42 @@ namespace
         return SshHostkeyHash(KeyType, fingerprint, FingerprintLength);
     }
 
-    struct SshKnownhostsFile
+    /// Offers @p config's key pair to the server for its user.
+    ///
+    /// libssh2 opens a key file through fopen(), which takes its name as a narrow string. A POSIX path is
+    /// one as it is. Windows would read it in the ANSI code page, which spells most of Unicode not at all,
+    /// so there the files are read here and handed over in memory. Not so everywhere, because libssh2's
+    /// libgcrypt backend reads no key from memory.
+    /// @return What libssh2 answers: LIBSSH2_ERROR_NONE, LIBSSH2_ERROR_EAGAIN, or the failure;
+    ///         LIBSSH2_ERROR_FILE where a key file cannot be read.
+    [[nodiscard]] int authenticateWithKeyFiles(LIBSSH2_SESSION* session,
+                                               SshHostConfig const& config,
+                                               std::string const& passphrase)
     {
-        LIBSSH2_KNOWNHOSTS* handle = nullptr;
+#ifdef _WIN32
+        auto const keys = readSshKeyFiles(config);
+        if (!keys)
+            return LIBSSH2_ERROR_FILE;
+        return libssh2_userauth_publickey_frommemory(session,
+                                                     config.username.data(),
+                                                     config.username.size(),
+                                                     keys->publicKey.empty() ? nullptr
+                                                                             : keys->publicKey.data(),
+                                                     keys->publicKey.size(),
+                                                     keys->privateKey.data(),
+                                                     keys->privateKey.size(),
+                                                     passphrase.c_str());
+#else
+        return libssh2_userauth_publickey_fromfile_ex(
+            session,
+            config.username.data(),
+            static_cast<unsigned int>(config.username.size()),
+            config.publicKeyFile.empty() ? nullptr : config.publicKeyFile.c_str(),
+            config.privateKeyFile.c_str(),
+            passphrase.c_str());
+#endif
+    }
 
-        explicit SshKnownhostsFile(LIBSSH2_SESSION* session): handle { libssh2_knownhost_init(session) } {}
-
-        ~SshKnownhostsFile()
-        {
-            if (handle)
-                libssh2_knownhost_free(handle);
-        }
-
-        // NOLINTNEXTLINE(readability-make-member-function-const)
-        std::optional<std::string> readFromFile(std::filesystem::path const& path)
-        {
-            int const rc =
-                libssh2_knownhost_readfile(handle, path.string().c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
-            if (rc < 0)
-                return std::string(libssl2ErrorString(rc));
-            return std::nullopt;
-        }
-
-        struct SshKnownhostKey
-        {
-            int status;
-            std::string key;
-        };
-
-        [[nodiscard]] SshKnownhostKey checkHostkey(SshHostConfig const& host, SshHostkey const& hostkey) const
-        {
-            libssh2_knownhost* knownHost = nullptr;
-            auto const knownhostType = hostkeyTypeToKnownHostType(hostkey.type);
-            auto const rc = libssh2_knownhost_checkp(handle,
-                                                     host.hostname.c_str(),
-                                                     host.port,
-                                                     hostkey.data.data(),
-                                                     hostkey.data.size(),
-                                                     LIBSSH2_KNOWNHOST_TYPE_PLAIN
-                                                         | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType,
-                                                     &knownHost);
-            switch (rc)
-            {
-                case LIBSSH2_KNOWNHOST_CHECK_MATCH: return { .status = rc, .key = knownHost->key };
-                case LIBSSH2_KNOWNHOST_CHECK_MISMATCH: return { .status = rc, .key = knownHost->key };
-                case LIBSSH2_KNOWNHOST_CHECK_NOTFOUND: return { .status = rc, .key = ""s };
-                default: return { .status = rc, .key = ""s };
-            }
-        }
-
-        /// Adds the host key to the known_hosts file.
-        [[nodiscard]] int addToFile(SshHostConfig const& host, SshHostkey const& hostkey) const
-        {
-            auto const knownhostType = hostkeyTypeToKnownHostType(hostkey.type);
-            auto const comment = host.toKnownhostComment();
-            auto const typeMask = LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostType;
-            libssh2_knownhost_addc(handle,
-                                   host.hostname.c_str(),
-                                   nullptr /* salt */,
-                                   hostkey.data.data(),
-                                   hostkey.data.size(),
-                                   comment.data(),
-                                   comment.size(),
-                                   typeMask,
-                                   nullptr /* store */);
-            return libssh2_knownhost_writefile(
-                handle, host.knownHostsFile.string().c_str(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
-        }
-    };
 } // namespace
 // }}}
 
@@ -357,13 +325,13 @@ std::string SshHostConfig::toString() const
         result += "*:" + std::to_string(port);
 
     if (!privateKeyFile.empty())
-        add(std::format("private key: {}", privateKeyFile.string()));
+        add(std::format("private key: {}", core::pathToUtf8(privateKeyFile)));
 
     if (!publicKeyFile.empty())
-        add(std::format("public key: {}", privateKeyFile.string()));
+        add(std::format("public key: {}", core::pathToUtf8(publicKeyFile)));
 
     if (!knownHostsFile.empty())
-        add(std::format("known hosts: {}", knownHostsFile.string()));
+        add(std::format("known hosts: {}", core::pathToUtf8(knownHostsFile)));
 
     add(std::format("ForwardAgent: {}", forwardAgent ? "Yes" : "No"));
 
@@ -385,9 +353,9 @@ std::string SshHostConfig::toConfigString(std::string const& host) const
     if (!username.empty())
         result += std::format("{}User {}\n", prefix, username);
     if (!privateKeyFile.empty())
-        result += std::format("{}IdentityFile {}\n", prefix, privateKeyFile.string());
+        result += std::format("{}IdentityFile {}\n", prefix, core::pathToUtf8(privateKeyFile));
     if (!knownHostsFile.empty())
-        result += std::format("{}KnownHostsFile {}\n", prefix, knownHostsFile.string());
+        result += std::format("{}KnownHostsFile {}\n", prefix, core::pathToUtf8(knownHostsFile));
     result += std::format("{}ForwardAgent {}\n", prefix, forwardAgent);
     result += std::format("\n");
     return result;
@@ -399,6 +367,23 @@ std::string SshHostConfig::toKnownhostComment() const
         return std::format("{}@{}:{} (added by Contour)", username, hostname, port);
     else
         return std::format("{}@{} (added by Contour)", username, hostname);
+}
+
+std::expected<SshKeyFiles, std::error_code> readSshKeyFiles(SshHostConfig const& config)
+{
+    auto const read = [](std::filesystem::path const& file) -> std::expected<std::string, std::error_code> {
+        auto stream = std::ifstream { file, std::ios::binary };
+        if (!stream)
+            return std::unexpected(std::error_code { errno, std::generic_category() });
+        return std::string { std::istreambuf_iterator<char> { stream }, std::istreambuf_iterator<char> {} };
+    };
+    auto const publicKey = config.publicKeyFile.empty() ? std::expected<std::string, std::error_code> {}
+                                                        : read(config.publicKeyFile);
+    return publicKey.and_then([&](std::string const& publicText) {
+        return read(config.privateKeyFile).transform([&](std::string privateText) {
+            return SshKeyFiles { .publicKey = publicText, .privateKey = std::move(privateText) };
+        });
+    });
 }
 
 std::expected<SshHostConfigMap, std::error_code> loadSshConfig(std::filesystem::path const& configPath)
@@ -453,7 +438,7 @@ std::expected<SshHostConfigMap, std::error_code> loadSshConfig(std::filesystem::
             else if (key == "User")
                 config.username = value;
             else if (key == "IdentityFile")
-                config.privateKeyFile = value;
+                config.privateKeyFile = core::pathFromUtf8(value).value_or(std::filesystem::path {});
             else if (key == "ForwardAgent")
                 config.forwardAgent = (value == "yes");
             else
@@ -688,7 +673,8 @@ void SshSession::processState()
                         fail("Host key verification failed. Connection aborted.");
                         break;
                     case HostkeyVerificationStatus::FailedToReadKnownHosts:
-                        fail("Failed to read known_hosts file \"{}\".", _config.knownHostsFile.string());
+                        fail("Failed to read known_hosts file \"{}\".",
+                             core::pathToUtf8(_config.knownHostsFile));
                         break;
                     case HostkeyVerificationStatus::WaitingForUserConfirmation:
                         logInfoWithInject("Waiting for user confirmation for host key.");
@@ -1296,10 +1282,14 @@ bool SshSession::connect(std::string_view host, int port)
                     break;
             }
 
+            auto const addressLength = addressLengthOf(*addrEntry);
+            if (!addressLength)
+                continue; // longer than any address is: nothing connect() could be handed whole
+
             _p->sshSocket = SocketHandle::fromNative(
                 socket(addrEntry->ai_family, addrEntry->ai_socktype, addrEntry->ai_protocol));
 
-            if (::connect(_p->sshSocket, addrEntry->ai_addr, addrEntry->ai_addrlen) == 0)
+            if (::connect(_p->sshSocket, addrEntry->ai_addr, *addressLength) == 0)
             {
                 auto const addrAndPort =
                     port == 22 ? std::string(addrStr) : std::format("{}:{}", addrStr, port);
@@ -1336,10 +1326,19 @@ SshSession::HostkeyVerificationStatus SshSession::verifyHostkey()
     if (_config.knownHostsFile.empty())
         return HostkeyVerificationStatus::Skipped;
 
-    auto knownhostFile = SshKnownhostsFile { _p->sshSession };
+    auto knownhostFile = SshKnownHosts { _p->sshSession };
 
-    if (auto const error = knownhostFile.readFromFile(_config.knownHostsFile); error.has_value())
+    auto const read = knownhostFile.readFromFile(_config.knownHostsFile);
+    if (!read)
+    {
+        logError("{}", read.error());
         return HostkeyVerificationStatus::FailedToReadKnownHosts;
+    }
+    for (auto const& [number, reason]: *read)
+        logError("Skipped line {} of known_hosts file \"{}\". {}",
+                 number,
+                 core::pathToUtf8(_config.knownHostsFile),
+                 reason);
 
     auto const hostkey = getHostkey(_p->sshSession);
 
@@ -1392,14 +1391,13 @@ void SshSession::hostkeyVerificationResultCallback(bool accepted)
     _hostkeyVerified = accepted;
     if (accepted)
     {
-        auto knownhostsFile = SshKnownhostsFile { _p->sshSession };
-        knownhostsFile.readFromFile(_config.knownHostsFile);
+        // Appended, as OpenSSH adds a host: nothing is read, and no line the file has is touched. A file
+        // that is not there yet is what a first connection creates.
+        auto knownhostsFile = SshKnownHosts { _p->sshSession };
         auto const hostkey = getHostkey(_p->sshSession);
-        auto const rc = knownhostsFile.addToFile(_config, hostkey);
-
-        if (rc != LIBSSH2_ERROR_NONE)
+        if (auto const appended = knownhostsFile.appendToFile(_config, hostkey); !appended)
         {
-            logErrorWithDetails(rc, "Failed to write known_hosts file");
+            logError("Failed to write known_hosts file. {}", appended.error());
             logInfoWithInject("Host key verified, but failed to write known_hosts file.");
         }
         else
@@ -1460,13 +1458,7 @@ int SshSession::waitForSocket(std::optional<std::chrono::milliseconds> timeout)
 void SshSession::authenticateWithPrivateKey()
 {
     auto const password = _injectedWrite;
-    auto const rc = libssh2_userauth_publickey_fromfile_ex(
-        _p->sshSession,
-        _config.username.data(),
-        _config.username.size(),
-        _config.publicKeyFile.empty() ? nullptr : _config.publicKeyFile.string().data(),
-        _config.privateKeyFile.string().data(),
-        password.data());
+    auto const rc = authenticateWithKeyFiles(_p->sshSession, _config, password);
 
     if (rc == LIBSSH2_ERROR_EAGAIN)
     {

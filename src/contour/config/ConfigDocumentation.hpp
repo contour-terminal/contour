@@ -234,9 +234,11 @@ constexpr StringLiteral ProgressTimeoutConfig {
 };
 
 constexpr StringLiteral NotificationCloseTimeoutConfig {
-    "{comment} How long after showing a desktop notification the terminal assumes it was closed,\n"
-    "{comment} in milliseconds, on desktops that cannot report a close. A notification that states\n"
-    "{comment} its own lifetime (OSC 99 `w=`) wins; 0 disables the assumption, reporting nothing.\n"
+    "{comment} How long after showing a desktop notification that asked to hear of its close\n"
+    "{comment} (OSC 99 `c=1`) the terminal assumes it was closed, in milliseconds, on desktops that\n"
+    "{comment} cannot report a close. A notification that states its own lifetime (OSC 99 `w=`)\n"
+    "{comment} wins; 0 disables the assumption, reporting nothing. Any other notification is never\n"
+    "{comment} assumed closed: it can still be withdrawn and clicked.\n"
     "notification_close_timeout: {}\n"
     "\n"
 };
@@ -375,8 +377,9 @@ constexpr StringLiteral FoldingConfig {
     "    {comment} Requires shell integration: the fold ranges come from the OSC 133 marks a\n"
     "    {comment} shell leaves behind, so a shell that emits none has nothing to fold.\n"
     "    enabled: {}\n"
-    "    {comment} Whether to reserve a gutter column left of the grid and draw a marker there\n"
-    "    {comment} on every foldable prompt line. Costs one column of terminal width.\n"
+    "    {comment} Whether the gutter's block column, left of the grid, draws a marker on every\n"
+    "    {comment} foldable prompt line. The column costs one column of terminal width, and is\n"
+    "    {comment} reserved while this, gutter.exit_status or gutter.user_marks is on.\n"
     "    show_markers: {}\n"
     "    {comment} Whether to collapse the previous command automatically when a new prompt starts.\n"
     "    auto_collapse_on_new_command: {}\n"
@@ -386,6 +389,39 @@ constexpr StringLiteral FoldingConfig {
     "    {comment} Plain motions (j, k, {{, }}, Ctrl-D, Ctrl-U) always step over a collapsed block\n"
     "    {comment} regardless of this setting.\n"
     "    on_jump_into_fold: {}\n"
+    "\n"
+
+};
+
+constexpr StringLiteral GutterConfig {
+
+    "gutter:\n"
+    "    {comment} The strip left of the grid. Its width follows this configuration and never the\n"
+    "    {comment} content, so a growing line number cannot resize the page mid-command. The block\n"
+    "    {comment} column beside the grid is reserved while fold markers (folding.show_markers), exit\n"
+    "    {comment} status or user marks are on -- one column, as the fold markers always took.\n"
+    "    {comment} Colour each command's fold controls by how it ended, draw a triangle beside a running\n"
+    "    {comment} command, and a dot beside a finished one that shows no fold control -- one with nothing\n"
+    "    {comment} to fold, or any one while fold markers are off.\n"
+    "    exit_status: {}\n"
+    "    {comment} Draw a diamond beside every row marked with vi-mode mm.\n"
+    "    user_marks: {}\n"
+    "    {comment} Line numbers, as in vim:\n"
+    "    {comment}   off      - none\n"
+    "    {comment}   absolute - every row's number, counted from the session's first row (nu)\n"
+    "    {comment}   relative - every row's distance from the cursor row (rnu)\n"
+    "    {comment}   hybrid   - the cursor row's own number, every other row's distance (nu rnu)\n"
+    "    line_numbers: {}\n"
+    "    {comment} Columns the line numbers take, 3 to 10. A longer number keeps its last digits,\n"
+    "    {comment} behind an ellipsis.\n"
+    "    line_number_width: {}\n"
+    "    {comment} Show the time each row was first reached, wherever it differs from the row above.\n"
+    "    timestamps: {}\n"
+    "    {comment} A std::format chrono specification in local time, such as '%H:%M' or '%a %H:%M:%S'.\n"
+    "    {comment} It must begin with a % conversion -- '[%H:%M]', '8%H' and '>%H' are refused -- and\n"
+    "    {comment} every character it spells must take exactly one column, so a double-width (CJK) or a\n"
+    "    {comment} combining character is refused too. A refused format is reported and the default kept.\n"
+    "    timestamp_format: {}\n"
     "\n"
 
 };
@@ -422,13 +458,92 @@ constexpr StringLiteral OscContextConfig {
 
 };
 
+constexpr StringLiteral CommandBlocksConfig {
+
+    "command_blocks:\n"
+    "    {comment} How many shell commands one session remembers: the command line, its exit\n"
+    "    {comment} status, how long it ran, where and when -- even once its output has scrolled\n"
+    "    {comment} away. The oldest are forgotten first. Needs a shell that emits OSC 133 (or\n"
+    "    {comment} systemd's OSC 3008); without one nothing is recorded. At least 1, at most 1000000.\n"
+    "    {comment} A change applies to sessions opened afterwards.\n"
+    "    max_records: {}\n"
+    "    {comment} The program \"Open Output in Pager\" (the OpenCommandOutput action) runs when its\n"
+    "    {comment} binding names none. Read as a shell: setting is: a string naming a program runs as\n"
+    "    {comment} it is; otherwise its first word is the program and the rest its arguments -- on\n"
+    "    {comment} Windows passed on as written, so C:\\Tools\\less.exe -R needs no quoting. The file\n"
+    "    {comment} holding the output is appended as its last argument.\n"
+    "    pager: {}\n"
+    "    {comment} Whether that pager renders colours: sgr keeps them in the file it is given, plain\n"
+    "    {comment} writes text only. A binding's own format: wins; a binding's own program: gets sgr.\n"
+    "    pager_format: {}\n"
+    "\n"
+
+};
+
 constexpr StringLiteral ScrollbarConfig {
 
     "scrollbar:\n"
-    "    {comment} scroll bar position: Left, Right, Hidden (ignore-case)\n"
+    "    {comment} scroll bar position: Left, Right (the default), Hidden (ignore-case).\n"
+    "    {comment} Hidden also hides the marks below. Right is the default for new configurations\n"
+    "    {comment} only: a contour.yml written by an earlier version keeps Hidden, so set Right there\n"
+    "    {comment} to see the marks.\n"
     "    position: {}\n"
     "    {comment} whether or not to hide the scrollbar when in alt-screen.\n"
     "    hide_in_alt_screen: {}\n"
+    "    {comment} Which marks the scrollbar shows as ticks; clicking one scrolls its line to the top.\n"
+    "    {comment} A list of:\n"
+    "    {comment}   failures   - commands that exited with an error\n"
+    "    {comment}   commands   - every other command, finished or still running\n"
+    "    {comment}   user_marks - lines marked with `mm` in vi normal mode\n"
+    "    {comment} [] shows none. The first two need a shell that emits OSC 133 (or systemd's\n"
+    "    {comment} OSC 3008).\n"
+    "    marks: {}\n"
+    "\n"
+
+};
+
+constexpr StringLiteral NotifyOnCommandFinishConfig {
+
+    "notify_on_command_finish:\n"
+    "    {comment} Tells you when a command finishes. Needs shell integration (OSC 133): a shell\n"
+    "    {comment} without it reports no commands, so nothing is ever notified.\n"
+    "    {comment} When to notify, by where the pane is:\n"
+    "    {comment}   never     - never\n"
+    "    {comment}   unfocused - unless it is the focused pane of the active window\n"
+    "    {comment}   hidden    - only while it is off screen (another tab, a zoomed sibling,\n"
+    "    {comment}               a minimised window)\n"
+    "    {comment}   always    - every time\n"
+    "    when: {}\n"
+    "    {comment} Commands that ran for fewer seconds than this never notify.\n"
+    "    min_duration: {}\n"
+    "    {comment} Which commands notify: any, or failure (a non-zero exit or a signal).\n"
+    "    outcome: {}\n"
+    "    {comment} How: notify (a desktop notification), bell (the profile's bell sound and\n"
+    "    {comment} window alert), or notify_bell (both).\n"
+    "    action: {}\n"
+    "    {comment} When a notification still on screen is withdrawn: focus (the pane is\n"
+    "    {comment} focused), next (the pane's next command starts), or never. Only a desktop\n"
+    "    {comment} notification can be withdrawn (Linux); a tray message elsewhere stays until\n"
+    "    {comment} it times out, whatever this says.\n"
+    "    clear_on: {}\n"
+    "\n"
+
+};
+
+constexpr StringLiteral StickyHeaderConfig {
+
+    "sticky_header:\n"
+    "    {comment} Pins the command line of the block you are reading over the top row once that\n"
+    "    {comment} command has scrolled out of view above its own output. Needs prompt marks\n"
+    "    {comment} (OSC 133;A): a shell that marks only where its commands run (;C, ;D) gets none.\n"
+    "    {comment}   never    - never, but for show_evicted below\n"
+    "    {comment}   scrolled - only while the viewport is scrolled back into history\n"
+    "    {comment}   always   - also while following live output\n"
+    "    mode: {}\n"
+    "    {comment} Whether the header still names a command whose own line has already been dropped\n"
+    "    {comment} from the scrollback (\"earlier output evicted\"): at the very top of the scrollback\n"
+    "    {comment} whatever mode says, and anywhere else wherever mode would show a header.\n"
+    "    show_evicted: {}\n"
     "\n"
 
 };
@@ -587,6 +702,9 @@ constexpr StringLiteral ColorsConfig {
     "{comment}\n"
     "{comment} The dark color scheme is used when the system is configured to prefer dark mode and light "
     "theme otherwise.\n"
+    "{comment}\n"
+    "{comment} A configuration reload applies the colors to running sessions too, replacing any a\n"
+    "{comment} program set there (OSC 4, 10, 11), just as switching to another profile does.\n"
     "\n"
     "colors: {}\n"
 };
@@ -748,6 +866,7 @@ constexpr StringLiteral FrozenDecModeConfig {
     "{comment}\n"
     "{comment} This can be an object with each key being the DEC mode number and its value a boolean,\n"
     "{comment} indicating whether this DEC mode is permanently set (enabled) or unset (disabled).\n"
+    "{comment} A change applies to sessions opened afterwards.\n"
     "{comment}\n"
     "{comment} Example:\n"
     "{comment}\n"
@@ -840,6 +959,7 @@ constexpr StringLiteral PTYReadBufferSizeConfig {
     "{comment}\n"
     "{comment} Larger batches parse output faster; smaller ones show a flood of it in smaller steps.\n"
     "{comment} This is an advanced option. Use with care!\n"
+    "{comment} A change applies to sessions opened afterwards.\n"
     "read_buffer_size: {}\n"
     "\n"
 };
@@ -848,6 +968,7 @@ constexpr StringLiteral PTYBufferObjectSizeConfig {
     "{comment} Size in bytes per PTY Buffer Object.\n"
     "{comment}\n"
     "{comment} This is an advanced option of an internal storage. Only change with care!\n"
+    "{comment} A change applies to sessions opened afterwards.\n"
     "pty_buffer_size: {}\n"
     "\n"
 };
@@ -855,6 +976,7 @@ constexpr StringLiteral PTYBufferObjectSizeConfig {
 constexpr StringLiteral ReflowOnResizeConfig {
     "\n"
     "{comment} Whether or not to reflow the lines on terminal resize events.\n"
+    "{comment} A change applies to sessions opened afterwards.\n"
     "reflow_on_resize: {}\n"
 };
 
@@ -886,7 +1008,7 @@ constexpr StringLiteral GraphemeClusteringConfig {
     "{comment} narrows again: U+FE0E asks for text presentation, not for a column back. While\n"
     "{comment} unset, a cell is measured by plain wcwidth() with no clustering at all. An\n"
     "{comment} application can still turn the mode on or off at runtime; this only chooses what it\n"
-    "{comment} finds.\n"
+    "{comment} finds. A change applies to sessions opened afterwards.\n"
     "grapheme_clustering: {}\n"
 };
 
@@ -1470,7 +1592,68 @@ constexpr StringLiteral ContextTintHeaderConfig {
     "tint:\n"
 };
 
-constexpr StringLiteral ContextTintEntryConfig { "    {}: {}\n" };
+/// One `key: value` row of a map whose header precedes it, such as a colour scheme's `tint` or
+/// `block_status`.
+constexpr StringLiteral IndentedEntryConfig { "    {}: {}\n" };
+
+constexpr StringLiteral BlockStatusConfig {
+    "\n"
+    "{comment} Colors of the gutter's block column by how each command ended: its fold controls, the\n"
+    "{comment} triangle beside a running command and the dot beside a finished one all take them.\n"
+    "{comment} Unset by default: success then looks exactly like the fold column (fold_marker above),\n"
+    "{comment} failure takes this scheme's red (normal color 1) and running its yellow (normal color 3),\n"
+    "{comment} so a scheme that has never heard of them still shows them legibly. Uncomment to override.\n"
+    "{comment} The values shown are what the default scheme derives, so uncommenting failure and running\n"
+    "{comment} as they are changes nothing. Uncommenting success changes one thing: a success the scheme\n"
+    "{comment} sets is lifted only halfway toward the text color under the pointer, as the other two are,\n"
+    "{comment} where the fold column comes up to full strength.\n"
+    "{comment} block_status:\n"
+    "{comment}     success: '#7E7C7C'\n"
+    "{comment}     failure: '#C63939'\n"
+    "{comment}     running: '#A0A000'\n"
+};
+
+constexpr StringLiteral BlockStatusHeaderConfig {
+    "\n"
+    "{comment} Colors of the gutter's block column by how each command ended. Written back because this\n"
+    "{comment} scheme sets them; remove a key to derive it again -- success from the fold column, failure\n"
+    "{comment} from normal color 1, running from normal color 3.\n"
+    "block_status:\n"
+};
+
+constexpr StringLiteral GutterTextConfig {
+    "\n"
+    "{comment} Color of the gutter's line numbers and timestamps. Unset by default: this scheme's own\n"
+    "{comment} foreground faded toward its background, as quiet as the resting fold column. The value\n"
+    "{comment} shown is what the default scheme derives.\n"
+    "{comment} gutter_text: '#7E7C7C'\n"
+};
+
+constexpr StringLiteral GutterTextSetConfig {
+    "\n"
+    "{comment} Color of the gutter's line numbers and timestamps. Remove it to derive the color from\n"
+    "{comment} this scheme's own foreground and background again.\n"
+    "gutter_text: {}\n"
+};
+
+constexpr StringLiteral StickyHeaderColorsConfig {
+    "\n"
+    "{comment} Colors of the sticky command header pinned over the top row (profile key sticky_header):\n"
+    "{comment} its band, and the line along its bottom edge. Unset by default: the band is this scheme's\n"
+    "{comment} background lifted a tenth of the way toward its foreground, the line about a third of the\n"
+    "{comment} way, so both read in any theme. The values shown are what the default scheme derives, so\n"
+    "{comment} uncommenting them as they are changes nothing.\n"
+    "{comment} sticky_header:\n"
+    "{comment}     background: '#2C2928'\n"
+    "{comment}     separator: '#595757'\n"
+};
+
+constexpr StringLiteral StickyHeaderColorsHeaderConfig {
+    "\n"
+    "{comment} Colors of the sticky command header. Written back because this scheme sets them; remove a\n"
+    "{comment} key to derive it again from this scheme's own background and foreground.\n"
+    "sticky_header:\n"
+};
 
 constexpr StringLiteral InputMethodEditorConfig { "\n"
                                                   "{comment} Colors for the IME (Input Method Editor) area.\n"
@@ -1478,17 +1661,21 @@ constexpr StringLiteral InputMethodEditorConfig { "\n"
                                                   "    foreground: {}\n"
                                                   "    background: {}\n" };
 
-constexpr StringLiteral NormalColorsConfig { "\n"
-                                             "{comment} Normal colors\n"
-                                             "normal:\n"
-                                             "    black:   {}\n"
-                                             "    red:     {}\n"
-                                             "    green:   {}\n"
-                                             "    yellow:  {}\n"
-                                             "    blue:    {}\n"
-                                             "    magenta: {}\n"
-                                             "    cyan:    {}\n"
-                                             "    white:   {}\n" };
+constexpr StringLiteral NormalColorsConfig {
+    "\n"
+    "{comment} Normal colors, by name. normal, bright and dim also take\n"
+    "{comment} a list in this order: [black, red, ..., white].\n"
+    "{comment} A color is '#rrggbb' or 0xrrggbb, not a decimal number.\n"
+    "normal:\n"
+    "    black:   {}\n"
+    "    red:     {}\n"
+    "    green:   {}\n"
+    "    yellow:  {}\n"
+    "    blue:    {}\n"
+    "    magenta: {}\n"
+    "    cyan:    {}\n"
+    "    white:   {}\n"
+};
 
 constexpr StringLiteral BrightColorsConfig { "\n"
                                              "{comment} Bright colors\n"
@@ -1589,12 +1776,14 @@ constexpr StringLiteral CommandPaletteRecentCountWeb {
 constexpr StringLiteral PTYReadBufferSizeWeb {
     "option sets the most bytes taken from the PTY in one read, and so the most parsed in one go. Larger "
     "batches parse output faster; smaller ones show a flood of it in smaller steps. It is an advanced option "
-    "and should be used with caution. The default value is `{}`."
+    "and should be used with caution. The default value is `{}`. A change applies to sessions opened "
+    "afterwards."
 };
 
 constexpr StringLiteral PTYBufferObjectSizeWeb {
     "option sets the size in bytes per PTY Buffer Object. It is an advanced option for internal storage and "
-    "should be changed carefully. The default value is `1048576`."
+    "should be changed carefully. The default value is `1048576`. A change applies to sessions opened "
+    "afterwards."
 };
 
 constexpr StringLiteral DefaultProfilesWeb {
@@ -1614,7 +1803,7 @@ constexpr StringLiteral GraphemeClusteringWeb {
     "Whether DEC mode 2027 starts out set. While set, a late codepoint may widen its grapheme "
     "cluster -- U+FE0F widens a cluster to two columns -- but a cluster never narrows again. "
     "While unset, a cell is measured by plain wcwidth() with no clustering. "
-    "Applications may still toggle the mode at runtime."
+    "Applications may still toggle the mode at runtime. A change applies to sessions opened afterwards."
 };
 
 constexpr StringLiteral TextScalingMethodWeb {
@@ -1626,7 +1815,7 @@ constexpr StringLiteral TextScalingMethodWeb {
 
 constexpr StringLiteral ReflowOnResizeWeb {
     "option controls whether or not the lines in the terminal should be reflowed when a resize event occurs. "
-    "The default value is `true`."
+    "The default value is `true`. A change applies to sessions opened afterwards."
 };
 
 constexpr StringLiteral TabSwitchOnHorizontalWheelWeb {
@@ -1866,7 +2055,7 @@ constexpr StringLiteral AccessibilityAnnouncementsWeb {
     "\n"
     "Whether events with no representation in the accessibility tree -- the bell, a desktop "
     "notification, a mode change -- are announced to assistive technology. Costs nothing while no "
-    "assistive client is attached. See [Accessibility](../../accessibility.md).\n"
+    "assistive client is attached. See [Accessibility](../accessibility.md).\n"
     "\n"
 };
 
@@ -1875,7 +2064,7 @@ constexpr StringLiteral AccessibilityCaretReportingWeb {
     "Whether the terminal reports where the caret is to assistive technology, which is how a screen "
     "magnifier follows what you are typing. Costs nothing while no assistive client is attached. Turn "
     "it off to rule the caret reports out when diagnosing input latency. See "
-    "[Accessibility](../../accessibility.md).\n"
+    "[Accessibility](../accessibility.md).\n"
     "\n"
 };
 
@@ -1903,8 +2092,8 @@ constexpr StringLiteral ProgressTimeoutWeb {
 
 constexpr StringLiteral NotificationCloseTimeoutWeb {
     "\n"
-    "How long after showing a desktop notification the terminal waits before assuming the desktop "
-    "closed it, in milliseconds.\n"
+    "How long after showing a desktop notification that asked to hear of its close (`c=1`) the terminal "
+    "waits before assuming the desktop closed it, in milliseconds.\n"
     "\n"
     "This only applies where a close cannot be observed. Contour normally learns that a notification "
     "was dismissed or expired from the desktop itself and reports it back to the application as the "
@@ -1920,6 +2109,10 @@ constexpr StringLiteral NotificationCloseTimeoutWeb {
     "be true: `0` here, which disables the assumption outright, and `w=0` on the notification, which "
     "asks for a popup that never expires on its own. An application that requested close events in "
     "either case is not told.\n"
+    "\n"
+    "A notification that asked for no close event -- a command's finish notice among them -- is never "
+    "assumed closed: assuming it would only make it impossible to withdraw, and its click, from the "
+    "desktop's notification history, would go unanswered.\n"
     "\n"
     "Read once per terminal session, so a changed value reaches sessions opened after the reload.\n"
     "\n"
@@ -1989,7 +2182,7 @@ constexpr StringLiteral UiFontFamilyWeb {
     "\n"
     "Font family the terminal-style chrome is drawn with. When empty (the default) the chrome inherits "
     "the regular font family of the profile the window is running (`-p`/`--profile`, else "
-    "[`default_profile`](#default_profile)), which is what makes it match the terminal grid below it. "
+    "[`default_profile`](#default_profile_name)), which is what makes it match the terminal grid below it. "
     "Ignored while [`ui_style`](#ui_style) is `native`, where the chrome uses the platform UI font. "
     "Takes effect on the next start.\n"
     "\n"
@@ -2131,12 +2324,12 @@ constexpr StringLiteral FoldingWeb {
     "no additional escape sequence is involved and any shell that already speaks OSC 133 works. Only "
     "FINISHED commands fold, which is why the prompt you are typing at never does.\n"
     ":octicons-horizontal-rule-16: ==enabled== Whether folding is available at all. When false the "
-    "actions below do nothing and no gutter is reserved. <br/>\n"
-    ":octicons-horizontal-rule-16: ==show_markers== Whether to reserve a one-column gutter to the left "
-    "of the grid and draw a fold column in it: a boxed minus on a foldable prompt line whose output is "
-    "showing, a boxed plus once it is collapsed, and a bar down the side of the block joining the two. "
-    "Clicking anywhere on that column toggles the fold. Note that the gutter costs one column of "
-    "terminal width. <br/>\n"
+    "actions below do nothing and no fold markers are drawn. <br/>\n"
+    ":octicons-horizontal-rule-16: ==show_markers== Whether the gutter's block column, left of the grid, "
+    "draws fold markers: a boxed minus on a foldable prompt line whose output is showing, a boxed plus "
+    "once it is collapsed, and a bar down the side of the block joining the two. Clicking anywhere on "
+    "that column toggles the fold. Note that the column costs one column of terminal width; it is "
+    "reserved while this, `gutter.exit_status` or `gutter.user_marks` is on. <br/>\n"
     ":octicons-horizontal-rule-16: ==auto_collapse_on_new_command== Whether a command's output is "
     "collapsed automatically as soon as the next prompt appears, so that only the command you are "
     "running now is shown in full. <br/>\n"
@@ -2152,6 +2345,77 @@ constexpr StringLiteral FoldingWeb {
     "\n"
 };
 
+constexpr StringLiteral GutterWeb {
+    "configuration controls the gutter: the strip left of the grid that carries per-line timestamps, "
+    "line numbers and the block column.\n"
+    "``` yaml\n"
+    "gutter:\n"
+    "  exit_status: true\n"
+    "  user_marks: true\n"
+    "  line_numbers: off\n"
+    "  line_number_width: 6\n"
+    "  timestamps: false\n"
+    "  timestamp_format: '%H:%M:%S'\n"
+    "```\n"
+    "The gutter's width follows this configuration and never its content, so a growing line number "
+    "cannot resize the page in the middle of a command's output. The block column is reserved while "
+    "fold markers (`folding.show_markers`), exit status or user marks are on -- one column, exactly as "
+    "the fold markers always took.\n"
+    ":octicons-horizontal-rule-16: ==exit_status== Colour each command's fold controls by how it ended "
+    "-- the colour scheme's `block_status` colours -- draw a triangle beside a running command, and a "
+    "dot beside a finished one that shows no fold control: one with nothing to fold, or any one while "
+    "fold markers are off. Hovering the block column shows the exit code, duration, start time, working "
+    "directory and command line. <br/>\n"
+    ":octicons-horizontal-rule-16: ==user_marks== Draw a diamond beside every row marked with vi-mode "
+    "`mm`. <br/>\n"
+    ":octicons-horizontal-rule-16: ==line_numbers== `off`, `absolute` (every row's number, counted from "
+    "the session's first row, so the numbers stay put while history scrolls away), `relative` (every "
+    "row's distance from the cursor row, counting a collapsed block as one row -- exactly what `j` and "
+    "`k` count) or `hybrid` (the cursor row's own number, every other row's distance), as vim's `nu` and "
+    "`rnu`. In vi mode the distance counts from the vi cursor. <br/>\n"
+    ":octicons-horizontal-rule-16: ==line_number_width== Columns the line numbers take, 3 to 10. A "
+    "longer number shows its last digits after an ellipsis. <br/>\n"
+    ":octicons-horizontal-rule-16: ==timestamps== Show the time each row was first reached. A row shows "
+    "it only where it differs from the row above, so a long output does not repeat one second. <br/>\n"
+    ":octicons-horizontal-rule-16: ==timestamp_format== A `std::format` chrono specification in local "
+    "time, such as `%H:%M` or `%a %H:%M:%S`. It must begin with a `%` conversion, so a leading literal "
+    "such as `[%H:%M]` is refused, and so is a leading width or alignment such as `8%H` or `>%H`, which "
+    "`std::format` would pad the timestamp with. Every character it spells must take exactly one "
+    "column, so a double-width character (a CJK ideograph, say) or a combining mark is refused as well. "
+    "A format that cannot be drawn is reported when the configuration loads, and the default is kept. "
+    "<br/>\n"
+    "\n"
+    "In vi normal mode, `za`, `zo`, `zc`, `zM` and `zR` toggle, open and close the block under the "
+    "cursor, and close or open all of them, as in vim.\n"
+};
+
+constexpr StringLiteral CommandBlocksWeb {
+    "configuration controls what the terminal remembers about each shell command it saw run.\n"
+    "``` yaml\n"
+    "command_blocks:\n"
+    "  max_records: 1000\n"
+    "  pager: less -R\n"
+    "  pager_format: sgr\n"
+    "```\n"
+    "A command block is one prompt and the output of the command run at it, delimited by the OSC 133 "
+    "marks a shell with shell integration emits -- or, without one, by systemd's OSC 3008 contexts. For "
+    "each block the terminal keeps its command line, exit status, duration, start time and working "
+    "directory, even after the block's rows have left the scrollback.\n"
+    ":octicons-horizontal-rule-16: ==max_records== How many blocks one session remembers; the oldest are "
+    "forgotten first. At least 1, at most 1000000. A change applies to sessions opened afterwards. <br/>\n"
+    ":octicons-horizontal-rule-16: ==pager== The program the OpenCommandOutput action (\"Open Output in "
+    "Pager\", Ctrl+Shift+G) opens a command's output with when its binding names none. It is read as a "
+    "profile's `shell:` is: a string naming a program runs as it is; otherwise its first word is the "
+    "program and the rest its arguments -- on Windows passed on as written, so `C:\\Tools\\less.exe -R` "
+    "needs no quoting. A binding's own `program:` is read the same way. The output is written to a "
+    "private file that is appended as the last argument and deleted when the pane closes. Defaults to "
+    "`less -R` (`more` on Windows). <br/>\n"
+    ":octicons-horizontal-rule-16: ==pager_format== Whether the pager renders colours: `sgr` writes the "
+    "output with its SGR sequences, `plain` as text only. Defaults to `sgr`, which both `less -R` and "
+    "Windows `more` (inside the terminal's pseudo console) render. A binding's own `format:` wins, and a "
+    "binding that names its own `program:` gets `sgr`. <br/>\n"
+};
+
 constexpr StringLiteral ScrollbarWeb {
     "configuration allows you to customize the appearance and behavior of the visual scrollbar in the "
     "terminal.\n"
@@ -2159,15 +2423,82 @@ constexpr StringLiteral ScrollbarWeb {
     "profiles:\n"
     "  profile_name:\n"
     "    scrollbar:\n"
-    "      position: Hidden\n"
+    "      position: Right\n"
     "      hide_in_alt_screen: true\n"
+    "      marks: [failures, commands, user_marks]\n"
     "```\n"
     ":octicons-horizontal-rule-16: ==position==  This option specifies the position of the scrollbar in the "
-    "terminal window. It can be set to one of the following values: Left, Right, Hidden. <br/>\n"
+    "terminal window. It can be set to one of the following values: Left, Right, Hidden. The default is "
+    "Right for new configurations; a `contour.yml` written by an earlier version keeps `Hidden`, so set "
+    "`position: Right` there to see the marks. Hidden turns the scrollbar, and with it the command marks, "
+    "off. The scrollbar floats over the edge of the terminal, takes no column from it, and is shown only "
+    "while there is history to scroll through. <br/>\n"
     ":octicons-horizontal-rule-16: ==hide_in_alt_screen== This boolean option determines whether the "
     "scrollbar should be hidden when the terminal is in the alternate screen mode. If set to true, the "
     "scrollbar will be hidden when the terminal switches to the alternate screen. If set to false, the "
     "scrollbar will remain visible even in the alternate screen mode. <br/>\n"
+    ":octicons-horizontal-rule-16: ==marks== Which marks the scrollbar shows as thin ticks; clicking a tick "
+    "scrolls its line to the top of the view, opening it if it is folded. A list of `failures` (commands "
+    "that exited with an error), `commands` (every other command, finished or still running) and "
+    "`user_marks` (lines marked with `mm` in vi normal mode); `[]` shows none. Command ticks need the OSC "
+    "133 marks a shell with shell integration emits -- or, without one, systemd's OSC 3008 contexts. "
+    "Ticks are hidden whenever the scrollbar is. <br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral NotifyOnCommandFinishWeb {
+    "configuration tells you when a command you are not watching finishes: a desktop notification, the "
+    "bell, or both.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    notify_on_command_finish:\n"
+    "      when: unfocused\n"
+    "      min_duration: 10\n"
+    "      outcome: any\n"
+    "      action: notify\n"
+    "      clear_on: focus\n"
+    "```\n"
+    "Commands are known from the OSC 133 marks shell integration emits; a shell without it reports none, "
+    "so nothing is notified. A notification reads `✓ make finished`, `✗ make failed (exit 2)` or "
+    "`✗ make killed (SIGSEGV)`, with how long it took, where it ran and the tab's name below. A newer "
+    "finish in the same pane replaces the older notification, and clicking it brings the pane forward "
+    "where the desktop reports clicks.\n"
+    ":octicons-horizontal-rule-16: ==when== `never`, `unfocused` (unless it is the focused pane of the "
+    "active window), `hidden` (only while the pane is off screen: another tab is active, a sibling pane "
+    "is zoomed, or the window is minimised) or `always`. <br/>\n"
+    ":octicons-horizontal-rule-16: ==min_duration== Commands that ran for fewer seconds than this never "
+    "notify. <br/>\n"
+    ":octicons-horizontal-rule-16: ==outcome== `any`, or `failure` for commands that exited non-zero or "
+    "died of a signal. <br/>\n"
+    ":octicons-horizontal-rule-16: ==action== `notify` (a desktop notification), `bell` (the profile's "
+    "bell sound and window alert) or `notify_bell` (both). <br/>\n"
+    ":octicons-horizontal-rule-16: ==clear_on== When a notification still on screen is withdrawn: "
+    "`focus` (the pane is focused), `next` (the pane's next command starts) or `never`. Only a desktop "
+    "notification can be withdrawn, which is what Linux shows; on Windows and macOS the notice is a tray "
+    "message, which stays until it times out whatever `clear_on` says. <br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral StickyHeaderWeb {
+    "configuration pins the command line of the block you are reading over the top row of the terminal, "
+    "once that command has scrolled out of view above its own output.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    sticky_header:\n"
+    "      mode: scrolled\n"
+    "      show_evicted: true\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==mode== When the header appears: `never`, `scrolled` (only while the "
+    "viewport is scrolled back into history; the default) or `always` (also while following live output, so "
+    "a long build keeps its command in view). It needs prompt marks (OSC 133;A), never appears on the "
+    "alternate screen, shows the command's exit status and duration on its right, and a click on it scrolls "
+    "to the command. A shell that marks only where its commands run (`;C`, `;D`) gets no header. <br/>\n"
+    ":octicons-horizontal-rule-16: ==show_evicted== Whether the header still names a command whose own line "
+    "has already been dropped from the scrollback, as `⋯ <command> — earlier output evicted`, so a long "
+    "output does not lose its header when its prompt is evicted. At the very top of the scrollback it shows "
+    "whatever `mode` says (even `never`); anywhere else it shows wherever `mode` would show a header. <br/>\n"
     "\n"
 };
 
@@ -2444,6 +2775,9 @@ constexpr StringLiteral ColorsWeb {
     "dark mode is on,\n"
     "and `light`'s color scheme otherwise.\n"
     "\n"
+    "A configuration reload applies the colors to running sessions too, replacing any a program set "
+    "there (OSC 4, 10, 11 and friends), just as switching to another profile does.\n"
+    "\n"
 
 };
 
@@ -2668,8 +3002,12 @@ using TerminalSize = DocumentationEntry<TerminalSizeConfig, TerminalSizeWeb>;
 using TerminalId = DocumentationEntry<TerminalIdConfig, TerminalIdWeb>;
 using History = DocumentationEntry<HistoryConfig, HistoryWeb>;
 using Folding = DocumentationEntry<FoldingConfig, FoldingWeb>;
+using Gutter = DocumentationEntry<GutterConfig, GutterWeb>;
 using OscContext = DocumentationEntry<OscContextConfig, OscContextWeb>;
+using CommandBlocks = DocumentationEntry<CommandBlocksConfig, CommandBlocksWeb>;
 using Scrollbar = DocumentationEntry<ScrollbarConfig, ScrollbarWeb>;
+using StickyHeader = DocumentationEntry<StickyHeaderConfig, StickyHeaderWeb>;
+using NotifyOnCommandFinish = DocumentationEntry<NotifyOnCommandFinishConfig, NotifyOnCommandFinishWeb>;
 using StatusLine = DocumentationEntry<StatusLineConfig, StatusLineWeb>;
 using OptionKeyAsAlt = DocumentationEntry<OptionKeyAsAltConfig, OptionKeyAsAltWeb>;
 using Fonts = DocumentationEntry<FontsConfig, FontsWeb>;
@@ -2846,7 +3184,13 @@ using FoldMarkerDefault = DocumentationEntry<FoldMarkerDefaultConfig, Dummy>;
 using FoldMarkerHover = DocumentationEntry<FoldMarkerHoverConfig, Dummy>;
 using ContextTint = DocumentationEntry<ContextTintConfig, Dummy>;
 using ContextTintHeader = DocumentationEntry<ContextTintHeaderConfig, Dummy>;
-using ContextTintEntry = DocumentationEntry<ContextTintEntryConfig, Dummy>;
+using BlockStatus = DocumentationEntry<BlockStatusConfig, Dummy>;
+using BlockStatusHeader = DocumentationEntry<BlockStatusHeaderConfig, Dummy>;
+using GutterText = DocumentationEntry<GutterTextConfig, Dummy>;
+using GutterTextSet = DocumentationEntry<GutterTextSetConfig, Dummy>;
+using IndentedEntry = DocumentationEntry<IndentedEntryConfig, Dummy>;
+using StickyHeaderColors = DocumentationEntry<StickyHeaderColorsConfig, Dummy>;
+using StickyHeaderColorsHeader = DocumentationEntry<StickyHeaderColorsHeaderConfig, Dummy>;
 using InputMethodEditor = DocumentationEntry<InputMethodEditorConfig, Dummy>;
 using InputMethodEditorSupport = DocumentationEntry<InputMethodEditorSupportConfig, Dummy>;
 using NormalColors = DocumentationEntry<NormalColorsConfig, Dummy>;

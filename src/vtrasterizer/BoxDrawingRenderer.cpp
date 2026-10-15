@@ -346,6 +346,65 @@ namespace detail
             }
         };
 
+        /// Supersampling factor used for anti-aliased shapes: the mathematical symbols and the gutter's
+        /// status marks.
+        constexpr auto MathSymbolSS = 4;
+
+        /// Which of the gutter's status marks a cell draws.
+        enum class StatusMarkShape : uint8_t
+        {
+            SmallTriangle = 0, ///< U+10F002, a block whose command is still running.
+            Diamond,           ///< U+10F003, a row the user marked.
+            Disc,              ///< U+10F004, a finished block with no fold control on its head.
+        };
+
+        /// The block column's status marks: a small right-pointing triangle, a diamond and a disc.
+        ///
+        /// Drawn here rather than left to the font for the reason FoldHead is: they share a column with
+        /// the fold controls, and a font's marks differ in size and weight between families. Each shape
+        /// is a membership test on the cell's centre, sampled four times per axis and box-filtered down,
+        /// which is what anti-aliases its slanted and curved edges.
+        struct StatusMark
+        {
+            ImageSize size {};
+            StatusMarkShape shape = StatusMarkShape::Disc;
+
+            /// How much of the cell's shorter side the mark spans.
+            static constexpr double Extent = 0.6;
+
+            /// Whether the point (@p dx, @p dy), relative to the cell centre, lies in @p shape of
+            /// half-extent @p radius.
+            [[nodiscard]] static bool contains(StatusMarkShape shape,
+                                               double dx,
+                                               double dy,
+                                               double radius) noexcept
+            {
+                switch (shape)
+                {
+                    case StatusMarkShape::SmallTriangle:
+                        // Base on the left at -0.8r, apex on the centre line at +0.8r.
+                        return dx >= -radius * 0.8 && std::abs(dy) <= ((radius * 0.8) - dx) / 2.0;
+                    case StatusMarkShape::Diamond: return std::abs(dx) + std::abs(dy) <= radius;
+                    case StatusMarkShape::Disc: return (dx * dx) + (dy * dy) <= radius * radius;
+                }
+                return false;
+            }
+
+            operator atlas::Buffer() const
+            {
+                auto pixmap = blockElement<MathSymbolSS>(size);
+                auto const w = unbox<int>(pixmap.size.width);
+                auto const h = unbox<int>(pixmap.size.height);
+                auto const radius = std::min(w, h) * Extent / 2.0;
+                return pixmap
+                    .fill([&](int x, int y) {
+                        return contains(shape, (x + 0.5) - (w / 2.0), (y + 0.5) - (h / 2.0), radius) ? 0xFF
+                                                                                                     : 0x00;
+                    })
+                    .take();
+            }
+        };
+
         struct Box
         {
             Line upval = NoLine;
@@ -1053,9 +1112,6 @@ namespace detail
             Left,
             Right
         };
-
-        /// Supersampling factor used for anti-aliased mathematical symbol rendering.
-        constexpr auto MathSymbolSS = 4;
 
         /// Draws a thick quarter-ellipse arc on a Pixmap.
         ///
@@ -2089,7 +2145,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
            || ascending(0x2500, 0x259F)             // box drawing, block elements, shades
            || codepoint == 0x25B6                   // ▶ BLACK RIGHT-POINTING TRIANGLE
            || codepoint == 0x25BC                   // ▼ BLACK DOWN-POINTING TRIANGLE
-           || ascending(0x10F000, 0x10F001)         // Contour's fold-head glyphs
+           || ascending(0x10F000, 0x10F004)         // Contour's own: fold heads, gutter status marks
            || ascending(0x1FB00, 0x1FBAF)           // more block sextants
            || ascending(0x1FBF0, 0x1FBF9)           // digits
            || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
@@ -2279,7 +2335,6 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         // TODO: ▴  U+25B4  BLACK UP-POINTING SMALL TRIANGLE
         // TODO: ▵  U+25B5  WHITE UP-POINTING SMALL TRIANGLE
         // TODO: ▷  U+25B7  WHITE RIGHT-POINTING TRIANGLE
-        // TODO: ▸  U+25B8  BLACK RIGHT-POINTING SMALL TRIANGLE
         // TODO: ▹  U+25B9  WHITE RIGHT-POINTING SMALL TRIANGLE
         // TODO: ►  U+25BA  BLACK RIGHT-POINTING POINTER
         // TODO: ▻  U+25BB  WHITE RIGHT-POINTING POINTER
@@ -2292,7 +2347,6 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         // TODO: ◃  U+25C3  WHITE LEFT-POINTING SMALL TRIANGLE
         // TODO: ◄  U+25C4  BLACK LEFT-POINTING POINTER
         // TODO: ◅  U+25C5  WHITE LEFT-POINTING POINTER
-        // TODO: ◆  U+25C6  BLACK DIAMOND
         // TODO: ◇  U+25C7  WHITE DIAMOND
         // TODO: ◈  U+25C8  WHITE DIAMOND CONTAINING BLACK SMALL DIAMOND
         // TODO: ◉  U+25C9  FISHEYE
@@ -2301,7 +2355,6 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         // TODO: ◌  U+25CC  DOTTED CIRCLE
         // TODO: ◍  U+25CD  CIRCLE WITH VERTICAL FILL
         // TODO: ◎  U+25CE  BULLSEYE
-        // TODO: ●  U+25CF  BLACK CIRCLE
         // TODO: ◐  U+25D0  CIRCLE WITH LEFT HALF BLACK
         // TODO: ◑  U+25D1  CIRCLE WITH RIGHT HALF BLACK
         // TODO: ◒  U+25D2  CIRCLE WITH LOWER HALF BLACK
@@ -2623,6 +2676,13 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
             return /* fold head, open   */ FoldHead { .size = size, .state = FoldHeadState::Open };
         case 0x10F001:
             return /* fold head, closed */ FoldHead { .size = size, .state = FoldHeadState::Closed };
+        // The gutter's status marks, drawn by StatusMark: a running command, a user's mark, a finished command
+        // with no fold control on its head. Shapes Unicode has (U+25B8, U+25C6, U+25CF), but claiming those
+        // would draw every one a program writes -- a prompt's, systemctl's -- in place of its font's.
+        case 0x10F002:
+            return /* running, ▸ */ StatusMark { .size = size, .shape = StatusMarkShape::SmallTriangle };
+        case 0x10F003: return /* user mark, ◆ */ StatusMark { .size = size, .shape = StatusMarkShape::Diamond };
+        case 0x10F004: return /* finished, ● */ StatusMark { .size = size, .shape = StatusMarkShape::Disc };
 
         // PUA defines as introduced by FiraCode: https://github.com/tonsky/FiraCode/issues/1324
         case 0xEE00: return progressBar().left();

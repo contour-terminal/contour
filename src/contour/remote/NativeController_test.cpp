@@ -14,6 +14,7 @@
 #include <chrono>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <future>
 #include <memory>
@@ -41,6 +42,8 @@
 #include <core/net/IoBackend.hpp>
 #include <core/net/Sockets.hpp>
 #include <core/net/Tls.hpp>
+#include <core/platform/NativeFileSystem.hpp>
+#include <core/testing/ScopedTempDir.hpp>
 
 #include <cstdint>
 
@@ -150,7 +153,7 @@ struct DaemonFixture
             },
             vtbackend::Settings {},
             core::defaultEnvironment(),
-            /*startPumps=*/false);
+            vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual });
         auto listener = core::net::listen(loop, "127.0.0.1", 0);
         REQUIRE(listener.has_value());
         port = (*listener)->boundPort();
@@ -314,10 +317,12 @@ struct MirrorPane
         auto* device = pty.get();
         terminal = std::make_unique<vtbackend::Terminal>(events,
                                                          core::defaultEnvironment(),
+                                                         core::platform::NativeFileSystem::instance(),
                                                          std::move(pty),
                                                          std::move(settings),
                                                          std::nullopt,
-                                                         std::chrono::steady_clock::now());
+                                                         vtbackend::TerminalClocks::system(),
+                                                         vtbackend::randomSemanticBlockTokens());
         factory.bindTerminal(device, *terminal);
     }
 
@@ -391,11 +396,12 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     auto daemon = DaemonFixture {};
     auto const session = daemon.seedSession("hello attach");
 
-    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt };
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt, nullptr };
     auto const connected = controller.connectAndWait(10s);
     REQUIRE(connected.has_value());
     REQUIRE(controller.pendingCount() == 1);
     REQUIRE(controller.canCreateSession());
+    CHECK(controller.hosting() == contour::session::SessionHosting::Remote);
 
     // Through the ROUTER, exactly as the app does — see AttachRoute.
     auto route = AttachRoute { controller };
@@ -439,7 +445,7 @@ TEST_CASE("a GUI detach ends the daemon's TLS connection as a disconnect", "[att
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("detach");
 
-    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt };
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt, nullptr };
     REQUIRE(controller.connectAndWait(10s).has_value());
     controller.stop();
 
@@ -465,7 +471,7 @@ TEST_CASE("attach controller captures the daemon's tab and pane layout", "[attac
         return 0;
     });
 
-    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt };
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt, nullptr };
     auto const connected = controller.connectAndWait(10s);
     REQUIRE(connected.has_value());
 
@@ -502,7 +508,8 @@ TEST_CASE("attach realizes a split daemon layout as a 2-pane tab", "[attach][con
     });
 
     // The NativeController is the manager's session factory (attach mode).
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -542,7 +549,8 @@ TEST_CASE("attach reconciles a split authored on the daemon after attach", "[att
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("only");
 
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -584,7 +592,8 @@ TEST_CASE("attach reconciles an uneven daemon split with matching proportions", 
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("only");
 
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -632,7 +641,8 @@ TEST_CASE("attach reconciles a pane closed on the daemon by removing it locally"
         return tab->activePane()->session(); // the new (active) pane's session
     });
 
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -690,7 +700,7 @@ TEST_CASE("releasing a mirrored pty leaves its remote session running", "[attach
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("keep me running");
 
-    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt };
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt, nullptr };
     requireConnected(controller);
     REQUIRE(controller.pendingCount() == 1);
     auto const liveSessions = [&daemon] {
@@ -728,7 +738,8 @@ TEST_CASE("the ClosePane action ends a remote session like a local one", "[attac
         return 0;
     });
 
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -758,6 +769,156 @@ TEST_CASE("the ClosePane action ends a remote session like a local one", "[attac
     ac->stop();
 }
 
+TEST_CASE("an action that changes hosted state is performed by the daemon, and the mirror follows",
+          "[attach][controller][operations][threading]")
+{
+    static_assert(contour::remote::toWireOperation(contour::session::HostedOperation::WriteScreen)
+                  == vthost::proto::EngineOperation::WriteScreen);
+
+    auto daemon = DaemonFixture {};
+    auto rows = std::string {};
+    for (auto const row: std::views::iota(0, 60))
+        rows += std::format("row {}\r\n", row);
+    auto const session = daemon.seedSession(rows + "\033]133;A\033\\$ prompt-here");
+    auto const daemonHistory = [&] {
+        return daemon.onDaemon(
+            [&] { return daemon.host->terminal(session)->primaryScreen().historyLineCount(); });
+    };
+    REQUIRE(daemonHistory() > vtbackend::LineCount(0));
+
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+    requireConnected(*ac);
+    REQUIRE(waitUntil([&] { return ac->layout().has_value(); }));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto* pane = win->activeSession();
+    REQUIRE(pane != nullptr);
+    auto const& terminal = pane->terminal();
+    auto const& mirror = terminal.primaryScreen();
+    // Under the terminal lock: the controller writes the mirror from its reactor thread.
+    auto const mirrorShows = [&](auto const& predicate) {
+        return waitUntil([&] {
+            auto const guard = std::lock_guard { terminal };
+            return predicate();
+        });
+    };
+    REQUIRE(mirrorShows([&] { return mirror.historyLineCount() > vtbackend::LineCount(0); }));
+
+    // The action's own path, as a key binding or the context menu runs it.
+    CHECK((*pane)(contour::actions::ClearToPrompt {}));
+
+    CHECK(waitUntil([&] { return daemonHistory() == vtbackend::LineCount(0); }));
+    CHECK(mirrorShows([&] { return mirror.historyLineCount() == vtbackend::LineCount(0); }));
+    CHECK(mirrorShows(
+        [&] { return mirror.grid().lineText(vtbackend::LineOffset(0)).starts_with("$ prompt-here"); }));
+
+    ac->stop();
+}
+
+TEST_CASE("an action that changes hosted state does not report success without a daemon",
+          "[attach][controller][operations]")
+{
+    // Never connected, as after the daemon went away: there is nowhere for the operation to run that would
+    // stick, so it is not "sent".
+    auto controller = contour::remote::NativeController {
+        vthost::TcpEndpoint { .host = "127.0.0.1", .port = 1, .token = {}, .caPem = {} },
+        std::nullopt,
+        nullptr
+    };
+    auto const pty =
+        vtpty::MockPty { vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) } };
+    for (auto const& row: contour::session::HostedOperationTable)
+        CHECK(controller.requestHostedOperation(
+                  &pty, contour::session::HostedOperationRequest { .operation = row.operation })
+              == contour::session::HostedOperationRoute::Unreachable);
+}
+
+namespace
+{
+
+/// Types @p keys into @p session, each one pressed and released, as a keyboard delivers them.
+void typeKeys(contour::session::TerminalSession& session, std::string_view keys)
+{
+    for (auto const key: keys)
+    {
+        auto const ch = static_cast<char32_t>(key);
+        auto const identity =
+            vtbackend::KeyIdentity { .unshiftedKey = ch, .nativeVirtualKey = static_cast<uint32_t>(ch) };
+        for (auto const eventType:
+             { vtbackend::KeyboardEventType::Press, vtbackend::KeyboardEventType::Release })
+            session.sendCharEvent(
+                ch, identity, vtbackend::KeyboardModifiers {}, eventType, std::chrono::steady_clock::now());
+    }
+}
+
+/// The rows of @p terminal's page that carry a vi mark, by their text.
+[[nodiscard]] std::vector<std::string> markedRows(vtbackend::Terminal const& terminal)
+{
+    auto const& grid = terminal.primaryScreen().grid();
+    auto marked = std::vector<std::string> {};
+    for (auto const row: std::views::iota(0, unbox<int>(terminal.pageSize().lines)))
+        if (grid.lineAt(vtbackend::LineOffset(row)).isFlagEnabled(vtbackend::LineFlag::UserMark))
+        {
+            auto text = grid.lineText(vtbackend::LineOffset(row));
+            text.erase(text.find_last_not_of(' ') + 1);
+            marked.push_back(std::move(text));
+        }
+    return marked;
+}
+
+} // namespace
+
+TEST_CASE("a vi mark on an attached pane is the daemon's, and the mirror shows it",
+          "[attach][controller][operations][vi]")
+{
+    static_assert(contour::remote::toWireOperation(contour::session::HostedOperation::SetUserMark)
+                  == vthost::proto::EngineOperation::SetUserMark);
+
+    auto daemon = DaemonFixture {};
+    auto const session = daemon.seedSession("first\r\nsecond\r\nthird\r\n$ ");
+    auto const daemonMarks = [&] {
+        return daemon.onDaemon([&] { return markedRows(*daemon.host->terminal(session)); });
+    };
+
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
+    auto* ac = acOwned.get();
+    contour::test::TestApp app { std::move(acOwned) };
+    contour::test::ScopedController const win { app.manager() };
+    requireConnected(*ac);
+    REQUIRE(waitUntil([&] { return ac->layout().has_value(); }));
+    contour::remote::applyRemoteLayout(app.manager(), win.id, *ac);
+    auto* pane = win->activeSession();
+    REQUIRE(pane != nullptr);
+    auto const& terminal = pane->terminal();
+    // Under the terminal lock: the controller writes the mirror from its reactor thread.
+    auto const mirrorMarks = [&] {
+        auto const guard = std::lock_guard { terminal };
+        return markedRows(terminal);
+    };
+    REQUIRE(waitUntil([&] {
+        auto const guard = std::lock_guard { terminal };
+        return terminal.primaryScreen().grid().renderMainPageText().contains("third");
+    }));
+
+    // The keys' own path, as the keyboard delivers them in normal mode: up from the prompt to "second".
+    (*pane)(contour::actions::ViNormalMode {});
+    typeKeys(*pane, "kkmm");
+
+    CHECK(waitUntil([&] { return daemonMarks() == std::vector<std::string> { "second" }; }));
+    CHECK(waitUntil([&] { return mirrorMarks() == std::vector<std::string> { "second" }; }));
+
+    // `mm` on the line the daemon marked takes the mark off there, and so here.
+    typeKeys(*pane, "mm");
+    CHECK(waitUntil([&] { return daemonMarks().empty(); }));
+    CHECK(waitUntil([&] { return mirrorMarks().empty(); }));
+
+    ac->stop();
+}
+
 // Regression: what a client reports upstream after a split. `proto::ResizeRequest` names the whole
 // CLIENT AREA — the daemon projects the tab's pane tree into it (SessionHost::reprojectLayouts ->
 // vtworkspace::layoutInCells). Reporting one PANE's grid there halved the area on every split: a
@@ -770,7 +931,8 @@ TEST_CASE("attach sizes remote panes to the panes the GUI renders", "[attach][co
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("root");
 
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -878,7 +1040,8 @@ TEST_CASE("attach authors a split on the daemon and reconciles it locally", "[at
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("only");
 
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -927,7 +1090,8 @@ TEST_CASE("attach reports a moved divider, so a re-attaching client restores it"
 
     {
         // The first client splits and then drags the divider well off centre.
-        auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+        auto acOwned =
+            std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
         auto* ac = acOwned.get();
         contour::test::TestApp app { std::move(acOwned) };
         contour::test::ScopedController const win { app.manager() };
@@ -959,7 +1123,8 @@ TEST_CASE("attach reports a moved divider, so a re-attaching client restores it"
 
     // A brand-new client, with nothing claimed: applyRemoteLayout realizes the WHOLE tab from the
     // daemon's layout — the path that used to hand back an even split.
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -980,7 +1145,8 @@ TEST_CASE("a divider moved on the daemon re-flows an already realized tab", "[at
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("only");
 
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -1034,7 +1200,8 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("first");
 
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -1064,6 +1231,76 @@ TEST_CASE("attach authors a tab on the daemon and reconciles it locally", "[atta
     ac->stop();
 }
 
+namespace
+{
+/// Writes a configuration file naming @p profile with @p terminalId, as a user saving it would.
+void writeConfigWithTerminalId(std::filesystem::path const& file,
+                               std::string const& profile,
+                               std::string_view terminalId)
+{
+    contour::test::writeConfigFile(
+        file,
+        contour::test::profileConfigYaml(profile, {}, std::format("        terminal_id: {}\n", terminalId)));
+}
+} // namespace
+
+// A session the client creates takes the client's profile from the configuration the GUI holds in
+// memory -- what a reload updates, and what a local new tab is built from -- not from the file as saved.
+// The sessions that already exist keep theirs.
+TEST_CASE("a session the client creates gets the profile the GUI holds in memory", "[attach][controller]")
+{
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("first");
+
+    auto testApp = contour::test::ConfiguredTestApp {};
+    auto& app = testApp.app();
+    auto const profileName = app.profileName();
+    auto const setInMemory = [&](vtbackend::VTType id) {
+        REQUIRE(app.config().findProfile(profileName) != nullptr);
+        app.config().findProfile(profileName)->terminalId.value() = id;
+    };
+    // The file says something else throughout, so a source that read it would be caught.
+    writeConfigWithTerminalId(app.config().configFile, profileName, "VT320");
+    setInMemory(vtbackend::VTType::VT420);
+
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt, [&app] {
+                                                             return app.currentEmulationSettings();
+                                                         } };
+    requireConnected(controller);
+
+    auto const tabCount = [&] {
+        return daemon.onDaemon(
+            [&] { return daemon.host->model().window(daemon.host->windowId())->tabCount(); });
+    };
+    auto const terminalIdOfTab = [&](int index) {
+        return daemon.onDaemon([&] {
+            auto const* window = daemon.host->model().window(daemon.host->windowId());
+            return daemon.host->terminal(window->tabAt(index)->rootPane()->session())->terminalId();
+        });
+    };
+
+    controller.requestCreateTab(nullptr);
+    REQUIRE(waitUntil([&] { return tabCount() == 2; }));
+    CHECK(terminalIdOfTab(1) == vtbackend::VTType::VT420);
+
+    // The configuration in memory changes, as a reload changes it; the file does not.
+    setInMemory(vtbackend::VTType::VT220);
+    controller.requestCreateTab(nullptr);
+    REQUIRE(waitUntil([&] { return tabCount() == 3; }));
+    CHECK(terminalIdOfTab(2) == vtbackend::VTType::VT220);
+
+    // The file changes and nothing reloads it: the next tab still follows the configuration in memory.
+    writeConfigWithTerminalId(app.config().configFile, profileName, "VT340");
+    controller.requestCreateTab(nullptr);
+    REQUIRE(waitUntil([&] { return tabCount() == 4; }));
+    CHECK(terminalIdOfTab(3) == vtbackend::VTType::VT220);
+
+    // The sessions that already existed keep what they were created with.
+    CHECK(terminalIdOfTab(1) == vtbackend::VTType::VT420);
+
+    controller.stop();
+}
+
 // B4: a second daemon window (authored via requestRemoteWindow) is reconciled into
 // its OWN GUI window — the client maps one OS window per daemon window, each mirroring
 // only that window's tabs, with no cross-window session bleed.
@@ -1072,7 +1309,8 @@ TEST_CASE("attach maps each daemon window onto its own GUI window", "[attach][co
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("win one"); // the primary daemon window
 
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win1 { app.manager() };
@@ -1129,7 +1367,8 @@ TEST_CASE("attach authors a tab in the window the request came from", "[attach][
     auto daemon = DaemonFixture {};
     std::ignore = daemon.seedSession("win one");
 
-    auto acOwned = std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt);
+    auto acOwned =
+        std::make_unique<contour::remote::NativeController>(daemon.endpoint(), std::nullopt, nullptr);
     auto* ac = acOwned.get();
     contour::test::TestApp app { std::move(acOwned) };
     contour::test::ScopedController const win1 { app.manager() };
@@ -1175,7 +1414,7 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
     auto daemon = DaemonFixture {};
     auto const session = daemon.seedSession("first line");
 
-    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt };
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt, nullptr };
     requireConnected(controller);
     REQUIRE(controller.pendingCount() == 1);
 
@@ -1217,7 +1456,9 @@ TEST_CASE("attach controller reports an unreachable daemon", "[attach][controlle
 {
     // Port 1 on loopback has nothing listening: connect is refused before any TLS.
     auto controller = contour::remote::NativeController {
-        vthost::TcpEndpoint { .host = "127.0.0.1", .port = 1, .token = {}, .caPem = {} }, std::nullopt
+        vthost::TcpEndpoint { .host = "127.0.0.1", .port = 1, .token = {}, .caPem = {} },
+        std::nullopt,
+        nullptr
     };
     auto const connected = controller.connectAndWait(2s);
     REQUIRE(!connected.has_value());
@@ -1296,6 +1537,10 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
             return nullptr;
         }
         [[nodiscard]] bool canCreateSession() const noexcept override { return false; }
+        [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
+        {
+            return contour::session::SessionHosting::Remote;
+        }
         [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty) override
         {
             ++tabs;
@@ -1334,12 +1579,18 @@ TEST_CASE("the routing session factory forwards every verb to its delegate", "[a
     auto settings = vtbackend::Settings {};
     auto pty = std::make_unique<vtpty::MockPty>(settings.pageSize);
     auto* device = pty.get();
-    auto terminal = vtbackend::Terminal { events,         core::defaultEnvironment(),
-                                          std::move(pty), std::move(settings),
-                                          std::nullopt,   std::chrono::steady_clock::now() };
+    auto terminal = vtbackend::Terminal { events,
+                                          core::defaultEnvironment(),
+                                          core::platform::NativeFileSystem::instance(),
+                                          std::move(pty),
+                                          std::move(settings),
+                                          std::nullopt,
+                                          vtbackend::TerminalClocks::system(),
+                                          vtbackend::randomSemanticBlockTokens() };
 
     CHECK(router.createPty(std::nullopt) == nullptr);
     CHECK_FALSE(router.canCreateSession());
+    CHECK(router.hosting() == contour::session::SessionHosting::Remote);
     CHECK(router.requestRemoteTab(device));
     CHECK(router.requestRemoteSplit(device, true));
     CHECK(router.requestRemoteWindow());

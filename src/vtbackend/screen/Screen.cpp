@@ -2,6 +2,9 @@
 #include <vtbackend/screen/Screen.hpp>
 
 #include <vtbackend/Logging.hpp>
+#include <vtbackend/core/FileUrl.hpp>
+#include <vtbackend/core/LineFlags.hpp>
+#include <vtbackend/core/RowMove.hpp>
 #include <vtbackend/graphics/MessageParser.hpp>
 #include <vtbackend/graphics/SixelParser.hpp>
 #include <vtbackend/graphics/regis/ReGISContext.hpp>
@@ -12,11 +15,16 @@
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/screen/AsciiText.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/shell/CommandBlock.hpp>
+#include <vtbackend/shell/CommandBlockRows.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
 #include <vtbackend/vt/HierarchicalContext.hpp>
+#include <vtbackend/vt/JsonString.hpp>
+#include <vtbackend/vt/MacroDefinition.hpp>
 #include <vtbackend/vt/ModifyKeys.hpp>
 #include <vtbackend/vt/RectangularAreaChecksum.hpp>
+#include <vtbackend/vt/SemanticPrompt.hpp>
 #include <vtbackend/vt/SgrWriter.hpp>
 #include <vtbackend/vt/VTType.hpp>
 #include <vtbackend/vt/VTWriter.hpp>
@@ -40,11 +48,13 @@
 #include <libunicode/word_segmenter.h>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <charconv>
 #include <cstring>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -67,7 +77,6 @@ using namespace std::string_view_literals;
 
 using core::escape;
 using core::times;
-using core::toHexString;
 
 using std::array;
 using std::clamp;
@@ -394,6 +403,7 @@ void Screen::hardReset()
     _grid.reset();
     _cursor = {};
     _lastCursorPosition = {};
+    _outputStartMarking = OutputStartMarking::Unseen;
     resetProtection();
     resetKittyState();
     updateCursorIterator();
@@ -402,15 +412,46 @@ void Screen::hardReset()
 void Screen::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
 {
     ZoneScoped;
-    auto cursorPosition = _cursor.position;
 
     // Only reset margins when the page size actually changes (during a resize),
     // not during a simple page switch where the grid size already matches.
     auto const sizeChanged = (_grid.pageSize() != mainDisplayPageSize);
+    auto const columnsChanged = _grid.pageSize().columns != mainDisplayPageSize.columns;
 
-    // Ensure correct screen buffer size for the buffer we've just switched to.
-    cursorPosition = _grid.resize(mainDisplayPageSize, cursorPosition, _cursor.wrapPending);
-    cursorPosition = clampCoordinate(cursorPosition);
+    // The live prompt is left for the shell to redraw at the new width, rather than reflowed under it.
+    auto const prompt = columnsChanged ? unreflowedPrompt() : std::nullopt;
+    auto const reflows = [&](Cursor const& cursor) {
+        return _grid.reflowOnResize() && !(prompt && cursor.position.line >= prompt->firstLine);
+    };
+
+    // A pending wrap outlives the resize unless the column count changes and the cursor moves to where
+    // the wrap was going: a reflow takes it there, as does a widening, which has the room. A narrowing
+    // without reflow moves the cursor onto the new last column, where the wrap stays pending.
+    auto const wrapTaken = [&](Cursor const& cursor) {
+        return columnsChanged
+               && (reflows(cursor)
+                   || cursor.position.column < boxed_cast<ColumnOffset>(mainDisplayPageSize.columns));
+    };
+
+    // Ensure correct screen buffer size for the buffer we've just switched to. The cursor DECSC saved
+    // goes along with the live one, so DECRC after a reflow comes back to the same text.
+    auto const nextWritePosition = [&](Cursor const& cursor) {
+        return _grid.nextWritePosition(
+            mainDisplayPageSize, cursor.position, cursor.wrapPending ? WrapPending::Yes : WrapPending::No);
+    };
+    auto const widthBefore = _grid.pageSize().columns;
+    auto cursors = std::array { nextWritePosition(_cursor), nextWritePosition(_savedCursor) };
+    _grid.resize(mainDisplayPageSize,
+                 cursors,
+                 prompt ? std::optional { prompt->firstLine } : std::optional<LineOffset> {});
+    if (prompt)
+        renameUnreflowedPromptLines(*prompt,
+                                    cursors[0].line - _cursor.position.line,
+                                    WidthChange { .from = widthBefore, .to = mainDisplayPageSize.columns });
+    auto const cursorPosition = clampCoordinate(cursors[0]);
+    if (wrapTaken(_savedCursor))
+        _savedCursor.wrapPending = false;
+    _savedCursor.position = cursors[1]; // restoreCursor() holds it to the page
 
     if (sizeChanged)
     {
@@ -421,7 +462,7 @@ void Screen::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
         };
     }
 
-    if (_cursor.position.column < boxed_cast<ColumnOffset>(mainDisplayPageSize.columns))
+    if (wrapTaken(_cursor))
         _cursor.wrapPending = false;
 
     // update (last-)cursor position
@@ -527,7 +568,7 @@ void Screen::writeText(string_view text, size_t cellCount)
         // fresh buffer. Without this, the next PTY read reuses the same large buffer,
         // batching the subsequent output (e.g., shell prompt) into the same chunk —
         // preventing the display from refreshing between them.
-        if (auto const& buf = _terminal->parsingBuffer(); buf)
+        if (auto* const buf = _terminal->parsingBuffer())
             buf->advanceHotEndUntil(text.data() + *bulkWrittenUntil);
         _terminal->resetInstructionCounter();
     }
@@ -788,14 +829,47 @@ void Screen::writeTextInternal(char32_t sourceCodepoint)
     _terminal->resetInstructionCounter();
 }
 
+Screen::CharacterPlacement Screen::placeWideCharacter(int width) noexcept
+{
+    auto const lastColumn = lastWritableColumn();
+    auto const firstColumn = _terminal->isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins()
+                                 ? margin().horizontal.from
+                                 : ColumnOffset(0);
+    // At the start of its row the character fits nowhere better, and is written as it is.
+    if (_cursor.position.column + ColumnOffset::cast_from(width - 1) <= lastColumn
+        || _cursor.position.column == firstColumn)
+        return CharacterPlacement::Written;
+
+    if (!_terminal->isModeEnabled(DECMode::AutoWrap))
+        return CharacterPlacement::Dropped;
+
+    auto& line = currentLine();
+    auto const padding = _cursor.graphicsRendition.with(CellFlag::WrapPadding);
+    for (auto column = _cursor.position.column; column <= lastColumn; ++column)
+    {
+        if (cellCouldBelongToMulticell(line.useCellAt(column)))
+            eraseMulticellBlockAt(CellLocation { .line = _cursor.position.line, .column = column });
+        line.useCellAt(column).reset(padding, _cursor.hyperlink);
+        _terminal->markCellDirty(CellLocation { .line = _cursor.position.line, .column = column });
+    }
+    _cursor.wrapPending = true;
+    crlfIfWrapPending();
+    return CharacterPlacement::Written;
+}
+
 void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 {
+    // Measured once: the placement, the room IRM makes and the cell itself all take the same width.
+    auto const width = unicode::width(codepoint);
+
+    // A character wider than the room left before the margin goes to the next row, as in xterm, foot
+    // and kitty, or, without autowrap, is dropped, as xterm drops it (measured).
+    if (width > 1 && placeWideCharacter(static_cast<int>(width)) == CharacterPlacement::Dropped)
+        return;
+
     // IRM: shift existing cells right to make room for the new character
     if (_terminal->isModeEnabled(AnsiMode::Insert))
-    {
-        auto const width = ColumnCount::cast_from(unicode::width(codepoint));
-        insertChars(realCursorPosition().line, width);
-    }
+        insertChars(realCursorPosition().line, ColumnCount::cast_from(width));
 
     Line& line = currentLine();
 
@@ -834,10 +908,7 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 
     auto const oldWidth = cell.width();
 
-    cell.write(_cursor.graphicsRendition,
-               codepoint,
-               static_cast<uint8_t>(unicode::width(codepoint)),
-               _cursor.hyperlink);
+    cell.write(_cursor.graphicsRendition, codepoint, static_cast<uint8_t>(width), _cursor.hyperlink);
 
     _lastCursorPosition = _cursor.position;
 
@@ -1012,10 +1083,12 @@ std::string Screen::screenshot(function<string(LineOffset)> const& postLine) con
 
     for (int const line: iota(0, *pageSize().lines))
     {
+        // A line break between rows only: one after the last would scroll the replayed page by a row.
+        if (line > 0)
+            writer.crlf();
         writer.write(_grid.lineAt(LineOffset(line)));
         if (postLine)
             writer.write(postLine(LineOffset(line)));
-        writer.crlf();
     }
 
     return result.str();
@@ -1032,7 +1105,7 @@ optional<LineOffset> Screen::findMarkerUpwards(LineOffset startLine) const
     startLine = std::min(startLine, boxed_cast<LineOffset>(pageSize().lines - 1));
 
     for (LineOffset i = startLine - 1; i >= -boxed_cast<LineOffset>(historyLineCount()); --i)
-        if (_grid.lineAt(i).marked())
+        if (_grid.lineAt(i).isFlagEnabled(NavigationMarkFlags))
             return { i };
 
     return nullopt;
@@ -1050,7 +1123,7 @@ optional<LineOffset> Screen::findMarkerDownwards(LineOffset startLine) const
     auto const bottom = LineOffset(0);
 
     for (LineOffset i = top + 1; i <= bottom; ++i)
-        if (_grid.lineAt(i).marked())
+        if (_grid.lineAt(i).isFlagEnabled(NavigationMarkFlags))
             return { i };
 
     return nullopt;
@@ -1155,10 +1228,52 @@ void Screen::linefeed(ColumnOffset newColumn)
     // debug build; in a release build it is simply a cursor pointing outside the grid.
 }
 
+void Screen::followRowMove(std::optional<RowMove> const& move)
+{
+    if (!move)
+        return;
+
+    // The shell marks the prompt in progress on whichever screen it draws it.
+    _livePromptMarks.follow(*move);
+
+    if (this != &_terminal->primaryScreen())
+        return;
+
+    // The rows as they stand, before the scroll: what their ids name now is what moves or goes.
+    auto const top = _grid.stableLineIdOf(LineOffset(0));
+    auto const rows = std::views::iota(move->changed.first - top, move->changed.last - top + 1)
+                      | std::views::transform([this](int64_t offset) -> Line const& {
+                            return _grid.lineAt(LineOffset::cast_from(offset));
+                        });
+    if (std::ranges::any_of(rows, [](Line const& row) { return row.blockId() != CommandBlockId {}; }))
+        _terminal->commandBlockRowsMoved(*move);
+    if (std::ranges::any_of(rows, [](Line const& row) { return row.flags().any(ShellMarkLineFlags); }))
+        _terminal->foldRowsMoved(*move);
+    if (std::ranges::any_of(rows, [](Line const& row) { return row.isFlagEnabled(LineFlag::UserMark); }))
+        _terminal->userMarkRowsMoved(*move);
+}
+
+void Screen::followScrollUp(LineCount n, Margin margin)
+{
+    followRowMove(_grid.rowMoveOfScrollUp(n, margin));
+}
+
 void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
 {
     ZoneScoped;
-    auto const scrollCount = _grid.scrollUp(n, sgr, margin);
+    auto const isFullPageMargin =
+        margin.horizontal.from.value == 0 && margin.horizontal.to.value + 1 == pageSize().columns.value
+        && margin.vertical.from.value == 0 && margin.vertical.to.value + 1 == pageSize().lines.value;
+
+    // A scroll of the whole page carries every row along with its id, so there is no row move to follow
+    // (Grid::rowMoveOfScrollUp() says so too), and no margin for the grid to look at either: the line
+    // feed that scrolls the page goes straight to the grid's whole-page scroll.
+    auto const scrollCount = [&]() {
+        if (isFullPageMargin) [[likely]]
+            return _grid.scrollUp(n, sgr);
+        followScrollUp(n, margin);
+        return _grid.scrollUp(n, sgr, margin);
+    }();
     updateCursorIterator();
 
     // Only notify the viewport/Vi-cursor/selection of a scrollback scroll when the
@@ -1166,9 +1281,6 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
     // (e.g. a top-anchored partial DECSTBM region) may still feed lines into
     // scrollback, but the live area below the region did not move, so shifting the
     // viewport, the Normal-mode cursor, or the active selection would be wrong.
-    auto const isFullPageMargin =
-        margin.horizontal.from.value == 0 && margin.horizontal.to.value + 1 == pageSize().columns.value
-        && margin.vertical.from.value == 0 && margin.vertical.to.value + 1 == pageSize().lines.value;
     if (isFullPageMargin)
         _terminal->onBufferScrolled(scrollCount);
 
@@ -1188,12 +1300,14 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
 void Screen::scrollDown(LineCount n, Margin margin)
 {
     ZoneScoped;
+    followRowMove(_grid.rowMoveOfScrollDown(n, margin));
     _grid.scrollDown(n, cursor().graphicsRendition, margin);
     updateCursorIterator();
 }
 
 void Screen::unscroll(LineCount n)
 {
+    followRowMove(_grid.rowMoveOfUnscroll(n));
     _grid.unscroll(n, cursor().graphicsRendition);
     updateCursorIterator();
 }
@@ -1235,11 +1349,15 @@ void Screen::linefeed()
     if (_terminal->isModeEnabled(DECMode::SmoothScroll)
         && _terminal->settings().smoothLineScrolling.count() != 0)
     {
-        _terminal->unlock();
-        auto const _ = core::Finally([&]() { _terminal->lock(); });
-        if (!_terminal->isRenderingSuppressed())
-            _terminal->screenUpdated();
-        sleepFor(_terminal->settings().smoothLineScrolling);
+        // Brought down to the output before it is shown, under the lock, as at the end of a parse batch. The
+        // pause is read under it too, as a reload sets it under the lock.
+        _terminal->followOutput();
+        auto const pause = _terminal->settings().smoothLineScrolling;
+        _terminal->runWithOwnStateLockReleased([&] {
+            if (!_terminal->isRenderingSuppressed())
+                _terminal->screenUpdated();
+            sleepFor(pause);
+        });
     }
 
     // If coming through stdout-fastpipe, the LF acts like CRLF.
@@ -1295,12 +1413,17 @@ void Screen::reportCursorPosition()
     reply("\033[{};{}R", logicalCursorPosition().line + 1, logicalCursorPosition().column + 1);
 }
 
+void Screen::reportMacroSpace()
+{
+    // DECMSR: "the number of bytes available for macro definitions divided by 16 (rounded down)".
+    reply("\033[{}*{{", _terminal->macroSpaceAvailable() / 16);
+}
+
 void Screen::reportMacroSpaceChecksum(unsigned requestId)
 {
-    // DECCKSR. There is no macro memory to checksum, so the checksum of it is zero -- but the reply
-    // still carries back the id it was asked with, which is how an application with several requests in
-    // flight tells the answers apart.
-    reply("\033P{}!~0000\033\\", requestId);
+    // DECCKSR: "four hexadecimal digits ... indicating the checksum" (DEC STD 070) -- and the id the request
+    // was tagged with, which is how an application with several requests in flight tells the answers apart.
+    reply("\033P{}!~{:04X}\033\\", requestId, _terminal->macroChecksum());
 }
 
 void Screen::reportColorPaletteUpdate()
@@ -1463,10 +1586,71 @@ void Screen::sendTerminalId()
     reply("\033[>{};{};{}c", pp, Pv, Pc);
 }
 
+Line& Screen::eraseRowInPlace(LineOffset line, LineFlags flags, GraphicsAttributes attributes) noexcept
+{
+    auto& row = _grid.lineAt(line);
+    auto const block = row.blockId();
+    auto const before = row.flags();
+    row.reset(flags, attributes);
+    if (line == _cursor.position.line)
+        row.adoptProvenance(_stamp);
+
+    // The row may have headed its block, whose heads are then looked at again when next read, and it may
+    // have carried a vi mark, which the scrollbar's index of them then forgets.
+    noteRowRewritten(line, block, before);
+
+    // A fold may have hung off the row, or ended on it: the cached ranges are scanned again, as a mark
+    // stamped or cleared through setLogicalLineFlags() has them.
+    if ((row.flags() & ShellMarkLineFlags) != (before & ShellMarkLineFlags))
+        _terminal->invalidateFoldRanges();
+    return row;
+}
+
+void Screen::noteBlockRowChange(CommandBlockId block, LineFlags flags, Line const& row) noexcept
+{
+    if (block != CommandBlockId {}
+        && (row.blockId() != block || (row.flags() & BlockHeadLineFlags) != (flags & BlockHeadLineFlags)))
+        ++_blockRowChanges;
+}
+
+void Screen::noteUserMarkChange(LineOffset line, LineFlags before) noexcept
+{
+    // The primary screen only: the alternate screen has no scrollback for a tick to point into.
+    auto const marked = _grid.lineAt(line).isFlagEnabled(LineFlag::UserMark);
+    if (marked == before.test(LineFlag::UserMark) || this != &_terminal->primaryScreen())
+        return;
+
+    _terminal->userMarkChanged(_grid.stableLineIdOf(line),
+                               marked ? UserMarkChange::Added : UserMarkChange::Removed);
+}
+
+void Screen::noteRowRewritten(LineOffset line, CommandBlockId block, LineFlags before) noexcept
+{
+    noteBlockRowChange(block, before, std::as_const(_grid).lineAt(line));
+    noteUserMarkChange(line, before);
+}
+
+void Screen::endWrapBelow(LineOffset line) noexcept
+{
+    if (line + 1 < boxed_cast<LineOffset>(pageSize().lines))
+        _grid.lineAt(line + 1).setWrapped(false);
+}
+
+void Screen::forgetCursorRowErasedWhole() noexcept
+{
+    auto& row = currentLine();
+    auto const before = row.flags();
+    row.flags().disable(LineRenditionFlags);
+    row.flags().disable(LineFlag::UserMark);
+    noteUserMarkChange(_cursor.position.line, before);
+}
+
 // {{{ ED
 
 void Screen::clearToEndOfScreen()
 {
+    endWrapBelow(_cursor.position.line);
+
     // Under ISO protection a regular ED must spare the ISO-guarded cells -- which is the selective
     // erase sparing CharacterProtectedISO, so delegate rather than duplicate the per-cell skip logic.
     if (eraseSkipsProtectedCells())
@@ -1476,12 +1660,13 @@ void Screen::clearToEndOfScreen()
     }
 
     clearToEndOfLine();
+    // From the first column, ED erases the cursor's row whole, like every row below it.
+    if (_cursor.position.column == ColumnOffset(0))
+        forgetCursorRowErasedWhole();
 
     for (auto const lineOffset: iota(unbox(_cursor.position.line) + 1, unbox(pageSize().lines)))
-    {
-        Line& line = _grid.lineAt(LineOffset::cast_from(lineOffset));
-        line.reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
-    }
+        eraseRowInPlace(
+            LineOffset::cast_from(lineOffset), _grid.defaultLineFlags(), _cursor.graphicsRendition);
 }
 
 void Screen::clearToBeginOfScreen()
@@ -1493,12 +1678,16 @@ void Screen::clearToBeginOfScreen()
     }
 
     clearToBeginOfLine();
+    // The row above is erased, so the cursor's row no longer continues it.
+    if (_cursor.position.line > LineOffset(0))
+        endWrapBelow(_cursor.position.line - 1);
+    // To the last column, it erases the cursor's row whole, like every row above it.
+    if (_cursor.position.column == boxed_cast<ColumnOffset>(pageSize().columns) - 1)
+        forgetCursorRowErasedWhole();
 
     for (auto const lineOffset: iota(0, *_cursor.position.line))
-    {
-        Line& line = _grid.lineAt(LineOffset::cast_from(lineOffset));
-        line.reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
-    }
+        eraseRowInPlace(
+            LineOffset::cast_from(lineOffset), _grid.defaultLineFlags(), _cursor.graphicsRendition);
 }
 
 void Screen::clearScreen()
@@ -1519,6 +1708,19 @@ void Screen::clearScreen()
     // ED 2 erases the WHOLE screen regardless of any DECSTBM/DECSLRM scrolling region (the region is
     // ignored -- xterm), so scroll the full page into history, not just the current margin band.
     scrollUp(_grid.pageSize().lines, Terminal::makeDefaultMargin(_grid.pageSize()));
+}
+
+LineCount Screen::dropRowsAbove(LineOffset head)
+{
+    auto const shift = _grid.dropRowsAbove(head);
+    auto const raised = [shift](LineOffset line) {
+        return std::max(line - boxed_cast<LineOffset>(shift), LineOffset(0));
+    };
+    _cursor.position.line = raised(_cursor.position.line);
+    _savedCursor.position.line = raised(_savedCursor.position.line);
+    _lastCursorPosition.line = raised(_lastCursorPosition.line); // where the next chunk continues a cluster
+    updateCursorIterator();
+    return shift;
 }
 // }}}
 
@@ -1563,10 +1765,7 @@ void Screen::selectiveEraseToEndOfLine(CellFlag protectedFlag)
 
 void Screen::selectiveEraseToBeginOfLine(CellFlag protectedFlag)
 {
-    if (isFullHorizontalMargins() && _cursor.position.column.value == pageSize().columns.value)
-        selectiveEraseLine(_cursor.position.line, protectedFlag);
-    else
-        selectiveErase(_cursor.position.line, ColumnOffset(0), _cursor.position.column + 1, protectedFlag);
+    selectiveErase(_cursor.position.line, ColumnOffset(0), _cursor.position.column + 1, protectedFlag);
 }
 
 void Screen::selectiveEraseLine(LineOffset line, CellFlag protectedFlag)
@@ -1578,8 +1777,7 @@ void Screen::selectiveEraseLine(LineOffset line, CellFlag protectedFlag)
         return;
     }
 
-    auto& targetLine = _grid.lineAt(line);
-    targetLine.reset(targetLine.flags(), _cursor.graphicsRendition);
+    eraseRowInPlace(line, _grid.lineAt(line).flags(), _cursor.graphicsRendition);
 
     auto const left = ColumnOffset(0);
     auto const right = boxed_cast<ColumnOffset>(pageSize().columns - 1);
@@ -1704,6 +1902,8 @@ void Screen::selectiveEraseArea(Rect area, CellFlag protectedFlag)
 
 void Screen::clearToEndOfLine()
 {
+    endWrapBelow(_cursor.position.line);
+
     if (eraseSkipsProtectedCells())
     {
         selectiveEraseToEndOfLine(CellFlag::CharacterProtectedISO);
@@ -1712,7 +1912,7 @@ void Screen::clearToEndOfLine()
 
     if (isFullHorizontalMargins() && _cursor.position.column.value == 0)
     {
-        currentLine().reset(currentLine().flags(), _cursor.graphicsRendition);
+        eraseRowInPlace(_cursor.position.line, currentLine().flags(), _cursor.graphicsRendition);
         return;
     }
 
@@ -1766,7 +1966,7 @@ void Screen::clearLine()
         return;
     }
 
-    currentLine().reset(currentLine().flags(), _cursor.graphicsRendition);
+    eraseRowInPlace(_cursor.position.line, currentLine().flags(), _cursor.graphicsRendition);
 
     auto const line = _cursor.position.line;
     auto const left = ColumnOffset(0);
@@ -2643,7 +2843,10 @@ void Screen::screenAlignmentPattern()
     // once lines have scrolled into history the page wraps its physical end and a span would run off
     // the buffer.
     for (auto const line: std::views::iota(0, *pageSize().lines))
-        _grid.lineAt(LineOffset(line)).fill(_grid.defaultLineFlags(), GraphicsAttributes {}, U'E', 1);
+    {
+        auto& row = eraseRowInPlace(LineOffset(line), _grid.defaultLineFlags(), GraphicsAttributes {});
+        row.fill(ColumnOffset(0), GraphicsAttributes {}, std::string(unbox<size_t>(row.size()), 'E'));
+    }
 }
 
 void Screen::applicationKeypadMode(bool enable)
@@ -3148,39 +3351,14 @@ void Screen::requestTabStops()
     reply(dcs.str());
 }
 
-namespace
-{
-    std::string asHex(std::string_view value)
-    {
-        std::string output;
-        for (char const ch: value)
-            output += std::format("{:02X}", unsigned(ch));
-        return output;
-    }
-} // namespace
-
 void Screen::requestCapability(std::string_view name)
 {
-    if (booleanCapability(name))
-        reply("\033P1+r{}\033\\", toHexString(name));
-    else if (auto const value = numericCapability(name); value != Database::Npos)
-        reply("\033P1+r{}={}\033\\", toHexString(name), asHex(std::to_string(value)));
-    else if (auto const value = stringCapability(name); !value.empty())
-        reply("\033P1+r{}={}\033\\", toHexString(name), asHex(value));
-    else
-        reply("\033P0+r\033\\");
+    reply(capabilities::capabilityReply(*this, name));
 }
 
 void Screen::requestCapability(capabilities::Code code)
 {
-    if (booleanCapability(code))
-        reply("\033P1+r{}\033\\", code.hex());
-    else if (auto const value = numericCapability(code); value != Database::Npos)
-        reply("\033P1+r{}={}\033\\", code.hex(), asHex(std::to_string(value)));
-    else if (auto const value = stringCapability(code); !value.empty())
-        reply("\033P1+r{}={}\033\\", code.hex(), asHex(value));
-    else
-        reply("\033P0+r\033\\");
+    reply(capabilities::capabilityReply(*this, code));
 }
 
 void Screen::resetDynamicColor(DynamicColorName name)
@@ -3279,6 +3457,7 @@ void Screen::inspect(std::string const& message, std::ostream& os) const
         // auto const absoluteLine = _grid.toAbsoluteLine(lineNo);
         return std::format("{} {:>4}: {}", ":", lineNo.value, _grid.lineAt(lineNo).flags());
     });
+    os << "\r\n"; // the screenshot ends its last row without one
     hline();
     _terminal->imagePool().inspect(os);
     hline();
@@ -3758,10 +3937,10 @@ namespace impl
 
         /// One DECDSR (`CSI ? Ps n`) request whose answer never changes.
         ///
-        /// A terminal with no printer, no user-defined keys, no macro memory and no session multiplexer
-        /// still has to *say so*, in the words the standard gives it. Most of DECDSR is exactly that: a
-        /// fixed answer to a fixed question. The two that are not -- the cursor's position, and the
-        /// checksum of a macro memory that does not exist -- are handled apart from this table.
+        /// A terminal with no printer, no user-defined keys and no session multiplexer still has to *say
+        /// so*, in the words the standard gives it. Most of DECDSR is exactly that: a fixed answer to a
+        /// fixed question. Those that are not -- the cursor's position, the room left for macros, and the
+        /// checksum of the macro definitions -- are handled apart from this table.
         ///
         /// Adding a report is adding a row.
         struct DeviceStatusReport
@@ -3784,9 +3963,6 @@ namespace impl
                                  .reply = "\033[?50n",
                                  .comment = "Locator, xterm's spelling of the same question" },
             DeviceStatusReport { .request = 56, .reply = "\033[?57;0n", .comment = "Locator type: unknown" },
-            DeviceStatusReport { .request = 62,
-                                 .reply = "\033[0*{",
-                                 .comment = "DECMSR: no macro space, because there are no macros" },
             DeviceStatusReport { .request = 75,
                                  .reply = "\033[?70n",
                                  .comment = "Data integrity: no errors. There is no link to have any." },
@@ -3796,9 +3972,14 @@ namespace impl
 
         /// DECDSR -- `CSI ? Ps n`, the device status reports.
         // NOLINTNEXTLINE(readability-identifier-naming): VT mnemonic, spelled as the standard does.
-        ApplyResult DSR(Sequence const& seq, Screen& screen)
+        ApplyResult DSR(Sequence const& seq, Screen& screen, VTType operatingLevel)
         {
             auto const request = seq.paramOr(0, 0u);
+
+            // The macro reports are Level 4 in DEC STD 070, as the macros they report on are; xterm, too,
+            // leaves them unanswered below VT420.
+            auto const reportsOnMacros =
+                conformanceLevelOf(operatingLevel) >= conformanceLevelOf(VTType::VT420);
 
             switch (request)
             {
@@ -3806,10 +3987,17 @@ namespace impl
                     // DECXCPR: the cursor's position, and the page it is on.
                     screen.reportExtendedCursorPosition();
                     return ApplyResult::Ok;
+                case 62:
+                    // DECMSR: the room left for macro definitions.
+                    if (!reportsOnMacros)
+                        return ApplyResult::Unsupported;
+                    screen.reportMacroSpace();
+                    return ApplyResult::Ok;
                 case 63:
-                    // DECCKSR: the checksum of the macro memory. There are no macros, so it is zero --
-                    // but the reply still carries back the id the request was tagged with, so that an
-                    // application issuing several can tell the answers apart.
+                    // DECCKSR: the checksum of the macro definitions, with the id the request was tagged
+                    // with, so that an application issuing several can tell the answers apart.
+                    if (!reportsOnMacros)
+                        return ApplyResult::Unsupported;
                     screen.reportMacroSpaceChecksum(seq.paramOr(1, 0u));
                     return ApplyResult::Ok;
                 case ColorPaletteUpdateDsrRequestId:
@@ -6247,74 +6435,153 @@ namespace
     constexpr auto SBQueryResponseAuthFailed = std::string_view("\033P>3b\033\\");
     constexpr auto DcsTerminator = std::string_view("\033\\");
 
-    /// JSON-encodes a string value, escaping special characters.
-    std::string jsonEscape(std::string_view input)
+    /// The text of one command block as the semantic-block query reply reports it.
+    struct CommandBlockText
     {
-        auto result = std::string {};
-        result.reserve(input.size() + 2);
-        result += '"';
-        for (auto const ch: input)
-        {
-            switch (ch)
-            {
-                case '"': result += "\\\""; break;
-                case '\\': result += "\\\\"; break;
-                case '\b': result += "\\b"; break;
-                case '\f': result += "\\f"; break;
-                case '\n': result += "\\n"; break;
-                case '\r': result += "\\r"; break;
-                case '\t': result += "\\t"; break;
-                default:
-                    if (static_cast<unsigned char>(ch) < 0x20)
-                        result +=
-                            std::format("\\u{:04x}", static_cast<unsigned>(static_cast<unsigned char>(ch)));
-                    else
-                        result += ch;
-                    break;
-            }
-        }
-        result += '"';
-        return result;
-    }
+        std::string prompt;      ///< Its prompt lines, which hold the command the user typed.
+        std::string output;      ///< What the command printed.
+        int outputLineCount = 0; ///< The number of lines @ref output spans.
+    };
 
-    /// Formats a single CommandBlockInfo as a JSON object.
-    std::string formatBlockJson(CommandBlockInfo const& block,
-                                std::string_view prompt,
-                                std::string_view output,
-                                int outputLineCount)
+    /// Formats a single command block as a JSON object.
+    ///
+    /// The command line is untrusted -- whatever wrote to the PTY reported it -- and the reply goes back to
+    /// the PTY, so it is sanitised as for insertion first, as every other sink reads it through
+    /// CommandLineText.
+    /// @param block The block's record.
+    /// @param text The text of its own rows.
+    std::string formatBlockJson(CommandBlockRecord const& block, CommandBlockText const& text)
     {
         return std::format(
             R"({{"command":{},"prompt":{},"output":{},"exitCode":{},"finished":{},"outputLineCount":{}}})",
-            block.commandLine ? jsonEscape(*block.commandLine) : "null",
-            jsonEscape(prompt),
-            jsonEscape(output),
-            block.exitCode,
-            block.finished ? "true" : "false",
-            outputLineCount);
+            block.commandLineSource != CommandLineSource::None ? jsonString(block.commandLine.insertable())
+                                                               : "null",
+            jsonString(text.prompt),
+            jsonString(text.output),
+            block.exitCode.value_or(-1),
+            block.state == CommandBlockState::Finished ? "true" : "false",
+            text.outputLineCount);
     }
 
-    /// Feeds a Screen's grid to the command-block scanner, walking backwards from a starting line.
+    /// How many columns zsh leaves between a right prompt and the right margin by default
+    /// (ZLE_RPROMPT_INDENT).
+    constexpr auto MaxRightPromptIndent = 1;
+
+    /// How many blanks at least set a right prompt apart from what precedes it on its row.
+    constexpr auto MinRightPromptGap = 2;
+
+    /// Where a right prompt begins on the logical line whose rows are [@p head, @p last], guessed from its
+    /// looks alone: the fallback for a line the shell marked none on (OSC 133;P;k=r), as zsh's integrations
+    /// do not.
     ///
-    /// The adapter half of the CommandBlockLineSource seam: the state machine itself lives in
-    /// CommandBlocks.cpp and knows nothing about a Grid, which is what lets it be tested against a plain
-    /// vector of lines.
+    /// zsh's RPROMPT stays beside the typed command once Enter is pressed (unless TRANSIENT_RPROMPT is set).
+    /// So a run of text on the last row that ends at the right margin, or at most MaxRightPromptIndent
+    /// columns short of it, and stands at least MinRightPromptGap blanks clear of what precedes it, is taken
+    /// for a right prompt. The price: typed input that itself reaches the margin after such a run of blanks
+    /// is cut there too.
+    /// @param grid The grid the rows are in.
+    /// @param head The logical line's head.
+    /// @param last Its last row, where the right margin is.
+    /// @param begin The logical column the input begins at; nothing before it is looked at.
+    /// @return The logical column the right prompt begins at, or nullopt when there seems to be none.
+    [[nodiscard]] std::optional<ColumnOffset> guessedRightPromptColumn(Grid const& grid,
+                                                                       LineOffset head,
+                                                                       LineOffset last,
+                                                                       ColumnOffset begin)
+    {
+        auto const width = unbox<int>(grid.pageSize().columns);
+        auto const rowStart = (unbox<int>(last) - unbox<int>(head)) * width;
+        auto const& row = grid.lineAt(last);
+        auto const rowEnd = std::min(width, unbox<int>(row.size()));
+
+        auto blanks = 0;
+        auto continuation = 0; // the cells a wide character covers beyond its first
+        auto runStart = std::optional<int> {};
+        auto runEnd = -1;
+        for (auto const column: std::views::iota(std::clamp(unbox<int>(begin) - rowStart, 0, rowEnd), rowEnd))
+        {
+            if (continuation > 0)
+            {
+                --continuation;
+                continue;
+            }
+            auto const cell = ColumnOffset::cast_from(column);
+            if (row.cellEmptyAt(cell))
+            {
+                ++blanks;
+                continue;
+            }
+            if (blanks >= MinRightPromptGap)
+                runStart = column;
+            blanks = 0;
+            continuation = row.cellWidthAt(cell) - 1;
+            runEnd = column + continuation;
+        }
+
+        if (!runStart || runEnd < width - 1 - MaxRightPromptIndent)
+            return std::nullopt;
+        return ColumnOffset::cast_from(rowStart + *runStart);
+    }
+
+    /// @return The logical line whose head is @p head, by the name a scroll keeps.
+    [[nodiscard]] StableLine stableLineAt(Grid const& grid, LineOffset head) noexcept
+    {
+        return StableLine { .id = grid.stableLineIdOf(head), .generation = grid.stableIdGeneration() };
+    }
+
+    /// Where a right prompt begins on the logical line [@p head, @p last] of the prompt in progress, if it
+    /// carries one.
+    ///
+    /// Where the shell marked one (OSC 133;P;k=r), there -- unless the command has been drawn over it since:
+    /// zsh shows RPROMPT only while a blank at least stands between it and the command, and draws the command
+    /// over it once the command reaches it. Where the shell marked none, guessedRightPromptColumn() guesses,
+    /// on a line it marked the input's beginning on.
+    /// @param grid The grid the rows are in.
+    /// @param marks What the shell marked on the lines of the prompt in progress.
+    /// @param head The logical line's head.
+    /// @param last Its last row.
+    /// @param promptEnd Where on this line the input begins, if the shell marked it (;B).
+    /// @return The logical column the right prompt begins at, or nullopt when there is none.
+    [[nodiscard]] std::optional<ColumnOffset> rightPromptColumn(Grid const& grid,
+                                                                LivePromptMarks const& marks,
+                                                                LineOffset head,
+                                                                LineOffset last,
+                                                                std::optional<ColumnOffset> promptEnd)
+    {
+        auto const begin = promptEnd.value_or(ColumnOffset(0));
+        auto const marked = marks.rightPromptOn(stableLineAt(grid, head));
+        if (!marked)
+            return promptEnd ? guessedRightPromptColumn(grid, head, last, begin) : std::nullopt;
+        if (*marked <= begin)
+            return std::nullopt;
+
+        // The cell left of it, which a blank must still fill; a mark past the line's rows has none.
+        auto const column = *marked - ColumnOffset(1);
+        auto const before = grid.cellAtLogicalColumn(head, column, last);
+        if (grid.logicalColumnOf(before) != column || !grid.lineAt(before.line).cellEmptyAt(before.column))
+            return std::nullopt;
+        return marked;
+    }
+
+    /// Feeds a Screen's grid to the live-prompt and fold scans, walking backwards from a starting line.
+    ///
+    /// The adapter half of the PromptRegionLineSource and FoldLineSource seams: the scans themselves live in
+    /// PromptRegion.cpp and Folding.cpp and know nothing about a Grid, which is what lets them be tested
+    /// against a plain vector of lines.
     ///
     /// It presents the grid's physical lines as the LOGICAL lines the shell actually wrote: a head plus
     /// the continuations a wrap chopped it into are one line here, which is the only unit the OSC 133
     /// marks are stamped on and therefore the only unit a resize cannot disturb.
     ///
     /// The walk is LAZY, and that is the whole point of hasLineAt() being a predicate rather than a count:
-    /// this runs on the GUI thread, under the terminal lock, on every right-click. Counting the logical
-    /// lines up front would mean climbing the entire scrollback — 100'000 lines at the configurable limit —
-    /// before the scan had looked at a single flag, when the scan wants the handful of lines above the
-    /// cursor that hold the last command. So it climbs exactly as far as it is asked to, and keeps nothing
-    /// but the line it is standing on: the scan is a single forward pass, so nothing older is ever needed.
-    // Implements ALL THREE line sources: the scans walk the same lazy, reflow-safe climb over logical
-    // lines, differing only in what they ask about each one. One hasLineAt() override satisfies them all.
-    class GridCommandBlockLines final:
-        public CommandBlockLineSource,
-        public PromptRegionLineSource,
-        public FoldLineSource
+    /// this runs under the terminal lock. Counting the logical lines up front would mean climbing the entire
+    /// scrollback — 100'000 lines at the configurable limit — before the scan had looked at a single flag,
+    /// when a scan wants the handful of lines above where it starts. So it climbs exactly as far as it is
+    /// asked to, and keeps nothing but the line it is standing on: the scan is a single forward pass, so
+    /// nothing older is ever needed.
+    // Implements both line sources: the scans walk the same lazy, reflow-safe climb over logical lines,
+    // differing only in what they ask about each one. One hasLineAt() override satisfies both.
+    class GridCommandBlockLines final: public PromptRegionLineSource, public FoldLineSource
     {
       public:
         /// @param grid The grid to walk. Must outlive this source.
@@ -6358,21 +6625,6 @@ namespace
             return _grid.stableLineIdOf(extentOf(index).second);
         }
 
-        [[nodiscard]] std::string textAt(size_t index) const override
-        {
-            return textOfLogicalLine(index, ColumnOffset(0), std::nullopt);
-        }
-
-        [[nodiscard]] std::string textBeforeCommandEndAt(size_t index) const override
-        {
-            return textOfLogicalLine(index, ColumnOffset(0), headAt(index).commandEndOffset());
-        }
-
-        [[nodiscard]] std::string textFromCommandEndAt(size_t index) const override
-        {
-            return textOfLogicalLine(index, headAt(index).commandEndOffset(), std::nullopt);
-        }
-
       private:
         /// Climbs to the logical line @p index, one line at a time, and stands there.
         /// @return false once the walk has run past the top of the history — there is no such line.
@@ -6409,33 +6661,6 @@ namespace
             return { _head, std::max(_head, last) };
         }
 
-        /// The text of the logical line @p index over its columns [@p begin, @p end), trailing blanks
-        /// dropped. Columns are counted across the whole logical line, so they run straight through the
-        /// wraps — which is exactly what makes a command-end offset survive a resize.
-        [[nodiscard]] std::string textOfLogicalLine(size_t index,
-                                                    ColumnOffset begin,
-                                                    std::optional<ColumnOffset> end) const
-        {
-            auto const [first, last] = extentOf(index);
-            auto const width = _grid.pageSize().columns;
-
-            auto text = std::string {};
-            for (auto line = first; line <= last; ++line)
-            {
-                auto const lineBegin = ColumnOffset::cast_from((*line - *first) * *width);
-                auto const lineEnd = lineBegin + boxed_cast<ColumnOffset>(width);
-                if (end.has_value() && lineBegin >= *end)
-                    break;
-                auto const from = std::max(begin, lineBegin) - lineBegin;
-                auto const to = (end.has_value() ? std::min(*end, lineEnd) : lineEnd) - lineBegin;
-                if (from < to)
-                    text += _grid.lineAt(line).toUtf8(from, to);
-            }
-
-            text.resize(core::trimRight(text).size());
-            return text;
-        }
-
         Grid const& _grid;
         LineOffset _fromLine;
         LineOffset _historyTop;
@@ -6465,154 +6690,87 @@ void Screen::handleSemanticBlockQuery(Sequence const& seq)
         return;
     }
 
-    auto const candidateToken = SemanticBlockTracker::Token {
-        static_cast<uint16_t>(seq.param(2)),
-        static_cast<uint16_t>(seq.param(3)),
-        static_cast<uint16_t>(seq.param(4)),
-        static_cast<uint16_t>(seq.param(5)),
-    };
+    // A part left out is not the part zero, and the parser reads every number past 65535 as 65535, which
+    // therefore stands for all of them: a token never has such a part, so none out of range can match.
+    auto candidateToken = SemanticBlockTracker::Token {};
+    for (auto const index: std::views::iota(size_t { 0 }, candidateToken.size()))
+    {
+        auto const part = seq.paramOpt<uint16_t>(index + 2);
+        if (!part || *part > MaxSemanticBlockTokenPart)
+        {
+            reply(SBQueryResponseAuthFailed);
+            return;
+        }
+        candidateToken[index] = *part;
+    }
     if (!tracker.validateToken(candidateToken))
     {
         reply(SBQueryResponseAuthFailed);
         return;
     }
 
-    auto const queryType = seq.paramOr(0, SBQueryType::LastCommand);
-    auto const count = seq.paramOr(1, 1); // Pn: count (default 1)
-
-    auto const& completedBlocks = tracker.completedBlocks();
-
-    // Handle in-progress query.
-    if (queryType == SBQueryType::InProgress)
+    auto const& blocks = _terminal->commandBlocks();
+    switch (seq.paramPositiveOr(0, SBQueryType::LastCommand)) // Ps: a zero, like none, is the default
     {
-        handleInProgressQuery(tracker);
-        return;
-    }
-
-    // Handle last completed command(s).
-    handleCompletedBlocksQuery(tracker, completedBlocks, queryType, count);
-}
-
-void Screen::handleInProgressQuery(SemanticBlockTracker const& tracker)
-{
-    auto const& currentBlock = tracker.currentBlock();
-    if (!currentBlock || currentBlock->finished)
-    {
-        reply(SBQueryResponseDisabled);
-        return;
-    }
-
-    auto const cursorLine = cursor().position.line;
-
-    // Find the most recent OutputStart line by scanning backward from cursor.
-    auto const [foundOutputStart, outputStartLine] = [&]() -> std::pair<bool, LineOffset> {
-        for (auto line = cursorLine; line >= LineOffset(0); --line)
-            if (_grid.lineAt(line).isFlagEnabled(LineFlag::OutputStart))
-                return { true, line };
-        return { false, cursorLine };
-    }();
-
-    // Collect output text from OutputStart to cursor.
-    auto outputText = std::string {};
-    auto outputLineCount = 0;
-    if (foundOutputStart)
-    {
-        for (auto line: std::views::iota(*outputStartLine, *cursorLine + 1))
-        {
-            auto const lineOffset = LineOffset::cast_from(line);
-            if (lineOffset != outputStartLine)
-                outputText += '\n';
-            outputText += _grid.lineAt(lineOffset).toUtf8Trimmed(false, true);
-            ++outputLineCount;
-        }
-    }
-
-    // Collect prompt text by scanning backward from OutputStart to find the Marked line.
-    auto promptText = std::string {};
-    if (foundOutputStart)
-    {
-        for (auto line = outputStartLine - 1; line >= LineOffset(0); --line)
-        {
-            if (_grid.lineAt(line).isFlagEnabled(LineFlag::Marked))
-            {
-                for (auto pl: std::views::iota(*line, *outputStartLine))
-                {
-                    auto const plOffset = LineOffset::cast_from(pl);
-                    if (plOffset != line)
-                        promptText += '\n';
-                    promptText += _grid.lineAt(plOffset).toUtf8Trimmed(false, true);
-                }
-                break;
-            }
-        }
-    }
-
-    auto const json = formatBlockJson(*currentBlock, promptText, outputText, outputLineCount);
-    reply(R"({}{{"version":1,"blocks":[{}]}}{})", SBQueryResponseSuccess, json, DcsTerminator);
-}
-
-void Screen::handleCompletedBlocksQuery(SemanticBlockTracker const& tracker,
-                                        std::deque<CommandBlockInfo> const& completedBlocks,
-                                        unsigned queryType,
-                                        int count)
-{
-    auto const requestedCount = (queryType == SBQueryType::LastCommand) ? 1 : std::max(count, 1);
-
-    if (completedBlocks.empty())
-    {
-        // Check if there's a finished current block not yet pushed.
-        if (!tracker.currentBlock() || !tracker.currentBlock()->finished)
-        {
-            reply(SBQueryResponseDisabled);
+        case SBQueryType::LastCommand: replyWithBlocks(tracker.finishedBlocks(blocks, 1)); return;
+        case SBQueryType::LastNumberOfCommands:
+            replyWithBlocks(tracker.finishedBlocks(blocks, seq.paramPositiveOr(1, size_t { 1 }))); // Pn
+            return;
+        case SBQueryType::InProgress: {
+            auto const* const block = tracker.inProgressBlock(blocks);
+            replyWithBlocks(std::span { &block, block ? 1U : 0U }); // the one block in progress, or none
             return;
         }
+        default:
+            // A query this terminal does not know is answered as one with no data, never as another it does.
+            reply(SBQueryResponseDisabled);
+            return;
     }
+}
 
-    // Collect blocks to return (most recent first, then reverse for JSON output).
-    auto blocks = std::vector<CommandBlockInfo const*> {};
-
-    // Include the current block if finished.
-    if (tracker.currentBlock() && tracker.currentBlock()->finished)
-        blocks.push_back(&*tracker.currentBlock());
-
-    // Add from completed blocks (back = most recent).
-    for (auto it = completedBlocks.rbegin();
-         it != completedBlocks.rend() && std::cmp_less(blocks.size(), requestedCount);
-         ++it)
-        blocks.push_back(&*it);
-
-    if (blocks.empty())
+void Screen::replyWithBlocks(std::span<CommandBlockRecord const* const> newestFirst)
+{
+    if (newestFirst.empty())
     {
         reply(SBQueryResponseDisabled);
         return;
     }
 
-    // Reconstruct each block's text from the OSC 133 marks the shell left in the grid. The tracker knows
-    // HOW MANY blocks there are and what their metadata is; the grid is what still holds their text.
-    auto const blockTexts =
-        scanCommandBlocksBackward(GridCommandBlockLines { _grid, cursor().position.line }, blocks.size());
+    // Each record with the text of its own rows, split into prompt and output as the block actions split it,
+    // but whole: the blank lines that end a part are lines of it too. The rows are the primary screen's,
+    // whichever screen the query arrived on.
+    auto const& grid = _terminal->primaryScreen().grid();
+    auto const linesOf = [&](LineOffset anchor, CommandBlockPart part) {
+        auto const rows = _terminal->commandBlockRowsAt(anchor, part);
+        if (!rows)
+            return std::vector<std::string> {};
+        return std::ranges::to<std::vector>(
+            logicalLinesOf(grid, *rows) | std::views::transform([&grid](CommandBlockLine const& line) {
+                return grid.logicalLineText(
+                    line.head, line.last, line.begin, line.end, CaptureRendition::PlainText);
+            }));
+    };
+    auto const textOf = [&](CommandBlockRecord const& block) {
+        auto const anchor = _terminal->commandBlockAnchor(block);
+        if (!anchor)
+            return CommandBlockText {}; // every row of it has left the grid
+        auto const output = linesOf(*anchor, CommandBlockPart::Output);
+        return CommandBlockText {
+            .prompt = core::joinWith(linesOf(*anchor, CommandBlockPart::Prompt), "\n"),
+            .output = core::joinWith(output, "\n"),
+            .outputLineCount = static_cast<int>(output.size()),
+        };
+    };
 
-    // Build JSON response with blocks in chronological order (oldest first).
+    // Oldest first.
     auto json = std::string {};
-    json += R"({"version":1,"blocks":[)";
-    auto const actualCount = std::min(blockTexts.size(), blocks.size());
-    for (auto i = actualCount; i-- > 0;)
+    for (auto const* const block: newestFirst | std::views::reverse)
     {
-        if (i != actualCount - 1)
+        if (!json.empty())
             json += ',';
-        json += formatBlockJson(
-            *blocks[i], blockTexts[i].prompt, blockTexts[i].output, blockTexts[i].outputLineCount);
+        json += formatBlockJson(*block, textOf(*block));
     }
-    json += "]}";
-    reply("{}{}{}", SBQueryResponseSuccess, json, DcsTerminator);
-}
-
-std::optional<CommandBlockText> Screen::lastCommandBlock() const
-{
-    auto blocks = scanCommandBlocksBackward(GridCommandBlockLines { _grid, cursor().position.line }, 1);
-    if (blocks.empty())
-        return std::nullopt;
-    return std::move(blocks.front());
+    reply(R"({}{{"version":1,"blocks":[{}]}}{})", SBQueryResponseSuccess, json, DcsTerminator);
 }
 
 std::expected<LivePromptSpan, PromptRegionError> Screen::livePromptSpan() const
@@ -6642,6 +6800,45 @@ std::expected<LivePromptSpan, PromptRegionError> Screen::livePromptSpan() const
         });
 }
 
+std::optional<Screen::UnreflowedPrompt> Screen::unreflowedPrompt() const
+{
+    if (!_grid.reflowOnResize() || _promptRedraw == PromptRedraw::Never
+        || _outputStartMarking == OutputStartMarking::Unseen)
+        return std::nullopt;
+    auto const span = livePromptSpan();
+    if (!span || span->firstLine < LineOffset(0))
+        return std::nullopt;
+
+    // A prompt drawn after output that did not end its line shares that logical line with the output, and a
+    // logical line is either reflowed or left whole: kitty leaves the rows from the prompt's own on, but the
+    // output's rows above it would be cut with them.
+    if (auto const& head = _grid.lineAt(span->firstLine);
+        head.isFlagEnabled(LineFlag::CommandEnd) && head.commandEndOffset() != ColumnOffset(0))
+        return std::nullopt;
+
+    auto prompt = UnreflowedPrompt { .firstLine = span->firstLine };
+    for (auto const row: std::views::iota(unbox<int>(span->firstLine), unbox<int>(pageSize().lines)))
+    {
+        auto const line = LineOffset::cast_from(row);
+        if (!_grid.lineAt(line).wrapped())
+            prompt.lines.emplace_back(line, stableLineAt(_grid, line));
+    }
+    return prompt;
+}
+
+void Screen::renameUnreflowedPromptLines(UnreflowedPrompt const& prompt, LineOffset moved, WidthChange width)
+{
+    auto const moveColumn = [width](ColumnOffset column) {
+        return unreflowedColumn(column, width);
+    };
+    for (auto const& [row, name]: prompt.lines)
+    {
+        // A blank row below the cursor may have given way to the rows above.
+        if (auto const now = row + moved; now < boxed_cast<LineOffset>(pageSize().lines))
+            _livePromptMarks.rename(name, stableLineAt(_grid, now), moveColumn);
+    }
+}
+
 std::vector<FoldRange> Screen::foldRanges(size_t maxScanLines) const
 {
     // From the bottom of the page upwards, not from the cursor: a fold may hang off a block whose output
@@ -6653,13 +6850,21 @@ std::vector<FoldRange> Screen::foldRanges(size_t maxScanLines) const
 
 void Screen::setLogicalLineFlags(LineOffset line, LineFlags flags, bool enable) noexcept
 {
-    enableLineFlags(_grid.logicalLineHead(line), flags, enable);
+    auto const head = _grid.logicalLineHead(line);
+    auto const before = _grid.lineAt(head).flags();
+    enableLineFlags(head, flags, enable);
 
     // The grid's own identity cannot stand in for this: a mark arriving on a page that has not scrolled
     // moves neither the generation nor the stable base, so a cache keyed on those alone would go on
-    // reporting the ranges from before the command that has just finished.
-    if ((flags & HeadOnlyLineFlags).any())
+    // reporting the ranges from before the command that has just finished. Only the shell's marks: no
+    // fold hangs off a user mark, so a vi `mm` keeps the cache -- and the scan it saves.
+    if ((flags & ShellMarkLineFlags).any())
         _terminal->invalidateFoldRanges();
+
+    // The scrollbar places one tick per user mark from an index of their stable ids rather than by walking
+    // the scrollback, and this funnel is the only way a mark is written here -- so it is where the index
+    // hears about it.
+    noteUserMarkChange(head, before);
 }
 
 void Screen::markLogicalLineAtCursorWithColumn(ColumnMark mark) noexcept
@@ -6680,6 +6885,16 @@ void Screen::markLogicalLineAtCursorWithColumn(ColumnMark mark) noexcept
 void Screen::setMark()
 {
     markLogicalLineAtCursor(LineFlag::Marked);
+    _livePromptMarks.clear(); // an earlier prompt's right prompts are not this one's
+
+    // A ;B always follows its own ;A, so a PromptEnd the line carries already is an older prompt's -- kept
+    // by an erase, which keeps a row's marks -- and would be read as where this prompt's input begins. Not so
+    // a CommandEnd: the line a ;D closes is routinely the line the next ;A opens.
+    auto const head = _grid.logicalLineHead(cursor().position.line);
+    if (!_grid.lineAt(head).isFlagEnabled(LineFlag::PromptEnd))
+        return;
+    setLogicalLineFlags(head, LineFlag::PromptEnd, false);
+    _grid.changingLineAt(head).setPromptEndOffset(ColumnOffset(0));
 }
 
 ApplyResult Screen::processHierarchicalContext(std::string_view payload)
@@ -6704,6 +6919,29 @@ ApplyResult Screen::processHierarchicalContext(std::string_view payload)
     return ApplyResult::Ok;
 }
 
+namespace
+{
+    /// The command line an OSC 3008 `type=command` start carried, when it carried a non-empty `cmdline=`.
+    [[nodiscard]] std::optional<std::string> commandLineOf(ContextCommand const& command)
+    {
+        if (!command.present.contains(ContextField::CommandLine) || command.commandLine.empty())
+            return std::nullopt;
+        return std::string { command.commandLine };
+    }
+
+    /// The exit code an OSC 133;D reports: its first parameter alone, for `key=value` parameters may follow
+    /// it (WezTerm sends `D;1;aid=42`).
+    /// @param parameters Everything after the "D", e.g. ";1;aid=42"; empty for a bare "D".
+    /// @return The exit code; zero when there is none, or it is not a number.
+    [[nodiscard]] int reportedExitCode(std::string_view parameters) noexcept
+    {
+        if (!parameters.starts_with(';'))
+            return 0;
+        parameters.remove_prefix(1);
+        return core::toInteger<10, int>(parameters.substr(0, parameters.find(';'))).value_or(0);
+    }
+} // namespace
+
 void Screen::synthesizeSemanticMarks(ContextTransition const& transition, ContextCommand const& command)
 {
     // Only the shell/command cycle carries a positional guarantee. run0's `elevate` and
@@ -6719,6 +6957,18 @@ void Screen::synthesizeSemanticMarks(ContextTransition const& transition, Contex
             arbiter.observedContextCommandStart();
         else
             arbiter.observedContextCommandEnd();
+    }
+
+    // OSC 133 owns the session, so OSC 3008 may not open or close a block -- but a command's end= still
+    // knows HOW it ended (a signal, a crash), which OSC 133;D's bare number cannot say. Which block's command
+    // it was, if any, the store tells by the context each command ran in: a shell nested inside one runs
+    // commands whose ends are not that block's.
+    if (arbiter.contextMayEnrich() && transition.subjectType == ContextType::Command && isMainDisplay())
+    {
+        if (command.verb == ContextVerb::Start)
+            _terminal->commandContextStarted(transition.subject);
+        else if (transition.kind == ContextTransitionKind::Ended)
+            _terminal->enrichCommandOutcome(transition.subject, command.outcome);
     }
 
     if (!arbiter.contextMayMark())
@@ -6741,7 +6991,8 @@ void Screen::synthesizeSemanticMarks(ContextTransition const& transition, Contex
     //
     // A type=shell PUSH marks nothing: systemd opens that context when profile.d is sourced, which can
     // be arbitrarily far above the first prompt, and a mark there would land on the motd.
-    auto const notify = arbiter.contextMayNotify();
+    auto const mayFeedBlocks = arbiter.contextMayFeedBlocks();
+    auto const feedsBlocks = mayFeedBlocks && isMainDisplay();
     switch (transition.subjectType)
     {
         case ContextType::Shell:
@@ -6749,12 +7000,10 @@ void Screen::synthesizeSemanticMarks(ContextTransition const& transition, Contex
                 && transition.kind != ContextTransitionKind::ReturnedTo)
                 return;
             setMark();
-            if (notify)
-            {
-                _terminal->shellIntegration().promptStart();
-                _terminal->semanticBlockTracker().promptStart();
+            if (feedsBlocks)
+                _terminal->beginCommandBlock();
+            if (mayFeedBlocks)
                 _terminal->autoCollapseOnNewPrompt();
-            }
             return;
         case ContextType::Command:
             if (command.verb == ContextVerb::Start)
@@ -6762,24 +7011,19 @@ void Screen::synthesizeSemanticMarks(ContextTransition const& transition, Contex
                 // No DepthExceeded guard here: a refused push carries no subject, so its transition
                 // reports ContextType::None and the type test at the top of this function has already
                 // returned. Restating it read as a second gate and was dead code.
-                markLogicalLineAtCursor(LineFlag::OutputStart);
-                if (notify)
+                markOutputStart();
+                if (feedsBlocks)
                 {
-                    // No cmdline: the systemd shim sends none, and 3008 may FILL a command line but
-                    // never overwrite one OSC 133;C already supplied.
-                    _terminal->shellIntegration().commandOutputStart(std::nullopt);
-                    _terminal->semanticBlockTracker().commandOutputStart(std::nullopt);
+                    auto commandLine = commandLineOf(command);
+                    auto const source = commandLine ? CommandLineSource::Reported : CommandLineSource::None;
+                    _terminal->beginCommand(std::move(commandLine), source);
                 }
             }
             else if (transition.kind == ContextTransitionKind::Ended)
             {
                 markLogicalLineAtCursorWithColumn(ColumnMark::CommandEnd);
-                if (notify)
-                {
-                    auto const exitCode = command.outcome.asShellExitCode();
-                    _terminal->shellIntegration().commandFinished(exitCode);
-                    _terminal->semanticBlockTracker().commandFinished(exitCode);
-                }
+                if (feedsBlocks)
+                    _terminal->endCommand(command.outcome.asShellExitCode(), command.outcome);
             }
             return;
         default: return;
@@ -6793,36 +7037,70 @@ void Screen::processShellIntegration(Sequence const& seq)
         return;
 
     // The shell speaks OSC 133 itself, so it owns this session's marks from here on and OSC 3008
-    // contributes metadata only. Recorded before the switch, so every one of the four sub-commands
-    // counts -- a shell integration that emits only ;A still settles the question.
+    // contributes metadata only. Recorded before the switch, so every sub-command counts -- a shell
+    // integration that emits only ;A still settles the question.
     _terminal->markArbiter().observedShellIntegration();
 
-    auto const forEachKeyValue = []<typename Callback>(std::string_view text, Callback&& callback) {
-        core::forEachKeyValue(
-            core::ForEachKeyValueParams {
-                .text = text,
-                .entryDelimiter = ';',
-                .assignmentDelimiter = '=',
-            },
-            std::forward<Callback>(callback));
+    // The marks are stamped on every page; the command blocks are fed from the main display alone -- the
+    // alternate screen included, for a shell can be left drawing there by a full-screen program that died
+    // without leaving it. Their rows are stamped on the primary screen whichever fed them.
+    auto const feedsBlocks = isMainDisplay();
+
+    // The logical line the cursor is on, as the marks the rows have no room for name it.
+    auto const cursorLine = [this] {
+        return stableLineAt(_grid, _grid.logicalLineHead(cursor().position.line));
+    };
+
+    // A part of the prompt in progress, of @p kind, starts here: no prompt and no block of its own. Only a
+    // right prompt (k=r) is worth remembering: where it begins, which the command line read off the grid at
+    // ;C must leave out.
+    auto const startPromptPart = [this, &cursorLine](PromptKind kind) {
+        if (kind == PromptKind::Right)
+            _livePromptMarks.markRightPrompt(cursorLine(), _grid.logicalColumnOf(cursor().position));
     };
 
     switch (cmd[0])
     {
-        case 'A': {
+        case 'A':
+        case 'N': {
+            // A further line of the prompt in progress (k=c or k=s: PS2, and reedline -- Nushell 0.111+ --
+            // before every continuation line) or a right prompt beside it (k=r) starts no new prompt: marking
+            // it a head would end the block being typed. As no A does the fresh-line here (below), such an A
+            // is the ;P of its kind -- iTerm2 reads the kind off A, N and P alike -- and leaves what the
+            // prompt said about redrawing itself as it was.
+            if (auto const kind = promptKindOf(cmd.substr(1)); kind != PromptKind::Initial)
+            {
+                startPromptPart(kind);
+                break;
+            }
+
+            // ;N announces a new command, which may first end the one before: what a new prompt does here
+            // anyway (an unfinished command is closed at the next prompt). Neither does the fresh-line the
+            // semantic-prompts proposal asks of them, for kitty, foot and Konsole do none, and a line break
+            // the shell did not print would change what it drew.
+            //
+            // `click_events=1` (click-to-move in the prompt) is accepted and ignored: prompt editing, not
+            // blocks, and a follow-up of its own.
+            //
+            // Each prompt says for itself whether the shell redraws it on a resize, as kitty reads it.
+            _promptRedraw = promptRedrawOf(cmd.substr(1));
+
+            // A command's output that started on this line and was never ended -- a shell that sends ;C but
+            // no ;D, after a command that printed no line -- ends here, where this prompt starts, as a ;D
+            // would have ended it. The line then reads as the prompt it now is: kitty reads a line by its
+            // last mark.
+            if (auto const& head = _grid.lineAt(_grid.logicalLineHead(cursor().position.line));
+                head.isFlagEnabled(LineFlag::OutputStart) && !head.isFlagEnabled(LineFlag::CommandEnd))
+                markLogicalLineAtCursorWithColumn(ColumnMark::CommandEnd);
+
             setMark();
-            bool clickEvents = false;
-            auto const params = seq.intermediateCharacters().substr(1);
-            forEachKeyValue(params, [&](std::string_view key, std::string_view value) {
-                if (key == "click_events" && value == "1")
-                    clickEvents = true;
-            });
-            _terminal->shellIntegration().promptStart(clickEvents);
-            _terminal->semanticBlockTracker().promptStart();
+            if (feedsBlocks)
+                _terminal->beginCommandBlock();
             _terminal->autoCollapseOnNewPrompt();
             break;
         }
-        case 'B': {
+        case 'B':
+        case 'I': {
             // Recorded unconditionally, for the reason given at ;C below.
             //
             // Along with WHERE the prompt stopped. The shell emits ;B the moment it has finished painting
@@ -6833,25 +7111,47 @@ void Screen::processShellIntegration(Sequence const& seq)
             // run of cells.
             markLogicalLineAtCursorWithColumn(ColumnMark::PromptEnd);
 
-            _terminal->shellIntegration().promptEnd();
+            // ;I is ;B whose input ends with its line, so the command line read off the grid at ;C ends there
+            // too; the later of the two said on a line counts.
+            _livePromptMarks.markInputEnd(cursorLine(),
+                                          cmd[0] == 'I' ? InputEnd::AtLineEnd : InputEnd::AtOutputStart);
             break;
         }
+        case 'L': {
+            // Fresh-line: a CR LF, unless the cursor already stands where a CR would put it (WezTerm compares
+            // with the left margin the same way).
+            auto const column = _cursor.position.column;
+            moveCursorToBeginOfLine();
+            if (_cursor.position.column != column)
+                linefeed();
+            break;
+        }
+        case 'P': startPromptPart(promptKindOf(cmd.substr(1))); break;
         case 'C': {
+            // An empty command line says nothing about the command -- commandLineOf() refuses an empty OSC
+            // 3008 cmdline= for the same reason -- so it is recovered as if none were sent.
+            auto commandLine = reportedCommandLine(cmd.substr(1));
+            auto source = commandLine ? CommandLineSource::Reported : CommandLineSource::None;
+
+            // Read off the grid BEFORE the OutputStart below is stamped, for the reason recoverCommandLine()
+            // gives.
+            if (!commandLine && feedsBlocks)
+            {
+                commandLine = recoverCommandLine();
+                if (commandLine)
+                    source = CommandLineSource::Recovered;
+            }
+
             // The line flags are terminal MEMORY, and are recorded unconditionally — exactly as OSC 133;A's
             // Marked flag always has been. The shell said where this command's output begins, so the
-            // terminal remembers it. DEC mode 2034 gates the semantic-block READER PROTOCOL (the block
-            // deque, the command metadata, the session token, the DCS query), not what the terminal knows
-            // about its own scrollback. Gating the flags too made every feature built on them — "copy last
-            // command output", precise mark navigation — impossible for a shell that speaks plain OSC 133.
-            markLogicalLineAtCursor(LineFlag::OutputStart);
-            std::optional<std::string> commandLine;
-            auto const params = seq.intermediateCharacters().substr(1);
-            forEachKeyValue(params, [&](std::string_view key, std::string_view value) {
-                if (key == "cmdline_url")
-                    commandLine = core::unescapeURL(value);
-            });
-            _terminal->shellIntegration().commandOutputStart(commandLine);
-            _terminal->semanticBlockTracker().commandOutputStart(commandLine);
+            // terminal remembers it. DEC mode 2034 gates the semantic-block READER PROTOCOL (the session
+            // token, the DCS query), not what the terminal knows about its own scrollback or its command
+            // blocks. Gating the flags too made every feature built on them — "copy last command output",
+            // precise mark navigation — impossible for a shell that speaks plain OSC 133.
+            markOutputStart();
+
+            if (feedsBlocks)
+                _terminal->beginCommand(std::move(commandLine), source);
             break;
         }
         case 'D': {
@@ -6864,14 +7164,139 @@ void Screen::processShellIntegration(Sequence const& seq)
             // output either swallows the next prompt or loses its own last line.
             markLogicalLineAtCursorWithColumn(ColumnMark::CommandEnd);
 
-            auto const exitCode =
-                (cmd.size() > 2 && cmd[1] == ';') ? core::toInteger<10, int>(cmd.substr(2)).value_or(0) : 0;
-            _terminal->shellIntegration().commandFinished(exitCode);
-            _terminal->semanticBlockTracker().commandFinished(exitCode);
+            if (feedsBlocks)
+                _terminal->endCommand(reportedExitCode(cmd.substr(1)), ContextOutcome {});
             break;
         }
         default: break;
     }
+}
+
+void Screen::markOutputStart()
+{
+    markLogicalLineAtCursor(LineFlag::OutputStart);
+    _outputStartMarking = OutputStartMarking::Seen;
+}
+
+void Screen::setActiveContextId(ContextId id) noexcept
+{
+    _stamp.contextId = id;
+    restampCursorLogicalLine(LineProvenance { .contextId = id, .blockId = {}, .bornAt = 0 });
+}
+
+void Screen::setActiveBlockId(CommandBlockId id) noexcept
+{
+    _stamp.blockId = id;
+    restampCursorLogicalLine(LineProvenance { .contextId = {}, .blockId = id, .bornAt = 0 });
+}
+
+void Screen::forgetBlockIds() noexcept
+{
+    for (auto const row: std::views::iota(unbox<int>(_grid.addressableTop()), unbox<int>(pageSize().lines)))
+    {
+        auto const offset = LineOffset::cast_from(row);
+        if (!_grid.lineAt(offset).blockId())
+            continue;
+        // changingLineAt(), not lineAt(): most such rows sit in the scrollback, which the delta scan only
+        // covers for a row announced through it.
+        _grid.changingLineAt(offset).forgetBlock();
+    }
+}
+
+void Screen::restampCursorLogicalLine(LineProvenance const& transition) noexcept
+{
+    if (transition == LineProvenance {})
+        return; // nothing to hand out, and no reason to announce a scrollback row as changing
+
+    // Up from the cursor's row to the logical line's head, in one walk. A line a single-line `cat` of a
+    // megabyte wrote is most of the history, and a prompt drawn at its end is followed by a ;C handing out
+    // the same block again.
+    auto const rowsUp =
+        std::views::iota(-unbox<int>(_grid.historyLineCount()), unbox<int>(_cursor.position.line) + 1)
+        | std::views::reverse;
+    for (auto const row: rowsUp)
+    {
+        // changingLineAt(), not lineAt(): a logical line's head may sit in the scrollback, which the delta
+        // scan only covers for a row announced through it. But only for a row the transition changes:
+        // announcing one costs that deeper scan whatever then happens to it, and a context change is fanned
+        // out to every screen.
+        ++_restampWork;
+        auto const offset = LineOffset::cast_from(row);
+        auto const& line = _grid.lineAt(offset);
+        if (!line.wouldRelabel(transition))
+            return; // it carries the ids, and so does every row of the line above it
+        auto const block = line.blockId();
+        _grid.changingLineAt(offset).relabel(transition);
+
+        // A new prompt took the row from an older block, whose head may have been on it.
+        if (block != CommandBlockId {} && line.blockId() != block)
+            ++_blockRowChanges;
+
+        if (!line.wrapped())
+            return; // the line's head
+    }
+}
+
+std::optional<std::string> Screen::recoverCommandLine() const
+{
+    auto const span = livePromptSpan();
+    if (!span || !span->inputBegin)
+        return std::nullopt;
+
+    // From the prompt's ;B to the cursor, line by logical line, in LOGICAL columns, so a resize in between
+    // moves nothing; a line break the user typed is kept as a newline. A line carrying PromptEnd -- the
+    // prompt's own, or a continuation prompt the shell marked the same way -- is read from its own ;B
+    // column; any other from its start, for nothing tells a continuation prompt there from typed text.
+    auto const end = cursor().position;
+    auto text = std::string {};
+    auto inInput = false;
+    for (auto const row: std::views::iota(unbox<int>(span->firstLine), unbox<int>(end.line) + 1))
+    {
+        auto const head = LineOffset::cast_from(row);
+        auto const& line = _grid.lineAt(head);
+        if (head != span->firstLine && line.wrapped())
+            continue; // read with the head it continues
+        auto const marked = line.isFlagEnabled(LineFlag::PromptEnd);
+        if (!inInput && !marked)
+            continue; // a row of the prompt above the one its input begins on
+
+        // Read no further than decides a truncation: the store keeps no more, and a hostile shell must not
+        // make the terminal copy an unbounded region of the grid between a ;B and a ;C.
+        if (text.size() > MaxRecordedCommandLineBytes)
+            break;
+        if (inInput)
+            text += '\n';
+        inInput = true;
+
+        auto const last = _grid.logicalLineEnd(head, end.line);
+        auto const promptEnd = marked ? std::optional { line.promptEndOffset() } : std::nullopt;
+        auto const begin = promptEnd.value_or(ColumnOffset(0));
+        auto until = last == end.line ? std::optional { _grid.logicalColumnOf(end) } : std::nullopt;
+        // A prompt's line may carry a right prompt beside the input, which stays there after Enter.
+        if (auto const rightPrompt = rightPromptColumn(_grid, _livePromptMarks, head, last, promptEnd))
+            until = std::min(until.value_or(*rightPrompt), *rightPrompt);
+        text += _grid.logicalLineText(head,
+                                      last,
+                                      begin,
+                                      until,
+                                      CaptureRendition::PlainText,
+                                      MaxRecordedCommandLineBytes
+                                          - std::min(text.size(), MaxRecordedCommandLineBytes));
+
+        // A prompt that ended with ;I rather than ;B said its input ends with this line.
+        if (marked && _livePromptMarks.inputEndOn(stableLineAt(_grid, head)) == InputEnd::AtLineEnd)
+            break;
+    }
+
+    text.resize(core::trimRight(text).size());
+    if (text.empty())
+        return std::nullopt;
+    return text;
+}
+
+bool Screen::isMainDisplay() const noexcept
+{
+    return this == &_terminal->primaryScreen() || this == &_terminal->alternateScreen();
 }
 
 void Screen::applyAndLog(Function const& function, Sequence const& seq)
@@ -7068,7 +7493,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             moveCursorToPrevLine(LineCount::cast_from(seq.paramPositiveOr(0, Sequence::Parameter { 1 })));
             break;
         case ANSIDSR: return impl::ANSIDSR(seq, *this);
-        case DSR: return impl::DSR(seq, *this);
+        case DSR: return impl::DSR(seq, *this, _terminal->operatingLevel());
         case CUB: moveCursorBackward(seq.paramPositiveOr<ColumnCount>(0, ColumnCount { 1 })); break;
         case CUD: moveCursorDown(seq.paramPositiveOr<LineCount>(0, LineCount { 1 })); break;
         case CUF: moveCursorForward(seq.paramPositiveOr<ColumnCount>(0, ColumnCount { 1 })); break;
@@ -7456,10 +7881,13 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                         case 0: clearToEndOfScreen(); break;
                         case 1: clearToBeginOfScreen(); break;
                         case 2: clearScreen(); break;
-                        case 3:
+                        case 3: {
+                            auto const evictedBefore = _grid.evictedRowCount();
                             _grid.clearHistory();
-                            _terminal->scrollbackBufferCleared();
+                            if (_grid.evictedRowCount() != evictedBefore)
+                                _terminal->rowsDropped(LineCount(0));
                             break;
+                        }
                         default: return ApplyResult::Invalid;
                     }
                 }
@@ -7654,13 +8082,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             switch (seq.paramOr(0, 0))
             {
                 case 0:
-                    if (_terminal->activeStatusDisplay() == ActiveStatusDisplay::StatusLine
-                        && _terminal->syncWindowTitleWithHostWritableStatusDisplay())
-                    {
-                        _terminal->setWindowTitle(core::trimRight(
-                            _terminal->hostWritableStatusLineDisplay().grid().lineText(LineOffset(0))));
-                        _terminal->setSyncWindowTitleWithHostWritableStatusDisplay(false);
-                    }
+                    _terminal->syncWindowTitleWithDeniedStatusLine();
                     _terminal->setActiveStatusDisplay(ActiveStatusDisplay::Main);
                     break;
 
@@ -7698,7 +8120,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                     InitialModifyOtherKeys));
         case CSIUENTER: {
             auto const flags = KeyboardEventFlags::fromValue(seq.paramOr(0, 1));
-            _terminal->keyboardProtocol().enter(flags);
+            _terminal->changeKeyboardProtocol([&](auto& protocol) { protocol.enter(flags); });
             return ApplyResult::Ok;
         }
         case CSIUQUERY: {
@@ -7711,16 +8133,24 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             auto const mode = seq.paramOr(1, 1);
             switch (mode)
             {
-                case 1: _terminal->keyboardProtocol().flags() = flags; return ApplyResult::Ok;
-                case 2: _terminal->keyboardProtocol().flags().enable(flags); return ApplyResult::Ok;
-                case 3: _terminal->keyboardProtocol().flags().disable(flags); return ApplyResult::Ok;
+                case 1:
+                    _terminal->changeKeyboardProtocol([&](auto& protocol) { protocol.flags() = flags; });
+                    return ApplyResult::Ok;
+                case 2:
+                    _terminal->changeKeyboardProtocol(
+                        [&](auto& protocol) { protocol.flags().enable(flags); });
+                    return ApplyResult::Ok;
+                case 3:
+                    _terminal->changeKeyboardProtocol(
+                        [&](auto& protocol) { protocol.flags().disable(flags); });
+                    return ApplyResult::Ok;
                 default: break;
             }
             return ApplyResult::Invalid;
         }
         case CSIULEAVE: {
             auto const count = seq.paramOr<size_t>(0, 1);
-            _terminal->keyboardProtocol().leave(count);
+            _terminal->changeKeyboardProtocol([&](auto& protocol) { protocol.leave(count); });
             return ApplyResult::Ok;
         }
         // OSC
@@ -7814,18 +8244,12 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
 
 void Screen::configureCurrentLineSize(LineFlags enabled)
 {
-    auto constexpr LineSizeAttributes = LineFlags {
-        LineFlag::DoubleHeightTop,
-        LineFlag::DoubleHeightBottom,
-        LineFlag::DoubleWidth,
-    };
-
-    Require(enabled.without(LineSizeAttributes).none());
+    Require(enabled.without(LineRenditionFlags).none());
 
     auto& line = currentLine();
 
-    line.flags().disable(LineSizeAttributes);
-    line.flags().enable(LineSizeAttributes.intersect(enabled));
+    line.flags().disable(LineRenditionFlags);
+    line.flags().enable(LineRenditionFlags.intersect(enabled));
 
     // See:
     //     https://vt100.net/docs/vt510-rm/DECDHL.html
@@ -8121,39 +8545,28 @@ unique_ptr<ParserExtension> Screen::hookDECDMAC(Sequence const& seq)
 {
     // DECDMAC — Define Macro
     // DCS Pid ; Pdt ; Pen ! z D...D ST
-    auto const macroId = seq.paramOr(0, 0);
-    auto const deleteAll = seq.paramOr(1, 0) == 1;
-    auto const hexEncoded = seq.paramOr(2, 0) == 1;
 
-    return make_unique<SimpleStringCollector>([this, macroId, deleteAll, hexEncoded](string_view data) {
-        auto body = std::string {};
-        if (hexEncoded)
-        {
-            // Decode hex-encoded data: pairs of hex digits → bytes
-            body.reserve(data.size() / 2);
-            for (size_t i = 0; i + 1 < data.size(); i += 2)
-            {
-                auto const hi = data[i];
-                auto const lo = data[i + 1];
-                auto const hexToByte = [](char ch) -> uint8_t {
-                    if (ch >= '0' && ch <= '9')
-                        return static_cast<uint8_t>(ch - '0');
-                    if (ch >= 'A' && ch <= 'F')
-                        return static_cast<uint8_t>(ch - 'A' + 10);
-                    if (ch >= 'a' && ch <= 'f')
-                        return static_cast<uint8_t>(ch - 'a' + 10);
-                    return 0;
-                };
-                body.push_back(static_cast<char>((hexToByte(hi) << 4) | hexToByte(lo)));
-            }
-        }
-        else
-        {
-            body = std::string(data);
-        }
+    // DEC STD 070: "Macro definitions cannot be nested." One that starts in a running macro body is ignored
+    // whole, deleting nothing either, as Windows Terminal has it.
+    if (_terminal->isMacroRunning())
+        return nullptr;
 
-        _terminal->defineMacro(macroId, deleteAll, std::move(body));
-    });
+    // A parameter out of range has the control ignored whole as well, Pdt's deletion included.
+    auto const parameters =
+        decodeMacroDefinitionParameters(seq.paramOr(0, 0U), seq.paramOr(1, 0U), seq.paramOr(2, 0U));
+    if (!parameters)
+        return nullptr;
+    auto const [macroId, deletion, encoding] = *parameters;
+
+    // Collected only as far as the room the definition will have: a body that outgrows it is ignored whole,
+    // and the rest of it consumed without being stored.
+    return make_unique<MacroBodyCollector>(
+        encoding,
+        _terminal->macroSpaceFor(macroId, deletion),
+        [this, macroId, deletion](std::expected<std::string, MacroDefinitionError> body) {
+            // Too large, it defines nothing -- after the deletion Pdt asks for, as one that fits has too.
+            _terminal->defineMacro(macroId, deletion, std::move(body).value_or(std::string {}));
+        });
 }
 
 unique_ptr<ParserExtension> Screen::hookDECUDK(Sequence const& seq)
@@ -8178,27 +8591,28 @@ optional<CellLocation> Screen::searchFrom(std::u32string_view searchText,
                                           CellLocation startPosition,
                                           CaseComparison comparison)
 {
-    // The grid's matchers still take a bool; converting here keeps the boundary in one place.
-    auto const isCaseSensitive = comparison == CaseComparison::Exact;
-
-    // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
-
     if (searchText.empty())
         return nullopt;
 
-    // First try match at start location.
-    if (_grid.lineAt(startPosition.line)
-            .matchTextAtWithSensitivityMode(searchText, startPosition.column, isCaseSensitive))
-        return startPosition;
-
-    // Search reverse until found or exhausted.
-    auto const lines = _grid.logicalLinesFrom(startPosition.line);
-    for (auto const& line: lines)
+    // A start past the end of its row begins at the next one; the find bar steps there from a match on
+    // the last column.
+    auto const columns = unbox<int>(pageSize().columns);
+    if (unbox(startPosition.column) >= columns)
     {
-        auto const result = line.search(searchText, startPosition.column, isCaseSensitive);
-        if (result.has_value())
-            return result; // new match found
+        ++startPosition.line;
         startPosition.column = ColumnOffset(0);
+    }
+
+    auto const firstLine = std::max(unbox(startPosition.line), -unbox<int>(historyLineCount()));
+    for (auto const line: std::views::iota(firstLine, unbox<int>(pageSize().lines)))
+    {
+        auto const firstColumn = line == unbox(startPosition.line) ? unbox(startPosition.column) : 0;
+        for (auto const column: std::views::iota(firstColumn, columns))
+        {
+            auto const candidate = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
+            if (_grid.textMatchesAt(searchText, candidate, comparison))
+                return candidate;
+        }
     }
     return nullopt;
 }
@@ -8214,25 +8628,23 @@ optional<CellLocation> Screen::searchReverseFrom(std::u32string_view searchText,
                                                  CellLocation startPosition,
                                                  CaseComparison comparison)
 {
-    // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
-    auto const isCaseSensitive = comparison == CaseComparison::Exact;
-
     if (searchText.empty())
         return nullopt;
 
-    // First try match at start location.
-    if (_grid.lineAt(startPosition.line)
-            .matchTextAtWithSensitivityMode(searchText, startPosition.column, isCaseSensitive))
-        return startPosition;
-
-    // Search reverse until found or exhausted.
-    auto const lines = _grid.logicalLinesReverseFrom(startPosition.line);
-    for (auto const& line: lines)
+    auto const columns = unbox<int>(pageSize().columns);
+    auto const lastLine = std::min(unbox(startPosition.line), unbox<int>(pageSize().lines) - 1);
+    auto const firstLine = -unbox<int>(historyLineCount());
+    for (auto const line: std::views::iota(firstLine, lastLine + 1) | std::views::reverse)
     {
-        auto const result = line.searchReverse(searchText, startPosition.column, isCaseSensitive);
-        if (result.has_value())
-            return result; // new match found
-        startPosition.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+        auto const lastColumn = line == unbox(startPosition.line)
+                                    ? std::min(unbox(startPosition.column), columns - 1)
+                                    : columns - 1;
+        for (auto const column: std::views::iota(0, lastColumn + 1) | std::views::reverse)
+        {
+            auto const candidate = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
+            if (_grid.textMatchesAt(searchText, candidate, comparison))
+                return candidate;
+        }
     }
     return nullopt;
 }

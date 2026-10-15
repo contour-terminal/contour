@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
+#include <format>
 #include <string>
+#include <string_view>
+#include <tuple>
 
 #include <vthost/ServiceControl.hpp>
 
@@ -90,3 +93,37 @@ TEST_CASE("a backend exists for every start mode", "[vthost][service]")
         CHECK(backend != nullptr);
     }
 }
+
+#ifdef _WIN32
+TEST_CASE("a logon registration refuses text that is not UTF-8 before it asks the Task Scheduler",
+          "[vthost][service]")
+{
+    // Spelled with U+FFFD instead, a name or a program that is not UTF-8 would look a task up under another
+    // name, or register one that runs another file. Each is refused before the Task Scheduler is asked
+    // anything, so this registers nothing.
+    auto constexpr NotUtf8 = std::string_view { "J\xfcrgen" }; // as the ANSI code page spells "Jürgen"
+
+    SECTION("the registration name")
+    {
+        auto backend = makeServiceBackend(ServiceStartMode::Logon, std::format("contour-daemon-{}", NotUtf8));
+        auto const status = backend->status();
+        REQUIRE_FALSE(status.has_value());
+        CHECK(status.error().code == ServiceErrorCode::NotUtf8);
+        CHECK(status.error().context == "the registration name");
+    }
+
+    SECTION("the program")
+    {
+        auto backend = makeServiceBackend(ServiceStartMode::Logon, "contour-daemon-test-not-utf8");
+        auto const installed = backend->install(ServiceInstallRequest {
+            .commandLine = { std::format(R"(C:\Users\{}\contour.exe)", NotUtf8), "daemon" },
+            .mode = ServiceStartMode::Logon,
+            .displayName = "contour test",
+            .description = "registered by mistake by vthost_test" });
+        if (installed)
+            std::ignore = backend->uninstall(); // registered after all: take it off this account again
+        REQUIRE_FALSE(installed.has_value());
+        CHECK(installed.error().toString() == "not UTF-8 (the program)");
+    }
+}
+#endif

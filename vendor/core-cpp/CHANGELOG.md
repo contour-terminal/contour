@@ -7,6 +7,315 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.8.0] - 2026-10-15
+
+### Breaking
+
+- **On Windows, a path handed to core-cpp as a string is read as UTF-8, not in the ANSI code page**: by
+  `core::log::parseLogFileSpec()` (so `--log-file`), `core::homeResolvedPath()`, `core::platform::absolutePath()`,
+  `FileInfoProvider::listDirectory()`, `core::tui::loadImage()`, `FilesystemImageProvider::prepare()`,
+  `ScopedTempDir`'s prefix and `operator/`, and `TestWorkingDirectory`. Each fixed a defect (see Fixed), and ASCII
+  reads as before. Text that is not UTF-8 names no file there, and is reported rather than read as another name:
+  `core::pathFromUtf8()` answers `std::errc::illegal_byte_sequence`; `homeDirectory()`, `configHome()` and
+  `App::localStateDir()` pass over such a variable as unset; `listDirectory()` lists nothing;
+  `FilesystemImageProvider::prepare()`, `NativeFileSystem::createTempFile()` and `App::installLogging()` refuse it;
+  and `core::net::listenUnix()` answers `NetErrorCode::AddressError`. A test fixture or double handed such text
+  throws `std::system_error` (`core::pathFromTrustedUtf8()`).
+  - *Migration*: a caller that passes one of these `path::string()` or `generic_string()`, which are in the ANSI
+    code page on Windows, passes `core::pathToUtf8()` instead, or `core::platform::normalizePath()` for the
+    generic form. Nothing changes on POSIX.
+- **`core::homeResolvedPath()`, `core::platform::absolutePath()` and `core::log::parseLogFileSpec()` return a
+  `std::expected`**, whose error is `std::errc::illegal_byte_sequence` on Windows where their text is not UTF-8.
+  Each reads text from outside the program -- a configuration value, a path to resolve, an option value -- where
+  such text is an input to report, not a defect to throw for. `homeResolvedPath()` takes a `std::string_view`.
+  - *Migration*: `homeResolvedPath()` is `std::expected<std::filesystem::path, std::error_code>`: test it, or
+    chain it with `transform()` and `and_then()`; comparing it with a path still compiles, and is false for an
+    error. `absolutePath()` is `std::expected<std::string, std::error_code>`. `parseLogFileSpec()` is
+    `std::expected<std::optional<std::filesystem::path>, std::error_code>`, so what it answered before is `*result`.
+    None of them fails on POSIX, where a path is the bytes it is given.
+
+### Added
+
+- **Copying to the clipboard through the terminal: `core::tui::ClipboardWriter`** (`<core/tui/ClipboardWriter.hpp>`).
+  It uses kitty's OSC 5522 where the terminal knows mode 5522 and OSC 52 otherwise, so a copy works the same
+  locally and over SSH. The first copy probes with DECRQM followed by DA1; the DA1 reply, which every terminal
+  sends, ends the probe, so only a terminal that answers nothing costs the probe timeout (500 ms by default,
+  `ClipboardWriterTimeouts`). An OSC 5522 copy returns the terminal's status -- `DONE`, or `EPERM`, `EFBIG` and
+  the rest as a `ClipboardWriteError` -- and any MIME type; an OSC 52 copy is plain text and unconfirmed.
+- **`core::tui::TerminalChannel` and `openControllingTerminal()`** (`<core/tui/TerminalChannel.hpp>`): a
+  short-lived connection to the controlling terminal beside standard I/O -- `/dev/tty` with ICANON and ECHO off
+  while open, or the Windows console's `CONIN$`/`CONOUT$` -- so a program whose output is redirected can still
+  query its terminal. A process outside the terminal's foreground process group gets a write-only channel.
+  `discardPendingInput()` drops queued input; `ClipboardWriter` calls it before each exchange it waits on, so a
+  late reply to an earlier exchange cannot answer the next one. A channel's errors are its own
+  (`TerminalChannelError`).
+- **`ClipboardProtocol.hpp`** in `core::tui_output`: `encodeOsc52()`, `appendOsc52()`, `encodeOsc5522Write()`,
+  the `Osc5522Probe` and `Osc5522ModeQuery` sequences,
+  `parseOsc5522WriteStatus()`, `describe(ClipboardWriteError)` and `isPlainTextMimeType()`, pure functions.
+- **`OscResponse`, and `VtParser::Options`** with `OscRecognition::Response`: a parser constructed so decodes an
+  OSC reply (ST or BEL terminated, capped at `MaxOscLength`). The default, `AltKey`, keeps `ESC ]` as Alt+], so
+  an interactive prompt is unaffected. `isProtocolReport()` counts `OscResponse` as a report.
+- **`core::tui::testing::ScriptedTerminal`** (`<core/tui/testing/ScriptedTerminalChannel.hpp>`): a scripted
+  terminal on a `ManualClock` for tests of code built on `TerminalChannel`.
+- **SHA-256 and HMAC-SHA256 in `core::base`: `core::Sha256` and `core::hmacSha256()`** (`<core/Sha256.hpp>`),
+  needing nothing but the standard library, so code that must not depend on TLS can hash; until now core-cpp
+  had SHA-256 only through OpenSSL in `core::net_tls`. `Sha256` is incremental -- `update()`, then `finish()`,
+  which leaves the hasher usable -- with a one-shot `hash()`, over `std::span<std::byte const>` or
+  `std::string_view`; a digest is `Sha256::Digest`, a `std::array<std::byte, 32>`. All of it is `constexpr`.
+  It is fastcached's scalar engine (`Core/Sha256`) without the hardware engines, so it suits identifiers and
+  keys rather than bulk data, and HMAC does not erase its stack copies of the key. Checked against the
+  FIPS 180-4 examples and RFC 4231's seven test cases.
+- **`core::toLowerHexString()`** (`<core/Utils.hpp>`): bytes as lower-case hexadecimal, two digits each, in a
+  constant expression too. `toHexString()` spells characters, in upper case.
+- **`core::pathFromUtf8()`, `core::pathFromTrustedUtf8()` and `core::pathToUtf8()`** (`<core/Utf8Path.hpp>`): a
+  `std::filesystem::path` from a UTF-8 string, and the path back as UTF-8, whatever the process code page.
+  `std::filesystem::path`'s narrow constructor and `path::string()` use the ANSI code page on Windows, so a path
+  beyond ASCII named another file there, or threw. On POSIX each is the identity on bytes. On Windows the text is
+  converted strictly, so text that is not UTF-8 -- a stray continuation byte, a truncated sequence, an overlong
+  form, an encoded surrogate -- names no file. `pathFromUtf8()`, for text from outside the program, answers
+  `std::expected<std::filesystem::path, std::error_code>`, with `std::errc::illegal_byte_sequence` for such text,
+  and never throws for it. `pathFromTrustedUtf8()`, for text the program spelled itself -- a literal, a string
+  built from a path -- throws `std::system_error` instead. `pathToUtf8()` never throws: on Windows a lone
+  surrogate, which an NTFS name may hold and UTF-8 cannot spell, comes out as U+FFFD, where
+  `path::u8string()` throws.
+- **`core::toUtf16()` and `core::toUtf8()`, on Windows** (`<core/WideString.hpp>`): the conversions between UTF-8
+  and the UTF-16 of the wide Win32 API. Every wide call in core-cpp already went through them, privately; a
+  consumer's own wide calls can now convert the same way rather than through a copy. `toUtf16(std::string_view)`
+  is strict, answering `std::expected<std::wstring, std::error_code>` with `std::errc::illegal_byte_sequence` for
+  text that is not UTF-8, as `pathFromUtf8()` does; `toUtf8(std::wstring_view)` reads a lone surrogate as U+FFFD
+  and converts the rest. The header declares nothing on other platforms, where a `wchar_t` is not UTF-16.
+- **`core::systemErrorMessage()`, on Windows** (`<core/WideString.hpp>`): the system's message for a Win32 error, in
+  UTF-8 -- `FormatMessageW()` converted by `toUtf8()`, in the thread's UI language where the system has it, without
+  the line break the system ends it with, and `unknown error <n>` where it has none. `FormatMessageA()` spells a
+  message in the ANSI code page, so a localized one beyond ASCII was not UTF-8. It takes the `DWORD` that
+  `GetLastError()` answers, spelled `unsigned long`.
+
+### Changed
+
+- **`InputEvent` has one more alternative, `OscResponse`.** A `std::visit` over it with one overload per
+  alternative and no generic fallback stops compiling until it handles `OscResponse`; no released parser emits
+  one unless constructed with `OscRecognition::Response`.
+- `TerminalOutput::copyToClipboard()` composes its sequence with `appendOsc52()`, encoding straight into the output
+  buffer; the bytes are unchanged.
+
+### Fixed
+
+- **`core::platform::hostName()` answers the DNS host name on Windows, not the NetBIOS name.** It called
+  `GetComputerNameA`, whose name is upper-cased and cut to 15 characters, while POSIX `gethostname()`, Qt's
+  `QHostInfo::localHostName()` and the host of a shell's OSC 7 `file://host/path` URL all give the DNS host name.
+  A consumer comparing the two called a directory on its own machine remote whenever the machine's name was
+  longer than 15 characters or had a lower-case letter. It now asks `GetComputerNameExW` for
+  `ComputerNameDnsHostname`, as Qt does, and converts the answer to UTF-8 rather than reading it through the ANSI
+  code page. `cachedHostName()` answers the same name; POSIX is unchanged.
+- **`core::toHexString()` spells a character from 0x80 up as two digits.** It widened each `char` to
+  `unsigned` with its sign where `char` is signed, as on x86 and with MSVC, so 0x80 came out as `FFFFFF80`
+  and 0xFF as `FFFFFFFF`: longer than two digits a byte, and not what `fromHexString()` reads back. ASCII input, the only kind its callers in core-cpp's consumers pass, is spelled as before. It shares
+  one implementation with `toLowerHexString()`, and is now `constexpr` and `[[nodiscard]]`; its template
+  accepts only `char`, the one type it ever compiled for.
+- **`core::replaceVariables()` no longer repeats the text before an unterminated `${`.** Finding no `}`, it
+  appended the text before the marker and then, leaving its loop, everything from the same offset again, so
+  `ab${x` came out as `abab${x` and `${HOME}/a${b` as `/home/user/a/a${b`. A `${` with no `}` before the next
+  `${` is now unterminated as well, instead of reading that variable into its name: `${x ${HOME}` gives
+  `${x /home/user`, where `replace()` used to be asked for `x ${HOME`. Malformed markers pass through as
+  written and a well-formed variable beside one still expands, as the function's documentation now says;
+  well-formed input and the `$${` escape are unchanged. It is now `[[nodiscard]]`.
+- **A `--log-file` beyond ASCII opens on Windows.** `core::log::parseLogFileSpec()`, which
+  `core::cli::App::installLogging()` reads `--log-file` through, built its path with the narrow constructor, so
+  on Windows the UTF-8 value was read in the ANSI code page: under `C:\Users\Jürgen` on a CP-1252 host the log
+  went to a directory with two characters where the `ü` was, and a daemon that exits when its log does not open
+  exited. It reads the value as UTF-8 now (`core::pathFromUtf8()`). `ScopedOutput::create()` names a log file it
+  cannot open in UTF-8 too: it spelled the name through `path::string()`, which threw for a name outside the code
+  page, so the refusal became an exception. POSIX is unchanged.
+- **Every other path core-cpp builds from a string reads it as UTF-8 on Windows** (`core::pathFromUtf8()`), so a
+  name beyond ASCII names the file it spells rather than another one. Each used the narrow constructor, which
+  reads the ANSI code page: `core::cli::App::localStateDir()` from `XDG_STATE_HOME` or `LOCALAPPDATA`;
+  `core::platform::homeDirectory()` and `configHome()` from `HOME`, `USERPROFILE`, `XDG_CONFIG_HOME` and
+  `APPDATA`; `core::homeResolvedPath()`; `core::platform::absolutePath()`, which spells its result in UTF-8 and so
+  changed a name between reading and writing it; the Windows `FileInfoProvider::listDirectory()`, which answered
+  nothing for a directory beyond ASCII; `core::tui::FilesystemImageProvider::prepare()`; and the test helpers
+  `core::testing::ScopedTempDir` (its prefix and `operator/`) and `core::platform::testing::TestWorkingDirectory`.
+  `core::tui::loadImage()` opens its path as UTF-8 on Windows too, through stb_image's `STBI_WINDOWS_UTF8`, where
+  `fopen()` read it in the ANSI code page. `FileSystem::listDirectoryRecursive()`'s refusal,
+  `ScopedTempDir::string()` and `FilesystemImageProvider::prepare()`'s refusals spell a path in UTF-8
+  (`core::pathToUtf8()`), where `path::string()` threw for a name outside the code page. POSIX is unchanged.
+- **A unix socket path beyond ASCII is bound, reclaimed and deleted on Windows.** Windows' AF_UNIX reads
+  `sun_path` as UTF-8 (measured on Windows 11 under CP-1252: the bytes `C3 BC` bind a file named U+00FC), but
+  `core::net::listenUnix()` made the parent directory through the narrow constructor, and the listener probed for
+  a stale socket file and deleted its own with `FindFirstFileA()` and `DeleteFileA()`, all of which read the ANSI
+  code page. Under `C:\Users\Jürgen` the socket was bound into a directory nothing had made; a listener that did
+  bind left its file behind when it closed, and the next bind could not find that file to reclaim it. Each now
+  names the file in UTF-8, through `core::pathFromUtf8()` and the wide API. `listenUnix()` and `connectUnix()`
+  take the path in UTF-8 on every platform, so a Windows caller passes `core::pathToUtf8()`, not
+  `path::string()`.
+- **`core::testing::setTestEnv()`, `unsetTestEnv()` and `ScopedEnv` write a name or value beyond ASCII as written
+  on Windows.** They wrote through `_putenv_s()`, which reads both in the ANSI code page, so a UTF-8 value reached
+  neither the Win32 block that `core::LiveEnvironment` reads and a child process inherits, nor the CRT's copy, as
+  written: on a CP-1252 host the `ü` of `Jürgen` read back as two characters. They write through the wide
+  `_wputenv_s()` now, in UTF-16, and so are defined out of line in `core::testing`, which a user of the header
+  already links. An empty value still sets the variable in the Win32 block, and POSIX is unchanged.
+
+## [0.7.0] - 2026-10-05
+
+### Added
+
+- **`core::tui::MouseTracking` and `protocols::appendMouseTrackingChange()`** (`<core/tui/MouseTracking.hpp>`,
+  in `core::tui_output`): the standard mouse tracking modes -- `Buttons` (DEC 1000), `Drag` (1002) and
+  `AnyMotion` (1003), with `Off` the default -- and the one function that writes a change between two of
+  them: from `Off` the mode's set and then SGR encoding (1006), to `Off` the reverse, and between two modes
+  only the swap. `protocols::EnableButtonTracking`, `EnableDragTracking` and their `Disable` twins join the
+  existing 1003 constants, with `mouseTrackingSet()` and `mouseTrackingReset()` mapping a mode to its own.
+- **`TerminalInput::setMouseTracking()` and `Terminal::setMouseTracking()`: standard mouse tracking.**
+  core::tui enabled only Contour's passive mode 2029, so xterm, kitty, WezTerm, iTerm2 and Windows Terminal
+  reported no mouse events at all. An application now asks for a `MouseTracking` mode, which
+  `enableProtocols()` writes with SGR encoding and `disableProtocols()` resets in reverse order; a change
+  while the protocols are enabled writes only the transition. The default stays `Off`, so no existing
+  program changes what a click-and-drag does in its terminal. The hover path that enables 1003 once the
+  terminal confirms 2029 now raises the requested mode to `AnyMotion`, and so also writes 1006;
+  `TerminalInput::mouseTracking()` answers the mode in effect.
+- **`Screen::componentAt(row, col)` is public**: the top-most visible component at a cell, as the last
+  `draw()` laid the screen out -- overlays first, the one shown last on top, then the tree in reverse
+  z-order, deepest descendant first -- or null where nothing but the root is. A drag source asks it for
+  the component under the pointer at the release.
+- **Pointer capture in `Screen`.** `Screen` hit-tested every mouse event, so a drag that left the component
+  it started on lost its moves and its release. A press now makes the component that handled it the
+  capture target: every move and the next release go to it directly, in its own coordinates, wherever the
+  pointer is. The release ends the capture, as do the next press, `Screen::releasePointer()` and the
+  target leaving the screen (destroyed, removed from the tree or hidden as an overlay); scroll events are
+  never captured. `Screen::pointerCapture()` answers the target.
+
+### Changed
+
+- **A mouse event over an overlay goes to the overlay.** `Screen` hit-tested only the component tree, so
+  a click on a popup or dialog shown with `showOverlay()` reached the component beneath it. Overlays are
+  now tested first, the one shown last on top. The screen's own tooltip is not a target, so the hover
+  stays with the component it describes.
+- **A mouse press hides the tooltip and resets the hover**, as a key press does, so no tooltip opens over
+  the drag the press starts.
+
+### Fixed
+
+- **Hit-testing breaks z-index ties the way painting does.** Siblings with the same z-index are painted in
+  the order they were added, so the last one is on top; hit-testing picked the first. A mouse event, and
+  `Screen::componentAt()`, now answer the component the user sees. An overlay's direct children are
+  painted by z-index too, where they used to be painted in insertion order.
+- **An overlay and its `Screen` may be destroyed in either order.** The screen's destructor detaches every
+  overlay still shown and its tree; before, an overlay that outlived the screen reached the destroyed one
+  from its own destructor, through `invalidate()`. A component destroyed while shown as an overlay leaves
+  the overlay list; before, the next `draw()` rendered the destroyed component.
+
+## [0.6.0] - 2026-10-02
+
+### Breaking
+
+- **`serve()` takes the loop it runs on, and a failed accept no longer ends it.** `serve` returned
+  on ANY failed accept and left the listening socket open, so one `EMFILE` or one client resetting
+  its queued connection stopped the server for good while the kernel went on completing handshakes
+  into a backlog nobody drained. It now answers each failed accept through `AcceptErrorPolicy`
+  (below): a connection that failed is accepted past, exhaustion backs off on the loop's timer and
+  serves again, an error nothing classifies is backed off on without end and reported as a degraded
+  loop if it persists, and only a closed listener (`Cancelled`) or a dead one (`BadHandle`) ends it.
+  A dead listener is closed before `serve` returns, so its port refuses rather than queues. A close
+  that lands during a backoff ends `serve` at once, and `serve` never calls into a listener its owner
+  destroyed while it waited; cancelling the flow returns from `serve` in a backoff as in an accept.
+  The new parameter is the loop, whose timer waits out a backoff and whose clock paces the reports;
+  a trailing `AcceptLoopReporting` says where the reports go, and with no `onEvent` they go to
+  `reportDiagnostic()`, so a loop that degrades or gives up is never silent by default. A loop that
+  stops -- closed or cancelled -- while degraded says so, so no registry keeps it degraded.
+  - *Migration*: `serve(listener, handler)` is `serve(&loop, listener, handler)`, and
+    `serve(listener, handler, limits)` is `serve(&loop, listener, handler, limits)`. A server that
+    wants the reports itself passes `AcceptLoopReporting { .surface = "...", .onEvent = ... }`, which
+    `AcceptLoopHealth::record` can be handed whole. No consumer calls `core::net::serve` yet; endo's
+    `httpServe` builtin, which calls contour's copy, takes the loop it already has when it moves
+    onto core-cpp.
+- **`IListener::close()` is the base class's, and an implementation overrides `doClose()`.** `close()`
+  fires the new `IListener::closeToken()` and then runs `doClose()`, once; the base destructor fires
+  the token too. The token is how a loop that waits on something other than `accept()` -- a backoff
+  -- hears a close at once, and how it learns that a listener was destroyed without touching it. A
+  virtual `close()` each implementation had to remember to signal from could promise neither.
+  - *Migration*: rename your override `void close() noexcept override` to a `protected`
+    `void doClose() noexcept override`; the token fires for you, on `close()` and on destruction. A
+    private helper named `close` with other parameters is renamed too, or it hides the base's
+    `close()`. The base's constructor allocates the token's state, so an implementation's
+    constructor is not `noexcept`, or an allocation failure there ends the process. Callers of
+    `close()` change nothing.
+    fastcached has five implementations (`BlockingListener` and four test listeners); no other
+    consumer implements one.
+- **Exhaustion is `NetErrorCode::ResourceExhausted`, no longer `SystemError`:** `EMFILE`, `ENFILE`,
+  `ENOBUFS`, `ENOMEM` and `ENOSR` on POSIX, and `WSAEMFILE`, `WSAENOBUFS` and
+  `WSA_NOT_ENOUGH_MEMORY` on Winsock, through the one socket-error table per platform. That table
+  now classifies, besides what it did, the POSIX listener's `socket`, the AF_UNIX dial's `socket`
+  and `connect`, the AF_UNIX listener's `socket`, `bind` and `listen` (Windows' too), and a
+  registration the epoll or kqueue backend refuses -- all of which built `SystemError` for these
+  `errno`s directly. `SystemError` is what nothing classified further; exhaustion is transient.
+  - *Migration*: a caller that read `SystemError` as "out of something, try again later" tests
+    `ResourceExhausted` instead. `ResourceExhausted` comes after `SystemError` in the enumeration,
+    so no code's value moved, and `toString` says `resource exhausted`.
+
+### Added
+
+- **`NetErrorCode::ResourceExhausted`**: the process or the system ran out of descriptors, buffer
+  space or memory. See Breaking for the codes that now report it.
+- **`<core/net/AcceptPolicy.hpp>`: what an accept loop does about a failed accept,** graduated from
+  fastcached so that a consumer's own accept loops answer it the way `serve` does.
+  `AcceptErrorTable` sorts every `NetErrorCode` into a disposition, in enumerator order, so a code
+  added to the enumeration fails the build until its row is decided; `AcceptErrorPolicy` turns a
+  failed accept and the loop's clock into a verdict -- accept again after a delay, stop, or give up
+  on a dead listener -- with a rate-limited warning and a change of condition. Exhaustion backs off
+  from 10 ms, doubling to 1 s, for as long as it lasts; a run of failed connections or poll ticks
+  yields for 10 ms every 16 rather than backing off, so a listener that answers without suspending
+  cannot hold the loop; and `SystemError` backs off the same way, for as long as it lasts, with a
+  run of 32 in a row and nothing else between them reported once as the loop being degraded and the
+  next accept or failed connection reported as its recovery. `describeAcceptFailure()`,
+  `describeAcceptDegraded()`, `describeAcceptRecovered()`, `describeAcceptLoopStopped()` and
+  `describeAcceptLoopEnded()` word the lines, and `AcceptLoopEvent` carries a report.
+- **`<core/net/AcceptLoopHealth.hpp>`: which accept loops of a process are degraded or gave up,**
+  for a liveness probe to answer from: a listening port is not a serving one. `record` takes an
+  accept loop's reports whole; a recovery, or a degraded loop's stopping, removes the degraded
+  entry. Graduated from fastcached,
+  whose health probe is its consumer once it moves onto this release, with `subscribe()` and
+  `forward()` for a component that keeps a registry of its own.
+- **`<core/net/testing/FailingListener.hpp>`: an `IListener` decorator whose first accepts answer
+  scripted `NetError`s,** then accept from the listener it decorates, owned or not; closed, it
+  answers no more of its script. It is how a consumer tests its own accept loop against failures no
+  kernel produces on demand: the `IAcceptCall` seam of 0.5.1 is private to the POSIX accept.
+  Graduated from fastcached's `FailingAcceptsListener`.
+
+### Fixed
+
+- **A POSIX accept whose listening descriptor the loop refuses to watch reports the refusal**
+  rather than throwing `FdRegistrationFailed` out of `IListener::accept()`, where it ended an accept
+  loop as an exception nobody reported. It reports the refusal's own code, which the backend's
+  socket-error table already classified -- a refusal for want of kernel memory or descriptors is
+  `ResourceExhausted`, which an accept loop backs off on, since the registration is made again at
+  the next accept -- and `BadHandle` only where the refusal says the descriptor is bad, or says
+  nothing. A refusal is never a close: one that classifies as `Cancelled` (`EINTR`) is reported as
+  `SystemError`. A pending `ETIMEDOUT` from `accept` is `HostUnreach` -- one
+  connection that timed out -- rather than `Timeout`, which an accept loop reads as its own poll
+  ticking.
+
+## [0.5.1] - 2026-09-29
+
+### Fixed
+
+- **A POSIX accept that failed for one connection is no longer reported as `SystemError`.** The
+  accept loop retried `EINTR` and `ECONNABORTED` and handed every other `errno` over as
+  `SystemError` with no category, which a caller has to read as exhaustion and back off on. That
+  covered a packet filter's `EPERM` for a single connection and the pending-connection errors that
+  Linux's accept(2) says to treat like `EAGAIN`. Now `EPROTO` and `ENOPROTOOPT` are retried with
+  `EINTR` and `ECONNABORTED`. Every other failed accept is classified by the one socket-error
+  table: `EPERM` is reported as `PermissionDenied`, and `EHOSTUNREACH`, `ENETUNREACH`,
+  `EHOSTDOWN`, `ENETDOWN` and `ENONET` as `HostUnreach`. `EOPNOTSUPP` is reported as
+  `Unsupported` rather than retried, because a socket that is not a stream answers it on every
+  call. Exhaustion (`EMFILE`, `ENFILE`, `ENOBUFS`, `ENOMEM`) stays `SystemError`, and a closed
+  listener is still `Cancelled`. `EINVAL` from accept, a socket that is not listening, is
+  `BadHandle` like `EBADF` and `ENOTSOCK` rather than `SystemError`, which read as exhaustion and
+  backed off on a dead listener forever; that row is accept's own, and `EINVAL` from any other call
+  is unchanged. The table's new rows apply to every POSIX transport and to the dial, not only to
+  accept. Windows gains `WSAEHOSTDOWN` as `HostUnreach` and `WSAEOPNOTSUPP` as `Unsupported`.
+  `WSAENETDOWN` stays `SystemError`: Winsock answers it when the network subsystem has failed, for
+  every call, and `AcceptEx` shares the table, so as `HostUnreach` it would read as one peer's
+  failure and be accepted again at once.
+
 ## [0.5.0] - 2026-09-26
 
 ### Breaking

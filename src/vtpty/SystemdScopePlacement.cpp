@@ -117,15 +117,13 @@ void SystemdScopePlacement::place(ParkedChild const& child)
             _bus = std::move(*connected);
             _protocol = ScopeProtocol::Current; // a new connection may reach a newer systemd
         }
-        auto result = request(child, _protocol);
         // systemd before 253 knows neither PIDFDs nor OOMPolicy on scopes, and refuses the whole
         // request over either. Speak what it knows from now on.
-        if (!result && result.error() == ScopeError::Unsupported && _protocol == ScopeProtocol::Current)
-        {
-            _protocol = ScopeProtocol::Legacy;
-            result = request(child, _protocol);
-        }
-        return result;
+        if (auto result = request(child, _protocol);
+            result || result.error() != ScopeError::Unsupported || _protocol != ScopeProtocol::Current)
+            return result;
+        _protocol = ScopeProtocol::Legacy;
+        return request(child, _protocol);
     }();
 
     if (!outcome && outcome.error() == ScopeError::Disconnected)

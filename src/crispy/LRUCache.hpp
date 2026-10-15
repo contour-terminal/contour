@@ -7,6 +7,7 @@
 #include <list>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace crispy
@@ -40,26 +41,26 @@ class LRUCache
         _items.clear();
     }
 
-    void touch(Key key) noexcept { (void) tryGet(key); }
+    void touch(Key const& key) noexcept { (void) tryGet(key); }
 
-    [[nodiscard]] bool contains(Key key) const noexcept { return _itemByKeyMapping.count(key) != 0; }
+    [[nodiscard]] bool contains(Key const& key) const noexcept { return _itemByKeyMapping.count(key) != 0; }
 
-    [[nodiscard]] Value* tryGet(Key key) const { return const_cast<LRUCache*>(this)->tryGet(key); }
+    [[nodiscard]] Value* tryGet(Key const& key) const { return const_cast<LRUCache*>(this)->tryGet(key); }
 
-    [[nodiscard]] Value* tryGet(Key key)
+    [[nodiscard]] Value* tryGet(Key const& key)
     {
         if (auto i = _itemByKeyMapping.find(key); i != _itemByKeyMapping.end())
         {
-            // move it to the front, and return it
-            auto i2 = moveItemToFront(i->second);
-            _itemByKeyMapping.at(key) = i2;
-            return &i2->value;
+            // Move it to the front, and return it. The mapping is updated through its own iterator, not
+            // by @p key: a caller may pass the key the item itself holds, which the move leaves empty.
+            i->second = moveItemToFront(i->second);
+            return &i->second->value;
         }
 
         return nullptr;
     }
 
-    [[nodiscard]] Value& at(Key key)
+    [[nodiscard]] Value& at(Key const& key)
     {
         if (Value* p = tryGet(key))
             return *p;
@@ -67,7 +68,7 @@ class LRUCache
         throw std::out_of_range("key");
     }
 
-    [[nodiscard]] Value const& at(Key key) const
+    [[nodiscard]] Value const& at(Key const& key) const
     {
         if (Value const* p = tryGet(key))
             return *p;
@@ -83,9 +84,9 @@ class LRUCache
             return *p;
 
         if (_items.size() == _capacity)
-            return evictOneAndPushFront(key, Value {})->value;
+            return evictOneAndPushFront(std::move(key), Value {})->value;
 
-        return emplaceItemToFront(key, Value {})->value;
+        return emplaceItemToFront(std::move(key), Value {})->value;
     }
 
     /// Conditionally creates a new item to the LRU-Cache iff its key was not present yet.
@@ -99,9 +100,9 @@ class LRUCache
             return false;
 
         if (_items.size() == _capacity)
-            evictOneAndPushFront(key, constructValue());
+            evictOneAndPushFront(std::move(key), constructValue());
         else
-            emplaceItemToFront(key, constructValue());
+            emplaceItemToFront(std::move(key), constructValue());
         return true;
     }
 
@@ -110,7 +111,7 @@ class LRUCache
     {
         if (Value* p = tryGet(key))
             return *p;
-        return emplace(key, constructValue());
+        return emplace(std::move(key), constructValue());
     }
 
     Value& emplace(Key key, Value&& value)
@@ -118,9 +119,9 @@ class LRUCache
         Require(!contains(key));
 
         if (_items.size() == _capacity)
-            return evictOneAndPushFront(key, std::move(value))->value;
+            return evictOneAndPushFront(std::move(key), std::move(value))->value;
 
-        return emplaceItemToFront(key, std::move(value))->value;
+        return emplaceItemToFront(std::move(key), std::move(value))->value;
     }
 
     [[nodiscard]] iterator begin() { return _items.begin(); }
@@ -142,10 +143,13 @@ class LRUCache
         return result;
     }
 
-    void erase(iterator iter)
+    void erase(iterator const& iter)
     {
+        // The key is copied out first: it lives in the node that erasing the item frees, and @p iter may be
+        // the very iterator the mapping holds, which erasing the mapping destroys.
+        auto const key = iter->key;
         _items.erase(iter);
-        _itemByKeyMapping.erase(iter->key);
+        _itemByKeyMapping.erase(key);
     }
 
     void erase(Key const& key)
@@ -164,15 +168,15 @@ class LRUCache
         Require(keyMappingIterator != _itemByKeyMapping.end());
 
         auto newItemIterator = moveItemToFront(keyMappingIterator->second);
-        newItemIterator->key = newKey;
+        newItemIterator->key = std::move(newKey);
         newItemIterator->value = std::move(newValue);
         _itemByKeyMapping.erase(keyMappingIterator);
-        _itemByKeyMapping.emplace(newKey, newItemIterator);
+        _itemByKeyMapping.emplace(newItemIterator->key, newItemIterator);
 
         return newItemIterator;
     }
 
-    [[nodiscard]] iterator moveItemToFront(iterator i)
+    [[nodiscard]] iterator moveItemToFront(iterator const& i)
     {
         _items.emplace_front(std::move(*i));
         _items.erase(i);
@@ -181,8 +185,8 @@ class LRUCache
 
     iterator emplaceItemToFront(Key key, Value&& value)
     {
-        _items.emplace_front(Item { key, std::move(value) });
-        _itemByKeyMapping.emplace(key, _items.begin());
+        _items.emplace_front(Item { std::move(key), std::move(value) });
+        _itemByKeyMapping.emplace(_items.front().key, _items.begin());
         return _items.begin();
     }
 

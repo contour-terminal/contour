@@ -13,6 +13,8 @@
 
 #include <array>
 #include <format>
+#include <optional>
+#include <string>
 
 #include <vthost/tmux/LayoutString.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -74,6 +76,46 @@ TEST_CASE("tmux split/kill commands match the server's command format (B5)", "[a
     CHECK(contour::remote::tmuxNewWindowCommand() == "new-window");
 }
 
+TEST_CASE("a hosted operation's tmux command is its row's", "[attach][tmux][operations]")
+{
+    // A column of the operation table, beside where the operation runs: a new operation states both in one
+    // row.
+    for (auto const& row: contour::session::HostedOperationTable)
+    {
+        auto const expected = row.tmuxCommand.empty()
+                                  ? std::optional<std::string> {}
+                                  : std::optional { std::format("{} -t %7", row.tmuxCommand) };
+        CHECK(contour::remote::tmuxOperationCommand(row.operation, 7) == expected);
+    }
+}
+
+TEST_CASE("tmux performs only the operations it has a command for", "[attach][tmux][operations]")
+{
+    using contour::session::HostedOperation;
+    using contour::session::HostedOperationRoute;
+    using contour::session::RemoteHostKind;
+    using contour::session::routeOf;
+
+    // A tmux tab's terminal parses the pane's output, so what changes only that terminal runs there, as in
+    // a local tab. Clearing to the prompt is refused: the server's pane would keep the rows.
+    CHECK(routeOf(HostedOperation::ClearToPrompt, RemoteHostKind::Tmux) == HostedOperationRoute::Refused);
+    CHECK(routeOf(HostedOperation::ClearHistoryAndReset, RemoteHostKind::Tmux)
+          == HostedOperationRoute::RunHere);
+    CHECK(routeOf(HostedOperation::SoftReset, RemoteHostKind::Tmux) == HostedOperationRoute::RunHere);
+    CHECK(routeOf(HostedOperation::WriteScreen, RemoteHostKind::Tmux) == HostedOperationRoute::RunHere);
+    // A daemon's client terminal is only a mirror, so the daemon performs every one of them.
+    for (auto const& row: contour::session::HostedOperationTable)
+        CHECK(routeOf(row.operation, RemoteHostKind::Daemon) == HostedOperationRoute::RunOnHost);
+
+    // The history half of ClearHistoryAndReset is tmux's own; the local terminal resets itself.
+    CHECK(contour::remote::tmuxOperationCommand(HostedOperation::ClearHistoryAndReset, 7)
+          == "clear-history -t %7");
+    // tmux has no command for these, so a tmux tab refuses them rather than change only its own copy.
+    CHECK_FALSE(contour::remote::tmuxOperationCommand(HostedOperation::ClearToPrompt, 7).has_value());
+    CHECK_FALSE(contour::remote::tmuxOperationCommand(HostedOperation::SoftReset, 7).has_value());
+    CHECK_FALSE(contour::remote::tmuxOperationCommand(HostedOperation::WriteScreen, 7).has_value());
+}
+
 // A GUI "new tab" in tmux mirror mode is authored on the server as a new window (requestRemoteTab
 // returns true so createNewTab does NOT fall through to a local createSession that canCreateSession()
 // refuses in steady state) — the regression that made the "+"/new-tab gesture a silent no-op.
@@ -113,6 +155,43 @@ TEST_CASE("a GUI split in tmux mode is authored on the tmux server (B5)", "[atta
     auto foreign =
         vtpty::MockPty { vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) } };
     CHECK_FALSE(ctrl->requestRemoteSplit(&foreign, /*vertical=*/true));
+
+    ctrl->stop();
+}
+
+// A pane running a program here (OpenCommandOutput's pager) cannot come from tmux: each pane the factory
+// makes is bound to a pane tmux announced, whatever command it was asked to run. So it is refused, and a
+// pane tmux announced is left to the realization that is waiting for it.
+TEST_CASE("a command pane is refused in tmux mode", "[attach][tmux][semanticblocks]")
+{
+    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(std::string {});
+    auto* ctrl = ctrlOwned.get();
+    contour::test::TestApp app { std::move(ctrlOwned) };
+    contour::test::ScopedController const win { app.manager() };
+    CHECK(ctrl->hosting() == contour::session::SessionHosting::Remote);
+
+    ctrl->paneAdded(/*window=*/1, /*pane=*/10, 80, 24);
+    ctrl->adoptPendingPanes(app.manager(), win.id);
+    auto* tab = app.manager().model().window(win.id)->tabAt(0);
+    REQUIRE(tab != nullptr);
+    auto* session = app.manager().sessionForId(tab->activePane()->session());
+    REQUIRE(session != nullptr);
+
+    // tmux announces another pane: until it is realized, the factory could make a session -- for it.
+    ctrl->paneAdded(/*window=*/1, /*pane=*/11, 80, 24);
+    REQUIRE(ctrl->canCreateSession());
+
+    auto pager = vtpty::Process::ExecInfo {};
+    pager.program = "less";
+    for (auto const placement:
+         { contour::session::CommandPanePlacement::Split, contour::session::CommandPanePlacement::Tab })
+    {
+        auto const pane = app.manager().openCommandPane(session, placement, pager);
+        REQUIRE_FALSE(pane.has_value());
+        CHECK(pane.error() == contour::session::CommandPaneError::RemoteSessions);
+    }
+    CHECK(ctrl->canCreateSession()); // the announced pane is still there for its own realization
+    CHECK(win->count() == 1);
 
     ctrl->stop();
 }
@@ -341,11 +420,10 @@ TEST_CASE("a remote resize updates a not-yet-realized pane's extent", "[attach][
 
 #ifndef _WIN32
 
-    // <array> is included at the top of the file, for the cases above.
+    // <array> and <string> are included at the top of the file, for the cases above.
     #include <chrono>
     #include <cstdio>
     #include <filesystem>
-    #include <string>
     #include <thread>
     #include <tuple>
 

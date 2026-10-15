@@ -4,19 +4,78 @@
 // engine and scene graph run without a display server (CI-safe), then constructs the
 // QGuiApplication that the QML components need before running the Catch2 session.
 
+#include <contour/test/NotificationFixtures.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 
 #include <core/testing/SuppressWindowsDialogs.hpp>
 
+#include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
 #include <QtCore/QStringList>
 #include <QtGui/QGuiApplication>
 
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <string>
+#include <system_error>
 
 #include <QtQuickControls2/QQuickStyle>
 
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
+
+namespace
+{
+
+/// Deletes what a test run left to deleteLater() once that run is over.
+///
+/// Tearing down QML hands much of the work to the event loop: a Loader, a Repeater releasing its
+/// delegates and a Menu all delete their items with deleteLater(). A test that drives a page and
+/// returns without spinning the loop again leaves those deletions queued, and QCoreApplication drops
+/// the queue at exit without deleting a single receiver. Everything those objects still hold, the
+/// font engines their texts shaped with among it, then outlives the run, and LeakSanitizer reports
+/// what it can no longer reach. In a long run the next test's event processing hides this; run alone,
+/// the test leaks. The application itself never stops spinning its loop, so it has no such queue.
+class DeferredDeletionDrain final: public Catch::EventListenerBase
+{
+  public:
+    using Catch::EventListenerBase::EventListenerBase;
+
+    /// Runs the deletions queued by one run of a test case, after its locals are gone.
+    void testCasePartialEnded(Catch::TestCaseStats const& /*stats*/, std::uint64_t /*partNumber*/) override
+    {
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    }
+};
+
+/// Whether this process runs QtDBus's connection thread.
+///
+/// QtDBus starts it on the first use of any bus and keeps it until the process ends, so its presence
+/// at the end of a run says that something in the run reached a session bus -- a session handed the
+/// desktop's notifier, a transport built against the real bus -- whichever test did it. Read from the
+/// thread names the kernel keeps per task; elsewhere than Linux there is no D-Bus to reach.
+[[nodiscard]] bool reachedSessionBus()
+{
+    auto const tasks = std::filesystem::path { "/proc/self/task" };
+    auto error = std::error_code {};
+    for (auto const& task: std::filesystem::directory_iterator { tasks, error })
+    {
+        auto comm = std::ifstream { task.path() / "comm" };
+        auto name = std::string {};
+        std::getline(comm, name);
+        if (name == "QDBusConnection")
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
+CATCH_REGISTER_LISTENER(DeferredDeletionDrain)
 
 int main(int argc, char* argv[])
 {
@@ -78,6 +137,19 @@ int main(int argc, char* argv[])
         for (auto const& m: qmlErrors)
             std::cerr << "  - " << m.toStdString() << '\n';
         std::cerr << "=================================================================\n";
+        return testResult != 0 ? testResult : 1;
+    }
+
+    // Run-wide gate: no test reaches the machine's session bus. A session gets the harness's notifier,
+    // and the cases that drive a real transport run only on the private bus the wedged-bus harness
+    // stands up (contour::test::onPrivateSessionBus()).
+    if (!contour::test::onPrivateSessionBus() && reachedSessionBus())
+    {
+        std::cerr << "\n=================================================================\n"
+                  << "FAILURE: a test reached the session bus (a QDBusConnection thread is running). Give a\n"
+                     "session contour::test::makeTestNotifier(), or run a real-transport case only under\n"
+                     "contour::test::onPrivateSessionBus(). Run the suite by tag to find which test it was.\n"
+                  << "=================================================================\n";
         return testResult != 0 ? testResult : 1;
     }
 

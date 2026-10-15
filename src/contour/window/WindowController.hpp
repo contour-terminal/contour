@@ -165,6 +165,9 @@ class WindowController:
     /// a role would have to emit dataChanged for each one to stay honest. A tooltip is only read when it
     /// opens, so asking then is both simpler and always current.
     ///
+    /// Written with `~` only when the directory is on this machine; any other is shown as reported,
+    /// made safe to show.
+    ///
     /// @param index The tab's row.
     /// @return The directory, or an empty string when none can be determined.
     Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int index) const;
@@ -341,6 +344,12 @@ class WindowController:
     /// The titles of this window's tabs, in tab order (TabTitleProvider, for TabCommandSource).
     [[nodiscard]] std::vector<std::string> tabTitles() const override;
 
+    /// The label the strip shows for one tab, read as tabTitles() reads each row. Resolving a label
+    /// takes that tab's terminal lock, so naming one tab this way waits on no other tab's parser.
+    /// @param tab The tab to name.
+    /// @return Its label, or empty when @p tab is not in this window.
+    [[nodiscard]] std::string tabTitleOf(vtworkspace::TabId tab) const;
+
     // {{{ PaneProxy tree + window-service reads
     [[nodiscard]] session::PaneProxy* activeTabRootPane() const noexcept { return _activeTabRootProxy; }
     [[nodiscard]] session::TerminalSession* activeSession() const noexcept;
@@ -470,6 +479,51 @@ class WindowController:
 
     /// Minimizes this window — routed here so every show-mode change stays on the controller.
     Q_INVOKABLE void minimizeWindow();
+
+    /// Whether this window's OS window is minimised. False before a window is bound.
+    ///
+    /// Read from QWindow::windowStates(), which the platform keeps current. (Wayland compositors do not
+    /// report minimising, so there a minimised window reads as shown.)
+    [[nodiscard]] bool isMinimized() const noexcept;
+
+    /// Brings this window to the front: un-minimises it, keeping a maximised or full-screen state,
+    /// raises it, and asks the window manager to activate it. What clicking a finish notification
+    /// does after its tab was made active. A no-op before a window is bound.
+    void raiseAndActivate();
+
+    /// Asks this window's QML to show a tray message on behalf of one of its sessions.
+    ///
+    /// Routed through the WINDOW because the session may sit in a background tab, which has no
+    /// SessionChrome to relay a signal of its own. The delivery for platforms without a desktop Notifier.
+    /// @param title     The message title.
+    /// @param body      The message body.
+    /// @param onClicked What a click on the message does, besides bringing the window forward.
+    void requestNotification(QString const& title, QString const& body, std::function<void()> onClicked);
+
+    /// Asks this window's QML to show a tray message whose click only brings the window forward: a notice
+    /// a pane on screen relays from its session.
+    /// @param title The message title.
+    /// @param body  The message body.
+    Q_INVOKABLE void requestNotification(QString const& title, QString const& body)
+    {
+        requestNotification(title, body, {});
+    }
+
+    /// A click on this window's tray message: brings the window forward, and does what the message asked a
+    /// click to do -- a finish notice's session revealed, an OSC 99 notification activated.
+    ///
+    /// Qt's tray reports a click with no word of which message it was on (QSystemTrayIcon::messageClicked
+    /// carries nothing), and shows one message at a time, so the click is taken for one on the last
+    /// message shown. A click on a message a later one replaced is lost to it.
+    Q_INVOKABLE void trayMessageClicked();
+
+    /// Asks this window's QML to play a bell sound, for the same reason.
+    /// @param source The sound's URL; empty plays nothing.
+    /// @param volume 0.0 (silent) .. 1.0 (loudest).
+    void requestBell(QString const& source, double volume) { emit bellRequested(source, volume); }
+
+    /// Asks this window's QML to flash its taskbar entry, for the same reason.
+    void requestAlert() { emit alertRequested(); }
 
     /// Sizes the still-unmapped window from the active pane's REAL cell metrics (FreeType math run
     /// headlessly during session attach) plus the declared chrome, applies the WM size hints, then maps
@@ -607,6 +661,12 @@ class WindowController:
     void chromeHeightChanged();
     /// The content area switched between the settings page and the terminal (settingsActive changed).
     void settingsActiveChanged();
+    /// @see requestNotification.
+    void notificationRequested(QString const& title, QString const& body);
+    /// @see requestBell.
+    void bellRequested(QString const& source, double volume);
+    /// @see requestAlert.
+    void alertRequested();
 
   private:
     /// Sets whether the settings page is shown, emitting settingsActiveChanged only on a real change.
@@ -623,6 +683,8 @@ class WindowController:
     [[nodiscard]] vtworkspace::Tab* tabAtRow(int index) const noexcept;
     /// The row index of @p tab in this window, or -1.
     [[nodiscard]] int rowOfTab(vtworkspace::TabId tab) const noexcept;
+    /// The strip's label for list-model row @p row, through the model's own TitleRole.
+    [[nodiscard]] std::string titleAtRow(int row) const;
     /// Resolves the label shown on @p row's tab.
     [[nodiscard]] QString resolvedTabLabel(vtworkspace::Tab* tab,
                                            session::TerminalSession* session,
@@ -679,6 +741,10 @@ class WindowController:
     /// having it recorded at each site.
     void onWindowVisibilityChanged();
 
+    /// QWindow::windowStateChanged handler: minimising and restoring, which a window hidden from the
+    /// screen also goes through without its visibility changing.
+    void onWindowStateChanged();
+
     /// The frame policy for this window's platform and current decoration.
     [[nodiscard]] platform::FramePolicy framePolicy() const noexcept;
 
@@ -728,6 +794,9 @@ class WindowController:
     /// under the open menu makes the row a no-op rather than a use-after-free.
     QPointer<session::TerminalSession> _contextMenuSession;
     // }}}
+
+    /// What a click on the tray message last shown does, besides bringing the window forward.
+    std::function<void()> _trayMessageClicked;
 
     display::TerminalDisplay* _activeDisplay = nullptr;
     // The OS window (QQuickWindow) this controller adapts, adopted from the first display that focuses in.

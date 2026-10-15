@@ -98,6 +98,9 @@ struct DrawnGlyph
     bool operator==(DrawnGlyph const&) const = default;
 };
 
+std::vector<DrawnGlyph> renderedLayout(vtbackend::RenderBuffer const& buffer, vtbackend::LineOffset line);
+
+/// renderedLayout() of the buffer @p buf holds locked.
 std::vector<DrawnGlyph> renderedLayout(vtbackend::RenderBufferRef const& buf, vtbackend::LineOffset line);
 
 /// A layout as `col:U+XXXX+U+YYYY(wN) ...`. Catch2 prints a u32string as `{?}`, which says nothing

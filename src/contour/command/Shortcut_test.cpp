@@ -12,6 +12,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <utility>
+
 using namespace contour;
 using namespace contour::command;
 using vtbackend::Key;
@@ -55,6 +57,29 @@ TEST_CASE("shortcutText renders a chord the way a user would type it", "[contour
     {
         CHECK(shortcutText(Modifiers {}, ShortcutInput { Key::F3 }) == "F3");
     }
+}
+
+TEST_CASE("shortcutIndex advertises the built-in chords the user's bindings leave free", "[contour][palette]")
+{
+    auto const openOutput = commandId(actions::OpenCommandOutput {});
+
+    // Ctrl+Shift+G is in no default binding, so only the fallback table can name it.
+    auto const defaults = config::Config {};
+    auto const index = shortcutIndex(defaults);
+    REQUIRE(index.contains(openOutput));
+    CHECK(index.at(openOutput) == "Ctrl+Shift+G");
+
+    // A user binding of the same chord is found first, so the built-in one never runs.
+    auto mappings = defaults.inputMappings.value();
+    mappings.charMappings.push_back(
+        config::CharInputMapping { .modes {},
+                                   .modifiers { Modifier::Control, Modifier::Shift },
+                                   .input = U'G',
+                                   .binding = { actions::ScrollToTop {} } });
+    auto shadowing = config::Config {};
+    shadowing.inputMappings = std::move(mappings);
+    auto const shadowed = shortcutIndex(shadowing);
+    CHECK_FALSE(shadowed.contains(openOutput));
 }
 
 TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][palette]")

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/CommandLine.hpp>
 #include <vtpty/EnvironmentBlock.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
@@ -11,10 +12,12 @@
 #include <core/Overloaded.hpp>
 #include <core/UserInfo.hpp>
 #include <core/Utils.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -26,6 +29,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <type_traits>
 
 #ifndef __FreeBSD__
@@ -84,6 +88,21 @@ namespace
 
     /// The id a Process holds while it has no child. @see Process::Private::pid.
     constexpr pid_t NoChild = -1;
+
+    /// How often a HangupGrace looks whether the child has ended, and whether the grace has passed.
+    constexpr auto HangupGraceStep = std::chrono::milliseconds { 10 };
+
+    /// @return The signal that asks a child to end as @p hint says.
+    [[nodiscard]] constexpr int signalFor(Process::TerminationHint hint) noexcept
+    {
+        switch (hint)
+        {
+            case Process::TerminationHint::Normal: return SIGTERM;
+            case Process::TerminationHint::Hangup: return SIGHUP;
+            case Process::TerminationHint::Kill: return SIGKILL;
+        }
+        return SIGTERM;
+    }
 
     string getLastErrorAsString()
     {
@@ -238,6 +257,7 @@ struct Process::Private
 
     unique_ptr<Pty> pty {};
     shared_ptr<ProcessPlacement> placement {};
+    HangupGrace hangupGrace;
 
     // The child's id, or NoChild: before start() spawned one, when fork() failed, and once the child has
     // been reaped. Never 0, which waitpid() and kill() read as the caller's whole process group, nor any
@@ -245,6 +265,10 @@ struct Process::Private
     mutable pid_t pid = NoChild;
     mutable std::mutex exitStatusMutex {};
     mutable std::optional<Process::ExitStatus> exitStatus {};
+
+    /// Started by close() while the child runs: kills it once hangupGrace has passed without it ending.
+    std::optional<std::thread> hangupWatch {};
+    std::mutex hangupWatchMutex {}; ///< Guards hangupWatch.
 
     [[nodiscard]] std::optional<ExitStatus> checkStatus(bool waitForExit) const;
 
@@ -263,7 +287,8 @@ Process::Process(string const& path,
                  vector<string> removedEnvironment,
                  bool escapeSandbox,
                  unique_ptr<Pty> pty,
-                 shared_ptr<ProcessPlacement> placement):
+                 shared_ptr<ProcessPlacement> placement,
+                 HangupGrace hangupGrace):
     _d(new Private { .path = path,
                      .args = args,
                      .cwd = cwd,
@@ -271,7 +296,8 @@ Process::Process(string const& path,
                      .removedEnvironment = std::move(removedEnvironment),
                      .escapeSandbox = escapeSandbox,
                      .pty = std::move(pty),
-                     .placement = std::move(placement) },
+                     .placement = std::move(placement),
+                     .hangupGrace = hangupGrace },
        [](Private* p) { delete p; })
 {
     Require(_d->placement != nullptr);
@@ -312,7 +338,8 @@ StartResult Process::start()
             overrides[name] = value;
         if (stdoutFastPipe)
             overrides[string { StdoutFastPipeEnvironmentName }] = string { StdoutFastPipeFdStr };
-        return buildEnvironmentBlock(inheritedEnvironment(), overrides, _d->removedEnvironment);
+        return buildEnvironmentBlock(
+            inheritedEnvironment(), overrides, _d->removedEnvironment, EnvironmentNames::CaseSensitive);
     }();
 
     // `environ` layout: pointers to each entry, terminated by a null pointer. Both vectors outlive
@@ -323,13 +350,28 @@ StartResult Process::start()
         childEnvp.push_back(entry.data());
     childEnvp.push_back(nullptr);
 
+    // What runs: the program as configured -- or, where it names no program but holds whitespace
+    // ("bash -l"), the command line it spells -- looked up on the PATH the child execs with, a relative
+    // path in the directory the child changes to before it execs; looked up nowhere when flatpak-spawn
+    // runs it on the host (programsFor()).
+    auto const searchPath = string {
+        environmentValue(childEnvironment, "PATH", EnvironmentNames::CaseSensitive).value_or(string_view {})
+    };
+    auto const invocation = invocationToRun(
+        _d->path,
+        _d->args,
+        programsFor(isFlatpak() && _d->escapeSandbox ? ProgramHost::SandboxHost : ProgramHost::ThisMachine,
+                    ProgramSearch { .path = searchPath,
+                                    .workingDirectory = _d->cwd,
+                                    .fileSystem = core::platform::NativeFileSystem::instance() }));
+
     // argv is assembled before the fork for the same reason: the flatpak variant reads the home
     // directory and formats a dozen strings, none of which the child is allowed to do.
-    auto childArgs = [stdoutFastPipe, this]() -> vector<string> {
+    auto childArgs = [stdoutFastPipe, &invocation, this]() -> vector<string> {
         if (!isFlatpak() || !_d->escapeSandbox)
         {
-            auto args = vector<string> { _d->path };
-            args.insert(args.end(), _d->args.begin(), _d->args.end());
+            auto args = vector<string> { invocation.program };
+            args.insert(args.end(), invocation.arguments.begin(), invocation.arguments.end());
             return args;
         }
 
@@ -355,8 +397,8 @@ StartResult Process::start()
         if (stdoutFastPipe)
             realArgs.emplace_back(
                 std::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFd));
-        realArgs.push_back(_d->path);
-        for (auto const& arg: _d->args)
+        realArgs.push_back(invocation.program);
+        for (auto const& arg: invocation.arguments)
             realArgs.push_back(arg);
 
         return realArgs;
@@ -485,7 +527,36 @@ StartResult Process::start()
 
 Process::~Process()
 {
+    {
+        auto const _ = lock_guard { _d->hangupWatchMutex };
+        if (_d->hangupWatch)
+            _d->hangupWatch->join();
+    }
     (void) wait();
+}
+
+void Process::close()
+{
+    // The kernel hangs the child up as its terminal's master closes, sending its session SIGHUP. A child
+    // that ignores that would keep everyone waiting for it waiting for good -- a session's exit watcher,
+    // and ~Process on the GUI thread as the session is freed -- so after a short grace it is killed, as
+    // wezterm does. Off this thread: a shell ends within the grace, and closing a tab must not wait on it.
+    _d->pty->close();
+
+    auto const _ = lock_guard { _d->hangupWatchMutex };
+    if (_d->hangupWatch || !alive())
+        return;
+    // The grace starts here, not whenever the thread gets to run.
+    auto const& clock = _d->hangupGrace.clock.get();
+    _d->hangupWatch.emplace([this, &clock, deadline = clock.now() + _d->hangupGrace.duration]() {
+        while (clock.now() < deadline)
+        {
+            if (!alive())
+                return;
+            std::this_thread::sleep_for(HangupGraceStep);
+        }
+        terminate(TerminationHint::Kill);
+    });
 }
 
 Pty& Process::pty() noexcept
@@ -523,44 +594,50 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) co
     if (childPid == NoChild)
         return nullopt;
 
-    auto status = 0;
-    while (true)
+    // A blocking wait only waits for the child to end here, without reaping it (WNOWAIT): every reap
+    // happens below, under the lock, together with recording how the child ended. Reaped out here, a
+    // concurrent waiter -- a session's exit watcher beside a close's grace -- could find the child gone
+    // while its status was still unrecorded, and so report none.
+    if (waitForExit)
     {
-        auto const rv = waitpid(childPid, &status, waitForExit ? 0 : WNOHANG);
-        auto const waitPidErrorCode = errno;
-
-        // A signal arriving is no reason to stop waiting.
-        if (rv < 0 && waitPidErrorCode == EINTR)
-            continue;
-
-        if (rv < 0)
+        auto info = siginfo_t {};
+        while (waitid(P_PID, static_cast<id_t>(childPid), &info, WEXITED | WNOWAIT) < 0 && errno == EINTR)
         {
-            auto const _ = lock_guard { exitStatusMutex };
-            if (exitStatus.has_value())
-                return exitStatus; // Reaped by a concurrent wait, which recorded it.
-            if (waitPidErrorCode == ECHILD)
-            {
-                // Not ours to wait for any more -- reaped elsewhere, or by the system with SIGCHLD
-                // ignored -- so there is no child, and no status to be had for it.
-                pid = NoChild;
-                return nullopt;
-            }
-            errorLog()("waitpid() failed: {}", std::generic_category().message(waitPidErrorCode));
-            return nullopt;
+            // A signal arriving is no reason to stop waiting.
         }
-
-        if (rv == 0) // WNOHANG, and the child still runs.
-            return nullopt;
-
-        if (WIFEXITED(status) || WIFSIGNALED(status))
-            break;
-
-        // Stopped, as a tracer is told: still running.
-        if (!waitForExit)
-            return nullopt;
+        // Whatever ended the wait, the reap below says what became of the child.
     }
 
     auto const _ = lock_guard { exitStatusMutex };
+    if (exitStatus.has_value())
+        return exitStatus; // Reaped by a concurrent wait, which recorded it.
+    if (pid == NoChild)
+        return nullopt;
+
+    auto status = 0;
+    auto rv = pid_t {};
+    do
+    {
+        rv = waitpid(pid, &status, WNOHANG);
+    } while (rv < 0 && errno == EINTR);
+
+    if (rv < 0)
+    {
+        if (errno == ECHILD)
+        {
+            // Not ours to wait for any more -- reaped by the system with SIGCHLD ignored -- so there is
+            // no child, and no status to be had for it.
+            pid = NoChild;
+            return nullopt;
+        }
+        errorLog()("waitpid() failed: {}", std::generic_category().message(errno));
+        return nullopt;
+    }
+
+    // Still running, or only stopped, as a tracer is told.
+    if (rv == 0 || (!WIFEXITED(status) && !WIFSIGNALED(status)))
+        return nullopt;
+
     pid = NoChild;
     exitStatus = WIFEXITED(status) ? ExitStatus { NormalExit { WEXITSTATUS(status) } }
                                    : ExitStatus { SignalExit { WTERMSIG(status) } };
@@ -582,7 +659,7 @@ void Process::terminate(TerminationHint terminationHint)
     if (childPid == NoChild || _d->checkStatus(false).has_value())
         return;
 
-    ::kill(childPid, terminationHint == TerminationHint::Hangup ? SIGHUP : SIGTERM);
+    ::kill(childPid, signalFor(terminationHint));
 }
 
 optional<Process::ExitStatus> Process::wait()

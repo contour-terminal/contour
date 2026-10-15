@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/net/Sockets.hpp>
+#include <core/net/detail/SocketErrors.hpp>
 #include <core/net/posix/FdUtils.hpp>
 #include <core/net/posix/PosixListener.hpp>
 #include <core/net/posix/PosixSocket.hpp>
@@ -91,7 +92,7 @@ async::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(Event
 
     auto const fd = makeStreamSocket(AF_UNIX, 0);
     if (fd < 0)
-        co_return std::unexpected(makeNetError(NetErrorCode::SystemError, errno, "socket"));
+        co_return std::unexpected(detail::socketError(errno, "socket"));
 
     auto const rc = ::connect(fd, reinterpret_cast<sockaddr const*>(&address), sizeof(address));
     if (rc == 0)
@@ -116,16 +117,12 @@ async::Task<std::expected<std::unique_ptr<ISocket>, NetError>> connectUnix(Event
         if (soError == 0)
             co_return std::unique_ptr<ISocket>(new PosixSocket(*loop, fd));
         discardSocket(loop, fd);
-        co_return std::unexpected(
-            makeNetError(soError == ECONNREFUSED ? NetErrorCode::ConnRefused : NetErrorCode::SystemError,
-                         soError,
-                         "connect"));
+        co_return std::unexpected(detail::socketError(soError, "connect"));
     }
 
     auto const err = errno;
     discardSocket(loop, fd);
-    co_return std::unexpected(makeNetError(
-        err == ECONNREFUSED ? NetErrorCode::ConnRefused : NetErrorCode::SystemError, err, "connect"));
+    co_return std::unexpected(detail::socketError(err, "connect"));
 }
 
 std::expected<std::unique_ptr<ISocket>, NetError> adoptSocket(EventLoop& loop,

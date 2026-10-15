@@ -21,11 +21,13 @@ A small number of bindings are built in and do **not** appear in `input_mapping`
 |---------|--------|
 | `Ctrl+Tab` / `Ctrl+PageDown` | Switch to the tab on the right (wrapping around) |
 | `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Switch to the tab on the left (wrapping around) |
+| `Ctrl+Shift+G` | Open the last command's output in the pager named by `command_blocks.pager` (needs a shell that marks its commands with [OSC 133](../vt-extensions/osc-133-shell-integration.md)). With nothing to open the chord is swallowed rather than sent to the shell as `^G`; on the alternate screen it goes to the application |
 | `Right` mouse button | Open the terminal's context menu |
+| `Ctrl` + triple-click with the `Left` mouse button | Select the output of the command under the pointer (needs a shell that marks its commands with [OSC 133](../vt-extensions/osc-133-shell-integration.md); on the alternate screen, which has no commands, the click selects as usual) |
 | Horizontal wheel / two-finger sideways swipe | Switch tabs |
 
-These are consulted only when your `input_mapping` does not claim the same key or button, so binding
-one of them yourself replaces it.
+These are consulted only when your `input_mapping` does not claim the same key or button (for the
+triple-click, the same button and click count), so binding one of them yourself replaces it.
 
 They are built in rather than listed as defaults for the reason given in the warning above: an
 `input_mapping` section replaces the built-in list wholesale, and the generated `contour.yml` writes
@@ -94,5 +96,22 @@ chord. Shift is carried by `mods`, not by the letter's case, so writing an upper
  Mouse buttons can be one of the following self-explanatory ones:
 
    `Left, Middle, Right, WheelUp, WheelDown, WheelLeft, WheelRight`
+
+A mouse binding may also name a click count with `clicks` (1 to 4). Such a binding fires on that
+click of a multi-click sequence only, and it is consulted *before* Contour's own double-, triple- and
+quadruple-click selection, so it replaces that selection for the chord it names:
+
+```yaml
+input_mapping:
+    - { mods: [Control], mouse: Left, clicks: 3, action: SelectCommandBlock, target: pointer, part: output }
+```
+
+A binding without `clicks` fires on every press that no `clicks` binding claimed. Like the selection
+it replaces, a `clicks` binding never takes a click that an application asked for, unless the
+[`bypass_mouse_protocol_modifier`](index.md#bypass_mouse_protocol_modifiers) is held.
+
+`clicks` applies to the `Left`, `Middle` and `Right` buttons only: a wheel step is never more than a
+first click. An entry that gives it to a key or a wheel, or a count other than 1 to 4, is dropped and
+the reason is reported on startup.
 
 

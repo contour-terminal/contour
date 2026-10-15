@@ -10,33 +10,32 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <ranges>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
+#include <vthost/CommandBlockWire.hpp>
 #include <vthost/ContextWire.hpp>
 #include <vthost/CursorStyle.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/ImageWire.hpp>
 #include <vthost/MirroredModes.hpp>
 #include <vthost/MouseWire.hpp>
+#include <vthost/NotifyWire.hpp>
 #include <vthost/ProgressWire.hpp>
 #include <vthost/StatusWire.hpp>
+#include <vthost/TimeWire.hpp>
 
 namespace vthost::client
 {
 
 namespace
 {
-    /// std::ranges::contains is not yet in Apple's libc++; find() is.
-    [[nodiscard]] bool containsValue(std::vector<uint32_t> const& values, uint32_t needle)
-    {
-        return std::ranges::find(values, needle) != values.end();
-    }
-
     /// @return The row @p stableId names, or nullptr if the mirror does not hold it.
     [[nodiscard]] proto::WireLine const* rowOrNull(RemoteScreen const& screen, int64_t stableId)
     {
@@ -85,7 +84,44 @@ namespace
         }
         return placements;
     }
+
+    /// The eviction count that numbers the mirror's rows as the server numbers them.
+    ///
+    /// The server's row at its floor is number `evicted + 1`, so the mirror's top row is that plus its id's
+    /// distance below the floor -- or minus it, where the mirror keeps history the server has since dropped,
+    /// and the top row lies above the floor. Rows the mirror kept that the server's ids no longer name
+    /// continue the arithmetic, as they continue the page's offsets. Every operand
+    /// is peer-announced, so the distance is taken in unsigned arithmetic, which wraps where signed
+    /// arithmetic would overflow, and the count is clamped at zero: a mirror holding rows older than any
+    /// the server ever numbered calls its top row 1.
+    /// @param screen The mirrored screen: the server's count, its floor and its viewport base.
+    /// @param topOffset The mirror grid's addressableTop(), relative to its page, which the viewport
+    ///        base names.
+    /// @return The count for the mirror grid to adopt.
+    [[nodiscard]] uint64_t mirroredEvictedRowCount(RemoteScreen const& screen,
+                                                   vtbackend::LineOffset topOffset)
+    {
+        auto const below = static_cast<uint64_t>(screen.viewportBase)
+                           + static_cast<uint64_t>(unbox<int64_t>(topOffset))
+                           - static_cast<uint64_t>(screen.stableFloor);
+        if (static_cast<int64_t>(below) >= 0)
+            return screen.evictedRowCount + below;
+        auto const above = uint64_t { 0 } - below;
+        return screen.evictedRowCount - std::min(screen.evictedRowCount, above);
+    }
 } // namespace
+
+ScreenMirror::ScreenMirror(vtbackend::Terminal& terminal, DaemonMachine daemon):
+    _terminal { &terminal }, _ownStatusDisplayType { terminal.statusDisplayType() }
+{
+    // Under the lock, as every later read of the role is: the terminal is already shown, and the GUI asks
+    // it where its directory is whenever it likes.
+    auto const guard = std::lock_guard { terminal };
+    // The daemon sends every machine id derived, so this machine is named the same way to be compared.
+    terminal.bindReplica(daemon == DaemonMachine::Same ? vtbackend::ReplicaRole::SameMachine
+                                                       : vtbackend::ReplicaRole::OtherMachine,
+                         appSpecificIdentity(terminal.localIdentity()));
+}
 
 vtbackend::Screen& ScreenMirror::activePage() const noexcept
 {
@@ -177,6 +213,89 @@ void ScreenMirror::syncContexts(RemoteScreen const& screen)
     _terminal->setContextChain(chain);
 }
 
+void ScreenMirror::syncCommandBlocks(RemoteScreen const& screen, CommandBlockSync sync)
+{
+    // First of all, as the host forgets its own rows' ids first: an id from before its ids started over names
+    // nothing now, or a block minted since. The host sends again the rows it still holds, without their ids;
+    // the ones it no longer holds -- this mirror's deeper scrollback -- only this forgets.
+    if (screen.commandBlockIdEpoch != _commandBlockIdEpoch)
+    {
+        _terminal->primaryScreen().forgetBlockIds();
+        _commandBlockIdEpoch = screen.commandBlockIdEpoch;
+    }
+    // Gated like the host's walk: nothing in the table moved since the last sync, nothing to adopt.
+    // The first replay always runs — it has never synced.
+    if (sync == CommandBlockSync::Follow && screen.commandBlocksRevision == _syncedCommandBlocks)
+        return;
+    // Before any adoption, and before `newest` is taken: that order is what follows the host's ids
+    // starting over. @see the declaration.
+    if (sync == CommandBlockSync::Prime || screen.commandBlocksRetiredAt > _syncedCommandBlocks)
+        retireAbsentCommandBlocks(screen);
+
+    auto& store = _terminal->commandBlocks();
+    // The newest id held before this sync, advanced as records are adopted oldest first. A reported
+    // finish only ever happens to the host's newest record (OSC 133;D finishes the current one), so a
+    // record this store never held that is OLDER than what it holds cannot be news.
+    auto newest = store.currentId().value;
+
+    // What changed since the last sync -- everything, on the attach -- read off the revision index rather
+    // than found by walking the table, and adopted in id order, oldest first, as the rule above needs.
+    auto const since = sync == CommandBlockSync::Prime ? uint64_t { 0 } : _syncedCommandBlocks;
+    auto changed =
+        std::ranges::to<std::vector>(std::ranges::subrange(screen.commandBlocksByRevision.upper_bound(since),
+                                                           screen.commandBlocksByRevision.end())
+                                     | std::views::values);
+    std::ranges::sort(changed);
+
+    for (auto const id: changed)
+    {
+        auto const& mirrored = screen.commandBlocks.at(id); // the index names exactly what the table holds
+        // A record the store already holds unchanged is adopted all the same: the store takes it for a
+        // resend, and nothing moves.
+        auto const* const held = store.find(vtbackend::CommandBlockId { id });
+        auto const mode = (sync == CommandBlockSync::Prime || (held == nullptr && id < newest))
+                              ? vtbackend::AdoptMode::Snapshot
+                              : vtbackend::AdoptMode::Live;
+        // A record new to the store has no head here; its rows may be written already (a capped snapshot's
+        // remainder follows them) or arrive in this update.
+        if (held == nullptr)
+            _headCandidates.emplace_back(id);
+        // Whether or not this store held it: a head this mirror never placed may have left the host since.
+        if (hostHeadOf(mirrored.wire) == HostHead::Evicted)
+            _evictedHeads.emplace_back(id);
+        // `held` is read before the adoption, which may move the store's records.
+        _terminal->adoptCommandBlock(fromWireCommandBlock(mirrored.wire, held), mode);
+        newest = std::max(newest, id);
+    }
+    _syncedCommandBlocks = screen.commandBlocksRevision;
+}
+
+void ScreenMirror::syncHostClock(RemoteScreen const& screen)
+{
+    // Only a reading this mirror has not measured yet: the one a SessionState just brought. A replay later
+    // driven from the same RemoteScreen would otherwise measure an old reading against a clock that moved
+    // on since, as if the host's clock had fallen behind by however long ago it came.
+    if (screen.hostTime == 0 || screen.hostTime == _measuredHostTime)
+        return;
+    _measuredHostTime = screen.hostTime;
+    _terminal->adoptHostClock(fromWireTime(screen.hostTime));
+}
+
+void ScreenMirror::retireAbsentCommandBlocks(RemoteScreen const& screen)
+{
+    // Both sides ascend by id, so one merge walk names what the store holds and the table does not. It
+    // runs on every retirement the host makes -- a prompt that ran nothing, and, once the host's store is
+    // full, every new prompt, whose delta also retires the oldest -- and usually finds one record or none,
+    // as the store's own cap may have dropped the oldest already.
+    auto& store = _terminal->commandBlocks();
+    auto held = store.records() | std::views::transform(&vtbackend::CommandBlockRecord::id);
+    auto stated = screen.commandBlocks | std::views::keys
+                  | std::views::transform([](uint32_t id) { return vtbackend::CommandBlockId { id }; });
+    auto stale = std::vector<vtbackend::CommandBlockId> {};
+    std::ranges::set_difference(held, stated, std::back_inserter(stale));
+    store.retire(stale);
+}
+
 void ScreenMirror::writeRow(vtbackend::Screen& page,
                             RemoteScreen const& screen,
                             int64_t stableId,
@@ -195,18 +314,45 @@ void ScreenMirror::writeRow(vtbackend::Screen& page,
         // the server merely stopped naming would destroy history rather than refresh it.
         if (row == nullptr || offset < -vtbackend::LineOffset::cast_from(page.grid().historyLineCount()))
             return;
-        applyWireLine(page.grid().changingLineAt(offset), *row, _linkIds, _contextIds);
+        writeLine(page, offset, row);
         return;
     }
     if (offset >= vtbackend::LineOffset::cast_from(page.pageSize().lines))
         return; // the server's page is taller than ours; the extra rows have nowhere to go
-    auto& line = page.grid().lineAt(offset);
+    writeLine(page, offset, row);
+}
+
+void ScreenMirror::writeLine(vtbackend::Screen& page,
+                             vtbackend::LineOffset offset,
+                             proto::WireLine const* row)
+{
+    // A scrollback row is changed through the accessor that has the grid's scans reach that deep; a page
+    // row is always scanned.
+    auto& grid = page.grid();
+    auto& line = offset < vtbackend::LineOffset(0) ? grid.changingLineAt(offset) : grid.lineAt(offset);
+    auto const block = line.blockId();
+    auto const before = line.flags();
     if (row != nullptr)
+        // Its flags whole, the user's vi mark among them: the host holds that too (see hostRowOf()).
         applyWireLine(line, *row, _linkIds, _contextIds);
     else
         // A row the mirror has no data for is cleared rather than left holding whatever was
         // there before: stale content is worse than a blank line, because it looks correct.
         line.reset(vtbackend::LineFlags {}, vtbackend::GraphicsAttributes {});
+
+    page.noteRowRewritten(offset, block, before);
+    // Noted, not looked up: the store is read once the update's rows are all written, by placeHeads().
+    if (line.blockId() != vtbackend::CommandBlockId {} && line.flags().any(vtbackend::BlockHeadLineFlags))
+        _headCandidates.push_back(line.blockId());
+}
+
+void ScreenMirror::placeHeads()
+{
+    // First: placement passes over a block headed in this generation, which a retired one then is.
+    _terminal->retireCommandBlockHeads(_evictedHeads);
+    _evictedHeads.clear();
+    _terminal->placeCommandBlockHeads(_headCandidates);
+    _headCandidates.clear();
 }
 
 void ScreenMirror::scrollInRow(vtbackend::Screen& page, RemoteScreen const& screen, int64_t stableId)
@@ -282,6 +428,9 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
         auto const guard = std::lock_guard { *_terminal };
         syncHyperlinks(screen); // before any row: a cell's link id is unresolvable without it
         syncContexts(screen);   // and before any row for the same reason: so is a line's context id
+        syncHostClock(screen);  // before any record: it says how to read the record's instants
+        // And before any row for the same reason: a head row needs its record.
+        syncCommandBlocks(screen, CommandBlockSync::Follow);
         auto& page = activePage();
         auto const lines = unbox<int64_t>(page.pageSize().lines);
 
@@ -322,6 +471,7 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
             _alignedFloor = scrollFrom;
         for (auto const id: std::views::iota(scrollFrom, newBase + lines))
             scrollInRow(page, screen, id);
+        placeHeads();
 
         syncInputEncoding(screen);
         if (delta.titleChanged != 0)
@@ -340,8 +490,9 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
         if (delta.statusLinesChanged != 0)
             applyStatusLines(screen);
         if (delta.kittyKeyboardChanged != 0)
-            _terminal->keyboardProtocol().flags() =
-                vtbackend::KeyboardEventFlags::fromValue(delta.kittyKeyboardFlags);
+            _terminal->changeKeyboardProtocol([&](auto& protocol) {
+                protocol.flags() = vtbackend::KeyboardEventFlags::fromValue(delta.kittyKeyboardFlags);
+            });
         if (delta.modifyOtherKeysChanged != 0)
             _terminal->setModifyOtherKeys(delta.modifyOtherKeys);
         if (delta.progressChanged != 0)
@@ -351,6 +502,7 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
                 _terminal->setProgress(*progress);
         applyImages(screen);
         finish(screen);
+        anchorPrimaryPage(screen);
     }
     // Outside the lock, exactly where Terminal::processInputOnce publishes a parsed chunk.
     _terminal->screenUpdated();
@@ -358,6 +510,8 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
 
 void ScreenMirror::fullReplay(RemoteScreen const& screen, LocalHistory history)
 {
+    // Decided before `_primed` flips: the first replay is the attach, and nothing it shows is news.
+    auto const blockSync = _primed ? CommandBlockSync::Follow : CommandBlockSync::Prime;
     _primed = true;
     _generation = screen.generation;
     _viewportBase = screen.viewportBase;
@@ -369,6 +523,9 @@ void ScreenMirror::fullReplay(RemoteScreen const& screen, LocalHistory history)
         auto const guard = std::lock_guard { *_terminal };
         syncHyperlinks(screen); // before any row: a cell's link id is unresolvable without it
         syncContexts(screen);   // and before any row for the same reason: so is a line's context id
+        syncHostClock(screen);  // before any record: it says how to read the record's instants
+        // And before any row for the same reason: a head row needs its record.
+        syncCommandBlocks(screen, blockSync);
         // The page has to be the right one BEFORE _screenType is adopted: activePage() reads it.
         auto const wantAlternate = screen.screenType == 1;
         if (_terminal->isAlternateScreen() != wantAlternate)
@@ -395,8 +552,27 @@ void ScreenMirror::fullReplay(RemoteScreen const& screen, LocalHistory history)
                                         || page.grid().historyLineCount() == vtbackend::LineCount(0));
         if (history == LocalHistory::Discard && !wantAlternate)
         {
+            // The history goes as ED 3 takes it on the host, and whatever names its rows goes with it -- even
+            // with no history to drop, since every row the replay keeps is rewritten below.
             page.grid().clearHistory();
-            _terminal->scrollbackBufferCleared();
+            _terminal->rowsDropped(vtbackend::LineCount(0));
+        }
+        if (rebuildHistory)
+        {
+            // The rows below come back under ids this grid mints anew, while its stable-id generation stays
+            // put (Grid::clearHistory() is deliberately no bump), so a head would go on naming whatever row
+            // now holds its id -- of its own block, maybe, but not the row the rule picks. Every head is
+            // forgotten and looked for again among the rows streamed, as after a reflow.
+            auto& store = _terminal->commandBlocks();
+            store.forEachRecord([&](vtbackend::CommandBlockRecord const& record) {
+                store.updateHeadPosition(record.id, 0, vtbackend::UnknownHeadGeneration);
+                _headCandidates.push_back(record.id);
+                // No row streamed below can head a block whose host head row is gone.
+                if (auto const mirrored = screen.commandBlocks.find(record.id.value);
+                    mirrored != screen.commandBlocks.end()
+                    && hostHeadOf(mirrored->second.wire) == HostHead::Evicted)
+                    _evictedHeads.push_back(record.id);
+            });
         }
 
         // Stream history (then the viewport) through the page top-down: once the page is full,
@@ -429,14 +605,43 @@ void ScreenMirror::fullReplay(RemoteScreen const& screen, LocalHistory history)
             // addressable by id; rows scrolling in from here on are, and they all sit below it.
             _alignedFloor = screen.viewportBase;
         }
+        placeHeads();
 
         applySessionState(screen);
         applyStatusLines(screen);
         syncInputEncoding(screen);
         applyImages(screen);
         finish(screen);
+        anchorPrimaryPage(screen);
     }
     _terminal->screenUpdated();
+}
+
+std::optional<proto::RowAddress> ScreenMirror::hostRowOf(int64_t stableId, uint64_t generation) const
+{
+    auto const guard = std::lock_guard { *_terminal };
+    auto const& grid = _terminal->primaryScreen().grid();
+    // A reflow of this grid since the last update renamed every row: until the host's reflowed page comes,
+    // no id here lines up with one there.
+    if (_screenType != 0 || !_primaryAnchor || grid.stableIdGeneration() != generation
+        || _primaryAnchor->mirrorIdGeneration != generation || !grid.lineOffsetOf(stableId))
+        return std::nullopt;
+    // The anchor's line held the host row at the viewport base, and every row down to the aligned floor holds
+    // the one its distance from it names.
+    auto const hostRow = _viewportBase + (stableId - _primaryAnchor->mirrorBase);
+    if (hostRow < _alignedFloor)
+        return std::nullopt;
+    return proto::RowAddress { .stableId = hostRow, .generation = _primaryAnchor->hostIdGeneration };
+}
+
+void ScreenMirror::anchorPrimaryPage(RemoteScreen const& screen) noexcept
+{
+    if (_screenType != 0)
+        return;
+    auto const& grid = _terminal->primaryScreen().grid();
+    _primaryAnchor = PageAnchor { .mirrorBase = grid.stableLineIdOf(vtbackend::LineOffset(0)),
+                                  .mirrorIdGeneration = grid.stableIdGeneration(),
+                                  .hostIdGeneration = screen.stableIdGeneration };
 }
 
 void ScreenMirror::applySessionState(RemoteScreen const& screen)
@@ -461,8 +666,9 @@ void ScreenMirror::applySessionState(RemoteScreen const& screen)
     _terminal->colorPalette().defaultForeground = vtbackend::RGBColor { screen.defaultForeground };
     _terminal->colorPalette().defaultBackground = vtbackend::RGBColor { screen.defaultBackground };
     applyStatusDisplay(screen.statusDisplayType, screen.activeStatusDisplay);
-    _terminal->keyboardProtocol().flags() =
-        vtbackend::KeyboardEventFlags::fromValue(screen.kittyKeyboardFlags);
+    _terminal->changeKeyboardProtocol([&](auto& protocol) {
+        protocol.flags() = vtbackend::KeyboardEventFlags::fromValue(screen.kittyKeyboardFlags);
+    });
     if (_terminal->modifyOtherKeys() != screen.modifyOtherKeys)
         _terminal->setModifyOtherKeys(screen.modifyOtherKeys);
     // The working directory is the exception: an empty one is "not known", not "the root", and
@@ -475,6 +681,12 @@ void ScreenMirror::applySessionState(RemoteScreen const& screen)
     if (auto const progress = progressOf(screen.progressState, screen.progressPercentage);
         progress.has_value() && _terminal->progress() != *progress)
         _terminal->setProgress(*progress);
+    // The rows carry their birth stamps as seconds since the HOST's session began, so they name the
+    // right instants only when counted from the host's epoch. Zero is "never stated" (a bare test
+    // screen), not 1970. Compared first, like everything above: a replay runs on every resize.
+    if (screen.sessionEpoch != 0)
+        if (auto const epoch = fromWireTime(screen.sessionEpoch); _terminal->sessionEpoch() != epoch)
+            _terminal->adoptSessionEpoch(epoch);
 }
 
 void ScreenMirror::applyStatusDisplay(uint8_t wireType, uint8_t wireActive)
@@ -522,7 +734,7 @@ void ScreenMirror::syncInputEncoding(RemoteScreen const& screen)
     // cannot survive.
     for (auto const mode: MirroredModes)
     {
-        auto const want = containsValue(screen.setModes, vtbackend::toDECModeNum(mode));
+        auto const want = std::ranges::contains(screen.setModes, vtbackend::toDECModeNum(mode));
         if (want != _terminal->isModeEnabled(mode))
             _terminal->setMode(mode, want);
     }
@@ -534,7 +746,7 @@ void ScreenMirror::syncInputEncoding(RemoteScreen const& screen)
     // while the same application in a local tab works.
     for (auto const mode: MirroredAnsiModes)
     {
-        auto const want = containsValue(screen.setAnsiModes, vtbackend::toAnsiModeNum(mode));
+        auto const want = std::ranges::contains(screen.setAnsiModes, vtbackend::toAnsiModeNum(mode));
         if (want != _terminal->isModeEnabled(mode))
             _terminal->setMode(mode, want);
     }
@@ -666,23 +878,44 @@ void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
 {
     // One overload per event shape, so each reads only the fields it has. The visit is exhaustive by
     // construction: a fourth event alternative fails to compile until it gets its own arm.
-    std::visit(
-        core::Overloaded {
-            [this](proto::SessionBell const&) { _terminal->bell(); },
-            [this](proto::SessionNotify const& notify) { _terminal->notify(notify.title, notify.body); },
-            [this](proto::SessionClipboard const& clipboard) {
-                // Under the CLIENT's own write permission, which is the point of routing it
-                // through the terminal rather than to the clipboard directly.
-                _terminal->copyToClipboard(clipboard.data);
-            },
-        },
-        event);
+    std::visit(core::Overloaded {
+                   [this](proto::SessionBell const&) { _terminal->bell(); },
+                   [this](proto::SessionNotify const& notify) {
+                       // An OSC 99 notification is raised as a local one is, so the frontend decides its
+                       // occasion by the same rule; one that stated none takes the OSC 9 / OSC 777 path and
+                       // that rule.
+                       auto const occasion = displayOccasionOf(notify.occasion);
+                       if (!occasion)
+                       {
+                           _terminal->notify(notify.title, notify.body);
+                           return;
+                       }
+                       auto notification = vtbackend::DesktopNotification {};
+                       notification.title = notify.title;
+                       notification.body = notify.body;
+                       notification.occasion = *occasion;
+                       _terminal->showDesktopNotification(notification);
+                   },
+                   [this](proto::SessionClipboard const& clipboard) {
+                       // Under the CLIENT's own write permission, which is the point of routing it
+                       // through the terminal rather than to the clipboard directly.
+                       _terminal->copyToClipboard(clipboard.data);
+                   },
+               },
+               event);
 }
 
 void ScreenMirror::finish(RemoteScreen const& screen)
 {
+    // After every replay and every delta, since either may have moved this grid's floor: its absolute line
+    // numbers are the server's, whatever its own floor saw.
+    auto& grid = activePage().grid();
+    grid.adoptEvictedRowCount(mirroredEvictedRowCount(screen, grid.addressableTop()));
     activePage().moveCursorTo(vtbackend::LineOffset::cast_from(screen.cursorLine),
                               vtbackend::ColumnOffset::cast_from(screen.cursorColumn));
+    // A view scrolled back follows the remote screen's output as it would a local one's: under the lock,
+    // before the update is published.
+    _terminal->followOutput();
     _terminal->markScreenDirty();
 }
 

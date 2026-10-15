@@ -724,6 +724,26 @@ jobs:
             && make -j"$(sysctl -n hw.ncpu)" \
             && sudo make install
           tmux -V
+      - name: "install fish, the one shell the shell-integration tests drive that macOS lacks"
+        # contour_test runs each bundled integration script in its own shell on a real PTY, and SKIPs a
+        # shell that is not installed. macOS brings bash (/bin/bash, 3.2.57), zsh and tcsh, and the runner
+        # image PowerShell (actions/runner-images' macos-15-arm64-Readme.md); fish it does not.
+        #
+        # Pinned, as tmux is: Homebrew installs whatever its formula moved to, and the fish version
+        # decides which marks the script sends itself. fish's own release package, checked against its
+        # SHA-256, installs a universal binary into /usr/local/bin.
+        run: |
+          set -ex
+          curl -sSL -o "$RUNNER_TEMP/fish.pkg" \
+            https://github.com/fish-shell/fish-shell/releases/download/4.2.1/fish-4.2.1.pkg
+          echo "07630a79598eb52ec42d54f458c99c9e2ebd39e525342ce3b354d338ef716965  $RUNNER_TEMP/fish.pkg" \
+            | shasum -a 256 -c -
+          sudo installer -pkg "$RUNNER_TEMP/fish.pkg" -target /
+          fish --version
+          bash --version
+          zsh --version
+          tcsh --version
+          pwsh --version
       - name: "Generate build files"
         run: |
           # The `macos-package` preset IS the definition of a shippable macOS build --
@@ -784,6 +804,18 @@ jobs:
           printf '%s\n' "$output"
           if printf '%s' "$output" | grep -q 'skipped'; then
             echo "::error::$binary reported SKIPPED; the tmux interop tests are not being exercised on macOS"
+            exit 1
+          fi
+      - name: "verify the shell-integration tests actually ran"
+        # @see the identical assertion on the Linux matrix: a Catch2 SKIP exits 0. macOS is where Apple's
+        # bash 3.2 and tcsh, with BSD awk and sed, run the scripts, and PowerShell runs on macOS.
+        run: |
+          set -o pipefail
+          binary=out/macos-package/src/contour/contour_test
+          output=$("$binary" '[shells]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
+          printf '%s\n' "$output"
+          if printf '%s' "$output" | grep -q 'skipped'; then
+            echo "::error::$binary [shells] reported SKIPPED; a shell the integration scripts target is not being exercised on macOS"
             exit 1
           fi
       - name: "Create Package(s)"
@@ -1046,6 +1078,31 @@ jobs:
               exit 1
             fi
           done
+      - name: "verify the PowerShell integration tests actually ran"
+        # @see "verify the AF_UNIX tests actually ran": a Catch2 SKIP exits 0, and contour_test SKIPs
+        # the PowerShell integration's cases where no pwsh is on PATH. windows-latest carries
+        # PowerShell 7 (per actions/runner-images' Windows2025-VS2026-Readme.md), so a skip here is a
+        # regression -- and Windows is where the script's OSC 133 has to pass through ConPTY. Only
+        # [pwsh]: contour_test does not run the POSIX shells on Windows at all.
+        shell: pwsh
+        run: |
+          $binary = "out/build/$env:CMAKE_PRESET/bin/contour_test.exe"
+          # A missing binary must not read as "nothing skipped".
+          if (-not (Test-Path $binary)) {
+            Write-Output "::error::$binary not found; the assertion below would pass vacuously"
+            exit 1
+          }
+          Write-Output "--- $binary [pwsh]"
+          $output = & $binary '[pwsh]' 2>&1 | Out-String
+          $status = $LASTEXITCODE
+          Write-Output $output
+          # Before the exit status: Catch2 exits non-zero when every case skipped, which is exactly what
+          # a missing pwsh looks like.
+          if ($output -match 'skipped') {
+            Write-Output "::error::$binary [pwsh] reported SKIPPED; the PowerShell integration is not being exercised on Windows"
+            exit 1
+          }
+          if ($status -ne 0) { exit 1 }
       - name: "Install Wix Toolset"
         run: |
           # Use this to list all available versions
@@ -1191,6 +1248,19 @@ jobs:
             && make -j"$(nproc)" \
             && sudo make install
           tmux -V
+      - name: "install the shells the shell-integration tests drive"
+        # contour_test runs each bundled integration script in its own shell on a real PTY, and SKIPs
+        # a shell that is not installed. bash and PowerShell come with both runner images (per
+        # actions/runner-images' Ubuntu2404-Readme.md and Ubuntu2404-Arm64-Readme.md). The versions are
+        # printed because they decide what is tested: the distro's fish 3.7 marks no prompts itself, so
+        # its integration script sends every mark.
+        run: |
+          set -ex
+          sudo apt -qy install zsh fish tcsh
+          zsh --version
+          fish --version
+          tcsh --version
+          pwsh --version
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
       # Ubuntu 24.04's distro Qt is 6.4.2, which does not provide the Qt6::GuiPrivate CMake package
@@ -1320,6 +1390,19 @@ jobs:
               exit 1
             fi
           done
+      - name: "verify the shell-integration tests actually ran"
+        # @see "verify the tmux oracles actually ran": a Catch2 SKIP exits 0, so a green suite cannot
+        # tell "every script works in its shell" from "no shell was installed". PowerShell included:
+        # both runner images carry it (see "install the shells the shell-integration tests drive").
+        run: |
+          set -o pipefail
+          binary=out/gcc-debug/src/contour/contour_test
+          output=$("$binary" '[shells]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
+          printf '%s\n' "$output"
+          if printf '%s' "$output" | grep -q 'skipped'; then
+            echo "::error::$binary [shells] reported SKIPPED; a shell the integration scripts target is not being exercised"
+            exit 1
+          fi
       - name: "session OOM isolation under a real systemd user manager"
         # The suite above SKIPs this test -- exit 77, which ctest counts as passing -- because a
         # runner has no systemd user manager until a lingering user session starts one. Start one,

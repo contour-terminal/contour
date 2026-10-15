@@ -4,13 +4,16 @@
 #include <core/Defines.hpp>
 #include <core/Escape.hpp>
 #include <core/Overloaded.hpp>
+#include <core/Utf8Path.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cwctype>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -20,6 +23,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -539,15 +543,57 @@ std::optional<std::basic_string<T>> fromHexString(std::basic_string_view<T> hexS
     return output;
 }
 
-template <typename T>
-std::basic_string<T> toHexString(std::basic_string_view<T> input)
+namespace detail
 {
-    std::basic_string<T> output;
+    /// The upper-case hexadecimal digits, indexed by the nibble each one spells.
+    inline constexpr auto UpperHexDigits = std::string_view { "0123456789ABCDEF" };
 
-    for (T const ch: input)
-        output += std::format("{:02X}", static_cast<unsigned>(ch));
+    /// The lower-case hexadecimal digits, indexed by the nibble each one spells.
+    inline constexpr auto LowerHexDigits = std::string_view { "0123456789abcdef" };
 
-    return output;
+    /// Spells @p bytes in hexadecimal, two digits per byte, the high nibble first.
+    ///
+    /// Each element is read as the unsigned byte it holds, whatever its type: widened with its
+    /// sign instead, a `char` from 0x80 up spells eight digits (`FFFFFF80`).
+    /// @param bytes The bytes to spell, each one byte wide.
+    /// @param digits The sixteen digits, `UpperHexDigits` or `LowerHexDigits`.
+    /// @return `2 * bytes.size()` characters from @p digits.
+    template <typename Byte>
+        requires(sizeof(Byte) == 1)
+    [[nodiscard]] constexpr std::string spellHex(std::span<Byte const> bytes, std::string_view digits)
+    {
+        auto output = std::string {};
+        output.reserve(bytes.size() * 2);
+        for (auto const byte: bytes)
+        {
+            auto const value = std::size_t { std::bit_cast<unsigned char>(byte) };
+            output.push_back(digits[value >> 4U]);
+            output.push_back(digits[value & 0x0FU]);
+        }
+        return output;
+    }
+} // namespace detail
+
+/// Spells each character of @p input in upper-case hexadecimal, as the byte it holds: two digits
+/// per character, the high nibble first. `fromHexString()` reads it back.
+/// @param input The characters to spell.
+/// @return `2 * input.size()` characters from `0123456789ABCDEF`.
+template <typename T>
+    requires std::same_as<T, char>
+[[nodiscard]] constexpr std::basic_string<T> toHexString(std::basic_string_view<T> input)
+{
+    return detail::spellHex(std::span { input }, detail::UpperHexDigits);
+}
+
+/// Spells @p bytes in lower-case hexadecimal, two digits per byte, the high nibble first.
+///
+/// `toHexString()` spells characters in upper case; a digest, a key or an identifier is
+/// conventionally written in lower case.
+/// @param bytes The bytes to spell.
+/// @return `2 * bytes.size()` characters from `0123456789abcdef`.
+[[nodiscard]] constexpr std::string toLowerHexString(std::span<std::byte const> bytes)
+{
+    return detail::spellHex(bytes, detail::LowerHexDigits);
 }
 
 namespace detail
@@ -702,17 +748,24 @@ inline std::string replace(std::string_view text, std::string_view pattern, T&& 
     return os.str();
 }
 
-inline std::filesystem::path homeResolvedPath(std::string const& input,
-                                              std::filesystem::path const& homeDirectory)
+/// Resolves a leading `~` in @p input against @p homeDirectory.
+///
+/// @param input A path in UTF-8, such as a configuration value, read as core::pathFromUtf8() reads
+///              it.
+/// @param homeDirectory What `~` stands for.
+/// @return @p input with a leading `~` or `~/` replaced by @p homeDirectory; otherwise @p input.
+///         @c std::errc::illegal_byte_sequence on Windows where @p input is not UTF-8.
+[[nodiscard]] inline std::expected<std::filesystem::path, std::error_code> homeResolvedPath(
+    std::string_view input, std::filesystem::path const& homeDirectory)
 {
-    if (!input.empty() && input[0] == '~')
+    if (input.starts_with('~'))
     {
         bool const pathSepFound = input.size() >= 2 && (input[1] == '/' || input[1] == '\\');
-        auto subPath = input.substr(pathSepFound ? 2 : 1);
-        return homeDirectory / std::filesystem::path(subPath);
+        return pathFromUtf8(input.substr(pathSepFound ? 2 : 1))
+            .transform([&](std::filesystem::path const& subPath) { return homeDirectory / subPath; });
     }
 
-    return { input };
+    return pathFromUtf8(input);
 }
 
 /// Substitutes each `${NAME}` in @p text with `replace(NAME)`.
@@ -720,8 +773,19 @@ inline std::filesystem::path homeResolvedPath(std::string const& input,
 /// A `$${` sequence escapes substitution: it emits a literal `${` and leaves the rest of the
 /// would-be variable untouched, so machine-emitted config (e.g. SaveLayout) can round-trip values
 /// that contain literal `${...}` text without them being re-expanded on reload.
+///
+/// Malformed input passes through as written, and a well-formed variable beside it still
+/// expands. NAME runs from `${` to the first `}`; a `${` with no `}` before the next `${` or the
+/// end of @p text is unterminated, is emitted as written, and scanning resumes right after it.
+/// So `ab${x` stays `ab${x`, `${a}x${b` is `replace("a")` followed by `x${b`, and `${a${b}}` is
+/// `${a`, `replace("b")`, `}`. A `$` not followed by `{` is literal, and `${}` calls
+/// `replace("")`.
+///
+/// @param text The text to substitute in.
+/// @param replace Called with each NAME; its result is appended in place of `${NAME}`.
+/// @return @p text with each well-formed `${NAME}` substituted.
 template <typename VariableReplacer>
-inline std::string replaceVariables(std::string_view text, VariableReplacer const& replace)
+[[nodiscard]] inline std::string replaceVariables(std::string_view text, VariableReplacer const& replace)
 {
     using namespace std::string_view_literals;
 
@@ -751,15 +815,22 @@ inline std::string replaceVariables(std::string_view text, VariableReplacer cons
         auto const gapText = text.substr(i, markerStartOffset - i);
         output += gapText;
 
-        auto const markerEndOffset = text.find(MarkerEnd, markerStartOffset + MarkerStart.size());
-        if (markerEndOffset == Npos)
-            break; // Invalid variable format. Closing variable marker not found.
+        // The name ends at the first "}" before the next "${". Searching no further than that keeps
+        // the scan linear in the length of the text, however many unterminated markers it holds.
+        auto const nameOffset = markerStartOffset + MarkerStart.size();
+        auto const nextMarkerStartOffset = std::min(text.find(MarkerStart, nameOffset), text.size());
+        auto const nameLength = text.substr(nameOffset, nextMarkerStartOffset - nameOffset).find(MarkerEnd);
+        if (nameLength == Npos)
+        {
+            // Unterminated: emit the "${" as written and scan on right after it, so the text it
+            // would have opened passes through and a variable within it still expands.
+            output += MarkerStart;
+            i = nameOffset;
+            continue;
+        }
 
-        auto const nameLength = markerEndOffset - (markerStartOffset + MarkerStart.size());
-        auto const name = text.substr(markerStartOffset + MarkerStart.size(), nameLength);
-        output += replace(name);
-
-        i = markerEndOffset + MarkerEnd.size();
+        output += replace(text.substr(nameOffset, nameLength));
+        i = nameOffset + nameLength + MarkerEnd.size();
     }
     output += text.substr(i);
 

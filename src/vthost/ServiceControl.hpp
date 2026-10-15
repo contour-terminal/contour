@@ -69,6 +69,7 @@ enum class ServiceErrorCode : std::uint8_t
     NotRunning,       ///< Stop found nothing to stop.
     Unsupported,      ///< No backend exists for this platform.
     Backend,          ///< The OS refused; see the context and system code.
+    NotUtf8,          ///< A name, program or argument is not UTF-8; the context says which.
 };
 
 /// A service-control failure: the category, the raw OS status, and what was being attempted.

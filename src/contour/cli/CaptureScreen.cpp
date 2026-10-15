@@ -6,9 +6,13 @@
 #include <vtparser/Parser.hpp>
 #include <vtparser/ParserEvents.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 
+#include <chrono>
 #include <cstdlib>
+#include <expected>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
@@ -22,7 +26,7 @@
 
 // clang-format off
 #ifdef _WIN32
-    #include <Winsock2.h>
+    #include <Windows.h>
 #else
     #include <fcntl.h>
     #include <sys/select.h>
@@ -110,6 +114,28 @@ namespace
     }
 #endif
 
+#ifdef _WIN32
+    /// The console standard input is.
+    class StdinConsole final: public ConsoleInput
+    {
+      public:
+        [[nodiscard]] std::optional<unsigned long> mode() const override
+        {
+            auto modes = DWORD {};
+            if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &modes) == 0)
+                return std::nullopt;
+            return modes;
+        }
+
+        [[nodiscard]] std::expected<void, unsigned long> setMode(unsigned long mode) override
+        {
+            if (SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), mode) == 0)
+                return std::unexpected(GetLastError());
+            return {};
+        }
+    };
+#endif
+
     struct TTY final: CaptureTransport
     {
         bool configured = false;
@@ -125,8 +151,10 @@ namespace
 #ifndef _WIN32
             tcsetattr(fd, TCSANOW, &savedModes);
 #else
-            auto stdinHandle = GetStdHandle(STD_INPUT_HANDLE);
-            SetConsoleMode(stdinHandle, savedModes);
+            if (!configured)
+                return;
+            auto console = StdinConsole {};
+            leaveCaptureInputMode(console, savedModes, cerr);
 #endif
         }
 
@@ -154,30 +182,26 @@ namespace
 
             configured = true;
 #else
-            auto stdinHandle = GetStdHandle(STD_INPUT_HANDLE);
-
-            GetConsoleMode(stdinHandle, &savedModes);
-
-            DWORD modes = savedModes;
-            modes |= ENABLE_VIRTUAL_TERMINAL_INPUT;
-            modes &= ~ENABLE_LINE_INPUT;
-            modes &= ~ENABLE_ECHO_INPUT;
-
-            SetConsoleMode(stdinHandle, modes);
-            configured = true;
+            auto console = StdinConsole {};
+            if (auto const saved = enterCaptureInputMode(console))
+            {
+                savedModes = *saved;
+                configured = true;
+            }
 #endif
         }
 
-        int wait(timeval* timeout) override
+        int wait(std::chrono::microseconds& timeout) override
         {
 #ifdef _WIN32
             auto const fd0 = GetStdHandle(STD_INPUT_HANDLE);
-            DWORD const timeoutMillis = timeout->tv_sec * 1000 + timeout->tv_usec / 1000;
+            auto const timeoutMillis =
+                static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count());
             DWORD const result = WaitForSingleObject(fd0, timeoutMillis);
             switch (result)
             {
-                case WSA_WAIT_EVENT_0: return 1;
-                case WSA_WAIT_TIMEOUT: return 0;
+                case WAIT_OBJECT_0: return 1;
+                case WAIT_TIMEOUT: return 0;
                 case WAIT_FAILED:
                 case WAIT_ABANDONED:
                 default: return -1;
@@ -191,7 +215,14 @@ namespace
             FD_ZERO(&serr);
             FD_SET(fd, &sin);
             auto const watermark = fd + 1;
-            return select(watermark, &sin, &sout, &serr, timeout);
+            auto const seconds = std::chrono::duration_cast<std::chrono::seconds>(timeout);
+            auto remaining = timeval {};
+            remaining.tv_sec = static_cast<decltype(remaining.tv_sec)>(seconds.count());
+            remaining.tv_usec = static_cast<decltype(remaining.tv_usec)>((timeout - seconds).count());
+            auto const result = select(watermark, &sin, &sout, &serr, &remaining);
+            timeout =
+                std::chrono::seconds { remaining.tv_sec } + std::chrono::microseconds { remaining.tv_usec };
+            return result;
 #endif
         }
 
@@ -225,7 +256,7 @@ namespace
     };
 
     /// Queries the peer terminal's screen size over @p input (CSI 18 t / CSI 8;lines;cols t reply).
-    optional<tuple<int, int>> queryScreenSize(CaptureTransport& input, timeval* timeout)
+    optional<tuple<int, int>> queryScreenSize(CaptureTransport& input, std::chrono::microseconds& timeout)
     {
         // Naive implementation. TODO: use select() to poll and time out properly.
         if (input.write("\033[18t") < 0)
@@ -258,7 +289,10 @@ namespace
     }
 
     // Reads a response chunk.
-    bool readCaptureReply(CaptureTransport& input, timeval* timeout, bool words, ostream& output)
+    bool readCaptureReply(CaptureTransport& input,
+                          std::chrono::microseconds& timeout,
+                          bool words,
+                          ostream& output)
     {
         auto captureBufferCollector = CaptureBufferCollector { output, words };
         auto parser = vtparser::Parser<vtparser::ParserEvents> { captureBufferCollector };
@@ -295,15 +329,38 @@ namespace
     }
 } // namespace
 
+#ifdef _WIN32
+std::optional<unsigned long> enterCaptureInputMode(ConsoleInput& console)
+{
+    auto const saved = console.mode();
+    if (!saved)
+        return nullopt;
+
+    auto modes = *saved;
+    modes |= ENABLE_VIRTUAL_TERMINAL_INPUT;
+    modes &= ~static_cast<unsigned long>(ENABLE_LINE_INPUT);
+    modes &= ~static_cast<unsigned long>(ENABLE_ECHO_INPUT);
+    if (!console.setMode(modes))
+        return nullopt;
+    return saved;
+}
+
+void leaveCaptureInputMode(ConsoleInput& console, unsigned long saved, ostream& diagnostics)
+{
+    if (auto const restored = console.setMode(saved); !restored)
+        diagnostics << std::format(
+            "Could not restore the console's input mode (error {}): it is left without line editing or "
+            "echo.\r\n",
+            restored.error());
+}
+#endif
+
 bool captureScreen(CaptureSettings const& settings, CaptureTransport& transport, ostream& output)
 {
-    auto constexpr MicrosPerSecond = 1'000'000;
-    auto const timeoutMicros = int(settings.timeout * MicrosPerSecond);
-    auto timeout = timeval {};
-    timeout.tv_sec = timeoutMicros / MicrosPerSecond;
-    timeout.tv_usec = timeoutMicros % MicrosPerSecond;
+    auto timeout = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::duration<double> { settings.timeout });
 
-    auto const screenSizeOpt = queryScreenSize(transport, &timeout);
+    auto const screenSizeOpt = queryScreenSize(transport, timeout);
     if (!screenSizeOpt.has_value())
     {
         cerr << "Could not get current screen size.\r\n";
@@ -331,7 +388,7 @@ bool captureScreen(CaptureSettings const& settings, CaptureTransport& transport,
         return false;
     }
 
-    return readCaptureReply(transport, &timeout, settings.words, output);
+    return readCaptureReply(transport, timeout, settings.words, output);
 }
 
 bool captureScreen(CaptureSettings const& settings)
@@ -344,7 +401,8 @@ bool captureScreen(CaptureSettings const& settings)
     unique_ptr<ostream> customOutput;
     if (settings.outputFile != "-"sv)
     {
-        customOutput = make_unique<ofstream>(settings.outputFile.data(), std::ios::trunc);
+        customOutput = make_unique<ofstream>(
+            core::pathFromUtf8(settings.outputFile).value_or(std::filesystem::path {}), std::ios::trunc);
         output = *customOutput;
     }
 

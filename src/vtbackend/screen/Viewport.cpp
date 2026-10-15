@@ -11,6 +11,17 @@
 namespace vtbackend
 {
 
+namespace
+{
+    /// The middle one of @p rows rows: the upper of the two on an even count, where vim puts its M.
+    /// @param rows How many rows; at least one.
+    /// @return The middle row, counted from the first.
+    [[nodiscard]] LineOffset middleOf(LineCount rows) noexcept
+    {
+        return boxed_cast<LineOffset>((rows - LineCount(1)) / LineCount(2));
+    }
+} // namespace
+
 bool Viewport::scrollUp(LineCount numLines)
 {
     ViewportLog()("scrollUp");
@@ -45,7 +56,7 @@ bool Viewport::forceScrollToBottom()
 {
     ViewportLog()("force ScrollToBottom");
     bool changed = scrollTo(ScrollOffset(0));
-    if (_pixelOffset != 0.0f)
+    if (pixelOffset() != 0.0f)
     {
         resetPixelOffset();
         if (!changed)
@@ -69,6 +80,7 @@ bool Viewport::clampScrollOffset()
 
     ViewportLog()("clampScrollOffset: {} -> {}", _scrollOffset, maxOffset);
     _scrollOffset = maxOffset;
+    publishPosition();
 
     // The sub-cell offset goes with it. It measures a slide between two adjacent rows, and the row it
     // was sliding towards is one a collapsed fold has just taken away.
@@ -115,9 +127,7 @@ bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset, LineCount paddin
     // with collapsed folds in between the two counts differ -- subtracting grid lines would scroll by
     // however many rows the folds hide as well, overshooting by exactly that much.
     auto const screenRow = translateGridToScreenCoordinate(lineOffset);
-    auto const topRow = boxed_cast<LineOffset>(paddingLines);
-    auto const bottomRow =
-        boxed_cast<LineOffset>(screenLineCount() - 1) - boxed_cast<LineOffset>(paddingLines);
+    auto const [topRow, bottomRow] = safeArea(paddingLines);
 
     ViewportLog()("makeVisibleWithinSafeArea: screenRow {} in [{}, {}] for line {}",
                   screenRow,
@@ -136,6 +146,30 @@ bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset, LineCount paddin
     return false;
 }
 
+Viewport::SafeArea Viewport::safeArea(LineCount paddingLines) const noexcept
+{
+    // The context above is capped first, at the page's middle row, and the context below takes what is left
+    // -- which is where vim settles the cursor on a page of either parity.
+    auto const lines = screenLineCount();
+    auto const middle = boxed_cast<LineCount>(middleOf(lines));
+    auto const above = std::min(paddingLines, middle);
+    auto const below = std::min(paddingLines, lines - LineCount(1) - middle);
+    return SafeArea { .top = boxed_cast<LineOffset>(above),
+                      .bottom = boxed_cast<LineOffset>(lines - LineCount(1) - below) };
+}
+
+LineOffset Viewport::middleRow() const
+{
+    auto const projection = _terminal->foldProjection();
+    if (projection.empty())
+        return middleOf(screenLineCount());
+
+    // The projection's rows from the screen's top on: those above it are smooth scrolling's, and past its end
+    // the page is blank where collapsed folds hid more than the history could fill in.
+    auto const drawnEnd = unbox<int>(_terminal->foldProjectionTopRow()) + static_cast<int>(projection.size());
+    return middleOf(std::clamp(LineCount::cast_from(drawnEnd), LineCount(1), screenLineCount()));
+}
+
 bool Viewport::makeVisible(LineOffset lineOffset)
 {
     ViewportLog()("makeVisible {}", unbox(lineOffset));
@@ -151,10 +185,14 @@ bool Viewport::scrollTo(ScrollOffset offset)
     if (offset == _scrollOffset)
         return false;
 
-    if (0 <= *offset && offset <= boxed_cast<ScrollOffset>(scrollableLineCount()))
+    // The bottom is in range by definition, scrollableLineCount() never being negative, so it is not asked:
+    // the count reaches the fold projection, which a frontend's scroll to the bottom on new output -- made
+    // on the parser thread, without the lock -- must not rebuild.
+    if (*offset == 0 || (0 < *offset && offset <= boxed_cast<ScrollOffset>(scrollableLineCount())))
     {
         ViewportLog()("Scroll to offset {}", offset);
         _scrollOffset = offset;
+        publishPosition();
         _modified();
         return true;
     }
@@ -228,6 +266,12 @@ bool Viewport::scrollMarkDown()
     return scrollTo(scrollOffsetForTopLine(*marker));
 }
 
+bool Viewport::scrollLineToTop(LineOffset line)
+{
+    ViewportLog()("scrollLineToTop {}", unbox(line));
+    return scrollTo(scrollOffsetForTopLine(line));
+}
+
 bool Viewport::isLineVisible(LineOffset line) const
 {
     auto const projection = _terminal->foldProjection();
@@ -251,15 +295,17 @@ LineOffset Viewport::translateScreenToGridLine(LineOffset line) const
     if (projection.empty())
         return line - boxed_cast<LineOffset>(_scrollOffset);
 
-    // BOTTOM-aligned, exactly as Grid::render draws it: when collapsed folds hide more rows than the
-    // history can backfill, the projection is shorter than the page and the difference is blank rows at
-    // the TOP. Assuming row 0 here while the render pass drew from further down is precisely what would
-    // misplace a selection, so the offset comes from the one place that owns the rule.
+    // Placed exactly as Grid::render draws it: when collapsed folds hide more rows than the history can
+    // backfill, the projection is shorter than the page, it still starts on the TOP row, and the
+    // difference is blank rows at the BOTTOM; only rows smooth scrolling supplies beyond the page sit
+    // above it. Placing the projection by any other rule than the render pass does is precisely what
+    // would misplace a selection, so the offset comes from the one place that owns the rule.
     auto const index = unbox<int>(line) - unbox<int>(_terminal->foldProjectionTopRow());
 
-    // Rows outside the projection are the blank ones above it and the space below; keep them
-    // proportional to the nearest real row so a coordinate there stays ORDERED rather than clamping onto
-    // it, which would make a selection dragged off the edge select the same row over and over.
+    // Rows outside the projection are the ones above it, off the viewport's top, and the blank ones
+    // below it, on a short page or past its bottom; keep them proportional to the nearest real row so a
+    // coordinate there stays ORDERED rather than clamping onto it, which would make a selection dragged
+    // off the edge select the same row over and over.
     //
     // Continued in VISIBLE lines, because that is what a row is: a selection dragged one row above the
     // viewport must reach the line the viewport WOULD show next, not whichever grid line happens to sit

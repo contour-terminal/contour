@@ -43,6 +43,7 @@
 namespace
 {
 
+using contour::test::closeAllTabs;
 using contour::test::mockPtyOf;
 using contour::test::MockPtySessionFactory;
 using contour::test::ScopedController;
@@ -77,13 +78,6 @@ void clearPtyInput(contour::session::TerminalSession& session)
     REQUIRE(tab != nullptr);
     REQUIRE(tab->activePane() != nullptr);
     return manager.sessionForId(tab->activePane()->session());
-}
-
-/// Closes every tab of @p controller, mirroring how the multi-window tests wind sessions down.
-void closeAllTabs(contour::window::WindowController& controller)
-{
-    for (int row = controller.count() - 1; row >= 0; --row)
-        controller.closeTabAtIndex(row);
 }
 
 } // namespace
@@ -274,13 +268,11 @@ TEST_CASE("focus: bindWindow wires OS window activation to focus ownership", "[c
     // test window.
     TestApp app;
     auto& manager = app.manager();
-    ScopedController window { manager };
-
-    auto osWindow = std::make_unique<QQuickWindow>();
-    window->bindWindow(osWindow.get());
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
 
     // NB: this consumes the connection it verifies; nothing below depends on it.
-    CHECK(QObject::disconnect(osWindow.get(), &QWindow::activeChanged, window.controller, nullptr));
+    CHECK(QObject::disconnect(window.osWindow.get(), &QWindow::activeChanged, window.controller, nullptr));
 
     // And the two ends of what that signal drives: a grant focuses the window's active leaf, a revoke
     // leaves nothing focused.

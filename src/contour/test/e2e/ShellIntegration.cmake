@@ -3,7 +3,7 @@
 # src/contour/cli/shell-integration/.
 #
 # Run by ctest as
-#   cmake -D CONTOUR_BINARY=... -D SHELLS=... -D SOURCE_DIR=... -D WORK_DIR=... -P ShellIntegration.cmake
+#   cmake -D CONTOUR_BINARY=... -D SHELLS=bash,fish,... -D SOURCE_DIR=... -D WORK_DIR=... -P ShellIntegration.cmake
 # WORK_DIR is passed explicitly rather than derived from the working directory, so running this by
 # hand cannot scatter output into whatever directory it was started from.
 # A CMake script for the same reasons CliVerbs.cmake is one: it has to run on Windows, where `sh` is
@@ -25,6 +25,8 @@ endif()
 if(NOT SHELLS)
     message(FATAL_ERROR "SHELLS must name at least one shell")
 endif()
+# Comma-separated on the command line, where a ';' would have split it into arguments of its own.
+string(REPLACE "," ";" SHELLS "${SHELLS}")
 if(NOT IS_DIRECTORY "${SOURCE_DIR}/shell-integration")
     message(FATAL_ERROR "SOURCE_DIR does not hold a shell-integration directory: '${SOURCE_DIR}'")
 endif()
@@ -55,15 +57,15 @@ foreach(shell IN LISTS SHELLS)
         continue()
     endif()
 
-    # Compared with CR stripped from both sides: the source file's line endings depend on the
-    # checkout's git settings, and on Windows the C++ text-mode stream adds its own on the way out.
-    # What this test is about is the payload, not either platform's newline policy.
+    # Compared byte for byte, with no CR on the generated side: a script with CRLF in it breaks in the
+    # shell that sources it, on Windows too (Git Bash). Only the source file's CRLF is folded to LF, as
+    # the embedding folds it: its line endings depend on the checkout's git settings. Folded on the byte
+    # list, where a ';' separates every byte, so that no "0d0a" across two bytes can match.
     file(READ "${generated}" generatedText HEX)
     file(READ "${SOURCE_DIR}/shell-integration/shell-integration.${shell}" expectedText HEX)
     string(REGEX MATCHALL "[0-9a-f][0-9a-f]" generatedBytes "${generatedText}")
     string(REGEX MATCHALL "[0-9a-f][0-9a-f]" expectedBytes "${expectedText}")
-    list(REMOVE_ITEM generatedBytes "0d")
-    list(REMOVE_ITEM expectedBytes "0d")
+    string(REPLACE "0d;0a" "0a" expectedBytes "${expectedBytes}")
 
     if(NOT generatedBytes)
         list(APPEND failures "'generate integration shell ${shell}' produced an empty script")
@@ -76,6 +78,25 @@ foreach(shell IN LISTS SHELLS)
     endif()
 endforeach()
 
+# A file named beyond ASCII is written where it is named. Windows hands a program its command line in
+# UTF-16, and the narrow argv main() is given spells it in the ANSI code page, which spells most of
+# these characters not at all: ü, €, 李 and 😀 are two, three and four UTF-8 bytes long.
+list(GET SHELLS 0 firstShell)
+set(awkwardDir "${outputDir}/ü€李😀")
+file(MAKE_DIRECTORY "${awkwardDir}")
+set(awkwardFile "${awkwardDir}/integration.${firstShell}")
+execute_process(
+    COMMAND "${CONTOUR_BINARY}" generate integration shell "${firstShell}" to "${awkwardFile}"
+    OUTPUT_QUIET
+    ERROR_VARIABLE awkwardError
+    RESULT_VARIABLE awkwardResult
+    TIMEOUT 30)
+if(NOT awkwardResult EQUAL 0)
+    list(APPEND failures "'generate integration' into a directory beyond ASCII failed (${awkwardResult}): ${awkwardError}")
+elseif(NOT EXISTS "${awkwardFile}")
+    list(APPEND failures "'generate integration' into a directory beyond ASCII wrote no file there")
+endif()
+
 # An unknown shell must fail loudly rather than write an empty file that a user would then source.
 execute_process(
     COMMAND "${CONTOUR_BINARY}" generate integration shell nosuchshell to -
@@ -84,6 +105,30 @@ execute_process(
     TIMEOUT 30)
 if(unknownResult EQUAL 0)
     list(APPEND failures "'generate integration shell nosuchshell' unexpectedly succeeded")
+endif()
+
+# A shell that integrates natively gets no file at all, not an empty one.
+set(nativeFile "${outputDir}/integration.nu")
+execute_process(
+    COMMAND "${CONTOUR_BINARY}" generate integration shell nu to "${nativeFile}"
+    OUTPUT_QUIET ERROR_QUIET
+    RESULT_VARIABLE nativeResult
+    TIMEOUT 30)
+if(nativeResult EQUAL 0)
+    list(APPEND failures "'generate integration shell nu' unexpectedly succeeded")
+endif()
+if(EXISTS "${nativeFile}")
+    list(APPEND failures "'generate integration shell nu' wrote a file")
+endif()
+
+# A file that cannot be written is an error, not a silent success.
+execute_process(
+    COMMAND "${CONTOUR_BINARY}" generate integration shell "${firstShell}" to "${outputDir}/no-such-directory/f"
+    OUTPUT_QUIET ERROR_QUIET
+    RESULT_VARIABLE unwritableResult
+    TIMEOUT 30)
+if(unwritableResult EQUAL 0)
+    list(APPEND failures "'generate integration' into a directory that does not exist unexpectedly succeeded")
 endif()
 
 if(NOT failures STREQUAL "")

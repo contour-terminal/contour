@@ -79,7 +79,7 @@ sequence specifies, and what ConEmu and Windows Terminal do. A hard reset (`RIS`
 which covers the common case of a shell reset after a crash.
 
 If you would rather have the terminal give up on a silent application, set
-[`progress_timeout`](../configuration/advanced/misc.md) to a non-zero number of milliseconds.
+[`progress_timeout`](../configuration/index.md#progress_timeout) to a non-zero number of milliseconds.
 Applications using the protocol are expected to refresh it roughly once a second, so a value well
 above that — 15000 or so, which is what Ghostty hardcodes — is the useful range.
 

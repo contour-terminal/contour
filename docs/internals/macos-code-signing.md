@@ -18,7 +18,7 @@ source=Unnotarized Developer ID
 ```
 
 All four steps run automatically from `cpack`. The mechanics live in
-[`scripts/macos-bundle.py`](../../scripts/macos-bundle.py), which is driven by the
+[`scripts/macos-bundle.py`](https://github.com/contour-terminal/contour/blob/master/scripts/macos-bundle.py), which is driven by the
 `install(CODE …)` block in `src/contour/CMakeLists.txt` and by the two CPack hooks
 `cmake/MacOSNotarizeApp.cmake` and `cmake/MacOSSignDmg.cmake`.
 
@@ -200,7 +200,7 @@ codesign --verify --deep --strict --verbose=4 contour.app
 
 ## Entitlements
 
-[`support/macOS/entitlements.plist`](../../support/macOS/entitlements.plist) is applied to
+[`support/macOS/entitlements.plist`](https://github.com/contour-terminal/contour/blob/master/support/macOS/entitlements.plist) is applied to
 the app bundle only. It carries no explanatory comments, because the kernel's entitlements
 parser (AMFI) rejects XML comments outright — `Failed to parse entitlements:
 AMFIUnserializeXML: syntax error` — so the reasoning lives here:
@@ -267,7 +267,7 @@ simply refused to start.
 
 So the six libraries Contour links — openssl, libssh2, yaml-cpp, freetype, harfbuzz, cairo
 — are built from source by vcpkg against `CMAKE_OSX_DEPLOYMENT_TARGET`. The whole mechanism
-is one triplet file, [`cmake/vcpkg-triplets/arm64-osx-contour.cmake`](../../cmake/vcpkg-triplets/arm64-osx-contour.cmake),
+is one triplet file, [`cmake/vcpkg-triplets/arm64-osx-contour.cmake`](https://github.com/contour-terminal/contour/blob/master/cmake/vcpkg-triplets/arm64-osx-contour.cmake),
 whose `VCPKG_OSX_DEPLOYMENT_TARGET` is the single knob. This is not a new mechanism: the
 Windows job has always built its dependencies with vcpkg from the same `vcpkg.json`.
 

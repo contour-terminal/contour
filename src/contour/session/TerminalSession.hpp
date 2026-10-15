@@ -12,11 +12,15 @@
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/Notifier.hpp>
 #include <contour/session/DisplaySurface.hpp>
+#include <contour/session/HostedOperation.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
 #include <contour/session/SearchStatus.hpp>
 
+#include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
+#include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/shell/ScrollbarMarks.hpp>
 
 #include <vtpty/Pty.hpp>
 
@@ -25,21 +29,27 @@
 #include <crispy/Point.hpp>
 
 #include <QtCore/QAbstractItemModel>
-#include <QtCore/QFileSystemWatcher>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
+#include <QtCore/QVariant>
 #include <QtQml/QJSValue>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <concepts>
 #include <cstdint>
+#include <deque>
+#include <expected>
 #include <format>
 #include <initializer_list>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include <qcolor.h>
 
@@ -52,6 +62,11 @@ namespace display
 {
     class ForcedFontDpiProvider;
 } // namespace display
+
+namespace platform
+{
+    struct FinishNotificationRequest;
+} // namespace platform
 
 class ContourGuiApp;
 
@@ -79,7 +94,7 @@ enum class GuardedRole : uint8_t
  */
 using PermissionCache = std::map<GuardedRole, bool>;
 
-/// Whether the fold gutter took an input event, and the grid must therefore not also see it.
+/// Whether the gutter took an input event, and the grid must therefore not also see it.
 ///
 /// Named rather than left to a bool because the call sites read as a question about routing, not about
 /// truth: a bare `true` there says nothing about which of the two paths it selects.
@@ -89,15 +104,55 @@ enum class ConsumedByGutter : uint8_t
     Yes,
 };
 
-/// Whether a folding action is subject to the folding.enabled setting.
+/// Whether the sticky command header took a pointer press, and the grid must therefore not also see it.
 ///
-/// Named rather than left to a bool because the exception reads as a rule, not as a negation: turning
-/// the feature off must still let a user undo what they folded while it was on, rather than stranding
-/// the output behind a disabled setting.
-enum class FoldingGate : uint8_t
+/// Its own type rather than ConsumedByGutter: the two route independently -- a press beside row 0 can be
+/// over the gutter, which the gutter takes, or over the header -- and a shared type would let one
+/// handler's answer pass for the other's.
+enum class ConsumedByStickyHeader : uint8_t
 {
-    Configured = 0, ///< The action runs only while folding is enabled.
-    Always,         ///< The action runs regardless -- it can only ever REVEAL output.
+    No = 0,
+    Yes,
+};
+
+/// Who took a pointer press away from the grid, and is therefore owed its release too: a press the
+/// application never saw must not be followed by a release it does see, which would leave it holding a
+/// button that was never pressed.
+enum class PressOwner : uint8_t
+{
+    None = 0,     ///< Nobody: the grid's presses and releases go the normal way.
+    Gutter,       ///< The gutter took the press.
+    StickyHeader, ///< The sticky command header took the press.
+};
+
+/// What a session's program is to the user. Fixed at construction: it decides how the session's end is
+/// reported and whether a saved layout keeps the session's command.
+enum class SessionRole : uint8_t
+{
+    /// A shell, or a program configured to run in its place. One that ends within the early-exit
+    /// threshold has likely failed to start, so its pane is held open with a notice; a layout saves its
+    /// command.
+    Shell = 0,
+    /// A pager over a command's output (OpenCommandOutput). Ending at once is how it is used, so its pane
+    /// closes when it ends; a layout does not save its command, which names a private file that is gone by
+    /// the time the layout is restored.
+    CommandOutput,
+};
+
+/// What became of an action that changes engine state, in a session whose terminal may be hosted elsewhere.
+enum class RemoteDispatch : uint8_t
+{
+    RunHere = 0, ///< The terminal is this session's own: the handler runs the action itself.
+    Performed,   ///< The remote end that hosts the terminal performs it.
+    Refused,     ///< The remote end cannot, or cannot be reached; the user has been told.
+};
+
+/// Where a pointer over the gutter is: the row it names and the segment it is over.
+struct GutterHit
+{
+    vtbackend::LineOffset gridLine {};  ///< The grid line beside the pointer.
+    vtbackend::LineOffset screenRow {}; ///< The screen row that line is drawn on, a top status line counted.
+    vtbackend::GutterSegmentKind segment {}; ///< The segment under the pointer.
 };
 
 /**
@@ -134,6 +189,17 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // signal serves them: the anchor without its text describes nothing.
     Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
     Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
+    // The command block under the pointer in the gutter's block column; an empty anchor means no tooltip.
+    // The text is read through commandBlockTooltip() whenever the anchor's signal fires.
+    Q_PROPERTY(
+        QRectF commandBlockTooltipAnchor READ commandBlockTooltipAnchor NOTIFY commandBlockHoverChanged)
+
+    // The scrollbar's tick marks, top first: { position: 0..1 down the track, kind: a ScrollbarMarkKind as
+    // an int, targetLine: what scrollToScrollbarMark() takes }. Empty with nothing to mark, on the
+    // alternate screen, and while scrollbar.marks is [] or the scrollbar is hidden. The colours are indexed
+    // by kind; both lists are rebuilt together, so one signal serves them.
+    Q_PROPERTY(QVariantList scrollbarMarks READ scrollbarMarks NOTIFY scrollbarMarksChanged)
+    Q_PROPERTY(QVariantList scrollbarMarkColors READ scrollbarMarkColors NOTIFY scrollbarMarksChanged)
 
     // The find bar's state. All four change together -- a new pattern re-tallies, which re-words the
     // summary and re-decides whether stepping is possible -- so one signal serves them, as the
@@ -247,12 +313,21 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// along with it.
     [[nodiscard]] QRectF hyperlinkTooltipAnchor() const noexcept { return _hyperlinkTooltipAnchor; }
 
+    /// The gutter cell the hovered command block was entered at, in the display's item-local logical
+    /// coordinates; empty while no block is hovered. The ENTRY cell, so the tooltip stays put while the
+    /// pointer traces the block's rows.
+    [[nodiscard]] QRectF commandBlockTooltipAnchor() const noexcept { return _commandBlockTooltipAnchor; }
+
+    /// What the block-column tooltip says about the hovered command block, or empty for "show nothing"
+    /// (@see commandBlockTooltipText). Reads the record under the terminal lock, at the moment it is asked.
+    Q_INVOKABLE [[nodiscard]] QString commandBlockTooltip() const;
+
     /// Withdraws the hyperlink tooltip, whatever the pointer is over.
     ///
-    /// Called when the pointer leaves the terminal, and when the viewport scrolls: the hovered-link
-    /// state tracks mouse MOVEMENT, so scrolling moves the link out from under a stationary pointer
-    /// without anything noticing. Hiding is the honest answer to that; continuing to show a tooltip for
-    /// a link no longer under the pointer is worse than showing none.
+    /// Called when the pointer leaves the terminal or the grid, and when the viewport scrolls: the
+    /// hovered-link state tracks mouse MOVEMENT, so scrolling moves the link out from under a stationary
+    /// pointer without anything noticing. Hiding is the honest answer to that; continuing to show a tooltip
+    /// for a link no longer under the pointer is worse than showing none. GUI thread only.
     void clearHyperlinkHover();
 
   private:
@@ -330,7 +405,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     }
     float getOpacityBackground() const noexcept
     {
-        if (_terminal.colorPalette().backgroundImage.get())
+        if (_terminal.colorPalette().backgroundImage)
         {
             return _terminal.colorPalette().backgroundImage->opacity;
         }
@@ -393,9 +468,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     QString title() const;
     void setTitle(QString const& value) { terminal().setWindowTitle(value.toStdString()); }
 
-    int pageLineCount() const noexcept { return unbox(_terminal.pageSize().lines); }
+    /// The main page's lines, read without the terminal lock. @see vtbackend::Terminal::mainPageSize()
+    int pageLineCount() const noexcept { return unbox(_terminal.mainPageSize().lines); }
 
-    int pageColumnsCount() const noexcept { return unbox(_terminal.pageSize().columns); }
+    /// The main page's columns, read without the terminal lock. @see vtbackend::Terminal::mainPageSize()
+    int pageColumnsCount() const noexcept { return unbox(_terminal.mainPageSize().columns); }
 
     bool showResizeIndicator() const noexcept { return _config.profile().sizeIndicatorOnResize.value(); }
 
@@ -406,18 +483,54 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// travel at the top that scrolls nowhere.
     ///
     /// Reported from what announceScrollableLineCount() last published, and emphatically NOT computed
-    /// here -- see there for why the GUI thread may neither compute this count nor take the lock that
+    /// here -- see there for why this property may neither compute the count nor take the lock that
     /// would make computing it safe. It is therefore also exactly what the NOTIFY signal carried.
-    int historyLineCount() const noexcept { return _lastHistoryLineCount.load(std::memory_order_relaxed); }
+    int historyLineCount() const noexcept { return _lastHistoryLineCount; }
 
     int scrollOffset() const noexcept { return unbox(terminal().viewport().scrollOffset()); }
+
+    /// Scrolls the view to @p value rows above the bottom: the QML scrollbar's write. Under the terminal
+    /// lock, as the parser thread moves the view under it too, and through runUnderStateLock(), which runs it
+    /// at once where this thread holds the lock already: while hovered, the bar writes back at once the
+    /// offset a scroll announces, and a Vi motion or a scroll action announces it under the lock.
+    /// @param value The offset, in rows above the bottom.
     void setScrollOffset(int value)
     {
-        terminal().resetSmoothScroll();
-        terminal().viewport().scrollTo(vtbackend::ScrollOffset::cast_from(value));
+        _terminal.runUnderStateLock([&] {
+            _terminal.resetSmoothScroll();
+            _terminal.viewport().scrollTo(vtbackend::ScrollOffset::cast_from(value));
+        });
     }
 
     void onScrollOffsetChanged(vtbackend::ScrollOffset value) override;
+
+    /// The ticks the scrollbar draws. @see the scrollbarMarks Q_PROPERTY for the shape of each entry.
+    [[nodiscard]] QVariantList scrollbarMarks() const { return _scrollbarMarks; }
+
+    /// One colour per ScrollbarMarkKind, in enumerator order, resolved from the session's colour scheme.
+    [[nodiscard]] QVariantList scrollbarMarkColors() const { return _scrollbarMarkColors; }
+
+    /// Tells the session how tall the scrollbar's track is, in logical pixels.
+    ///
+    /// A setter, deliberately: the track's height is externally-driven geometry -- the QML layout decides
+    /// it, and every window resize moves it.
+    /// @param pixels The track's height; zero or less means there is no track to mark.
+    Q_INVOKABLE void setScrollbarMarkTrackPixels(int pixels);
+
+    /// Scrolls so a tick's target line is the viewport's top row, opening a collapsed fold on the way.
+    ///
+    /// Does nothing when the target no longer names a row -- evicted, or renamed by a reflow since the ticks
+    /// were published; the refresh that change scheduled replaces the tick anyway.
+    /// @param targetLine A tick's targetLine.
+    Q_INVOKABLE void scrollToScrollbarMark(qint64 targetLine);
+
+    /// Publishes the scrollbar's travel (announceScrollableLineCount()), and rebuilds the ticks if anything
+    /// they depend on moved, and announces them.
+    ///
+    /// GUI thread only, since it takes the terminal lock. Production reaches it from the frame timer that
+    /// requestScrollbarMarksRefresh() arms, so it runs at most once per frame however fast output arrives;
+    /// public so a test can run it without an event loop, as refreshSearchStatus() is.
+    void refreshScrollbarMarks();
     // }}}
 
     // {{{ QAbstractItemModel overrides
@@ -451,8 +564,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
      *        Recorded verbatim for later introspection (e.g. by layout tooling); does not affect the
      *        PTY itself, which is already spawned by the caller.
      * @param notifier how desktop notifications are raised. Null (the default) means the notifier
-     *        this platform offers, per platform::makeDesktopNotifier(); a test passes a recording
-     *        one to assert what OSC 99 asked for and to drive close/activation events back.
+     *        this platform offers, per platform::makeDesktopNotifier(), with the hosting window's
+     *        tray where it offers none; a test passes a recording one to assert what was raised and
+     *        to drive close/activation events back.
+     * @param role what the session's program is to the user (@see SessionRole). The default is a shell.
      */
     TerminalSession(TerminalSessionManager* manager,
                     std::unique_ptr<vtpty::Pty> pty,
@@ -460,10 +575,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                     std::string profileName = {},
                     std::optional<vtbackend::PageSize> initialPageSize = std::nullopt,
                     std::optional<vtpty::Process::ExecInfo> launchedCommand = std::nullopt,
-                    std::unique_ptr<platform::Notifier> notifier = nullptr);
+                    std::unique_ptr<platform::Notifier> notifier = nullptr,
+                    SessionRole role = SessionRole::Shell);
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
+
+    /// What the session's program is to the user, as it was constructed.
+    [[nodiscard]] SessionRole role() const noexcept { return _role; }
+
+    /// The notifier this session raises desktop notifications through, as chosen at construction:
+    /// the one it was handed, or else the platform's own.
+    [[nodiscard]] platform::Notifier const& notifier() const noexcept { return *_desktopNotifier; }
 
     /// The command override this session was created with, if any (nullopt when it launched the
     /// profile's configured shell instead of an explicit command).
@@ -562,16 +685,21 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     [[nodiscard]] std::string workingDirectory() const;
 
     /// This machine's identity, for deciding whether a context describes it.
-    [[nodiscard]] vtbackend::LocalIdentity localIdentity() const noexcept
+    ///
+    /// Also the vtbackend::Terminal::Events hook the terminal reads at OSC 133;C, on the parser thread:
+    /// both strings are fixed at construction, so answering there needs no lock.
+    [[nodiscard]] vtbackend::LocalIdentity localIdentity() const noexcept override
     {
-        return vtbackend::LocalIdentity { .machineId = _localMachineId, .hostname = _localHostName };
+        return _localIdentity.view();
     }
 
     /// The working directory for @p purpose, resolved from the OSC 3008 ancestry and then OSC 7.
     ///
     /// One resolution consulted by every caller, so "where does a new tab start" and "what does the
     /// tab tooltip say" can never disagree about the ORDER even though they deliberately disagree
-    /// about the FILTER: a path worth SHOWING need not be one a child could be spawned in.
+    /// about the FILTER: a path worth SHOWING need not be one a child could be spawned in. The
+    /// terminal's (vtbackend::Terminal::resolveWorkingDirectory), so a pane mirroring a daemon on
+    /// another machine holds every directory foreign.
     ///
     /// Takes the terminal lock. A caller that already holds it must use
     /// @ref resolveWorkingDirectoryLocked instead.
@@ -597,6 +725,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Distinct from workingDirectory() on purpose: that one answers "where should a new tab start",
     /// must name a directory that exists on THIS machine, and says "." when it cannot tell. Neither is
     /// something to put in front of a user.
+    ///
+    /// Made safe to show (vtbackend::SanitizePurpose::Display): a control or bidi override a directory name
+    /// holds is replaced, not shown raw.
     ///
     /// @return The directory, or an empty string when none can be determined.
     [[nodiscard]] std::string displayWorkingDirectory() const;
@@ -643,6 +774,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void bufferChanged(vtbackend::ScreenType) override;
     void renderBufferUpdated() override;
     void screenUpdated() override;
+    void pageResized() override;
+
+    /// New output brings a scrolled-back view down to it, except where the user parked the view on a search
+    /// match: with the find bar open, or after stepping to one. Answered from atomics, as the terminal asks
+    /// under its lock on the parser thread.
+    [[nodiscard]] vtbackend::OutputFollowing outputFollowing() const noexcept override;
+
     vtbackend::FontDef getFontDef() override;
     void setFontDef(vtbackend::FontDef const& fontDef) override;
     void copyToClipboard(std::string_view data) override;
@@ -664,9 +802,35 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void setWindowFrameColor(vtbackend::RGBColor color) override;
     void resetWindowFrameColor() override;
     void progressChanged(vtbackend::Progress progress) override;
+
+    /// A shell command block finished (OSC 133;D, or an OSC 3008 end while OSC 3008 owns the marks).
+    ///
+    /// Raised on the parser thread with Terminal::_stateMutex held, exactly like progressChanged():
+    /// this only copies the summary into the block events the GUI thread is to handle, reading no
+    /// terminal state.
+    /// @see handlePendingBlockEvents
+    /// @param summary The finished block, as a value copy.
+    void commandBlockFinished(vtbackend::CommandBlockSummary const& summary) override;
+
+    /// Has the block tooltip re-read the block whose record changed, should it be the hovered one: the
+    /// tooltip reads a block as the pointer enters it, and would go on saying what the record said then --
+    /// "Running" after the command finished, or no signal after OSC 3008 named one -- under a pointer that
+    /// stays. A command starting is such a change too, and the one a `clear_on: next` finish notification
+    /// waits for.
+    /// Gathered, as commandBlockFinished() is, for the GUI thread to handle.
+    /// @see handlePendingBlockEvents
+    /// @see withdrawFinishNoticeIfNextCommandStarted
+    /// @param change The block whose record changed, and the newest block that ran a command.
+    void commandBlockChanged(vtbackend::CommandBlockChange const& change) override;
     void setTerminalProfile(std::string const& configProfileName) override;
     void discardImage(vtbackend::Image const&) override;
     void inputModeChanged(vtbackend::ViMode mode) override;
+    /// Asks the session's host to place or take off the user mark the user toggled on this mirror's row
+    /// (SetUserMark, ClearUserMark), on the GUI thread: the request is raised under the terminal lock, and
+    /// asking reaches the remote end, which takes the mirror's lock to name the row. Where the session turns
+    /// out to run here after all, the mark is placed on this terminal.
+    /// @param request The row, by this terminal's stable id, and what to do to its line.
+    void userMarkRequested(vtbackend::UserMarkRequest const& request) override;
     void searchPromptRequested() override;
     void searchCleared() override;
     void updateHighlights() override;
@@ -696,31 +860,74 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                             vtbackend::CellLocation pos,
                             vtbackend::PixelCoordinate pixelPosition);
 
-    /// Reports where the pointer is over the fold gutter, or that it is not over it at all.
+    /// Reports where the pointer is over the gutter, or that it is not over it at all.
     ///
     /// Consulted BEFORE the ordinary move path and, when it claims the event, instead of it: the
     /// gutter is not part of the grid, so a move there must not reach the mouse protocol, extend a
-    /// selection, or hover a hyperlink at the column-0 cell it would otherwise be clamped onto.
+    /// selection, or hover a hyperlink at the column-0 cell it would otherwise be clamped onto. Only
+    /// the block column lights a fold; beside the timestamps or the line numbers the pointer is the
+    /// gutter's all the same.
     ///
-    /// @param gridLine The grid line under the pointer, or nullopt when it is not over the gutter.
+    /// @param hit Where over the gutter the pointer is, or nullopt when it is not over the gutter.
     /// @return Whether the gutter consumed the event.
-    ConsumedByGutter sendGutterHoverEvent(std::optional<vtbackend::LineOffset> gridLine);
+    ConsumedByGutter sendGutterHoverEvent(std::optional<GutterHit> hit);
 
-    /// Toggles the fold at @p gridLine when the press landed on the fold column.
+    /// Toggles the fold beside @p hit when the press landed on the block column.
     ///
     /// The press half of the gutter's click handshake, and the only place that arms it: a press the
     /// child never saw must be followed by a release it never sees either, and leaving that to the
-    /// caller means a third event path re-deriving the rule (@see sendGutterReleaseEvent).
+    /// caller means a third event path re-deriving the rule (@see sendOwedRelease).
     ///
-    /// @param gridLine The grid line under the pointer, or nullopt when it is not over the gutter.
+    /// A left press beside the timestamps or the line numbers is consumed and does nothing.
+    ///
+    /// @param hit Where over the gutter the pointer is, or nullopt when it is not over the gutter.
     /// @param button The button that went down.
     /// @return Whether the gutter consumed the event.
-    ConsumedByGutter sendGutterPressEvent(std::optional<vtbackend::LineOffset> gridLine,
-                                          vtbackend::MouseButton button);
+    ConsumedByGutter sendGutterPressEvent(std::optional<GutterHit> hit, vtbackend::MouseButton button);
 
-    /// Swallows the release matching a press the fold column consumed.
-    /// @return Whether the gutter consumed the event.
-    ConsumedByGutter sendGutterReleaseEvent();
+    /// Acts on the press that landed on the sticky header, for the header's command block.
+    ///
+    /// Consulted after the gutter and before the grid, as the gutter's press is: the header covers row 0,
+    /// so a press there must not start a selection or reach the mouse protocol at a row the user cannot
+    /// see. Every button is consumed while a header shows. The left one jumps to the command; a press on the
+    /// evicted placeholder jumps nowhere, the command's row being gone. Any other button does what its
+    /// binding does on the block's own rows -- a middle press pastes, a right press opens the block's context
+    /// menu -- even while an application tracks the mouse, which never hears of the press.
+    ///
+    /// @param mainPageRow The main-page row under the pointer, measured WITHOUT the smooth-scroll shift
+    ///                    (the header is pinned, not scrolled), or nullopt when off the page.
+    /// @param button The button that went down.
+    /// @param modifiers The modifiers held, which pick the button's binding.
+    /// @return Whether the header consumed the event.
+    [[nodiscard]] ConsumedByStickyHeader sendStickyHeaderPressEvent(
+        std::optional<vtbackend::LineOffset> mainPageRow,
+        vtbackend::MouseButton button,
+        vtbackend::Modifiers modifiers);
+
+    /// Swallows a release owed to whoever took its press -- the gutter or the sticky header.
+    ///
+    /// Owed for the button that was pressed only: another button's release, half of a chord, goes the
+    /// normal way.
+    /// @param button The button that went up.
+    /// @return Who the release was owed to; PressOwner::None when it is the grid's.
+    [[nodiscard]] PressOwner sendOwedRelease(vtbackend::MouseButton button);
+
+    /// Forgets a release still owed: the pointer grab ended without one -- a popup, such as the context menu
+    /// a right press opens, took the button's release -- so none is coming.
+    void dropOwedRelease();
+
+    /// Takes a pointer motion over the sticky header, while one shows.
+    ///
+    /// Consulted after the gutter and before the grid, as the press is. The header is drawn over row 0, so a
+    /// motion there must not hover a link on the hidden row, show the grid's I-beam, or reach an application
+    /// tracking the mouse: the pointer is off the grid, and shows the arrow. Off the header's band the motion
+    /// is the grid's again.
+    ///
+    /// @param mainPageRow The main-page row under the pointer, measured WITHOUT the smooth-scroll shift
+    ///                    (the header is pinned, not scrolled), or nullopt when off the page.
+    /// @return Whether the header consumed the event.
+    [[nodiscard]] ConsumedByStickyHeader sendStickyHeaderHoverEvent(
+        std::optional<vtbackend::LineOffset> mainPageRow);
     void sendMouseReleaseEvent(vtbackend::Modifiers modifiers,
                                vtbackend::MouseButton button,
                                vtbackend::PixelCoordinate pixelPosition);
@@ -734,10 +941,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void sendFocusInEvent();
     void sendFocusOutEvent();
 
+    /// The user is looking at this pane: it holds focus, in a window that is shown. A `clear_on: focus`
+    /// finish notification has then done its job. Said on a focus-in, and by the session manager when
+    /// the window comes back to the user without focus moving at all.
+    void paneSeen();
+
     // Actions
     bool operator()(actions::CancelSelection);
     bool operator()(actions::ChangeProfile const&);
     bool operator()(actions::ClearHistoryAndReset);
+    bool operator()(actions::ClearToPrompt);
     bool operator()(actions::CopyPreviousMarkRange);
     bool operator()(actions::CopySelection);
     bool operator()(actions::CreateDebugDump);
@@ -839,6 +1052,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::CopyLastCommandOutput);
     bool operator()(actions::CopyLastCommandBlock);
     bool operator()(actions::CopyHyperlink const& action);
+    bool operator()(actions::SelectCommandBlock const& action);
+    bool operator()(actions::CopyCommandBlock const& action);
+    bool operator()(actions::CopyCommandLine const& action);
+    bool operator()(actions::OpenCommandOutput const& action);
 
     /// The world as this pane's context menu needs to see it, snapshotted under a single terminal lock.
     ///
@@ -902,6 +1119,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
   signals:
     void hyperlinkHoverChanged();
+    /// The hovered command block changed, or the pointer left it: re-read commandBlockTooltip().
+    void commandBlockHoverChanged();
     /// The find bar should open and take focus. Raised by searchPromptRequested(), the
     /// vtbackend::Terminal::Events hook -- which cannot itself be the signal, being an override.
     void searchBarRequested();
@@ -913,6 +1132,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void columnsCountChanged(int newValue);
     void historyLineCountChanged(int newValue);
     void scrollOffsetChanged(int newValue);
+    /// The scrollbarMarks and scrollbarMarkColors properties changed.
+    void scrollbarMarksChanged();
     void titleChanged(QString const& value);
     void pathToBackgroundChanged();
     void opacityBackgroundChanged();
@@ -940,27 +1161,63 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void switchToTabRight();
     void switchToTab(int position);
 
+  public:
+    /// Applies a configuration that was just reloaded -- read once, by
+    /// TerminalSessionManager::reloadAllSessions, for every session -- under @p profileName.
+    /// A configuration that no longer has the profile is refused and logged; the session keeps
+    /// the configuration it has.
+    /// @param config The reloaded configuration.
+    /// @param profileName The profile to run under: the session's own, unless it is switching.
+    void applyReloadedConfig(config::Config const& config, std::string const& profileName);
+
   public slots:
-    void onConfigReload();
     void onHighlightUpdate();
     void configureDisplay();
 
   private:
     // helpers
 
-    /// Runs @p action against the terminal under the lock, and republishes the scrollable count.
+    /// Runs @p action against the terminal under the lock, republishes the scrollable count, and asks for the
+    /// scrollbar's ticks to be rebuilt.
     ///
-    /// The one gate every folding action passes, so that adding one is a handler rather than a handler
-    /// plus a remembered check -- a forgotten check leaves an action live behind a disabled setting,
-    /// and nothing diagnoses it. Republishing is here for the same reason: an action that moved rows
-    /// into or out of the scrollable range and did not say so leaves the scrollbar sized for the range
-    /// before it.
+    /// The one path every action takes that moves rows into or out of the scrollable range -- the folding
+    /// actions, ClearToPrompt, and the jumps that open a fold -- so that adding one is a handler rather than
+    /// a handler plus a remembered step: an action that moved rows and did not say so leaves the scrollbar
+    /// sized, and its ticks spread, for the range before it.
+    /// Whether an action may fold at all with folding.enabled off is the terminal's to decide
+    /// (vtbackend::FoldingAvailability), as it is for the vi `z` keys.
     ///
     /// @param action What to do with the terminal; its result is the action's result.
-    /// @param gate   Whether @p action is subject to the folding.enabled setting.
-    /// @return What @p action returned, or false when folding is disabled and @p gate honours it.
-    bool withFolding(std::invocable<vtbackend::Terminal&> auto&& action,
-                     FoldingGate gate = FoldingGate::Configured);
+    /// @return What @p action returned.
+    bool withScrollableChange(std::invocable<vtbackend::Terminal&> auto&& action);
+
+    /// Hands @p action to the session's remote end when the terminal it changes is hosted there.
+    ///
+    /// The first step of every handler of an action that changes engine state (the table in
+    /// HostedOperation.hpp): a pane attached to a daemon mirrors a terminal the daemon runs, so changing
+    /// the local one would be undone by the next update. A refusal is told to the user.
+    /// @param action The action, one the table names.
+    /// @return RunHere when the handler runs the action itself; otherwise what became of it.
+    template <typename Action>
+    [[nodiscard]] RemoteDispatch dispatchRemotely(Action const& action);
+
+    /// Asks where @p request runs, which sends it to the session's remote end when it runs there, and tells
+    /// the user when it runs nowhere.
+    /// @param request The operation.
+    /// @return Where it runs: RunHere leaves it to the caller, RunOnHost has sent it, and Refused and
+    ///         Unreachable did nothing but say so.
+    [[nodiscard]] HostedOperationRoute routeHostedOperation(HostedOperationRequest const& request);
+
+    /// Queues @p change to run on the manager on the GUI thread, from a callback the parser thread raises
+    /// under the terminal lock.
+    ///
+    /// Queued on the MANAGER, not on this session, and handed nothing of the session's: a session is not
+    /// deleted with its manager, so a call queued on the session could still run once the manager was gone.
+    /// Qt drops a call queued on a destroyed manager, and the manager's own lookups by session id answer a
+    /// session closed in the meantime.
+    /// @param change Invoked with the manager; it must capture what it needs by value.
+    template <typename Change>
+    void postToManager(Change change);
 
     bool reloadConfig(config::Config newConfig, std::string const& profileName);
     int executeAllActions(std::vector<actions::Action> const& actions);
@@ -981,18 +1238,43 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// disagree -- clearing one without the other left a hover the next motion had to undo.
     void clearGutterHover();
 
-    /// Publishes @p scrollable as the scrollbar's travel, announcing it when it moved.
+    /// Withdraws everything the pointer's position decided -- the hyperlink tooltip, the gutter's hover and
+    /// the block tooltip -- for a pointer that no longer stands where it did: it left, or the content moved
+    /// under it. The next move decides them afresh. GUI thread only: QML reads that state without a lock.
+    void clearHovers();
+
+    /// The pointer stands on no grid cell -- over the gutter, over the sticky header, or outside the terminal
+    /// -- so nothing there is hovered: the hyperlink's tooltip goes, the terminal stops drawing the link as
+    /// hovered, and the next move onto the grid decides the pointer's shape afresh, on the cell it left from
+    /// too. The one place that says so, for every way off the grid.
+    void leaveGrid();
+
+    /// Points the block-column tooltip at @p block, entered at screen row @p screenRow, or withdraws it.
+    /// Announces only a change of BLOCK: tracing one block's rows keeps the tooltip where it was entered.
+    /// @param block The block under the pointer, or nullopt when there is none to describe.
+    /// @param screenRow The screen row the pointer entered @p block at, a top status line counted.
+    void updateCommandBlockHover(std::optional<vtbackend::CommandBlockId> block,
+                                 vtbackend::LineOffset screenRow);
+
+    /// Publishes @p scrollable as the scrollbar's travel, announcing it when it moved. GUI thread only.
     ///
     /// The historyLineCount property reads what this stored rather than computing a count of its
     /// own, because computing one goes through the fold projection -- a lazily built cache the
-    /// render pass clears and refills under the terminal lock, so a GUI-thread rebuild races it.
-    /// Taking that lock in the property instead is what cannot be done: a scroll performed under it
-    /// emits scrollOffsetChanged, whose QML handler reads this very property on the same thread, and
-    /// the lock is not recursive. So every caller computes the count itself and hands it here, and
-    /// this is called OUTSIDE any lock -- the binding it wakes reaches back into the session.
+    /// render pass clears and refills under the terminal lock, so a rebuild without that lock, on any
+    /// thread, races it. Taking that lock in the property instead is what cannot be done: a scroll
+    /// performed under it emits scrollOffsetChanged, whose QML handler reads this very property on the
+    /// same thread, and the lock is not recursive. So every caller computes the count under the lock
+    /// and hands it here after releasing it -- the binding this wakes reaches back into the session.
+    /// Output on the parser thread is no caller: it asks refreshScrollbarMarks() to publish instead.
     ///
-    /// @param scrollable The scrollable line count, computed by the caller.
+    /// @param scrollable The scrollable line count, computed by the caller under the terminal lock.
     void announceScrollableLineCount(vtbackend::LineCount scrollable);
+
+    /// Arranges for refreshScrollbarMarks() to run on the GUI thread within a frame.
+    ///
+    /// Callable from either thread, the terminal lock held or not: it neither locks nor computes, only
+    /// posts -- and at most one post is in flight, so a burst of output costs one atomic per PTY read.
+    void requestScrollbarMarksRefresh();
 
     /// Re-announces every Q_PROPERTY whose value is derived from the profile, so the QML bindings that
     /// read them re-evaluate against the profile that was just swapped in. Call after every assignment
@@ -1018,7 +1300,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param windowSizePolicy Whether to resize the window to the profile's terminal_size.
     void activateProfile(std::string const& newProfileName,
                          ProfileWindowSizePolicy windowSizePolicy = ProfileWindowSizePolicy::Preserve);
-    bool reloadConfigWithProfile(std::string const& profileName);
+    /// Reloads the configuration file for every session (TerminalSessionManager::reloadAllSessions),
+    /// and makes sure this one runs under @p profileName afterwards.
+    /// @return Why the file could not be read; nothing changed then.
+    [[nodiscard]] std::expected<void, std::string> reloadAllConfigs(std::string const& profileName);
+
+    /// After the manager reloaded every session it hosts, makes sure this one runs under @p profileName
+    /// in the reloaded configuration: it is not reached when the manager does not host it, or when it
+    /// is to switch profile.
+    /// @param profileName The profile to run under from now on.
+    void followReload(std::string const& profileName);
     bool resetConfig();
     void followHyperlink(vtbackend::HyperlinkInfo const& hyperlink);
 
@@ -1033,10 +1324,27 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param subject How to name it -- the user's own spelling, which is not always @p url's.
     void openExternally(QUrl const& url, std::string_view what, std::string_view subject);
 
-    /// Copies @p part of the most recently finished shell command into the clipboard.
-    /// @param part Which part of the command block to copy.
-    /// @return false when the scrollback holds no finished command (no OSC 133 shell integration).
-    bool copyLastCommandBlock(vtbackend::CommandBlockPart part);
+    /// Copies one part of a command block as plain text; refuses (and leaves the clipboard alone) when
+    /// there is nothing to copy.
+    /// @param target Which block.
+    /// @param part Which part of it.
+    /// @param block A pinned block (zero: resolve @p target).
+    /// @return Nothing once copied; otherwise why nothing was -- no such block, or an empty part.
+    [[nodiscard]] std::expected<void, vtbackend::CommandBlockActionError> copyCommandBlock(
+        vtbackend::CommandBlockTarget target,
+        vtbackend::CommandBlockPart part,
+        vtbackend::CommandBlockId block);
+
+    /// Copies text taken from a command block into the clipboard, unless there is none.
+    /// @param text The text, or why there is none.
+    /// @return Nothing once copied; otherwise why nothing was. Empty text is an empty part: copying it
+    ///         would only destroy what the clipboard held.
+    [[nodiscard]] std::expected<void, vtbackend::CommandBlockActionError> copyBlockText(
+        std::expected<std::string, vtbackend::CommandBlockActionError> text);
+
+    /// Logs why OpenCommandOutput showed nothing and tells the user through showNotification().
+    /// @param reason What went wrong, lower-case and without a trailing period.
+    void reportOpenOutputFailure(std::string_view reason);
 
     void setFontSize(text::FontSize size);
 
@@ -1048,6 +1356,52 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// thread via the display's event loop.
     void refreshGuiTabInfoForStatusLine();
 
+    /// Shows an application's notification (OSC 777, OSC 9 or OSC 99) if its occasion wants it from where
+    /// this session is now, and wires the reports it asked for. GUI thread.
+    /// @param notification The notification, with the occasion it is decided by.
+    void raiseDesktopNotification(vtbackend::DesktopNotification const& notification);
+
+    /// Decides on, and delivers, the finish notification for @p summary. GUI thread.
+    /// @param summary The finished block.
+    void handleCommandBlockFinished(vtbackend::CommandBlockSummary const& summary);
+
+    /// Handles every block event gathered since the last call, in the order they were raised: each finish,
+    /// then what the changes ask -- the hovered block's tooltip re-read, a `clear_on: next` notice
+    /// withdrawn. GUI thread; takes no lock but the one guarding the gathered events.
+    void handlePendingBlockEvents();
+
+    /// Delivers @p request about @p block, remembering a raised notification for withdrawal on
+    /// @p clearOn. It is raised through the session's notifier: the desktop's on Linux, elsewhere one
+    /// that hands it to the hosting window's tray, as the bell always goes (a background tab has no
+    /// SessionChrome to relay it).
+    /// @param block The block the notification reports.
+    /// @param request What to say, and how.
+    /// @param clearOn What withdraws the notification.
+    void deliverFinishNotice(vtbackend::CommandBlockId block,
+                             platform::FinishNotificationRequest const& request,
+                             config::NotifyClearOn clearOn);
+
+    /// Withdraws this session's finish notification from the desktop, if it has one.
+    void withdrawFinishNotice();
+
+    /// Forgets this session's finish notification without withdrawing it: the desktop retired it.
+    void forgetFinishNotice() noexcept;
+
+    /// Whether this session has a finish notification out that @p trigger withdraws.
+    /// @param trigger The `clear_on` event that just happened.
+    /// @return True when a notification is outstanding and its `clear_on` is @p trigger.
+    [[nodiscard]] bool finishNoticeClearsOn(config::NotifyClearOn trigger) const noexcept;
+
+    /// Connects the notifier's click and close events for this session's finish notification once --
+    /// every finish notification of a session carries the same identifier -- and the session's own close.
+    void connectFinishNoticeEvents();
+
+    /// Withdraws a `clear_on: next` finish notification once its block is no longer the newest that ran a
+    /// command: a later command has started, or a reset forgot the block. GUI thread; takes no lock.
+    /// @param lastCommand The newest record that ran a command, as a record change left the store; zero
+    ///                    when none had.
+    void withdrawFinishNoticeIfNextCommandStarted(vtbackend::CommandBlockId lastCommand);
+
     void setDefaultCursor();
     void configureTerminal();
     void configureCursor(config::CursorConfig const& cursorConfig);
@@ -1057,7 +1411,30 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Scrolls down by @p lineCount lines, using smooth pixel scrolling if enabled, otherwise line-based.
     void smoothScrollDown(vtbackend::LineCount lineCount);
-    uint8_t matchModeFlags() const;
+
+    /// The actions a `clicks:` mouse binding has for this press: the user's mappings first, then the
+    /// built-in fallbacks. Only looks: it runs under the terminal lock, inside the claimant.
+    /// @param button The pressed button.
+    /// @param modifiers The chord, with the bypass modifier already removed.
+    /// @param clickCount The press's place in its multi-click sequence.
+    /// @return The bound actions, or nullptr -- also for a binding executeAllActions() would refuse.
+    [[nodiscard]] config::ActionList const* clickCountBinding(vtbackend::MouseButton button,
+                                                              vtbackend::Modifiers modifiers,
+                                                              uint8_t clickCount) const;
+
+    /// The actions an ordinary press of @p button is bound to: the user's mappings first, then the built-in
+    /// fallbacks, as for a press the grid declined.
+    /// @param button The pressed button.
+    /// @param modifiers The chord, with the bypass modifier already removed (@see bindingModifiers).
+    /// @return The bound actions, or nullptr.
+    [[nodiscard]] config::ActionList const* mouseBinding(vtbackend::MouseButton button,
+                                                         vtbackend::Modifiers modifiers) const;
+
+    /// @p modifiers as a mouse binding matches them: without the mouse-protocol bypass modifiers, when it
+    /// holds them, since those only say the press is not the application's.
+    /// @param modifiers The chord held.
+    /// @return The chord to match.
+    [[nodiscard]] vtbackend::Modifiers bindingModifiers(vtbackend::Modifiers modifiers) const;
     void flushInput();
     void mainLoop();
 
@@ -1073,20 +1450,20 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // default). Kept separate from _profileName, which always resolves to a concrete profile.
     std::optional<std::string> _profileOverride;
     std::optional<vtpty::Process::ExecInfo> _launchedCommand;
+    SessionRole _role;
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;
-    /// This machine's host name, asked once because one of the file:// URLs measured against it is
-    /// resolved on the GUI thread under the terminal lock. @see vtbackend::isLocalHost
-    std::string _localHostName;
-
-    /// This machine's /etc/machine-id, read once, empty where there is none.
+    /// This machine's identity, as the app read it once (ContourGuiApp::hostIdentity): neither half changes
+    /// while the process runs, and both are asked on the parser thread and on the GUI thread under the
+    /// terminal lock. A copy rather than a reference into the app, which a session may outlive at exit.
     ///
-    /// The STRONG half of the locality test an OSC 3008 working directory needs. Nothing emits a
-    /// `remote` context for ssh today, so a remote host's own sequences look entirely local and its
-    /// paths may well exist here too; comparing machine ids is the only thing that catches it, and
-    /// systemd's shim emits one for free. @see vtbackend::LocalIdentity.
-    std::string _localMachineId;
+    /// The machine id is the STRONG half of the locality test an OSC 3008 working directory needs.
+    /// Nothing emits a `remote` context for ssh today, so a remote host's own sequences look entirely
+    /// local and its paths may well exist here too; comparing machine ids is the only thing that catches
+    /// it, and systemd's shim emits one for free. The host name is what every file:// URL is measured
+    /// against. @see vtbackend::LocalIdentity, vtbackend::isLocalHost
+    vtbackend::HostIdentity _localIdentity;
 
     crispy::Point _accumulatedPixelScroll;
     crispy::Point _accumulatedAngleScroll;
@@ -1097,6 +1474,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::unique_ptr<platform::Announcer> _announcer = std::make_unique<platform::NullAnnouncer>();
     QString _hyperlinkTooltipText;
     QRectF _hyperlinkTooltipAnchor;
+
+    /// The command block whose tooltip is showing, if any (@see commandBlockTooltip).
+    std::optional<vtbackend::CommandBlockId> _hoveredBlock {};
+    QRectF _commandBlockTooltipAnchor {};
 
     /// What the find bar currently shows, re-derived by refreshSearchStatus().
     SearchStatus _searchStatus;
@@ -1109,8 +1490,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     QTimer _searchTallyTimer;
     /// Whether the find bar is open. Two things read it: whether a tally is worth computing at all,
     /// and whether new output may auto-scroll the viewport back to the bottom -- the bar being open
-    /// means the user is reading something they went looking for. @see screenUpdated.
-    /// Atomic: written on the GUI thread, read by screenUpdated() on the parser thread.
+    /// means the user is reading something they went looking for. @see outputFollowing.
+    /// Atomic: written on the GUI thread, read on the parser thread.
     std::atomic<bool> _isSearchBarOpen { false };
     /// Whether the viewport was last moved to show a search match rather than by new output.
     ///
@@ -1147,8 +1528,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool _terminatedAndWaitingForKeyPress = false;
     DisplaySurface* _display = nullptr;
 
-    std::unique_ptr<QFileSystemWatcher> _configFileChangeWatcher;
-
     std::atomic<bool> _terminating { false };
 
     /// Guards against piling up cursor-moved posts (IME rectangle update + accessible caret report).
@@ -1164,24 +1543,32 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     vtbackend::ScreenType _currentScreenType = vtbackend::ScreenType::Primary;
     vtbackend::CellLocation _currentMousePosition = vtbackend::CellLocation {};
 
-    /// Whether the pointer was last seen over the fold gutter rather than over the grid.
+    /// Whether the pointer was last seen over the gutter rather than over the grid.
     ///
     /// Kept here so the common case -- pointer over the grid -- can be answered without taking
     /// the terminal lock on every single motion event, while still clearing a hover that was set.
     bool _gutterHovered = false;
 
-    /// Whether this pane's last press was consumed by the fold column, so its release must be too.
-    ///
-    /// A press the child never saw must not be followed by a release it does see: that leaves the
-    /// application holding a button down that was never pressed. Per SESSION rather than per process:
-    /// every pane and every window shares the GUI thread, so a press in one pane's gutter followed by
-    /// a release delivered to another would otherwise swallow the second pane's release.
-    bool _gutterClickPending = false;
+    /// A press taken away from the grid, whose release is owed to the same taker (@see PressOwner).
+    struct OwedRelease
+    {
+        PressOwner owner = PressOwner::None;                          ///< Who took the press.
+        vtbackend::MouseButton button = vtbackend::MouseButton::Left; ///< The button pressed.
+    };
+
+    /// This pane's press that the gutter or the sticky header took, if any. Per SESSION rather than per
+    /// process: every pane and every window shares the GUI thread, so a press in one pane's gutter
+    /// followed by a release delivered to another would otherwise swallow the second pane's release.
+    OwedRelease _owedRelease {};
+
+    /// The block a context menu opened over the sticky header describes, while the press that opens it
+    /// runs its binding; zero otherwise, when the menu describes the cell under the pointer.
+    vtbackend::CommandBlockId _contextMenuBlock {};
 
     /// Whether the mouse cursor shape must be re-decided on the next motion, even over the same cell.
     ///
     /// The move path changes the shape only when the pointer changes grid CELL, that being the only
-    /// thing that can change its answer -- but the fold gutter sets the shape without going through
+    /// thing that can change its answer -- but the gutter sets the shape without going through
     /// it, and leaving the gutter lands the pointer back on the cell it came from. @see
     /// clearGutterHover(), which raises this.
     bool _isPointerShapeStale = false;
@@ -1201,9 +1588,49 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::vector<int> _musicalNotesBuffer;
 
     /// The scrollable line count the historyLineCount property reports and its NOTIFY signal last
-    /// carried. Atomic because the parser thread publishes it while the GUI thread reads it; see
-    /// announceScrollableLineCount() for why the GUI thread cannot simply compute it.
-    std::atomic<int> _lastHistoryLineCount = 0;
+    /// carried. GUI thread only; see announceScrollableLineCount() for why the property cannot simply
+    /// compute it.
+    int _lastHistoryLineCount = 0;
+
+    /// Everything the scrollbar's ticks are a function of -- the marks, as the terminal's revision of them
+    /// says, and the rows they are spread over -- plus the track and what selects and colours them.
+    /// Compared under the terminal lock, so a refresh that finds none of it moved neither copies the marks
+    /// out nor wakes QML.
+    struct ScrollbarMarksKey
+    {
+        uint64_t marksRevision = 0;                 ///< Terminal::scrollbarMarksRevision()
+        int64_t visibleRowCount = 0;                ///< The rows the scrollbar spans
+        int trackPixels = 0;                        ///< The track's height
+        vtbackend::ScrollbarMarkSources sources {}; ///< The kinds drawn
+        std::array<vtbackend::RGBColor, vtbackend::ScrollbarMarkKindList.size()> colors {}; ///< By kind
+
+        [[nodiscard]] bool operator==(ScrollbarMarksKey const&) const noexcept = default;
+    };
+
+    /// What the scrollbarMarks / scrollbarMarkColors properties report. GUI thread only.
+    QVariantList _scrollbarMarks;
+    QVariantList _scrollbarMarkColors;
+
+    /// The ticks _scrollbarMarks was built from, so a refresh that buckets the same ones wakes no binding.
+    /// GUI thread only.
+    std::vector<vtbackend::ScrollbarTick> _scrollbarTicks;
+
+    /// The track's height in logical pixels, as the QML last reported it. GUI thread only.
+    int _scrollbarMarkTrackPixels = 0;
+
+    /// The key the published ticks were built from; nullopt before the first refresh. GUI thread only.
+    std::optional<ScrollbarMarksKey> _scrollbarMarksKey;
+
+    /// The Grid::stableIdGeneration() the published ticks' target ids were read in: what a click on one hands
+    /// Terminal::revealStableLineAtTop(), which refuses an id from another. GUI thread only.
+    uint64_t _scrollbarTicksGeneration = 0;
+
+    /// Fires refreshScrollbarMarks() a frame after the first request, so a burst of output costs one
+    /// rebuild per frame rather than one per PTY read.
+    QTimer _scrollbarMarksTimer;
+
+    /// Collapses repeated requests to at most one post in flight, as _searchTallyPostPending does.
+    std::atomic_flag _scrollbarMarksPostPending = ATOMIC_FLAG_INIT;
 
     struct CaptureBufferRequest
     {
@@ -1252,9 +1679,75 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @see noteTransportLost.
     std::atomic<bool> _transportLost = false;
 
+    /// The finish notification this session has on the desktop: which block it reports and what
+    /// withdraws it. At most one -- a newer finish replaces the older under the same identifier.
+    /// Recorded on every platform, so withdrawal is uniform (a tray message's is a no-op).
+    struct FinishNotice
+    {
+        vtbackend::CommandBlockId block {};                           ///< The block it reports.
+        config::NotifyClearOn clearOn = config::NotifyClearOn::Focus; ///< What withdraws it.
+    };
+    std::optional<FinishNotice> _finishNotice;
+
+    /// Whether gathering a block event must queue the call that hands the gathered events on.
+    enum class BlockEventsCall : uint8_t
+    {
+        Queued = 0, ///< One is queued already, and takes this event along.
+        Needed,     ///< None is: this event is the first since the last call.
+    };
+
+    /// Which records changed, as far as PendingBlockEvents keeps count.
+    enum class ChangedRecords : uint8_t
+    {
+        None = 0, ///< No record changed.
+        Listed,   ///< The records PendingBlockEvents::changed lists did.
+        Unlisted, ///< More did than the list keeps: any record may have.
+    };
+
+    /// The command-block events the parser thread raised that the GUI thread has yet to handle. Gathered
+    /// rather than queued one call apiece, so a flood of them -- a `cat` of a log replaying its OSC 133 --
+    /// queues one call, and holds no more of them than the store holds records.
+    struct PendingBlockEvents
+    {
+        std::deque<vtbackend::CommandBlockSummary> finished;  ///< Oldest first; the oldest go past the limit.
+        std::vector<vtbackend::CommandBlockId> changed;       ///< Ascending, while ChangedRecords::Listed.
+        ChangedRecords changedRecords = ChangedRecords::None; ///< How far @ref changed tells.
+        vtbackend::CommandBlockId lastCommand {};             ///< As the newest change left the store.
+
+        /// Gathers a finish.
+        /// @param summary The finished block.
+        /// @param limit The most finishes kept.
+        /// @return Whether the call that hands the events on must be queued.
+        [[nodiscard]] BlockEventsCall noteFinished(vtbackend::CommandBlockSummary const& summary,
+                                                   size_t limit);
+
+        /// Gathers a change.
+        /// @param change The record that changed, and the newest command.
+        /// @param limit The most changed records listed.
+        /// @return Whether the call that hands the events on must be queued.
+        [[nodiscard]] BlockEventsCall noteChanged(vtbackend::CommandBlockChange const& change, size_t limit);
+
+        /// @return Whether nothing is gathered.
+        [[nodiscard]] bool empty() const noexcept
+        {
+            return finished.empty() && changedRecords == ChangedRecords::None;
+        }
+    };
+
+    /// Guards _pendingBlockEvents: the parser thread gathers, the GUI thread takes.
+    std::mutex _pendingBlockEventsMutex;
+
+    /// @see handlePendingBlockEvents
+    PendingBlockEvents _pendingBlockEvents;
+
+    /// The most finishes, and changed records, _pendingBlockEvents keeps: as many records as the terminal's
+    /// store keeps, which is fixed with the terminal.
+    size_t _pendingBlockEventsLimit =
+        std::max(_terminal.settings().commandBlockLimits.maxRecords, size_t { 1 });
+
     /// How desktop notifications are raised. Never null: platform::makeDesktopNotifier() answers
-    /// with a NullNotifier where there is nothing to raise them through, so no #ifdef reaches this
-    /// declaration and no call site has to check.
+    /// with a tray where there is no desktop to raise them on, so no #ifdef reaches this declaration and
+    /// no call site has to check.
     std::unique_ptr<platform::Notifier> _desktopNotifier;
 };
 

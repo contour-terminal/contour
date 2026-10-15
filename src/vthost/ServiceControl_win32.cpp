@@ -7,13 +7,18 @@
 #endif
 // clang-format on
 
+#include <vtpty/WindowsCommandLine.hpp>
+
 #include <vthost/Daemon.hpp>
 #include <vthost/ServiceControl.hpp>
 
 #ifdef _WIN32
 
+    #include <core/WideString.hpp>
+
     #include <array>
     #include <cstddef>
+    #include <expected>
     #include <format>
     #include <span>
     #include <string>
@@ -119,37 +124,16 @@ namespace
         HRESULT _hr;
     };
 
-    [[nodiscard]] std::wstring widen(std::string_view text)
+    /// @return @p text in the UTF-16 the Task Scheduler takes; a NotUtf8 error naming @p what where it is
+    ///         not UTF-8, which spelled with U+FFFD would register a task that runs another file, or none.
+    [[nodiscard]] std::expected<std::wstring, ServiceError> wideText(std::string_view text,
+                                                                     std::string_view what)
     {
-        if (text.empty())
-            return {};
-        auto const needed =
-            ::MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
-        if (needed <= 0)
-            return {};
-        auto wide = std::wstring(static_cast<std::size_t>(needed), L'\0');
-        ::MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), needed);
-        return wide;
-    }
-
-    [[nodiscard]] std::string narrow(std::wstring_view text)
-    {
-        if (text.empty())
-            return {};
-        auto const needed = ::WideCharToMultiByte(
-            CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
-        if (needed <= 0)
-            return {};
-        auto narrowed = std::string(static_cast<std::size_t>(needed), '\0');
-        ::WideCharToMultiByte(CP_UTF8,
-                              0,
-                              text.data(),
-                              static_cast<int>(text.size()),
-                              narrowed.data(),
-                              needed,
-                              nullptr,
-                              nullptr);
-        return narrowed;
+        return core::toUtf16(text).transform_error([what](std::error_code const&) {
+            return ServiceError { .code = ServiceErrorCode::NotUtf8,
+                                  .systemCode = 0,
+                                  .context = std::string { what } };
+        });
     }
 
     [[nodiscard]] ServiceError comError(HRESULT hr, std::string context)
@@ -174,28 +158,55 @@ namespace
         auto size = static_cast<DWORD>(buffer.size());
         if (::GetUserNameW(buffer.data(), &size) == 0)
             return {};
-        auto const user = std::wstring { buffer.data() };
+        auto const user = std::wstring_view { buffer.data() };
 
         auto domainBuffer = std::array<wchar_t, 256> {};
         auto domainSize = static_cast<DWORD>(domainBuffer.size());
         if (::GetComputerNameW(domainBuffer.data(), &domainSize) == 0)
-            return user;
-        return std::wstring { domainBuffer.data() } + L"\\" + user;
+            return std::wstring { user };
+        return std::wstring { domainBuffer.data() } + L"\\" + std::wstring { user };
     }
 
     /// Splits a full argv into the executable and the quoted argument tail an IExecAction wants
     /// — it takes the two separately, unlike CreateProcess.
     ///
-    /// The tail is quoted by vthost::joinCommandLine, the same function the auto-spawn path
-    /// hands to CreateProcess: a registration that quoted its arguments differently from the
-    /// process the client spawns would break on exactly the paths (`C:\Program Files\...`)
-    /// that quoting exists for.
+    /// The tail is spelled by vtpty::buildWindowsArguments(), as the auto-spawn path spells the
+    /// arguments it hands to CreateProcess: a registration that quoted its arguments differently
+    /// from the process the client spawns would break on exactly the paths
+    /// (`C:\Program Files\...`) that quoting exists for.
     [[nodiscard]] std::pair<std::string, std::string> splitExecutableAndArguments(
         std::vector<std::string> const& commandLine)
     {
         if (commandLine.empty())
             return {};
-        return { commandLine.front(), joinCommandLine(std::span { commandLine }.subspan(1)) };
+        return { commandLine.front(), vtpty::buildWindowsArguments(std::span { commandLine }.subspan(1)) };
+    }
+
+    /// What a registration hands the Task Scheduler, in UTF-16.
+    struct WideRegistration
+    {
+        std::wstring description; ///< The registration info's description.
+        std::wstring executable;  ///< The action's program.
+        std::wstring arguments;   ///< The action's argument tail.
+    };
+
+    /// @return @p request's texts in UTF-16; the error for the first of them that is not UTF-8.
+    [[nodiscard]] std::expected<WideRegistration, ServiceError> wideRegistration(
+        ServiceInstallRequest const& request)
+    {
+        auto const [executable, arguments] = splitExecutableAndArguments(request.commandLine);
+        auto description = wideText(request.description, "the description");
+        auto program = wideText(executable, "the program");
+        auto argumentText = wideText(arguments, "the arguments");
+        if (!description)
+            return std::unexpected(description.error());
+        if (!program)
+            return std::unexpected(program.error());
+        if (!argumentText)
+            return std::unexpected(argumentText.error());
+        return WideRegistration { .description = *std::move(description),
+                                  .executable = *std::move(program),
+                                  .arguments = *std::move(argumentText) };
     }
 
     /// Hosts the daemon as a Scheduled Task triggered by the installing user's logon.
@@ -206,7 +217,9 @@ namespace
     class TaskSchedulerBackend final: public ServiceBackend
     {
       public:
-        explicit TaskSchedulerBackend(std::string_view name): _name(widen(name)) {}
+        explicit TaskSchedulerBackend(std::string_view name): _name(wideText(name, "the registration name"))
+        {
+        }
 
         [[nodiscard]] std::expected<void, ServiceError> install(
             ServiceInstallRequest const& request) override;
@@ -221,9 +234,12 @@ namespace
         connect();
 
         /// Looks the registration up; a missing one is NotInstalled, not a backend failure.
+        /// @pre The name is UTF-8: every operation refuses first where it is not.
         [[nodiscard]] std::expected<ComPtr<IRegisteredTask>, ServiceError> lookup(ITaskFolder* folder) const;
 
-        std::wstring _name;
+        /// The registration's name, or why there is none: a name that is not UTF-8 names no task, and every
+        /// operation says so before it asks the Task Scheduler anything.
+        std::expected<std::wstring, ServiceError> _name;
     };
 
     std::expected<std::pair<ComPtr<ITaskService>, ComPtr<ITaskFolder>>, ServiceError> TaskSchedulerBackend::
@@ -257,7 +273,7 @@ namespace
     std::expected<ComPtr<IRegisteredTask>, ServiceError> TaskSchedulerBackend::lookup(
         ITaskFolder* folder) const
     {
-        auto const name = Bstr { _name };
+        auto const name = Bstr { _name.value() };
         auto task = ComPtr<IRegisteredTask> {};
         auto const hr = folder->GetTask(name.get(), task.put());
         if (FAILED(hr))
@@ -269,6 +285,12 @@ namespace
 
     std::expected<void, ServiceError> TaskSchedulerBackend::install(ServiceInstallRequest const& request)
     {
+        if (!_name)
+            return std::unexpected(_name.error());
+        auto const registration = wideRegistration(request);
+        if (!registration)
+            return std::unexpected(registration.error());
+
         auto const com = ComScope {};
         if (!com.ok())
             return std::unexpected(comError(com.hr(), "CoInitializeEx"));
@@ -287,7 +309,7 @@ namespace
         {
             auto const author = Bstr { L"Contour Terminal" };
             std::ignore = info->put_Author(author.get());
-            auto const description = Bstr { widen(request.description) };
+            auto const description = Bstr { registration->description };
             std::ignore = info->put_Description(description.get());
         }
 
@@ -345,16 +367,15 @@ namespace
         if (FAILED(hr))
             return std::unexpected(comError(hr, "IAction::QueryInterface(IExecAction)"));
 
-        auto const [executable, arguments] = splitExecutableAndArguments(request.commandLine);
-        auto const path = Bstr { widen(executable) };
+        auto const path = Bstr { registration->executable };
         std::ignore = exec->put_Path(path.get());
-        auto const argumentText = Bstr { widen(arguments) };
+        auto const argumentText = Bstr { registration->arguments };
         std::ignore = exec->put_Arguments(argumentText.get());
 
         auto empty = VARIANT {};
         ::VariantInit(&empty);
         auto registered = ComPtr<IRegisteredTask> {};
-        auto const name = Bstr { _name };
+        auto const name = Bstr { *_name };
         hr = folder->RegisterTaskDefinition(name.get(),
                                             definition.get(),
                                             TASK_CREATE_OR_UPDATE,
@@ -370,6 +391,8 @@ namespace
 
     std::expected<void, ServiceError> TaskSchedulerBackend::uninstall()
     {
+        if (!_name)
+            return std::unexpected(_name.error());
         auto const com = ComScope {};
         if (!com.ok())
             return std::unexpected(comError(com.hr(), "CoInitializeEx"));
@@ -384,7 +407,7 @@ namespace
         if (auto task = lookup(folder.get()); task)
             std::ignore = (*task)->Stop(0);
 
-        auto const name = Bstr { _name };
+        auto const name = Bstr { *_name };
         if (auto const hr = folder->DeleteTask(name.get(), 0); FAILED(hr))
             return std::unexpected(ServiceError { .code = ServiceErrorCode::NotInstalled,
                                                   .systemCode = static_cast<long>(hr),
@@ -394,6 +417,8 @@ namespace
 
     std::expected<void, ServiceError> TaskSchedulerBackend::start()
     {
+        if (!_name)
+            return std::unexpected(_name.error());
         auto const com = ComScope {};
         if (!com.ok())
             return std::unexpected(comError(com.hr(), "CoInitializeEx"));
@@ -417,6 +442,8 @@ namespace
 
     std::expected<void, ServiceError> TaskSchedulerBackend::stop()
     {
+        if (!_name)
+            return std::unexpected(_name.error());
         auto const com = ComScope {};
         if (!com.ok())
             return std::unexpected(comError(com.hr(), "CoInitializeEx"));
@@ -439,6 +466,8 @@ namespace
 
     std::expected<ServiceStatus, ServiceError> TaskSchedulerBackend::status() const
     {
+        if (!_name)
+            return std::unexpected(_name.error());
         auto const com = ComScope {};
         if (!com.ok())
             return std::unexpected(comError(com.hr(), "CoInitializeEx"));
@@ -472,12 +501,12 @@ namespace
                         BSTR arguments = nullptr;
                         if (SUCCEEDED(exec->get_Path(&path)) && path != nullptr)
                         {
-                            commandLine = narrow(path);
+                            commandLine = core::toUtf8(path);
                             ::SysFreeString(path);
                         }
                         if (SUCCEEDED(exec->get_Arguments(&arguments)) && arguments != nullptr)
                         {
-                            commandLine += " " + narrow(arguments);
+                            commandLine += " " + core::toUtf8(arguments);
                             ::SysFreeString(arguments);
                         }
                     }

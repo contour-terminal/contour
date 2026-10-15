@@ -37,19 +37,30 @@ constexpr auto Rows = std::array {
     Row { .systemCode = WSAECONNREFUSED, .code = NetErrorCode::ConnRefused },
     Row { .systemCode = WSAEHOSTUNREACH, .code = NetErrorCode::HostUnreach },
     Row { .systemCode = WSAENETUNREACH, .code = NetErrorCode::HostUnreach },
+    Row { .systemCode = WSAEHOSTDOWN, .code = NetErrorCode::HostUnreach },
     Row { .systemCode = WSAEADDRINUSE, .code = NetErrorCode::AddressInUse },
     Row { .systemCode = WSAEADDRNOTAVAIL, .code = NetErrorCode::AddressNotAvail },
     Row { .systemCode = WSAEACCES, .code = NetErrorCode::PermissionDenied },
+    Row { .systemCode = WSAEOPNOTSUPP, .code = NetErrorCode::Unsupported },
     Row { .systemCode = WSAEBADF, .code = NetErrorCode::BadHandle },
     Row { .systemCode = WSAENOTSOCK, .code = NetErrorCode::BadHandle },
     Row { .systemCode = WSAEINTR, .code = NetErrorCode::Cancelled },
     Row { .systemCode = WSAETIMEDOUT, .code = NetErrorCode::Timeout },
     Row { .systemCode = WSAEMSGSIZE, .code = NetErrorCode::MessageTooLarge },
     Row { .systemCode = WSAEWOULDBLOCK, .code = NetErrorCode::WouldBlock },
+    // Out of sockets, and out of buffer space: what a failed `WSASocketW` for the next `AcceptEx`
+    // answers under load, and transient, which `SystemError` may not be.
+    Row { .systemCode = WSAEMFILE, .code = NetErrorCode::ResourceExhausted },
+    Row { .systemCode = WSAENOBUFS, .code = NetErrorCode::ResourceExhausted },
+    Row { .systemCode = WSA_NOT_ENOUGH_MEMORY, .code = NetErrorCode::ResourceExhausted },
     // Not resets, on purpose: an abort this end's stack made and a keepalive-detected loss are
     // `SystemError`, as `EPIPE` is on POSIX.
     Row { .systemCode = WSAECONNABORTED, .code = NetErrorCode::SystemError },
     Row { .systemCode = WSAENETRESET, .code = NetErrorCode::SystemError },
+    // Not `HostUnreach` like POSIX's `ENETDOWN`, on purpose: Winsock answers it when the network
+    // subsystem has failed, for every call, and `AcceptEx` shares this table, so as `HostUnreach` a
+    // machine-wide failure would read as one peer's and be accepted again at once, forever.
+    Row { .systemCode = WSAENETDOWN, .code = NetErrorCode::SystemError },
 };
 
 } // namespace

@@ -83,6 +83,10 @@ fastcached
     its test, merged with contour's src/net/EventSource.hpp), and
     src/core/net/detail/ReadyBatch.hpp (the in-flight batch of
     src/FastCache/Async/EpollReactor.cpp)
+  Imported at 8c27b162ffe278ef9d5b96a960cc2a7c8b4cd425 (origin/master)
+  - src/core/Sha256.hpp and Sha256_test.cpp (the scalar engine and HMAC-SHA256 of
+    src/FastCache/Core/Sha256.{hpp,cpp} and their test, adapted), and
+    core::toLowerHexString() in src/core/Utils.hpp (from HexDigest)
 
 Documentation and CI configuration adapted from the following projects, each
 licensed under the Apache License, Version 2.0, and each read as a git blob at the

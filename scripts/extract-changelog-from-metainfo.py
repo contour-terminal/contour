@@ -39,6 +39,19 @@ class Release:
         joined_sections = "\n".join([str(section) for section in self.sections])
         return f"## {self.version} ({self.date})\n\n{self.summary}{joined_sections}\n"
 
+def inline_markdown(element: ET.Element) -> str:
+    """
+    Return all of an element's text as Markdown: its own, each child's and each child's tail, with a
+    <code> span in backticks. ElementTree's .text alone stops at the first child element, and a <code>
+    span spelt as plain text would let Markdown read a `<command>` in it as an HTML tag.
+    """
+    parts = [element.text or ""]
+    for child in element:
+        inner = "".join(child.itertext())
+        parts.append(f"`{inner}`" if child.tag == "code" else inner)
+        parts.append(child.tail or "")
+    return "".join(parts)
+
 def extract_changelog_from_metainfo(metainfo_file: str) -> list[Release]:
     """
     Read metainfo.xml file and extract changelog entries
@@ -72,8 +85,7 @@ def extract_changelog_from_metainfo(metainfo_file: str) -> list[Release]:
                     else:
                         pending_title = normalized(element.text)
                 elif element.tag == "ul":
-                    changes = [Change(li.text) for li in element.findall("li")
-                               if li.text is not None]
+                    changes = [Change(text) for li in element.findall("li") if (text := inline_markdown(li))]
                     if len(changes) != 0:
                         sections.append(Section(pending_title, changes))
                     pending_title = ""
@@ -92,7 +104,7 @@ def write_releases_page(releases: list[Release], output_file: str):
     """
     Write releases to output file
     """
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         f.write("# Releases\n\n")
         for release in releases:
             f.write(str(release))

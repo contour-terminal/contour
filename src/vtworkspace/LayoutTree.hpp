@@ -23,10 +23,9 @@ struct LayoutPane
     std::optional<std::string> command;
     /// Arguments passed to @c command.
     std::vector<std::string> arguments;
-    /// Working directory the pane's shell starts in. Unset uses the profile's. Kept as a lossless
-    /// filesystem::path (like every other resolved config path) rather than an eagerly narrowed
-    /// std::string: on Windows path::string() throws for a path outside the active code page, and
-    /// narrowing at parse time would fail the WHOLE config load instead of just this pane's launch.
+    /// Working directory the pane's shell starts in. Unset uses the profile's. A filesystem::path, like
+    /// every other resolved config path: a std::string narrowed from it with path::string() would be
+    /// spelled in the ANSI code page on Windows, which spells most of Unicode not at all.
     std::optional<std::filesystem::path> directory;
     /// Per-pane profile override (terminal-level settings only — not window ones).
     std::optional<std::string> profile;

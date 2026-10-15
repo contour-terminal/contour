@@ -34,12 +34,16 @@ Where `Ps` in the DECRQM response is:
 - `2` = reset (disabled)
 
 When enabled:
-- The terminal tracks semantic zones from OSC 133 sequences using line flags and internal metadata.
+- The terminal reports the command blocks whose command has not started yet: the prompt on screen at this
+  point (a shell may enable the mode from its prompt hook), and every block after it. Contour records every
+  shell's command blocks whether or not this mode is on (its gutter, sticky header and notifications read
+  them), but a reader never sees a command that started before it enabled the mode, so enabling it is never a
+  way to read back commands that ran earlier.
 - The terminal generates a session token and replies with a DCS containing the token (see Authentication below).
 - The query sequence `CSI > Ps ; Pn ; T1 ; T2 ; T3 ; T4 b` becomes available.
 
 When disabled:
-- All tracked semantic block data is discarded.
+- Nothing is reported any more; commands started so far stay hidden even if the mode is enabled again.
 - The session token is invalidated.
 - The query sequence returns an error response.
 
@@ -53,16 +57,21 @@ DCS > 2034 ; 1 b T1 ; T2 ; T3 ; T4 ST
 
 That is: `ESC P > 2034 ; 1 b T1 ; T2 ; T3 ; T4 ESC \`
 
-The 4 integer values (`T1`..`T4`) are the session token. These same values must be included
-in every SBQUERY request as additional CSI parameters (see Query Syntax below). No conversion
-is needed — the values from the DCS reply are used directly.
+`T1`..`T4` are the session token: four decimal integers from 0 to 65534, its four 16-bit parts. Every
+SBQUERY carries them back as its last four parameters, exactly as received (see Query Syntax below).
+There is nothing to convert.
+
+A part is never 65535: a terminal reads every larger number in a CSI parameter as 65535, so that value
+stands for all of them. An SBQUERY whose token carries a part of 65535 or more, or leaves a part out, fails
+authentication (status 3).
 
 ### Token Lifecycle
 
 1. **On DECSET 2034**: Terminal generates a fresh token and replies with the DCS token response.
 2. **On SBQUERY**: The token must be included as parameters T1..T4. Missing or invalid tokens produce error responses.
-3. **On DECRST 2034**: The token is invalidated along with all tracked data.
-4. **On re-enable**: A new token is generated; previous tokens are no longer valid.
+3. **On DECRST 2034**: The token is invalidated, and the commands started so far are hidden from every later session.
+4. **On RIS**: As on DECRST 2034. A hard reset returns every mode to its power-up state, this one included.
+5. **On re-enable**: A new token is generated; previous tokens are no longer valid.
 
 ### Security Note
 
@@ -84,13 +93,19 @@ CSI with `>` leader, final character `b` (for "blocks").
 |-----------|------------------------------------------------------|
 | Ps        | Query type (see table below)                         |
 | Pn        | Count parameter (default 1)                          |
-| T1..T4    | Session token as 4 × uint16 values (from DECSET reply) |
+| T1..T4    | The session token, as the DECSET reply carried it    |
 
 | Ps | Meaning                         | Pn                  |
 |----|-------------------------------- |---------------------|
 | 1  | Last completed command block    | ignored             |
 | 2  | Last N completed command blocks | count (default 1)   |
 | 3  | Current in-progress command     | ignored             |
+
+A `Ps` of 0, like an omitted one, means 1. Any other `Ps` is answered `DCS > 0 b ST`, as a query with no
+data: a reader asking a question the terminal does not know never receives the answer to another.
+
+A *completed* block is one the shell finished with OSC 133;D (or OSC 3008 `end=`). A block that a newer
+prompt superseded without one -- the prompt of a nested shell, such as inside `ssh` -- is not reported.
 
 ## Response Syntax
 
@@ -126,24 +141,27 @@ DCS > 3 b ST
 
 | Status | Meaning                          |
 |--------|----------------------------------|
-| 0      | Mode disabled or no data         |
+| 0      | Mode disabled, no data, or an unknown query type |
 | 1      | Success with JSON payload        |
 | 2      | Authentication required (no token provided) |
 | 3      | Authentication failed (invalid token)       |
 
 ## JSON Response Schema
 
+The JSON of step 4 of the [example session](#example-session) below, laid out with whitespace the terminal
+does not send:
+
 ```json
 {
   "version": 1,
   "blocks": [
     {
-      "command": "ls -la",
-      "prompt": "user@host:~$ ",
-      "output": "total 42\ndrwxr-xr-x ...",
+      "command": "echo hello",
+      "prompt": "user@host:~$ echo hello",
+      "output": "hello",
       "exitCode": 0,
       "finished": true,
-      "outputLineCount": 10
+      "outputLineCount": 1
     }
   ]
 }
@@ -155,17 +173,24 @@ DCS > 3 b ST
 |-------------------|-------------------|-------------------------------------------------------------------|
 | `version`         | integer           | Schema version, currently `1`.                                    |
 | `blocks`          | array             | Array of command block objects, ordered chronologically.           |
-| `command`         | string or null    | The command line from OSC 133;C `cmdline_url` parameter.          |
-| `prompt`          | string            | Text content of the prompt region (from Marked line to OutputStart). |
-| `output`          | string            | Text content of the command output region.                        |
-| `exitCode`        | integer           | From OSC 133;D parameter. `-1` if unknown.                       |
+| `command`         | string or null    | The command line from OSC 133;C `cmdline_url` or `cmdline`, or -- when the shell sent none but marked its prompt end with OSC 133;B -- the text typed after the prompt. `null` when neither is known. Longer than 4096 bytes it is cut at a character boundary and ends in `…`. |
+| `prompt`          | string            | The prompt the command was typed at, the typed command included: the block's lines from the one OSC 133;A marked down to the one its output starts on. |
+| `output`          | string            | What the command printed: the block's lines from the one OSC 133;C marked to where OSC 133;D ended it. For a command still running, what it printed so far, down to the line the cursor is on. |
+| `exitCode`        | integer           | From OSC 133;D (or OSC 3008 `end=`). `-1` if unknown.            |
 | `finished`        | boolean           | `false` for in-progress commands (Ps=3 query), `true` otherwise. |
-| `outputLineCount` | integer           | Number of output lines in the block.                              |
+| `outputLineCount` | integer           | Number of lines in `output`.                                      |
+
+`prompt` and `output` are read from the block's own lines, wherever they are in the scrollback, so
+neither ever carries another command's text. Lines that have scrolled out of the history are missing
+from them; once all of a block's lines have, both are empty.
 
 Text fields use JSON's native encoding for control characters (e.g. `\u001b` for ESC),
 which ensures the payload never contains a raw ST (ESC \) sequence.
 
 ## Example Session
+
+At a `user@host:~$ ` prompt, in a shell whose OSC 133 integration reports each command line
+(`cmdline_url`). Every `printf` is a command of its own, and so a command block of its own.
 
 ```sh
 # 1. Enable the semantic block protocol and capture the token
@@ -177,19 +202,21 @@ printf '\033[?2034h'
 printf '\033[?2034$p'
 # Response: CSI ? 2034 ; 1 $ y
 
-# 3. Run some commands (with OSC 133 shell integration active)
-ls -la
+# 3. Run some commands
+ls
 echo hello
 
 # 4. Query the last completed command (with token)
 printf '\033[>1;1;41394;50132;58870;1816b'
-# Response: DCS > 1 b {"version":1,"blocks":[{"command":"echo hello",...}]} ST
+# Response: DCS > 1 b {"version":1,"blocks":[{"command":"echo hello","prompt":"user@host:~$ echo hello","output":"hello","exitCode":0,"finished":true,"outputLineCount":1}]} ST
 
 # 5. Query the last 3 completed commands (with token)
 printf '\033[>2;3;41394;50132;58870;1816b'
+# Response: DCS > 1 b {JSON} ST, listing `ls`, `echo hello` and the printf of step 4, oldest first
 
 # 6. Query any in-progress command (with token)
 printf '\033[>3;1;41394;50132;58870;1816b'
+# Response: DCS > 1 b {JSON} ST, listing this printf itself, with "finished":false and "exitCode":-1
 
 # 7. Disable when done (invalidates the token)
 printf '\033[?2034l'
@@ -199,13 +226,14 @@ printf '\033[?2034l'
 
 - **Token storage**: Terminals implementing this specification should generate the session token
   using a cryptographically secure random number generator and store it for the duration of the
-  mode being enabled. The token must be regenerated on each enable.
+  mode being enabled. The token must be regenerated on each enable. Contour draws it from the
+  platform's random device.
 - **Terminal multiplexers**: DECSET does not normally produce a reply. Multiplexers and terminal
   proxies that intercept DEC mode sequences should be aware that mode 2034 produces a DCS reply
   and must forward it to the requesting application.
 - **CLI/tool integration**: Tools should capture the DCS token reply immediately after sending
-  DECSET 2034 and parse the 16-character hex token before issuing any SBQUERY. Libraries should
-  provide a helper to convert the hex token into the 4 integer parameters.
+  DECSET 2034, and read `T1`..`T4` from it (see [Authentication](#authentication)) before issuing
+  any SBQUERY.
 - **Error handling**: Consumers should check the status byte in every DCS response and handle
   status 2 (missing token) and 3 (invalid token) gracefully, e.g. by re-enabling the mode to
   obtain a fresh token.

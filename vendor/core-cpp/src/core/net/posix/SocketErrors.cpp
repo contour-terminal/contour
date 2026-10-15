@@ -15,9 +15,18 @@ NetErrorCode classifySocketError(int systemCode) noexcept
         case ECONNRESET: return NetErrorCode::ConnReset;
         case ECONNREFUSED: return NetErrorCode::ConnRefused;
         // A route that does not exist and a host that does not answer are one category: both mean
-        // this endpoint is unreachable from here, and neither is retryable at this layer.
+        // this endpoint is unreachable from here, and neither is retryable at this layer. A host
+        // reported down and a network that is down or absent belong with them; `accept` answers
+        // all of these for one pending connection, and unclassified an accept loop would back off on
+        // them, then give up on a listener that is fine.
         case EHOSTUNREACH:
-        case ENETUNREACH: return NetErrorCode::HostUnreach;
+        case ENETUNREACH:
+        case EHOSTDOWN:
+        case ENETDOWN:
+#ifdef ENONET
+        case ENONET:
+#endif
+            return NetErrorCode::HostUnreach;
         case EADDRINUSE: return NetErrorCode::AddressInUse;
         case EADDRNOTAVAIL: return NetErrorCode::AddressNotAvail;
         // `EPERM` beside `EACCES`: a packet filter refusing a connect answers EPERM on Linux, and
@@ -27,7 +36,8 @@ NetErrorCode classifySocketError(int systemCode) noexcept
         // A family or protocol this host does not have, which a dial or an `openUdpSocket` meets
         // on a machine without IPv6.
         case EAFNOSUPPORT:
-        case EPROTONOSUPPORT: return NetErrorCode::Unsupported;
+        case EPROTONOSUPPORT:
+        case EOPNOTSUPP: return NetErrorCode::Unsupported;
         case EBADF:
         case ENOTSOCK: return NetErrorCode::BadHandle;
         case EINTR: return NetErrorCode::Cancelled;
@@ -42,6 +52,18 @@ NetErrorCode classifySocketError(int systemCode) noexcept
         case EAGAIN:
 #endif
             return NetErrorCode::WouldBlock;
+        // Out of descriptors (the process's, the system's), buffer space or memory: transient where
+        // `SystemError` may be permanent, which is what lets an accept loop back off on these and
+        // give up on that (`AcceptPolicy.hpp`). `accept`, `socket` and a dial all answer them.
+        case EMFILE:
+        case ENFILE:
+        case ENOBUFS:
+        case ENOMEM:
+#ifdef ENOSR
+        // Out of STREAMS resources, which accept(2) documents among its errors.
+        case ENOSR:
+#endif
+            return NetErrorCode::ResourceExhausted;
         default: return NetErrorCode::SystemError;
     }
 }

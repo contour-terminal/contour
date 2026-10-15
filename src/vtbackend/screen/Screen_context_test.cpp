@@ -2,7 +2,9 @@
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
+#include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 #include <vtbackend/vt/Functions.hpp>
 
 #include <libunicode/convert.h>
@@ -11,10 +13,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <ranges>
 #include <string>
 #include <string_view>
 
 using namespace vtbackend;
+using namespace vtbackend::test;
 using namespace std::string_view_literals;
 
 namespace
@@ -26,10 +30,13 @@ std::string osc3008(std::string_view body)
     return "\033]3008;" + std::string { body } + "\033\\";
 }
 
+/// A page big enough for the traffic these cases push through it.
+constexpr auto TrafficPageSize = PageSize { LineCount(6), ColumnCount(40) };
+
 /// A MockTerm with a page big enough for the traffic these cases push through it.
 MockTerm<> makeTerm()
 {
-    return MockTerm { PageSize { LineCount(6), ColumnCount(40) } };
+    return MockTerm { TrafficPageSize };
 }
 
 } // namespace
@@ -309,6 +316,48 @@ TEST_CASE("Screen.osc3008 a blank line inherits from the output above it", "[con
     CHECK(screen.contextIdAt(LineOffset(2)) == id); // never written to
 }
 
+TEST_CASE("Screen.osc3008 a line the cursor returns to keeps the context that wrote it", "[context]")
+{
+    // Moving onto a line is not writing it: a program that homes the cursor, or steps back up over earlier
+    // output, must not hand that output to whatever context is active now.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=one;type=command"));
+    auto const first = mock.terminal.contexts().activeId();
+    mock.writeToScreen("first\r\n");
+    mock.writeToScreen(osc3008("end=one;exit=success"));
+    mock.writeToScreen(osc3008("start=two;type=command"));
+    auto const second = mock.terminal.contexts().activeId();
+    REQUIRE(first != second);
+
+    mock.writeToScreen("\033[Hx\r\n\r\n");
+
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    CHECK(grid.lineAt(LineOffset(0)).contextId() == first);
+    CHECK(grid.lineAt(LineOffset(1)).contextId() == second); // where the context started
+    CHECK(grid.lineAt(LineOffset(2)).contextId() == second); // reached for the first time
+}
+
+TEST_CASE("Screen.osc3008 a line reset under the cursor keeps the context writing it", "[context]")
+{
+    // `\r\e[K` finalising a progress line: the reset clears the row's stamp, as a reset must, yet the
+    // context is still writing that row -- and the cursor never leaves it, so nothing else re-stamps it.
+    // Left unstamped, the row would read as the PREVIOUS context's output above it.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=one;type=command"));
+    auto const first = mock.terminal.contexts().activeId();
+    mock.writeToScreen("first\r\n");
+    mock.writeToScreen(osc3008("end=one;exit=success"));
+    mock.writeToScreen(osc3008("start=two;type=command"));
+    auto const second = mock.terminal.contexts().activeId();
+    REQUIRE(first != second);
+
+    mock.writeToScreen("50%\r\033[Kdone\r\n");
+
+    auto const& screen = mock.terminal.primaryScreen();
+    CHECK(screen.grid().lineAt(LineOffset(1)).contextId() == second);
+    CHECK(screen.contextIdAt(LineOffset(1)) == second);
+}
+
 TEST_CASE("Screen.osc3008 the stamp survives a scroll into history", "[context]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10) };
@@ -376,6 +425,38 @@ TEST_CASE("Screen.osc3008 line association survives a reflow", "[context]")
     CHECK(physicalRowsCarrying(id) == 2);
 }
 
+TEST_CASE("Screen.osc3008 a context started at the end of a wrapped line owns that whole line", "[context]")
+{
+    // Output that did not end in a newline leaves the cursor on the last physical row of a wrapped line, and
+    // a context announced there writes the rest of that logical line. Reflow hands every piece of a logical
+    // line its head's context, so restamping the cursor's row alone would hand what the new context wrote
+    // back to the old one at the next resize: the whole logical line changes hands, last writer wins.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(10) }, LineCount(20) };
+    mock.terminal.setMode(DECMode::TextReflow, true);
+    mock.writeToScreen(osc3008("start=shell-a;type=shell"));
+    mock.writeToScreen(std::string(15, 'a')); // rows 0 and 1, the cursor on row 1
+    mock.writeToScreen(osc3008("start=cmd-1;type=command"));
+    auto const command = mock.terminal.contexts().activeId();
+    mock.writeToScreen("bbb\r\n");
+
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    CHECK(grid.lineAt(LineOffset(0)).contextId() == command);
+    CHECK(grid.lineAt(LineOffset(1)).contextId() == command);
+
+    mock.terminal.resizeScreen(PageSize { LineCount(6), ColumnCount(20) }); // rejoined into one row
+
+    auto const top = -unbox<int>(grid.historyLineCount());
+    auto rowsWithOutput = 0;
+    for (auto const i: std::views::iota(top, unbox<int>(mock.terminal.pageSize().lines)))
+    {
+        if (!grid.lineText(LineOffset(i)).contains('b'))
+            continue;
+        CHECK(grid.lineAt(LineOffset(i)).contextId() == command);
+        ++rowsWithOutput;
+    }
+    CHECK(rowsWithOutput == 1);
+}
+
 TEST_CASE("Screen.osc3008 a reflow keeps two contexts apart", "[context]")
 {
     auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(10) }, LineCount(20) };
@@ -441,6 +522,16 @@ bool lineHas(MockTerm<>& mock, int line, LineFlag flag)
     return mock.terminal.primaryScreen().isLogicalLineFlagEnabled(LineOffset(line), flag);
 }
 
+/// A makeTerm() whose session OSC 3008 owns: one systemd cycle has run and closed with no OSC 133 in
+/// sight, which decides the arbiter. That first cycle feeds the store nothing; the next one does.
+MockTerm<> makeContextOwnedTerm()
+{
+    return MockTerm<> { TrafficPageSize, HistoryLimits {}, 1024, [](MockTerm<>& mock) {
+                           systemdCycle(mock, "cmd-1");
+                           mock.writeToScreen(osc3008("end=cmd-1;exit=success"));
+                       } };
+}
+
 } // namespace
 
 TEST_CASE("Screen.osc3008 synthesises the OSC 133 marks when 133 is silent", "[context]")
@@ -481,10 +572,7 @@ TEST_CASE("Screen.osc3008 never synthesises PromptEnd", "[context]")
 TEST_CASE("Screen.osc3008 stamps nothing once OSC 133 has spoken", "[context]")
 {
     auto mock = makeTerm();
-    mock.writeToScreen("\033]133;A\033\\"); // a shell integration is installed
-    mock.writeToScreen("$ ");
-    mock.writeToScreen("\033]133;B\033\\");
-    mock.writeToScreen("\r\n");
+    typeAtPrompt(mock, ""); // a shell integration is installed
 
     // Now the systemd stream arrives too, on a fresh line that 133 has not marked.
     mock.writeToScreen(osc3008("start=shell-uuid;type=shell"));
@@ -576,39 +664,299 @@ TEST_CASE("Screen.osc3008 synthesised marks drive folding", "[context]")
     CHECK(!mock.terminal.foldRanges().empty());
 }
 
-TEST_CASE("Screen.osc3008 drives the semantic block tracker once it owns the session", "[context]")
+TEST_CASE("Screen.osc3008 drives the command block store once it owns the session",
+          "[context][semanticblocks]")
 {
-    auto mock = makeTerm();
-    mock.terminal.semanticBlockTracker().setEnabled(true);
+    // The first cycle only DECIDES; the store hears from the second on.
+    auto mock = makeContextOwnedTerm();
+    CHECK(mock.terminal.commandBlocks().size() == 0);
 
-    systemdCycle(mock, "cmd-1");
-    mock.writeToScreen(osc3008("end=cmd-1;exit=success"));
-    // The first cycle only DECIDES; the callbacks start with the second.
     systemdCycle(mock, "cmd-2");
     mock.writeToScreen(osc3008("end=cmd-2;exit=failure;status=139;signal=SIGSEGV"));
 
-    // commandFinished() marks the CURRENT block; it moves to completedBlocks on the next prompt.
-    auto const& current = mock.terminal.semanticBlockTracker().currentBlock();
-    REQUIRE(current.has_value());
-    CHECK(current->finished);
-    // 128+11, as every POSIX shell spells a SIGSEGV death -- which OSC 133;D, carrying only a numeric
-    // exit code, cannot distinguish from a command that merely returned 139.
-    CHECK(current->exitCode == 139);
+    auto const* block = mock.terminal.commandBlocks().lastFinished();
+    REQUIRE(block != nullptr);
+    CHECK(block->end == CommandBlockEnd::Reported);
+    // 128+11, as every POSIX shell spells a SIGSEGV death...
+    CHECK(block->exitCode == 139);
+    // ...and, unlike OSC 133;D's bare number, the signal itself.
+    CHECK(block->outcome.signal == ContextSignal::Segv);
+    CHECK(block->workingDirectory.path == "/home/user");
+    REQUIRE(mock.finishedCommandBlocks.size() == 1);
+    CHECK(mock.finishedCommandBlocks.front().exitCode == 139);
 }
 
-TEST_CASE("Screen.osc3008 fires no callbacks during its first, undecided cycle", "[context]")
+TEST_CASE("Screen.osc3008 a re-announced shell context opens the block at its prompt",
+          "[context][semanticblocks]")
 {
-    // The cost of deferring, stated plainly: with no OSC 133 anywhere, the session's FIRST command
-    // block gets line flags but no tracker entry. One block, once, in a protocol that is off by
-    // default -- cheaper than letting a cmdline-less 3008 command clobber a good cmdline_url.
-    auto mock = makeTerm();
-    mock.terminal.semanticBlockTracker().setEnabled(true);
+    // The update stands in for OSC 133;A, so the block starts at the prompt rather than at the command's
+    // first line of output.
+    auto mock = makeContextOwnedTerm();
 
+    mock.writeToScreen(osc3008("start=shell-uuid;type=shell;cwd=/home/user"));
+    REQUIRE(mock.terminal.commandBlocks().current() != nullptr);
+    CHECK(mock.terminal.commandBlocks().current()->state == CommandBlockState::Prompting);
+
+    mock.writeToScreen("$ ls\r\n");
+    mock.writeToScreen(osc3008("start=cmd-2;type=command"));
+
+    auto const* const promptBlock = mock.terminal.commandBlockAt(LineOffset(2));
+    REQUIRE(promptBlock != nullptr);
+    CHECK(promptBlock->state == CommandBlockState::Running);
+}
+
+TEST_CASE("Screen.osc3008 feeds the store nothing during its first, undecided cycle",
+          "[context][semanticblocks]")
+{
+    // The cost of deferring, stated plainly: with no OSC 133 anywhere, the session's FIRST command gets line
+    // flags but no record -- cheaper than letting a cmdline-less 3008 command race a good OSC 133;C.
+    auto mock = makeTerm();
     systemdCycle(mock, "cmd-1");
     mock.writeToScreen(osc3008("end=cmd-1;exit=success"));
 
-    CHECK(mock.terminal.semanticBlockTracker().completedBlocks().empty());
+    CHECK(mock.terminal.commandBlocks().size() == 0);
+    CHECK(mock.finishedCommandBlocks.empty());
     CHECK(mock.terminal.markArbiter().owner() == MarkOwner::ContextSignalling);
+}
+
+TEST_CASE("Screen.osc3008 a command context's cmdline is the block's reported command line",
+          "[context][semanticblocks]")
+{
+    auto mock = makeContextOwnedTerm();
+
+    mock.writeToScreen(osc3008("start=shell-uuid;type=shell;cwd=/home/user"));
+    mock.writeToScreen("$ make\r\n");
+    mock.writeToScreen(osc3008("start=cmd-2;type=command;cmdline=make"));
+
+    auto const* block = mock.terminal.commandBlocks().current();
+    REQUIRE(block != nullptr);
+    CHECK(block->state == CommandBlockState::Running);
+    CHECK(block->commandLine.raw() == "make");
+    CHECK(block->commandLineSource == CommandLineSource::Reported);
+}
+
+TEST_CASE("Screen.osc3008 an empty cmdline leaves the block without a command line",
+          "[context][semanticblocks]")
+{
+    // `cmdline=` may legitimately be empty, and an empty report is no report: recording it would claim the
+    // command line was known.
+    auto mock = makeContextOwnedTerm();
+
+    mock.writeToScreen(osc3008("start=shell-uuid;type=shell;cwd=/home/user"));
+    mock.writeToScreen("$ \r\n");
+    mock.writeToScreen(osc3008("start=cmd-2;type=command;cmdline="));
+
+    auto const* block = mock.terminal.commandBlocks().current();
+    REQUIRE(block != nullptr);
+    CHECK(block->state == CommandBlockState::Running);
+    CHECK(block->commandLine.empty());
+    CHECK(block->commandLineSource == CommandLineSource::None);
+}
+
+TEST_CASE("Screen.osc3008 enriches an OSC 133 block with how its command died", "[context][semanticblocks]")
+{
+    // OSC 133 owns the marks, so OSC 3008 may not open or close a block -- but its end= still knows HOW the
+    // command ended, which OSC 133;D's bare number cannot say. The two arrive in either order.
+    auto const runCrashingCommand = [](MockTerm<>& mock) {
+        typeAtPrompt(mock, "crash");
+        mock.writeToScreen(osc3008("start=cmd-1;type=command"));
+        mock.writeToScreen("\033]133;C;cmdline_url=crash\033\\");
+        mock.writeToScreen("boom\r\n");
+    };
+
+    SECTION("the 3008 end arrives before ;D")
+    {
+        auto mock = makeTerm();
+        runCrashingCommand(mock);
+        mock.writeToScreen(osc3008("end=cmd-1;exit=crash;signal=SIGSEGV"));
+
+        REQUIRE(mock.terminal.commandBlocks().current() != nullptr);
+        CHECK(mock.terminal.commandBlocks().current()->state == CommandBlockState::Running); // not closed
+        CHECK(mock.finishedCommandBlocks.empty());
+
+        mock.writeToScreen("\033]133;D;139\033\\");
+        REQUIRE(mock.finishedCommandBlocks.size() == 1);
+        CHECK(mock.finishedCommandBlocks.front().outcome.signal == ContextSignal::Segv);
+        CHECK(mock.finishedCommandBlocks.front().exitCode == 139);
+    }
+
+    SECTION("the 3008 end arrives after ;D")
+    {
+        auto mock = makeTerm();
+        runCrashingCommand(mock);
+        mock.writeToScreen("\033]133;D;139\033\\");
+        mock.writeToScreen(osc3008("end=cmd-1;exit=crash;signal=SIGSEGV"));
+
+        auto const* block = mock.terminal.commandBlocks().lastFinished();
+        REQUIRE(block != nullptr);
+        CHECK(block->outcome.exit == ContextExit::Crash);
+        CHECK(block->outcome.signal == ContextSignal::Segv);
+        CHECK(block->exitCode == 139);
+        CHECK(mock.finishedCommandBlocks.size() == 1); // never announced twice
+    }
+}
+
+TEST_CASE("Screen.osc3008 a shell context's end enriches no OSC 133 block", "[context][semanticblocks]")
+{
+    // The shell's own exit says how the SHELL ended, not the command OSC 133 is tracking inside it.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=shell-uuid;type=shell"));
+    typeAtPrompt(mock, "exit 3");
+    mock.writeToScreen("\033]133;C\033\\");
+    mock.writeToScreen(osc3008("end=shell-uuid;exit=failure;status=3"));
+
+    auto const* block = mock.terminal.commandBlocks().current();
+    REQUIRE(block != nullptr);
+    CHECK(block->outcome == ContextOutcome {});
+}
+
+TEST_CASE("Screen.osc3008 enriches the block whichever side of ;C its command context starts on",
+          "[context][semanticblocks]")
+{
+    // The shell runs its two hooks in the order they were installed, so OSC 133;C may as well come first:
+    // the command context then starts directly beneath the shell context that was active at the ;C.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=shell-uuid;type=shell"));
+    typeAtPrompt(mock, "crash");
+    mock.writeToScreen("\033]133;C\033\\");
+    mock.writeToScreen(osc3008("start=cmd-1;type=command"));
+    mock.writeToScreen("boom\r\n");
+    mock.writeToScreen(osc3008("end=cmd-1;exit=crash;signal=SIGSEGV"));
+
+    auto const* block = mock.terminal.commandBlocks().current();
+    REQUIRE(block != nullptr);
+    CHECK(block->outcome.signal == ContextSignal::Segv);
+}
+
+TEST_CASE("Screen.osc3008 a nested shell's commands do not enrich the block they run inside",
+          "[context][semanticblocks]")
+{
+    // `ssh` to a host whose shell speaks OSC 3008 but not OSC 133: the local block runs for the whole
+    // session, and the remote shell's command contexts nest beneath it. How a remote command ended is not
+    // how `ssh` did.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=local-shell;type=shell"));
+    typeAtPrompt(mock, "ssh host");
+    mock.writeToScreen(osc3008("start=local-cmd;type=command"));
+    mock.writeToScreen("\033]133;C\033\\");
+
+    mock.writeToScreen(osc3008("start=remote-shell;type=shell"));
+    mock.writeToScreen("remote$ false\r\n");
+    mock.writeToScreen(osc3008("start=remote-cmd;type=command"));
+    mock.writeToScreen(osc3008("end=remote-cmd;exit=failure;status=1"));
+
+    REQUIRE(mock.terminal.commandBlocks().current() != nullptr);
+    CHECK(mock.terminal.commandBlocks().current()->outcome == ContextOutcome {});
+
+    // ...while the end of `ssh`'s own command context still says how it ended.
+    mock.writeToScreen(osc3008("end=local-cmd;exit=failure;status=255"));
+    REQUIRE(mock.terminal.commandBlocks().current() != nullptr);
+    CHECK(mock.terminal.commandBlocks().current()->outcome.status == 255);
+}
+
+TEST_CASE("Screen.osc3008 an end= after the next prompt still enriches its own block",
+          "[context][semanticblocks]")
+{
+    // Contour's own bash integration emits ;D and the next ;A together from precmd, which bash-preexec runs
+    // ahead of systemd's prompt hook: the command context's end= arrives after the next prompt has opened.
+    // Either hook may report the command's start first.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=shell-uuid;type=shell"));
+    typeAtPrompt(mock, "crash");
+    SECTION("its command context starts before ;C")
+    {
+        mock.writeToScreen(osc3008("start=cmd-1;type=command"));
+        mock.writeToScreen("\033]133;C\033\\");
+    }
+    SECTION("its command context starts after ;C")
+    {
+        mock.writeToScreen("\033]133;C\033\\");
+        mock.writeToScreen(osc3008("start=cmd-1;type=command"));
+    }
+    mock.writeToScreen("boom\r\n");
+    mock.writeToScreen("\033]133;D;139\033\\\033]133;A\033\\$ ");
+    mock.writeToScreen(osc3008("end=cmd-1;exit=crash;signal=SIGSEGV"));
+
+    auto const* block = mock.terminal.commandBlocks().lastFinished();
+    REQUIRE(block != nullptr);
+    CHECK(block->outcome.signal == ContextSignal::Segv);
+    CHECK(mock.finishedCommandBlocks.size() == 1);
+}
+
+TEST_CASE("Screen.osc3008 only the first command context beneath the ;C's is the block's command",
+          "[context][semanticblocks]")
+{
+    // The ;C saw only the shell's context. Of two command contexts starting beneath it while the command
+    // runs, the first is the command's own; a sibling's end= says nothing about the block, even though the
+    // first one's end= reported nothing either.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=shell-uuid;type=shell"));
+    typeAtPrompt(mock, "crash");
+    mock.writeToScreen("\033]133;C\033\\");
+    mock.writeToScreen(osc3008("start=cmd-1;type=command"));
+    mock.writeToScreen(osc3008("end=cmd-1"));
+    mock.writeToScreen(osc3008("start=cmd-2;type=command")); // beneath the shell again: a sibling
+    mock.writeToScreen(osc3008("end=cmd-2;exit=interrupt;signal=SIGTERM"));
+
+    auto const* block = mock.terminal.commandBlocks().current();
+    REQUIRE(block != nullptr);
+    CHECK(block->state == CommandBlockState::Running);
+    CHECK(block->outcome == ContextOutcome {});
+}
+
+TEST_CASE("Screen.osc3008 a command that started after its block ended enriches nothing",
+          "[context][semanticblocks]")
+{
+    // The ;C ran under the shell context and no command context of its own started while it ran; a command
+    // context that starts beneath the same shell later -- the block finished, the next prompt up -- is not
+    // the block's command, and how it ended must not turn a successful block into a failed one.
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=shell-uuid;type=shell"));
+    typeAtPrompt(mock, "true");
+    mock.writeToScreen("\033]133;C\033\\");
+    mock.writeToScreen("\033]133;D;0\033\\\033]133;A\033\\$ ");
+    mock.writeToScreen(osc3008("start=other;type=command"));
+    mock.writeToScreen(osc3008("end=other;exit=interrupt;signal=SIGTERM"));
+
+    auto const* block = mock.terminal.commandBlocks().lastFinished();
+    REQUIRE(block != nullptr);
+    CHECK(block->outcome == ContextOutcome {});
+    CHECK(outcomeOf(*block) == CommandBlockOutcome::Success);
+}
+
+TEST_CASE("Screen.osc3008 the alternate screen feeds the store too", "[context][semanticblocks]")
+{
+    // A shell can be left drawing on the alternate screen (a full-screen program died without leaving it),
+    // and its blocks still open, close and learn how they ended there, whichever protocol reports them.
+    SECTION("while OSC 3008 owns the session")
+    {
+        auto mock = makeContextOwnedTerm();
+        REQUIRE(mock.terminal.markArbiter().contextMayFeedBlocks());
+
+        mock.writeToScreen("\033[?1049h");
+        systemdCycle(mock, "cmd-2");
+        mock.writeToScreen(osc3008("end=cmd-2;exit=success"));
+
+        CHECK(mock.terminal.commandBlocks().size() == 1);
+        CHECK(mock.finishedCommandBlocks.size() == 1);
+    }
+
+    SECTION("while OSC 133 owns it")
+    {
+        // The block's ;C and its command context are on the primary screen, the end= on the alternate one.
+        auto mock = makeTerm();
+        mock.writeToScreen(osc3008("start=shell-uuid;type=shell"));
+        typeAtPrompt(mock, "crash");
+        mock.writeToScreen("\033]133;C\033\\");
+        mock.writeToScreen(osc3008("start=cmd-1;type=command"));
+
+        mock.writeToScreen("\033[?1049h");
+        mock.writeToScreen(osc3008("end=cmd-1;exit=crash;signal=SIGSEGV"));
+
+        auto const* block = mock.terminal.commandBlocks().current();
+        REQUIRE(block != nullptr);
+        CHECK(block->outcome.signal == ContextSignal::Segv);
+    }
 }
 
 // }}}
@@ -818,6 +1166,20 @@ TEST_CASE("Screen.osc3008 a container renders with its type prefix", "[context]"
     CHECK(breadcrumb(mock) == "container:foobar");
 }
 
+TEST_CASE("Screen.osc3008 a field's bidi override is shown, not obeyed", "[context]")
+{
+    // Any program on the tty can name a context: a right-to-left override in the name would reverse the
+    // rest of the status line. Replaced, the reader still sees that something was there. (The override is
+    // spliced in rather than written into a literal, where it would be a misleading bidi character itself.)
+    auto const rightToLeftOverride = unicode::convert_to<char>(char32_t { 0x202E });
+    auto mock = makeTerm();
+    mock.writeToScreen(osc3008("start=box;type=container;container=foo" + rightToLeftOverride + "bar"));
+
+    CHECK(breadcrumb(mock)
+          == "container:foo\xEF\xBF\xBD"
+             "bar");
+}
+
 TEST_CASE("Screen.osc3008 an elevate renders its target user without a prefix", "[context]")
 {
     auto mock = makeTerm();
@@ -902,7 +1264,7 @@ TEST_CASE("Screen.osc3008 control bytes in a context field never reach the statu
 {
     // Defence in depth: this string is handed to writeToScreenInternal(), which PARSES it. The
     // decoder already rejects control bytes, so one arriving here would mean a parser bug -- and
-    // without the strip, that bug would be an injection able to clear the status screen from a field
+    // without the sanitiser, that bug would be an injection able to clear the status screen from a field
     // any program on the tty can write.
     auto mock = makeTerm();
     mock.writeToScreen(osc3008("start=box;type=container;container=safe"));
@@ -912,10 +1274,11 @@ TEST_CASE("Screen.osc3008 control bytes in a context field never reach the statu
     record.container = "ev\033[2Jil";
     mock.terminal.adoptContext(record);
 
-    // The ESC is what makes the rest a SEQUENCE; strip it and "[2J" is inert text on the status line.
+    // The ESC is what makes the rest a SEQUENCE; replaced, "[2J" is inert text on the status line, and the
+    // reader sees that something stood before it, as everywhere else untrusted text is shown.
     auto const text = breadcrumb(mock);
     CHECK(!text.contains('\033'));
-    CHECK(text == "container:ev[2Jil");
+    CHECK(text == "container:ev\xEF\xBF\xBD[2Jil");
 }
 
 TEST_CASE("Screen.osc3008 the breadcrumb round-trips through the status-line serializer", "[context]")

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/CommandBlockOutcome.hpp>
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 
@@ -237,10 +238,13 @@ struct ColorPalette
     RGBColor mouseForeground = 0x800000_rgb;
     RGBColor mouseBackground = 0x808000_rgb;
 
-    struct
+    /// The colours of a hyperlink's underline.
+    struct HyperlinkDecorationColors
     {
-        RGBColor normal = 0xF0F000_rgb;
-        RGBColor hover = 0xFF0000_rgb;
+        RGBColor normal = 0xF0F000_rgb; ///< At rest.
+        RGBColor hover = 0xFF0000_rgb;  ///< While the pointer is over it.
+
+        bool operator==(HyperlinkDecorationColors const&) const = default;
     } hyperlinkDecoration;
 
     RGBColorPair inputMethodEditor = { .foreground = 0xFFFFFF_rgb, .background = 0xFF0000_rgb };
@@ -330,8 +334,7 @@ struct ColorPalette
     [[nodiscard]] RGBColorPair foldMarkerColors() const noexcept
     {
         return foldMarker.value_or(
-            RGBColorPair { .foreground = mixColor(defaultForeground, defaultBackground, FoldMarkerRestFade),
-                           .background = defaultBackground });
+            RGBColorPair { .foreground = restingForeground(), .background = defaultBackground });
     }
 
     /// The fold column's colors while the pointer is over it, with the unset case resolved.
@@ -348,6 +351,89 @@ struct ColorPalette
     {
         return foldMarkerHover.value_or(
             RGBColorPair { .foreground = defaultForeground, .background = defaultBackground });
+    }
+
+    /// The block column's colours, indexed by CommandBlockOutcome, each unset unless the scheme says
+    /// otherwise.
+    ///
+    /// Derived when unset, for the reason foldMarker is: a status that a scheme predating it cannot
+    /// colour would be a status nobody sees. An array for the reason contextTints below is one: a fourth
+    /// outcome is a row in the configuration's key table, not a member, a reader line and a writer line.
+    ///
+    /// @see blockStatusColor for what each derives from.
+    std::array<std::optional<RGBColor>, CommandBlockOutcomeCount> blockStatus {};
+
+    /// The colour of the gutter's text -- its line numbers and timestamps -- unset unless the scheme says
+    /// otherwise.
+    std::optional<RGBColor> gutterText;
+
+    /// The colour a block's gutter glyphs take for @p outcome, with the unset case resolved.
+    ///
+    /// Success derives from the fold column's resting colour -- neutral, so a column of successful
+    /// commands looks exactly as the fold column always did -- while failure and running derive from the
+    /// palette's own red and yellow, which every scheme already tunes to read on its background.
+    ///
+    /// @param outcome How the block's command ended, or that it is still running.
+    /// @return The scheme's colour for @p outcome, or the derived one when the scheme sets none.
+    [[nodiscard]] RGBColor blockStatusColor(CommandBlockOutcome outcome) const noexcept
+    {
+        if (auto const& configured = blockStatus[static_cast<size_t>(outcome)])
+            return *configured;
+        switch (outcome)
+        {
+            case CommandBlockOutcome::Success: return foldMarkerColors().foreground;
+            case CommandBlockOutcome::Failure: return normalColor(1);
+            case CommandBlockOutcome::Running: return normalColor(3);
+        }
+        return foldMarkerColors().foreground;
+    }
+
+    /// The gutter's text colour with the unset case resolved: the scheme's foreground faded toward its
+    /// background exactly as the resting fold column is, so numbers and times stay quieter than the
+    /// output beside them in any theme.
+    ///
+    /// @return The scheme's gutter text colour, or the faded foreground when the scheme sets none.
+    [[nodiscard]] RGBColor gutterTextColor() const noexcept
+    {
+        return gutterText.value_or(restingForeground());
+    }
+
+    /// The gutter's text colour on the page's own background: what its line numbers, its timestamps and a
+    /// collapsed fold's label are drawn in.
+    /// @return gutterTextColor() on defaultBackground.
+    [[nodiscard]] RGBColorPair gutterTextColors() const noexcept
+    {
+        return RGBColorPair { .foreground = gutterTextColor(), .background = defaultBackground };
+    }
+
+    /// The sticky command header's band, and the one-pixel line along its bottom edge.
+    ///
+    /// Optional, for the reason foldMarker is: no constant suits every scheme. Unset derives from the
+    /// scheme's own background lifted toward its foreground -- far enough to read as a band over the page,
+    /// not so far that it competes with the command copied into it.
+    std::optional<RGBColor> stickyHeaderBackground;
+    std::optional<RGBColor> stickyHeaderSeparator;
+
+    /// How far the derived band is lifted from the background toward the foreground.
+    static constexpr float StickyHeaderBackgroundLift = 0.10f;
+
+    /// How far the derived separator is lifted -- enough to read as an edge on the band.
+    static constexpr float StickyHeaderSeparatorLift = 0.35f;
+
+    /// The band's colour, with the unset case resolved.
+    /// @return The scheme's band colour, or the background lifted by StickyHeaderBackgroundLift.
+    [[nodiscard]] RGBColor stickyHeaderBackgroundColor() const noexcept
+    {
+        return stickyHeaderBackground.value_or(
+            mixColor(defaultBackground, defaultForeground, StickyHeaderBackgroundLift));
+    }
+
+    /// The separator's colour, with the unset case resolved.
+    /// @return The scheme's separator colour, or the background lifted by StickyHeaderSeparatorLift.
+    [[nodiscard]] RGBColor stickyHeaderSeparatorColor() const noexcept
+    {
+        return stickyHeaderSeparator.value_or(
+            mixColor(defaultBackground, defaultForeground, StickyHeaderSeparatorLift));
     }
 
     /// The page background under each kind of OSC 3008 context, when the scheme chooses to tint one.
@@ -395,6 +481,18 @@ struct ColorPalette
     [[nodiscard]] bool hasContextTints() const noexcept
     {
         return std::ranges::any_of(contextTints, [](auto const& c) { return c.has_value(); });
+    }
+
+    /// Member-wise. The background image compares by identity: an equal image loaded anew counts as a
+    /// change, which costs a spurious palette report at worst and never a missed one.
+    bool operator==(ColorPalette const&) const = default;
+
+  private:
+    /// The scheme's foreground faded toward its background by FoldMarkerRestFade: what the gutter derives
+    /// its quiet colours from when the scheme sets none.
+    [[nodiscard]] RGBColor restingForeground() const noexcept
+    {
+        return mixColor(defaultForeground, defaultBackground, FoldMarkerRestFade);
     }
 };
 

@@ -3,10 +3,17 @@
 
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/core/FileUrl.hpp>
+#include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
+#include <vtbackend/input/MatchModes.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
+#include <vtbackend/screen/Gutter.hpp>
 #include <vtbackend/screen/RenderBufferBuilder.hpp>
+#include <vtbackend/shell/CommandBlockPaths.hpp>
+#include <vtbackend/shell/CommandLineSanitizer.hpp>
+#include <vtbackend/shell/PromptRegion.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/Functions.hpp>
 #include <vtbackend/vt/SequenceBuilder.hpp>
@@ -19,6 +26,7 @@
 #include <core/Base64.hpp>
 #include <core/Environment.hpp>
 #include <core/Escape.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
@@ -34,15 +42,18 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <ranges>
 #include <regex>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include <tracy/Tracy.hpp>
 
@@ -68,9 +79,10 @@ namespace // {{{ helpers
     ///
     /// The parser is a state machine that is not safe to re-enter. A sequence handler that replies
     /// reaches Terminal::flushInput() (Screen::reportColorPaletteUpdate(), Screen::replyGipStatus(),
-    /// ... all reply and flush), and with SRM reset that echoes -- which parses. Parsing there would
-    /// clobber the state machine half-way through the sequence being dispatched, and would take the
-    /// non-recursive _stateMutex that writeToScreen() already holds. xterm guards the identical hazard
+    /// ... all reply and flush), and with SRM reset a flush echoes -- which parses. A flush sends nothing
+    /// while the state lock is held, but a parse lets go of the lock mid-batch for a smooth-scrolling
+    /// pause, and a flush there would parse half-way through the sequence being dispatched, clobbering the
+    /// state machine. xterm guards the identical hazard
     /// with ParseState::check_recur and defers the bytes instead -- "Defer parsing when parser is
     /// already running as the parser is not safe to reenter" (xterm-406, charproc.c, doparsing()).
     ///
@@ -79,6 +91,10 @@ namespace // {{{ helpers
     ///
     /// @see Terminal::echoLocally(), Terminal::processPendingLocalEcho().
     thread_local int tlParseDepth = 0;
+
+    /// How long the PTY's reader waits before it writes again what the PTY had no room for. @see
+    /// readFromPty()
+    constexpr auto PendingInputRetry = std::chrono::milliseconds { 10 };
 
     /// Marks this thread as being inside the VT parser for as long as it is alive.
     struct ParseDepthGuard
@@ -92,30 +108,91 @@ namespace // {{{ helpers
         ParseDepthGuard& operator=(ParseDepthGuard&&) = delete;
     };
 
-    std::optional<std::string> resolveExistingLocalPath(std::string const& cwd,
+    /// Runs @p step, and logs what it throws instead of letting it escape: for what the state lock's release
+    /// sends and asks, from a lock guard's destructor.
+    /// @param what What @p step is, for the log.
+    /// @param step What to run.
+    template <typename Step>
+    void runContained(std::string_view what, Step const& step) noexcept
+    {
+        try
+        {
+            step();
+        }
+        catch (std::exception const& e)
+        {
+            errorLog()("Releasing the terminal lock: {} failed: {}", what, e.what());
+        }
+        catch (...)
+        {
+            errorLog()("Releasing the terminal lock: {} failed.", what);
+        }
+    }
+
+    /// The UDK key number DECUDK programs a string for @p key under: the CSI ~ parameter it sends. F6 to F20
+    /// have one; no other key does.
+    /// @param key The key pressed.
+    /// @return Its key number, or nullopt.
+    [[nodiscard]] std::optional<int> userDefinedKeyNumberOf(Key key) noexcept
+    {
+        static constexpr auto KeyNumbers = std::array<std::pair<Key, int>, 15> { {
+            { Key::F6, 17 },
+            { Key::F7, 18 },
+            { Key::F8, 19 },
+            { Key::F9, 20 },
+            { Key::F10, 21 },
+            { Key::F11, 23 },
+            { Key::F12, 24 },
+            { Key::F13, 25 },
+            { Key::F14, 26 },
+            { Key::F15, 28 },
+            { Key::F16, 29 },
+            { Key::F17, 31 },
+            { Key::F18, 32 },
+            { Key::F19, 33 },
+            { Key::F20, 34 },
+        } };
+
+        auto const it = std::ranges::find(KeyNumbers, key, &std::pair<Key, int>::first);
+        if (it == KeyNumbers.end())
+            return std::nullopt;
+        return it->second;
+    }
+
+    /// The existing local file or directory @p match names, normalised.
+    /// @param files Where each candidate is looked up.
+    /// @param directories Where a relative @p match is looked up, first to last; none resolves it nowhere.
+    /// @param home The home directory a `~/` path is relative to; empty when unknown.
+    /// @param match The path as printed.
+    /// @return The first of its candidates that exists, as a normalised UTF-8 path; nullopt when none does.
+    std::optional<std::string> resolveExistingLocalPath(core::platform::FileSystem const& files,
+                                                        std::span<std::string const> directories,
                                                         std::string const& home,
                                                         std::string const& match)
     {
-        auto candidate = std::filesystem::path {};
-        if (match.starts_with("~/"))
-        {
-            if (home.empty())
+        auto const inDirectory = [](std::string_view directory,
+                                    std::string_view relative) -> std::optional<std::filesystem::path> {
+            auto const base = core::pathFromUtf8(directory);
+            auto const rest = core::pathFromUtf8(relative);
+            if (directory.empty() || !base || !rest)
                 return std::nullopt;
-            candidate = std::filesystem::path(home) / match.substr(2);
-        }
-        else if (auto const matchPath = std::filesystem::path(match); matchPath.is_absolute())
-            candidate = matchPath;
-        else
-        {
-            if (cwd.empty())
+            return *base / *rest;
+        };
+        auto const existing =
+            [&files](std::optional<std::filesystem::path> const& candidate) -> std::optional<std::string> {
+            if (!candidate || !files.exists(*candidate))
                 return std::nullopt;
-            candidate = std::filesystem::path(cwd) / matchPath;
-        }
+            return core::pathToUtf8(candidate->lexically_normal());
+        };
 
-        auto ec = std::error_code {};
-        if (!std::filesystem::exists(candidate, ec))
-            return std::nullopt;
-        return candidate.lexically_normal().string();
+        if (match.starts_with("~/"))
+            return existing(inDirectory(home, std::string_view { match }.substr(2)));
+        if (auto const matchPath = core::pathFromUtf8(match); matchPath && matchPath->is_absolute())
+            return existing(*matchPath);
+        for (auto const& directory: directories)
+            if (auto found = existing(inDirectory(directory, match)))
+                return found;
+        return std::nullopt;
     }
 
     constexpr size_t MaxColorPaletteSaveStackSize = 10;
@@ -163,17 +240,55 @@ namespace // {{{ helpers
         return CellLocation { .line = std::max(location.line, minimumLine), .column = location.column };
     }
 
+    /// The primary screen's rows as a block action walks them: each attributed to the block
+    /// Terminal::commandBlockAt() names for it, so the action and the gutter never disagree about a row.
+    class AttributedBlockRows final: public CommandBlockRowSource
+    {
+      public:
+        explicit AttributedBlockRows(Terminal const& terminal) noexcept:
+            _terminal { terminal }, _grid { terminal.primaryScreen().grid() }
+        {
+        }
+
+        [[nodiscard]] LineOffset topRow() const override { return _grid.addressableTop(); }
+
+        [[nodiscard]] LineOffset bottomRow() const override
+        {
+            return boxed_cast<LineOffset>(_grid.pageSize().lines) - LineOffset(1);
+        }
+
+        [[nodiscard]] CommandBlockId blockIdAt(LineOffset row) const override
+        {
+            auto const* const record = _terminal.commandBlockAt(row);
+            return record ? record->id : CommandBlockId {};
+        }
+
+        [[nodiscard]] LineFlags flagsAt(LineOffset row) const override { return _grid.lineAt(row).flags(); }
+
+        [[nodiscard]] ColumnOffset commandEndColumnAt(LineOffset row) const override
+        {
+            return _grid.lineAt(row).commandEndOffset();
+        }
+
+      private:
+        Terminal const& _terminal;
+        Grid const& _grid;
+    };
+
 } // namespace
 // }}}
 
 Terminal::Terminal(Events& eventListener,
                    core::Environment const& env,
+                   core::platform::FileSystem const& fileSystem,
                    std::unique_ptr<vtpty::Pty> pty,
                    Settings factorySettings,
                    optional<StatusLineCommandServices> commandServices,
-                   chrono::steady_clock::time_point now):
+                   TerminalClocks clocks,
+                   SemanticBlockTokenSource sessionTokens):
     _eventListener { eventListener },
     _homeDirectory { env.get("HOME").value_or("") },
+    _fileSystem { fileSystem },
     // Read here rather than per reply: what it names is how this terminal was launched, and a
     // configuration value re-read on every DA/DSR/CPR is a lookup on a path that answers thousands
     // of times a second.
@@ -182,22 +297,27 @@ Terminal::Terminal(Events& eventListener,
                          .value_or(false) },
     _factorySettings { std::move(factorySettings) },
     _settings { _factorySettings },
-    _currentTime { now },
+    _currentTime { clocks.steady.now() },
+    _clocks { clocks },
+    _sessionEpoch { chrono::floor<chrono::seconds>(clocks.wall.now()) },
     _ptyBufferPool { core::nextPowerOfTwo(_settings.ptyBufferObjectSize) },
     _currentPtyBuffer { _ptyBufferPool.allocateBufferObject() },
     _ptyReadBufferSize { core::nextPowerOfTwo(_settings.ptyReadBufferSize) },
     _pty { std::move(pty) },
-    _lastCursorBlink { now },
+    _clickCounter { clocks.steady, ClickCounter::DefaultInterval },
+    _cursorBlink { CursorBlink { .since = _currentTime.load(), .phase = CursorBlinkPhase::Shown }.packed() },
     _hostWritableStatusLineScreen { *this,
                                     &_hostWritableScreenMargin,
-                                    PageSize { LineCount(1), _settings.pageSize.columns },
+                                    PageSize { StatusLineHeight, _settings.pageSize.columns },
                                     false,
                                     LineCount(0),
                                     "host-writable-status-line" },
-    _indicatorStatusScreen {
-        *this,        &_indicatorScreenMargin, PageSize { LineCount(1), _settings.pageSize.columns }, false,
-        LineCount(0), "indicator-status-line"
-    },
+    _indicatorStatusScreen { *this,
+                             &_indicatorScreenMargin,
+                             PageSize { StatusLineHeight, _settings.pageSize.columns },
+                             false,
+                             LineCount(0),
+                             "indicator-status-line" },
     _currentScreen { &_hostWritableStatusLineScreen }, // temporary; reassigned after _pages is populated
     _viewport { *this, std::bind(&Terminal::onViewportChanged, this) },
     _indicatorStatusLineDefinition { parseStatusLineDefinition(_settings.indicatorStatusLine.left,
@@ -206,7 +326,7 @@ Terminal::Terminal(Events& eventListener,
     _selectionHelper { this },
     _extendedSelectionHelper { this },
     _customSelectionHelper { this },
-    _refreshInterval { _settings.refreshRate },
+    _refreshInterval { RefreshInterval { _settings.refreshRate } },
     _traceHandler { *this },
     _cellPixelSize {},
     _defaultColorPalette { _settings.colorPalette },
@@ -229,7 +349,7 @@ Terminal::Terminal(Events& eventListener,
     _parser { std::ref(_sequenceBuilder), _settings.parserBulkScan },
     _viCommands { *this },
     _inputHandler { _viCommands, ViMode::Insert },
-    _shellIntegration { std::make_unique<NullShellIntegration>() },
+    _semanticBlockTracker { std::move(sessionTokens) },
     _statusLineCommands { commandServices ? std::make_unique<StatusLineCommandCache>(
                                                 *commandServices,
                                                 [this](StatusLineCommandOutput output) {
@@ -262,8 +382,10 @@ Terminal::Terminal(Events& eventListener,
 
     _savedColorPalettes.reserve(MaxColorPaletteSaveStackSize);
 
-    _inputGenerator.setMouseWheelScrollMultiplier(
-        static_cast<unsigned>(unbox(_settings.mouseWheelScrollMultiplier)));
+    changeInputEncoding([&](InputGenerator& input) {
+        input.setMouseWheelScrollMultiplier(
+            static_cast<unsigned>(unbox(_settings.mouseWheelScrollMultiplier)));
+    });
 
     // TODO(should be this instead?): hardReset();
 
@@ -275,6 +397,7 @@ Terminal::Terminal(Events& eventListener,
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
+    setMode(DECMode::NoSixelScrolling, _settings.sixelScrolling == SixelScrolling::Disabled);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::Unicode, _settings.graphemeClustering);
     setMode(DECMode::VisibleCursor, true);
@@ -283,6 +406,15 @@ Terminal::Terminal(Events& eventListener,
 
     for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
+
+    // A double and a triple click walk words by the delimiters the settings carry when they walk, so a
+    // terminal selects words from the start, and setWordDelimiters() has nothing to rewire.
+    _selectionHelper.wordDelimited = [this](CellLocation const& pos) {
+        return wordDelimited(pos, _settings.wordDelimiters);
+    };
+    _extendedSelectionHelper.wordDelimited = [this](CellLocation const& pos) {
+        return wordDelimited(pos, _settings.extendedWordDelimiters);
+    };
 }
 
 void Terminal::onViewportChanged()
@@ -307,7 +439,7 @@ void Terminal::onViewportChanged()
 
 void Terminal::extendSelectionAfterScroll()
 {
-    if (_isAutoScrolling || !_leftMouseButtonPressed || !selectionAvailable()
+    if (_isAutoScrolling || _leftButtonPress != LeftButtonPress::Selecting || !selectionAvailable()
         || selector()->state() == Selection::State::Complete)
         return;
 
@@ -331,18 +463,25 @@ void Terminal::setLastMarkRangeOffset(LineOffset value) noexcept
 std::optional<Terminal::PtyReadResult> Terminal::readFromPty()
 {
     ZoneScoped;
-    auto const timeout =
+    auto timeout =
 #ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
         (_renderBuffer.state == RenderBufferState::WaitingForRefresh && !_screenDirty)
-            ? std::optional { _refreshInterval.value }
+            ? std::optional { _refreshInterval.get().value }
             : std::chrono::milliseconds(0);
 #else
         std::optional<std::chrono::milliseconds> { std::nullopt };
 #endif
 
+    // The reader writes what other threads queue, so input the PTY had no room for -- the application reads
+    // too slowly -- is written again after a short wait, rather than after the next output: an application
+    // waiting for that input may write none.
+    if (_settings.inputWriter == InputWriter::ReaderThread && hasInput())
+        timeout = std::min(timeout.value_or(PendingInputRetry), PendingInputRetry);
+
     // Request a new Buffer Object if the current one cannot sufficiently
-    // store a single text line.
-    if (_currentPtyBuffer->bytesAvailable() < unbox<size_t>(_settings.pageSize.columns))
+    // store a single text line. The width comes from the lock-free mirror: this runs before the parser
+    // thread takes the state, while the GUI thread may be resizing the page under it.
+    if (_currentPtyBuffer->bytesAvailable() < unbox<size_t>(totalPageSize().columns))
     {
         if (vtpty::ptyInLog)
             vtpty::ptyInLog()("Only {} bytes left in TBO. Allocating new buffer from pool.",
@@ -417,9 +556,61 @@ void Terminal::setExecutionMode(ExecutionMode mode)
     _pty->wakeupReader();
 }
 
+uint8_t Terminal::bindingModes() const noexcept
+{
+    auto flags = _publishedBindingModes.load(std::memory_order_relaxed);
+
+    if (_inputHandler.mode() == ViMode::Insert)
+        flags |= static_cast<uint8_t>(MatchModes::Flag::Insert);
+
+    if (_executionMode.load(std::memory_order_relaxed) != ExecutionMode::Normal)
+        flags |= static_cast<uint8_t>(MatchModes::Flag::Trace);
+
+    return flags;
+}
+
+void Terminal::publishBindingModes() noexcept
+{
+    using Flag = MatchModes::Flag;
+    auto const flagIf = [](bool holds, Flag flag) {
+        return holds ? static_cast<uint8_t>(flag) : uint8_t { 0 };
+    };
+    auto const flags = static_cast<uint8_t>(
+        flagIf(isAlternateScreen(), Flag::AlternateScreen) | flagIf(applicationCursorKeys(), Flag::AppCursor)
+        | flagIf(applicationKeypad(), Flag::AppKeypad) | flagIf(selectionAvailable(), Flag::Select)
+        | flagIf(!_search.pattern.empty(), Flag::Search));
+    _publishedBindingModes.store(flags, std::memory_order_relaxed);
+}
+
+template <typename Mutex, typename Parse>
+void Terminal::runParseBatch(std::unique_lock<Mutex> lock, Parse const& parse)
+{
+    auto batchedRendering = false;
+    {
+        auto const heldLock = std::move(lock);
+        auto const batchClock = sampleBatchClock();
+        parse();
+
+        // What the parse deferred runs now, inside this batch: no later batch is promised to drain it.
+        processPendingLocalEcho(); // local echo (SRM) a reply deferred
+
+        // Under the lock, as every other thread moves the view: the view follows what was just written.
+        followOutput();
+
+        // Sampled inside the lock: _modes is written by the GUI thread too (a Vi-mode toggle sets
+        // DECMode::VisibleCursor under this lock), and screenUpdated() below must stay OUTSIDE it
+        // because it calls back into the GUI.
+        batchedRendering = isRenderingSuppressed();
+    }
+
+    if (!batchedRendering)
+        screenUpdated();
+}
+
 bool Terminal::processInputOnce()
 {
     ZoneScoped;
+    _readerThread.store(std::this_thread::get_id(), std::memory_order_relaxed);
     // clang-format off
     switch (_executionMode.load())
     {
@@ -429,21 +620,24 @@ bool Terminal::processInputOnce()
         case ExecutionMode::Normal:
             if (!_traceHandler.pendingSequences().empty())
             {
-                auto const _ = std::lock_guard { *this };
+                auto const _ = std::lock_guard { _ownStateLock };
+                auto const batchClock = sampleBatchClock(); // the queued sequences take effect now
                 _traceHandler.flushAllPending();
                 return true;
             }
             break;
         case ExecutionMode::Waiting:
         {
-            auto lock = std::unique_lock(_breakMutex);
+            // Named, not deduced: std::condition_variable waits only on a std::unique_lock<std::mutex>.
+            auto lock = std::unique_lock<std::mutex>(_breakMutex);
             _breakCondition.wait(lock, [this]() { return _executionMode != ExecutionMode::Waiting; });
             return true;
         }
         case ExecutionMode::SingleStep:
             if (!_traceHandler.pendingSequences().empty())
             {
-                auto const _ = std::lock_guard { *this };
+                auto const _ = std::lock_guard { _ownStateLock };
+                auto const batchClock = sampleBatchClock();
                 _executionMode = ExecutionMode::Waiting;
                 _traceHandler.flushOne();
                 return true;
@@ -476,53 +670,35 @@ bool Terminal::processInputOnce()
 
     auto readAheadBatch = std::vector<vtpty::Pty::ReadResult> {};
     auto batch = std::span { &ptyReadResult->readResult, 1 };
-    auto batchedRendering = false;
+    auto lock = std::unique_lock { _ownStateLock, std::try_to_lock };
+    if (!lock.owns_lock())
     {
-        auto lock = std::unique_lock { _stateMutex, std::try_to_lock };
-        if (!lock.owns_lock())
-        {
-            // Another thread -- the render thread, building a frame -- holds the state. Read what the
-            // child writes meanwhile instead of waiting idle, so it is not left blocked on a full PTY and
-            // the parse below covers all of it in this one hold of the lock.
-            readAheadBatch = readAhead(*ptyReadResult->buffer, ptyReadResult->readResult);
-            batch = readAheadBatch;
-            lock.lock();
-            releaseReadAhead(*ptyReadResult->buffer, batch);
-        }
-        TracyPlot("pty.read.bytes",
-                  static_cast<int64_t>(std::accumulate(
-                      batch.begin(), batch.end(), size_t { 0 }, [](size_t total, auto const& piece) {
-                          return total + piece.data.size();
-                      })));
+        // Another thread -- the render thread, building a frame -- holds the state. Read what the
+        // child writes meanwhile instead of waiting idle, so it is not left blocked on a full PTY and
+        // the parse below covers all of it in this one hold of the lock.
+        readAheadBatch = readAhead(*ptyReadResult->buffer, ptyReadResult->readResult);
+        batch = readAheadBatch;
+        lock.lock();
+        releaseReadAhead(*ptyReadResult->buffer, batch);
+    }
+    TracyPlot("pty.read.bytes",
+              static_cast<int64_t>(std::accumulate(
+                  batch.begin(), batch.end(), size_t { 0 }, [](size_t total, auto const& piece) {
+                      return total + piece.data.size();
+                  })));
 
+    runParseBatch(std::move(lock), [&] {
         // Parse against the buffer readFromPty() read into, not _currentPtyBuffer, which writeToScreen()
         // on another thread may have replaced meanwhile: Screen's bulk text path moves this buffer's hot
         // end past the text it parsed.
         _parsingBuffer = ptyReadResult->buffer;
+        for (auto const& piece: batch)
         {
-            auto const parseGuard = ParseDepthGuard {};
-            for (auto const& piece: batch)
-            {
-                _usingStdoutFastPipe = piece.fromStdoutFastPipe;
-                _parser.parseFragment(piece.data);
-            }
+            _usingStdoutFastPipe = piece.fromStdoutFastPipe;
+            parseExpandingMacros(piece.data);
         }
         _parsingBuffer = nullptr;
-
-        // Process any macros that were queued by DECINVM during the parse.
-        processPendingMacros();
-
-        // Process any local echo (SRM) that a reply deferred during the parse.
-        processPendingLocalEcho();
-
-        // Sampled inside the lock: _modes is written by the GUI thread too (a Vi-mode toggle sets
-        // DECMode::VisibleCursor under this lock), and screenUpdated() below must stay OUTSIDE it
-        // because it calls back into the GUI.
-        batchedRendering = isRenderingSuppressed();
-    }
-
-    if (!batchedRendering)
-        screenUpdated();
+    });
 
 #ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
     ensureFreshRenderBuffer();
@@ -563,7 +739,7 @@ void Terminal::onStatusLineCommandCompleted(StatusLineCommandOutput output)
 std::string Terminal::statusLineCommandOutput(StatusLineDefinitions::Command const& item) const
 {
     // The cache is internally synchronised, so the const accessor may call it through the pointer.
-    return _statusLineCommands ? _statusLineCommands->output(item.command, item.interval, _currentTime)
+    return _statusLineCommands ? _statusLineCommands->output(item.command, item.interval, currentTime())
                                : std::string {};
 }
 
@@ -582,8 +758,9 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
         return false;
     }
 
-    auto const elapsed = _currentTime - _renderBuffer.lastUpdate;
-    auto const avoidRefresh = elapsed < _refreshInterval.value;
+    auto const now = currentTime();
+    auto const elapsed = now - _renderBuffer.lastUpdate.load(std::memory_order_relaxed);
+    auto const avoidRefresh = elapsed < _refreshInterval.get().value;
 
     switch (_renderBuffer.state.load())
     {
@@ -610,7 +787,7 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
             [[fallthrough]];
         }
         case RenderBufferState::TrySwapBuffers: {
-            [[maybe_unused]] auto const success = _renderBuffer.swapBuffers(_currentTime);
+            [[maybe_unused]] auto const success = _renderBuffer.swapBuffers(now);
 
 #ifdef CONTOUR_PERF_STATS
             logRenderBufferSwap(success, _lastFrameID);
@@ -634,7 +811,8 @@ PageSize Terminal::TheSelectionHelper::pageSize() const noexcept
 
 bool Terminal::TheSelectionHelper::wrappedLine(LineOffset line) const noexcept
 {
-    return terminal->isLineWrapped(line);
+    // Asked by the word walks before they step into the row above, which must therefore still exist.
+    return terminal->isPrimaryScreen() && terminal->primaryScreen().grid().continuesRowAbove(line);
 }
 
 bool Terminal::TheSelectionHelper::cellEmpty(CellLocation pos) const noexcept
@@ -680,16 +858,30 @@ namespace
 
 void Terminal::updateInputMethodPreeditString(std::string preeditString)
 {
-    if (_inputMethodData.preeditString == preeditString)
-        return;
+    auto const composing = !preeditString.empty();
+    {
+        auto const _ = std::scoped_lock { _inputMethodMutex };
+        if (_inputMethodData.preeditString == preeditString)
+            return;
+        _inputMethodData.preeditString = std::move(preeditString);
+    }
 
-    _inputMethodData.preeditString = std::move(preeditString);
+    // Composing is typing, and typing reveals the cursor, which the text being composed is drawn at.
+    if (composing)
+        scrollToBottomOnInput();
+
     screenUpdated();
+}
+
+InputMethodData Terminal::inputMethodData() const
+{
+    auto const _ = std::scoped_lock { _inputMethodMutex };
+    return _inputMethodData;
 }
 
 void Terminal::fillRenderBuffer(RenderBuffer& output, bool includeSelection)
 {
-    auto const _ = std::lock_guard { *this };
+    auto const _ = std::lock_guard { _ownStateLock };
     fillRenderBufferInternal(output, includeSelection);
 }
 
@@ -759,7 +951,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             mainDisplayReverseVideo,
                                                                             _colorPalette.colorLookupTable,
                                                                             HighlightSearchMatches::Yes,
-                                                                            _inputMethodData,
+                                                                            inputMethodData(),
                                                                             effectiveCursorPosition,
                                                                             includeSelection },
                                                       _viewport.scrollOffset(),
@@ -774,15 +966,20 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             mainDisplayReverseVideo,
                                                                             _colorPalette.colorLookupTable,
                                                                             HighlightSearchMatches::Yes,
-                                                                            _inputMethodData,
+                                                                            inputMethodData(),
                                                                             effectiveCursorPosition,
                                                                             includeSelection },
                                                       _viewport.scrollOffset(),
                                                       renderLinesPerCell);
 
-    // After both branches: the gutter belongs to the main display whichever page it is showing, and
-    // fillGutter is a no-op wherever there is nothing foldable to point at.
+    // After both branches: the gutter and the fold labels belong to the main display whichever page it is
+    // showing, and each is a no-op on a page folding does not apply to.
     fillGutter(output, baseLine);
+    fillFoldLabels(output, baseLine);
+
+    // After the gutter, with the same baseLine: the header covers the main page's first row, wherever a top
+    // status line put it.
+    fillStickyHeader(output, baseLine);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
     auto const mainScreenLine = baseLine;
@@ -796,6 +993,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     applyHintOverlay(output, mainScreenLine);
     updateCursorMotionAnimation(output);
     applyScreenTransitionBlending(output);
+    publishAnimationsEnd();
 
     // Instrumentation: how many RenderCells this frame carries, against the page it was built from.
     // The two should be close; they are not, and finding out why is an open backlog item.
@@ -804,6 +1002,12 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
 void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
 {
+    auto const now = currentTime();
+
+    // A finished motion ends here, under the lock the fill holds, as everything else that changes it does.
+    if (_cursorMotion.active && _cursorMotion.isComplete(now))
+        _cursorMotion.active = false;
+
     if (!output.cursor.has_value())
         return;
 
@@ -811,16 +1015,12 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
     // to guarantee visible interpolation.
     constexpr auto MinFrames = 3;
     auto const effectiveDuration =
-        std::max(_settings.cursorMotionAnimationDuration, _refreshInterval.value * MinFrames);
+        std::max(_settings.cursorMotionAnimationDuration, _refreshInterval.get().value * MinFrames);
 
     // Use grid coordinates (without scroll offset or baseLine) for animation state.
     // This prevents viewport scrolling from triggering spurious cursor animations,
     // since the grid position doesn't change when the user scrolls.
-    auto const gridCursorPos = [&]() -> CellLocation {
-        if (inputHandler().mode() == ViMode::Insert)
-            return currentScreen().cursor().position;
-        return _viCommands.cursorPosition;
-    }();
+    auto const gridCursorPos = gridCursorPosition();
 
     // Grid -> screen is a projection LOOKUP, not an addition: with folds collapsed the rows on screen
     // are a non-contiguous selection of grid rows. Taking the difference at the cursor's own line and
@@ -837,25 +1037,25 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
                               .column = gridPosition.column };
     };
 
-    if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
+    if (_cursorMotion.active && !_cursorMotion.isComplete(now))
     {
         // Animation in progress — check if target changed (chaining)
         if (gridCursorPos != _cursorMotion.toPosition)
         {
             // Chain: start new animation from current interpolated position
-            auto const currentProgress = _cursorMotion.progress(_currentTime);
+            auto const currentProgress = _cursorMotion.progress(now);
             _cursorMotion.fromPosition =
                 lerpCellLocation(_cursorMotion.fromPosition, _cursorMotion.toPosition, currentProgress);
             _cursorMotion.fromColor =
                 mixColor(_cursorMotion.fromColor, _cursorMotion.toColor, currentProgress);
             _cursorMotion.toPosition = gridCursorPos;
             _cursorMotion.toColor = output.cursor->cursorColor;
-            _cursorMotion.startTime = _currentTime;
+            _cursorMotion.startTime = now;
             _cursorMotion.duration = effectiveDuration;
         }
         // Inject animation data (convert grid -> screen coordinates)
         output.cursor->animateFrom = toScreen(_cursorMotion.fromPosition);
-        output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
+        output.cursor->animationProgress = _cursorMotion.progress(now);
         output.cursor->animateFromColor = _cursorMotion.fromColor;
     }
     else if (gridCursorPos != _cursorMotion.toPosition && _settings.cursorMotionAnimationDuration.count() > 0)
@@ -866,11 +1066,11 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
         _cursorMotion.fromColor = _cursorMotion.toColor;       // previous target's color
         _cursorMotion.toPosition = gridCursorPos;
         _cursorMotion.toColor = output.cursor->cursorColor;
-        _cursorMotion.startTime = _currentTime;
+        _cursorMotion.startTime = now;
         _cursorMotion.duration = effectiveDuration;
 
         output.cursor->animateFrom = toScreen(_cursorMotion.fromPosition);
-        output.cursor->animationProgress = _cursorMotion.progress(_currentTime);
+        output.cursor->animationProgress = _cursorMotion.progress(now);
         output.cursor->animateFromColor = _cursorMotion.fromColor;
     }
     else
@@ -885,7 +1085,7 @@ void Terminal::applyScreenTransitionBlending(RenderBuffer& output)
     if (!_screenTransition.active)
         return;
 
-    auto const progress = _screenTransition.progress(_currentTime);
+    auto const progress = _screenTransition.progress(currentTime());
     if (progress >= 1.0f)
     {
         finalizeScreenTransition();
@@ -963,7 +1163,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
     // share, so the mode has to be overridden here rather than merely read.)
     auto constexpr StatusLineColorLookupTable = ColorLookupTable::AnsiSgr;
 
-    switch (_statusDisplayType)
+    switch (_statusDisplayType.get())
     {
         case StatusDisplayType::None:
             //.
@@ -1097,7 +1297,98 @@ void Terminal::scrollToBottomOnInput()
     // Unconditional on purpose: user input must always jump the viewport back to the bottom, even
     // when `autoScrollOnUpdate` (which governs output-driven scrolling only) is turned off. The
     // alt-screen guard still applies via `scrollToBottom()`'s own `scrollingDisabled()` check.
+    //
+    // Asked first without the state lock, which a key must not wait for: a view being typed into is at the
+    // bottom all but always. Only a view away from it takes the lock, to move it.
+    if (!_viewport.isAwayFromBottom())
+        return;
+
+    auto const _ = std::scoped_lock { *this };
     _viewport.scrollToBottom();
+}
+
+template <typename Dispatch>
+Handled Terminal::offerToViInput(Dispatch const& dispatch)
+{
+    // Hint mode is a Vi mode of its own, so in Insert mode neither wants the key.
+    if (_inputHandler.mode() == ViMode::Insert)
+        return Handled { false };
+
+    // Taken once, here, rather than by each command. The frontend hooks a command raises under it --
+    // screenUpdated(), the viewport, mode, selection and search notifications -- take no lock and wait on no
+    // other thread: they post, or read what takes no lock. What would is held back until the lock is
+    // released: a flush, whose local echo parses, a clipboard paste, which pastes through a flush, and a
+    // document to open.
+    return runUnderStateLock(dispatch);
+}
+
+void Terminal::acquireState(HoldBack holdBack) const
+{
+    _stateMutex.lock();
+    _stateLockOwner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+    _stateHoldBack = holdBack;
+}
+
+bool Terminal::tryAcquireState(HoldBack holdBack) const
+{
+    if (!_stateMutex.try_lock())
+        return false;
+    _stateLockOwner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+    _stateHoldBack = holdBack;
+    return true;
+}
+
+void Terminal::releaseState() const
+{
+    _stateLockOwner.store(std::thread::id {}, std::memory_order_relaxed);
+    _stateMutex.unlock();
+}
+
+void Terminal::OwnStateLock::lock() const
+{
+    _terminal->acquireState(HoldBack::No);
+}
+
+void Terminal::OwnStateLock::unlock() const
+{
+    _terminal->releaseOwnState();
+}
+
+void Terminal::releaseOwnState()
+{
+    // Taken while the lock is still held, as it is written under it.
+    auto const owed = std::exchange(_owedFlush, OwedFlush::None);
+    releaseState();
+    if (owed == OwedFlush::Owed)
+        runContained("sending the replies raised under it", [this] { flushInput(); });
+}
+
+bool Terminal::OwnStateLock::try_lock() const // NOLINT(readability-identifier-naming)
+{
+    return _terminal->tryAcquireState(HoldBack::No);
+}
+
+void Terminal::unlock() noexcept
+{
+    // Taken while the lock is still held, as it is written under it.
+    auto const heldBack = std::exchange(_outsideStateLock, {});
+    releaseState();
+
+    // Written here, or by the PTY's reader, woken for it, as Settings::inputWriter says. @see flushInput()
+    runContained("sending the input queued under it", [this] { flushInput(); });
+    for (auto const& action: heldBack)
+        runContained("asking for what it held back", action);
+}
+
+void Terminal::runOutsideStateLock(std::function<void()> action)
+{
+    if (holdsBack())
+    {
+        _outsideStateLock.emplace_back(std::move(action));
+        return;
+    }
+
+    action();
 }
 
 Handled Terminal::sendKeyEvent(Key key,
@@ -1105,8 +1396,7 @@ Handled Terminal::sendKeyEvent(Key key,
                                KeyboardEventType eventType,
                                Timestamp now)
 {
-    _cursorBlinkState = 1;
-    _lastCursorBlink = now;
+    restartCursorBlink(now);
 
     if (!allowInput())
         return Handled { true };
@@ -1121,18 +1411,20 @@ Handled Terminal::sendKeyEvent(Key key,
     // dwControlKeyState, numpad CSI parameters).
     auto const chord = modifiers.chord;
 
-    // Route Escape to hint mode handler if active (ignore key release events).
-    if (_hintModeHandler.isActive() && key == Key::Escape && eventType != KeyboardEventType::Release)
-    {
-        _hintModeHandler.processInput(U'\x1B');
-        return Handled { true };
-    }
-
-    if (_inputHandler.sendKeyPressEvent(key, chord, eventType))
+    if (offerToViInput([&] {
+            // Route Escape to hint mode handler if active (ignore key release events).
+            if (_hintModeHandler.isActive() && key == Key::Escape && eventType != KeyboardEventType::Release)
+            {
+                _hintModeHandler.processInput(U'\x1B');
+                return Handled { true };
+            }
+            return _inputHandler.sendKeyPressEvent(key, chord, eventType);
+        }))
         return Handled { true };
 
     // Check for User-Defined Keys (DECUDK) — override function keys F6-F20
-    // when no modifiers are pressed and the key is being pressed (not released).
+    // when no modifiers are pressed and the key is being pressed (not released). Looked up under the input
+    // lock the parser thread programs them under, not the state lock, so that typing waits for no parse.
     if (chord.none() && eventType == KeyboardEventType::Press)
     {
         if (auto const udkStr = udkStringForKey(key); udkStr.has_value())
@@ -1165,8 +1457,7 @@ Handled Terminal::sendCharEvent(char32_t ch,
                                 KeyboardEventType eventType,
                                 Timestamp now)
 {
-    _cursorBlinkState = 1;
-    _lastCursorBlink = now;
+    restartCursorBlink(now);
 
     // Early exit if KAM is enabled.
     if (!allowInput())
@@ -1180,16 +1471,15 @@ Handled Terminal::sendCharEvent(char32_t ch,
     // input generator reports the latched lock state to the application.
     auto const chord = modifiers.chord;
 
-    // Route input to hint mode handler if active (no modifiers — just label chars).
-    // Ignore key release events to prevent the activating key's release from being
-    // processed as a label character (e.g. 'h' release after 'gh' triggered hint mode).
-    if (_hintModeHandler.isActive() && chord.none() && eventType != KeyboardEventType::Release)
-    {
-        if (_hintModeHandler.processInput(ch))
-            return Handled { true };
-    }
-
-    if (_inputHandler.sendCharPressEvent(ch, chord, eventType))
+    if (offerToViInput([&] {
+            // Route input to hint mode handler if active (no modifiers — just label chars).
+            // Ignore key release events to prevent the activating key's release from being
+            // processed as a label character (e.g. 'h' release after 'gh' triggered hint mode).
+            if (_hintModeHandler.isActive() && chord.none() && eventType != KeyboardEventType::Release
+                && _hintModeHandler.processInput(ch))
+                return Handled { true };
+            return _inputHandler.sendCharPressEvent(ch, chord, eventType);
+        }))
         return Handled { true };
 
     auto const success = core::locked(
@@ -1209,7 +1499,8 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
                                       MouseButton button,
                                       CellLocation newPosition,
                                       PixelCoordinate pixelPosition,
-                                      bool uiHandledHint)
+                                      bool uiHandledHint,
+                                      MousePressClaimant const& claimant)
 {
     // A press is not necessarily preceded by a MouseMove landing exactly here: the windowing system
     // usually delivers one, which is why a slow, deliberate drag never showed this, but a fast click
@@ -1217,30 +1508,40 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
     // (a previous selection, a different pane, ...). Without this, handleMouseSelection() below
     // anchors the drag on that stale position instead of where the button actually went down, and the
     // whole selection appears to jump the moment the drag starts. Mirrors the same update
-    // sendMouseMoveEvent already does for exactly this reason.
-    if (newPosition != _currentMousePosition)
+    // sendMouseMoveEvent already does for exactly this reason. A pointer back from off the grid lands
+    // somewhere new as well, even on the cell it left from.
+    if (newPosition != _currentMousePosition || _pointerPlacement == PointerPlacement::OffGrid)
     {
-        // For the same reason sendMouseMoveEvent resets it: a multi-click sequence is only a
-        // sequence while it stays on one cell. A press that lands somewhere else starts a new one,
-        // and without this a fast click arriving as a bare press within the one-second window would
-        // inherit the previous cell's count and open as a word- or line-selection instead of a drag.
-        //
-        // Left only: it is the sole button that opens a selection, so it is the only one whose
-        // sequence this counts. A right-click for the context menu, or a middle-click paste, lands
-        // on some other cell without ending a double-click the user is in the middle of.
-        if (button == MouseButton::Left)
-            _speedClicks = 0;
-
         _currentMousePosition = newPosition;
+        _pointerPlacement = PointerPlacement::OnGrid;
         updateHoveringHyperlinkState();
     }
 
-    if (button == MouseButton::Left)
+    // Counted once, for every button, before anyone looks at it: the count is both what a `clicks:`
+    // binding matches on and what picks drag, word or line below. A press on another cell starts a new
+    // sequence by the counter's own rule -- which is what this function used to reset by hand -- and
+    // each button keeps its own, so a right-click for the context menu does not end a double-click.
+    auto const clickCount = _clickCounter.press(_currentMousePosition, button);
+
+    // The terminal's own selection -- and so a binding standing in for it -- sees a press only when no
+    // application asked for the mouse, or the bypass modifier overrides that.
+    auto const reachesSelection =
+        !allowPassMouseEventToApp(modifiers) || isModeEnabled(DECMode::MousePassiveTracking);
+    auto const generationBeforeClaim = _selectionGeneration;
+    auto const claim = reachesSelection && claimant ? claimant(clickCount) : MousePressClaim::Unclaimed;
+
+    if (button == MouseButton::Left && claim == MousePressClaim::Claimed)
     {
-        _leftMouseButtonPressed = true;
+        // The action the binding runs may select, now or before the release; the release reports it then.
+        _leftButtonPress = LeftButtonPress::Claimed;
+        _claimedPressGeneration = generationBeforeClaim;
+    }
+    else if (button == MouseButton::Left)
+    {
+        _leftButtonPress = LeftButtonPress::Selecting;
         _lastMousePixelPositionOnLeftClick = pixelPosition;
-        if (!allowPassMouseEventToApp(modifiers) || isModeEnabled(DECMode::MousePassiveTracking))
-            uiHandledHint = handleMouseSelection(modifiers) || uiHandledHint;
+        if (reachesSelection)
+            uiHandledHint = handleMouseSelection(modifiers, clickCount) || uiHandledHint;
     }
 
     verifyState();
@@ -1338,13 +1639,9 @@ void Terminal::resetStatusLineDefinition()
     updateIndicatorStatusLine();
 }
 
-bool Terminal::handleMouseSelection(Modifiers modifiers)
+bool Terminal::handleMouseSelection(Modifiers modifiers, uint8_t clickCount)
 {
     verifyState();
-
-    double const diffMs = chrono::duration<double, std::milli>(_currentTime - _lastClick).count();
-    _lastClick = _currentTime;
-    _speedClicks = ((diffMs >= 0.0 && diffMs <= 1000.0 ? _speedClicks : 0) % 4) + 1;
 
     // Through the viewport, not by subtracting the scroll offset: with folds collapsed the rows on
     // screen are a non-contiguous selection of grid rows, and anchoring a selection by the old
@@ -1357,7 +1654,7 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
     if (modifiers.contains(Modifier::Shift) && selectionAvailable()
         && selector()->state() == Selection::State::Complete)
     {
-        _speedClicks = 0; // Don't count Shift+Click in the speed-click sequence.
+        _clickCounter.reset(); // Don't count Shift+Click in the multi-click sequence.
 
         // Anchor at the farthest endpoint so the selection grows in either direction.
         // NB: Store values before std::minmax — minmax returns references, and
@@ -1385,7 +1682,7 @@ bool Terminal::handleMouseSelection(Modifiers modifiers)
     if (_inputHandler.mode() != ViMode::Insert)
         _viCommands.cursorPosition = startPos;
 
-    switch (_speedClicks)
+    switch (clickCount)
     {
         case 1:
             if (_search.origin == SearchOrigin::DoubleClick)
@@ -1438,6 +1735,8 @@ void Terminal::setSelector(std::unique_ptr<Selection> selector)
     Require(selector.get() != nullptr);
     inputLog()("Creating cell selector: {}", *selector);
     _selection = std::move(selector);
+    ++_selectionGeneration;
+    publishBindingModes();
 }
 
 void Terminal::performAutoScroll(int direction, LineCount lineCount)
@@ -1471,7 +1770,7 @@ void Terminal::clearSelection()
 {
     if (_inputHandler.isVisualMode())
     {
-        if (!_leftMouseButtonPressed)
+        if (_leftButtonPress != LeftButtonPress::Selecting)
             // Don't clear if in visual mode and mouse wasn't used.
             return;
         _inputHandler.setMode(ViMode::Normal);
@@ -1482,6 +1781,8 @@ void Terminal::clearSelection()
 
     inputLog()("Clearing selection.");
     _selection.reset();
+    ++_selectionGeneration;
+    publishBindingModes();
 
     onSelectionUpdated();
 
@@ -1531,7 +1832,7 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
     // Updates the internal state to remember the current mouse' position.
     // On top of that, a few more things are happening:
     // - updates cursor hovering state (e.g. necessary for properly highlighting hyperlinks)
-    // - the internal speed-clicks counter (for tracking rapid multi click) is reset
+    // - the multi-click counter (_clickCounter, for tracking rapid multi click) is reset
     // - grid text selection is extended
     verifyState();
 
@@ -1539,18 +1840,20 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
     if (!(isPrimaryScreen() || isAlternateScreen()))
         return;
 
-    if (newPosition != _currentMousePosition)
+    // Back from off the grid is a move too, even onto the cell it left from.
+    if (newPosition != _currentMousePosition || _pointerPlacement == PointerPlacement::OffGrid)
     {
-        // Speed-clicks are only counted when not moving the mouse in between, so reset on mouse move here.
-        _speedClicks = 0;
+        // Multi-clicks are only counted when not moving the mouse in between, so reset on mouse move here.
+        _clickCounter.reset();
 
         _currentMousePosition = newPosition;
+        _pointerPlacement = PointerPlacement::OnGrid;
         updateHoveringHyperlinkState();
     }
 
     auto const shouldExtendSelection = shouldExtendSelectionByMouse(newPosition, pixelPosition);
     auto relativePos = _viewport.translateScreenToGridCoordinate(newPosition);
-    if (shouldExtendSelection && _leftMouseButtonPressed)
+    if (shouldExtendSelection && _leftButtonPress == LeftButtonPress::Selecting)
     {
         _viCommands.cursorPosition = relativePos;
         _viewport.makeVisible(_viCommands.cursorPosition.line);
@@ -1568,7 +1871,7 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
             return;
     }
 
-    if (_leftMouseButtonPressed)
+    if (_leftButtonPress == LeftButtonPress::Selecting)
     {
         if (!selectionAvailable())
         {
@@ -1596,6 +1899,12 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
     }
 }
 
+void Terminal::sendMouseLeaveEvent()
+{
+    _pointerPlacement = PointerPlacement::OffGrid;
+    updateHoveringHyperlinkState();
+}
+
 Handled Terminal::sendMouseReleaseEvent(Modifiers modifiers,
                                         MouseButton button,
                                         PixelCoordinate pixelPosition,
@@ -1605,7 +1914,12 @@ Handled Terminal::sendMouseReleaseEvent(Modifiers modifiers,
 
     if (button == MouseButton::Left)
     {
-        _leftMouseButtonPressed = false;
+        // A claimed press's action completes what it selects itself, so no drag is left to finish: report it,
+        // as a release that finishes a drag does, to whoever copies a finished selection.
+        if (std::exchange(_leftButtonPress, LeftButtonPress::Released) == LeftButtonPress::Claimed
+            && _selectionGeneration != _claimedPressGeneration && selectionAvailable()
+            && selector()->state() == Selection::State::Complete)
+            _eventListener.onSelectionCompleted();
         if (selectionAvailable())
         {
             switch (selector()->state())
@@ -1615,7 +1929,10 @@ Handled Terminal::sendMouseReleaseEvent(Modifiers modifiers,
                         selector()->complete();
                     _eventListener.onSelectionCompleted();
                     break;
-                case Selection::State::Waiting: _selection.reset(); break;
+                case Selection::State::Waiting:
+                    _selection.reset();
+                    publishBindingModes();
+                    break;
                 case Selection::State::Complete: break;
             }
         }
@@ -1682,6 +1999,11 @@ void Terminal::sendPaste(string_view text)
     flushInput();
 }
 
+void Terminal::sendPasteFromClipboard(unsigned count, bool strip)
+{
+    runOutsideStateLock([this, count, strip] { _eventListener.pasteFromClipboard(count, strip); });
+}
+
 void Terminal::sendRawInput(string_view text)
 {
     if (!allowInput())
@@ -1704,25 +2026,51 @@ std::string Terminal::peekInput() const
 
 void Terminal::flushInput()
 {
+    // Never with the state lock held: the write parks once the application leaves its input unread, and
+    // every thread waiting for the lock would park with it -- the parser thread, a frontend's, a daemon's
+    // loop building a client's delta; and with SRM reset the echo parses, which takes the lock again. Under a
+    // frontend's hold it is sent as that hold is released (@see unlock()); under the terminal's own -- a
+    // parse batch, some of whose replies ask for it on the spot -- by the same thread once it has let go of
+    // the lock (@see releaseOwnState()). The queue keeps the order either way.
+    if (isStateLockHeldByThisThread())
+    {
+        if (_stateHoldBack == HoldBack::No)
+            _owedFlush = OwedFlush::Owed;
+        return;
+    }
+
+    // Under InputWriter::ReaderThread only the PTY's reader writes, once it reads: any other thread -- a GUI
+    // thread typing or pasting -- wakes it instead, and never parks on a write the application leaves
+    // unread, nor waits behind one the reader is making. Woken whether or not anything is queued, as at the
+    // release of a frontend's hold.
+    if (_settings.inputWriter == InputWriter::ReaderThread)
+    {
+        auto const reader = _readerThread.load(std::memory_order_relaxed);
+        if (reader != std::thread::id {} && reader != std::this_thread::get_id())
+        {
+            _pty->wakeupReader();
+            return;
+        }
+    }
+
     std::string input;
     int rv = 0;
     {
-        // peek, write and consume are one step: this is called from both the parser and the GUI thread,
-        // and if two callers could interleave here both would send the same bytes and both would consume
-        // them. @see _inputMutex.
-        auto const _ = std::scoped_lock { _inputMutex };
+        // Take, write and consume are one step: this is called from the parser, the GUI and a daemon's pump
+        // thread, and if two callers could interleave here both would send the same bytes and both would
+        // consume them. @see _flushMutex.
+        auto const flushing = std::scoped_lock { _flushMutex };
 
-        if (_inputGenerator.peek().empty())
+        // Own the bytes: peek() returns a view into InputGenerator::_pendingSequence, which another thread
+        // appends to -- and reallocates -- as soon as _inputMutex is free, and the local echo parses these
+        // bytes, where a query among them replies and appends to it too. @see echoLocally().
+        input = core::locked(_inputMutex, [&] { return std::string(_inputGenerator.peek()); });
+        if (input.empty())
             return;
-
-        // Own the bytes before anything is allowed to touch the generator again: peek() returns a view
-        // into InputGenerator::_pendingSequence, and both steps below invalidate it. consume() may clear
-        // that string outright, and the local echo parses these bytes -- a query among them replies, which
-        // appends to that very string and reallocates it, leaving the view dangling. @see echoLocally().
-        input = std::string(_inputGenerator.peek());
 
         // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
         rv = _pty->write(input);
+        auto const error = errno;
         if (rv <= 0)
         {
             // EAGAIN/EINTR is backpressure: keep the bytes pending so the caller's deferred retry sends
@@ -1730,12 +2078,13 @@ void Terminal::flushInput()
             // leaving them pending keeps hasInput() true, which turns TerminalSession::flushInput()'s
             // self-repost into an unbounded loop that logs one error per iteration. That is the
             // "Failed to write to SSH channel" flood a broken SSH session used to produce.
-            if (rv < 0 && errno != EAGAIN && errno != EINTR)
-                _inputGenerator.consume(static_cast<int>(input.size()));
+            if (rv < 0 && error != EAGAIN && error != EINTR)
+                core::locked(_inputMutex, [&] { _inputGenerator.consume(static_cast<int>(input.size())); });
             return;
         }
 
-        _inputGenerator.consume(rv);
+        // Only this flush consumes, and others only append, so the head it wrote is still the head.
+        core::locked(_inputMutex, [&] { _inputGenerator.consume(rv); });
     }
 
     // SRM, reset: the terminal echoes everything it sends. This is the "local echo" a host that does not
@@ -1780,6 +2129,17 @@ void Terminal::processPendingLocalEcho()
     }
 }
 
+void Terminal::parseExpandingMacros(std::string_view input)
+{
+    auto const parseGuard = ParseDepthGuard {};
+    do
+    {
+        input.remove_prefix(_parser.parseFragment(input));
+        if (auto const invocation = std::exchange(_pendingMacroInvocation, std::nullopt))
+            runMacro(*invocation);
+    } while (!input.empty() && !(isMacroRunning() && _areRunningMacrosVoid));
+}
+
 void Terminal::parseFragmentChunked(string_view vtStream)
 {
     ZoneScoped;
@@ -1793,7 +2153,8 @@ void Terminal::parseFragmentChunked(string_view vtStream)
         vtStream.remove_prefix(chunk.size());
         // Set parsingBuffer to ensure BufferFragment holds the correct buffer reference.
         _parsingBuffer = _currentPtyBuffer;
-        _parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
+        auto const written = _currentPtyBuffer->writeAtEnd(chunk);
+        parseExpandingMacros(std::string_view { written.data(), written.size() });
         _parsingBuffer = nullptr;
     }
 }
@@ -1802,33 +2163,36 @@ void Terminal::writeToScreen(string_view vtStream)
 {
     ZoneScoped;
     TracyPlot("pty.parse.bytes", static_cast<int64_t>(vtStream.size()));
-    auto batchedRendering = false;
-    {
-        auto const l = std::lock_guard { *this };
-        parseFragmentChunked(vtStream);
-
-        // Any local echo the parse deferred (a sequence that replied) is safe to parse now.
-        processPendingLocalEcho();
-
-        // Sampled inside the lock, for the reason processInputOnce() gives at the same test.
-        batchedRendering = isRenderingSuppressed();
-    }
-
-    if (!batchedRendering)
-    {
-        screenUpdated();
-    }
+    runParseBatch(std::unique_lock { _ownStateLock }, [&] { parseFragmentChunked(vtStream); });
 }
 
-string_view Terminal::lockedWriteToPtyBuffer(string_view data)
+Terminal::BatchClock::BatchClock(Screen& primary, uint32_t stamp) noexcept: _primary { primary }
 {
-    if (_currentPtyBuffer->bytesAvailable() < 64 && _currentPtyBuffer->bytesAvailable() < data.size())
-        _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
+    _primary.setLineBirthStamp(stamp);
+}
 
-    auto const chunk = data.substr(0, std::min(data.size(), _currentPtyBuffer->bytesAvailable()));
-    auto const _ = std::scoped_lock { *_currentPtyBuffer };
-    auto const ref = _currentPtyBuffer->writeAtEnd(chunk);
-    return { ref.data(), ref.size() };
+Terminal::BatchClock::~BatchClock()
+{
+    _primary.setLineBirthStamp(0);
+}
+
+Terminal::BatchClock Terminal::sampleBatchClock() noexcept
+{
+    // Floored, then clamped below at the session's first second: a wall clock stepped back before the
+    // session began must not wrap a row into the far future.
+    auto const elapsed = chrono::floor<chrono::seconds>(_clocks.wall.now() - _sessionEpoch);
+    auto const stamp = std::clamp(elapsed, chrono::seconds::zero(), chrono::seconds { Line::MaxBornAt - 1 });
+    return BatchClock { primaryScreen(), static_cast<uint32_t>(stamp.count()) + 1U };
+}
+
+std::optional<chrono::system_clock::time_point> Terminal::lineBirthTime(Line const& line) const noexcept
+{
+    auto const stamp = line.bornAt();
+    if (stamp == 0 || stamp >= Line::MaxBornAt)
+        return std::nullopt;
+    // A replica's rows count from its host's epoch, by the host's clock: read on this one, as the records'
+    // instants are, so a row and its block name one time.
+    return onThisClock(_sessionEpoch + chrono::seconds { stamp - 1U });
 }
 
 size_t Terminal::maxBulkTextSequenceWidth() const noexcept
@@ -1894,35 +2258,36 @@ void Terminal::writeToScreenInternal(Screen& screen, std::string_view vtStream)
     parser.parseFragment(vtStream);
 }
 
-void Terminal::writeToScreenInternal(std::string_view vtStream)
-{
-    while (!vtStream.empty())
-    {
-        auto const chunk = lockedWriteToPtyBuffer(vtStream);
-        vtStream.remove_prefix(chunk.size());
-        _parser.parseFragment(chunk);
-    }
-}
-
 void Terminal::updateCursorVisibilityState() const noexcept
 {
     if (_settings.cursorDisplay == CursorDisplay::Steady)
         return;
 
-    auto const passed = chrono::duration_cast<chrono::milliseconds>(_currentTime - _lastCursorBlink);
-    if (passed < _settings.cursorBlinkInterval)
-        return;
+    auto const now = currentTime();
+    auto const interval = cursorBlinkInterval();
+    auto word = _cursorBlink.load(std::memory_order_relaxed);
+    while (true)
+    {
+        auto const blink = CursorBlink::unpacked(word);
+        if (now - blink.since < interval)
+            return;
 
-    _lastCursorBlink = _currentTime;
-    _cursorBlinkState = (_cursorBlinkState + 1) % 2;
+        auto const next =
+            CursorBlink { .since = now,
+                          .phase = blink.phase == CursorBlinkPhase::Shown ? CursorBlinkPhase::Hidden
+                                                                          : CursorBlinkPhase::Shown };
+        // Only over the word it read: a key that restarted the blink meanwhile changed it, and wins. The
+        // failed exchange reloads the word, which then shows the phase too young to end.
+        if (_cursorBlink.compare_exchange_weak(word, next.packed(), std::memory_order_relaxed))
+            return;
+    }
 }
 
 void Terminal::updateHoveringHyperlinkState()
 {
-    auto const newState =
-        _currentScreen->contains(_currentMousePosition)
-            ? _currentScreen->hyperlinkIdAt(_viewport.translateScreenToGridCoordinate(_currentMousePosition))
-            : HyperlinkId {};
+    // The cell the frame's hover highlight reads too (@see tryGetHoveringHyperlink), so the two agree.
+    auto const position = currentMouseGridPosition();
+    auto const newState = position ? _currentScreen->hyperlinkIdAt(*position) : HyperlinkId {};
 
     auto const oldState = _hoveringHyperlinkId.exchange(newState);
 
@@ -1932,15 +2297,17 @@ void Terminal::updateHoveringHyperlinkState()
 
 optional<chrono::milliseconds> Terminal::nextRender() const
 {
+    auto const now = currentTime();
     auto nextWakeup = chrono::milliseconds::max();
 
     // Cursor blink scheduling
     if (isModeEnabled(DECMode::VisibleCursor) && _settings.cursorDisplay == CursorDisplay::Blink)
     {
-        auto const passedCursor =
-            chrono::duration_cast<chrono::milliseconds>(_currentTime - _lastCursorBlink);
-        if (passedCursor <= _settings.cursorBlinkInterval)
-            nextWakeup = std::min(nextWakeup, _settings.cursorBlinkInterval - passedCursor);
+        // Read once: the frontend may set it meanwhile.
+        auto const interval = cursorBlinkInterval();
+        auto const passedCursor = chrono::duration_cast<chrono::milliseconds>(now - lastCursorBlink());
+        if (passedCursor <= interval)
+            nextWakeup = std::min(nextWakeup, interval - passedCursor);
     }
 
     // Cell blink scheduling
@@ -1949,8 +2316,8 @@ optional<chrono::milliseconds> Terminal::nextRender() const
         if (_settings.blinkStyle == BlinkStyle::Classic)
         {
             // Classic mode only needs redraws at toggle transitions.
-            nextWakeup = std::min(nextWakeup, _slowBlinker.nextToggleIn(_currentTime));
-            nextWakeup = std::min(nextWakeup, _rapidBlinker.nextToggleIn(_currentTime));
+            nextWakeup = std::min(nextWakeup, _slowBlinker.nextToggleIn(now));
+            nextWakeup = std::min(nextWakeup, _rapidBlinker.nextToggleIn(now));
         }
         else
         {
@@ -1962,8 +2329,7 @@ optional<chrono::milliseconds> Terminal::nextRender() const
     if (_statusDisplayType == StatusDisplayType::Indicator)
     {
         auto const currentSecond =
-            chrono::time_point_cast<chrono::seconds>(chrono::system_clock::now()).time_since_epoch().count()
-            % 60;
+            chrono::time_point_cast<chrono::seconds>(_clocks.wall.now()).time_since_epoch().count() % 60;
         auto const millisUntilNextMinute =
             chrono::duration_cast<chrono::milliseconds>(chrono::seconds(60 - currentSecond));
         nextWakeup = std::min(nextWakeup, millisUntilNextMinute);
@@ -1971,21 +2337,18 @@ optional<chrono::milliseconds> Terminal::nextRender() const
         // While synchronized output suppresses rendering the status line is not rebuilt, so an overdue
         // command would keep reporting 0 ms and spin the display; the end of the sync triggers a refresh.
         if (_statusLineCommands && !isRenderingSuppressed())
-            if (auto const due = _statusLineCommands->nextDue(_currentTime))
+            if (auto const due = _statusLineCommands->nextDue(now))
                 nextWakeup = std::min(nextWakeup, *due);
     }
 
-    // Screen transition animation scheduling at display refresh rate.
-    if (_screenTransition.active && !_screenTransition.isComplete(_currentTime))
-        nextWakeup = std::min(nextWakeup, _refreshInterval.value);
-
-    // Cursor motion animation scheduling at display refresh rate.
-    if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
-        nextWakeup = std::min(nextWakeup, _refreshInterval.value);
+    // Screen transition and cursor motion animation scheduling at display refresh rate, from what the fill
+    // published: their state is the fill's, under the state lock this does not take.
+    if (now < _animationsEnd.load(std::memory_order_relaxed))
+        nextWakeup = std::min(nextWakeup, _refreshInterval.get().value);
 
     // Momentum scrolling animation scheduling at display refresh rate.
-    if (_scrollMomentum.active && !_scrollMomentum.shouldStop())
-        nextWakeup = std::min(nextWakeup, _refreshInterval.value);
+    if (_isGliding.load(std::memory_order_relaxed))
+        nextWakeup = std::min(nextWakeup, _refreshInterval.get().value);
 
     if (nextWakeup == chrono::milliseconds::max())
         return nullopt;
@@ -1999,39 +2362,46 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
     (void) changes;
     // TODO: update render buffer if  (changes != 0)
 
-    _currentTime = now;
+    _currentTime.store(now, std::memory_order_relaxed);
     updateCursorVisibilityState();
 
-    if (_screenTransition.active && _screenTransition.isComplete(_currentTime))
-        finalizeScreenTransition();
-
-    if (_cursorMotion.active && _cursorMotion.isComplete(_currentTime))
-        _cursorMotion.active = false;
-
-    // Apply momentum scrolling each frame.
-    if (_scrollMomentum.active)
+    // Apply momentum scrolling each frame. The glide moves the view, which the parser thread and the GUI
+    // thread move under the state lock, so it takes that lock too: only while one is armed, as a frame
+    // without one should not wait for a parse. A frame with one waits for that lock anyway, to build the
+    // moved view.
+    if (_isGliding.load(std::memory_order_relaxed))
     {
-        auto const dt = chrono::duration<float>(now - _scrollMomentum.lastUpdate).count();
-        if (dt > 0.0f)
-        {
-            // Snapshot the viewport position so we can detect a no-progress frame (glide hit the
-            // history top / viewport bottom). applySmoothScrollPixelDelta clamps but still returns
-            // Applied, so the result alone does not signal the boundary.
-            auto const positionBefore = std::pair { _viewport.scrollOffset(), _viewport.pixelOffset() };
-            auto const requestedDelta = _scrollMomentum.velocity * dt;
-
-            auto const result = applySmoothScrollPixelDelta(requestedDelta);
-            _scrollMomentum.velocity *= std::pow(_scrollMomentum.tuning.frictionDecayPerSecond, dt);
-            _scrollMomentum.lastUpdate = now;
-
-            auto const hitBoundary =
-                requestedDelta != 0.0f
-                && std::pair { _viewport.scrollOffset(), _viewport.pixelOffset() } == positionBefore;
-
-            if (_scrollMomentum.shouldStop() || result != SmoothScrollResult::Applied || hitBoundary)
-                cancelMomentumScroll();
-        }
+        auto const _ = std::scoped_lock { _ownStateLock };
+        advanceMomentumGlide(now);
     }
+}
+
+void Terminal::advanceMomentumGlide(chrono::steady_clock::time_point now)
+{
+    // Ended meanwhile by another thread, between the frame seeing the glide armed and taking the lock.
+    if (!_scrollMomentum.active)
+        return;
+
+    auto const dt = chrono::duration<float>(now - _scrollMomentum.lastUpdate).count();
+    if (dt <= 0.0f)
+        return;
+
+    // Snapshot the viewport position so we can detect a no-progress frame (glide hit the
+    // history top / viewport bottom). applySmoothScrollPixelDelta clamps but still returns
+    // Applied, so the result alone does not signal the boundary.
+    auto const positionBefore = std::pair { _viewport.scrollOffset(), _viewport.pixelOffset() };
+    auto const requestedDelta = _scrollMomentum.velocity * dt;
+
+    auto const result = applySmoothScrollPixelDelta(requestedDelta);
+    _scrollMomentum.velocity *= std::pow(_scrollMomentum.tuning.frictionDecayPerSecond, dt);
+    _scrollMomentum.lastUpdate = now;
+
+    auto const hitBoundary =
+        requestedDelta != 0.0f
+        && std::pair { _viewport.scrollOffset(), _viewport.pixelOffset() } == positionBefore;
+
+    if (_scrollMomentum.shouldStop() || result != SmoothScrollResult::Applied || hitBoundary)
+        cancelMomentumScroll();
 }
 
 void Terminal::resetSmoothScroll() noexcept
@@ -2142,11 +2512,12 @@ void Terminal::handleScrollPhase(ScrollPhase phase,
 void Terminal::cancelMomentumScroll() noexcept
 {
     _scrollMomentum = ScrollMomentumState {};
+    _isGliding.store(false, std::memory_order_relaxed);
 }
 
 bool Terminal::isMomentumScrollActive() const noexcept
 {
-    return _scrollMomentum.active;
+    return _isGliding.load(std::memory_order_relaxed);
 }
 
 SmoothScrollResult Terminal::injectWheelMomentum(float pixelDelta,
@@ -2198,6 +2569,7 @@ void Terminal::armMomentum(float velocity,
     // stops crisply rather than crawling toward an ever-smaller threshold.
     _scrollMomentum.initialVelocity = std::abs(velocity);
     _scrollMomentum.lastUpdate = now;
+    _isGliding.store(true, std::memory_order_relaxed);
 
     // Kick the render loop so tick() advances the glide even when the display is otherwise idle;
     // without this the display idles after the last input and momentum would only advance on the
@@ -2285,6 +2657,7 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 
     // Cancel any active cursor motion animation on resize.
     _cursorMotion.active = false;
+    publishAnimationsEnd();
 
     // Reset smooth scroll state on resize.
     resetSmoothScroll();
@@ -2292,6 +2665,10 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
     auto const mainDisplayPageSize = totalPageSize - statusLineHeight();
+
+    // What the grid had, rather than what _settings.pageSize less the status line says: a status line just
+    // shown or hidden has already changed statusLineHeight() by the time it resizes through here.
+    auto const gridPageSizeBefore = currentScreen().grid().pageSize();
 
     auto const oldMainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
@@ -2332,6 +2709,10 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
     // clampToScreen keeps the cursor on the page but knows nothing about folds, so the page-delta
     // shift above can land it inside a collapsed block, where it renders as nothing at all.
     snapViCursorOutOfFolds();
+
+    // Not for a call that only brings new pixel sizes: no row moved.
+    if (currentScreen().grid().pageSize() != gridPageSizeBefore)
+        _eventListener.pageResized();
 
     reportInBandWindowResize();
 
@@ -2377,7 +2758,7 @@ void Terminal::verifyState()
     Require(*_currentMousePosition.line < *thePageSize.lines);
 
     Require(_hostWritableStatusLineScreen.pageSize() == _indicatorStatusScreen.pageSize());
-    Require(_hostWritableStatusLineScreen.pageSize().lines == LineCount(1));
+    Require(_hostWritableStatusLineScreen.pageSize().lines == StatusLineHeight);
     Require(_hostWritableStatusLineScreen.pageSize().columns == _settings.pageSize.columns);
 
     // TODO: the current main display's page size PLUS visible status line count must match total page size.
@@ -2415,20 +2796,11 @@ void Terminal::setCursorShape(CursorShape shape)
 void Terminal::setWordDelimiters(string const& wordDelimiters)
 {
     _settings.wordDelimiters = unicode::from_utf8(wordDelimiters);
-
-    _selectionHelper.wordDelimited = [wordDelimiters = _settings.wordDelimiters,
-                                      this](CellLocation const& pos) {
-        return this->wordDelimited(pos, wordDelimiters);
-    };
 }
 
 void Terminal::setExtendedWordDelimiters(string const& wordDelimiters)
 {
     _settings.extendedWordDelimiters = unicode::from_utf8(wordDelimiters);
-    _extendedSelectionHelper.wordDelimited = [extendedDelimieters = _settings.extendedWordDelimiters,
-                                              this](CellLocation const& pos) {
-        return this->wordDelimited(pos, extendedDelimieters);
-    };
 }
 
 namespace
@@ -2471,11 +2843,11 @@ namespace
             lastColumn = pos.column;
 
             // A cell that only CONTINUES another carries no text of its own -- horizontally, where its
-            // codepoint is 0, or vertically, where a tall block reaches down into the row. Without
-            // this they fall into the empty-cell branch below and copy as spaces: 中a would yield
-            // "中 a", and a six-column text-sizing block would trail five spaces.
-            if (cell.isFlagEnabled(CellFlag::WideCharContinuation)
-                || cell.isFlagEnabled(CellFlag::MulticellContinuation))
+            // codepoint is 0, or vertically, where a tall block reaches down into the row -- and nor does
+            // the padding a wide character left at the end of a row. Without this they fall into the
+            // empty-cell branch below and copy as spaces: 中a would yield "中 a", a six-column text-sizing
+            // block would trail five spaces, and a word a wide character wrapped early would be split.
+            if (cell.flags().any(NoTextCellFlags))
                 return;
 
             currentLineHasContent = true;
@@ -2537,18 +2909,25 @@ string Terminal::extractSelectionText() const
 
 void Terminal::selectAll()
 {
-    auto const& grid = _currentScreen->grid();
+    selectLines(-boxed_cast<LineOffset>(_currentScreen->grid().historyLineCount()),
+                boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1));
+}
 
-    auto const top =
-        CellLocation { .line = -boxed_cast<LineOffset>(grid.historyLineCount()), .column = ColumnOffset(0) };
-    auto const bottom =
-        CellLocation { .line = boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1),
-                       .column = boxed_cast<ColumnOffset>(pageSize().columns) - ColumnOffset(1) };
+void Terminal::selectLines(LineOffset top, LineOffset bottom)
+{
+    auto const from = CellLocation { .line = top, .column = ColumnOffset(0) };
+    auto const to = CellLocation { .line = bottom,
+                                   .column = boxed_cast<ColumnOffset>(pageSize().columns) - ColumnOffset(1) };
 
     // FullLineSelection rather than LinearSelection: it normalizes the columns to whole lines and follows
-    // wrapped ones, which is what "all" means here (and what ViMode's VisualLine already does).
-    setSelector(std::make_unique<FullLineSelection>(_selectionHelper, top, selectionUpdatedHelper()));
-    (void) _selection->extend(bottom);
+    // wrapped ones, which is what "all" and "this block" mean (and what ViMode's VisualLine already does).
+    selectThrough(std::make_unique<FullLineSelection>(_selectionHelper, from, selectionUpdatedHelper()), to);
+}
+
+void Terminal::selectThrough(std::unique_ptr<Selection> selector, CellLocation to)
+{
+    setSelector(std::move(selector));
+    (void) _selection->extend(to);
 
     // Completing a selection is Insert mode's business — exactly the gate sendMouseReleaseEvent() applies
     // to a finished drag. In a Visual mode the Vi layer owns the selection and every motion extends it
@@ -2556,18 +2935,21 @@ void Terminal::selectAll()
     // not Complete), so handing it a completed one aborts on the next keystroke.
     if (_inputHandler.mode() == ViMode::Insert)
         _selection->complete();
+    else
+    {
+        // The next motion moves the vi cursor and extends the selection to it, so the cursor stands where the
+        // selection ends, as it would had the motions made it.
+        _viCommands.cursorPosition = to;
+        _viewport.makeVisible(to.line);
+    }
 
     // Deliberately NOT updateSelectionMatches(): that serializes the selection into a search pattern to
-    // highlight the other occurrences of a selected WORD. For a selection that spans the whole scrollback
-    // the pattern is the entire buffer — megabytes built under the terminal lock, for a search whose only
-    // match is what is already selected, and which then disables the trivial-line render fast path for
-    // every frame that follows. The quadruple-click full-line selection skips it for the same reason.
+    // highlight the other occurrences of a selected WORD. For a selection that spans many lines -- the whole
+    // scrollback, or a block's long output -- the pattern is megabytes built under the terminal lock, for a
+    // search whose only match is what is already selected, and which then disables the trivial-line render
+    // fast path for every frame that follows. The quadruple-click full-line selection skips it for the same
+    // reason.
     onSelectionUpdated();
-}
-
-std::optional<CommandBlockText> Terminal::lastCommandBlock() const
-{
-    return primaryScreen().lastCommandBlock();
 }
 
 // {{{ Output folding
@@ -2675,6 +3057,9 @@ void Terminal::onFoldStateChanged()
 
 bool Terminal::toggleFoldContaining(LineOffset gridLine)
 {
+    if (!isFoldingAvailable())
+        return false;
+
     auto const range = foldContaining(gridLine);
     if (!range)
         return false;
@@ -2695,8 +3080,24 @@ bool Terminal::expandFoldContaining(LineOffset gridLine)
     return true;
 }
 
+void Terminal::collapseFoldContaining(LineOffset gridLine)
+{
+    if (!isFoldingAvailable())
+        return;
+
+    auto const range = foldContaining(gridLine);
+    if (!range || _foldState.isCollapsed(range->headStableId))
+        return;
+
+    _foldState.collapse(range->headStableId);
+    onFoldStateChanged();
+}
+
 bool Terminal::toggleLastFold()
 {
+    if (!isFoldingAvailable() || !foldingAppliesToDisplayedPage())
+        return false;
+
     auto const ranges = foldRanges();
     if (ranges.empty())
         return false;
@@ -2709,6 +3110,14 @@ bool Terminal::toggleLastFold()
 
 bool Terminal::collapseLastFold()
 {
+    // Like every fold verb a user reaches, a verb about the page on display: in vim, the primary screen
+    // and its folds are out of sight, and folding them away there would hide the output the user returns
+    // to.
+    return isFoldingAvailable() && foldingAppliesToDisplayedPage() && collapseNewestFold();
+}
+
+bool Terminal::collapseNewestFold()
+{
     auto const ranges = foldRanges();
     if (ranges.empty() || _foldState.isCollapsed(ranges.front().headStableId))
         return false;
@@ -2720,6 +3129,9 @@ bool Terminal::collapseLastFold()
 
 bool Terminal::collapseAllFolds()
 {
+    if (!isFoldingAvailable() || !foldingAppliesToDisplayedPage())
+        return false;
+
     auto const revision = _foldState.revision();
     _foldState.collapseAll(foldRanges());
     if (_foldState.revision() == revision)
@@ -2731,6 +3143,9 @@ bool Terminal::collapseAllFolds()
 
 bool Terminal::expandAllFolds()
 {
+    if (!foldingAppliesToDisplayedPage())
+        return false;
+
     auto const revision = _foldState.revision();
     _foldState.expandAll();
     if (_foldState.revision() == revision)
@@ -2740,74 +3155,450 @@ bool Terminal::expandAllFolds()
     return true;
 }
 
-void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
+LineOffset Terminal::drawnRowLimit() const
 {
-    // The same predicate the projection and the render pass use: the gutter marks the rows that were
-    // actually folded, so it appears exactly where folding applied.
-    if (!_settings.foldMarkers || !foldingAppliesToDisplayedPage())
-        return;
-
-    // Nothing anywhere in reach is foldable -- the overwhelmingly common case for a shell with no
-    // integration at all, and the one that must cost nothing beyond the cached scan.
-    if (foldRanges().empty())
-        return;
-
-    auto const stableBase = primaryScreen().grid().stableLineIdOf(LineOffset(0));
-
-    // Resolved by the palette itself, so a colour scheme that says nothing about folding still yields
-    // a legible column and every future consumer gets the same answer without re-deriving it.
-    auto const normal = _colorPalette.foldMarkerColors();
-    auto const hovered = _colorPalette.foldMarkerHoverColors();
-
-    // The whole run of the hovered fold lights up, not the one row under the pointer: that run is what a
-    // click acts on, so it is what the highlight has to describe.
-    auto const hoveredHead = _gutterHoverLine
-                                 ? foldCovering(foldRanges(), stableBase + unbox<int64_t>(*_gutterHoverLine))
-                                 : std::nullopt;
-
     // How far down the page the projection actually reaches, which is NOT always a page-full: collapsed
     // folds hiding more rows than the history can backfill leave it short, and the rest of the page is
     // blank. Mapping a blank row anyway extrapolates it onto the last visible line -- every one of them
-    // onto the SAME line -- so each would be handed that line's marker, a column of duplicates hanging
+    // onto the SAME line -- so each would be handed that line's gutter, a column of duplicates hanging
     // below content Grid::render draws nothing on.
     //
-    // Held as a count rather than as the span it comes from, because the loop below re-enters the cache
-    // that span points into. An empty projection means nothing is collapsed and the whole page is drawn.
+    // A count rather than the span it comes from, because the callers' loops re-enter the cache that span
+    // points into. An empty projection means nothing is collapsed and the whole page is drawn.
+    //
+    // The MAIN page, not the total: _settings.pageSize includes the status line, and nothing drawn here
+    // belongs beside it.
     auto const pageLines = boxed_cast<LineOffset>(pageSize().lines);
     auto const projectedRows = foldProjection().size();
-    auto const lastRow =
-        projectedRows == 0
-            ? pageLines
-            : std::min(pageLines, foldProjectionTopRow() + LineOffset::cast_from(projectedRows));
+    return projectedRows == 0
+               ? pageLines
+               : std::min(pageLines, foldProjectionTopRow() + LineOffset::cast_from(projectedRows));
+}
 
-    // The MAIN page, not the total: _settings.pageSize includes the status line, and a gutter marker
-    // does not belong beside it. Shifted by baseLine for the same reason every cell is -- a status line
-    // at the top moves the main page down, and a marker left where it was would point at the wrong row.
-    for (auto y = LineOffset(0); y < lastRow; ++y)
+CellLocation Terminal::gridCursorPosition() const noexcept
+{
+    if (_inputHandler.mode() == ViMode::Insert)
+        return currentScreen().cursor().position;
+    return _viCommands.cursorPosition;
+}
+
+void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
+{
+    // The same predicate the projection and the render pass use. On every other page -- the alternate
+    // screen of vim, less or htop among them -- the strip stays reserved, its width being the
+    // configuration's and never the content's, and stays empty: those rows have no history to number, no
+    // birth time worth showing and no command blocks. Asked first, so those frames build no layout at all.
+    if (!foldingAppliesToDisplayedPage())
+        return;
+
+    // Built per frame rather than cached: Settings is mutable through settings(), and the layout formats a
+    // sample only when timestamps are on.
+    auto const layout = gutterLayoutFor(_settings.gutter);
+    if (layout.totalColumns == 0)
+        return;
+
+    auto const& gutter = _settings.gutter;
+    auto const& grid = primaryScreen().grid();
+    auto const textColors = _colorPalette.gutterTextColors();
+
+    // Absolute numbers count every row the session ever had, the evicted ones included; the distance counts
+    // VISIBLE rows, so a collapsed fold is one row -- what `j` and `k` count.
+    //
+    // The drawn rows are consecutive visible rows, so row y is the top row's distance plus y: measured once
+    // per frame, which with folds collapsed is a walk of the hidden runs, and not at all in absolute mode,
+    // which never reads it.
+    auto const numbers = layout.segment(GutterSegmentKind::LineNumber);
+    auto const topRowDistance =
+        numbers && gutter.lineNumbers != LineNumberMode::Absolute
+            ? visibleDistance(gridCursorPosition().line, _viewport.translateScreenToGridLine(LineOffset(0)))
+            : 0;
+    auto const lineNumberOf = [&](LineOffset gridLine, int screenRow) {
+        if (!numbers)
+            return LineNumberText {};
+        auto const absolute = grid.evictedRowCount()
+                              + static_cast<uint64_t>(unbox<int64_t>(gridLine - grid.addressableTop())) + 1;
+        return lineNumberText(lineNumberFor(gutter.lineNumbers, absolute, topRowDistance + screenRow),
+                              numbers->columns);
+    };
+
+    // Only with the segment present, in the format the layout already resolved. A run spells the rows top
+    // to bottom, so it is asked once per drawn row, in order.
+    auto timestamps = layout.segment(GutterSegmentKind::Timestamp)
+                          ? std::optional { TimestampRun { layout.timestampFormat, _clocks.localTime } }
+                          : std::nullopt;
+    auto const timestampOf = [&](Line const& line) {
+        if (!timestamps)
+            return std::string {};
+        return timestamps->next(lineBirthTime(line));
+    };
+
+    // The whole run of the hovered fold lights up, not the one row under the pointer: that run is what a
+    // click acts on, so it is what the highlight has to describe.
+    auto const hoveredHead =
+        _gutterHoverLine ? foldCovering(foldRanges(), grid.stableLineIdOf(*_gutterHoverLine)) : std::nullopt;
+
+    // Shifted by baseLine for the same reason every cell is: a status line at the top moves the main page
+    // down, and a gutter left where it was would point at the wrong row.
+    for (auto const y: std::views::iota(0, unbox<int>(drawnRowLimit())))
     {
-        auto const id = stableBase + unbox<int64_t>(_viewport.translateScreenToGridLine(y));
+        auto const screenRow = LineOffset(y);
+        auto const gridLine = _viewport.translateScreenToGridLine(screenRow);
+        auto const id = grid.stableLineIdOf(gridLine);
+        auto const& line = grid.lineAt(gridLine);
+        auto const* record = commandBlockAt(gridLine);
 
         // Asked for per row rather than held across the loop: foldRanges() hands back a span over a
-        // CACHE, and the translation on the line above re-enters that cache once per row. Holding it
-        // survives only as long as no key input can move inside a frame -- one that could, and the
-        // remaining rows would be reading freed memory. A cache hit here is three integer comparisons.
+        // CACHE, and the translation above re-enters that cache once per row. Holding it survives only as
+        // long as no key input can move inside a frame -- one that could, and the remaining rows would be
+        // reading freed memory. A cache hit here is three integer comparisons.
         auto const range = foldCovering(foldRanges(), id);
-        if (!range)
+
+        auto const facts = BlockColumnFacts {
+            .fold = range ? markerIn(*range, id) : FoldMarker::None,
+            .head = blockHeadStateOf(record, id, grid.stableIdGeneration()),
+            .mark =
+                line.isFlagEnabled(LineFlag::UserMark) ? UserMarkPresence::Present : UserMarkPresence::Absent,
+        };
+        auto const glyph = blockColumnGlyph(facts, gutter);
+
+        auto const outcome =
+            record != nullptr && gutter.exitStatus ? std::optional { outcomeOf(*record) } : std::nullopt;
+        auto const hover = hoveredHead && range && hoveredHead->headStableId == range->headStableId
+                               ? GutterHover::Hovered
+                               : GutterHover::Rest;
+
+        appendGutterCells(
+            layout,
+            GutterRow { .screenLine = baseLine + screenRow,
+                        .timestamp = timestampOf(line),
+                        .lineNumber = lineNumberOf(gridLine, y),
+                        .glyph = glyph,
+                        // Mixed only for a glyph there is: most rows have none.
+                        .glyphColors = glyph == BlockColumnGlyph::None
+                                           ? RGBColorPair {}
+                                           : blockColumnColors(_colorPalette, glyph, outcome, hover) },
+            textColors,
+            output.gutter);
+    }
+}
+
+void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
+{
+    // Only a COLLAPSED fold is labelled, and nothing is collapsed in the common case -- which then costs
+    // one comparison. Independent of the gutter: with the fold column hidden, the label is the only sign
+    // left that output was folded away.
+    if (!foldingAppliesToDisplayedPage() || _foldState.empty())
+        return;
+
+    // The few collapsed folds, rather than every drawn row: the rows are what is expensive to translate while
+    // anything is collapsed. Copied out of foldRanges(), whose span points into a cache the translations
+    // below re-enter.
+    auto const collapsed =
+        std::ranges::to<std::vector>(foldRanges() | std::views::filter([this](FoldRange const& range) {
+                                         return _foldState.isCollapsed(range.headStableId);
+                                     }));
+
+    auto const& grid = primaryScreen().grid();
+    auto const pageLines = unbox<int>(pageSize().lines);
+    auto const drawnRows = drawnRowLimit();
+    auto const attributes = gutterCellAttributes(_colorPalette.gutterTextColors());
+
+    for (auto const& range: collapsed)
+    {
+        auto const head = grid.lineOffsetOf(range.headStableId);
+        if (!head)
             continue;
 
-        auto const marker = markerIn(*range, id);
-        if (marker == FoldMarker::None)
+        // The label follows the text where the head's LOGICAL line ends. A command line wider than the page
+        // wraps, and its head row is then full to the edge, so the label belongs on the last row of that line
+        // which is drawn: the last row of all, unless the viewport cuts the line short.
+        auto const continuations = std::ranges::distance(
+            std::views::iota(unbox<int>(*head) + 1, pageLines)
+            | std::views::take_while([&](int row) { return grid.lineAt(LineOffset(row)).wrapped(); }));
+        auto const bottomUp =
+            std::views::iota(unbox<int>(*head), unbox<int>(*head) + static_cast<int>(continuations) + 1)
+            | std::views::reverse;
+        auto const isDrawn = [&](int row) {
+            auto const screenRow = _viewport.translateGridToScreenCoordinate(LineOffset(row));
+            return screenRow >= LineOffset(0) && screenRow < drawnRows
+                   && _viewport.isLineVisible(LineOffset(row));
+        };
+        auto const lastDrawn = std::ranges::find_if(bottomUp, isDrawn);
+        if (lastDrawn == std::ranges::end(bottomUp))
             continue;
 
-        auto const& colors =
-            hoveredHead && hoveredHead->headStableId == range->headStableId ? hovered : normal;
+        auto const gridLine = LineOffset(*lastDrawn);
+        auto const hidden = static_cast<uint64_t>(range.lastStableId - range.firstStableId + 1);
+        layoutFoldLabel(output.annotations,
+                        baseLine + _viewport.translateGridToScreenCoordinate(gridLine),
+                        grid.lineAt(gridLine).trimmedColumns(),
+                        pageSize().columns,
+                        collapsedFoldLabel(hidden),
+                        attributes);
+    }
+}
 
-        output.gutter.push_back(
-            RenderGutterCell { .lineOffset = baseLine + y,
-                               .codepoint = foldMarkerGlyph(marker),
-                               .attributes = RenderAttributes { .foregroundColor = colors.foreground,
-                                                                .backgroundColor = colors.background,
-                                                                .decorationColor = colors.foreground } });
+namespace
+{
+    /// The primary screen's rows with the block each line was stamped with (Line::blockId()): unlike
+    /// AttributedBlockRows, no row is attributed through the store, so a row costs one read and never a
+    /// scan -- what the sticky header's per-frame walk down a prompt may spend.
+    class StampedBlockRows final: public CommandBlockRowSource
+    {
+      public:
+        explicit StampedBlockRows(Grid const& grid) noexcept: _grid { grid } {}
+
+        [[nodiscard]] LineOffset topRow() const override { return _grid.addressableTop(); }
+
+        [[nodiscard]] LineOffset bottomRow() const override
+        {
+            return boxed_cast<LineOffset>(_grid.pageSize().lines) - LineOffset(1);
+        }
+
+        [[nodiscard]] CommandBlockId blockIdAt(LineOffset row) const override
+        {
+            return _grid.lineAt(row).blockId();
+        }
+
+        [[nodiscard]] LineFlags flagsAt(LineOffset row) const override { return _grid.lineAt(row).flags(); }
+
+        [[nodiscard]] ColumnOffset commandEndColumnAt(LineOffset row) const override
+        {
+            return _grid.lineAt(row).commandEndOffset();
+        }
+
+      private:
+        Grid const& _grid;
+    };
+
+    /// Lays @p text out on @p line so that it ends just short of @p end, appended to @p output -- what
+    /// fits of it, when the row from column 0 to @p end is too narrow for all of it.
+    ///
+    /// Laid out from column 0 first, then moved right by the room left over: the width is read off the cells
+    /// as laid out, so the rule that a zero-width codepoint joins its base is spelled once, in
+    /// layoutRenderText().
+    /// @param output Where the cells go.
+    /// @param text The text.
+    /// @param attributes Its colours.
+    /// @param line The screen row.
+    /// @param end The first column the text may not reach.
+    /// @return The column its first cell starts at; @p end when nothing fits.
+    ColumnOffset layoutRightAligned(std::vector<RenderCell>& output,
+                                    std::u32string_view text,
+                                    RenderAttributes const& attributes,
+                                    LineOffset line,
+                                    ColumnOffset end)
+    {
+        auto const first = output.size();
+        auto const width = layoutRenderText(
+            output, text, attributes, CellLocation { .line = line, .column = ColumnOffset(0) }, end);
+        auto const shift = end - width;
+        for (auto& cell: output | std::views::drop(static_cast<std::ptrdiff_t>(first)))
+            cell.position.column += shift;
+        return shift;
+    }
+
+    /// Where @p record's head is in @p grid, for the sticky header: the test the reveal a jump to the head
+    /// performs (Terminal::revealStableLineAtTop()), split the same way.
+    /// @param grid The primary screen's grid.
+    /// @param record The block.
+    /// @return The head row; HeadEvicted when the record was headed in this grid's generation and its row
+    ///         has left the history since; HeadNotPlaced when it was headed in another generation -- a
+    ///         daemon mirror's record before the rows that head it arrive -- which is not known here, and
+    ///         not the same as gone.
+    [[nodiscard]] std::expected<LineOffset, CommandBlockJumpError> locateHead(
+        Grid const& grid, CommandBlockRecord const& record)
+    {
+        if (auto const head = headOffsetOf(grid, record))
+            return *head;
+        if (record.headIdGeneration == grid.stableIdGeneration())
+            return std::unexpected { CommandBlockJumpError::HeadEvicted };
+        return std::unexpected { CommandBlockJumpError::HeadNotPlaced };
+    }
+
+    /// Why a jump to a block's head failed, for a reveal of that head that was refused: the same reason, in
+    /// the jump's words.
+    /// @param error Why the reveal was refused.
+    /// @return The jump's error.
+    [[nodiscard]] CommandBlockJumpError jumpErrorOf(RevealError error) noexcept
+    {
+        switch (error)
+        {
+            case RevealError::Evicted: return CommandBlockJumpError::HeadEvicted;
+            case RevealError::OtherGeneration: return CommandBlockJumpError::HeadNotPlaced;
+            case RevealError::NotScrollable: return CommandBlockJumpError::NotScrollable;
+        }
+        core::unreachable();
+    }
+} // namespace
+
+Terminal::GatheredStickyHeader Terminal::stickyHeaderInput() const
+{
+    auto gathered = GatheredStickyHeader {
+        .input =
+            StickyHeaderInput {
+                .settings = _settings.stickyHeader,
+                // The DISPLAYED page, as folding and the gutter use: with DECPCCM reset the cursor's may
+                // differ.
+                .screen = screenTypeFromPage(_displayedPage),
+                .viewport = _viewport.scrolled() ? ViewportScroll::Scrolled : ViewportScroll::Live,
+                .topRowAge = TopRowAge::Newer,
+                .cursor = TopRowCursor::Elsewhere,
+                .block = std::nullopt,
+            },
+        .record = nullptr,
+        .inputLine = std::nullopt,
+    };
+    auto& input = gathered.input;
+
+    // Nothing below describes a page that carries no blocks, and the viewport's translation would speak
+    // for the wrong grid there.
+    if (input.screen != ScreenType::Primary)
+        return gathered;
+
+    auto const& grid = primaryScreen().grid();
+    auto const topLine = _viewport.topLine();
+    // A row of the scrollback, and the oldest it keeps. The live page's first row is no top of a scrollback
+    // even where nothing older survives -- with none kept -- so there the mode decides, as for any row.
+    input.topRowAge =
+        topLine < LineOffset(0) && topLine <= grid.addressableTop() ? TopRowAge::Oldest : TopRowAge::Newer;
+    // Outside insert mode the cursor drawn is the vi-mode one, in grid coordinates; in it, the terminal's
+    // own, on the live page -- where the page it is on is the one displayed.
+    if (_inputHandler.mode() != ViMode::Insert)
+        input.cursor =
+            _viCommands.cursorPosition.line == topLine ? TopRowCursor::ViCursor : TopRowCursor::Elsewhere;
+    else
+        input.cursor = _cursorPage == _displayedPage && primaryScreen().cursor().position.line == topLine
+                           ? TopRowCursor::TextCursor
+                           : TopRowCursor::Elsewhere;
+
+    // Where no block could get a header -- the commonest frame, live output under the default mode -- the
+    // block is not worth looking up.
+    if (!stickyHeaderPossible(input.settings, input.screen, input.viewport, input.topRowAge))
+        return gathered;
+
+    // The row's own block, resolved through the store -- not a walk up to its prompt.
+    auto const* const record = commandBlockAt(topLine);
+    if (record == nullptr)
+        return gathered;
+
+    // A block a ;C opened with no ;A before it never had a command row: none to copy, and none to have lost,
+    // so neither the header nor the placeholder -- which would claim an eviction that never happened.
+    if (!record->promptStartedAt)
+        return gathered;
+
+    auto facts = StickyHeaderBlockFacts {
+        .id = record->id,
+        .state = record->state,
+        .head = StickyHeadPosition::Visible,
+        .topRow = TopRowPart::Output,
+    };
+    auto const head = locateHead(grid, *record);
+    if (!head)
+    {
+        // A head not placed yet is unknown here, not gone: no header, and no placeholder to call it evicted.
+        if (head.error() == CommandBlockJumpError::HeadNotPlaced)
+            return gathered;
+        // The head scrolled out of the history, while the top row shows the block's rows outlived it.
+        facts.head = StickyHeadPosition::Evicted;
+    }
+    else if (*head < topLine)
+    {
+        if (auto const inputLine = inputRowOf(StampedBlockRows { grid }, *head, record->id))
+        {
+            facts.head = StickyHeadPosition::Above;
+            auto const lastRow = boxed_cast<LineOffset>(grid.pageSize().lines) - LineOffset(1);
+            auto const inputEnd = grid.logicalLineEnd(
+                *inputLine, std::min(*inputLine + LineOffset::cast_from(MaxPromptScanLines), lastRow));
+            facts.topRow = topLine > inputEnd ? TopRowPart::Output : TopRowPart::Input;
+            gathered.inputLine = inputLine;
+        }
+        else
+        {
+            // Headed at its output: the command row has left as surely as an evicted head has, and a copy of
+            // the row that heads the block now would pass off output as the command.
+            facts.head = StickyHeadPosition::Evicted;
+        }
+    }
+    input.block = facts;
+    gathered.record = record;
+    return gathered;
+}
+
+std::expected<void, CommandBlockJumpError> Terminal::scrollToCommandBlockHead(CommandBlockId id)
+{
+    auto const* const record = commandBlocks().find(id);
+    if (record == nullptr)
+        return std::unexpected { CommandBlockJumpError::UnknownBlock };
+
+    // The reveal a click on a scrollbar tick performs: it refuses a head placed in another generation, then
+    // one the scrollback dropped, and opens the fold hanging off the head first.
+    return revealStableLineAtTop(record->headStableId, record->headIdGeneration).transform_error(jumpErrorOf);
+}
+
+void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
+{
+    auto const gathered = stickyHeaderInput();
+    auto const decision = stickyHeaderFor(gathered.input);
+    if (!decision)
+        return;
+
+    // A decision names the block it was handed, whose record the gathering kept.
+    auto const* const record = gathered.record;
+
+    auto& header = output.showStickyHeader();
+    header.kind = decision->kind;
+    header.block = decision->block;
+    header.background = _colorPalette.stickyHeaderBackgroundColor();
+    header.separator = _colorPalette.stickyHeaderSeparatorColor();
+
+    // The page's own background, which the renderer leaves unpainted: the header's text sits on its opaque
+    // band without a rectangle per cell repainting the band over the band.
+    auto const background = _colorPalette.defaultBackground;
+
+    // The chip first, as it decides how much room the text gets: right-aligned, StickyHeaderChipInset columns
+    // short of the page's end (clear of the overlay scrollbar), and never pushed left of column 0 on a page
+    // too narrow for it. The injected wall clock, so a test drives the running time.
+    auto const statusColor = _colorPalette.blockStatusColor(outcomeOf(*record));
+    auto const chipStart = layoutRightAligned(
+        header.chip,
+        stickyHeaderChip(*record, _clocks.wall.now()),
+        RenderAttributes { .foregroundColor = statusColor,
+                           .backgroundColor = background,
+                           .decorationColor = statusColor,
+                           .flags = {},
+                           .lineFlags = LineFlag::None },
+        baseLine,
+        boxed_cast<ColumnOffset>(std::max(ColumnCount(0), pageSize().columns - StickyHeaderChipInset)));
+
+    // One blank column between the text and the chip, so a long command never runs into it.
+    auto const textColumns = std::max(ColumnCount(0), boxed_cast<ColumnCount>(chipStart) - ColumnCount(1));
+
+    switch (decision->kind)
+    {
+        case StickyHeaderKind::Command:
+            // Decided only for a head above the viewport, whose input row the gathering found.
+            RenderBufferBuilder::renderDetachedLine(header.cells,
+                                                    *this,
+                                                    primaryScreen().grid().lineAt(*gathered.inputLine),
+                                                    baseLine,
+                                                    textColumns);
+            break;
+        case StickyHeaderKind::Evicted: {
+            // No row of the block's prompt survives to be copied, so the record speaks for it: the command
+            // line it kept, sanitised, in the gutter's own quieter text colour.
+            auto const textColor = _colorPalette.gutterTextColor();
+            layoutRenderText(header.cells,
+                             evictedPlaceholderText(record->commandLine, textColumns),
+                             RenderAttributes { .foregroundColor = textColor,
+                                                .backgroundColor = background,
+                                                .decorationColor = textColor,
+                                                .flags = {},
+                                                .lineFlags = LineFlag::None },
+                             CellLocation { .line = baseLine, .column = ColumnOffset(0) },
+                             boxed_cast<ColumnOffset>(textColumns));
+            break;
+        }
     }
 }
 
@@ -2839,12 +3630,13 @@ void Terminal::setGutterHoverLine(std::optional<LineOffset> gridLine)
 
 void Terminal::autoCollapseOnNewPrompt()
 {
-    if (!_settings.autoCollapseFoldOnNewCommand)
+    if (!_settings.autoCollapseFoldOnNewCommand || !isFoldingAvailable())
         return;
 
     // The scan is driven off the marks, and the ;A that brought us here has already been stamped -- so
-    // the block that just finished is the front one, exactly as it is for CollapseLastFold.
-    collapseLastFold();
+    // the block that just finished is the front one, exactly as it is for CollapseLastFold. Whichever page
+    // is on display: the prompt belongs to the primary screen, and so does the block it finished.
+    collapseNewestFold();
 }
 
 std::span<FoldRange const> Terminal::foldRanges() const
@@ -2858,9 +3650,10 @@ std::span<FoldRange const> Terminal::foldRanges() const
     // application (vim, less) owns the page without leaving any.
     auto const& grid = primaryScreen().grid();
 
-    // stableBase advances on every scroll, which is exactly when a mark may have moved into or out of
-    // reach; a generation bump means row identity is gone. Between those, the marks cannot have changed
-    // position, so the previous scan still stands.
+    // stableBase advances on every scroll of the page, which is exactly when a mark may have moved into or
+    // out of reach; a generation bump means row identity is gone. Between those, marks change position only
+    // by a scroll inside margins, which drops the scan through the mark revision (foldRowsMoved()), so
+    // otherwise the previous scan still stands.
     auto const key = FoldRangesKey { .generation = grid.generation(),
                                      .stableBase = grid.stableLineIdOf(LineOffset(0)),
                                      .stableFloor = grid.stableRangeFloor(),
@@ -3078,6 +3871,186 @@ LineOffset Terminal::snapToVisibleLine(LineOffset line, VerticalDirection direct
 }
 // }}}
 
+// {{{ Scrollbar marks
+std::vector<ScrollbarMarkInput> Terminal::scrollbarMarkInputs() const
+{
+    // The alternate screen keeps no history and no marks: the scrollbar over it has nothing to point into.
+    // Nor is a tick offered while the primary screen is shown but cannot scroll, or the other way round:
+    // the gate is the reveal's, so no tick is drawn that a click would refuse.
+    if (!canRevealScrollback())
+        return {};
+
+    // Both reconcile a cache of their own first, so both are read before the intervals below, which view the
+    // fold projection's: nothing that could rebuild it then runs while they are in use.
+    auto const& blocks = commandBlocks();
+    auto const& marks = userMarks().ids();
+
+    // Row 0 is the oldest HISTORY row: where the viewport measures its own range from
+    // (Viewport::scrollableLineCount), so a tick agrees with the handle about which row a fraction of the
+    // track names.
+    auto const& grid = primaryScreen().grid();
+
+    // Empty while nothing is collapsed, and then every distance below is plain subtraction. Every mark is
+    // measured from the one row 0, so the runs' lengths are summed once and a mark costs a binary search
+    // rather than a step over every run above it: `zM` over a long session is a run per command.
+    auto const hidden = hiddenIntervals();
+    auto const fromTop = VisibleDistanceFrom { hidden, grid.stableRangeFloor() };
+    auto const visibleRowOf = [&](int64_t id) {
+        // A mark a collapsed fold hides is drawn nowhere, so its tick stands on the head that hides it.
+        return fromTop.to(snapToVisibleId(hidden, id, VerticalDirection::Up));
+    };
+
+    auto inputs = std::vector<ScrollbarMarkInput> {};
+    inputs.reserve(blocks.size() + marks.size());
+
+    // O(records), never O(scrollback): each record caches its head's stable id.
+    blocks.forEachRecord([&](CommandBlockRecord const& record) {
+        // A prompt nobody has run anything from is not a command yet; a head another generation recorded
+        // names some other row now, or none of this grid's, and one below the floor names none at all.
+        if (record.state == CommandBlockState::Prompting || !headOffsetOf(grid, record))
+            return;
+
+        inputs.push_back(ScrollbarMarkInput { .visibleRow = visibleRowOf(record.headStableId),
+                                              .kind = scrollbarMarkKindOf(outcomeOf(record)),
+                                              .targetStableId = record.headStableId });
+    });
+
+    // Every id userMarks() holds names a marked line of the grid.
+    for (auto const id: marks)
+        inputs.push_back(ScrollbarMarkInput {
+            .visibleRow = visibleRowOf(id), .kind = ScrollbarMarkKind::UserMark, .targetStableId = id });
+
+    return inputs;
+}
+
+uint64_t Terminal::scrollbarMarksRevision() const
+{
+    // Each store is reconciled with the grid before its revision is read: a reconciliation that moves one
+    // moves this once, and the next read finds it where it was.
+    auto const blockRevision = commandBlocks().revision();
+    auto const userMarkRevision = userMarks().revision();
+    refreshFoldState();
+    auto const& grid = primaryScreen().grid();
+    auto const inputs = ScrollbarMarksInputs {
+        .blockRevision = blockRevision,
+        .userMarkRevision = userMarkRevision,
+        .foldRevision = _foldState.revision(),
+        .stableIdGeneration = grid.stableIdGeneration(),
+        .stableFloor = grid.stableRangeFloor(),
+        .displayedPage = _displayedPage,
+        .cursorScreen = _currentScreenType,
+    };
+    if (inputs != _scrollbarMarksInputs)
+    {
+        _scrollbarMarksInputs = inputs;
+        ++_scrollbarMarksRevision;
+    }
+    return _scrollbarMarksRevision;
+}
+
+UserMarkIndex const& Terminal::userMarks() const
+{
+    auto const& grid = primaryScreen().grid();
+    auto const generation = grid.stableIdGeneration();
+
+    // A generation bump renamed every row, so every id held names some other line now. The marks
+    // themselves survived -- UserMark is head-only and rides a reflow on its logical line's head -- so one
+    // scan finds them again. Reflow has just walked the whole scrollback itself, so this adds no new order
+    // of cost, and it runs once per bump rather than once per read.
+    if (!_userMarks.isCurrentFor(generation))
+    {
+        // No mark has ever been placed -- every one is heard of in userMarkChanged() -- so there is nothing
+        // for the scan to find, and a session that never used `mm` does not walk its scrollback per reflow.
+        auto ids = std::vector<int64_t> {};
+        if (_userMarkChanges != 0)
+            grid.forEachValidLine([&](LineOffset offset, Line const& line) {
+                if (line.isFlagEnabled(LineFlag::UserMark))
+                    ids.push_back(grid.stableLineIdOf(offset));
+            });
+        _userMarks.rebuild(ids, generation);
+    }
+
+    // Marks whose rows left the grid: scrolled out of the scrollback -- without this the set grows for the
+    // life of the session -- or cut off below a page that shrank under them, whose ids the rows scrolled in
+    // next come to name. Every other way a mark goes is reported as it happens, so nothing here looks at a
+    // line.
+    auto const bottom = boxed_cast<LineOffset>(grid.pageSize().lines) - 1;
+    _userMarks.prune(StableIdSpan { .first = grid.stableRangeFloor(), .last = grid.stableLineIdOf(bottom) });
+    return _userMarks;
+}
+
+void Terminal::toggleUserMark(LineOffset line)
+{
+    auto& screen = currentScreen();
+    auto const change = screen.isLogicalLineFlagEnabled(line, LineFlag::UserMark) ? UserMarkChange::Removed
+                                                                                  : UserMarkChange::Added;
+    // Only the primary screen's marks are held anywhere (the index, the scrollbar, the host): an alternate
+    // screen's stays as local as its rows.
+    if (_replicaRole.load(std::memory_order_acquire) != ReplicaRole::None && &screen == &primaryScreen())
+    {
+        auto const& grid = screen.grid();
+        _eventListener.userMarkRequested(UserMarkRequest { .stableId = grid.stableLineIdOf(line),
+                                                           .generation = grid.stableIdGeneration(),
+                                                           .change = change });
+        return;
+    }
+    screen.setLogicalLineFlags(line, LineFlag::UserMark, change == UserMarkChange::Added);
+}
+
+void Terminal::placeUserMark(UserMarkRequest const& request)
+{
+    auto& screen = primaryScreen();
+    auto const& grid = screen.grid();
+    if (grid.stableIdGeneration() != request.generation)
+        return;
+    if (auto const line = grid.lineOffsetOf(request.stableId))
+        screen.setLogicalLineFlags(*line, LineFlag::UserMark, request.change == UserMarkChange::Added);
+}
+
+void Terminal::userMarkChanged(int64_t headStableId, UserMarkChange change)
+{
+    // Counted even where the index drops the change for its generation: the line carries the mark either
+    // way, and the rescan that follows has to look for it.
+    ++_userMarkChanges;
+    _userMarks.record(headStableId, primaryScreen().grid().stableIdGeneration(), change);
+}
+
+void Terminal::userMarkRowsMoved(RowMove const& move)
+{
+    _userMarks.follow(move);
+}
+
+std::expected<void, RevealError> Terminal::revealStableLineAtTop(int64_t stableId,
+                                                                 uint64_t stableIdGeneration)
+{
+    auto const& grid = primaryScreen().grid();
+    if (stableIdGeneration != grid.stableIdGeneration())
+        return std::unexpected { RevealError::OtherGeneration };
+
+    auto const line = grid.lineOffsetOf(stableId);
+    if (!line)
+        return std::unexpected { RevealError::Evicted };
+
+    // Asked before the fold is touched: a reveal that cannot land changes nothing.
+    if (!canRevealScrollback())
+        return std::unexpected { RevealError::NotScrollable };
+
+    // Expanded before scrolling: a collapsed fold changes which offset puts the line on top. A block's head
+    // stays drawn while collapsed, and a user who asked to see a command asked to see what it printed as
+    // well; a line inside the fold is drawn nowhere until it opens.
+    expandFoldContaining(*line);
+
+    // A part-row smooth-scroll offset would draw the line part-way off the top, and a glide in flight would
+    // carry it off again. Both show in the frame, so dropping them asks for one even where the line is on
+    // top already and the scroll offset stays: the viewport asks only when it moves.
+    auto const wasSmoothScrolling = _viewport.pixelOffset() != 0.0f || isMomentumScrollActive();
+    resetSmoothScroll();
+    if (!_viewport.scrollLineToTop(*line) && wasSmoothScrolling)
+        breakLoopAndRefreshRenderBuffer();
+    return {};
+}
+// }}}
+
 std::expected<LivePromptSpan, PromptRegionError> Terminal::livePromptSpan() const
 {
     // An alt-screen application owns the whole page and paints no shell prompt into it, so the primary
@@ -3148,6 +4121,22 @@ void Terminal::scrollbackBufferCleared()
     breakLoopAndRefreshRenderBuffer();
 }
 
+void Terminal::rowsDropped(LineCount pageShift)
+{
+    _viCommands.cursorPosition.line -= boxed_cast<LineOffset>(pageShift);
+    clampToHistory();
+
+    // A scrollback session's labels name rows for the whole session, and some of them are gone. A visible
+    // one re-scans the viewport whenever it changes.
+    if (_hintModeHandler.isActive() && _hintScope == HintScope::Scrollback)
+        _hintModeHandler.deactivate();
+    _highlightRange = std::nullopt;
+    _gutterHoverLine = std::nullopt;
+
+    // The fold caches need nothing: both are keyed on the stable floor and base, which a drop moves.
+    scrollbackBufferCleared();
+}
+
 void Terminal::screenUpdated()
 {
     ZoneScoped;
@@ -3156,12 +4145,28 @@ void Terminal::screenUpdated()
 
     if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
     {
-        _renderBuffer.swapBuffers(_renderBuffer.lastUpdate);
+        _renderBuffer.swapBuffers(_renderBuffer.lastUpdate.load(std::memory_order_relaxed));
         return;
     }
 
     _screenDirty = true;
     _eventListener.screenUpdated();
+}
+
+void Terminal::followOutput()
+{
+    if (!_settings.autoScrollOnUpdate || !_viewport.scrolled() || _inputHandler.mode() != ViMode::Insert)
+        return;
+
+    if (_eventListener.outputFollowing() == OutputFollowing::Follow)
+        _viewport.scrollToBottom();
+}
+
+void Terminal::runWithOwnStateLockReleased(std::function<void()> const& pause)
+{
+    _ownStateLock.unlock();
+    auto const _ = core::Finally([this] { _ownStateLock.lock(); });
+    pause();
 }
 
 void Terminal::renderBufferUpdated()
@@ -3171,7 +4176,7 @@ void Terminal::renderBufferUpdated()
 
     if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
     {
-        _renderBuffer.swapBuffers(_renderBuffer.lastUpdate);
+        _renderBuffer.swapBuffers(_renderBuffer.lastUpdate.load(std::memory_order_relaxed));
         return;
     }
 
@@ -3261,10 +4266,10 @@ void Terminal::requestClipboardRead(string_view pc)
 
 void Terminal::openDocument(string_view data)
 {
-    _eventListener.openDocument(data);
+    runOutsideStateLock([this, document = string(data)] { _eventListener.openDocument(document); });
 }
 
-std::optional<std::string> Terminal::localPathAtMousePosition() const
+std::optional<std::string> Terminal::pathTextAtMousePosition() const
 {
     auto const mousePosition = currentMouseGridPosition();
     if (!mousePosition)
@@ -3272,8 +4277,6 @@ std::optional<std::string> Terminal::localPathAtMousePosition() const
 
     auto const lineText = currentScreen().lineTextAt(mousePosition->line, false, false);
     auto const mouseColumn = static_cast<size_t>(*mousePosition->column);
-    auto const cwd = extractPathFromFileUrl(currentWorkingDirectory());
-    auto const& home = _homeDirectory;
 
     static auto const localPathRegex = [] {
         // Matches, in order: drive-letter absolute paths (C:/foo, C:\foo) for Windows,
@@ -3301,14 +4304,65 @@ std::optional<std::string> Terminal::localPathAtMousePosition() const
             utf8ByteOffsetToCodepointIndex(lineText, static_cast<size_t>(match.position() + match.length()))
             - 1;
 
-        if (mouseColumn < startColumn || mouseColumn > endColumn)
-            continue;
-
-        if (auto path = resolveExistingLocalPath(cwd, home, match.str()))
-            return path;
+        // Matches do not overlap, so the first that spans the mouse is the only one.
+        if (startColumn <= mouseColumn && mouseColumn <= endColumn)
+            return match.str();
     }
 
     return std::nullopt;
+}
+
+std::expected<PathBases, PathRefusal> Terminal::localPathBaseAt(LineOffset row) const
+{
+    return terminalDirectory().and_then(
+        [&](TerminalDirectory const& here) { return localPathBaseFor(pathBlockAt(row), here); });
+}
+
+CommandBlockRecord const* Terminal::pathBlockAt(LineOffset row) const
+{
+    // Blocks live on the primary screen; a row of an alternate screen belongs to none.
+    return isPrimaryScreen() ? commandBlockAt(row) : nullptr;
+}
+
+std::expected<TerminalDirectory, PathRefusal> Terminal::terminalDirectory() const
+{
+    // The role fileUrlLocalHost() judges a file:// URL by: on a replica of another machine's terminal,
+    // every path on screen names a file there -- an absolute one included, which no working directory is
+    // asked about -- and one that exists here too is another file.
+    if (_replicaRole.load(std::memory_order_acquire) == ReplicaRole::OtherMachine)
+        return std::unexpected(PathRefusal::ReplicaOfAnotherMachine);
+
+    // Only a directory provably on this machine: a relative path in another host's is not one here.
+    auto openLocally =
+        resolveWorkingDirectory(CwdPurpose::OpenLocally)
+            .transform([](ResolvedWorkingDirectory resolved) { return std::move(resolved.path); })
+            .value_or(std::string {});
+    // Judged as a block's own directory is (workingDirectorySnapshot()), so the two compare.
+    auto const shown = resolveWorkingDirectory(CwdPurpose::Display);
+    return TerminalDirectory { .openLocally = std::move(openLocally),
+                               .locality = shown ? shown->locality : ContextLocality::Unknown };
+}
+
+void Terminal::recordForeignDirectory()
+{
+    if (_replicaRole.load(std::memory_order_acquire) != ReplicaRole::None)
+        return;
+    // Judged as terminalDirectory() judges it, so the record keeps what a path base saw while the block ran.
+    if (auto const shown = resolveWorkingDirectory(CwdPurpose::Display);
+        shown && shown->locality == ContextLocality::Foreign)
+        _commandBlocks.foreignDirectoryReported();
+}
+
+std::expected<std::optional<std::string>, PathRefusal> Terminal::localPathAtMousePosition() const
+{
+    auto const mousePosition = currentMouseGridPosition();
+    auto const text = mousePosition ? pathTextAtMousePosition() : std::nullopt;
+    if (!text)
+        return std::nullopt;
+
+    return localPathBaseAt(mousePosition->line).transform([&](PathBases const& bases) {
+        return resolveExistingLocalPath(_fileSystem, bases, _homeDirectory, *text);
+    });
 }
 
 // {{{ Hint mode
@@ -3378,57 +4432,63 @@ void Terminal::activateHintMode(HintModeRequest request)
 
     auto mutablePatterns = std::move(request.patterns);
 
-    // When CWD is available, attach a filesystem-existence validator to filepath patterns.
-    auto const cwdUrl = currentWorkingDirectory();
-    auto const cwd = extractPathFromFileUrl(cwdUrl);
-    if (!cwd.empty())
+    // A path resolves against the directory of the command that printed it, and outside any block against the
+    // working directory for opening locally (localPathBaseAt()) -- decided per row, as the mouse decides it.
+    // A row whose paths name files on another machine offers none of them: none here may stand in for them. A
+    // row with no directory to resolve against offers what the pattern as given matches, as written. A row
+    // with one offers what exists there, resolved, matched by a pattern broadened to bare filenames,
+    // extensionless files (e.g. "Makefile") and directories (e.g. "src").
+    for (auto& pattern: mutablePatterns)
     {
-        auto const& home = _homeDirectory;
-        for (auto& pattern: mutablePatterns)
+        if (pattern.name != "filepath")
+            continue;
+
+        auto asWritten = std::move(pattern.regex);
+        pattern.regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
+                                   std::regex_constants::ECMAScript | std::regex_constants::optimize);
+
+        // Resolved as the mouse resolves a path (resolveExistingLocalPath), so both name the same file.
+        // Memoized per activation: the broadened regex matches every bare word, and a scrollback-scope
+        // scan of a thousand rows would otherwise stat() each repeated one again — brutal on a network
+        // filesystem. Repetition is the norm in terminal output (a file named once per compiler
+        // diagnostic), so the cache earns its keep. Kept per block: one name means different files in the
+        // outputs of commands that ran in different directories. What a block's rows resolve against is
+        // worked out once, at its first match, against the terminal's directory as it was at activation;
+        // a visible-scope refresh re-scans against the same.
+        struct BlockPaths
         {
-            if (pattern.name != "filepath")
-                continue;
-
-            // With CWD available, broaden the regex to also match bare filenames,
-            // extensionless files (e.g. "Makefile"), and directories (e.g. "src").
-            // The validator ensures only entries that actually exist on disk are kept.
-            pattern.regex =
-                std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
-                           std::regex_constants::ECMAScript | std::regex_constants::optimize);
-
-            // Resolve a matched path to an absolute filesystem path.
-            // When HOME is unset and the path starts with ~/, return it unchanged.
-            auto const resolvePath = [cwd, home](std::string const& matchStr) -> std::string {
-                if (matchStr.starts_with("/"))
-                    return matchStr;
-                if (matchStr.starts_with("~/"))
-                    return home.empty() ? matchStr : home + matchStr.substr(1);
-                auto resolved = cwd;
-                resolved += '/';
-                resolved += matchStr;
-                return resolved;
-            };
-
-            // Memoized per activation: the broadened regex matches every bare word, and a
-            // scrollback-scope scan of a thousand rows would otherwise stat() each repeated one
-            // again — brutal on a network filesystem. Repetition is the norm in terminal output
-            // (a file named once per compiler diagnostic), so the cache earns its keep.
-            pattern.validator = [resolvePath, home, cache = std::make_shared<std::map<std::string, bool>>()](
-                                    std::string const& matchStr) -> bool {
-                // Cannot resolve ~/ paths when HOME is unset — let them through unvalidated.
-                if (matchStr.starts_with("~/") && home.empty())
-                    return true;
-                if (auto const cached = cache->find(matchStr); cached != cache->end())
-                    return cached->second;
-                auto ec = std::error_code {};
-                auto const exists = std::filesystem::exists(resolvePath(matchStr), ec);
-                cache->emplace(matchStr, exists);
-                return exists;
-            };
-
-            // Transform matched text to absolute path so Copy/Open actions work correctly.
-            pattern.transformer = resolvePath;
-        }
+            std::expected<PathBases, PathRefusal> bases;
+            std::map<std::string, optional<string>, std::less<>> resolved;
+        };
+        pattern.resolve = [this,
+                           here = terminalDirectory(),
+                           asWritten = std::move(asWritten),
+                           blocks = std::make_shared<std::map<CommandBlockId, BlockPaths>>()](
+                              std::string const& matchStr, LineOffset row) -> optional<string> {
+            if (!here)
+                return std::nullopt;
+            auto const* const block = pathBlockAt(row);
+            auto const id = block ? block->id : CommandBlockId {};
+            auto known = blocks->find(id);
+            if (known == blocks->end())
+            {
+                auto paths = BlockPaths { .bases = localPathBaseFor(block, *here), .resolved = {} };
+                known = blocks->emplace(id, std::move(paths)).first;
+            }
+            auto& [bases, resolved] = known->second;
+            if (!bases)
+                return std::nullopt;
+            if (bases->empty())
+                return std::regex_match(matchStr, asWritten) ? optional { matchStr } : std::nullopt;
+            // Cannot resolve ~/ paths when HOME is unset — let them through unvalidated, as written.
+            if (matchStr.starts_with("~/") && _homeDirectory.empty())
+                return matchStr;
+            if (auto const cached = resolved.find(matchStr); cached != resolved.end())
+                return cached->second;
+            return resolved
+                .emplace(matchStr, resolveExistingLocalPath(_fileSystem, *bases, _homeDirectory, matchStr))
+                .first->second;
+        };
     }
 
     _hintModeHandler.activate(area, std::move(mutablePatterns), request.action);
@@ -3573,6 +4633,29 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
     }
 }
 
+namespace
+{
+    /// Pastes a hint's text into @p terminal, unless it cannot arrive as it is. A path resolved against the
+    /// working directory carries whatever the OSC 7 URL decoded into it -- an ESC, a line feed. Under
+    /// bracketed paste the paste drops ESC (InputGenerator::generatePaste), and without it a shell reads
+    /// TAB and LF as keys; either way a path with a character taken out names another file, so it is not
+    /// pasted at all.
+    /// @param terminal The terminal to paste into.
+    /// @param text The hint's text.
+    void typeHint(Terminal& terminal, std::string const& text)
+    {
+        auto const purpose =
+            terminal.isModeEnabled(DECMode::BracketedPaste) ? SanitizePurpose::Insert : SanitizePurpose::Type;
+        if (!isUnchangedBySanitizing(text, purpose))
+        {
+            terminalLog()("Not typing the hint \"{}\": a shell would read part of it as keys.",
+                          core::escape(text));
+            return;
+        }
+        terminal.sendPaste(text);
+    }
+} // namespace
+
 void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText,
                                                 HintAction action,
                                                 CellLocation start,
@@ -3581,11 +4664,11 @@ void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText,
     switch (action)
     {
         case HintAction::Copy: terminal._eventListener.copyToClipboard(matchedText); break;
-        case HintAction::Open: terminal._eventListener.openDocument(matchedText); break;
-        case HintAction::Paste: terminal.sendRawInput(matchedText); break;
+        case HintAction::Open: terminal.openDocument(matchedText); break;
+        case HintAction::Paste: typeHint(terminal, matchedText); break;
         case HintAction::CopyAndPaste:
             terminal._eventListener.copyToClipboard(matchedText);
-            terminal.sendRawInput(matchedText);
+            typeHint(terminal, matchedText);
             break;
         case HintAction::Select: {
             // Clear any existing selection so that entering Visual mode uses our
@@ -3691,7 +4774,11 @@ void Terminal::reply(string_view text)
     auto const bytes = eightBit ? std::string_view(folded) : text;
     core::locked(_inputMutex, [&] { _inputGenerator.generateRaw(bytes); });
 
-    if (_syncPtyOutput)
+    // Only inside the parser, which defers the local echo of what it flushes until it has unwound. A reply
+    // raised outside it -- a selection report, a notification's answer -- comes from a frontend that may hold
+    // the state lock, where a flush would echo, which parses and takes that lock again. It goes out with the
+    // next flush, as it does without the knob.
+    if (_syncPtyOutput && tlParseDepth > 0)
         flushInput();
 }
 
@@ -3727,17 +4814,18 @@ void Terminal::requestWindowFullScreen(WindowFullScreen how)
 
 void Terminal::setApplicationkeypadMode(bool enabled)
 {
-    _inputGenerator.setApplicationKeypadMode(enabled);
+    changeInputEncoding([&](InputGenerator& input) { input.setApplicationKeypadMode(enabled); });
+    publishBindingModes();
 }
 
 void Terminal::setBracketedPaste(bool enabled)
 {
-    _inputGenerator.setBracketedPaste(enabled);
+    changeInputEncoding([&](InputGenerator& input) { input.setBracketedPaste(enabled); });
 }
 
 void Terminal::setModifyOtherKeys(int mode)
 {
-    _inputGenerator.setModifyOtherKeys(mode);
+    changeInputEncoding([&](InputGenerator& input) { input.setModifyOtherKeys(mode); });
 }
 
 int Terminal::modifyOtherKeys() const noexcept
@@ -3749,9 +4837,6 @@ void Terminal::setCursorStyle(CursorDisplay display, CursorShape shape)
 {
     _settings.cursorDisplay = display;
     _settings.cursorShape = shape;
-
-    _cursorDisplay = display;
-    _cursorShape = shape;
 }
 
 void Terminal::setCursorVisibility(bool /*visible*/)
@@ -3771,17 +4856,17 @@ void Terminal::setMarginBellVolume(BellVolume volume)
 
 void Terminal::setGenerateFocusEvents(bool enabled)
 {
-    _inputGenerator.setGenerateFocusEvents(enabled);
+    changeInputEncoding([&](InputGenerator& input) { input.setGenerateFocusEvents(enabled); });
 }
 
 void Terminal::setMouseProtocol(MouseProtocol protocol, bool enabled)
 {
-    _inputGenerator.setMouseProtocol(protocol, enabled);
+    changeInputEncoding([&](InputGenerator& input) { input.setMouseProtocol(protocol, enabled); });
 }
 
 void Terminal::setMouseTransport(MouseTransport transport)
 {
-    _inputGenerator.setMouseTransport(transport);
+    changeInputEncoding([&](InputGenerator& input) { input.setMouseTransport(transport); });
 }
 
 namespace
@@ -3828,13 +4913,15 @@ void Terminal::setMouseCoordinateMode(DECMode mode, bool enable)
 
 void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode mode)
 {
-    _inputGenerator.setMouseWheelMode(mode);
+    changeInputEncoding([&](InputGenerator& input) { input.setMouseWheelMode(mode); });
 }
 
 void Terminal::setMouseWheelScrollMultiplier(LineCount lines)
 {
     _settings.mouseWheelScrollMultiplier = lines;
-    _inputGenerator.setMouseWheelScrollMultiplier(static_cast<unsigned>(unbox(lines)));
+    changeInputEncoding([&](InputGenerator& input) {
+        input.setMouseWheelScrollMultiplier(static_cast<unsigned>(unbox(lines)));
+    });
 }
 
 void Terminal::setWindowTitle(string_view title)
@@ -3870,6 +4957,7 @@ ContextTransition Terminal::applyContextCommand(ContextCommand const& command)
     if (transition.change == ContextChange::Yes)
     {
         publishActiveContext();
+        recordForeignDirectory();
 
         // Lock-free for the same reason setProgress() above is: the OSC 3008 dispatch in Screen reaches
         // this from inside writeToScreen()'s _stateMutex hold, and _stateMutex is not recursive.
@@ -3899,24 +4987,678 @@ void Terminal::adoptContext(TerminalContext record)
 
 void Terminal::setContextChain(std::span<ContextId const> ids)
 {
+    // Not through publishActiveContext(): the rows' contexts arrive with the rows.
     auto const before = _contexts.activeId();
     _contexts.setChain(ids);
     if (_contexts.activeId() != before)
-    {
-        publishActiveContext();
         _eventListener.contextChanged(_contexts.activeId());
+}
+
+void Terminal::adoptCommandBlock(CommandBlockRecord record, AdoptMode mode)
+{
+    auto const role = _replicaRole.load(std::memory_order_acquire);
+    // The host's clock read the record's instants; they are kept as this terminal's clock reads them.
+    auto const toThisClock = [this](chrono::system_clock::time_point hostInstant) {
+        return onThisClock(hostInstant);
+    };
+    record.promptStartedAt = record.promptStartedAt.transform(toThisClock);
+    record.commandStartedAt = record.commandStartedAt.transform(toThisClock);
+    // The daemon judged the directories against its own machine; on another one they name directories there.
+    // A record that names none keeps saying so.
+    if (role == ReplicaRole::OtherMachine)
+        for (auto* const directory: { &record.workingDirectory, &record.endWorkingDirectory })
+            if (!directory->path.empty())
+                directory->locality = ContextLocality::Foreign;
+    // Not through publishActiveBlock(): the rows' ids arrive with the rows.
+    if (auto const summary = commandBlocks().adopt(std::move(record), mode))
+        _eventListener.commandBlockFinished(*summary);
+}
+
+chrono::system_clock::time_point Terminal::sessionEpoch() const noexcept
+{
+    return _sessionEpoch;
+}
+
+void Terminal::adoptSessionEpoch(chrono::system_clock::time_point epoch) noexcept
+{
+    // Held before it is floored: flooring an instant near the clock's earliest is itself an overflow.
+    _sessionEpoch = chrono::floor<chrono::seconds>(heldInstant(epoch));
+}
+
+void Terminal::adoptHostClock(chrono::system_clock::time_point hostNow) noexcept
+{
+    _hostClockOffset = heldInstant(_clocks.wall.now()) - heldInstant(hostNow);
+}
+
+chrono::system_clock::time_point Terminal::onThisClock(
+    chrono::system_clock::time_point hostInstant) const noexcept
+{
+    // Another machine's clock read the instant; this one reads it against its own. On the same machine both
+    // read one clock, and the measured difference would be nothing but the reading's transit. Held first, so
+    // the sum stays inside what the clock can count: each part is within 2^62 ns of the Unix epoch.
+    if (_replicaRole.load(std::memory_order_acquire) != ReplicaRole::OtherMachine)
+        return hostInstant;
+    return heldInstant(heldInstant(hostInstant) + _hostClockOffset);
+}
+
+// {{{ Command blocks
+namespace
+{
+    /// Whether the block whose rows reach the first row the grid holds may be headed there for want of a
+    /// mark.
+    enum class TopRowHead : uint8_t
+    {
+        Refused = 0, ///< Its head may have left the history, which ids from a dead generation cannot tell.
+        Allowed,     ///< Its head is known to lie in the grid still: an erase took it, not eviction.
+    };
+
+    /// Offers @p offer the rows of @p grid that may head a command block, in the head rule's order: each
+    /// block's rows carrying Marked, lowest first; then those carrying OutputStart, lowest first; then, top
+    /// down, the topmost row of each run of rows carrying one id. @p offer keeps the first row it takes for a
+    /// block, so the order is the rule.
+    ///
+    /// A block's head is a row of the block that carries the mark the block began with: ;A's Marked, or --
+    /// for a block a ;C minted -- ;C's OutputStart. Marked wins wherever it is, so a block is never headed at
+    /// its ;C row while its prompt survives: the walk offers Marked rows as it meets them, and only notes
+    /// OutputStart rows, to offer them once it is over. (A block whose prompt row went but whose ;C row
+    /// survived is headed at that row: still a row of the block.)
+    ///
+    /// Bottom up, and the LOWEST such row wins: a row ABOVE the head can carry the block's id. The cursor
+    /// hands the running block to a row it reaches that belongs to none -- `clear` homes it onto the page's
+    /// top row before ED 2 scrolls the page into the history -- and an erase under the cursor starts a row
+    /// afresh in the running block while keeping its marks, an older prompt's among them.
+    ///
+    /// A block with neither mark left can still hold rows: an erase blanks a row away from the cursor to no
+    /// block, its marks with it -- ED 1 inside a command takes the prompt and the output start above the
+    /// cursor. Such a block is headed at the topmost row still carrying its id, which is why the runs are
+    /// offered top down; a row carrying no block does not end a run.
+    /// @param grid The primary screen's grid.
+    /// @param unplaced How many blocks wait for a head. The walk stops once Marked rows headed them all: what
+    ///        lies above cannot move one.
+    /// @param topRow Whether the block whose rows reach the first row the grid holds may take its topmost
+    /// row.
+    /// @param offer Called as offer(CommandBlockId, int64_t stableId); returns HeadPlacement::Placed when it
+    ///        took the row for the block.
+    /// @return How many rows the walk looked at.
+    template <typename Offer>
+    size_t offerHeadRows(Grid const& grid, size_t unplaced, TopRowHead topRow, Offer const& offer)
+    {
+        auto outputStarts = std::vector<std::pair<CommandBlockId, int64_t>> {};
+        // Each run of rows carrying one id, bottom up, as that id and the run's topmost row.
+        auto runs = std::vector<std::pair<CommandBlockId, int64_t>> {};
+        auto walked = size_t { 0 };
+        auto const rowsBottomUp =
+            std::views::iota(unbox<int>(grid.addressableTop()), unbox<int>(grid.pageSize().lines))
+            | std::views::reverse;
+        for (auto const row: rowsBottomUp)
+        {
+            if (unplaced == 0)
+                break;
+            ++walked;
+            auto const offset = LineOffset::cast_from(row);
+            auto const& line = grid.lineAt(offset);
+            auto const id = line.blockId();
+            if (!id)
+                continue;
+            auto const stableId = grid.stableLineIdOf(offset);
+            if (line.isFlagEnabled(LineFlag::Marked) && offer(id, stableId) == HeadPlacement::Placed)
+                --unplaced;
+            if (line.isFlagEnabled(LineFlag::OutputStart))
+                outputStarts.emplace_back(id, stableId);
+            if (!runs.empty() && runs.back().first == id)
+                runs.back().second = stableId;
+            else
+                runs.emplace_back(id, stableId);
+        }
+        for (auto const& [id, stableId]: outputStarts)
+            offer(id, stableId);
+
+        auto const reachesTop =
+            !runs.empty() && runs.back().second == grid.stableLineIdOf(grid.addressableTop());
+        auto const topBlock =
+            reachesTop && topRow == TopRowHead::Refused ? runs.back().first : CommandBlockId {};
+        for (auto const& [id, stableId]: runs | std::views::reverse)
+            if (id != topBlock)
+                offer(id, stableId);
+        return walked;
+    }
+
+    /// Whether @p record's head may have stopped being the one the head rule gives, though row identity held.
+    ///
+    /// A scroll moved or dropped what its id named (@p moved), whatever the row there carries now. Or its row
+    /// is still in the grid -- one below the floor scrolled out of the history, which is what "evicted" says
+    /// -- but carries another block's id or none, or no mark a head is found by: an erase or a new prompt
+    /// took the row out of the block, or its marks off it, and the cursor may have handed it back since. A
+    /// head of last resort carries no mark either, and is looked at again with the rest. A head recorded in
+    /// another generation keeps it until row identity next dies.
+    [[nodiscard]] bool isHeadInDoubt(Grid const& grid,
+                                     CommandBlockRecord const& record,
+                                     std::optional<StableIdSpan> const& moved) noexcept
+    {
+        if (record.headIdGeneration != grid.stableIdGeneration())
+            return false;
+        if (moved && moved->contains(record.headStableId))
+            return true;
+        auto const head = grid.lineOffsetOf(record.headStableId);
+        if (!head)
+            return false;
+        auto const& line = grid.lineAt(*head);
+        return line.blockId() != record.id || !line.flags().any(BlockHeadLineFlags);
+    }
+
+    /// @return Whether a block target names its block by the record (a pinned id, or the last one finished)
+    ///         rather than by a row the target stands on.
+    [[nodiscard]] constexpr bool namesBlockByRecord(CommandBlockTarget target, CommandBlockId pinned) noexcept
+    {
+        return pinned != CommandBlockId {} || target == CommandBlockTarget::Last;
+    }
+} // namespace
+
+CommandBlockStore& Terminal::commandBlocks() noexcept
+{
+    syncCommandBlockHeads();
+    return _commandBlocks;
+}
+
+CommandBlockStore const& Terminal::commandBlocks() const noexcept
+{
+    syncCommandBlockHeads();
+    return _commandBlocks;
+}
+
+void Terminal::syncCommandBlockHeads() const noexcept
+{
+    auto const& grid = primaryScreen().grid();
+    auto const generation = grid.stableIdGeneration();
+    auto const sameGeneration = generation == _commandBlockHeadsGeneration;
+    auto const floor = grid.stableRangeFloor();
+    auto const formerFloor = std::exchange(_commandBlockHeadsFloor, floor);
+
+    auto const erased = reheadCommandBlocks();
+
+    // A head the history let go of since the last look stays where it was, below the floor, and one whose
+    // block an erase left no row of is put just below it, which is what "evicted" says -- and a replica is
+    // told so, so the record has changed. Within one generation only: a rebuild renumbers the rows, and a
+    // replica is sent the whole store afresh. The change listener is not told
+    // (CommandBlockStore::headsLeft()), so this read raises no event: it may be any thread's.
+    if (sameGeneration && (floor > formerFloor || !erased.empty()))
+    {
+        _commandBlockHeadWork += _commandBlocks.size();
+        _commandBlocks.headsLeft(generation, formerFloor, floor, erased);
     }
 }
 
+std::vector<CommandBlockId> Terminal::reheadCommandBlocks() const noexcept
+{
+    auto const& screen = primaryScreen();
+    auto const& grid = screen.grid();
+    auto const generation = grid.stableIdGeneration();
+    auto const rowChanges = screen.blockRowChanges();
+    auto const moved = std::exchange(_commandBlockRowsMoved, std::nullopt);
+
+    if (generation == _commandBlockHeadsGeneration && rowChanges == _commandBlockHeadsRowChanges && !moved)
+        return {};
+    auto const rowsRenamed = generation != _commandBlockHeadsGeneration;
+    _commandBlockHeadsGeneration = generation;
+    _commandBlockHeadsRowChanges = rowChanges;
+    if (_commandBlocks.size() == 0)
+        return {}; // no shell integration, nothing to re-head: no reason to walk the scrollback
+
+    if (rowsRenamed)
+    {
+        // The rebuild carried every row's block id, so every block is headed afresh by the rule, among the
+        // rows of the new generation. Ids from the old one say nothing here, not even whether a head had
+        // scrolled out of the history before, so the rule goes by where rows lie alone, and misjudges:
+        // - a block whose prompt row scrolled out but whose ;C row survived: headed at that row, not
+        //   evicted -- an OutputStart under an evicted prompt reads as one that began the block;
+        // - a block whose head scrolled out, with no mark left and nothing of it left above the rows an erase
+        //   blanked (ED 1 inside long output, no history kept): headed at its topmost surviving row, not
+        //   evicted;
+        // - a block an erase took the head of, with no mark left and its topmost row the first the grid
+        //   holds (`\e[H\e[J` with no history): evicted, not headed at that row.
+        // Within one generation each comes out right (below); the next reflow decides it again, as here.
+        auto const unplaced =
+            std::ranges::count_if(_commandBlocks.records(), [generation](CommandBlockRecord const& record) {
+                return record.headIdGeneration != generation;
+            });
+        auto const place = [this, generation](CommandBlockId id, int64_t stableId) {
+            return _commandBlocks.placeHead(id, stableId, generation);
+        };
+        _commandBlockHeadWork +=
+            _commandBlocks.size()
+            + offerHeadRows(grid, static_cast<size_t>(unplaced), TopRowHead::Refused, place);
+
+        // A block still unplaced lost its head before the rebuild, and the record says so with an id below
+        // the new floor, which is what "evicted" means everywhere else.
+        _commandBlocks.retireUnplacedHeads(generation, grid.stableRangeFloor() - 1);
+        return {};
+    }
+
+    // Within one generation an erase, a new prompt or a scroll inside margins has changed rows, and stable
+    // ids still compare: a head below the floor scrolled out, and one a scroll moved away from, or still in
+    // range but no longer its block's head, is headed afresh by the same rule -- at the first row the grid
+    // holds too, if that is the topmost row the block has left.
+    auto inDoubt = std::vector<CommandBlockId> {};
+    for (auto const& record: _commandBlocks.records())
+        if (isHeadInDoubt(grid, record, moved))
+            inDoubt.push_back(record.id); // ascending, as the records are
+    _commandBlockHeadWork += _commandBlocks.size();
+    if (inDoubt.empty())
+        return {};
+    // A block headed is marked so rather than erased from the list, which would cost a read that heads many
+    // of them a shift of the list per block.
+    auto placements = std::vector<HeadPlacement>(inDoubt.size(), HeadPlacement::Unchanged);
+    auto const place = [this, generation, &inDoubt, &placements](CommandBlockId id, int64_t stableId) {
+        auto const it = std::ranges::lower_bound(inDoubt, id);
+        if (it == inDoubt.end() || *it != id)
+            return HeadPlacement::Unchanged;
+        auto& placement = placements[static_cast<size_t>(std::distance(inDoubt.begin(), it))];
+        if (placement == HeadPlacement::Placed)
+            return HeadPlacement::Unchanged; // the first row offered for a block heads it
+        placement = HeadPlacement::Placed;
+        _commandBlocks.updateHeadPosition(id, stableId, generation);
+        return placement;
+    };
+    _commandBlockHeadWork += offerHeadRows(grid, inDoubt.size(), TopRowHead::Allowed, place);
+
+    // A block none of whose rows is left: evicted, as after a rebuild.
+    auto evicted = std::vector<CommandBlockId> {};
+    for (auto const& [id, placement]: std::views::zip(inDoubt, placements))
+    {
+        if (placement == HeadPlacement::Placed)
+            continue;
+        _commandBlocks.updateHeadPosition(id, grid.stableRangeFloor() - 1, generation);
+        evicted.push_back(id);
+    }
+    return evicted;
+}
+
+void Terminal::placeCommandBlockHeads(std::span<CommandBlockId> blocks)
+{
+    if (blocks.empty())
+        return;
+    syncCommandBlockHeads();
+
+    auto const& grid = primaryScreen().grid();
+    auto const generation = grid.stableIdGeneration();
+    // Narrowed where they lie, sorted for the lookups below, down to the distinct ids with a record and no
+    // head in this generation -- usually none: the row a keystroke rewrites heads a block headed already.
+    auto const headedOrUnknown = [&](CommandBlockId id) {
+        auto const* const record = _commandBlocks.find(id);
+        return record == nullptr || record->headIdGeneration == generation;
+    };
+    std::ranges::sort(blocks);
+    auto const distinct = std::span { blocks.begin(), std::ranges::unique(blocks).begin() };
+    auto const unplaced =
+        std::span { distinct.begin(), std::ranges::remove_if(distinct, headedOrUnknown).begin() };
+    if (unplaced.empty())
+        return;
+
+    // Refused, as after a rebuild: nothing here says whether the head of a block reaching the first row the
+    // grid holds scrolled out of the history before its rows got here. placeHead() keeps the first row it
+    // is offered for a block, so the order of the offers is the rule.
+    auto const place = [this, generation, unplaced](CommandBlockId id, int64_t stableId) {
+        if (!std::ranges::binary_search(unplaced, id))
+            return HeadPlacement::Unchanged;
+        return _commandBlocks.placeHead(id, stableId, generation);
+    };
+    _commandBlockHeadWork += offerHeadRows(grid, unplaced.size(), TopRowHead::Refused, place);
+}
+
+void Terminal::retireCommandBlockHeads(std::span<CommandBlockId const> blocks)
+{
+    if (blocks.empty())
+        return;
+    syncCommandBlockHeads();
+
+    auto const& grid = primaryScreen().grid();
+    auto const generation = grid.stableIdGeneration();
+    for (auto const id: blocks)
+        if (auto const* const record = _commandBlocks.find(id);
+            record != nullptr && record->headIdGeneration != generation)
+            _commandBlocks.updateHeadPosition(id, grid.stableRangeFloor() - 1, generation);
+}
+
+void Terminal::commandBlockRowsMoved(RowMove const& move) noexcept
+{
+    _commandBlockRowsMoved =
+        _commandBlockRowsMoved ? _commandBlockRowsMoved->joinedWith(move.changed) : move.changed;
+}
+
+void Terminal::foldRowsMoved(RowMove const& move)
+{
+    _foldState.follow(move);
+    invalidateFoldRanges();
+}
+
+CommandBlockRecord const* Terminal::commandBlockAt(LineOffset gridLine) const
+{
+    auto const& grid = primaryScreen().grid();
+    if (gridLine < grid.addressableTop() || gridLine >= boxed_cast<LineOffset>(grid.pageSize().lines))
+        return nullptr;
+
+    // A row an erase blanked while the cursor was elsewhere carries no block until the cursor reaches it
+    // again. That is no information, not "outside any block": the fold it lies in still names its block, the
+    // one its head row carries -- read from the head directly, so a head that lost its own id names none.
+    // Outside every fold, the block still unfinished may be the one: it has no fold yet.
+    auto id = grid.lineAt(gridLine).blockId();
+    if (!id)
+    {
+        auto const range = foldCovering(foldRanges(), grid.stableLineIdOf(gridLine));
+        if (!range)
+            return unfinishedBlockReaching(gridLine);
+        auto const head = grid.lineOffsetOf(range->headStableId);
+        if (!head)
+            return nullptr;
+        id = grid.lineAt(*head).blockId();
+    }
+    return !id ? nullptr : commandBlocks().find(id);
+}
+
+CommandBlockRecord const* Terminal::unfinishedBlockReaching(LineOffset gridLine) const
+{
+    auto const* const record = commandBlocks().current();
+    auto const& screen = primaryScreen();
+    if (!record || gridLine > screen.cursor().position.line)
+        return nullptr;
+
+    // A head the history evicted lies above every row the grid holds. One recorded in another generation --
+    // a mirror's record before its rows arrive -- names no row to measure from, so it reaches none.
+    auto const& grid = screen.grid();
+    if (auto const head = headOffsetOf(grid, *record))
+        return gridLine >= *head ? record : nullptr;
+    return record->headIdGeneration == grid.stableIdGeneration() ? record : nullptr;
+}
+
+std::expected<CommandBlockRows, CommandBlockActionError> Terminal::commandBlockRowsAt(
+    LineOffset anchor, CommandBlockPart part) const
+{
+    // How far the block has got -- whether it is all prompt, and whether an end mark below its rows ends its
+    // output -- is its record's to say.
+    auto const* const record = commandBlockAt(anchor);
+    auto const progress = record != nullptr ? progressOf(*record) : CommandProgress::Unreported;
+
+    // Qualified: the member of the same name hides the free function.
+    return vtbackend::commandBlockRows(AttributedBlockRows { *this }, anchor, part, progress);
+}
+
+std::optional<LineOffset> Terminal::commandBlockAnchor(CommandBlockRecord const& record) const
+{
+    return bottomRowOfBlock(AttributedBlockRows { *this }, record.id);
+}
+
+std::optional<LineOffset> Terminal::commandBlockAnchor(CommandBlockTarget target, CommandBlockId pinned) const
+{
+    // A block named by its record -- a pinned id, or the last one finished -- stands on its lowest row, which
+    // commandBlockAt() names as that block for as long as its record lasts.
+    if (namesBlockByRecord(target, pinned))
+    {
+        auto const* const record = targetedCommandBlock(target, pinned);
+        return record ? commandBlockAnchor(*record) : std::nullopt;
+    }
+
+    switch (target)
+    {
+        case CommandBlockTarget::Pointer:
+            // Over an alternate screen, the pointer is over no block.
+            if (!isPrimaryScreen())
+                return std::nullopt;
+            return currentMouseGridPosition().transform([](CellLocation position) { return position.line; });
+        case CommandBlockTarget::Cursor:
+            // The vi cursor moves over the screen on display; while that is an alternate one, the shell's
+            // cursor is the primary screen's own.
+            return isPrimaryScreen() ? gridCursorPosition().line : primaryScreen().realCursorPosition().line;
+        case CommandBlockTarget::Last: break; // named by its record above
+    }
+    return std::nullopt;
+}
+
+std::expected<CommandBlockRows, CommandBlockActionError> Terminal::commandBlockRows(
+    CommandBlockTarget target, CommandBlockPart part, CommandBlockId pinned) const
+{
+    auto const anchor = commandBlockAnchor(target, pinned);
+    if (!anchor)
+        return std::unexpected(CommandBlockActionError::NoBlock);
+
+    // An action copies or selects no blank line after the text: the part ends with its last line that holds
+    // any up to where the part ends on it. Never above its first line, so a part that is all blank is still
+    // that part. One that is only a line its end mark opened has no line at all.
+    auto const& grid = primaryScreen().grid();
+    return commandBlockRowsAt(*anchor, part)
+        .and_then([&grid](CommandBlockRows rows) -> std::expected<CommandBlockRows, CommandBlockActionError> {
+            auto const lines = logicalLinesOf(grid, rows);
+            if (lines.empty())
+                return std::unexpected(CommandBlockActionError::EmptyPart);
+            auto const holdsText = [&grid](CommandBlockLine const& line) {
+                return !grid.isLogicalLineBlank(line.head, line.last, line.begin, line.end);
+            };
+            auto const kept = std::ranges::find_if(lines | std::views::reverse, holdsText);
+            auto const& last = kept != std::ranges::rend(lines) ? *kept : lines.front();
+            rows.last = last.last;
+            rows.endColumn = last.end;
+            return rows;
+        });
+}
+
+std::expected<void, CommandBlockActionError> Terminal::selectCommandBlock(CommandBlockTarget target,
+                                                                          CommandBlockPart part,
+                                                                          CommandBlockId pinned)
+{
+    // A selection lands on the screen on display, and only the primary screen holds blocks.
+    if (!isPrimaryScreen())
+        return std::unexpected(CommandBlockActionError::NoBlock);
+    return commandBlockRows(target, part, pinned).transform([this](CommandBlockRows rows) {
+        if (rows.firstColumn == ColumnOffset(0) && !rows.endColumn)
+        {
+            selectLines(rows.first, rows.last);
+            return;
+        }
+
+        // An end mark splits a line of the part: select through the columns it leaves the part, linearly,
+        // which takes every row between whole.
+        auto const& grid = primaryScreen().grid();
+        auto const from = grid.cellAtLogicalColumn(rows.first, rows.firstColumn, rows.last);
+        auto const to =
+            rows.endColumn
+                ? grid.cellAtLogicalColumn(std::max(grid.logicalLineHead(rows.last), rows.first),
+                                           *rows.endColumn - ColumnOffset(1),
+                                           rows.last)
+                : CellLocation { .line = rows.last,
+                                 .column = boxed_cast<ColumnOffset>(pageSize().columns) - ColumnOffset(1) };
+        selectThrough(std::make_unique<LinearSelection>(_selectionHelper, from, selectionUpdatedHelper()),
+                      to);
+    });
+}
+
+std::expected<std::string, CommandBlockActionError> Terminal::commandBlockText(CommandBlockTarget target,
+                                                                               CommandBlockPart part,
+                                                                               CaptureRendition rendition,
+                                                                               CommandBlockId pinned) const
+{
+    return commandBlockRows(target, part, pinned).transform([this, rendition](CommandBlockRows rows) {
+        // A line per logical line, each read once, as the semantic-block query reply reads it.
+        auto const& grid = primaryScreen().grid();
+        auto text = std::string {};
+        text.reserve(unbox<size_t>(rows.last - rows.first + LineOffset(1))
+                     * (unbox<size_t>(grid.pageSize().columns) + 1));
+        for (auto const& line: logicalLinesOf(grid, rows))
+        {
+            if (line.head != rows.first)
+                text += '\n';
+            text += grid.logicalLineText(line.head, line.last, line.begin, line.end, rendition);
+        }
+        return text;
+    });
+}
+
+bool Terminal::hasCommandBlockRows(CommandBlockTarget target, CommandBlockId pinned) const
+{
+    // A row the target stands on is the record's own (targetedCommandBlock()).
+    auto const* const record = targetedCommandBlock(target, pinned);
+    if (record == nullptr)
+        return false;
+    if (!namesBlockByRecord(target, pinned))
+        return true;
+    // Its head row answers while it is on the grid. Once the head has left the history, the rest of the block
+    // may still be there: its lowest row is looked for, and the walk stops there.
+    return headOffsetOf(primaryScreen().grid(), *record).has_value()
+           || commandBlockAnchor(*record).has_value();
+}
+
+CommandBlockRecord const* Terminal::targetedCommandBlock(CommandBlockTarget target,
+                                                         CommandBlockId pinned) const
+{
+    if (pinned != CommandBlockId {})
+        return commandBlocks().find(pinned);
+    // The record outlives its rows: a command line can still be copied once its output scrolled away.
+    if (target == CommandBlockTarget::Last)
+        return commandBlocks().lastFinished();
+    auto const anchor = commandBlockAnchor(target, pinned);
+    return anchor ? commandBlockAt(*anchor) : nullptr;
+}
+
+std::expected<void, CommandBlockActionError> Terminal::clearToPrompt()
+{
+    // Rows the user cannot see would go: the alternate screen is on display, not the history.
+    if (!isPrimaryScreen())
+        return std::unexpected(CommandBlockActionError::NoBlock);
+
+    auto& screen = primaryScreen();
+    return commandBlockRowsAt(screen.realCursorPosition().line, CommandBlockPart::Prompt)
+        .transform([&](CommandBlockRows prompt) {
+            auto const evictedBefore = screen.grid().evictedRowCount();
+            auto const pageShift = screen.dropRowsAbove(prompt.first);
+            if (screen.grid().evictedRowCount() != evictedBefore)
+                rowsDropped(pageShift);
+        });
+}
+
+Terminal::BlockHeadRow Terminal::cursorBlockHead() const noexcept
+{
+    auto const& screen = primaryScreen();
+    auto const& grid = screen.grid();
+    auto const head = grid.logicalLineHead(screen.cursor().position.line);
+    return BlockHeadRow { .stableId = grid.stableLineIdOf(head), .generation = grid.stableIdGeneration() };
+}
+
+void Terminal::beginCommandBlock()
+{
+    auto const [headStableId, headIdGeneration] = cursorBlockHead();
+    auto const idEpoch = _commandBlocks.idEpoch();
+    // The new record is the current one; the one before learns where its command left the shell.
+    _commandBlocks.promptStarted(headStableId, headIdGeneration, workingDirectorySnapshot());
+    publishActiveBlock(idEpoch);
+}
+
+void Terminal::beginCommand(std::optional<std::string> commandLine, CommandLineSource source)
+{
+    auto const [headStableId, headIdGeneration] = cursorBlockHead();
+    auto const idEpoch = _commandBlocks.idEpoch();
+    auto const* const context = _contexts.active();
+    _commandBlocks.commandStarted(CommandStart {
+        .commandLine = std::move(commandLine),
+        .source = source,
+        .workingDirectory = workingDirectorySnapshot(),
+        .context = _contexts.activeId(),
+        .contextType = context ? context->type : ContextType::None,
+        .headStableId = headStableId,
+        .headIdGeneration = headIdGeneration,
+    });
+    // A ;C with no ;A before it minted a record of its own, whose rows start here.
+    publishActiveBlock(idEpoch);
+}
+
+void Terminal::publishActiveBlock(uint64_t idEpochBefore) noexcept
+{
+    if (_commandBlocks.idEpoch() != idEpochBefore)
+        primaryScreen().forgetBlockIds();
+    primaryScreen().setActiveBlockId(_commandBlocks.currentId());
+}
+
+void Terminal::endCommand(int exitCode, ContextOutcome outcome)
+{
+    // Raised from inside the parse, under _stateMutex, exactly as progressChanged() is.
+    if (auto const summary = _commandBlocks.commandFinished(exitCode, outcome))
+        _eventListener.commandBlockFinished(*summary);
+}
+
+void Terminal::commandContextStarted(ContextId started)
+{
+    auto const* const context = _contexts.find(started);
+    _commandBlocks.commandContextStarted(started, context ? context->parent : ContextId {});
+}
+
+void Terminal::enrichCommandOutcome(ContextId ended, ContextOutcome outcome)
+{
+    _commandBlocks.enrichOutcome(ended, outcome);
+}
+
+WorkingDirectorySnapshot Terminal::workingDirectorySnapshot() const
+{
+    // Display, not Spawn: the record says where the command RAN, which is the right answer even behind a
+    // boundary. The locality travels with it, so a later "open locally" can still refuse.
+    auto resolved = resolveWorkingDirectory(CwdPurpose::Display);
+    if (!resolved)
+        return {};
+    return WorkingDirectorySnapshot { .path = std::move(resolved->path), .locality = resolved->locality };
+}
+
+void Terminal::setCurrentWorkingDirectory(string const& url)
+{
+    auto parsed = parseFileUrl(url);
+    if (!parsed)
+    {
+        terminalLog()("Ignoring a working directory whose path holds a NUL, so it names no directory: \"{}\"",
+                      core::escape(url));
+        return;
+    }
+    _currentWorkingDirectory = *std::move(parsed);
+    recordForeignDirectory();
+}
+
+optional<ResolvedWorkingDirectory> Terminal::resolveWorkingDirectory(CwdPurpose purpose) const
+{
+    switch (_replicaRole.load(std::memory_order_acquire))
+    {
+        case ReplicaRole::None:
+            return vtbackend::resolveWorkingDirectory(
+                _contexts, _currentWorkingDirectory, localIdentity(), purpose);
+        case ReplicaRole::SameMachine:
+            // The daemon's contexts name machines by the ids it derives from theirs, so this machine is
+            // named the same way to compare.
+            return vtbackend::resolveWorkingDirectory(
+                _contexts, _currentWorkingDirectory, _replicaIdentity.view(), purpose);
+        case ReplicaRole::OtherMachine: break;
+    }
+
+    // Every directory the application reported is one on the daemon's machine. Where the user is still
+    // shows; nothing here opens or spawns into it.
+    if (needsLocalPath(purpose))
+        return std::nullopt;
+    auto shown =
+        vtbackend::resolveWorkingDirectory(_contexts, _currentWorkingDirectory, localIdentity(), purpose);
+    if (shown)
+        shown->locality = ContextLocality::Foreign;
+    return shown;
+}
+
+optional<string_view> Terminal::fileUrlLocalHost() const noexcept
+{
+    if (_replicaRole.load(std::memory_order_acquire) == ReplicaRole::OtherMachine)
+        return std::nullopt;
+    return localIdentity().hostname;
+}
+// }}}
+
 Progress Terminal::resolvedProgress() const
 {
-    auto const l = std::lock_guard { _stateMutex };
+    auto const l = std::lock_guard { *this };
     return _progress;
 }
 
 std::string Terminal::resolvedWindowTitle() const
 {
-    auto const l = std::lock_guard { _stateMutex };
+    auto const l = std::lock_guard { *this };
     return _windowTitle;
 }
 
@@ -3964,7 +5706,7 @@ std::optional<std::string> Terminal::resolvedTabName() const
     // under _stateMutex (setTabName()/setWindowTitle()), and this runs on the GUI thread, so reading them
     // unlocked (or across three separate locked accessor calls) would race the writer. getTabsNamingMode()
     // reads _settings, which is not mutated by the parser thread, so it needs no extra protection.
-    auto const l = std::lock_guard { _stateMutex };
+    auto const l = std::lock_guard { *this };
     if (_tabName)
         return _tabName;
     if (_settings.tabNamingMode == TabsNamingMode::Title)
@@ -4037,7 +5779,8 @@ void Terminal::setTerminalProfile(string const& configProfileName)
 void Terminal::useApplicationCursorKeys(bool enable)
 {
     auto const keyMode = enable ? KeyMode::Application : KeyMode::Normal;
-    _inputGenerator.setCursorKeysMode(keyMode);
+    changeInputEncoding([&](InputGenerator& input) { input.setCursorKeysMode(keyMode); });
+    publishBindingModes();
 }
 
 void Terminal::setMode(AnsiMode mode, bool enable)
@@ -4057,7 +5800,7 @@ void Terminal::setMode(AnsiMode mode, bool enable)
     // Screen::linefeed(); the input half (Return sends CR LF) lives in the input generator, which
     // has no view of the mode register and must therefore be told.
     if (mode == AnsiMode::AutomaticNewLine)
-        _inputGenerator.setAutomaticNewLineMode(enable);
+        changeInputEncoding([&](InputGenerator& input) { input.setAutomaticNewLineMode(enable); });
 
     _modes.set(mode, enable);
 }
@@ -4126,6 +5869,12 @@ void Terminal::setMode(DECMode mode, bool enable)
             // is set, in which case a column-width change preserves the page (VT500 behaviour).
             if (!isModeEnabled(DECMode::NoClearScreenOnColumnChange))
                 clearScreen();
+
+            // "... and the Active Position to be set to the display origin (1,1)" (DEC STD 070, DECCOLM), as
+            // xterm's set_column_mode() and Windows Terminal do, with DECNCSM too. Before the resize: a
+            // cursor left past the new width would have the narrowing wrap the blanks up to it onto a row of
+            // their own.
+            _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0));
 
             // DECCOLM is authoritative and synchronous. An application switches to 132 columns and
             // immediately draws to the new width in the same output burst (vttest's cursor-movement test
@@ -4200,7 +5949,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             setMouseCoordinateMode(mode, enable);
             break;
         case DECMode::MousePassiveTracking:
-            _inputGenerator.setPassiveMouseTracking(enable);
+            changeInputEncoding([&](InputGenerator& input) { input.setPassiveMouseTracking(enable); });
             setMode(DECMode::MouseSGR, enable);                    // SGR is required.
             setMode(DECMode::MouseProtocolButtonTracking, enable); // ButtonTracking is default
             break;
@@ -4245,15 +5994,21 @@ void Terminal::setMode(DECMode mode, bool enable)
             break;
         case DECMode::ApplicationKeypad: setApplicationkeypadMode(enable); break;
         case DECMode::AutoRepeat: break;
-        case DECMode::BackarrowKey: _inputGenerator.setBackarrowKeyMode(enable); break;
-        case DECMode::Win32InputMode: _inputGenerator.setWin32InputMode(enable); break;
+        case DECMode::BackarrowKey:
+            changeInputEncoding([&](InputGenerator& input) { input.setBackarrowKeyMode(enable); });
+            break;
+        case DECMode::Win32InputMode:
+            changeInputEncoding([&](InputGenerator& input) { input.setWin32InputMode(enable); });
+            break;
         case DECMode::SemanticBlockProtocol:
-            _semanticBlockTracker.setEnabled(enable);
             if (enable)
             {
+                _semanticBlockTracker.enable(_commandBlocks);
                 auto const& t = *_semanticBlockTracker.token();
                 reply("\033P>2034;1b{};{};{};{}\033\\", t[0], t[1], t[2], t[3]);
             }
+            else
+                _semanticBlockTracker.disable();
             break;
         default: break;
     }
@@ -4388,10 +6143,9 @@ void Terminal::softReset()
 
     _currentScreen->cursor().hyperlink = {};
 
+    // The macro definitions, the UDKs and the soft character set stay: DEC STD 070 lists "DRCS", "UDK" and
+    // "Macro Definitions" among what is "NOT affected by the soft reset". hardReset() clears them.
     resetColorPalette();
-    clearMacros();
-    clearUDKs();
-    clearDRCS();
     resetLocator();
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
@@ -4490,7 +6244,11 @@ void Terminal::hardReset()
     // nothing can ever resync the two halves again.
     core::locked(_inputMutex, [&] { _inputGenerator.reset(); });
 
-    _modes = Modes {};
+    _modes.reset();
+
+    // The register is cleared whole, not through setMode(), so the state a mode keeps outside it
+    // goes here: mode 2034's reader session ends with the mode, and its token with it.
+    _semanticBlockTracker.disable();
 
     // SRM, set: the terminal does *not* echo what it sends -- the host does. The mode register was just
     // cleared to all zeroes, and a *reset* SRM means local echo is on, so leaving it here would echo every
@@ -4500,6 +6258,10 @@ void Terminal::hardReset()
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::AutoRepeat, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
+    // A configured setting, so RIS returns it to the configuration as the VT510 manual's RIS replaces every
+    // set-up feature with its saved setting -- DECSDM's VT340 counterpart is one -- and as xterm's full reset
+    // restores its sixelScrolling resource. From the factory settings, which a reload keeps current.
+    setMode(DECMode::NoSixelScrolling, _factorySettings.sixelScrolling == SixelScrolling::Disabled);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setMode(DECMode::Unicode, _settings.graphemeClustering);
     setMode(DECMode::VisibleCursor, true);
@@ -4517,6 +6279,11 @@ void Terminal::hardReset()
     // on DECSTR). @see resetTitleModes, TitleModeFeature.
     resetTitleModes();
 
+    // Before the pages: their reset re-seats each cursor, which stamps the row it lands on with the active
+    // block -- and after RIS there is none.
+    _commandBlocks.clear();
+    primaryScreen().setActiveBlockId(_commandBlocks.currentId());
+
     // Reset all pages.
     for (auto& page: _pages)
         page->hardReset();
@@ -4527,6 +6294,15 @@ void Terminal::hardReset()
 
     _imagePool.clear();
     _tabs.clear();
+
+    // DEC STD 070: "All macro definitions are cleared on receipt of a Reset to Initial State (RIS) or Secure
+    // Reset (DECSR)." A macro body that sent this RIS ends with it, and so does every body around it.
+    clearMacros();
+
+    // The VT520 manual's RIS "Clears user-defined keys" and "Clears the soft character set", as xterm's
+    // ReallyReset clears its UDKs and Windows Terminal's HardReset its soft font -- on RIS alone.
+    clearUDKs();
+    clearDRCS();
 
     // A pointer shape is application state like any other, so RIS withdraws it: a program that dies
     // holding a hand cursor must not leave the user with one. The stack keeps its bottom entry -- the
@@ -4585,6 +6361,9 @@ void Terminal::hardReset()
     // NB: _inputGenerator.reset() deliberately runs near the top of this function, before the mode
     // register is replayed. @see the comment there.
     _pendingLocalEcho.clear();
+
+    // That reset cleared DECCKM and DECNKM past their setters, which publish the binding modes.
+    publishBindingModes();
 }
 
 void Terminal::forceRedraw(std::function<void()> const& artificialSleep)
@@ -4613,6 +6392,16 @@ void Terminal::finalizeScreenTransition() noexcept
     _screenTransition.active = false;
     _screenTransition.snapshotCells.clear();
     _screenTransition.snapshotCursor.reset();
+    publishAnimationsEnd();
+}
+
+void Terminal::publishAnimationsEnd() noexcept
+{
+    auto const endOf = [](auto const& animation) {
+        return animation.active ? animation.startTime + animation.duration
+                                : chrono::steady_clock::time_point::min();
+    };
+    _animationsEnd.store(std::max(endOf(_cursorMotion), endOf(_screenTransition)), std::memory_order_relaxed);
 }
 
 void Terminal::setPage(PageIndex target, bool moveCursorHome)
@@ -4624,6 +6413,7 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
 
     // Cancel any active cursor motion animation on page change.
     _cursorMotion.active = false;
+    publishAnimationsEnd();
 
     // Reset smooth scroll state on page change.
     resetSmoothScroll();
@@ -4648,9 +6438,10 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
 
         _screenTransition.snapshotCells = std::move(snapshotBuffer.cells);
         _screenTransition.snapshotCursor = snapshotBuffer.cursor;
-        _screenTransition.startTime = _currentTime;
+        _screenTransition.startTime = currentTime();
         _screenTransition.duration = _settings.screenTransitionDuration;
         _screenTransition.active = true;
+        publishAnimationsEnd();
     }
 
     _cursorPage = clamped;
@@ -4669,6 +6460,7 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
         _displayedPage = clamped;
 
     _currentScreenType = screenTypeFromPage(clamped);
+    publishBindingModes();
 
     // Ensure correct screen buffer size for the buffer we've just switched to.
     applyPageSizeToCurrentBuffer();
@@ -4723,10 +6515,13 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
             pageAt(_cursorPage).applyPageSizeToMainDisplay(mainDisplayPageSize);
             break;
     }
-
-    (void) _hostWritableStatusLineScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, CellLocation {}, false);
-    (void) _indicatorStatusScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, CellLocation {}, false);
     // clang-format on
+
+    // Through the screens, as every page above: resizing a grid behind its screen's back left that screen's
+    // cursor past a narrowed right margin and its cached cursor line un-re-pointed.
+    auto const statusLinePageSize = PageSize { StatusLineHeight, _settings.pageSize.columns };
+    _hostWritableStatusLineScreen.applyPageSizeToMainDisplay(statusLinePageSize);
+    _indicatorStatusScreen.applyPageSizeToMainDisplay(statusLinePageSize);
 
     // adjust margins for statuslines as well
     auto const statuslineMargin =
@@ -4781,7 +6576,7 @@ bool Terminal::isRenderingSuppressed() const noexcept
     if (_renderBufferUpdateEnabled.load(std::memory_order_acquire))
         return false;
 
-    return (std::chrono::steady_clock::now() - _synchronizedOutputSince.load(std::memory_order_acquire))
+    return (_clocks.steady.now() - _synchronizedOutputSince.load(std::memory_order_acquire))
            < _settings.synchronizedOutputTimeout;
 }
 
@@ -4791,14 +6586,18 @@ void Terminal::synchronizedOutput(bool enabled)
     _renderBufferUpdateEnabled = !enabled;
     if (enabled)
     {
-        _synchronizedOutputSince.store(std::chrono::steady_clock::now(), std::memory_order_release);
+        _synchronizedOutputSince.store(_clocks.steady.now(), std::memory_order_release);
         return;
     }
 
-    tick(chrono::steady_clock::now());
+    // The frame this ends with is built here, on the parser thread, at the time it ends: the clock is set to
+    // that time, as the render thread's tick() sets it for the frames built there. Not by tick() itself,
+    // which would advance the cursor blink and a glide from a second thread.
+    auto const now = _clocks.steady.now();
+    _currentTime.store(now, std::memory_order_relaxed);
 
-    auto const diff = _currentTime - _renderBuffer.lastUpdate;
-    if (diff < _refreshInterval.value)
+    auto const diff = now - _renderBuffer.lastUpdate.load(std::memory_order_relaxed);
+    if (diff < _refreshInterval.get().value)
     {
         // Instrumentation only: this is the throttle doing its job, and it is the expected outcome
         // for most block ends. Named so a capture can tell it apart from the branch below.
@@ -4874,7 +6673,7 @@ void Terminal::clampToHistory() noexcept
 void Terminal::setHistoryLimits(HistoryLimits historyLimits)
 {
     _settings.historyLimits = historyLimits;
-    primaryScreen().grid().setHistoryLimits(historyLimits);
+    primaryScreen().setHistoryLimits(historyLimits);
 }
 
 LineCount Terminal::maxHistoryLineCount() const noexcept
@@ -4906,18 +6705,57 @@ void Terminal::setVT52Mode(bool enable) noexcept
         setOperatingLevel(VTType::VT100);
 }
 
-void Terminal::defineMacro(int id, bool deleteAll, std::string body)
+void Terminal::defineMacro(int id, MacroDeletion deletion, std::string body)
 {
-    if (deleteAll)
-        _macros.clear();
-
+    // A definition of no macro there can be is ignored, deletion and all (DEC STD 070).
     if (id < 0 || id >= MaxMacroCount)
         return;
 
-    if (body.empty())
-        _macros.erase(id);
-    else
-        _macros[id] = std::move(body);
+    switch (deletion)
+    {
+        case MacroDeletion::All: _macros.clear(); break;
+        case MacroDeletion::SameId: break; // just below, the same as for the other
+    }
+
+    // The old definition goes first, as Pdt says, so its room counts toward the new one -- and stays gone
+    // when the new one does not fit after all: "Any macro definitions which cannot fit in the remaining
+    // macro storage space are ignored" (DEC STD 070).
+    _macros.erase(id);
+    if (body.empty() || body.size() > macroSpaceAvailable())
+        return;
+    _macros.emplace(id, std::move(body));
+}
+
+size_t Terminal::macroSpaceAvailable() const noexcept
+{
+    auto const sizes = _macros | std::views::values
+                       | std::views::transform([](std::string const& body) { return body.size(); });
+    auto const used = std::ranges::fold_left(sizes, size_t { 0 }, std::plus {});
+    return MacroSpaceBytes - std::min(used, MacroSpaceBytes);
+}
+
+size_t Terminal::macroSpaceFor(int id, MacroDeletion deletion) const noexcept
+{
+    switch (deletion)
+    {
+        case MacroDeletion::All: return MacroSpaceBytes;
+        case MacroDeletion::SameId:
+            return macroSpaceAvailable() + macroBody(id).value_or(std::string_view {}).size();
+    }
+    core::unreachable();
+}
+
+uint16_t Terminal::macroChecksum() const noexcept
+{
+    // DEC STD 070 asks for "a checksum of the current text macro definitions" without spelling the sum out.
+    // This is Windows Terminal's MacroBuffer::CalculateChecksum, "intended to match the checksums produced
+    // by the original DEC VT420" -- over the definitions alone, not the remnants a VT420's memory would hold.
+    // The order of the definitions makes no difference to a sum.
+    auto sum = uint16_t { 0 };
+    for (auto const& body: _macros | std::views::values)
+        for (auto const byte: body)
+            sum = static_cast<uint16_t>(sum - static_cast<unsigned char>(byte));
+    return sum;
 }
 
 void Terminal::invokeMacro(int id)
@@ -4926,36 +6764,66 @@ void Terminal::invokeMacro(int id)
     if (it == _macros.end())
         return;
 
-    if (_macroRecursionDepth >= MaxMacroRecursionDepth)
-        return; // Guard against infinite recursion
+    // DEC STD 070: "Macros can invoke other macros with up to 16 levels of nesting, but cannot invoke
+    // themselves recursively" -- through another macro no more than directly.
+    if (std::ssize(_runningMacros) >= MaxMacroNestingDepth || std::ranges::contains(_runningMacros, id))
+        return;
 
-    // Queue the macro body for deferred execution.
-    // We cannot call parseFragment() re-entrantly during an active parse,
-    // so we buffer the body and process it after the current sequence completes.
-    _pendingMacroInvocations.push(it->second);
+    // The bound on the fan-out nesting leaves open, Windows Terminal's: "we don't allow the total sequence
+    // length to exceed the maximum buffer size" -- the bodies one invocation from the stream runs, counted
+    // afresh for each such invocation.
+    if (!isMacroRunning())
+        _macroBytesRun = 0;
+    auto const& body = it->second;
+    if (body.size() >= MaxMacroBytesPerInvocation - _macroBytesRun)
+        return;
+    _macroBytesRun += body.size();
+
+    auto invocation = MacroInvocation { .id = id, .body = body };
+
+    // Not during a parse: in the trace modes a queued DECINVM is executed as it is stepped through, after the
+    // parse has moved on, so its body is parsed then, from where the parse stands.
+    if (tlParseDepth == 0)
+    {
+        runMacro(invocation);
+        return;
+    }
+
+    // In place, as DEC STD 070 has it: "The terminal substitutes the DECINVM sequence with the contents of
+    // the macro definition, and executes the substituted text." The main parser is still handling the
+    // DECINVM, so the body runs once the parser has returned after it -- done with the sequence, and back in
+    // Ground -- as Windows Terminal's InvokeMacro waits for the CSI to complete.
+    _pendingMacroInvocation = std::move(invocation);
+    _parser.returnAfterCurrentByte();
 }
 
-void Terminal::processPendingMacros()
+void Terminal::runMacro(MacroInvocation const& invocation)
 {
-    while (!_pendingMacroInvocations.empty())
-    {
-        auto body = std::move(_pendingMacroInvocations.front());
-        _pendingMacroInvocations.pop();
+    // Through the main parser, which goes on from the state the body leaves it in exactly as it would after
+    // the same bytes from the host -- in VT52, with the character REP repeats, in the middle of a sequence
+    // -- as Windows Terminal's InvokeMacro hands the body to the state machine reading the stream. The
+    // terminal's state carries over as well: "The current state of the machine is not saved or restored when
+    // macros are invoked" (DEC STD 070).
+    _runningMacros.push_back(invocation.id);
+    auto const _ = core::Finally { [&]() noexcept {
+        _runningMacros.pop_back();
+        if (!isMacroRunning())
+            _areRunningMacrosVoid = false; // what a hard reset voided has all ended now
+    } };
+    parseExpandingMacros(invocation.body);
+}
 
-        ++_macroRecursionDepth;
+void Terminal::clearMacros() noexcept
+{
+    _macros.clear();
+    if (!isMacroRunning())
+        return;
 
-        // Write the macro body into the pty buffer so that parseFragment
-        // can reference it through the buffer management system.
-        auto const chunk = _currentPtyBuffer->writeAtEnd(std::string_view { body });
-        _parsingBuffer = _currentPtyBuffer;
-        {
-            auto const parseGuard = ParseDepthGuard {};
-            _parser.parseFragment(chunk);
-        }
-        _parsingBuffer = nullptr;
-
-        --_macroRecursionDepth;
-    }
+    // A hard reset in a body: Windows Terminal's ClearMacrosIfInUse replaces the definitions -- the very text
+    // its running bodies are read from -- "with NUL characters to prevent any further output". So every body
+    // running ends here, and the parser hands back control right after the reset to let them.
+    _areRunningMacrosVoid = true;
+    _parser.returnAfterCurrentByte();
 }
 
 std::shared_ptr<RasterizedImage> Terminal::createDRCSImage(DRCSGlyph const& glyph, RGBColor foregroundColor)
@@ -5176,6 +7044,9 @@ bool Terminal::handleLocatorMouseEvent(int button, bool press, CellLocation pos)
 
 void Terminal::programUDK(bool clearAll, bool locked, std::string_view data)
 {
+    // Under the input lock, which a function key looks its string up under. @see udkString()
+    auto const _ = std::scoped_lock { _inputMutex };
+
     if (_udkLocked)
         return;
 
@@ -5232,32 +7103,9 @@ void Terminal::programUDK(bool clearAll, bool locked, std::string_view data)
         _udkLocked = true;
 }
 
-std::optional<std::string> Terminal::udkStringForKey(Key key) const noexcept
+std::optional<std::string> Terminal::udkStringForKey(Key key) const
 {
-    // DEC UDK key IDs map to function keys F6-F20.
-    // These IDs match the CSI tilde parameter numbers.
-    static constexpr auto KeyMapping = std::array<std::pair<Key, int>, 15> { {
-        { Key::F6, 17 },
-        { Key::F7, 18 },
-        { Key::F8, 19 },
-        { Key::F9, 20 },
-        { Key::F10, 21 },
-        { Key::F11, 23 },
-        { Key::F12, 24 },
-        { Key::F13, 25 },
-        { Key::F14, 26 },
-        { Key::F15, 28 },
-        { Key::F16, 29 },
-        { Key::F17, 31 },
-        { Key::F18, 32 },
-        { Key::F19, 33 },
-        { Key::F20, 34 },
-    } };
-
-    auto const it = std::ranges::find_if(KeyMapping, [key](auto const& pair) { return pair.first == key; });
-    if (it != KeyMapping.end())
-        return udkString(it->second);
-    return std::nullopt;
+    return userDefinedKeyNumberOf(key).and_then([this](int keyNumber) { return udkString(keyNumber); });
 }
 
 void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
@@ -5275,6 +7123,32 @@ void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
 
     if (statusLineVisibleBefore != statusLineVisibleAfter)
         resizeScreen(_settings.pageSize, nullopt);
+}
+
+void Terminal::answerHostWritableStatusLineRequest(HostWritableStatusLineAnswer answer)
+{
+    switch (answer)
+    {
+        case HostWritableStatusLineAnswer::Denied:
+            // Owed whatever the configuration says now: it is read at DECSASD 0, where it acts.
+            _deniedStatusLineTitle = DeniedStatusLineTitle::Owed;
+            break;
+        case HostWritableStatusLineAnswer::Shown:
+            setStatusDisplay(StatusDisplayType::HostWritable);
+            _deniedStatusLineTitle = DeniedStatusLineTitle::Settled;
+            break;
+    }
+}
+
+void Terminal::syncWindowTitleWithDeniedStatusLine()
+{
+    if (_activeStatusDisplay != ActiveStatusDisplay::StatusLine
+        || _deniedStatusLineTitle != DeniedStatusLineTitle::Owed
+        || !_settings.syncWindowTitleWithHostWritableStatusDisplay)
+        return;
+
+    setWindowTitle(core::trimRight(_hostWritableStatusLineScreen.grid().lineText(LineOffset(0))));
+    _deniedStatusLineTitle = DeniedStatusLineTitle::Settled;
 }
 
 void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
@@ -5304,7 +7178,7 @@ void Terminal::pushStatusDisplay(StatusDisplayType type)
 {
     // Only remember the outermost saved status display type.
     if (!_savedStatusDisplayType)
-        _savedStatusDisplayType = _statusDisplayType;
+        _savedStatusDisplayType = _statusDisplayType.get();
 
     setStatusDisplay(type);
 }
@@ -5332,6 +7206,7 @@ bool Terminal::setNewSearchTerm(std::u32string text, SearchOrigin origin)
 
     _search.pattern = std::move(text);
     _search.comparison = caseComparisonFor(_search.pattern, _search.caseSensitivity);
+    publishBindingModes();
     return true;
 }
 
@@ -5405,6 +7280,7 @@ std::optional<CellLocation> Terminal::searchPrevMatch(CellLocation cursorPositio
 void Terminal::clearSearch()
 {
     _search.pattern.clear();
+    publishBindingModes();
     _search.origin = SearchOrigin::Typed;
     // Kept in step with the (now empty) pattern by the same rule the setters use, rather than pinned
     // to a constant: an empty needle under a pinned Sensitive policy still compares exactly.
@@ -5621,13 +7497,27 @@ void Terminal::setColorPalette(ColorPalette const& palette) noexcept
 
 void Terminal::resetColorPalette(ColorPalette const& colors)
 {
+    // Measured against the palette in effect, colours a program set included: that is what an application
+    // subscribed to the report has seen. It answers each report by querying its colours again and redrawing,
+    // so a re-seed that changes nothing -- every reload re-seeds -- must not send one.
+    auto const changed = _colorPalette != colors;
+
     _colorPalette = colors;
     _defaultColorPalette = colors;
     _settings.colorPalette = colors;
     _factorySettings.colorPalette = colors;
 
-    if (isModeEnabled(DECMode::ReportColorPaletteUpdated))
+    if (changed && isModeEnabled(DECMode::ReportColorPaletteUpdated))
         _currentScreen->reportColorPaletteUpdate();
+}
+
+void Terminal::reconfigureFactorySettings(Settings configured)
+{
+    // Both follow the live terminal rather than the configuration: the window decides the page size, and
+    // the color palette arrives through resetColorPalette(), which keeps it in step itself.
+    configured.pageSize = _factorySettings.pageSize;
+    configured.colorPalette = _factorySettings.colorPalette;
+    _factorySettings = std::move(configured);
 }
 
 void Terminal::pushColorPalette(size_t slot)
@@ -5677,8 +7567,18 @@ TraceHandler::TraceHandler(Terminal& terminal): _terminal { &terminal }
 {
 }
 
+SequenceHandler* TraceHandler::macroBodyDisplay() const noexcept
+{
+    return _terminal->isMacroRunning() ? &_terminal->activeDisplay() : nullptr;
+}
+
 void TraceHandler::executeControlCode(char controlCode)
 {
+    if (auto* const display = macroBodyDisplay())
+    {
+        display->executeControlCode(controlCode);
+        return;
+    }
     auto seq = Sequence {};
     seq.setCategory(FunctionCategory::C0);
     seq.setFinalChar(controlCode);
@@ -5687,7 +7587,10 @@ void TraceHandler::executeControlCode(char controlCode)
 
 void TraceHandler::processSequence(Sequence const& sequence)
 {
-    _pendingSequences.emplace_back(sequence);
+    if (auto* const display = macroBodyDisplay())
+        display->processSequence(sequence);
+    else
+        _pendingSequences.emplace_back(sequence);
 }
 
 void TraceHandler::processAPC(std::string_view body)
@@ -5697,21 +7600,32 @@ void TraceHandler::processAPC(std::string_view body)
     // Forwarding an APC straight to the display let it overtake every sequence still queued ahead of
     // it -- a kitty image placed against the cursor position a queued CUP had not moved yet, so
     // tracing a graphics problem showed behaviour that never happens outside trace mode.
-    _pendingSequences.emplace_back(ApplicationProgramCommand { .body = std::string(body) });
+    if (auto* const display = macroBodyDisplay())
+        display->processAPC(body);
+    else
+        _pendingSequences.emplace_back(ApplicationProgramCommand { .body = std::string(body) });
 }
 
 void TraceHandler::writeText(char32_t codepoint)
 {
-    _pendingSequences.emplace_back(codepoint);
+    if (auto* const display = macroBodyDisplay())
+        display->writeText(codepoint);
+    else
+        _pendingSequences.emplace_back(codepoint);
 }
 
 void TraceHandler::writeText(std::string_view codepoints, size_t cellCount)
 {
-    _pendingSequences.emplace_back(CodepointSequence { .text = codepoints, .cellCount = cellCount });
+    if (auto* const display = macroBodyDisplay())
+        display->writeText(codepoints, cellCount);
+    else
+        _pendingSequences.emplace_back(CodepointSequence { .text = codepoints, .cellCount = cellCount });
 }
 
 void TraceHandler::writeTextEnd()
 {
+    if (auto* const display = macroBodyDisplay())
+        display->writeTextEnd();
 }
 
 void TraceHandler::flushAllPending()

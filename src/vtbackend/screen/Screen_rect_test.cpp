@@ -146,6 +146,20 @@ TEST_CASE("DECSEL-1", "[screen]")
     REQUIRE(" BCD F" == screen.grid().lineText(LineOffset(0)));
 }
 
+TEST_CASE("DECSEL-1 from the last column", "[screen]")
+{
+    // With the cursor in the last column the erase covers the whole line, and must still spare the
+    // DECSCA-protected cells.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen(std::format("A{}BCD{}EF", "\033[1\"q", "\033[2\"q"));
+    REQUIRE("ABCDEF" == screen.grid().lineText(LineOffset(0)));
+
+    mock.writeToScreen("\033[1;6H");
+    mock.writeToScreen("\033[?1K");
+    CHECK(" BCD  " == screen.grid().lineText(LineOffset(0)));
+}
+
 TEST_CASE("DECSEL-2", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
@@ -389,6 +403,95 @@ TEST_CASE("EraseCharacters", "[screen]")
     {
         screen.eraseCharacters(ColumnCount(6));
         REQUIRE("     \n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+    }
+}
+
+TEST_CASE("ED.aCursorRowErasedWholeIsSingleSizeAgain", "[screen]")
+{
+    // DEC STD 070 p. 5-156: every line ED erases completely is set to single width and height, the
+    // cursor's row included when ED reaches all of it -- from its first column, or to its last. EL
+    // leaves the rendition alone (p. 5-154), as does an ED that leaves part of the cursor's row.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) } };
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    auto const renditionOf = [&](int line) {
+        return grid.lineAt(LineOffset(line)).flags().intersect(LineRenditionFlags);
+    };
+
+    SECTION("ED 0 from the first column of a middle row")
+    {
+        mock.writeToScreen("[2;1H#6AB[2;1H[J");
+        CHECK(renditionOf(1) == LineFlag::None);
+    }
+
+    SECTION("ED 0 at home")
+    {
+        mock.writeToScreen("[H#3AB[H[J");
+        CHECK(renditionOf(0) == LineFlag::None);
+    }
+
+    SECTION("ED 1 at the last column")
+    {
+        mock.writeToScreen("[2;1H#6AB[2;10H[1J");
+        CHECK(renditionOf(1) == LineFlag::None);
+    }
+
+    SECTION("ED 0 from a later column keeps it")
+    {
+        mock.writeToScreen("[2;1H#6AB[2;2H[J");
+        CHECK(renditionOf(1) == LineFlag::DoubleWidth);
+    }
+
+    SECTION("ED 1 before the last column keeps it")
+    {
+        mock.writeToScreen("[2;1H#6AB[2;9H[1J");
+        CHECK(renditionOf(1) == LineFlag::DoubleWidth);
+    }
+
+    SECTION("EL 2 keeps it")
+    {
+        mock.writeToScreen("[2;1H#6AB[2K");
+        CHECK(renditionOf(1) == LineFlag::DoubleWidth);
+    }
+}
+
+TEST_CASE("EL0.andED1.endTheWrapTheyEraseAcross", "[screen]")
+{
+    // "ABCDEFGHIJKLMNO" on a 10-column page wraps onto a second row. Erasing the right part of the first
+    // row ends that wrap -- xterm's ClearRight clears LINEWRAPPED, "we can't be wrapping" -- and erasing
+    // everything above the cursor ends the cursor row's continuation of it (xterm's ClearBufRows). What is
+    // left are two lines, which a reflow must not join again.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10) };
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    mock.writeToScreen("ABCDEFGHIJKLMNO");
+    REQUIRE(grid.lineAt(LineOffset(1)).isFlagEnabled(LineFlag::Wrapped));
+
+    SECTION("EL 0 inside the row")
+    {
+        mock.writeToScreen("\033[1;6H\033[K");
+        CHECK_FALSE(grid.lineAt(LineOffset(1)).isFlagEnabled(LineFlag::Wrapped));
+
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(20) });
+        CHECK(grid.lineText(LineOffset(0)) == "ABCDE               ");
+        CHECK(grid.lineText(LineOffset(1)) == "KLMNO               ");
+    }
+
+    SECTION("EL 0 from the first column")
+    {
+        mock.writeToScreen("\033[1;1H\033[K");
+        CHECK_FALSE(grid.lineAt(LineOffset(1)).isFlagEnabled(LineFlag::Wrapped));
+    }
+
+    SECTION("ED 1 on the continuation")
+    {
+        mock.writeToScreen("\033[2;3H\033[1J");
+        CHECK_FALSE(grid.lineAt(LineOffset(1)).isFlagEnabled(LineFlag::Wrapped));
+    }
+
+    SECTION("EL 1 and EL 2 keep it")
+    {
+        // xterm's ClearLeft and ClearLine leave the wrap alone.
+        mock.writeToScreen("\033[1;6H\033[1K\033[2;1H\033[2K");
+        CHECK(grid.lineAt(LineOffset(1)).isFlagEnabled(LineFlag::Wrapped));
     }
 }
 

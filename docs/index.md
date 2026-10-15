@@ -19,14 +19,15 @@ Bring your terminal to life with color schemes, profiles, and sixel inline image
 
 :material-check-bold:{.check-mark}  Available on all major platforms, Linux, macOS, FreeBSD, OpenBSD, Windows. <br/>
 :material-check-bold:{.check-mark}  [Font ligatures](demo/font-ligatures.md) support (very useful for programming and scripting) <br/>
-![demo](/screenshots/contour-font-ligatures.png){ align=left }
+![demo](screenshots/contour-font-ligatures.png){ align=left }
 :material-check-bold:{.check-mark}  Complex Unicode support, including colored Emoji (-: 🌈  💝  😛  👪  - including ZWJ, VS15, VS16 emoji :-) <br/>
 :material-check-bold:{.check-mark}  [Persistent sessions](persistent-sessions.md) that survive the window (daemon mode) — reattach locally or over the network <br/>
 :material-check-bold:{.check-mark}  [Vi-like input modes](input-modes.md) for improved navigation, selection and copy'n'paste experience <br/>
 :material-check-bold:{.check-mark}  [Vertical Line Markers](demo/line-marks.md) (quickly jump to markers in your history!) <br/>
+:material-check-bold:{.check-mark}  [Command blocks](demo/command-blocks.md) from shell integration: folding, an exit-status gutter, scrollbar marks and a sticky command header <br/>
 :material-check-bold:{.check-mark}  Profiles (grouped customization of: color scheme, login shell, and related behaviors) <br/>
 :material-check-bold:{.check-mark}  [Sixel Image support](demo/images.md) <br/>
-![sixel-index-demo](../screenshots/contour-sixel-plot.png){ align=left}
+![sixel-index-demo](screenshots/contour-sixel-plot.png){ align=left}
 :material-check-bold:{.check-mark}  [VT320 Host-programmable and Indicator statusline support](demo/statusline.md) <br/>
 :material-check-bold:{.check-mark}  Bold and italic fonts <br/>
 :material-arrow-right:{.arrow-right-bold} [For a full list of features, click here](features.md) <br/>

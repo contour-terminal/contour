@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <mutex>
 
-using std::scoped_lock;
 using std::string;
 
 using vtbackend::ImageSize;
@@ -80,6 +79,16 @@ bool applyFontDescription(text::DPI dpi,
     return true;
 }
 
+vtbackend::GutterLayout configuredGutterLayout(config::Config const& config)
+{
+    return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config));
+}
+
+geometry::GutterWidth configuredGutterWidth(config::Config const& config, vtbackend::ImageSize cellSize)
+{
+    return gutterWidthFor(configuredGutterLayout(config), cellSize);
+}
+
 void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer::Renderer& renderer)
 {
     if (*newPixelSize.width == 0 || *newPixelSize.height == 0)
@@ -108,7 +117,7 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
         cellSize,
         marginsDevicePx,
         [&](auto page) { return terminal.clampedTotalPageSize(page); },
-        gutterWidthFor(session.config().folding.value(), cellSize));
+        configuredGutterWidth(session.config(), cellSize));
 
     renderer.applyResize(newPixelSize, fit.pageSize, fit.pageMargin);
 
@@ -126,10 +135,12 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
                           viewSize,
                           newPixelSize,
                           session.profile().margins.value(),
-                          terminal.pageSize(),
+                          oldPageSize,
                           fit.pageSize);
 
-    auto const l = scoped_lock { terminal };
+    // With in-band resize reports on (DECSET 2048) the resize writes a report, which with SRM reset is echoed
+    // and parses, taking the lock again. The lock holds the report back and sends it once it is released.
+    auto const _ = std::scoped_lock { terminal };
 
     // fit.pageSize is already clamped (see above), so a direct comparison decides the early-out.
     if (fit.pageSize == terminal.totalPageSize())

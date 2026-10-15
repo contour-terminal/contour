@@ -25,6 +25,10 @@ osc_context:
     derive_markers: when_alone
     tinting: all
 
+# The command block store, with a non-default cap so its loader runs.
+command_blocks:
+    max_records: 500
+
 profiles:
     main:
         shell: /bin/sh
@@ -48,6 +52,9 @@ profiles:
             scroll_multiplier: 3
         scrollbar:
             position: Right
+        sticky_header:
+            mode: always
+            show_evicted: false
         status_line:
             display: indicator
             position: Bottom
@@ -78,6 +85,9 @@ color_schemes:
         cursor:
             default: '#B0B0B0'
             text: '#101010'
+        sticky_header:
+            background: '#202830'
+            separator: '#506070'
         # No shipped scheme sets these; the coverage scheme does, so the tint parse and the renderer
         # blend both run under the offscreen pass.
         tint:

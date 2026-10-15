@@ -5,6 +5,8 @@
 
 #include <array>
 #include <cerrno>
+#include <expected>
+#include <system_error>
 
 #ifdef __APPLE__
     #include <util.h>
@@ -21,7 +23,26 @@ namespace vtpty::util
 termios getTerminalSettings(int fd) noexcept;
 termios constructTerminalSettings(int fd) noexcept;
 bool applyTerminalSettings(int fd, termios const& tio);
-bool setFileFlags(int fd, int flags) noexcept;
+
+/// Marks @p fd close-on-exec -- a descriptor flag, set with F_SETFD -- so that no process this one spawns
+/// inherits it.
+/// @param fd The descriptor.
+/// @return Nothing; or why the flag could not be set.
+[[nodiscard]] std::expected<void, std::error_code> setCloseOnExec(int fd) noexcept;
+
+/// Makes reads and writes on @p fd return rather than wait, keeping its other status flags.
+/// @param fd The descriptor.
+/// @return Nothing; or why the flag could not be set.
+[[nodiscard]] std::expected<void, std::error_code> setNonBlocking(int fd) noexcept;
+
+/// Applies @p flags, as pipe2() and open() take them, to an open descriptor: O_CLOEXEC through
+/// setCloseOnExec(), O_NONBLOCK through setNonBlocking(). For a pipe made where pipe2() is missing.
+/// @param fd The descriptor.
+/// @param flags O_CLOEXEC and O_NONBLOCK, or neither.
+/// @return Nothing; or why a flag could not be set -- invalid_argument for any other flag, as pipe2()
+///         refuses one.
+[[nodiscard]] std::expected<void, std::error_code> applyCreationFlags(int fd, unsigned flags) noexcept;
+
 void saveClose(gsl::not_null<int*> fd) noexcept;
 void saveDup2(int a, int b) noexcept;
 
@@ -62,19 +83,53 @@ inline termios constructTerminalSettings(int fd) noexcept
     return tio;
 }
 
-inline bool setFileFlags(int fd, int flags) noexcept
+/// @return The calling thread's errno, as an error code.
+[[nodiscard]] inline std::error_code lastError() noexcept
 {
-    int currentFlags {};
-    if (fcntl(fd, F_GETFL, &currentFlags) < 0)
-        return false;
-    if (fcntl(fd, F_SETFL, currentFlags | flags) < 0)
-        return false;
-    return true;
+    return std::error_code { errno, std::generic_category() };
 }
 
-inline void setFileBlocking(int fd, bool blocking) noexcept
+inline std::expected<void, std::error_code> setCloseOnExec(int fd) noexcept
 {
-    setFileFlags(fd, blocking ? 0 : O_NONBLOCK);
+    auto const flags = fcntl(fd, F_GETFD);
+    if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0)
+        return std::unexpected(lastError());
+    return {};
+}
+
+inline std::expected<void, std::error_code> setNonBlocking(int fd) noexcept
+{
+    auto const flags = fcntl(fd, F_GETFL);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
+        return std::unexpected(lastError());
+    return {};
+}
+
+inline std::expected<void, std::error_code> applyCreationFlags(int fd, unsigned flags) noexcept
+{
+    using Setter = std::expected<void, std::error_code> (*)(int) noexcept;
+    struct CreationFlag
+    {
+        unsigned flag; ///< As pipe2() and open() take it.
+        Setter apply;  ///< What sets it on an open descriptor.
+    };
+    auto const known = std::array {
+        CreationFlag { .flag = static_cast<unsigned>(O_CLOEXEC), .apply = &setCloseOnExec },
+        CreationFlag { .flag = static_cast<unsigned>(O_NONBLOCK), .apply = &setNonBlocking },
+    };
+
+    auto rest = flags;
+    for (auto const& [flag, apply]: known)
+    {
+        if ((flags & flag) == 0)
+            continue;
+        rest &= ~flag;
+        if (auto const applied = apply(fd); !applied)
+            return applied;
+    }
+    if (rest != 0)
+        return std::unexpected(std::make_error_code(std::errc::invalid_argument));
+    return {};
 }
 
 inline void saveClose(gsl::not_null<int*> fd) noexcept

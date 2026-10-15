@@ -96,30 +96,45 @@ Item {
     }
 
     // The pixmap the OS drag cursor shows while this tab is dragged (see dragProxy). grabToImage is
-    // ASYNCHRONOUS — it delivers the url on a later frame — so we pre-grab here and re-grab whenever the
-    // tab's size/label/color/active-state changes, keeping a ready image for every drag. If it is still
-    // empty on a first-ever drag the drag still works (Qt uses a default pixmap); only the ghost is missing.
+    // ASYNCHRONOUS -- it delivers the url on a later frame -- so the tab grabs ahead of a drag: when the
+    // pointer comes onto it or presses it, as every drag begins, and again on a change to its size, label,
+    // color or active state while it is there. Not otherwise: a grab holds its image until the garbage
+    // collector frees it, and one still in flight when the window or the engine goes away is never freed at
+    // all. One grab is in flight at a time, and a change meanwhile asks for one more once it lands, so the
+    // latest look wins. With no image ready the drag still works (Qt uses a default pixmap); only the ghost
+    // is missing.
+    enum DragImageGrab { Idle, InFlight, InFlightAndStale }
+    property int dragImageGrab: TabItem.Idle
     property url dragImage: ""
     function refreshDragImage() {
+        if (!hover.hovered && !leftTap.pressed)
+            return
         // grabToImage warns (and, offscreen, fails the QML test gate) unless the item is realized: it
-        // needs a non-zero size and a visible window. Skip until then; the tab re-grabs when it lands on
-        // a visible window (onVisibleChanged) or its size/label/color change.
+        // needs a non-zero size and a visible window.
         if (root.width <= 0 || root.height <= 0)
             return
         if (!root.Window.window || !root.Window.window.visible)
             return
-        root.grabToImage(function(result) { root.dragImage = result.url })
+        if (root.dragImageGrab !== TabItem.Idle) {
+            root.dragImageGrab = TabItem.InFlightAndStale
+            return
+        }
+        root.dragImageGrab = TabItem.InFlight
+        let started = root.grabToImage(function(result) {
+            root.dragImage = result.url
+            let stale = root.dragImageGrab === TabItem.InFlightAndStale
+            root.dragImageGrab = TabItem.Idle
+            if (stale)
+                root.refreshDragImage()
+        })
+        if (!started)
+            root.dragImageGrab = TabItem.Idle
     }
-    Component.onCompleted: root.refreshDragImage()
     onWidthChanged: root.refreshDragImage()
     onVisibleChanged: root.refreshDragImage()
     onTabTitleChanged: root.refreshDragImage()
     onTabColorChanged: root.refreshDragImage()
     onTabActiveChanged: root.refreshDragImage()
-    Connections {
-        target: root.Window.window
-        function onVisibleChanged() { root.refreshDragImage() }
-    }
 
     Rectangle {
         anchors.fill: parent
@@ -174,7 +189,12 @@ Item {
         // Built when the hover STARTS, not bound: the working directory changes with every `cd`, and a
         // binding would have to be driven by a change signal the model does not emit. A tooltip is only
         // read while it is open, so composing it on open is both simpler and always current.
-        onHoveredChanged: if (hovered) root.hoverTooltip = root.buildHoverTooltip()
+        onHoveredChanged: {
+            if (!hovered)
+                return
+            root.hoverTooltip = root.buildHoverTooltip()
+            root.refreshDragImage()
+        }
     }
 
     // What the hover tooltip shows. Empty means "nothing worth saying", which suppresses it entirely.
@@ -431,7 +451,10 @@ Item {
     // and, on platforms/styles where that interval is reported as 0, fired the deferred activation
     // synchronously so a genuine double-tap flashed the wrong tab before renaming.
     TapHandler {
+        id: leftTap
         acceptedButtons: Qt.LeftButton
+        // A press is where a drag begins, on a touch screen too, which has no hover to grab on.
+        onPressedChanged: if (pressed) root.refreshDragImage()
         onTapped: (eventPoint, button) => {
             root.controller.activateTab(root.tabIndex)
             if (tapCount === 2)

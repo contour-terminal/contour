@@ -8,6 +8,7 @@
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/GuiTheme.hpp>
+#include <contour/platform/QtInvoke.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSession.hpp>
@@ -18,7 +19,9 @@
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/WindowController.hpp>
 
-#include <QtCore/QDir>
+#include <vtbackend/core/WorkingDirectory.hpp>
+#include <vtbackend/shell/CommandLineSanitizer.hpp>
+
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
@@ -69,7 +72,8 @@ WindowController::WindowController(session::TerminalSessionManager& manager, vtw
         [this]() -> config::Config const& { return _manager.app().config(); },
         std::make_shared<config::FileGuiConfigStore>(_manager.app().config().configFile.parent_path()),
         [this]() {
-            _manager.reloadAllSessions();
+            if (auto const reloaded = _manager.reloadAllSessions(); !reloaded)
+                errorLog()("Failed to reload configuration. {}", reloaded.error());
             // Re-apply the GUI chrome theme live: a settings-page change to `theme` is already in the
             // reloaded Config, so the chrome recolors without a restart.
             _manager.app().applyGuiTheme(_manager.app().config().theme.value());
@@ -88,7 +92,7 @@ void WindowController::openCommandPalette()
 {
     // Re-read the bindings on every open, not once at construction: a ReloadConfig can have rebound a
     // key since, and a shortcut column that advertises the OLD chord is worse than none at all.
-    _commandPalette->setShortcuts(command::shortcutIndex(_manager.app().config().inputMappings.value()));
+    _commandPalette->setShortcuts(command::shortcutIndex(_manager.app().config()));
 
     // Re-queries the sources (so the tab rows track the tabs that exist now) and clears any filter the
     // last open left behind.
@@ -246,9 +250,20 @@ std::vector<std::string> WindowController::tabTitles() const
     // label precedence (runtime rename > pane title > ...) lives in resolvedTabLabel(), and a second
     // implementation here would eventually disagree with what the user sees on the tab.
     for (auto const row: std::views::iota(0, tabCount))
-        titles.push_back(data(index(row, 0), static_cast<int>(Roles::TitleRole)).toString().toStdString());
+        titles.push_back(titleAtRow(row));
 
     return titles;
+}
+
+std::string WindowController::tabTitleOf(vtworkspace::TabId tab) const
+{
+    auto const row = rowOfTab(tab);
+    return row >= 0 ? titleAtRow(row) : std::string {};
+}
+
+std::string WindowController::titleAtRow(int row) const
+{
+    return data(index(row, 0), static_cast<int>(Roles::TitleRole)).toString().toStdString();
 }
 
 vtworkspace::Window* WindowController::window() const noexcept
@@ -415,10 +430,20 @@ QString WindowController::tabWorkingDirectory(int index) const
     if (session == nullptr)
         return {};
 
-    // Abbreviated as a shell prompt writes it. Purely presentational, which is why it happens here and
-    // not at the source: a caller that wants a path to act on wants the real one.
-    return QString::fromStdString(
-        abbreviateHomePath(session->displayWorkingDirectory(), QDir::homePath().toStdString()));
+    // Abbreviated as a shell prompt writes it, but only for a directory on this machine: this machine's
+    // home says nothing about another machine's paths, where `~` would name a different directory.
+    // Purely presentational, which is why it happens here and not at the source: a caller that wants a
+    // path to act on wants the real one.
+    auto const& home = _manager.homeDirectory();
+    auto const resolved = session->resolveWorkingDirectory(vtbackend::CwdPurpose::Display);
+    if (!resolved) // Nothing reported: the directory the session started in, which is on this machine.
+        return QString::fromStdString(
+            vtbackend::abbreviateHomePath(session->displayWorkingDirectory(), home));
+
+    auto const shown = resolved->locality == vtbackend::ContextLocality::Local
+                           ? vtbackend::abbreviateHomePath(resolved->path, home)
+                           : resolved->path;
+    return QString::fromStdString(vtbackend::sanitizeCommandLine(shown, vtbackend::SanitizePurpose::Display));
 }
 
 void WindowController::dispatchTabStripWheel(
@@ -952,6 +977,13 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
             this,
             &WindowController::onWindowVisibilityChanged,
             Qt::UniqueConnection);
+
+    // A restore puts the focused pane back in front of the user without moving focus.
+    connect(osWindow,
+            &QWindow::windowStateChanged,
+            this,
+            &WindowController::onWindowStateChanged,
+            Qt::UniqueConnection);
 }
 
 void WindowController::refreshWindowShadow()
@@ -979,6 +1011,11 @@ void WindowController::onWindowVisibilityChanged()
     // The window's presentation is READ from it (@see platform::presentationFor) rather than
     // mirrored into a member here, so this handler only has to say "look again".
     refreshWindowShadow();
+}
+
+void WindowController::onWindowStateChanged()
+{
+    _manager.windowStateChanged(_windowId);
 }
 
 void WindowController::onOSWindowActiveChanged()
@@ -1017,13 +1054,13 @@ void WindowController::showInitial()
     auto const marginsDevice =
         geometry::scaled(session::toGeometryMargins(session->profile().margins.value()), scale);
     auto const totalPage = session->terminal().totalPageSize();
-    auto const size = geometry::windowSizeForPage(
-        totalPage,
-        display->cellSize(),
-        marginsDevice,
-        scale,
-        chrome(),
-        session::gutterWidthFor(session->config().folding.value(), display->cellSize()));
+    auto const size =
+        geometry::windowSizeForPage(totalPage,
+                                    display->cellSize(),
+                                    marginsDevice,
+                                    scale,
+                                    chrome(),
+                                    session::configuredGutterWidth(session->config(), display->cellSize()));
 
     display::displayLog()("Initial window size {}x{} (page {}, cell {}, scale {}, chrome {}).",
                           size.width,
@@ -1149,8 +1186,7 @@ void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, Hi
     auto const margins = session::toGeometryMargins(requester.session().profile().margins.value());
     // Handed over in DEVICE pixels, the unit it is decided in: sizeHintsFor converts it once, where
     // unscaling it here and letting it be scaled back would truncate a pixel off at fractional DPR.
-    auto const gutterDevicePx =
-        session::gutterWidthFor(requester.session().config().folding.value(), cellSize);
+    auto const gutterDevicePx = session::configuredGutterWidth(requester.session().config(), cellSize);
     auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome(), gutterDevicePx);
 
     // The character-cell resize grid (base + increment) is cleared while maximized/fullscreen. An
@@ -1262,6 +1298,41 @@ void WindowController::minimizeWindow()
         _osWindow->showMinimized();
 }
 
+bool WindowController::isMinimized() const noexcept
+{
+    return _osWindow != nullptr && _osWindow->windowStates().testFlag(Qt::WindowMinimized);
+}
+
+void WindowController::requestNotification(QString const& title,
+                                           QString const& body,
+                                           std::function<void()> onClicked)
+{
+    _trayMessageClicked = std::move(onClicked);
+    emit notificationRequested(title, body);
+}
+
+void WindowController::trayMessageClicked()
+{
+    raiseAndActivate();
+    // Taken rather than kept: a message is clicked once.
+    if (auto const onClicked = std::exchange(_trayMessageClicked, {}))
+        onClicked();
+}
+
+void WindowController::raiseAndActivate()
+{
+    if (_osWindow == nullptr)
+        return;
+
+    // Cleared from the state set rather than via showNormal(): a window minimised from maximised must
+    // come back maximised.
+    auto states = _osWindow->windowStates();
+    states.setFlag(Qt::WindowMinimized, false);
+    _osWindow->setWindowStates(states);
+    _osWindow->raise();
+    _osWindow->requestActivate();
+}
+
 bool WindowController::resizeWindowForPage(session::DisplaySurface& requester,
                                            vtbackend::PageSize totalPageSize)
 {
@@ -1278,7 +1349,7 @@ bool WindowController::resizeWindowForPage(session::DisplaySurface& requester,
         marginsDevice,
         scale,
         geometry::Chrome {},
-        session::gutterWidthFor(requester.session().config().folding.value(), requester.cellSize()));
+        session::configuredGutterWidth(requester.session().config(), requester.cellSize()));
     return applyContentDrivenResize(requester, leafLogical);
 }
 
@@ -1357,7 +1428,7 @@ bool WindowController::applyContentDrivenResize(session::DisplaySurface& request
     // The flag covers the synchronous effects; the queued reset re-arms after the event settles.
     _inContentDrivenResize = true;
     osWindow->resize(content.width, content.height + _chromeHeight);
-    QMetaObject::invokeMethod(this, [this]() { _inContentDrivenResize = false; }, Qt::QueuedConnection);
+    platform::postToObject(this, [this]() { _inContentDrivenResize = false; });
     return true;
 }
 
@@ -1418,20 +1489,21 @@ void WindowController::rebuildActiveTabPaneProxies()
     // instead would prune the hidden panes' proxies and tear their terminals down on every zoom.
     std::unordered_map<uint64_t, vtworkspace::Pane*> live;
     if (tab != nullptr)
+    {
         tab->rootPane()->walkTree([&](vtworkspace::Pane& p) { live[p.id().value] = &p; });
 
-    for (auto const& [idValue, p]: live)
-    {
-        auto* proxy = getProxy(vtworkspace::PaneId { idValue });
-        // live is only populated when tab != nullptr, so tab->id() is safe here. The tab id keys the
-        // proxy's write-backs (setRatio/activate) to exactly this tab.
-        proxy->setPane(p, tab->id());
-        if (p->isLeaf())
-            proxy->setChildren(nullptr, nullptr);
-        else
-            proxy->setChildren(getProxy(p->first()->id()), getProxy(p->second()->id()));
-        proxy->notifyChanged();
-        proxy->notifyActiveChanged();
+        for (auto const& [idValue, p]: live)
+        {
+            auto* proxy = getProxy(vtworkspace::PaneId { idValue });
+            // The tab id keys the proxy's write-backs (setRatio/activate) to exactly this tab.
+            proxy->setPane(p, tab->id());
+            if (p->isLeaf())
+                proxy->setChildren(nullptr, nullptr);
+            else
+                proxy->setChildren(getProxy(p->first()->id()), getProxy(p->second()->id()));
+            proxy->notifyChanged();
+            proxy->notifyActiveChanged();
+        }
     }
 
     for (auto it = _paneProxies.begin(); it != _paneProxies.end();)

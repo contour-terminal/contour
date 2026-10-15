@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <optional>
 #include <ranges>
+#include <utility>
 
 using namespace std;
 
@@ -126,15 +128,15 @@ void HintModeHandler::rescanLines(HintScanArea const& area)
                 auto const start = gridPositionOf(logical, startIndex);
 
                 // The label is drawn at the match start, so a match starting on a row that cannot
-                // carry one could never be selected: do not offer it. Tested before the validator,
-                // which may go to the filesystem.
+                // carry one could never be selected: do not offer it. Tested before the pattern
+                // resolves the match, which may go to the filesystem.
                 if (!area.labelableRows.contains(start.line))
                     continue;
 
-                auto const matchStr = match.str();
-
-                // Apply pattern-specific validator (e.g. filesystem existence check).
-                if (pattern.validator && !pattern.validator(matchStr))
+                // What the match stands for, by the pattern's own rule (e.g. a path that must exist).
+                auto matchedText = pattern.resolve ? pattern.resolve(match.str(), start.line)
+                                                   : std::optional { match.str() };
+                if (!matchedText)
                     continue;
 
                 auto const endIndex =
@@ -142,7 +144,7 @@ void HintModeHandler::rescanLines(HintScanArea const& area)
 
                 _allMatches.push_back(HintMatch {
                     .label = {},
-                    .matchedText = pattern.transformer ? pattern.transformer(matchStr) : matchStr,
+                    .matchedText = std::move(*matchedText),
                     .start = start,
                     .end = gridPositionOf(logical, endIndex - 1),
                 });
@@ -340,23 +342,19 @@ vector<HintPattern> HintModeHandler::builtinPatterns()
         HintPattern { .name = "url",
                       .regex = regex(R"(https?://[^\s<>\"'\])\}]+)",
                                      regex_constants::ECMAScript | regex_constants::optimize),
-                      .validator = {},
-                      .transformer = {} },
+                      .resolve = {} },
         HintPattern { .name = "filepath",
                       .regex = regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w][\w.-]*/[\w./-]+))",
                                      regex_constants::ECMAScript | regex_constants::optimize),
-                      .validator = {},
-                      .transformer = {} },
+                      .resolve = {} },
         HintPattern {
             .name = "githash",
             .regex = regex(R"(\b[0-9a-f]{7,40}\b)", regex_constants::ECMAScript | regex_constants::optimize),
-            .validator = {},
-            .transformer = {} },
+            .resolve = {} },
         HintPattern { .name = "ipv4",
                       .regex = regex(R"(\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?\b)",
                                      regex_constants::ECMAScript | regex_constants::optimize),
-                      .validator = {},
-                      .transformer = {} },
+                      .resolve = {} },
         HintPattern {
             .name = "ipv6",
             .regex =
@@ -367,8 +365,7 @@ vector<HintPattern> HintModeHandler::builtinPatterns()
                       R"(|\b(?:[0-9a-fA-F]{1,4}:)+:(?![0-9a-fA-F:]))"
                       R"())",
                       regex_constants::ECMAScript | regex_constants::optimize),
-            .validator = {},
-            .transformer = {} },
+            .resolve = {} },
     };
     return cached;
 }

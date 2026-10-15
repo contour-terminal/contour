@@ -11,6 +11,8 @@
 
 #include <gsl/pointers>
 
+#include <atomic>
+
 namespace vtbackend
 {
 // Forward declaration (defined in HintModeHandler.h).
@@ -121,6 +123,16 @@ enum class ViOperator : uint8_t
     Open = 'o',
 };
 
+/// Vim's fold commands, the ones its `z` prefix names.
+enum class ViFoldCommand : uint8_t
+{
+    Toggle = 0, ///< `za`: open the block under the cursor if it is closed, close it otherwise.
+    Open,       ///< `zo`: open the block under the cursor.
+    Close,      ///< `zc`: close the block under the cursor.
+    CloseAll,   ///< `zM`: close every block within reach.
+    OpenAll,    ///< `zR`: open every block.
+};
+
 enum class TextObject : uint8_t
 {
     AngleBrackets = '<',  // i<  a<
@@ -187,6 +199,9 @@ class ViInputHandler: public InputHandler
 
         /// Enters hint mode with the given action.
         virtual void enterHintMode(HintAction action) = 0;
+
+        /// Runs one of vim's `z` fold commands on the block under the Vi cursor, or on all of them.
+        virtual void fold(ViFoldCommand command) = 0;
     };
 
     ViInputHandler(Executor& theExecutor, ViMode initialMode);
@@ -200,7 +215,7 @@ class ViInputHandler: public InputHandler
 
     [[nodiscard]] bool isVisualMode() const noexcept
     {
-        switch (_viMode)
+        switch (mode())
         {
             case ViMode::Insert:
             case ViMode::Normal:
@@ -239,7 +254,10 @@ class ViInputHandler: public InputHandler
     /// Asks the frontend to open the search prompt, which is all `/` does now.
     void startSearch();
 
-    ViMode _viMode = ViMode::Normal;
+    /// Written under the terminal's state lock, from the key path and from the parser thread, which leaves
+    /// hint mode when output scrolls its matches away. Atomic so that the key path can tell an Insert-mode
+    /// key, which nothing here wants, without waiting for that lock. @see Terminal::offerToViInput().
+    std::atomic<ViMode> _viMode { ViMode::Normal };
 
     std::string _pendingInput;
     CommandHandlerMap _normalMode;

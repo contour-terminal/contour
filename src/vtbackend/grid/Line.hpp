@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/ContextId.hpp>
 #include <vtbackend/core/GraphicsAttributes.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
@@ -20,6 +21,7 @@
 #include <libunicode/convert.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -27,15 +29,17 @@
 namespace vtbackend
 {
 
-/// How @ref Line::toUtf8 renders the continuation cell(s) of a wide (double-width) character.
+/// How @ref Line::toUtf8 renders the cells with no text of their own (NoTextCellFlags): the continuation
+/// cell(s) of a wide (double-width) character, the padding (CellFlag::WrapPadding) one leaves at the end of a
+/// row it did not fit, and the lower part of a tall text-sizing block (CellFlag::MulticellContinuation).
 enum class ContinuationCell : uint8_t
 {
     /// Emit nothing: a wide character contributes a single codepoint, so the result is the text as
     /// written. This is what copy/yank and selection want.
     Collapse = 0,
-    /// Emit one space per continuation cell, so every grid cell contributes exactly one codepoint and
-    /// a codepoint index into the result equals a column offset. This is what the hint scanner needs
-    /// to map a regex match position back to a grid column.
+    /// Emit one space per cell with no text of its own, so every grid cell contributes exactly one
+    /// codepoint and a codepoint index into the result equals a column offset. This is what the hint
+    /// scanner needs to map a regex match position back to a grid column.
     Pad = 1,
 };
 
@@ -65,6 +69,22 @@ struct TrivialLineBuffer
         usedColumns = {};
         text.reset();
     }
+};
+
+/// What EVERY physical piece of a logical line carries, head or not: who wrote the row, which command
+/// block it belongs to and when the cursor first reached it.
+///
+/// Unlike the head-only offsets (Line::commandEndOffset(), Line::promptEndOffset()), which name a border
+/// WITHIN a logical line, these name where a row came from, and a wrap changes none of them -- so reflow
+/// hands them to every piece it cuts. One value, so reflow hands them on without listing them, and a
+/// further such attribute is a member here rather than an edit at each of its sites.
+struct LineProvenance
+{
+    ContextId contextId {};    ///< The context that wrote the row. @see Line::contextId
+    CommandBlockId blockId {}; ///< The command block the row belongs to. @see Line::blockId
+    uint32_t bornAt = 0;       ///< When the cursor first reached the row. @see Line::bornAt
+
+    bool operator==(LineProvenance const&) const = default;
 };
 
 /**
@@ -119,13 +139,7 @@ class Line
         if (this == &other)
             return *this;
         _storage = other._storage;
-        _columns = other._columns;
-        _flags = other._flags;
-        _contextId = other._contextId;
-        _commandEndOffset = other._commandEndOffset;
-        _promptEndOffset = other._promptEndOffset;
-        _revision = other._revision;
-        _dirty = true;
+        assignScalarsFrom(other);
         return *this;
     }
 
@@ -134,13 +148,7 @@ class Line
         if (this == &other)
             return *this;
         _storage = std::move(other._storage);
-        _columns = other._columns;
-        _flags = other._flags;
-        _contextId = other._contextId;
-        _commandEndOffset = other._commandEndOffset;
-        _promptEndOffset = other._promptEndOffset;
-        _revision = other._revision;
-        _dirty = true;
+        assignScalarsFrom(other);
         return *this;
     }
 
@@ -173,7 +181,8 @@ class Line
 
     // ----------------------------------------------------------------------------------------
 
-    /// Reset the line to the blank state with the given fill attributes.
+    /// Reset the line to the blank state with the given fill attributes, carrying @p flags -- and the
+    /// offset of each of them it already carried.
     /// O(1): clears the SoA arrays without re-allocating per-column storage.
     /// Skips the six vector swaps when the line is already blank with matching fillAttrs.
     void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
@@ -370,9 +379,10 @@ class Line
     /// on the very same line. One line, two owners; this offset is the border between them. Zero (the
     /// common case) means the output did end in a newline and the whole line belongs to the prompt.
     ///
-    /// Counted from the start of the LOGICAL line, not of the physical one it happens to fall in. That is
-    /// what makes it survive a resize: reflow re-chops a logical line into different physical pieces, but
-    /// it never changes the line's content, so the border does not move.
+    /// Counted from the start of the LOGICAL line, not of the physical one it happens to fall in: the rows
+    /// above it times the page width, plus its column. That is what lets it survive a resize, which moves it
+    /// with the cell it names -- across the rows a reflow re-chops the line into and the padding a wide
+    /// character leaves at a row's end, or held to its row where the row is cut instead.
     [[nodiscard]] ColumnOffset commandEndOffset() const noexcept { return _commandEndOffset; }
     void setCommandEndOffset(ColumnOffset offset) noexcept
     {
@@ -387,9 +397,7 @@ class Line
     /// on this line, this one says where the prompt did. Together they cut a line that a shell shares
     /// between three owners — trailing output, prompt, typed command — into its parts.
     ///
-    /// Counted from the start of the LOGICAL line for the same reason commandEndOffset() is: reflow
-    /// re-chops a logical line into different physical pieces but never changes its content, so a
-    /// logical column does not move when the window is resized.
+    /// Counted from the start of the LOGICAL line, and moved by a resize, as commandEndOffset() is.
     [[nodiscard]] ColumnOffset promptEndOffset() const noexcept { return _promptEndOffset; }
 
     /// The context that wrote this line, or zero when none was in effect.
@@ -412,6 +420,125 @@ class Line
     {
         if (!!id)
             _contextId = id;
+    }
+
+    /// The shell command block this line belongs to.
+    /// @return The block's id, or zero when none.
+    /// @see CommandBlockStore
+    [[nodiscard]] CommandBlockId blockId() const noexcept { return _blockId; }
+
+    /// Records that this line belongs to the command block @p id.
+    ///
+    /// The contract of adoptContext(), for the same reasons: a ZERO id is ignored (no block being active is
+    /// an absence of information, not a claim that the line has none), and adopting does NOT dirty the line
+    /// -- the id is derived state, carried to a mirror with the line's next real change and in snapshots.
+    /// Last writer wins, so this is for an explicit transition: the line a ;D closes is routinely the line
+    /// the next ;A opens. A row merely reached takes a block only if it has none: adoptProvenance().
+    /// @param id The block; zero changes nothing.
+    void adoptBlock(CommandBlockId id) noexcept
+    {
+        if (!!id)
+            _blockId = id;
+    }
+
+    /// Forgets which command block this line belongs to, and dirties it if it named one -- a mirror only
+    /// revisits dirty rows.
+    ///
+    /// Only for when the ids themselves start over (CommandBlockStore::idEpoch()): the id this line carries
+    /// would otherwise name a block minted after it was written. A reset aside, nothing else takes a block
+    /// away from a line.
+    void forgetBlock() noexcept
+    {
+        if (!_blockId)
+            return;
+        _blockId = {};
+        _dirty = true;
+    }
+
+    /// When the cursor first reached this line.
+    /// @return Seconds since the session began, PLUS ONE, so that zero can mean "never stamped"; MaxBornAt
+    ///         when the line was born too late in the session for its time to be known.
+    [[nodiscard]] uint32_t bornAt() const noexcept
+    {
+        return static_cast<uint32_t>(_bornAt[0]) | (static_cast<uint32_t>(_bornAt[1]) << 8U)
+               | (static_cast<uint32_t>(_bornAt[2]) << 16U);
+    }
+
+    /// Stamps the time the cursor first reached this line, if it carries none yet.
+    ///
+    /// Unlike adoptBlock(), this DIRTIES the line -- once, the moment it is first reached -- so the
+    /// daemon's delta carries the stamp (and the block id adopted with it) even for a line nothing is
+    /// ever written to, such as a blank line in a command's output.
+    /// @param secondsPlusOne Seconds since the session began, plus one. Zero stamps nothing; a value past
+    ///        MaxBornAt is stored as MaxBornAt.
+    void stampBornAt(uint32_t secondsPlusOne) noexcept
+    {
+        if (secondsPlusOne == 0 || bornAt() != 0)
+            return;
+        auto const value = std::min(secondsPlusOne, MaxBornAt);
+        _bornAt = { static_cast<uint8_t>(value),
+                    static_cast<uint8_t>(value >> 8U),
+                    static_cast<uint8_t>(value >> 16U) };
+        _dirty = true;
+    }
+
+    /// The largest birth stamp three bytes hold, and the one that means "born, but when is no longer
+    /// known": a later stamp is saturated to it, so a row born that late reads as timeless
+    /// (Terminal::lineBirthTime() reports none) rather than wrapping round to the session's start. The known
+    /// times are the stamps below it: up to 2^24 - 2 seconds, about 194 days, into the session.
+    static constexpr uint32_t MaxBornAt = (1U << 24U) - 1U;
+
+    /// What this row hands on to every physical piece reflow cuts it into.
+    /// @return Its context, block and birth stamp.
+    [[nodiscard]] LineProvenance provenance() const noexcept
+    {
+        return LineProvenance { .contextId = _contextId, .blockId = _blockId, .bornAt = bornAt() };
+    }
+
+    /// Takes on each part of @p provenance this row does not carry yet: the context and the block where it
+    /// has none, the birth stamp where it is unstamped.
+    ///
+    /// Fill-once, so a row is never relabelled by being reached again. It is what the cursor arriving on a
+    /// row hands it (Screen::updateCursorIterator()), and what reflow hands every chunk and every rebuilt
+    /// row -- freshly constructed, so carrying nothing, and so ending up with exactly @p provenance.
+    /// Relabelling a row is an explicit transition's job: relabel().
+    /// @param provenance What the row is to carry where it carries nothing.
+    void adoptProvenance(LineProvenance const& provenance) noexcept
+    {
+        // Assigned rather than adopted: on a row that carries none, a zero id leaves it carrying none either
+        // way, and this runs on every line feed, where the test of the id would be the dearer half.
+        if (!_contextId)
+            _contextId = provenance.contextId;
+        if (!_blockId)
+            _blockId = provenance.blockId;
+        stampBornAt(provenance.bornAt);
+    }
+
+    /// Relabels this row as an explicit transition does -- OSC 133;A, an OSC 3008 context change: each id
+    /// @p transition carries replaces the row's own, last writer wins. A zero id leaves the row's alone, and
+    /// the birth stamp is never rewritten.
+    ///
+    /// Unlike adoptContext() and adoptBlock(), this DIRTIES the row when it changes it: the row may already
+    /// be clean and replicated, and a daemon mirror's delta scan only revisits dirty rows.
+    /// @param transition The ids the transition hands out.
+    void relabel(LineProvenance const& transition) noexcept
+    {
+        if (!wouldRelabel(transition))
+            return;
+        adoptContext(transition.contextId);
+        adoptBlock(transition.blockId);
+        _dirty = true;
+    }
+
+    /// Whether relabel(@p transition) would change this row: whether it carries an id the row has not.
+    ///
+    /// Asked before the row is handed out for writing, which below the page top arms the grid's history delta
+    /// scan whether or not anything then changes (Grid::changingLineAt()).
+    /// @param transition The ids the transition hands out.
+    [[nodiscard]] bool wouldRelabel(LineProvenance const& transition) const noexcept
+    {
+        return (!!transition.contextId && transition.contextId != _contextId)
+               || (!!transition.blockId && transition.blockId != _blockId);
     }
 
     void setPromptEndOffset(ColumnOffset offset) noexcept
@@ -437,8 +564,8 @@ class Line
     /// The text of the columns [@p begin, @p end) of this line, blank cells rendered as spaces.
     /// @param begin First column to render; clamped to the line.
     /// @param end One past the last column to render; clamped to the line.
-    /// @param continuation Whether a wide character's continuation cell(s) collapse away or emit a
-    ///                     padding space; see @ref ContinuationCell.
+    /// @param continuation Whether the cells with no text of their own collapse away or emit a space; see
+    ///                     @ref ContinuationCell.
     [[nodiscard]] std::string toUtf8(ColumnOffset begin,
                                      ColumnOffset end,
                                      ContinuationCell continuation = ContinuationCell::Collapse) const;
@@ -550,97 +677,6 @@ class Line
     }
     [[nodiscard]] LineSoA const& storage() const noexcept { return _storage; }
 
-    // Tests if the given text can be matched in this line at the exact given start column, in sensitive
-    // or insensitive mode.
-    [[nodiscard]] bool matchTextAtWithSensitivityMode(std::u32string_view text,
-                                                      ColumnOffset startColumn,
-                                                      bool isCaseSensitive) const noexcept
-    {
-        auto const cols = unbox<size_t>(size());
-        auto const baseColumn = unbox<size_t>(startColumn);
-        if (text.size() > cols - baseColumn)
-            return false;
-
-        // A blank line has no codepoints to match against; only an empty needle matches.
-        if (isBlank())
-            return text.empty();
-
-        size_t i = 0;
-        while (i < text.size())
-        {
-            auto const col = baseColumn + i;
-            auto const proxy = ConstCellProxy(_storage, col);
-            if (!CellUtil::beginsWith(text.substr(i), proxy, isCaseSensitive))
-                return false;
-            ++i;
-        }
-        return i == text.size();
-    }
-
-    // Search a line from left to right
-    [[nodiscard]] std::optional<SearchResult> search(std::u32string_view text,
-                                                     ColumnOffset startColumn,
-                                                     bool isCaseSensitive) const noexcept
-    {
-        auto const cols = unbox<size_t>(size());
-        if (cols < text.size())
-            return std::nullopt;
-
-        auto matchTextAt = [&](auto text, auto baseColumn) {
-            return matchTextAtWithSensitivityMode(text, baseColumn, isCaseSensitive);
-        };
-
-        auto baseColumn = startColumn;
-        auto rightMostSearchPosition = ColumnOffset::cast_from(cols);
-        while (baseColumn < rightMostSearchPosition)
-        {
-            if (cols - unbox<size_t>(baseColumn) < text.size())
-            {
-                auto partialText = text;
-                partialText.remove_suffix(text.size() - (unbox<size_t>(size()) - unbox<size_t>(baseColumn)));
-                if (matchTextAt(partialText, baseColumn))
-                    return SearchResult { .column = startColumn, .partialMatchLength = partialText.size() };
-            }
-            else if (matchTextAt(text, baseColumn))
-                return SearchResult { .column = baseColumn };
-            baseColumn++;
-        }
-
-        return std::nullopt;
-    }
-
-    // Search a line from right to left
-    [[nodiscard]] std::optional<SearchResult> searchReverse(std::u32string_view text,
-                                                            ColumnOffset startColumn,
-                                                            bool isCaseSensitive) const noexcept
-    {
-        auto const cols = unbox<size_t>(size());
-        if (cols < text.size())
-            return std::nullopt;
-
-        auto matchTextAt = [&](auto text, auto baseColumn) {
-            return matchTextAtWithSensitivityMode(text, baseColumn, isCaseSensitive);
-        };
-
-        auto baseColumn = std::min(startColumn, ColumnOffset::cast_from(cols - text.size()));
-        while (baseColumn >= ColumnOffset(0))
-        {
-            if (matchTextAt(text, baseColumn))
-                return SearchResult { .column = baseColumn };
-            baseColumn--;
-        }
-        baseColumn = ColumnOffset::cast_from(text.size() - 1);
-        auto remainingText = text;
-        while (!remainingText.empty())
-        {
-            if (matchTextAt(remainingText, ColumnOffset(0)))
-                return SearchResult { .column = startColumn, .partialMatchLength = remainingText.size() };
-            baseColumn--;
-            remainingText.remove_prefix(1);
-        }
-        return std::nullopt;
-    }
-
   private:
     /// What a reset does with the storage of the cells it clears.
     enum class Storage : uint8_t
@@ -649,14 +685,27 @@ class Line
         Keep,    ///< Keep its capacity for the write about to follow (@see recycle).
     };
 
-    /// What every reset clears besides the cells: flags, the context, the prompt and command borders.
+    /// What every reset clears besides the cells: flags, the context, the block, the birth time, and the
+    /// prompt and command borders of the flags it drops.
+    ///
+    /// An offset belongs to its flag (commandEndOffset() to CommandEnd, promptEndOffset() to PromptEnd): a
+    /// reset that keeps the flag keeps the border it names. Dropping only the offset would leave a prompt
+    /// redrawn with `\r\e[K` saying its input begins at column 0, prompt and all.
+    /// @param flags The flags the reused row starts with.
     void resetMetadata(LineFlags flags) noexcept
     {
+        auto const keeps = [this, flags](LineFlag flag) {
+            return _flags.contains(flag) && flags.contains(flag);
+        };
+        if (!keeps(LineFlag::CommandEnd))
+            _commandEndOffset = {};
+        if (!keeps(LineFlag::PromptEnd))
+            _promptEndOffset = {};
         _dirty = true;
         _flags = flags;
         _contextId = {};
-        _commandEndOffset = {};
-        _promptEndOffset = {};
+        _blockId = {};
+        _bornAt = {};
     }
 
     /// Resets the line to a blank one of @p columns, filled with @p attributes. Skips the cells when
@@ -679,6 +728,21 @@ class Line
             case Storage::Release: initializeBlankLineSoA(_storage, attributes); break;
             case Storage::Keep: recycleBlankLineSoA(_storage, attributes); break;
         }
+    }
+
+    /// Takes every scalar of @p other, the storage aside, and dirties this row (see operator=).
+    /// @param other The row being copied or moved from.
+    void assignScalarsFrom(Line const& other) noexcept
+    {
+        _columns = other._columns;
+        _flags = other._flags;
+        _contextId = other._contextId;
+        _commandEndOffset = other._commandEndOffset;
+        _promptEndOffset = other._promptEndOffset;
+        _revision = other._revision;
+        _bornAt = other._bornAt;
+        _blockId = other._blockId;
+        _dirty = true;
     }
 
     LineSoA _storage;
@@ -706,6 +770,14 @@ class Line
                             ///< one batch per ~20ms a wrap takes ~11.7 billion
                             ///< years, so wrap is not handled in the comparison.
     bool _dirty = true;     ///< Fresh lines are pending: bootstrap self-heals.
+
+    /// The birth stamp bornAt() decodes, three bytes little-endian. Placed in the padding after _dirty,
+    /// like _blockId below, so neither costs a byte per line; the static_assert after the class keeps it so.
+    std::array<uint8_t, 3> _bornAt {};
+
+    /// The command block blockId() reports. NOT head-only, for the reason _contextId gives: it names what
+    /// produced the line, and a wrap does not change that.
+    CommandBlockId _blockId {};
 };
 
 /// Line's size is a fact about the whole scrollback, so it is pinned rather than left to drift.
@@ -721,6 +793,10 @@ class Line
 /// differ between libstdc++, libc++ and the MSVC STL, so a pinned literal would be a build break on
 /// macOS and Windows rather than a statement about Line's own tail. What matters here is exactly that
 /// tail -- the scalars after the storage -- and it is the same 32 bytes everywhere.
+///
+/// The tail after LineSoA is, by offset: _columns (+0), _flags (+4), _contextId (+6), _commandEndOffset
+/// (+8), _promptEndOffset (+12), _revision (+16), _dirty (+24), _bornAt (+25..27), _blockId (+28..31) --
+/// every byte used, none added. A field that does not fit there is a decision to grow every line.
 static_assert(sizeof(Line) == sizeof(LineSoA) + 32,
               "Line's scalar tail grew. See the comment on Line::_contextId before changing this.");
 

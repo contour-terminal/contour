@@ -4,6 +4,7 @@
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/shell/CommandLineSanitizer.hpp>
 
 #include <crispy/InterpolatedString.hpp>
 
@@ -13,7 +14,6 @@
 
 #include <chrono>
 #include <concepts>
-#include <ctime>
 #include <format>
 #include <iterator>
 #include <optional>
@@ -347,23 +347,7 @@ namespace
 
         std::string visit(StatusLineDefinitions::Clock const&)
         {
-            core::ignoreUnused(this);
-
-            // TODO: Find a more convenient way; The following is printing the time in UTC,
-            //       but we need it in local time.
-            // return std::format("{:%H:%M}", std::chrono::system_clock::now());
-
-            auto now = std::chrono::system_clock::now();
-            std::time_t const nowTimeT = std::chrono::system_clock::to_time_t(now);
-            std::tm tmBuf {};
-#ifdef _WIN32
-            localtime_s(&tmBuf, &nowTimeT);
-#else
-            localtime_r(&nowTimeT, &tmBuf);
-#endif
-            std::stringstream out;
-            out << std::put_time(&tmBuf, "%H:%M");
-            return out.str();
+            return std::format("{:%H:%M}", vt.localTimeNow());
         }
 
         std::string visit(StatusLineDefinitions::HistoryLineCount const&)
@@ -556,22 +540,6 @@ namespace
             }
         }
 
-        /// Strips anything a terminal would INTERPRET.
-        ///
-        /// Defence in depth, and not theoretical: this string is handed to writeToScreenInternal(),
-        /// which parses it. The sequence decoder already rejects control bytes, so one arriving here
-        /// means a parser bug -- and without this, that bug would be an injection able to clear the
-        /// status screen from a field any program on the tty can write.
-        [[nodiscard]] static std::string sanitized(std::string_view text)
-        {
-            auto out = std::string {};
-            out.reserve(text.size());
-            for (auto const ch: text)
-                if (static_cast<unsigned char>(ch) >= 0x20 && static_cast<unsigned char>(ch) != 0x7f)
-                    out.push_back(ch);
-            return out;
-        }
-
         /// How @p record reads in a breadcrumb at @p verbosity, or empty when it says nothing worth
         /// showing.
         [[nodiscard]] static std::string segmentFor(TerminalContext const& record,
@@ -610,7 +578,13 @@ namespace
 
             if (value.empty())
                 return {};
-            return (known ? std::string { rule->prefix } : std::string {}) + sanitized(value);
+            // Made safe to show, which is also defence in depth, and not theoretical: this string is handed
+            // to writeToScreenInternal(), which parses it. The sequence decoder already rejects control
+            // bytes, so one arriving here means a parser bug -- and without this, that bug would be an
+            // injection able to clear the status screen from a field any program on the tty can write. A
+            // bidi override would reverse the rest of the line.
+            return (known ? std::string { rule->prefix } : std::string {})
+                   + sanitizeCommandLine(value, SanitizePurpose::Display);
         }
 
         /// Joins @p segments, eliding the MIDDLE when the result would exceed @p maxWidth columns.

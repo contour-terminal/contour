@@ -83,23 +83,51 @@ payload`, where the tagged length's low bit is a reserved compression flag
 break). `serial == 0` marks unsolicited server pushes. Unknown idents decode
 to `Invalid{ident}` — data, not an error — so newer peers keep talking.
 A `ClientHello/ServerHello` version handshake precedes everything.
+An accepted `ServerHello` also names the machine the daemon runs on, once for the connection: every
+command block's locality was judged against that machine, so the client decides whether it is its
+own before it mirrors a single session, and every mirror it builds keeps that verdict. A refused
+`ServerHello` names nothing.
 
-The handshake is an **exact match**, not a negotiation: a peer one version away is refused, and the
-two ends must therefore be the same build. The refusal is deliberately shaped like a token mismatch
-(same `ServerHello`, same drop), so an attacker probing it learns neither the version nor whether its
-token was right; the price is that a user who upgraded and left an old daemon running gets no
-diagnosis from the wire.
+The machine id never travels as `/etc/machine-id` holds it, which machine-id(5) asks to keep
+confidential, but derived for Contour the way `sd_id128_get_machine_app_specific(3)` derives one
+(`vthost::appSpecificMachineId`) — the daemon's in the `ServerHello`, and every OSC 3008 context's
+`machineid=` alike (`vthost::toWireContext`); the client derives its own the same way to compare. On a systemd
+machine, `systemd-id128 machine-id --app-specific=71621e7c11854bdbb34c6eddd2c15d97` prints the id a
+daemon there states.
 
-**While the protocol is unreleased, `CodecVersion` stays 1 and is NOT bumped per change.** Nothing
-outside this source tree speaks it, so there is no peer for a version number to be compatible with;
-the counter had reached 13 above a changelog of twelve revisions no reader could ever have observed.
-Fields are added, removed and renamed without touching it, and the price — two builds that pass the
+A mirror binds the verdict into its terminal as the terminal's replica role
+(`vtbackend::Terminal::bindReplica`): a replica of another machine's terminal holds every directory
+its application reports — a command block's, an OSC 3008 context's, the OSC 7 one — as foreign,
+showing it but never opening or spawning into it.
+
+The handshake is an **exact match**, not a negotiation: a peer of another revision is refused, and the
+two ends must therefore speak the same one. The refusal is the same `ServerHello` whether the version
+or the token was wrong — the daemon's version and nothing else, then the drop — so a peer probing it
+learns which revision the daemon speaks, but not whether its token was right. That version is the
+diagnosis a user needs who upgraded and left an old daemon running: each end reports the other's
+(`daemon speaks codec v1, we speak v2`).
+
+The diagnosis has to survive the revisions between the two ends, so the hellos keep two layout rules.
+**Each starts with its version, and a hello of another revision is decoded no further**: whatever a
+later revision adds after the version is never read. **And each stays readable to contour 0.7.0**,
+whose daemon decodes a hello whole before it checks the version and refuses a byte too many: a
+`ClientHello` carries its fields as one blob followed by a zero byte, which that daemon reads as a
+token and no session settings, and a refusing `ServerHello` is the version alone, all of one that
+release reads. `vthost/testing/ShippedCodec.hpp` holds both hellos to that release's reader.
+
+**The protocol is experimental since 0.7.0**, which shipped `CodecVersion` 1. Experimental means no
+compatibility across revisions beyond that handshake. The version moves once per release whose wire
+differs from the previous release's, not once per change: no peer outside this source tree speaks the
+revision in flight, and a per-change counter had once reached 13 above a changelog of twelve revisions
+no reader could ever have observed. The price — two builds from between releases that pass the
 handshake and then disagree about the bytes — is paid by rebuilding the daemon and its clients
-together. Once the protocol ships, versioning resumes and every wire change needs a new number.
+together.
 
-The same reasoning applies to `PduType`: the catalog is kept **contiguous** and renumbered freely, so
-a retired PDU leaves no gap. A gap exists to keep a tag from being reused while a deployed peer still
-remembers the old meaning; with no deployed peer it is archaeology. Tags become stable at release too.
+The same reasoning applies to `PduType`: the catalog is kept **contiguous** and may be renumbered with
+a version bump, so a retired PDU leaves no gap. A gap exists to keep a tag from being reused while a
+peer still remembers the old meaning, and the handshake refuses a peer of another revision before it
+sends any other PDU. The two hellos are the exception: their tags are how two revisions meet, so they
+keep 0.7.0's.
 
 Two limits ride here as well, both applying in BOTH directions: `MaxFrameSize` bounds a declared
 payload, and `MaxGridExtent` bounds an announced or proposed grid — an announced one because the
@@ -128,7 +156,7 @@ absence looks like an oversight:
 
 Adding the verb later is not a compatibility event, which is why it is not rushed in ahead of a
 release: a new tag decodes to `Invalid{ident}` on an older peer, and the exact-match handshake above
-means both ends are the same build regardless. What genuinely costs a version bump is changing an
+means both ends speak the same revision regardless. What genuinely costs a version bump is changing an
 existing PDU's fields.
 
 ### Where a split ratio lives
@@ -185,6 +213,53 @@ last column that happened to be sent — which is why `applyWireLine` clears the
 `fillAttrsOf(row)` before writing any cell, and why the same function serves the page,
 the history and the host-writable status line.
 
+### Actions that change hosted state
+
+A client's terminal is a mirror rebuilt from deltas, so an action that changes the engine's state —
+ClearToPrompt, ClearHistoryAndReset, SoftReset, WriteScreen — would change only the mirror if it ran
+there: the host's rows stay, every other client keeps them, and the next delta may undo the change.
+Such an action is performed where the session lives. The client sends `PerformOperation`, naming the
+session and a `proto::EngineOperation`; `SessionHost::performOperation` applies it to the hosted
+`Terminal` and announces a screen update, and every attached mirror follows through its deltas as it
+follows output.
+
+It is **one verb carrying an enum**, not one PDU per action, and both ends keep a table:
+
+- **The client** (`contour/session/HostedOperation.hpp`) maps each action to an operation, and each
+  operation to where it runs on each kind of remote end. A session asks its `SessionFactory` where the
+  operation runs: a local factory runs it here, `NativeController` sends it to the daemon, and the
+  local handler then does nothing. With the connection gone the action reports no success and the user
+  is told, rather than the request being dropped on the floor.
+- **The host** (`SessionHost.cpp`) maps each operation to what it does to the `Terminal`, and to the
+  thread that does it. The loop thread performs the resets and the clear, under the terminal lock the
+  host takes. A write is handed to the session's pump, which parses it between two reads as it parses
+  the application's output, in order with the client's input: the loop thread neither sleeps in a
+  smooth-scrolling (DECSCLM) linefeed nor writes a reply to a PTY. Like every parse, it writes what
+  it sends only once it has let go of the terminal lock, which the loop takes to build every attached
+  client's delta: a write the application leaves parked never holds it.
+
+The next such action is an enumerator, a client row and a host row. An operation the host does not
+know — from a newer client — decodes all the same and is refused and logged by the host, as an
+unknown PDU is. The PDU arrived with revision 2 of the codec.
+
+**A vi mark is such an operation too**, though no action asks for it. A mirror's terminal is a replica,
+so `mm` there changes no row (`Terminal::toggleUserMark`): it raises `userMarkRequested`, and the
+session sends `SetUserMark` or `ClearUserMark` naming the row. The row is the host's, and only the
+mirror can name it: `ScreenMirror::hostRowOf` counts from where the primary page stood, in the mirror's
+own row ids, when an update last wrote it, and answers with the host's stable id and the host grid's
+stable-id generation of then (`Delta::stableIdGeneration`). The host places the mark through
+`Terminal::placeUserMark`, which passes over a row named in a generation since gone, and the row comes
+back flagged to every client. A mark is therefore the session's: every client shows it, and the host's
+reflow carries it. A row the host no longer holds, or one asked for while the mirror's own reflow is
+ahead of the host's, has no name, and the mark is not sent.
+
+**tmux tabs** run the parser locally on `%output`, so their terminal is not a delta mirror, but it is
+not where the pane lives either. The table's tmux column says what happens there. SoftReset and
+WriteScreen change only that local terminal, as they do in a local tab. ClearHistoryAndReset also
+sends `clear-history` for the pane, as iTerm2's tmux integration clears a buffer. ClearToPrompt is
+refused with a notice: tmux has no command for it, and dropping rows locally would leave the server's
+pane — what a re-attach replays — as it was.
+
 ### Why the client does not render escape sequences
 
 A thin pane must be indistinguishable from a local one — same behaviour, same rendering — and for
@@ -204,7 +279,7 @@ vocabulary cannot express everything a grid holds.**
   row erase goes through — clears them, so even a re-emitted OSC 133 would need re-asserting after
   every repaint.
 - Reproducing the marks with real OSC 133 would additionally feed the client's
-  `SemanticBlockTracker` command text and exit codes it does not have.
+  `CommandBlockStore` command text and exit codes it does not have.
 - The underline STYLES had no distinct representation either, because the shared flag→SGR table
   held one integer per flag and could not spell `4:3`.
 
@@ -285,11 +360,15 @@ at all.
   That is what made a daemon with two scrollback-heavy panes permanently unattachable: the attach
   walked every pane pushing a whole grid each, and the second one did not fit. Snapshots
   therefore go through `NativeSession`'s streamer, which `waitUntilBacklogBelow`s a piece's worth
-  before each PDU and splits anything past `SnapshotChunkBytes` into a `proto::SnapshotPart` run.
+  before each PDU and splits anything past a piece into a `proto::SnapshotPart` run.
   The watermark is deliberately a *low*-water mark. Pacing to `bound − piece` delivers the
   snapshot just as well, but does it by riding the backlog just under the bound for the whole
   run — leaving a single piece of headroom for every producer that *cannot* pace itself, and
-  refusing the first one that needs more.
+  refusing the first one that needs more. The piece is sized to the bound —
+  `snapshotPieceBytes`, a quarter of it capped at `SnapshotChunkBytes`, which the 4 MiB default
+  keeps — so a run holds about half the bound at most. A piece of a fixed size under a smaller
+  bound sat in the backlog already over it, and an increment or a bell enqueued behind it cost
+  the connection.
 
 The same rule has a second shape in-tree, for a producer that *cannot* suspend: `ControlOutput::pump`
 reads `queuedBytes()` and spends a headroom-derived per-pane credit, re-arming a timer while work
@@ -311,6 +390,24 @@ request changed something, because clients re-assert an unchanged client area on
 attach, and each pane's grid is clamped before it is applied — so both "different request,
 same grid" and "same request, discard a per-pane refinement" are real cases.
 
+### A client's input: paused, never refused
+
+The other direction has the opposite constraint. A client's `Input` is written to the session's PTY,
+and a PTY write parks once the application leaves its input unread, so the loop thread never writes
+it: `SessionHost::writeInput` queues it for the session's pump thread, which writes it between reads.
+That queue must not grow without bound while the application reads nothing, and it must not drop
+either, since a lost keystroke is a corrupted command line. It applies backpressure instead: once a
+session holds `SessionHostConfig::inputWatermarks.high` bytes of unwritten input, the connection whose
+`Input` filled it is read no further (`pumpPdus`'s `awaitReadRoom`), and that client's writes park in
+its own transport; once the session holds no more than `low`, the connection is read again. Every
+other connection and every other session is served meanwhile, so the daemon holds about the
+high-water mark, one PDU and one read chunk for each such connection. `WriteScreen`'s text shares the
+queue (`HostedSession::deliverOnPump`), since the pump parses it, so it backs up alike.
+
+Two costs follow. A paused connection is polled rather than woken, which is acceptable for a state
+that only an application ignoring its input causes. And a client that disconnects while paused is
+noticed only once the session drains.
+
 ### Stable row identity in the grid
 
 The delta source lives in `vtbackend` (added by this work, guarded by the
@@ -321,10 +418,11 @@ usual terminal lock, one byte store per mutation on the hot paths):
   lines between rows);
 - `Grid` names physical rows by **stable ids** maintained exclusively inside
   the ring-rotation primitives: scrolling changes a row's `LineOffset`, never
-  its id. The eviction floor is monotonic and deliberately not derived from
-  `historyLineCount()` — at-capacity scroll-down wraps destroyed page rows
-  into the oldest history slots without resetting them, and a derived floor
-  would re-validate evicted ids against garbage;
+  its id. The eviction floor is monotonic within a generation and names the
+  oldest history row wherever a `Grid` operation returns. It is kept as its
+  own member rather than derived from `historyLineCount()`, so that a step
+  which grows the history before the base moves cannot re-validate ids the
+  floor has already passed;
 - wholesale rebuilds (resize/reflow, history-limit change, reset) bump a
   **generation** instead; ids are only meaningful within one generation;
 - `finalizeRevisions()` stamps dirty lines with a batch seqno lazily —
@@ -410,12 +508,16 @@ break to remove.
 **Emulation is owned by the daemon; a session inherits the profile of the client that CREATED it.**
 `ClientHello` optionally carries `WireSessionSettings` — the emulation half of the client's resolved
 profile (history depth, reported terminal identity, reflow, grapheme clustering, frozen modes, image
-registers; never the page size, which `ResizeRequest` negotiates). The daemon applies it over its own
+registers, sixel scrolling; never the page size, which `ResizeRequest` negotiates). The daemon applies it over its own
 settings, validating every field, and hands the result to the sessions *that connection* creates:
 `CreateTab`, `SplitPane`, `NewWindow`, and the first session an attach to an empty daemon spawns.
 Sessions that already exist are never re-emulated, which is what makes two clients on different
 profiles conflict-free rather than a race — an application that already read DA1 cannot be told its
-terminal changed identity. Both `contour daemon` and `contour client` resolve those settings through
+terminal changed identity. A client whose configuration changed restates its preference with
+`SessionSettingsChanged`, which replaces what its `ClientHello` stated for the sessions it creates
+from then on; `contour client` resolves its profile again before every session it asks for, from the
+configuration the GUI holds in memory (as a local new tab does), and sends the restatement only when
+the result differs, so a tab opened after a configuration reload gets the reloaded profile. Both `contour daemon` and `contour client` resolve those settings through
 the one `config::resolveEmulationSettings` helper, so a warm daemon and the client attaching to it
 cannot disagree about what a profile means.
 
@@ -476,10 +578,25 @@ display/render/input machinery learns the session is remote:
   streams the snapshot's rows in regardless, because there is no second copy to make.
   Without that, a client attaching while the session sat on the alternate screen never
   materialized the primary's pre-attach scrollback, though the wire had carried it.
+  **A vi mark comes back with its row.** The mark is the host's (see *Actions that
+  change hosted state*), so a row carries it on the wire like any other line flag, and
+  the mirror writes the flags it is sent and keeps no mark of its own: a replay puts
+  back exactly the marks the host holds, and a resize moves them as the host's reflow
+  moved them.
   The retention bound is the client's own `history.limit`
   (`RemoteScreen::historyKeep`, stamped by `NativeClient` from the `ClientHello`'s
   settings), not a constant: a hardcoded ceiling silently contradicted a user who had
   configured deeper scrollback — the daemon served the rows and the mirror dropped them.
+  Absolute line numbers are the daemon's too. Every `Delta` carries the host grid's
+  `evictedRowCount` beside `stableFloor`, so the row at the floor is number
+  `evictedRowCount + 1`; it rides on every piece of a chunked snapshot with the rest
+  of the scalars. After every replay and every delta the mirror hands its grid
+  that count plus the distance from the floor to the server id of its own top row
+  (`Grid::adoptEvictedRowCount`, a replica-only setter). Counting its own floor moves
+  instead numbered from the oldest row the daemon still held at attach, never restarted
+  on a daemon-side reset, and jumped by the whole local scrollback at every discarding
+  replay, whose `clearHistory()` reads as an eviction. The field arrived with revision 2
+  of the codec.
 - **Output, tmux path**: the raw `%output` bytes ARE VT — `TmuxClientModel`'s
   injectable `PaneSink` feeds them (buffering capture-pane replay until the
   local pty binds). The replay is `capture-pane -peqJ -S -`; `-S -` is what reaches
@@ -756,8 +873,8 @@ the transport knows one — so a whole connection reads as one story:
 
 ```
 [vthost.conn]        native#3: accepted
-[vthost.trace.proto] native#3 recv #1 ClientHello version=1 token=yes settings=yes (58 bytes)
-[vthost.conn]        native#3: handshake complete (codec v1)
+[vthost.trace.proto] native#3 recv #1 ClientHello version=2 token=yes settings=yes (60 bytes)
+[vthost.conn]        native#3: handshake complete (codec v2)
 [vthost.trace.proto] native#3 send #0 Delta session=1 gen=3 seq=98 lines=7 (412 bytes)
 [error]              native#3: malformed frame (MalformedVarint); dropping the connection
 ```

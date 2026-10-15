@@ -9,6 +9,7 @@
 // INSIDE `close()`; that flow ran to its end and destroyed the client, and the second statement
 // then called through a destroyed `_connection`. Deterministic, and an ASan report in the loop's
 // own guarantees rather than in contour's code.
+#include <core/Utf8Path.hpp>
 #include <core/async/Cancellation.hpp>
 #include <core/async/DetachedTask.hpp>
 #include <core/async/Task.hpp>
@@ -538,7 +539,7 @@ TEST_CASE("A listener closed and destroyed in one turn is not touched by its res
                                        / std::format("core-cpp-accept-{}", std::random_device {}());
                 auto bound = kind == ListenerKind::Tcp
                                  ? core::net::listen(loop, "127.0.0.1", 0)
-                                 : core::net::listenUnix(loop, (directory / "accept.sock").string());
+                                 : core::net::listenUnix(loop, core::pathToUtf8(directory / "accept.sock"));
                 REQUIRE(bound.has_value());
                 auto listener = std::move(*bound);
 

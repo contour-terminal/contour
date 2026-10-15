@@ -605,6 +605,14 @@ enum class CursorDisplay : uint8_t
     Blink
 };
 
+/// Whether a cursor's wrap is pending: it stands on the last column of a row it has just filled, and
+/// the next character goes to the start of the next row (DEC STD 070's Last Column Flag).
+enum class WrapPending : uint8_t
+{
+    No,
+    Yes,
+};
+
 enum class CursorShape : uint8_t
 {
     Block,
@@ -1498,17 +1506,6 @@ constexpr unsigned setDynamicColorCommand(DynamicColorName name) noexcept
                std::ranges::distance(DynamicColorCommands.begin(),
                                      std::ranges::find(DynamicColorCommands, std::optional { name })));
 }
-
-/// Where one match starts within a line, and how much of it spilled past the line's end.
-///
-/// The rest of the search vocabulary -- the case policy, the pattern's origin, the match tally and
-/// HighlightSearchMatches -- lives in core/Search.hpp. This one type stays here because its
-/// ColumnOffset member is exactly the primitive that header is built to do without.
-struct SearchResult
-{
-    ColumnOffset column;           // column at the start of match
-    size_t partialMatchLength = 0; // length of partial match that happens at either end
-};
 
 } // namespace vtbackend
 

@@ -36,6 +36,7 @@ class ViCommands: public ViInputHandler::Executor
     void toggleLineMark() override;
     void searchCurrentWord() override;
     void enterHintMode(HintAction action) override;
+    void fold(ViFoldCommand command) override;
     void execute(ViOperator op, ViMotion motion, unsigned count, char32_t lastChar = U'\0') override;
     void moveCursor(ViMotion motion, unsigned count, char32_t lastChar = U'\0') override;
     void select(TextObjectScope scope, TextObject textObject) override;

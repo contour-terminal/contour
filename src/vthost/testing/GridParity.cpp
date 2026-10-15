@@ -159,6 +159,11 @@ namespace
                                            l.fillUnderlineColor,
                                            describeCellFlags(l.fillFlags));
                     } },
+        // Compared RAW, unlike the context below: the mirror holds the host's own block ids
+        // (@see applyWireLine), so equal numbers ARE the claim.
+        LineField { "blockId", [](proto::WireLine const& l) { return std::format("{}", l.blockId); } },
+        // Raw too: the mirror holds the host's own stamps, counted from the host's session start.
+        LineField { "bornAt", [](proto::WireLine const& l) { return std::format("{}", l.bornAt); } },
     };
 
     /// One comparable property of a wire cell. @see LineField for why this is a table.

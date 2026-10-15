@@ -11,10 +11,12 @@
 #include <atomic>
 #include <condition_variable>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <system_error>
 #include <variant>
 
@@ -40,6 +42,19 @@ struct SshHostConfig
 };
 
 using SshHostConfigMap = std::map<std::string, SshHostConfig>;
+
+/// A host's key pair as read from its files, which is how libssh2 takes it in memory.
+struct SshKeyFiles
+{
+    std::string publicKey;  ///< The public key file's text; empty where the host names none.
+    std::string privateKey; ///< The private key file's text.
+};
+
+/// Reads @p config's key files through their paths. libssh2 would open each by a narrow name, which
+/// Windows reads in the ANSI code page, so that a key file beyond it is handed over in memory instead.
+/// @param config The host, naming its key files.
+/// @return Both files' text; the error of the first that cannot be read.
+[[nodiscard]] std::expected<SshKeyFiles, std::error_code> readSshKeyFiles(SshHostConfig const& config);
 
 std::expected<SshHostConfigMap, std::error_code> loadSshConfig(std::filesystem::path const& configPath);
 std::expected<SshHostConfigMap, std::error_code> loadSshConfig();

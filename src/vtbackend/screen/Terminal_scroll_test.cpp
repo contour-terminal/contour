@@ -26,9 +26,12 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -1405,6 +1408,368 @@ TEST_CASE("Terminal.Wheel.AltScreen.ScrollMultiplier.repeats_cursor_keys", "[ter
               Modifier::None, MouseButton::WheelDown, mock.terminal.currentMousePosition(), NoPixel, false)
           == Handled { true });
     CHECK(e(mock.replyData()) == e("\033[B\033[B\033[B"));
+}
+
+TEST_CASE("Terminal.followOutput.brings_the_view_down_as_the_listener_and_the_settings_ask", "[terminal]")
+{
+    // New output brings a view scrolled back into the history down to it, under the lock it is written under,
+    // where the listener follows output, auto_scroll_on_update is set and the view is in Insert mode.
+    using vtbackend::OutputFollowing;
+    using vtbackend::ViMode;
+    struct Row
+    {
+        std::string_view name;
+        OutputFollowing following;
+        bool autoScrollOnUpdate;
+        ViMode mode;
+        OutputFollowing outcome;
+    };
+    auto const rows = std::array {
+        Row { .name = "a listener that follows",
+              .following = OutputFollowing::Follow,
+              .autoScrollOnUpdate = true,
+              .mode = ViMode::Insert,
+              .outcome = OutputFollowing::Follow },
+        Row { .name = "a listener that stays",
+              .following = OutputFollowing::Stay,
+              .autoScrollOnUpdate = true,
+              .mode = ViMode::Insert,
+              .outcome = OutputFollowing::Stay },
+        Row { .name = "auto_scroll_on_update off",
+              .following = OutputFollowing::Follow,
+              .autoScrollOnUpdate = false,
+              .mode = ViMode::Insert,
+              .outcome = OutputFollowing::Stay },
+        Row { .name = "Vi Normal mode",
+              .following = OutputFollowing::Follow,
+              .autoScrollOnUpdate = true,
+              .mode = ViMode::Normal,
+              .outcome = OutputFollowing::Stay },
+    };
+
+    for (auto const& row: rows)
+    {
+        INFO(row.name);
+        auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
+        mc.following = row.following;
+        mc.terminal.settings().autoScrollOnUpdate = row.autoScrollOnUpdate;
+        printLines(mc, "line", 20);
+        mc.terminal.inputHandler().setMode(row.mode);
+        REQUIRE(mc.terminal.viewport().scrollUp(LineCount(3)));
+
+        mc.writeToScreen("more\r\n");
+
+        auto const outcome =
+            mc.terminal.viewport().scrolled() ? OutputFollowing::Stay : OutputFollowing::Follow;
+        CHECK(outcome == row.outcome);
+    }
+}
+
+TEST_CASE("Terminal.smoothLinefeed.shows_the_view_brought_down_to_the_output", "[terminal]")
+{
+    // A linefeed under smooth scrolling (DECSCLM) shows the output so far before its batch ends, and so
+    // before the batch's end brings the view down: it brings the view down itself first, or the line would be
+    // shown to a view still scrolled back.
+    using vtbackend::OutputFollowing;
+    struct ShowingTerm final: MockTerm<>
+    {
+        using MockTerm<>::MockTerm;
+
+        void screenUpdated() override
+        {
+            if (!firstShown)
+                firstShown = terminal.viewport().scrolled() ? OutputFollowing::Stay : OutputFollowing::Follow;
+        }
+
+        std::optional<OutputFollowing> firstShown;
+    };
+
+    auto mc = ShowingTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
+    mc.following = OutputFollowing::Follow;
+    mc.terminal.settings().smoothLineScrolling = 1ms;
+    printLines(mc, "line", 20);
+    mc.writeToScreen("\033[?4h");
+    REQUIRE(mc.terminal.viewport().scrollUp(LineCount(3)));
+    mc.firstShown.reset();
+
+    mc.writeToScreen("\n");
+
+    REQUIRE(mc.firstShown.has_value());
+    CHECK(*mc.firstShown == OutputFollowing::Follow);
+}
+
+TEST_CASE("Terminal.smoothLinefeed.what_the_rest_of_its_batch_sends_on_the_spot_goes_out", "[terminal]")
+{
+    // A linefeed under smooth scrolling (DECSCLM) shows the output so far before the next line: the parser
+    // thread lets go of the state lock for the pause, and takes it back as its own. Taken back as a
+    // frontend's, the hold kept back what the rest of the batch sends on the spot -- here the report a
+    // colour palette query asks for (DSR 996).
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mc.terminal.settings().smoothLineScrolling = 1ms;
+    mc.writeToScreen("\033[?4h");
+    mc.discardPendingReplies();
+
+    mc.writeToScreen("\n\033[?996n");
+
+    CHECK(mc.replyData().starts_with("\033[?997;"));
+}
+
+TEST_CASE("Terminal.inputMethod.composing_brings_the_view_down", "[terminal]")
+{
+    // Composing is typing, and the text being composed is drawn at the cursor: a view scrolled back into the
+    // history comes down to it, as it does for a key. Ending a composition types nothing.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
+    printLines(mc, "line", 20);
+    mc.terminal.updateInputMethodPreeditString("k");
+    REQUIRE(mc.terminal.viewport().scrollUp(LineCount(3)));
+
+    mc.terminal.updateInputMethodPreeditString("");
+    CHECK(mc.terminal.viewport().scrolled());
+
+    mc.terminal.updateInputMethodPreeditString("ka");
+    CHECK_FALSE(mc.terminal.viewport().scrolled());
+}
+
+TEST_CASE("Terminal.wheelGlide.moves_the_view_without_racing_the_parser_thread", "[terminal][threading]")
+{
+    // A glide moves the view each frame, on the render thread, as that ticks. The parser thread moves a
+    // scrolled-back view too, under the state lock: output keeps it on the lines it shows. The case to run
+    // under ThreadSanitizer, which reports the glide's moves against the parser's unless the glide takes that
+    // lock as well.
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 1000 } };
+    auto& terminal = mc.terminal;
+    for ([[maybe_unused]] auto const line: std::views::iota(0, 100))
+        mc.writeToScreen("line\r\n");
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    auto now = chrono::steady_clock::time_point();
+    terminal.tick(now);
+    auto glides = 0;
+    {
+        auto const writer = writeOnOwnThread([&] { mc.writeToScreen("x\r\n"); });
+        for ([[maybe_unused]] auto const frame: std::views::iota(0, 200))
+        {
+            if (!terminal.isMomentumScrollActive())
+            {
+                auto const _ = std::scoped_lock { terminal };
+                if (terminal.injectWheelMomentum(180.0f, now) == SmoothScrollResult::Applied)
+                    ++glides;
+            }
+            now += 16ms;
+            terminal.tick(now);
+        }
+    }
+
+    CHECK(glides > 1);
+    CHECK(terminal.viewport().scrolled());
+}
+
+TEST_CASE("Terminal.wheelGlide.is_not_stepped_where_a_synchronized_update_ends", "[terminal]")
+{
+    // A glide steps on the render thread's tick alone. Where a synchronized update ends, the parser thread
+    // sets the terminal's clock to the time it builds that frame at, and moves no glide on.
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 40 } };
+    auto& terminal = mc.terminal;
+    for ([[maybe_unused]] auto const line: std::views::iota(0, 30))
+        mc.writeToScreen("line\r\n");
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+    auto constexpr CellHeight = 20.0f;
+
+    auto const start = mc.steadyClock.now();
+    terminal.tick(start);
+    REQUIRE(terminal.injectWheelMomentum(180.0f, start) == SmoothScrollResult::Applied);
+
+    mc.steadyClock.advance(50ms);
+    mc.writeToScreen("\033[?2026h\033[?2026l");
+    CHECK(terminal.currentTime() == start + 50ms);
+    CHECK(totalScrollPixels(terminal, CellHeight) == 0.0f);
+
+    terminal.tick(start + 50ms);
+    CHECK(totalScrollPixels(terminal, CellHeight) > 0.0f);
+}
+
+TEST_CASE("Terminal.animations.the_clock_they_run_on_does_not_race_the_parser_thread",
+          "[terminal][threading]")
+{
+    // The render thread ticks the terminal's clock before and after each frame, and asks when the next frame
+    // is due: sooner while the cursor glides to where it moved, or the screens cross-fade. The parser thread
+    // builds a frame itself where a synchronized update ends, which starts the cursor's glide, and a switch
+    // of screens starts the cross-fade. The case to run under ThreadSanitizer, which reports the parser
+    // thread's frame and switch against the render thread's tick and question unless each piece of that state
+    // has one owner or is read race-free.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+    auto& terminal = mc.terminal;
+    terminal.settings().screenTransitionStyle = vtbackend::ScreenTransitionStyle::Fade;
+    terminal.settings().screenTransitionDuration = 50ms;
+    REQUIRE(terminal.settings().cursorMotionAnimationDuration.count() > 0);
+
+    {
+        auto const writer = writeOnOwnThread([&] {
+            mc.writeToScreen("\033[?2026h\033[5;5H\033[?2026l");
+            mc.writeToScreen("\033[?1049h\033[?1049l");
+            mc.writeToScreen("\033[?2026h\033[1;1H\033[?2026l");
+        });
+        for ([[maybe_unused]] auto const frame: std::views::iota(0, 200))
+        {
+            mc.steadyClock.advance(16ms);
+            terminal.tick(mc.steadyClock.now());
+            (void) terminal.nextRender();
+            std::this_thread::sleep_for(1ms);
+        }
+    }
+
+    CHECK_FALSE(terminal.isAlternateScreen());
+}
+
+TEST_CASE("Terminal.frames are scheduled without racing what schedules them", "[terminal][threading]")
+{
+    // The render thread ticks the terminal and asks when the next frame is due, without the state lock: when
+    // the cursor blinks next, from its display (DECSCUSR) and its blink interval; the blinking cells, from
+    // their blink style; the indicator status line's clock (DECSSDT); and the rate the frames come at, from
+    // when the last one came. The parser thread changes some of them under that lock, the frontend the
+    // others. The case to run under ThreadSanitizer, which reports each change against the render thread's
+    // read unless that read is race-free.
+    struct Row
+    {
+        std::string_view setting;
+        std::function<void(MockTerm<>&)> change;
+    };
+    auto const rows = std::array {
+        Row { .setting = "the cursor's display (DECSCUSR)",
+              .change = [](auto& mc) { mc.writeToScreen("\033[2 q\033[1 q"); } },
+        Row { .setting = "the cursor's blink interval",
+              .change =
+                  [](auto& mc) {
+                      auto const _ = std::scoped_lock { mc.terminal };
+                      mc.terminal.setCursorBlinkingInterval(
+                          mc.terminal.cursorBlinkInterval() == 500ms ? 400ms : 500ms);
+                  } },
+        Row { .setting = "the cells' blink style",
+              .change =
+                  [](auto& mc) {
+                      auto const _ = std::scoped_lock { mc.terminal };
+                      auto& style = mc.terminal.settings().blinkStyle;
+                      style = style == vtbackend::BlinkStyle::Classic ? vtbackend::BlinkStyle::Smooth
+                                                                      : vtbackend::BlinkStyle::Classic;
+                  } },
+        Row { .setting = "the status line (DECSSDT)",
+              .change = [](auto& mc) { mc.writeToScreen("\033[1$~\033[0$~"); } },
+        Row { .setting = "the refresh rate",
+              .change =
+                  [](auto& mc) {
+                      mc.terminal.setRefreshRate(vtbackend::RefreshRate { .value = 60 });
+                      mc.terminal.setRefreshRate(vtbackend::RefreshRate { .value = 120 });
+                  } },
+    };
+
+    for (auto const& row: rows)
+    {
+        INFO(row.setting);
+        auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+        mc.writeToScreen("\033[1 q\033[5mblinking\033[m");
+        auto const frames = runWhileWriting([&] { row.change(mc); },
+                                            [&] {
+                                                mc.steadyClock.advance(16ms);
+                                                mc.terminal.tick(mc.steadyClock.now());
+                                                (void) mc.terminal.refreshRenderBuffer();
+                                                (void) mc.terminal.nextRender();
+                                            });
+        CHECK(frames > 0);
+    }
+}
+
+TEST_CASE("Terminal.smoothScroll.the_pixel_offset_is_read_without_racing_a_scroll", "[terminal][threading]")
+{
+    // The renderer reads the smooth-scroll pixel offset as it draws the frame it just filled, and the GUI
+    // thread as it maps the pointer onto a cell, neither under the state lock, while a scroll moves it under
+    // that lock: the wheel's, here, or a glide's. The case to run under ThreadSanitizer, which reports the
+    // reads against the moves unless the offset is read race-free.
+    auto mc = MockTerm { PageSize { LineCount { 4 }, ColumnCount { 10 } }, LineCount { 100 } };
+    auto& terminal = mc.terminal;
+    for ([[maybe_unused]] auto const line: std::views::iota(0, 30))
+        mc.writeToScreen("line\r\n");
+    terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+
+    auto strayOffsets = 0;
+    (void) runWhileWriting(
+        [&] {
+            auto const _ = std::scoped_lock { terminal };
+            (void) terminal.applySmoothScrollPixelDelta(5.0f);
+            (void) terminal.applySmoothScrollPixelDelta(-5.0f);
+        },
+        [&] {
+            (void) terminal.refreshRenderBuffer();
+            auto const offset = terminal.smoothScrollPixelOffset();
+            if (offset != 0.0f && offset != 5.0f)
+                ++strayOffsets;
+        });
+
+    CHECK(strayOffsets == 0);
+}
+
+TEST_CASE("Terminal.the layout a frame is drawn at is read without racing its writers",
+          "[terminal][threading]")
+{
+    // The renderer reads the page's layout each frame without the state lock: the main page's size, the
+    // status line's height and position, the row the main page starts at, and whether the primary screen is
+    // shown. The parser thread changes some of them under that lock -- switching screens, putting the status
+    // line up -- and the frontend the others: it resizes, and a reload moves the status line. The case to run
+    // under ThreadSanitizer, which reports each change against the renderer's read unless that read is
+    // race-free.
+    struct Row
+    {
+        std::string_view change;
+        std::function<void(MockTerm<>&)> write;
+    };
+    auto const rows = std::array {
+        Row { .change = "the alternate screen (DECSET 1049)",
+              .write = [](auto& mc) { mc.writeToScreen("\033[?1049h\033[?1049l"); } },
+        Row { .change = "the status line (DECSSDT)",
+              .write = [](auto& mc) { mc.writeToScreen("\033[1$~\033[0$~"); } },
+        Row { .change = "a resize, with the status line up",
+              .write =
+                  [](auto& mc) {
+                      auto const _ = std::scoped_lock { mc.terminal };
+                      auto const columns = mc.terminal.totalPageSize().columns == ColumnCount(40) ? 30 : 40;
+                      mc.terminal.resizeScreen(PageSize { LineCount(10), ColumnCount(columns) });
+                  } },
+        Row { .change = "the status line's position (a reload)",
+              .write =
+                  [](auto& mc) {
+                      auto const _ = std::scoped_lock { mc.terminal };
+                      auto& position = mc.terminal.settings().statusDisplayPosition;
+                      position = position == vtbackend::StatusDisplayPosition::Top
+                                     ? vtbackend::StatusDisplayPosition::Bottom
+                                     : vtbackend::StatusDisplayPosition::Top;
+                  } },
+    };
+
+    for (auto const& row: rows)
+    {
+        INFO(row.change);
+        auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+        mc.writeToScreen("\033[1$~");
+        // Each read on its own: a frame's reads are not one snapshot, so only what holds for each is checked.
+        auto strayLayouts = size_t { 0 };
+        auto framesAtTop = size_t { 0 };
+        auto framesOnAlternate = size_t { 0 };
+        auto const frames = runWhileWriting(
+            [&] { row.write(mc); },
+            [&] {
+                auto& terminal = mc.terminal;
+                (void) terminal.refreshRenderBuffer();
+                if (!terminal.isPrimaryScreen())
+                    ++framesOnAlternate;
+                if (terminal.settings().statusDisplayPosition == vtbackend::StatusDisplayPosition::Top)
+                    ++framesAtTop;
+                if (terminal.mainPageSize().lines < LineCount(9) || terminal.statusLineHeight() > LineCount(1)
+                    || terminal.mainPageTopRow() > LineOffset(1))
+                    ++strayLayouts;
+            });
+        CHECK(strayLayouts == 0);
+        CHECK(framesAtTop <= frames);
+        CHECK(framesOnAlternate <= frames);
+    }
 }
 
 // NOLINTEND(misc-const-correctness)

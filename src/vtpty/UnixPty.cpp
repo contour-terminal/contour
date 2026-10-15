@@ -11,6 +11,8 @@
 #include <core/Escape.hpp>
 #include <core/log/LogStore.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <csignal>
 #include <cstddef>
@@ -21,6 +23,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <tuple>
 #include <utility>
 
 #include <tracy/Tracy.hpp>
@@ -39,6 +42,9 @@
 #endif
 #include <sys/ioctl.h>
 #include <sys/select.h>
+#ifndef __APPLE__
+    #include <poll.h>
+#endif
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -97,6 +103,42 @@ namespace
 
         return { .master = PtyMasterHandle::cast_from(masterFd),
                  .slave = PtySlaveHandle::cast_from(slaveFd) };
+    }
+
+    /// Waits until @p fd takes a write, or @p closeSignal turns readable.
+    /// @param fd The master descriptor, as it was when the caller last held the lock close() takes: if it
+    ///        has been closed since, @p closeSignal is readable already.
+    /// @param closeSignal What close() writes to.
+    /// @return False once @p closeSignal is readable, or the wait failed.
+    [[nodiscard]] bool waitWritable(int fd, int closeSignal) noexcept
+    {
+#ifdef __APPLE__
+        // macOS's poll() reports a terminal device invalid, so select() waits here, as the read
+        // selector's does.
+        while (true)
+        {
+            auto writers = fd_set {};
+            auto readers = fd_set {};
+            FD_ZERO(&writers);
+            FD_ZERO(&readers);
+            FD_SET(fd, &writers);
+            FD_SET(closeSignal, &readers);
+            auto const rv = ::select(std::max(fd, closeSignal) + 1, &readers, &writers, nullptr, nullptr);
+            if (rv < 0 && errno == EINTR)
+                continue;
+            return rv > 0 && !FD_ISSET(closeSignal, &readers);
+        }
+#else
+        auto fds = std::array { pollfd { .fd = fd, .events = POLLOUT, .revents = 0 },
+                                pollfd { .fd = closeSignal, .events = POLLIN, .revents = 0 } };
+        while (true)
+        {
+            auto const rv = ::poll(fds.data(), fds.size(), -1);
+            if (rv < 0 && errno == EINTR)
+                continue;
+            return rv > 0 && (fds[1].revents & POLLIN) == 0;
+        }
+#endif
     }
 
 #if defined(__linux__) && defined(UTEMPTER)
@@ -227,14 +269,20 @@ StartResult UnixPty::start()
 {
     auto const handles = createUnixPty(_pageSize, _pixels);
     _masterFd = crispy::FileDescriptor::fromNative(unbox<int>(handles.master));
+    _masterState.store(MasterState::Open, std::memory_order_release);
     _slave = make_unique<Slave>(handles.slave);
 
-    if (!util::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
+    // Close-on-exec, so that no process this one spawns inherits the master: our own children close every
+    // descriptor above stderr, but a QProcess or a URL opener does not. The stdout fast pipe stays
+    // inheritable, as the child writes to it.
+    if (auto const configured =
+            util::setCloseOnExec(_masterFd)
+                .and_then([this] { return util::setNonBlocking(_masterFd); })
+                .and_then([this] { return util::setNonBlocking(_stdoutFastPipe.reader()); });
+        !configured)
         return std::unexpected(
             StartFailure { .error = StartError::PtyAllocationFailed,
-                           .detail = "Failed to configure PTY. "s + std::generic_category().message(errno) });
-
-    util::setFileFlags(_stdoutFastPipe.reader(), O_NONBLOCK);
+                           .detail = "Failed to configure PTY. "s + configured.error().message() });
     ptyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
 
     _readSelector.wantRead(_masterFd);
@@ -278,12 +326,18 @@ void UnixPty::close()
     ptyLog()("PTY closing master from thread {} (file descriptor {}).", core::threadName(), _masterFd);
     _readSelector.cancelRead(_masterFd);
     _masterFd.close();
+    _masterState.store(MasterState::Closed, std::memory_order_release);
+    // Wakes a write waiting for the application to read, which then finds the descriptor closed. Never
+    // drained, so that a write that only begins to wait after this returns at once as well.
+    std::ignore = ::write(_closeSignal.writer(), "x", 1);
     wakeupReader();
 }
 
 bool UnixPty::isClosed() const noexcept
 {
-    return _masterFd == -1;
+    // Published by close(), rather than read under its lock: it is asked from the GUI thread, or a daemon's
+    // loop, while a write may wait for an application that reads nothing.
+    return _masterState.load(std::memory_order_acquire) == MasterState::Closed;
 }
 
 void UnixPty::wakeupReader() noexcept
@@ -376,15 +430,32 @@ std::optional<Pty::ReadResult> UnixPty::read(crispy::BufferObject<char>& storage
 
 int UnixPty::write(std::string_view data)
 {
-    auto const* buf = data.data();
-    auto const size = data.size();
+    // One write at a time, from its first byte to its last, so that two never interleave.
+    auto const writing = std::scoped_lock { _writeMutex };
 
-    // Serialize against a concurrent close() (a routine GUI operation now that tabs and panes close
-    // PTYs mid-session): an unlocked ::write() could hit a just-closed -- and possibly already
-    // recycled -- fd, injecting the data into an unrelated file or another pane's PTY. The fast path
-    // is a non-blocking write, so the lock is held only briefly; the blocking continuation below is a
-    // rare fallback (PTY buffer full) bounded by the child draining its side, and holding _mutex
-    // across it pins the fd open for the duration -- the invariant the fd-validity check relies on.
+    auto const rv = writeAvailable(data);
+    if (rv < 0 || std::cmp_equal(rv, data.size()))
+        return rv;
+
+    // A short write: the rest goes as the application reads, until all of it has or the PTY closes. The
+    // waits release _mutex, so that close() -- the way to be rid of a program that reads nothing -- and
+    // isClosed() never wait for that program; close() wakes them instead.
+    auto written = static_cast<size_t>(rv);
+    while (written < data.size() && awaitWritable())
+    {
+        auto const more = writeAvailable(data.substr(written));
+        if (more > 0)
+            written += static_cast<size_t>(more);
+        else if (more < 0 && errno != EAGAIN && errno != EINTR)
+            break;
+    }
+    return static_cast<int>(written);
+}
+
+int UnixPty::writeAvailable(std::string_view data)
+{
+    // Under the lock close() closes the descriptor under: never into a closed -- and possibly already
+    // recycled -- descriptor, which would hand the bytes to another pane's PTY or an unrelated file.
     auto const _ = std::scoped_lock { _mutex };
     if (_masterFd.isClosed())
     {
@@ -392,6 +463,8 @@ int UnixPty::write(std::string_view data)
         return -1;
     }
 
+    auto const* buf = data.data();
+    auto const size = data.size();
     ssize_t const rv = ::write(_masterFd, buf, size);
     if (ptyOutLog)
     {
@@ -399,30 +472,21 @@ int UnixPty::write(std::string_view data)
             ptyOutLog()("Sending bytes: \"{}\"", core::escape(buf, buf + rv));
 
         if (rv < 0)
-            // errorlog()("PTY write failed: {}", strerror(errno));
             ptyOutLog()("PTY write of {} bytes failed. {}\n", size, std::generic_category().message(errno));
-        else if (0 <= rv && std::cmp_less(rv, size))
-            // clang-format off
-            ptyOutLog()("Partial write. {} bytes written and {} bytes left.",
-                        rv,
-                        size - static_cast<size_t>(rv));
-        // clang-format on
+        else if (std::cmp_less(rv, size))
+            ptyOutLog()(
+                "Partial write. {} bytes written and {} bytes left.", rv, size - static_cast<size_t>(rv));
     }
-
-    if (0 <= rv && std::cmp_less(rv, size))
-    {
-        util::setFileBlocking(_masterFd, true);
-        auto const rv2 = ::write(_masterFd, buf + rv, size - rv);
-        util::setFileBlocking(_masterFd, false);
-        if (rv2 >= 0)
-        {
-            if (ptyOutLog)
-                ptyOutLog()("Sending bytes: \"{}\"", core::escape(buf + rv, buf + rv + rv2));
-            return static_cast<int>(rv + rv2);
-        }
-    }
-
     return static_cast<int>(rv);
+}
+
+bool UnixPty::awaitWritable()
+{
+    auto const fd = [this] {
+        auto const _ = std::scoped_lock { _mutex };
+        return _masterFd.get();
+    }();
+    return fd >= 0 && waitWritable(fd, _closeSignal.reader());
 }
 
 PageSize UnixPty::pageSize() const noexcept

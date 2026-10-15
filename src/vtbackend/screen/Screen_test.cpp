@@ -16,6 +16,7 @@
 #include <libunicode/convert.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <charconv>
@@ -1709,6 +1710,39 @@ TEST_CASE("ScrollDown", "[screen]")
     }
 }
 
+TEST_CASE("ScrollDown.aFullPageReverseScrollLeavesTheScrollbackAlone", "[screen]")
+{
+    // SD and RI at the top row scroll the page, the scrolling region, and nothing above it: xterm 407,
+    // measured, keeps every saved line and drops the rows pushed off the page's bottom.
+    struct ReverseScroll
+    {
+        std::string_view name;     ///< The case, for the test's report.
+        std::string_view sequence; ///< What the application sends once the page holds L5 to L7.
+        std::string_view rows;     ///< Every row afterwards, the four history rows first.
+    };
+    auto const scrolls = std::array {
+        ReverseScroll { .name = "SD 2", .sequence = "\033[2T", .rows = "L1\nL2\nL3\nL4\n\n\nL5\n" },
+        ReverseScroll {
+            .name = "RI at the top row", .sequence = "\033[H\033M", .rows = "L1\nL2\nL3\nL4\n\nL5\nL6\n" },
+    };
+    for (auto const& scroll: scrolls)
+    {
+        INFO(scroll.name);
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(10) };
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("L1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7");
+        REQUIRE(screen.historyLineCount() == LineCount(4));
+
+        mock.writeToScreen(scroll.sequence);
+
+        CHECK(screen.historyLineCount() == LineCount(4));
+        auto rows = std::string {};
+        for (auto const row: std::views::iota(-4, 3))
+            rows += screen.grid().lineTextTrimmed(LineOffset(row)) + '\n';
+        CHECK(rows == scroll.rows);
+    }
+}
+
 TEST_CASE("Unscroll", "[screen]")
 {
     SECTION("with history")
@@ -3339,6 +3373,299 @@ TEST_CASE("search.smartCaseIsCodepointAware", "[screen]")
     }
 }
 
+TEST_CASE("search.walksTextCellsAcrossWideCharactersAndPadding", "[screen]")
+{
+    // A needle is matched against the text a reader sees: a wide character is one character, and neither
+    // its second half nor the padding a wide character leaves at the end of a row is any. foot's search
+    // steps over its spacers the same way (search.c:377).
+    using vtbackend::SearchCaseSensitivity;
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) }, LineCount(10) };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("ABCD\xE4\xB8\xAD"
+                       "E"); // U+4E2D, two columns
+    auto const top = CellLocation { LineOffset(0), ColumnOffset(0) };
+    auto const end = CellLocation { LineOffset(3), ColumnOffset(9) };
+
+    auto const find = [&](std::u32string_view needle) {
+        return screen.search(needle, top, SearchCaseSensitivity::Smart);
+    };
+    auto const findBackwards = [&](std::u32string_view needle, CellLocation from) {
+        return screen.searchReverse(needle, from, SearchCaseSensitivity::Smart);
+    };
+
+    SECTION("on one row")
+    {
+        CHECK(find(U"D中") == CellLocation { LineOffset(0), ColumnOffset(3) });
+        CHECK(find(U"中E") == CellLocation { LineOffset(0), ColumnOffset(4) });
+        CHECK(findBackwards(U"D中", end) == CellLocation { LineOffset(0), ColumnOffset(3) });
+        CHECK(findBackwards(U"中E", end) == CellLocation { LineOffset(0), ColumnOffset(4) });
+        // The second half begins no match, and holds no space either.
+        CHECK_FALSE(find(U"中 E").has_value());
+    }
+
+    SECTION("across the padding a narrowing leaves")
+    {
+        // "ABCD" and padding, then "中E" on the row that continues it.
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(5) });
+        auto const narrowEnd = CellLocation { LineOffset(3), ColumnOffset(4) };
+        REQUIRE(screen.grid().lineAt(LineOffset(0)).storage().sgr[4].flags.contains(CellFlag::WrapPadding));
+
+        CHECK(find(U"D中") == CellLocation { LineOffset(0), ColumnOffset(3) });
+        CHECK(find(U"CD中E") == CellLocation { LineOffset(0), ColumnOffset(2) });
+        CHECK(find(U"中E") == CellLocation { LineOffset(1), ColumnOffset(0) });
+        CHECK(findBackwards(U"D中", narrowEnd) == CellLocation { LineOffset(0), ColumnOffset(3) });
+        CHECK(findBackwards(U"中E", narrowEnd) == CellLocation { LineOffset(1), ColumnOffset(0) });
+        // The padding is no space.
+        CHECK_FALSE(find(U"D 中").has_value());
+    }
+
+    SECTION("across a soft wrap that leaves no padding")
+    {
+        // "ab中" fills its row, so "cd" goes on to the next.
+        mock.writeToScreen("\033[2J");
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(4) });
+        mock.writeToScreen("\033[Hab\xE4\xB8\xAD"
+                           "cd");
+        REQUIRE(screen.grid().lineAt(LineOffset(1)).isFlagEnabled(LineFlag::Wrapped));
+
+        CHECK(find(U"中c") == CellLocation { LineOffset(0), ColumnOffset(2) });
+        CHECK(findBackwards(U"中cd", CellLocation { LineOffset(3), ColumnOffset(3) })
+              == CellLocation { LineOffset(0), ColumnOffset(2) });
+    }
+
+    SECTION("not across a hard line break")
+    {
+        // A full row, and a row of its own after it.
+        mock.writeToScreen("\r\n0123456789\r\nFG");
+        CHECK_FALSE(find(U"9F").has_value());
+    }
+}
+
+namespace
+{
+/// The cells on the page the renderer paints as a search match of @p needle, as (row, column) pairs.
+std::set<std::pair<int, int>> highlightedCells(MockTerm<>& mock, std::u32string needle)
+{
+    // Both match colours made one recognisable colour, so a painted cell says nothing but "matched".
+    auto constexpr Matched = RGBColor { 0xAB, 0xCD, 0xEF };
+    auto const paint = CellRGBColorAndAlphaPair { .foreground = RGBColor { 0, 0, 0 },
+                                                  .foregroundAlpha = 1.0f,
+                                                  .background = Matched,
+                                                  .backgroundAlpha = 1.0f };
+    mock.terminal.colorPalette().searchHighlight = paint;
+    mock.terminal.colorPalette().searchHighlightFocused = paint;
+    (void) mock.terminal.setNewSearchTerm(std::move(needle), SearchOrigin::Typed);
+    mock.terminal.refreshRenderBuffer(true);
+
+    auto cells = std::set<std::pair<int, int>> {};
+    for (auto const& cell: mock.terminal.renderBuffer().get().cells)
+        if (cell.attributes.backgroundColor == Matched)
+            cells.emplace(unbox(cell.position.line), unbox(cell.position.column));
+    return cells;
+}
+} // namespace
+
+TEST_CASE("search.highlightPaintsExactlyTheCellsTheSearchMatches", "[screen]")
+{
+    // The highlight asks the matcher the search asks, so a match the search jumps to is painted, on the
+    // cells it covers and no others: a wide character's two columns, and not the padding it left behind.
+    using Cells = std::set<std::pair<int, int>>;
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10) };
+    mock.writeToScreen("ABCD\xE4\xB8\xAD"
+                       "E"); // U+4E2D, two columns
+
+    SECTION("on one row")
+    {
+        CHECK(highlightedCells(mock, U"D中") == Cells { { 0, 3 }, { 0, 4 }, { 0, 5 } });
+        CHECK(highlightedCells(mock, U"中E") == Cells { { 0, 4 }, { 0, 5 }, { 0, 6 } });
+    }
+
+    SECTION("across the padding a narrowing leaves")
+    {
+        // "ABCD" and padding, then "中E" on the row that continues it.
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(5) });
+        CHECK(highlightedCells(mock, U"D中") == Cells { { 0, 3 }, { 1, 0 }, { 1, 1 } });
+        CHECK(highlightedCells(mock, U"中E") == Cells { { 1, 0 }, { 1, 1 }, { 1, 2 } });
+        CHECK(highlightedCells(mock, U"CD中E") == Cells { { 0, 2 }, { 0, 3 }, { 1, 0 }, { 1, 1 }, { 1, 2 } });
+    }
+
+    SECTION("across the page's top edge")
+    {
+        // The row holding "ABCD" scrolls into the history; the match it begins goes on onto the page.
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(5) });
+        mock.writeToScreen("\r\n\r\n");
+        REQUIRE(mock.terminal.primaryScreen().grid().lineText(LineOffset(-1)).starts_with("ABCD"));
+        CHECK(highlightedCells(mock, U"D中") == Cells { { 0, 0 }, { 0, 1 } });
+        CHECK(highlightedCells(mock, U"中E") == Cells { { 0, 0 }, { 0, 1 }, { 0, 2 } });
+        CHECK(highlightedCells(mock, U"CD中E") == Cells { { 0, 0 }, { 0, 1 }, { 0, 2 } });
+    }
+}
+
+namespace
+{
+/// Replays @p screen's screenshot into a fresh terminal of the same size and checks that every cell came
+/// back: its text (one codepoint per column), its width, its text sizing, and what it continues.
+void checkScreenshotReplaysCellForCell(Screen const& screen, PageSize pageSize)
+{
+    auto replay = MockTerm { pageSize };
+    replay.writeToScreen(screen.screenshot());
+    auto const& replayed = replay.terminal.primaryScreen();
+
+    for (auto const line: std::views::iota(0, unbox(pageSize.lines)))
+    {
+        INFO(std::format("line {}", line));
+        CHECK(replayed.grid().lineAt(LineOffset(line)).toUtf8ColumnAligned()
+              == screen.grid().lineAt(LineOffset(line)).toUtf8ColumnAligned());
+        for (auto const column: std::views::iota(0, unbox(pageSize.columns)))
+        {
+            INFO(std::format("column {}", column));
+            auto const at = CellLocation { LineOffset(line), ColumnOffset(column) };
+            CHECK(replayed.at(at).width() == screen.at(at).width());
+            CHECK(replayed.at(at).textScale() == screen.at(at).textScale());
+            CHECK(replayed.at(at).isFlagEnabled(CellFlag::WideCharContinuation)
+                  == screen.at(at).isFlagEnabled(CellFlag::WideCharContinuation));
+            CHECK(replayed.at(at).isFlagEnabled(CellFlag::MulticellContinuation)
+                  == screen.at(at).isFlagEnabled(CellFlag::MulticellContinuation));
+        }
+    }
+}
+} // namespace
+
+TEST_CASE("search.highlightReachesAcrossRowsWithoutText", "[screen]")
+{
+    // A row made only of a tall text-sizing block's lower part gives a match no character, so it does not
+    // count against how far above the page a match painted on it may begin. Here "aBb" begins four rows
+    // above the page while being three characters long: the two rows between its "B" and its "b" are the
+    // lower part of "B".
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(3) }, LineCount(10) };
+    mock.writeToScreen("xxaBBBYYYZZZbcc");          // five rows, each continuing the one above
+    mock.writeToScreen("\033[2;1H\033]66;s=3;B\a"); // a block three rows tall over "BBB", "YYY" and "ZZZ"
+    mock.writeToScreen("\033[5;1H\n\n\n\n");        // "bcc" scrolls up to the page's top row
+    auto& screen = mock.terminal.primaryScreen();
+    REQUIRE(screen.grid().lineText(LineOffset(0)).starts_with("bcc"));
+    REQUIRE(screen.grid()
+                .lineAt(LineOffset(-2))
+                .storage()
+                .sgr[0]
+                .flags.contains(CellFlag::MulticellContinuation));
+    REQUIRE(screen.grid()
+                .lineAt(LineOffset(-1))
+                .storage()
+                .sgr[2]
+                .flags.contains(CellFlag::MulticellContinuation));
+    REQUIRE(screen.search(
+                U"aBb", CellLocation { LineOffset(-4), ColumnOffset(0) }, SearchCaseSensitivity::Sensitive)
+            == CellLocation { LineOffset(-4), ColumnOffset(2) });
+
+    CHECK(highlightedCells(mock, U"aBb") == std::set<std::pair<int, int>> { { 0, 0 } });
+}
+
+TEST_CASE("Screen.screenshot.startsWhereTheReplayingCursorIs", "[screen]")
+{
+    // The state dump (Screen::inspect) prints the screenshot between lines of its own, into a log or a
+    // console, so the screenshot moves no cursor to an absolute position: one would jump to the top of
+    // the console it is printed on. A replay that wants the page back homes the cursor first.
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(5) };
+    auto mock = MockTerm { pageSize };
+    mock.writeToScreen("ab\r\ncd\r\nef");
+    auto const& screen = mock.terminal.primaryScreen();
+    auto const shot = screen.screenshot();
+    CHECK_FALSE(shot.contains("\033[H"));
+    CHECK_FALSE(shot.contains("\033[2J"));
+
+    auto replay = MockTerm { pageSize };
+    replay.writeToScreen("\033[2;3Hxyz\033[H"); // a cursor elsewhere, on a page that holds text
+    replay.writeToScreen(shot);
+    for (auto const line: std::views::iota(0, unbox(pageSize.lines)))
+        CHECK(replay.terminal.primaryScreen().grid().lineText(LineOffset(line))
+              == screen.grid().lineText(LineOffset(line)));
+}
+
+TEST_CASE("Screen.inspect.endsTheScreenshotBeforeItsRule", "[screen]")
+{
+    // The screenshot ends without a line break after its last row, so the dump around it puts one there
+    // itself: each rule of '=' stands on a line of its own.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
+    mock.writeToScreen("ab");
+    auto os = std::stringstream {};
+    mock.terminal.primaryScreen().inspect("message", os);
+    auto const dump = os.str();
+    INFO(dump);
+    auto rules = 0;
+    for (auto const at: std::views::iota(size_t { 0 }, dump.size()))
+    {
+        if (dump[at] != '=' || (at > 0 && dump[at - 1] == '='))
+            continue; // not where a rule begins
+        ++rules;
+        CHECK((at == 0 || dump[at - 1] == '\n'));
+    }
+    CHECK(rules >= 3);
+}
+
+TEST_CASE("Screen.screenshot.replaysWideCharactersInPlace", "[screen]")
+{
+    // A screenshot is the VT stream that redraws the screen. Replaying it must put every character back in
+    // its column: a wide character's second half is covered by the character itself, so a space written
+    // for it pushes the rest of the row one column to the right. Replayed at the page's own height: a line
+    // break between rows, and none after the last, which would scroll the page.
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(5) };
+    auto mock = MockTerm { pageSize };
+    // "中E" on its own row; "ABCD" and the padding a wide character leaves where it does not fit, then
+    // "中" on the row after.
+    mock.writeToScreen("\xE4\xB8\xAD"
+                       "E\r\nABCD\xE4\xB8\xAD");
+    auto const& screen = mock.terminal.primaryScreen();
+    REQUIRE(screen.grid().lineAt(LineOffset(1)).storage().sgr[4].flags.contains(CellFlag::WrapPadding));
+
+    checkScreenshotReplaysCellForCell(screen, pageSize);
+}
+
+TEST_CASE("Screen.screenshot.replaysTextSizingBlocks", "[screen]")
+{
+    // A text-sizing block replays as the OSC 66 that made it, as kitty's own ANSI dump of a line writes
+    // one for each multicell character (line.c:60, write_multicell_ansi_prefix): its explicit width, its
+    // scale, its fraction and alignment. The rows a tall block reaches down into are stepped over, not
+    // written: writing there would destroy the block the row above just made.
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(10) };
+    auto mock = MockTerm { pageSize };
+    mock.writeToScreen("\033]66;w=3;X\az\r\n"            // one row, three columns
+                       "\033]66;s=2;Y\aq"                // two rows and two columns, its own width
+                       "\033]66;s=2:n=1:d=2:v=2:h=1;F\a" // drawn at half its scale, aligned
+                       "\033[3;6Hr");                    // beside the blocks' lower part
+    auto const& screen = mock.terminal.primaryScreen();
+    REQUIRE(screen.at(CellLocation { LineOffset(1), ColumnOffset(0) }).scale() == 2);
+    REQUIRE(screen.at(CellLocation { LineOffset(2), ColumnOffset(3) })
+                .isFlagEnabled(CellFlag::MulticellContinuation));
+
+    checkScreenshotReplaysCellForCell(screen, pageSize);
+}
+
+TEST_CASE("Screen.screenshot.leavesABlockWhoseHeadLeftThePageBlank", "[screen]")
+{
+    // A page screenshot cannot make a block whose head has scrolled into the history: OSC 66 makes a block
+    // from its head down, and the head is not on the page. kitty's dump writes nothing for such cells
+    // either (text_in_cell_ansi, line.c:139). They replay as blank cells, and what stands beside them keeps
+    // its column.
+    auto const pageSize = PageSize { LineCount(2), ColumnCount(6) };
+    auto mock = MockTerm { pageSize, LineCount(5) };
+    mock.writeToScreen("\033]66;s=2;X\a\033[2;3Hyz\033[2;1H\n"); // the head row scrolls into the history
+    auto const& screen = mock.terminal.primaryScreen();
+    REQUIRE(screen.at(CellLocation { LineOffset(0), ColumnOffset(0) })
+                .isFlagEnabled(CellFlag::MulticellContinuation));
+    REQUIRE(screen.grid().lineAt(LineOffset(0)).toUtf8ColumnAligned().starts_with("  yz"));
+
+    auto replay = MockTerm { pageSize };
+    replay.writeToScreen(screen.screenshot());
+    auto const& replayed = replay.terminal.primaryScreen();
+    CHECK(replayed.grid().lineAt(LineOffset(0)).toUtf8ColumnAligned().starts_with("  yz"));
+    for (auto const column: { 0, 1 })
+    {
+        auto const at = CellLocation { LineOffset(0), ColumnOffset(column) };
+        CHECK(replayed.at(at).empty());
+        CHECK_FALSE(replayed.at(at).isFlagEnabled(CellFlag::MulticellContinuation));
+    }
+}
+
 TEST_CASE("tallyMatches", "[screen]")
 {
     using vtbackend::SearchCaseSensitivity;
@@ -3620,6 +3947,26 @@ TEST_CASE("findMarkerUpwards", "[screen]")
     }
 }
 
+TEST_CASE("findMarker visits user marks as well as prompt marks", "[screen][semanticblocks]")
+{
+    // ScrollMarkUp/ScrollMarkDown and CopyPreviousMarkRange walk these: `mm` fed them before it became a
+    // user mark, and must go on feeding them.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
+    auto& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("1abc\r\n2def\r\n3ghi\r\n4jkl\r\n5mno\r\n6pqr");
+    REQUIRE(screen.historyLineCount() == LineCount { 3 });
+
+    screen.setLogicalLineFlags(LineOffset(-2), LineFlag::UserMark, true); // 2def
+
+    auto const up = screen.findMarkerUpwards(LineOffset(0));
+    REQUIRE(up.has_value());
+    CHECK(*up == LineOffset(-2));
+
+    auto const down = screen.findMarkerDownwards(LineOffset(-3));
+    REQUIRE(down.has_value());
+    CHECK(*down == LineOffset(-2));
+}
+
 TEST_CASE("save_restore_DEC_modes", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
@@ -3787,6 +4134,412 @@ TEST_CASE("Screen.resize.narrowingStepByStepKeepsTheCursorColumn", "[screen]")
     {
         screen.grid().setReflowOnResize(false);
         narrowStepByStep();
+    }
+}
+
+TEST_CASE("Screen.resize.aReflowKeepsTheCursorOnItsText", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+
+    SECTION("the next character continues a line whose wrap was pending")
+    {
+        // Twenty characters on a twenty-column page leave the cursor on the last one, waiting to wrap.
+        // The reflow already counts that wrap: the next character goes straight after the "T", rather
+        // than wrapping a second time onto a row of its own.
+        auto& screen = mock.terminal.primaryScreen();
+        mock.writeToScreen("ABCDEFGHIJKLMNOPQRST");
+        REQUIRE(screen.cursor().wrapPending);
+
+        // "ABCDEF" "GHIJKL" "MNOPQR" "ST", above one of the four blank rows.
+        mock.terminal.resizeScreen(PageSize { LineCount(5), ColumnCount(6) });
+        mock.writeToScreen("X");
+        CHECK(screen.grid().lineText(LineOffset(3)) == "STX   ");
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(3) });
+    }
+
+    SECTION("the alternate screen does not reflow, and clamps the cursor instead")
+    {
+        mock.writeToScreen("\033[?1049hABCDEFGHIJKL");
+        auto const& screen = mock.terminal.alternateScreen();
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(12) });
+
+        mock.terminal.resizeScreen(PageSize { LineCount(5), ColumnCount(8) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(7) });
+        CHECK(screen.grid().lineText(LineOffset(1)) == "        ");
+
+        mock.terminal.resizeScreen(PageSize { LineCount(5), ColumnCount(20) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(7) });
+    }
+}
+
+TEST_CASE("Screen.resize.aHeightChangeKeepsAPendingWrap", "[screen]")
+{
+    // Only the line count changes, so the cursor still sits on the last cell of a full row with its wrap
+    // pending: the next character wraps onto the next row instead of overwriting the "T". foot keeps the
+    // wrap pending likewise (grid.c, the `lcf` step), as does xterm's ScreenResize, which leaves do_wrap.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10) };
+    auto& screen = mock.terminal.primaryScreen();
+    auto const reflow = GENERATE(true, false);
+    CAPTURE(reflow);
+    screen.grid().setReflowOnResize(reflow);
+
+    mock.writeToScreen("ABCDEFGHIJKLMNOPQRST");
+    REQUIRE(screen.cursor().wrapPending);
+
+    auto const newHeight = GENERATE(LineCount(2), LineCount(5));
+    CAPTURE(newHeight);
+    mock.terminal.resizeScreen(PageSize { newHeight, ColumnCount(20) });
+    CHECK(screen.cursor().wrapPending);
+
+    mock.writeToScreen("X");
+    CHECK(screen.grid().lineText(LineOffset(0)) == "ABCDEFGHIJKLMNOPQRST");
+    CHECK(screen.grid().lineText(LineOffset(1)) == "X                   ");
+}
+
+TEST_CASE("Screen.resize.aReflowKeepsTheBlanksInsideALine", "[screen]")
+{
+    // An erase inside a wrapped line leaves blank cells that are part of the line: a reflow re-chops the
+    // line, but must not close the gap. Only the blanks that end the logical line may go.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(10) }, LineCount(10) };
+    auto& grid = mock.terminal.primaryScreen().grid();
+    auto const firstLogicalLine = [&]() {
+        auto text = grid.logicalLinesFrom(grid.addressableTop()).begin()->text();
+        text.resize(core::trimRight(text).size());
+        return text;
+    };
+
+    SECTION("widening")
+    {
+        mock.writeToScreen("ABCDEFGHIJKLMNO\033[1;6H\033[5X");
+        mock.terminal.resizeScreen(PageSize { LineCount(6), ColumnCount(20) });
+        CHECK(firstLogicalLine() == "ABCDE     KLMNO");
+        CHECK(grid.lineText(LineOffset(0)) == "ABCDE     KLMNO     ");
+    }
+
+    SECTION("narrowing")
+    {
+        mock.terminal.resizeScreen(PageSize { LineCount(6), ColumnCount(20) });
+        mock.writeToScreen("ABCDEFGHIJKLMNOPQRSTUVWXY\033[1;13H\033[8X");
+        mock.terminal.resizeScreen(PageSize { LineCount(6), ColumnCount(8) });
+        CHECK(firstLogicalLine() == "ABCDEFGHIJKL        UVWXY");
+    }
+}
+
+TEST_CASE("Screen.resize.aNarrowingFillsTheBlankRowsBelowTheCursorFirst", "[screen]")
+{
+    // A prompt on the top row of an otherwise empty page wraps onto more rows when the page narrows. The
+    // blank rows below it make room for that, as in kitty, foot and WezTerm, which drop the empty rows at
+    // the bottom before they reflow: the prompt goes into the history only once the page is full.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(20) }, LineCount(10) };
+    auto const& screen = mock.terminal.primaryScreen();
+    mock.writeToScreen("0123456789ABC");
+
+    SECTION("there is room")
+    {
+        // "0123456" "789ABC" and the cursor after them.
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(7) });
+        CHECK(screen.historyLineCount() == LineCount(0));
+        CHECK(screen.grid().lineText(LineOffset(0)) == "0123456");
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(6) });
+    }
+
+    SECTION("there is not")
+    {
+        // "012" "345" "678" "9AB" "C": one row more than the page holds.
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(3) });
+        CHECK(screen.historyLineCount() == LineCount(1));
+        CHECK(screen.grid().lineText(LineOffset(-1)) == "012");
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
+    }
+}
+
+TEST_CASE("Screen.resize.aReflowCarriesTheSavedCursorToo", "[screen]")
+{
+    // The cursor DECSC saved goes with its text like the live one, as foot and kitty track it: DECRC after
+    // the resize comes back to the same character.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto const& screen = mock.terminal.primaryScreen();
+    auto const charUnderCursor = [&]() {
+        auto const position = screen.logicalCursorPosition();
+        return screen.grid().lineText(position.line).at(unbox<size_t>(position.column));
+    };
+
+    SECTION("DECSC and DECRC")
+    {
+        // Saved on the "C"; the live cursor on the bottom row keeps every row in use, so "0123456789"
+        // goes into the history.
+        mock.writeToScreen("0123456789ABCDEFGHIJKLMNO\033[1;13H\0337\033[5;1H");
+        mock.terminal.resizeScreen(PageSize { LineCount(5), ColumnCount(10) });
+        mock.writeToScreen("\0338");
+        CHECK(charUnderCursor() == 'C');
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
+    }
+
+    SECTION("a full-screen program on the alternate screen")
+    {
+        // The resize happens while the alternate screen shows; the primary one follows when it comes back,
+        // and its cursor is the one saved on the way out.
+        mock.writeToScreen("user@host:~$ \033[?1049h");
+        mock.terminal.resizeScreen(PageSize { LineCount(5), ColumnCount(6) });
+        mock.writeToScreen("\033[?1049lls");
+        CHECK(screen.grid().lineText(LineOffset(2)) == " ls   ");
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(3) });
+    }
+}
+
+TEST_CASE("Screen.write.aWideCharacterThatDoesNotFitItsRow", "[screen]")
+{
+    // A two-column character arriving at the last column does not fit there. Measured in xterm on a
+    // 10-column page: with autowrap, "ABCDEFGHI中X" leaves the last cell of the first row and puts the
+    // character on the next one; without, it drops the character and the "X" lands in the last column.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) }, LineCount(10) };
+    auto& screen = mock.terminal.primaryScreen();
+    auto const wide = std::string_view { "\xE4\xB8\xAD" }; // U+4E2D, two columns
+
+    SECTION("autowrap moves it to the next row")
+    {
+        mock.writeToScreen(std::format("ABCDEFGHI{}X", wide));
+        CHECK(screen.grid().lineAt(LineOffset(0)).toUtf8ColumnAligned() == "ABCDEFGHI ");
+        CHECK(screen.grid().lineText(LineOffset(1)).starts_with(std::format("{}X", wide)));
+        CHECK(screen.grid().lineAt(LineOffset(1)).isFlagEnabled(LineFlag::Wrapped));
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(3) });
+    }
+
+    SECTION("a widening reads the line back whole")
+    {
+        // The cell left behind is not part of the text: the reflow does not keep it as a blank.
+        mock.writeToScreen(std::format("ABCDEFGHI{}X", wide));
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(20) });
+        auto text = screen.grid().lineText(LineOffset(0));
+        text.resize(core::trimRight(text).size());
+        CHECK(text == std::format("ABCDEFGHI{}X", wide));
+    }
+
+    SECTION("without autowrap it is dropped")
+    {
+        mock.writeToScreen(std::format("\033[?7lABCDEFGHI{}X", wide));
+        CHECK(screen.grid().lineText(LineOffset(0)) == "ABCDEFGHIX");
+        CHECK(screen.grid().lineText(LineOffset(1)) == "          ");
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(9) });
+    }
+
+    SECTION("without autowrap it is dropped, with nothing written after it")
+    {
+        // Not left there half on the page for the next character to clear away.
+        mock.writeToScreen(std::format("\033[?7lABCDEFGHI{}", wide));
+        CHECK(screen.grid().lineText(LineOffset(0)) == "ABCDEFGHI ");
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(9) });
+    }
+}
+
+TEST_CASE("Screen.resize.aNarrowingMovesAWideCharacterWhole", "[screen]")
+{
+    // "ABCD中EF" on 10 columns puts the two-column character on columns 4 and 5. Narrowed to 5, the
+    // new edge falls between its halves: the character moves on to the next row whole, as foot and kitty
+    // move it, and the cell it leaves is padding a widening drops again.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(10) }, LineCount(10) };
+    auto const& screen = mock.terminal.primaryScreen();
+    auto const wide = std::string_view { "\xE4\xB8\xAD" }; // U+4E2D, two columns
+    mock.writeToScreen(std::format("ABCD{}EF", wide));
+
+    SECTION("the text")
+    {
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(5) });
+        CHECK(screen.grid().lineAt(LineOffset(0)).toUtf8ColumnAligned() == "ABCD ");
+        CHECK(screen.grid().lineText(LineOffset(1)).starts_with(std::format("{}EF", wide)));
+        CHECK(screen.grid().lineAt(LineOffset(1)).isFlagEnabled(LineFlag::Wrapped));
+
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(10) });
+        auto text = screen.grid().lineText(LineOffset(0));
+        text.resize(core::trimRight(text).size());
+        CHECK(text == std::format("ABCD{}EF", wide));
+    }
+
+    SECTION("re-chopped further, and widened to an edge it straddles again")
+    {
+        // "ABCDE中X" narrowed to 3: the first row keeps "ABC", and the overflow "DE中X" is cut again
+        // across the character, which moves on whole: "DE" and padding, then "中X". Widened to 6, the
+        // joined line is cut across it once more: "ABCDE" and padding, then "中X".
+        mock.writeToScreen(std::format("\r\033[KABCDE{}X", wide));
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(3) });
+        CHECK(screen.grid().lineText(LineOffset(0)) == "ABC");
+        CHECK(screen.grid().lineAt(LineOffset(1)).toUtf8ColumnAligned() == "DE ");
+        CHECK(screen.grid().lineText(LineOffset(2)).starts_with(std::format("{}X", wide)));
+
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(6) });
+        CHECK(screen.grid().lineAt(LineOffset(0)).toUtf8ColumnAligned() == "ABCDE ");
+        CHECK(screen.grid().lineText(LineOffset(1)).starts_with(std::format("{}X", wide)));
+
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(10) });
+        auto text = screen.grid().lineText(LineOffset(0));
+        text.resize(core::trimRight(text).size());
+        CHECK(text == std::format("ABCDE{}X", wide));
+    }
+
+    SECTION("the cursor on the wide character")
+    {
+        mock.writeToScreen("\033[1;5H");
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(5) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(10) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(4) });
+    }
+
+    SECTION("the cursor after a character a second cut moved")
+    {
+        // "ABCDE中X" narrowed to 3 is "ABC", "DE" and padding, "中X": the "X" ends on the third row.
+        mock.writeToScreen(std::format("\r\033[KABCDE{}X\033[1;8H", wide)); // on the "X"
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(3) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(2) });
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(10) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(7) });
+    }
+
+    SECTION("the cursor after it")
+    {
+        mock.writeToScreen("\033[1;7H"); // on the "E"
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(5) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
+        mock.terminal.resizeScreen(PageSize { LineCount(4), ColumnCount(10) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(6) });
+    }
+}
+
+TEST_CASE("Screen.resize.aReflowMovesATextSizingBlockWhole", "[screen]")
+{
+    // An OSC 66 block is no more divisible than a wide character, and one taller than a row reaches into the
+    // rows below its head: a reflow moves it whole, its part on those rows along with it, as kitty's rewrap
+    // does. The cells it leaves at the end of a row are padding, which a widening drops again.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(10) }, LineCount(10) };
+    auto const& screen = mock.terminal.primaryScreen();
+    // The block a cell belongs to, as "line,column columnsxrows" of its head, or "none".
+    auto const blockAt = [&](int line, int column) -> std::string {
+        auto const block = screen.multicellBlockAt(
+            CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) });
+        if (!block)
+            return "none";
+        return std::format(
+            "{},{} {}x{}", block->origin.line, block->origin.column, block->columns, block->rows);
+    };
+    auto const resizeTo = [&](int columns) {
+        mock.terminal.resizeScreen(PageSize { LineCount(6), ColumnCount(columns) });
+    };
+    auto const trimmedText = [&](int line) {
+        auto text = screen.grid().lineText(LineOffset(line));
+        text.resize(core::trimRight(text).size());
+        return text;
+    };
+
+    SECTION("three columns wide, straddling the new edge")
+    {
+        mock.writeToScreen("ABCD\033]66;w=3;X\aEF"); // the block on columns 4 to 6
+        REQUIRE(blockAt(0, 6) == "0,4 3x1");
+
+        resizeTo(6);
+        CHECK(trimmedText(0) == "ABCD");
+        CHECK(blockAt(1, 2) == "1,0 3x1");
+        CHECK(trimmedText(1) == "XEF");
+
+        resizeTo(10);
+        CHECK(blockAt(0, 6) == "0,4 3x1");
+        CHECK(trimmedText(0) == "ABCDXEF");
+    }
+
+    SECTION("two rows tall, straddling the new edge")
+    {
+        mock.writeToScreen("ABCD\033]66;s=2;X\aEF"); // the block on columns 4 and 5 of rows 0 and 1
+        REQUIRE(blockAt(1, 5) == "0,4 2x2");
+
+        resizeTo(5);
+        CHECK(trimmedText(0) == "ABCD");
+        CHECK(blockAt(1, 0) == "1,0 2x2");
+        CHECK(blockAt(2, 1) == "1,0 2x2");
+        CHECK(blockAt(2, 4) == "none");
+        CHECK(trimmedText(1) == "XEF");
+
+        resizeTo(10);
+        CHECK(blockAt(1, 5) == "0,4 2x2");
+        CHECK(blockAt(2, 0) == "none");
+        CHECK(trimmedText(0) == "ABCDXEF");
+    }
+
+    SECTION("a run of tall blocks, re-chopped")
+    {
+        // Four blocks two rows tall in a row. Narrowed to 5, a row takes two of them, and the row below each
+        // pair is theirs: the second pair starts below the first one's, as kitty lays it out.
+        mock.writeToScreen("\033]66;s=2;abcd\a");
+        REQUIRE(blockAt(1, 7) == "0,6 2x2");
+
+        resizeTo(5);
+        CHECK(blockAt(1, 3) == "0,2 2x2");
+        CHECK(blockAt(2, 0) == "2,0 2x2");
+        CHECK(blockAt(3, 3) == "2,2 2x2");
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(4) });
+
+        resizeTo(10);
+        CHECK(blockAt(1, 7) == "0,6 2x2");
+        CHECK(blockAt(1, 1) == "0,0 2x2");
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(8) });
+        CHECK(trimmedText(2).empty());
+    }
+
+    SECTION("wider than the new width")
+    {
+        // kitty drops a block it has no row wide enough for, and the text after it closes up, the cursor with
+        // it: past "CD", on the row the narrowing adds for it.
+        mock.writeToScreen("AB\033]66;w=3;X\aCD");
+        resizeTo(2);
+        CHECK(trimmedText(0) == "AB");
+        CHECK(trimmedText(1) == "CD");
+        CHECK(screen.grid().lineAt(LineOffset(1)).isFlagEnabled(LineFlag::Wrapped));
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
+        for (auto const column: std::views::iota(0, 2))
+            CHECK(blockAt(0, column) == "none");
+    }
+
+    SECTION("taller and wider than the new width")
+    {
+        mock.writeToScreen("\033]66;s=3;Y\a"); // three columns, three rows
+        resizeTo(2);
+        for (auto const line: std::views::iota(0, 6))
+            for (auto const column: std::views::iota(0, 2))
+                CHECK(blockAt(line, column) == "none");
+    }
+}
+
+TEST_CASE("Screen.resize.whereACommandEndedMovesWithItsTextPastTextSizingBlocks", "[screen]")
+{
+    // ;D's column names the cell after the output's last character. A reflow that drops a block before it on
+    // its row closes the text up, and one that makes a row for a tall block's lower part inside the line
+    // moves the rows after it down: either way the column must still name that cell.
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(12) }, LineCount(10) };
+    auto const& screen = mock.terminal.primaryScreen();
+    auto const& grid = screen.grid();
+    // The logical column of the cell after the last "Y" on the page.
+    auto const afterY = [&]() -> ColumnOffset {
+        for (auto const row: std::views::iota(0, 8) | std::views::reverse)
+        {
+            auto const& cells = grid.lineAt(LineOffset(row)).storage();
+            for (auto const column: std::views::iota(size_t { 0 }, cells.codepoints.size()))
+                if (cells.codepoints[column] == U'Y')
+                    return grid.logicalColumnOf(CellLocation {
+                        .line = LineOffset(row), .column = ColumnOffset::cast_from(column + 1) });
+        }
+        return ColumnOffset(-1);
+    };
+
+    SECTION("a block dropped before it")
+    {
+        mock.writeToScreen("\033]133;C\033\\AB\033]66;w=3;X\aXY\033]133;D;0\033\\\r\n");
+        mock.terminal.resizeScreen(PageSize { LineCount(8), ColumnCount(2) });
+        CHECK(grid.lineAt(LineOffset(0)).commandEndOffset() == afterY());
+    }
+
+    SECTION("a row made for a tall block's lower part")
+    {
+        mock.writeToScreen("\033]133;C\033\\\033]66;s=2;abcd\aXY\033]133;D;0\033\\\r\n\r\n");
+        mock.terminal.resizeScreen(PageSize { LineCount(8), ColumnCount(5) });
+        CHECK(grid.lineAt(LineOffset(0)).commandEndOffset() == afterY());
     }
 }
 
@@ -4501,6 +5254,9 @@ TEST_CASE("Delta.imagePlacementBumpsExactlyTheCoveredLines", "[screen][delta]")
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
 
     auto& grid = mock.terminal.primaryScreen().grid();
+    // A row's first visit stamps its birth time, and dirties it once: the image's trailing linefeed
+    // would reach row 10 for the first time, so visit it before draining.
+    mock.writeToScreen("\033[11;1H\033[H");
     auto cursor = drainedDeltaCursor(grid);
 
     mock.writeToScreen(ChessBoard); // a 10x10-cell sixel image over rows 0..9
@@ -4890,9 +5646,9 @@ TEST_CASE("BulkText.aPendingWrapGetsNoBulkRun", "[screen][LineShape]")
 {
     // A pending wrap moves the run to the NEXT line before it is written, and the gate asks only about
     // the current one. At a real deferred wrap the cursor stands on the right margin, where the gate
-    // returns 0 anyway; but the wrap survives a margin widened under it and a DECRC after a resize, and
-    // both leave the cursor left of the margin. The run then landed on a line holding a wide character
-    // and overwrote its head without erasing its continuation.
+    // returns 0 anyway; but the wrap survives a margin widened under it, which leaves the cursor left of
+    // the margin. The run then landed on a line holding a wide character and overwrote its head without
+    // erasing its continuation.
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
     auto const& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("\033[2;1Hab\xE4\xB8\xAD"sv); // line 1 holds a wide character at columns 2..3
@@ -4901,19 +5657,30 @@ TEST_CASE("BulkText.aPendingWrapGetsNoBulkRun", "[screen][LineShape]")
     {
         mock.writeToScreen("\033[?69h\033[1;5s"sv); // DECSLRM at columns 1..5, which homes the cursor
         mock.writeToScreen("abcde\033[?69l"sv);     // a wrap pending at column 4, then DECLRMM reset
+        REQUIRE(screen.cursor().wrapPending);
+        CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+
+        mock.writeToScreen("xyz"sv);
+        CHECK(screen.at(LineOffset(1), ColumnOffset(2)).codepoints() == U"z");
+        CHECK_FALSE(screen.at(LineOffset(1), ColumnOffset(3)).isFlagEnabled(CellFlag::WideCharContinuation));
     }
     SECTION("restored after a resize")
     {
+        // The widening takes the saved cursor's wrap as it takes the live one's
+        // (Screen::applyPageSizeToMainDisplay): the row has room now for what would have wrapped, so DECRC
+        // comes back right after its text, and the run leaves the next line's wide character whole.
         mock.writeToScreen("\033[1;1H0123456789\0337"sv); // a wrap pending at column 9, then DECSC
         mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(14) });
         mock.writeToScreen("\0338"sv); // DECRC
-    }
-    REQUIRE(screen.cursor().wrapPending);
-    CHECK(mock.terminal.maxBulkTextSequenceWidth() == 0);
+        REQUIRE_FALSE(screen.cursor().wrapPending);
+        REQUIRE(screen.cursor().position
+                == CellLocation { .line = LineOffset(0), .column = ColumnOffset(10) });
 
-    mock.writeToScreen("xyz"sv);
-    CHECK(screen.at(LineOffset(1), ColumnOffset(2)).codepoints() == U"z");
-    CHECK_FALSE(screen.at(LineOffset(1), ColumnOffset(3)).isFlagEnabled(CellFlag::WideCharContinuation));
+        mock.writeToScreen("xyz"sv);
+        CHECK(screen.grid().lineText(LineOffset(0)) == "0123456789xyz ");
+        CHECK(screen.at(LineOffset(1), ColumnOffset(2)).codepoints() == U"中");
+        CHECK(screen.at(LineOffset(1), ColumnOffset(3)).isFlagEnabled(CellFlag::WideCharContinuation));
+    }
 }
 
 TEST_CASE("BulkText.aSingleShiftMapsOneCharacterOnly", "[screen]")

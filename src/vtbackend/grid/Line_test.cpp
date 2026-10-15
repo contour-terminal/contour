@@ -5,9 +5,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstdint>
+#include <format>
 #include <ranges>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using namespace std;
@@ -203,18 +206,6 @@ TEST_CASE("Line.blank.toUtf8ReturnsSpaces", "[Line][blank]")
     REQUIRE(line.isBlank());
     CHECK(line.toUtf8() == "     ");
     CHECK(line.toUtf8Trimmed().empty());
-}
-
-TEST_CASE("Line.blank.searchOnlyMatchesEmpty", "[Line][blank]")
-{
-    auto line = Line(ColumnCount(20), LineFlag::None, GraphicsAttributes {});
-
-    REQUIRE(line.isBlank());
-    CHECK(line.search(U"hello", ColumnOffset(0), true) == std::nullopt);
-    CHECK(line.searchReverse(U"hello", ColumnOffset(19), true) == std::nullopt);
-    auto const empty = line.search(U"", ColumnOffset(0), true);
-    REQUIRE(empty.has_value());
-    CHECK(empty->column == ColumnOffset(0));
 }
 
 TEST_CASE("Line.blank.materializeOnUseCellAt", "[Line][blank]")
@@ -560,4 +551,249 @@ TEST_CASE("Line.recycle.keepsTheStorageForTheNextWrite", "[Line]")
     // reset() still releases it, which is what clearing the screen wants.
     line.reset(LineFlag::None, GraphicsAttributes {}, ColumnCount(80));
     CHECK(line.storage().codepoints.capacity() == 0);
+}
+
+// {{{ block id and birth time
+
+TEST_CASE("Line.block.adoptIgnoresZeroAndLeavesTheLineClean", "[Line][semanticblocks]")
+{
+    auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+    static_cast<void>(line.stampRevision(1)); // clean
+
+    CHECK(line.blockId() == CommandBlockId {});
+    line.adoptBlock(CommandBlockId { 4 });
+    CHECK(line.blockId() == CommandBlockId { 4 });
+    // Derived state, like the context id: adopting it is not a change a mirror must be told about.
+    CHECK_FALSE(line.isDirty());
+
+    // Zero is an absence of information, not a claim: it never erases an id the line already has.
+    line.adoptBlock(CommandBlockId {});
+    CHECK(line.blockId() == CommandBlockId { 4 });
+
+    // Last writer wins: the row a ;D closes is routinely the row the next ;A opens.
+    line.adoptBlock(CommandBlockId { 5 });
+    CHECK(line.blockId() == CommandBlockId { 5 });
+}
+
+TEST_CASE("Line.bornAt.stampsOnceAndDirtiesOnce", "[Line][semanticblocks]")
+{
+    auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+    static_cast<void>(line.stampRevision(1));
+    CHECK(line.bornAt() == 0);
+
+    line.stampBornAt(0); // "no clock yet" stamps nothing
+    CHECK(line.bornAt() == 0);
+    CHECK_FALSE(line.isDirty());
+
+    line.stampBornAt(0x12'34'56);
+    CHECK(line.bornAt() == 0x12'34'56); // all three bytes round-trip
+    CHECK(line.isDirty());              // so the daemon's delta carries the stamp
+
+    static_cast<void>(line.stampRevision(2));
+    line.stampBornAt(99); // the cursor coming back later does not make the line younger
+    CHECK(line.bornAt() == 0x12'34'56);
+    CHECK_FALSE(line.isDirty());
+}
+
+TEST_CASE("Line.bornAt.saturatesAtTheHorizon", "[Line][semanticblocks]")
+{
+    // MaxBornAt + 1 is the first stamp whose three low bytes are all zero: unclamped, it would read back as
+    // "never stamped".
+    for (auto const stamp: std::array { Line::MaxBornAt + 1, Line::MaxBornAt + 1000 })
+    {
+        auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+        line.stampBornAt(stamp);
+        CHECK(line.bornAt() == Line::MaxBornAt);
+    }
+}
+
+TEST_CASE("Line.blockAndBirth.areClearedWhenTheLineIsReused", "[Line][semanticblocks]")
+{
+    auto const stamped = [] {
+        auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+        line.adoptBlock(CommandBlockId { 3 });
+        line.stampBornAt(7);
+        return line;
+    };
+
+    SECTION("reset")
+    {
+        auto line = stamped();
+        line.reset(LineFlag::None, GraphicsAttributes {});
+        CHECK(line.blockId() == CommandBlockId {});
+        CHECK(line.bornAt() == 0);
+    }
+
+    SECTION("reset to a new width")
+    {
+        auto line = stamped();
+        line.reset(LineFlag::None, GraphicsAttributes {}, ColumnCount(10));
+        CHECK(line.blockId() == CommandBlockId {});
+        CHECK(line.bornAt() == 0);
+    }
+
+    SECTION("recycle")
+    {
+        auto line = stamped();
+        line.recycle(LineFlag::None, GraphicsAttributes {}, ColumnCount(8));
+        CHECK(line.blockId() == CommandBlockId {});
+        CHECK(line.bornAt() == 0);
+    }
+
+    SECTION("fill")
+    {
+        auto line = stamped();
+        line.fill(LineFlag::None, GraphicsAttributes {}, U'E', 1);
+        CHECK(line.blockId() == CommandBlockId {});
+        CHECK(line.bornAt() == 0);
+    }
+}
+
+TEST_CASE("Line.reset.aFlagItKeepsKeepsItsOffset", "[Line][semanticblocks]")
+{
+    // An offset means nothing without its flag, and a flag that names a border means little without its
+    // offset: a reset keeps them together, or drops them together.
+    auto const marked = [] {
+        auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+        line.setFlag(LineFlags { LineFlag::PromptEnd, LineFlag::CommandEnd }, true);
+        line.setPromptEndOffset(ColumnOffset(2));
+        line.setCommandEndOffset(ColumnOffset(5));
+        return line;
+    };
+
+    SECTION("both kept")
+    {
+        auto line = marked();
+        line.reset(line.flags(), GraphicsAttributes {});
+        CHECK(line.promptEndOffset() == ColumnOffset(2));
+        CHECK(line.commandEndOffset() == ColumnOffset(5));
+    }
+
+    SECTION("one kept")
+    {
+        auto line = marked();
+        line.reset(LineFlag::PromptEnd, GraphicsAttributes {});
+        CHECK(line.promptEndOffset() == ColumnOffset(2));
+        CHECK(line.commandEndOffset() == ColumnOffset(0));
+    }
+
+    SECTION("none kept")
+    {
+        auto line = marked();
+        line.reset(LineFlag::None, GraphicsAttributes {});
+        CHECK(line.promptEndOffset() == ColumnOffset(0));
+        CHECK(line.commandEndOffset() == ColumnOffset(0));
+    }
+
+    SECTION("a flag the row did not carry starts with no offset")
+    {
+        auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+        line.setPromptEndOffset(ColumnOffset(4)); // a stale column, with no flag to give it meaning
+        line.reset(LineFlag::PromptEnd, GraphicsAttributes {});
+        CHECK(line.promptEndOffset() == ColumnOffset(0));
+    }
+}
+
+TEST_CASE("Line.blockAndBirth.travelWithTheLineOnAssignment", "[Line][semanticblocks]")
+{
+    // Margin scrolls move whole lines between rows by assignment: the row that receives the text must
+    // receive its block and its birth time with it.
+    auto source = Line(ColumnCount(4), LineFlag::None, GraphicsAttributes {});
+    source.adoptBlock(CommandBlockId { 9 });
+    source.stampBornAt(11);
+
+    auto copied = Line(ColumnCount(4), LineFlag::None, GraphicsAttributes {});
+    copied = source;
+    CHECK(copied.blockId() == CommandBlockId { 9 });
+    CHECK(copied.bornAt() == 11);
+
+    auto moved = Line(ColumnCount(4), LineFlag::None, GraphicsAttributes {});
+    moved = std::move(source);
+    CHECK(moved.blockId() == CommandBlockId { 9 });
+    CHECK(moved.bornAt() == 11);
+}
+
+TEST_CASE("Line.provenance.isWhatAFreshLineAdopts", "[Line][semanticblocks]")
+{
+    // Reflow cuts a logical line into fresh rows and hands each the provenance of the row it came from.
+    auto source = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+    source.adoptContext(ContextId { 5 });
+    source.adoptBlock(CommandBlockId { 9 });
+    source.stampBornAt(11);
+
+    auto piece = Line(ColumnCount(4), LineFlag::None, GraphicsAttributes {});
+    piece.adoptProvenance(source.provenance());
+    CHECK(piece.contextId() == ContextId { 5 });
+    CHECK(piece.blockId() == CommandBlockId { 9 });
+    CHECK(piece.bornAt() == 11);
+}
+
+TEST_CASE("Line.provenance.fillsOnlyWhatTheRowDoesNotCarryYet", "[Line][semanticblocks]")
+{
+    // The cursor reaching a row hands it what is in effect only where the row carries nothing yet: a writer,
+    // a block or a time it already has is never relabelled.
+    auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+    line.adoptContext(ContextId { 3 });
+    line.stampBornAt(7);
+
+    line.adoptProvenance(
+        LineProvenance { .contextId = ContextId { 5 }, .blockId = CommandBlockId { 9 }, .bornAt = 11 });
+
+    CHECK(line.contextId() == ContextId { 3 });
+    CHECK(line.blockId() == CommandBlockId { 9 }); // the one part it had none of
+    CHECK(line.bornAt() == 7);
+
+    line.adoptProvenance(LineProvenance { .contextId = {}, .blockId = CommandBlockId { 12 }, .bornAt = 0 });
+    CHECK(line.blockId() == CommandBlockId { 9 });
+}
+
+TEST_CASE("Line.provenance.aRelabelThatChangesNothingIsKnownBeforehand", "[Line][semanticblocks]")
+{
+    // A transition is fanned out to every screen, and handing a scrollback row out for writing costs a deeper
+    // delta scan whether it then changes or not: a row the transition leaves as it is says so up front.
+    auto line = Line(ColumnCount(8), LineFlag::None, GraphicsAttributes {});
+    line.adoptContext(ContextId { 3 });
+    line.adoptBlock(CommandBlockId { 9 });
+    auto const relabelling = [](ContextId context, CommandBlockId block) {
+        return LineProvenance { .contextId = context, .blockId = block, .bornAt = 0 };
+    };
+
+    CHECK_FALSE(line.wouldRelabel(relabelling({}, {})));
+    CHECK_FALSE(line.wouldRelabel(relabelling(ContextId { 3 }, {})));
+    CHECK_FALSE(line.wouldRelabel(relabelling({}, CommandBlockId { 9 })));
+    CHECK_FALSE(line.wouldRelabel(relabelling(ContextId { 3 }, CommandBlockId { 9 })));
+    CHECK_FALSE(line.wouldRelabel(LineProvenance { .contextId = {}, .blockId = {}, .bornAt = 42 })); // kept
+    CHECK(line.wouldRelabel(relabelling(ContextId { 4 }, {})));
+    CHECK(line.wouldRelabel(relabelling({}, CommandBlockId { 10 })));
+    CHECK(line.wouldRelabel(relabelling(ContextId { 3 }, CommandBlockId { 10 })));
+
+    // ...and relabel() dirties the row exactly when it said so.
+    line.stampRevision(1);
+    line.relabel(relabelling(ContextId { 3 }, CommandBlockId { 9 }));
+    CHECK_FALSE(line.isDirty());
+    line.relabel(relabelling({}, CommandBlockId { 10 }));
+    CHECK(line.isDirty());
+    CHECK(line.blockId() == CommandBlockId { 10 });
+    CHECK(line.contextId() == ContextId { 3 });
+}
+
+// }}}
+
+TEST_CASE("LineFlags.userMarkIsAHeadOnlyNavigationMark", "[Line][semanticblocks]")
+{
+    CHECK(std::format("{}", LineFlags { LineFlag::UserMark }) == "UserMark");
+    CHECK(HeadOnlyLineFlags.contains(LineFlag::UserMark));
+    CHECK(NavigationMarkFlags == LineFlags { LineFlag::Marked, LineFlag::UserMark });
+}
+
+TEST_CASE("LineFlags.theMarkSetsFollowTheTablesRoles", "[Line][semanticblocks]")
+{
+    // A reader that means "the shell spoke here" must not see the user's bookmark.
+    CHECK(
+        ShellMarkLineFlags
+        == LineFlags { LineFlag::Marked, LineFlag::OutputStart, LineFlag::CommandEnd, LineFlag::PromptEnd });
+    CHECK(HeadOnlyLineFlags == ShellMarkLineFlags.with(LineFlag::UserMark));
+    CHECK(lineFlagsOf(LineFlagRole::Physical) == LineFlags { LineFlag::Wrappable, LineFlag::Wrapped });
+    CHECK(LineRenditionFlags
+          == LineFlags { LineFlag::DoubleWidth, LineFlag::DoubleHeightTop, LineFlag::DoubleHeightBottom });
 }

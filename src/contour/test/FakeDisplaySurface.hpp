@@ -12,6 +12,7 @@
 
 #include <QtQuick/QQuickWindow>
 
+#include <atomic>
 #include <functional>
 #include <utility>
 #include <vector>
@@ -56,8 +57,9 @@ class FakeDisplaySurface final: public session::DisplaySurface
     std::vector<config::TabBarPosition> tabBarPositions;
     std::vector<bool> blurBehindRequests;
 
-    int postCount = 0;
-    int redrawCount = 0;
+    /// Atomic, as the session posts and asks for a redraw from its parser thread as well as the GUI thread.
+    std::atomic<int> postCount = 0;
+    std::atomic<int> redrawCount = 0;
     int renderBufferUpdateCount = 0;
     int closeCount = 0;
     int releaseSessionCount = 0;
@@ -65,6 +67,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     int discardedImages = 0;
     int cursorMovedReports = 0;
     int terminalResizeRequests = 0;
+    int pageRefits = 0;
     int fullScreenToggles = 0;
     int titleBarToggles = 0;
     int imeToggles = 0;
@@ -117,6 +120,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     [[nodiscard]] bool hasRenderTarget() const override { return renderTargetPresent; }
 
     void resizeTerminalToDisplaySize() override { ++terminalResizeRequests; }
+    void refitPage() override { ++pageRefits; }
     void resizeWindow(vtbackend::LineCount lineCount, vtbackend::ColumnCount columnCount) override
     {
         pageResizeRequests.emplace_back(lineCount, columnCount);

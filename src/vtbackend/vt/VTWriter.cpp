@@ -3,7 +3,15 @@
 
 #include <vtbackend/grid/CellProxy.hpp>
 
+#include <libunicode/width.h>
+
+#include <algorithm>
+#include <format>
 #include <numeric>
+#include <optional>
+#include <ranges>
+#include <string>
+#include <vector>
 
 using std::string;
 using std::string_view;
@@ -11,6 +19,44 @@ using std::vector;
 
 namespace vtbackend
 {
+
+namespace
+{
+    /// The OSC 66 that writes @p cell's text-sizing block again, or nothing where the cell is ordinary text.
+    ///
+    /// Written the way kitty dumps a multicell character (write_multicell_ansi_prefix, line.c): the
+    /// explicit width `w` only where the text's own width would not give the block its columns, the scale
+    /// `s` only above 1, and the fraction and alignment only where set.
+    [[nodiscard]] std::optional<std::string> textSizingOf(ConstCellProxy const& cell)
+    {
+        auto const sizing = cell.textScale();
+        auto const scale = std::max(1U, unsigned { sizing.scale });
+        auto const columns = unsigned { cell.width() };
+        auto const ownWidth = std::max(1U, unicode::grapheme_cluster_width(cell.codepoints()));
+        if (sizing.isOrdinary() && sizing.numerator == 0 && sizing.denominator == 0 && columns <= ownWidth)
+            return std::nullopt;
+
+        auto keys = std::vector<std::string> {};
+        // Without `w` a block holds one grapheme cluster, `scale` times its own width.
+        if (cell.codepointCount() != 1 || columns != scale * ownWidth)
+            keys.push_back(std::format("w={}", columns / scale));
+        if (scale > 1)
+            keys.push_back(std::format("s={}", scale));
+        if (sizing.numerator != 0)
+            keys.push_back(std::format("n={}", sizing.numerator));
+        if (sizing.denominator != 0)
+            keys.push_back(std::format("d={}", sizing.denominator));
+        if (sizing.verticalAlignment != 0)
+            keys.push_back(std::format("v={}", sizing.verticalAlignment));
+        if (sizing.horizontalAlignment != 0)
+            keys.push_back(std::format("h={}", sizing.horizontalAlignment));
+
+        auto metadata = std::string {};
+        for (auto const& key: keys)
+            metadata += (metadata.empty() ? "" : ":") + key;
+        return std::format("\033]66;{};{}\a", metadata, cell.toUtf8());
+    }
+} // namespace
 
 // TODO: compare with old sgr value set instead to be more generic in reusing stuff
 
@@ -209,9 +255,33 @@ void VTWriter::write(Line const& line)
         return;
     }
 
-    for (size_t i = 0; i < cols; ++i)
+    // How many cells after the character just written its replay covers by itself: a wide character's
+    // second half, or the rest of a text-sizing block's columns, which a space would push the rest of the
+    // row to the right past.
+    auto covered = 0U;
+    for (auto const i: std::views::iota(size_t { 0 }, cols))
     {
         auto const cell = ConstCellProxy(line.storage(), i);
+        if (covered > 0 && cell.isFlagEnabled(CellFlag::WideCharContinuation))
+        {
+            --covered;
+            continue;
+        }
+        covered = 0;
+
+        // A tall text-sizing block's lower part belongs to the block the row above made, and writing
+        // anything there would destroy that block: the cursor steps over it instead.
+        //
+        // Where the block's head is not in what is written -- its head row has scrolled above the page --
+        // the block cannot be made again, as OSC 66 makes a block from its head down. Its lower part then
+        // replays as blank cells, kept so that what stands beside it stays in its column. kitty's dump
+        // writes nothing for such cells either (text_in_cell_ansi, line.c).
+        if (cell.isFlagEnabled(CellFlag::MulticellContinuation))
+        {
+            write("\033[C");
+            continue;
+        }
+
         if (cell.flags() & CellFlag::Bold)
             sgrAdd(GraphicsRendition::Bold);
         else
@@ -223,8 +293,17 @@ void VTWriter::write(Line const& line)
 
         if (!cell.codepointCount())
             write(' ');
+        else if (auto const sizing = textSizingOf(cell))
+        {
+            write(*sizing);
+            covered = unsigned { cell.width() } - 1;
+        }
         else
+        {
             write(cell.toUtf8());
+            auto const ownWidth = std::max(1U, unicode::grapheme_cluster_width(cell.codepoints()));
+            covered = std::min(unsigned { cell.width() }, ownWidth) - 1;
+        }
     }
 
     sgrAdd(GraphicsRendition::Reset);

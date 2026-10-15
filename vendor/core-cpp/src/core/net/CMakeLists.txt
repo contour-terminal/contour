@@ -116,6 +116,8 @@ endif()
 # whose peer hangs up), and the includes they need, under #ifndef _WIN32.
 core_cpp_add_module(net KIND STATIC
     HEADERS
+        AcceptLoopHealth.hpp
+        AcceptPolicy.hpp
         AsyncBufferedReader.hpp
         BlockingConnector.hpp
         BlockingSocket.hpp
@@ -167,6 +169,7 @@ core_cpp_add_module(net KIND STATIC
         testing/BackendMatrix.hpp
         testing/CoroTestSupport.hpp
         testing/DatagramPayload.hpp
+        testing/FailingListener.hpp
         testing/InMemoryDatagram.hpp
         testing/InMemorySocket.hpp
         testing/InMemoryTransport.hpp
@@ -179,6 +182,8 @@ core_cpp_add_module(net KIND STATIC
         testing/TestLoop.hpp
     SOURCES
         ${_coreCppNetSubset}
+        AcceptLoopHealth.cpp
+        AcceptPolicy.cpp
         AsyncBufferedReader.cpp
         BlockingConnector.cpp
         BlockingSocket.cpp
@@ -316,6 +321,8 @@ if(NOT EMSCRIPTEN)
 core_cpp_add_test(net
     SOURCES
         AcceptedHalfClose_test.cpp
+        AcceptLoopHealth_test.cpp
+        AcceptPolicy_test.cpp
         AdoptSocket_test.cpp
         AsyncBufferedReader_test.cpp
         BackendParity_test.cpp
@@ -347,6 +354,7 @@ core_cpp_add_test(net
         WaitReadable_test.cpp
         WithTimeout_test.cpp
         WriteQueue_test.cpp
+        testing/FailingListener_test.cpp
         testing/InMemoryDatagram_test.cpp
         testing/InMemorySocket_test.cpp
         testing/ParkingReadableSocket_test.cpp
@@ -376,6 +384,7 @@ core_cpp_add_test(net
         ReactorSocket_test.cpp
         SocketDecorator_test.cpp
         SocketRegistration_test.cpp
+        posix/AcceptLoop_test.cpp
         posix/AdoptListener_test.cpp
         posix/FdPassing_test.cpp
         posix/PortSharing_test.cpp

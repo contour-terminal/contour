@@ -20,6 +20,7 @@
 
 #include <contour/remote/ReactorThread.hpp>
 #include <contour/remote/RemoteController.hpp>
+#include <contour/session/HostedOperation.hpp>
 #include <contour/session/SessionFactory.hpp>
 
 #include <vtbackend/screen/Settings.hpp>
@@ -28,12 +29,15 @@
 
 #include <QtCore/QObject>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -41,6 +45,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <vthost/Daemon.hpp>
@@ -57,18 +62,61 @@ class TerminalSessionManager;
 namespace contour::remote
 {
 
+/// The wire operation a hosted operation travels as: the conversion at the protocol boundary, which keeps
+/// the session layer free of the protocol. The two enums name the same operations by the same values, as
+/// the assertion below pins, so the conversion is a cast; a value no enumerator names travels as itself,
+/// for the host to refuse.
+/// @param operation The operation a session asks for.
+/// @return Its proto::EngineOperation.
+[[nodiscard]] constexpr vthost::proto::EngineOperation toWireOperation(
+    contour::session::HostedOperation operation) noexcept
+{
+    return static_cast<vthost::proto::EngineOperation>(std::to_underlying(operation));
+}
+
+static_assert(
+    [] {
+        using contour::session::HostedOperation;
+        using vthost::proto::EngineOperation;
+        // One pair per operation: a HostedOperation added without the EngineOperation it travels as fails the
+        // count, and one whose value differs fails the comparison.
+        constexpr auto Pairs = std::array {
+            std::pair { HostedOperation::ClearToPrompt, EngineOperation::ClearToPrompt },
+            std::pair { HostedOperation::ClearHistoryAndReset, EngineOperation::ClearHistoryAndReset },
+            std::pair { HostedOperation::SoftReset, EngineOperation::SoftReset },
+            std::pair { HostedOperation::WriteScreen, EngineOperation::WriteScreen },
+            std::pair { HostedOperation::SetUserMark, EngineOperation::SetUserMark },
+            std::pair { HostedOperation::ClearUserMark, EngineOperation::ClearUserMark },
+        };
+        return Pairs.size() == contour::session::HostedOperationTable.size()
+               && std::ranges::all_of(Pairs, [](auto const& pair) {
+                      return std::to_underlying(pair.first) == std::to_underlying(pair.second);
+                  });
+    }(),
+    "every HostedOperation travels as the proto::EngineOperation of its name and value");
+
 /// The attach-mode session factory and remote-session registry.
 class NativeController final: public QObject, public contour::session::SessionFactory, public RemoteController
 {
     Q_OBJECT
 
   public:
+    /// Resolves this client's profile in the configuration the GUI holds now: the emulation settings
+    /// to ask the daemon for on the next session this client creates, or why they cannot be resolved.
+    /// Called on the GUI thread.
+    using SessionSettingsSource = std::function<std::expected<vtbackend::Settings, std::string>()>;
+
     /// @param endpoint How to reach the daemon: the local unix control socket, or
     ///        a TLS-encrypted, token-authenticated TCP endpoint.
-    /// @param sessionSettings The emulation settings to ask the daemon for on the sessions this
-    ///        client creates — this client's own resolved profile — or nullopt to take whatever the
-    ///        daemon hosts with. Not defaulted, so a caller with no preference says so.
-    NativeController(vthost::AttachEndpoint endpoint, std::optional<vtbackend::Settings> sessionSettings);
+    /// @param attachSettings The emulation settings to state in the ClientHello — this client's own
+    ///        resolved profile — or nullopt to take whatever the daemon hosts with.
+    /// @param sessionSettings Asked before every session this client creates, so a session created
+    ///        after a configuration reload gets the reloaded settings; empty to keep @p attachSettings.
+    ///        When it fails, the settings last stated stay in force. Neither is defaulted, so a caller
+    ///        with no preference says so.
+    NativeController(vthost::AttachEndpoint endpoint,
+                     std::optional<vtbackend::Settings> attachSettings,
+                     SessionSettingsSource sessionSettings);
 
     /// Stops the reactor (detaching if still connected) and joins.
     ~NativeController() override;
@@ -98,6 +146,13 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///         reconciler map a GUI pane back to its daemon session (to split/close
     ///         the right pane).
     [[nodiscard]] std::optional<uint64_t> sessionForPty(vtpty::Pty const* pty) const;
+
+    /// The daemon's row that the row @p row of @p session's mirror holds: what the daemon is asked to act on
+    /// when the user acts on a row of the mirror. Call on the reactor, where the mirror is applied.
+    /// @see vthost::client::ScreenMirror::hostRowOf
+    /// @return The daemon's row, or std::nullopt when the mirror cannot name it.
+    [[nodiscard]] std::optional<vthost::proto::RowAddress> hostRowOf(uint64_t session,
+                                                                     contour::session::HostedRow row) const;
 
     /// Asks the daemon to create a new tab (B3-Qt). The daemon honors it and
     /// re-pushes its layout, which the GUI reconciles into a new local tab. A no-op
@@ -168,6 +223,12 @@ class NativeController final: public QObject, public contour::session::SessionFa
 
     [[nodiscard]] bool canCreateSession() const noexcept override;
 
+    /// SessionFactory: every pane this factory makes mirrors a session the daemon hosts.
+    [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
+    {
+        return contour::session::SessionHosting::Remote;
+    }
+
     /// SessionFactory: a GUI "new tab" is authored on the daemon (requestCreateTab)
     /// rather than created locally; the daemon's layout re-push reconciles it in.
     [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty) override
@@ -208,6 +269,12 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// `unbind()`, which merely forgets a binding and cannot tell why the pty went away.
     void requestRemoteClose(vtpty::Pty const* pty) override;
 
+    /// SessionFactory: every pane's terminal mirrors one the daemon hosts, so an operation on the engine is
+    /// sent there (proto::PerformOperation) and the mirror follows through its deltas. A pty that is not
+    /// bound to a daemon session runs it here; without a connection every operation is Unreachable.
+    [[nodiscard]] contour::session::HostedOperationRoute requestHostedOperation(
+        vtpty::Pty const* pty, contour::session::HostedOperationRequest const& request) override;
+
     /// SessionFactory: the terminal built around one of our ptys arrived, so the session's mirror
     /// can be created and primed with whatever the daemon has already told us about it.
     void bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal) override;
@@ -237,11 +304,13 @@ class NativeController final: public QObject, public contour::session::SessionFa
     ///
     /// The pty stays for INPUT and resize (keystrokes and geometry travel out through its sinks);
     /// remote output no longer flows through it, because the mirror writes the terminal's grid
-    /// directly. The mirror is therefore absent until `bindTerminal` announces the terminal — a pty
-    /// exists before the terminal built around it does.
+    /// directly. The terminal is therefore absent until `bindTerminal` announces it — a pty exists
+    /// before the terminal built around it does — and the mirror until the reactor primes it, since
+    /// what it is built with (where the daemon runs) is the connection's, which lives there.
     struct Binding
     {
         vtpty::ChannelPty* pty = nullptr;
+        vtbackend::Terminal* terminal = nullptr;
         std::unique_ptr<vthost::client::ScreenMirror> mirror;
     };
 
@@ -284,8 +353,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// GUI to reconcile its own tree against it.
     void onLayout(vthost::proto::LayoutState const& layout);
 
-    /// Reactor-side: feeds a fresh binding its full replay if the session's
-    /// screen is already known.
+    /// Reactor-side: builds the mirror of a binding whose terminal arrived, judging once whether the
+    /// daemon runs on the terminal's machine, and feeds it its full replay if the session's screen is
+    /// already known.
     void primeBinding(uint64_t session);
 
     /// GUI-side (from a pane's pty resize sink, on whichever thread resized it): records the grid
@@ -324,12 +394,20 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// Closes every bound pty (EOF to its session) — the disconnect path.
     void closeAllBindings();
 
+    /// Resolves the session settings on the calling (GUI) thread, then posts @p create to the reactor
+    /// thread, preceded by restating those settings when they changed, so the session it creates gets the
+    /// configuration as it is now.
+    /// @param create The creation verb to send.
+    void postSessionCreation(std::function<void(vthost::client::NativeClient&)> create);
+
     // The reactor and the connect state machine (_reactor, _mutex, _connected, _state, _failure,
     // _stopped) live in RemoteController; the registry below is attach-specific.
     vthost::AttachEndpoint _endpoint;
-    /// This client's profile, stated in the ClientHello and applied by the daemon to the sessions
-    /// this connection creates. Fixed at construction: it is what the user launched with.
-    std::optional<vtbackend::Settings> _sessionSettings;
+    /// This client's profile as stated in the ClientHello; the daemon applies it to the sessions this
+    /// connection creates.
+    std::optional<vtbackend::Settings> _attachSettings;
+    /// This client's profile as it is now, restated before every session this connection creates.
+    SessionSettingsSource _sessionSettings;
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
     /// The daemon's latest tab/pane tree per window id (B2/B4). Ordered so windowIds()

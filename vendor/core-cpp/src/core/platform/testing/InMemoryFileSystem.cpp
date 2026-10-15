@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/platform/PathUtils.hpp>
 
 #include <algorithm>
@@ -30,15 +31,15 @@ namespace
     /// constructor reads a char sequence in the platform's *native* narrow encoding, which on
     /// Windows is the ANSI code page -- so building a path back from a key that way mangles or
     /// throws on any name the code page cannot spell, which is the same defect that keying the
-    /// map through generic_string() was. A u8string_view is UTF-8 by definition, so this is the
-    /// one way back out of the key space, as normalizePath() is the one way in.
+    /// map through generic_string() was. core::pathFromTrustedUtf8() reads it as UTF-8, so this is
+    /// the one way back out of the key space, as normalizePath() is the one way in -- and a key is
+    /// UTF-8 by construction, spelled from a path, so the trusted form.
     ///
     /// @param key A normalized key of this filesystem.
     /// @return The path it names.
     [[nodiscard]] std::filesystem::path pathFromKey(std::string_view key)
     {
-        return std::filesystem::path { std::u8string_view { reinterpret_cast<char8_t const*>(key.data()),
-                                                            key.size() } };
+        return core::pathFromTrustedUtf8(key);
     }
 
     /// Streambuf that appends into the string an InMemoryFileSystem holds for a file.

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <core/Generator.hpp>
+#include <core/Utf8Path.hpp>
 
 #include <cstdint>
 #include <expected>
@@ -161,8 +162,8 @@ class FileSystem
         for (auto const& entry: walkDirectoryRecursive(path, &ec))
             entries.push_back(entry);
         if (ec)
-            return std::unexpected(
-                std::format("Cannot recursively list directory '{}': {}", path.string(), ec.message()));
+            return std::unexpected(std::format(
+                "Cannot recursively list directory '{}': {}", core::pathToUtf8(path), ec.message()));
         return entries;
     }
 

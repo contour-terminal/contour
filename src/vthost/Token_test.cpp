@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+
+#include <vtpty/test/NonAsciiSample.hpp>
+
+#include <core/Utf8Path.hpp>
 #include <core/net/Tls.hpp>
+#include <core/testing/ScopedTempDir.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,7 +20,7 @@ using vthost::resolveToken;
 
 namespace
 {
-/// A token file that removes itself when the test ends.
+/// A token file in a directory of its own, both removed when the test ends.
 ///
 /// Declared FIRST in the test so its destructor runs after every reader above it has closed:
 /// Windows refuses to delete a file any handle still holds open.
@@ -23,27 +28,20 @@ class ScratchTokenFile
 {
   public:
     ScratchTokenFile(std::string_view stem, std::string_view contents):
-        _path(std::filesystem::temp_directory_path() / ("contour-token-" + std::string { stem }))
+        _directory { "contour-token" }, _path { _directory / stem }
     {
         // Binary, so a "\r\n" under test reaches the file as written rather than being translated.
         auto out = std::ofstream { _path, std::ios::out | std::ios::binary | std::ios::trunc };
         out.write(contents.data(), static_cast<std::streamsize>(contents.size()));
     }
 
-    ~ScratchTokenFile()
-    {
-        auto ec = std::error_code {};
-        std::filesystem::remove(_path, ec);
-    }
+    [[nodiscard]] std::filesystem::path const& path() const noexcept { return _path; }
 
-    ScratchTokenFile(ScratchTokenFile const&) = delete;
-    ScratchTokenFile& operator=(ScratchTokenFile const&) = delete;
-    ScratchTokenFile(ScratchTokenFile&&) = delete;
-    ScratchTokenFile& operator=(ScratchTokenFile&&) = delete;
-
-    [[nodiscard]] std::string path() const { return _path.string(); }
+    /// @return The path as `--token-file` spells it: UTF-8.
+    [[nodiscard]] std::string utf8Path() const { return core::pathToUtf8(_path); }
 
   private:
+    core::testing::ScopedTempDir _directory;
     std::filesystem::path _path;
 };
 } // namespace
@@ -131,7 +129,15 @@ TEST_CASE("resolveToken picks the spelling that was given", "[vthost][token]")
     SECTION("--token-file, read from disk")
     {
         auto const file = ScratchTokenFile { "resolve", "from-file\n" };
-        CHECK(resolveToken("", file.path()).value() == "from-file");
+        CHECK(resolveToken("", file.utf8Path()).value() == "from-file");
+    }
+
+    SECTION("--token-file, named beyond ASCII")
+    {
+        auto const file = ScratchTokenFile { vtpty::testing::NonAsciiNameUtf8, "from-file\n" };
+        auto const token = resolveToken("", file.utf8Path());
+        INFO((token.has_value() ? *token : token.error()));
+        CHECK(token == "from-file");
     }
 }
 
@@ -140,7 +146,7 @@ TEST_CASE("resolveToken refuses both spellings at once", "[vthost][token]")
     // Two different secrets is a bug in the invocation; picking a winner would hide it until an
     // authentication failure much later, somewhere unrelated.
     auto const file = ScratchTokenFile { "conflict", "from-file\n" };
-    auto const token = resolveToken("inline-secret", file.path());
+    auto const token = resolveToken("inline-secret", file.utf8Path());
     REQUIRE_FALSE(token.has_value());
     CHECK(token.error().contains("not both"));
 }

@@ -1,101 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/ConfigEnumInfo.hpp>
+
 #include <vtbackend/core/Search.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
-#include <vtbackend/shell/Folding.hpp> // FoldJumpBehavior
+#include <vtbackend/screen/GutterSettings.hpp> // LineNumberMode
+#include <vtbackend/shell/Folding.hpp>         // FoldJumpBehavior
 #include <vtbackend/shell/MarkArbiter.hpp>
+#include <vtbackend/shell/ScrollbarMarks.hpp> // ScrollbarMarkSource
+#include <vtbackend/shell/StickyHeader.hpp>   // StickyHeaderMode
 
 #include <array>
-#include <cstddef>
-#include <optional>
-#include <ranges>
 #include <span>
-#include <string_view>
 
 namespace contour::config
 {
-
-/// One value of a configuration enum, in every vocabulary the application needs it in.
-///
-/// A configuration enum used to be spelled out in five places — the YAML reader's if-chain, the
-/// std::formatter's switch, the settings page's getter, its setter, and its list of combo box options
-/// — and a sixth would be needed by every menu that offers it. Each was an independent chance to
-/// disagree, and the settings page did: it showed users the raw configuration tokens because that is
-/// what it had.
-///
-/// So a value is described once, in the enum's own table, and the code interprets it. Adding a value
-/// is adding a row; adding a whole enum is adding a table plus one @c configEnumValues specialization.
-template <typename Enum>
-struct ConfigEnumInfo
-{
-    Enum value;
-    std::string_view token; ///< The configuration spelling; also what the settings page stores.
-    std::string_view label; ///< What a human reads, in a menu or a settings combo box.
-};
-
-namespace detail
-{
-    /// ASCII-lowercases @p ch.
-    ///
-    /// Spelled out rather than reached for in crispy: core::toLower allocates a std::string and is
-    /// neither constexpr nor ASCII-pinned, and this has to run at compile time over the token tables.
-    [[nodiscard]] constexpr char toLowerAscii(char ch) noexcept
-    {
-        return ch >= 'A' && ch <= 'Z' ? static_cast<char>(ch - 'A' + 'a') : ch;
-    }
-
-    /// Whether @p lhs and @p rhs are equal, ignoring ASCII case.
-    [[nodiscard]] constexpr bool equalsIgnoreCase(std::string_view lhs, std::string_view rhs) noexcept
-    {
-        if (lhs.size() != rhs.size())
-            return false;
-        for (auto const i: std::views::iota(size_t { 0 }, lhs.size()))
-            if (toLowerAscii(lhs[i]) != toLowerAscii(rhs[i]))
-                return false;
-        return true;
-    }
-} // namespace detail
-
-/// Every value of configuration enum @p Enum, in enumerator order.
-///
-/// Declared without a definition on purpose: each configuration enum supplies its own table by
-/// specializing this, so a missing table is a compile error rather than an empty list.
-template <typename Enum>
-[[nodiscard]] constexpr std::span<ConfigEnumInfo<Enum> const> configEnumValues() noexcept;
-
-/// The value @p token names, ignoring case.
-///
-/// @param token A configuration spelling, e.g. "multiple".
-/// @return The value, or nullopt when no value carries that token.
-template <typename Enum>
-[[nodiscard]] constexpr std::optional<Enum> configEnumFromToken(std::string_view token) noexcept
-{
-    for (auto const& info: configEnumValues<Enum>())
-        if (detail::equalsIgnoreCase(info.token, token))
-            return info.value;
-    return std::nullopt;
-}
-
-/// The configuration spelling of @p value.
-template <typename Enum>
-[[nodiscard]] constexpr std::string_view configEnumToken(Enum value) noexcept
-{
-    for (auto const& info: configEnumValues<Enum>())
-        if (info.value == value)
-            return info.token;
-    return {};
-}
-
-/// What a human should read for @p value.
-template <typename Enum>
-[[nodiscard]] constexpr std::string_view configEnumLabel(Enum value) noexcept
-{
-    for (auto const& info: configEnumValues<Enum>())
-        if (info.value == value)
-            return info.label;
-    return {};
-}
 
 namespace detail
 {
@@ -139,6 +59,39 @@ namespace detail
         ConfigEnumInfo<vtbackend::SearchCaseSensitivity> {
             vtbackend::SearchCaseSensitivity::Sensitive, "sensitive", "Match case" },
     };
+
+    /// Which line numbers the gutter shows, in vim's terms.
+    inline constexpr auto LineNumberModeTable = std::array {
+        ConfigEnumInfo<vtbackend::LineNumberMode> { vtbackend::LineNumberMode::Off, "off", "None" },
+        ConfigEnumInfo<vtbackend::LineNumberMode> {
+            vtbackend::LineNumberMode::Absolute, "absolute", "Absolute (vim: number)" },
+        ConfigEnumInfo<vtbackend::LineNumberMode> {
+            vtbackend::LineNumberMode::Relative, "relative", "Relative to the cursor (vim: relativenumber)" },
+        ConfigEnumInfo<vtbackend::LineNumberMode> {
+            vtbackend::LineNumberMode::Hybrid, "hybrid", "Hybrid (vim: number relativenumber)" },
+    };
+
+    /// When the sticky command header may cover the top row.
+    inline constexpr auto StickyHeaderModeTable = std::array {
+        ConfigEnumInfo<vtbackend::StickyHeaderMode> { vtbackend::StickyHeaderMode::Never, "never", "Never" },
+        ConfigEnumInfo<vtbackend::StickyHeaderMode> {
+            vtbackend::StickyHeaderMode::Scrolled, "scrolled", "While scrolled back" },
+        ConfigEnumInfo<vtbackend::StickyHeaderMode> {
+            vtbackend::StickyHeaderMode::Always, "always", "Also while following output" },
+    };
+
+    /// The groups of marks the scrollbar can show (`scrollbar.marks`), one token of its list each.
+    ///
+    /// Owned by vtbackend, so the table hangs off the type from here, as FoldJumpBehavior's does: the
+    /// reader and the written-back list both come from these rows.
+    inline constexpr auto ScrollbarMarkSourceTable = std::array {
+        ConfigEnumInfo<vtbackend::ScrollbarMarkSource> {
+            vtbackend::ScrollbarMarkSource::Failures, "failures", "Failed commands" },
+        ConfigEnumInfo<vtbackend::ScrollbarMarkSource> {
+            vtbackend::ScrollbarMarkSource::Commands, "commands", "Other commands" },
+        ConfigEnumInfo<vtbackend::ScrollbarMarkSource> {
+            vtbackend::ScrollbarMarkSource::UserMarks, "user_marks", "Vi line marks" },
+    };
 } // namespace detail
 
 template <>
@@ -163,6 +116,24 @@ template <>
 constexpr std::span<ConfigEnumInfo<vtbackend::SearchCaseSensitivity> const> configEnumValues() noexcept
 {
     return detail::SearchCaseSensitivityTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<vtbackend::LineNumberMode> const> configEnumValues() noexcept
+{
+    return detail::LineNumberModeTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<vtbackend::StickyHeaderMode> const> configEnumValues() noexcept
+{
+    return detail::StickyHeaderModeTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<vtbackend::ScrollbarMarkSource> const> configEnumValues() noexcept
+{
+    return detail::ScrollbarMarkSourceTable;
 }
 
 } // namespace contour::config

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/net/Tls.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/async/Awaitable.hpp>
 #include <core/async/Cancellation.hpp>
 #include <core/async/IExecutor.hpp>
@@ -1022,9 +1023,7 @@ namespace
         // The path as UTF-8, for the message: `path::string()` converts through the ANSI code page
         // on Windows and THROWS for a name it cannot represent, which would turn a refusal into an
         // exception on exactly the path that is reporting one.
-        auto const u8 = path.u8string();
-        auto const refusal = "cannot read " + std::string { what } + " '"
-                             + std::string { reinterpret_cast<char const*>(u8.data()), u8.size() } + "'";
+        auto const refusal = "cannot read " + std::string { what } + " '" + core::pathToUtf8(path) + "'";
 
         // Sized and read in one call rather than through `istreambuf_iterator`, which GCC 14's
         // -Wnull-dereference reports inside libstdc++'s streambuf at -O3.

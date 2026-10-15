@@ -40,11 +40,11 @@ struct Margins
 
 /// The width of the drawable gutter reserved to the LEFT of the grid, inside the margin.
 ///
-/// Asymmetric, which is why it is not part of @ref Margins: it is a strip the renderer draws fold
-/// markers into, not padding, and it exists on one side only. It is subtracted from the width available
-/// to cells and added to the width a page requires, so a page fitted WITH a gutter reports one fewer
-/// column to the shell than the same window without one -- which is the honest answer, the column
-/// genuinely not being there.
+/// Asymmetric, which is why it is not part of @ref Margins: it is a strip the renderer draws the
+/// gutter's timestamps, line numbers and block column into, not padding, and it exists on one side only.
+/// It is subtracted from the width available to cells and added to the width a page requires, so a page
+/// fitted WITH a gutter reports fewer columns to the shell than the same window without one -- which is
+/// the honest answer, those columns genuinely not being there.
 ///
 /// Every function below takes it last and defaults it to zero, so a caller that reserves no gutter gets
 /// exactly the arithmetic this header had before one existed.
@@ -409,7 +409,7 @@ template <typename ClampFn>
 /// status line is not a click on the grid, and answering with the nearest grid row would act on a
 /// cell the user did not point at.
 ///
-/// Pure, so the mapping is testable without a window -- and stated once, so the fold gutter's
+/// Pure, so the mapping is testable without a window -- and stated once, so the gutter's
 /// hit-test and the cell hit-test cannot drift apart.
 ///
 /// @param yDevicePx       The y coordinate in device pixels, relative to the item's top edge, with
@@ -471,6 +471,48 @@ template <typename ClampFn>
                                         GutterWidth gutterDevicePx) noexcept
 {
     return gutterDevicePx > 0 && xDevicePx >= pageMarginLeft - gutterDevicePx && xDevicePx < pageMarginLeft;
+}
+
+/// The gutter column under @p xDevicePx, counted from the gutter's LEFT edge -- the column
+/// vtbackend::gutterSegmentAt() names a segment for.
+///
+/// Built on isInGutter() so the two cannot disagree about where the strip is.
+/// @param xDevicePx       The x coordinate, in device pixels, relative to the item's left edge.
+/// @param pageMarginLeft  The renderer's grid origin (@c GridMetrics::pageMargin.left), in device pixels.
+/// @param gutterDevicePx  The reserved gutter width in device pixels; 0 means there is no gutter.
+/// @param cellWidthPx     The cell width in device pixels.
+/// @return The column, or nullopt when the coordinate is not over the gutter.
+[[nodiscard]] constexpr std::optional<int> gutterColumnAt(int xDevicePx,
+                                                          int pageMarginLeft,
+                                                          GutterWidth gutterDevicePx,
+                                                          int cellWidthPx) noexcept
+{
+    if (cellWidthPx <= 0 || !isInGutter(xDevicePx, pageMarginLeft, gutterDevicePx))
+        return std::nullopt;
+    return (xDevicePx - (pageMarginLeft - gutterDevicePx)) / cellWidthPx;
+}
+
+/// The page column under @p xDevicePx, or nullopt when it is beside the page: over the gutter, or the margins
+/// left and right of the columns.
+///
+/// The declining sibling of the cell hit-test's clamped column, for whatever spans the page's columns only --
+/// the sticky header, which leaves the gutter and the margins to themselves.
+/// @param xDevicePx      The x coordinate, in device pixels, relative to the item's left edge.
+/// @param pageMarginLeft The renderer's grid origin (@c GridMetrics::pageMargin.left), in device pixels.
+/// @param cellWidthPx    The cell width in device pixels.
+/// @param pageColumns    How many columns the page has.
+/// @return The column, or nullopt when the coordinate is not over the page's columns.
+[[nodiscard]] constexpr std::optional<int> pageColumnAt(int xDevicePx,
+                                                        int pageMarginLeft,
+                                                        int cellWidthPx,
+                                                        int pageColumns) noexcept
+{
+    if (cellWidthPx <= 0 || xDevicePx < pageMarginLeft)
+        return std::nullopt;
+    auto const column = (xDevicePx - pageMarginLeft) / cellWidthPx;
+    if (column >= pageColumns)
+        return std::nullopt;
+    return column;
 }
 
 /// Logical device-pixel availability of an item: floor(logical * scale) per axis (FLOOR side of the law).

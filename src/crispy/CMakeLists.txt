@@ -26,6 +26,7 @@ set(crispy_SOURCES
     Compose.hpp
     FileDescriptor.hpp
     InterpolatedString.cpp InterpolatedString.hpp
+    LifetimeAnnotatedMutex.hpp
     Reference.hpp
     Ring.hpp
 )
@@ -140,6 +141,7 @@ if(CRISPY_TESTING)
         Animation_test.cpp
         Compose_test.cpp
         InterpolatedString_test.cpp
+        LifetimeAnnotatedMutex_test.cpp
         Ring_test.cpp
         Sort_test.cpp
         TracyStub_test.cpp

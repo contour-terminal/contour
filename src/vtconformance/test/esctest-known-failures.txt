@@ -52,5 +52,13 @@ DA2Tests.test_DA2_NoParameter
 DATests.test_DA_0
 DATests.test_DA_NoParameter
 
+# --- Intentional gap: a terminal that stores macros reports room for them --------------------------
+# DECMSR answers with the room left for macro definitions, "the number of bytes available for macro
+# definitions divided by 16 (rounded down)". Contour implements DECDMAC with the VT420's 6 KiB of macro
+# space, so with no macro defined it answers 384. The test assumes a terminal without macros and demands
+# 0, as its docstring says ("This test assumes it's always 0"); xterm passes because it stores none.
+# Answering 0 while accepting definitions would misreport the room an application can still use.
+DECDSRTests.test_DECDSR_DECMSR
+
 # --- To fix: genuine gaps/bugs -------------------------------------------------------------------
 # (none) — every remaining failure below is an intentional gap, not a bug to fix.

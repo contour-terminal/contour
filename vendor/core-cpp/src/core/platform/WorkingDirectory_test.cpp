@@ -33,6 +33,19 @@ TEST_CASE("TestWorkingDirectory.changeDirectory_invalid", "[platform]")
     CHECK(cwd.currentDirectory().generic_string() == "/home/user");
 }
 
+TEST_CASE("TestWorkingDirectory holds its directories in UTF-8", "[platform]")
+{
+    // Its constructor and addValidPath() take UTF-8, as every core-cpp string is. On Windows the
+    // narrow constructor read them in the ANSI code page, and generic_string() spelled a directory
+    // back in it, which throws for a name the code page cannot spell.
+    TestWorkingDirectory cwd("/home/j\xC3\xBCrgen");
+    CHECK(cwd.currentDirectory() == std::filesystem::path { u8"/home/jürgen" });
+
+    cwd.addValidPath("/home/j\xC3\xBCrgen/\xCE\xA9");
+    REQUIRE(cwd.changeDirectory(std::filesystem::path { u8"Ω" }).has_value());
+    CHECK(cwd.currentDirectory() == std::filesystem::path { u8"/home/jürgen/Ω" });
+}
+
 TEST_CASE("the native WorkingDirectory is the process's own", "[platform]")
 {
     // A working directory is not an environment variable, which is why it has a seam of its own

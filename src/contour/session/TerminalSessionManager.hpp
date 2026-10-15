@@ -4,16 +4,20 @@
 #include <contour/command/CommandHistoryStore.hpp>
 #include <contour/config/LayoutStore.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/platform/SessionVisibility.hpp>
 #include <contour/platform/TaskbarProgressRouter.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/window/WindowController.hpp>
 
+#include <QtCore/QFileSystemWatcher>
 #include <QtCore/QObject>
+#include <QtCore/QTimer>
 #include <QtGui/QColor>
 #include <QtQml/QQmlEngine>
 
 #include <algorithm>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <functional>
@@ -21,6 +25,8 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -57,6 +63,35 @@ enum class SessionEnd : uint8_t
     /// of daemon mode, so nothing is authored upstream here.
     Detach,
 };
+
+/// Where openCommandPane() puts the pane running the command.
+enum class CommandPanePlacement : uint8_t
+{
+    Split = 0, ///< A new pane stacked below the acting one, in its tab.
+    Tab,       ///< A new tab in the acting pane's window.
+};
+
+/// Why openCommandPane() opened no pane.
+enum class CommandPaneError : uint8_t
+{
+    RemoteSessions = 0, ///< Sessions run on a daemon or a tmux server (attach mode): none runs it.
+    NoPane,             ///< No session can be made right now, or the acting session is in no tab.
+};
+
+/// A short reason for @p error, for logs and user-facing notices.
+/// @param error The failure.
+/// @return A lower-case phrase without a trailing period.
+[[nodiscard]] constexpr std::string_view describe(CommandPaneError error) noexcept
+{
+    switch (error)
+    {
+        case CommandPaneError::RemoteSessions:
+            return "a window attached to a daemon or a tmux server cannot open a pane for it; "
+                   "use placement: detached instead";
+        case CommandPaneError::NoPane: return "no pane could be opened for it";
+    }
+    return "unknown error";
+}
 
 /**
  * Session-lifetime service, SessionModel host, and per-window ModelEvents router.
@@ -100,13 +135,21 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param commands Persistence for the command palette's most-recently-used list (injected:
     ///                production wires FileCommandHistoryStore, tests an in-memory store). Must
     ///                outlive this manager.
+    /// @param homeDirectory The user's home directory, as the tab tooltip and the finish notification
+    ///                write it as `~`. Read once, by the composition root, so nothing below it reads
+    ///                the environment.
     TerminalSessionManager(ContourGuiApp& app,
                            SessionFactory& factory,
                            config::LayoutStore& layouts,
-                           command::CommandHistoryStore& commands);
+                           command::CommandHistoryStore& commands,
+                           std::string homeDirectory);
 
     /// The owning application (spawn context, app-wide services). For the window controllers.
     [[nodiscard]] ContourGuiApp& app() noexcept { return _app; }
+
+    /// The user's home directory, for shortening a path on this machine to `~/...`. Fixed at
+    /// construction; empty shortens nothing.
+    [[nodiscard]] std::string const& homeDirectory() const noexcept { return _homeDirectory; }
 
     /// Thickness of the split divider handle in logical pixels, single-sourced from
     /// vtworkspace::DefaultSplitHandleThickness. PaneNode.qml's explicit SplitView `handle:` binds its
@@ -120,8 +163,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Creates a backing session + its model tab in @p window (the calling controller's window).
     /// @param window      The target window.
     /// @param profileName Profile to launch the session with, or std::nullopt for the app default.
-    TerminalSession* createSessionInBackground(vtworkspace::WindowId window,
-                                               std::optional<std::string> const& profileName = std::nullopt);
+    /// @param command     A command to run instead of the profile's shell, or std::nullopt.
+    /// @param role        What the session's program is to the user.
+    TerminalSession* createSessionInBackground(
+        vtworkspace::WindowId window,
+        std::optional<std::string> const& profileName = std::nullopt,
+        std::optional<vtpty::Process::ExecInfo> const& command = std::nullopt,
+        SessionRole role = SessionRole::Shell);
 
     /// Creates a new tab in @p window (the GUI "+" button entry point, via WindowController).
     /// @param window      The target window.
@@ -206,10 +254,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param acting The session that triggered the action; its hosting window shows the settings page.
     void openSettings(TerminalSession* acting);
 
-    /// Re-reads the master configuration from disk (picking up any GUI side-file changes) and pushes
-    /// it to every live session. The apply step the settings page runs after a Save/Delete so the
-    /// change takes effect immediately, without waiting for the optional live-reload file watcher.
-    void reloadAllSessions();
+    /// Re-reads the master configuration from disk once (picking up any GUI side-file changes) into
+    /// the app's configuration -- what the next new tab is built from -- and pushes it to every live
+    /// session, each under its own profile. Every reload goes through here: the settings page's
+    /// Save/Delete, the live_config file watcher, and the ReloadConfig and ResetConfig actions.
+    /// @return Why the file could not be read; the app's configuration and the sessions are then
+    ///         left as they were.
+    [[nodiscard]] std::expected<void, std::string> reloadAllSessions();
 
     /// Opens the terminal context menu over the pane of @p acting (the OpenContextMenu action).
     ///
@@ -299,7 +350,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param acting The session that received the keybinding; its hosting window is the target.
     void resetActiveTabColor(TerminalSession* acting);
 
-    void removeSession(TerminalSession&);
+    /// Lets go of a session that has ended: closes its pane, forgets it, and frees it once control
+    /// returns to the event loop.
+    /// @param session The ended session. One this manager did not make is left alone.
+    void removeSession(TerminalSession& session);
     void currentSessionIsTerminated();
 
     // {{{ Tab-strip operations (window-routed; called by WindowController with its own WindowId)
@@ -336,6 +390,21 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param ratio The new split's first-child space share, in (0, 1). Defaults to an even split; the
     ///        tmux mirror passes the remote split's ratio so a mirrored split reproduces its proportions.
     void splitActivePane(bool vertical, TerminalSession* acting, double ratio = 0.5);
+    /// Opens a pane running @p command next to @p acting: a split in its tab, or a tab in its window
+    /// (OpenCommandOutput's pager). The pane is a session like any other; it ends when the command does.
+    /// @param acting The session the action came from.
+    /// @param placement Split or tab.
+    /// @param command The program and arguments to run instead of a shell.
+    /// @return The new pane's session, never null; or why there is none.
+    [[nodiscard]] std::expected<TerminalSession*, CommandPaneError> openCommandPane(
+        TerminalSession* acting, CommandPanePlacement placement, vtpty::Process::ExecInfo const& command);
+    /// Why openCommandPane() would open no pane right now, asked before anything is prepared for one.
+    /// It is the rule openCommandPane() itself applies first.
+    /// @param acting The session the action came from.
+    /// @param placement Split or tab.
+    /// @return The reason; std::nullopt when a pane can be opened.
+    [[nodiscard]] std::optional<CommandPaneError> commandPaneRefusal(TerminalSession* acting,
+                                                                     CommandPanePlacement placement) const;
     /// Closes the active pane of the acting session's tab (closing the tab if it was the last pane).
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     /// @param end Whether the user is ending this pane's session (the ClosePane action) or the pane
@@ -382,6 +451,18 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param window The window to name.
     /// @return A pty of that window, or nullptr.
     [[nodiscard]] vtpty::Pty const* actingPtyOfWindow(vtworkspace::WindowId window) const;
+
+    /// Asks the session factory where an operation on the engine of the session backed by @p pty runs,
+    /// sending it to the remote end when that is where (@see SessionFactory::requestHostedOperation).
+    /// @param pty The pty backing the acting session.
+    /// @param request The operation, with its text.
+    /// @return Where it runs.
+    [[nodiscard]] HostedOperationRoute requestHostedOperation(vtpty::Pty const* pty,
+                                                              HostedOperationRequest const& request)
+    {
+        return _sessionFactory.requestHostedOperation(pty, request);
+    }
+
     /// Whether @p id is the active leaf of tab @p tab.
     [[nodiscard]] bool isActivePane(vtworkspace::TabId tab, vtworkspace::PaneId id) const noexcept;
     /// Sets the split ratio of node @p id in tab @p tab.
@@ -427,6 +508,55 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// clear the focused window's terminal focus.
     /// @param window The window that just stopped being the active OS window (or is being destroyed).
     void clearFocusedWindow(vtworkspace::WindowId window);
+
+    /// @p window changed how it is presented -- minimised, restored, maximised. Restoring the
+    /// focus-owning window brings its focused pane back in front of the user with no focus change at
+    /// all, which is news to that pane all the same. @see TerminalSession::paneSeen
+    /// @param window The window whose state changed.
+    void windowStateChanged(vtworkspace::WindowId window);
+
+    /// Where @p session sits relative to what the user is looking at, for finish notifications.
+    ///
+    /// Gathers the four facts -- terminal focus, the hosting tab's selection, a zoomed sibling, the
+    /// window's minimised state -- and leaves the rule to platform::sessionVisibilityFor(), where it is
+    /// table-tested. GUI thread.
+    /// @param session The session to place; one no tab hosts is Hidden unless it holds focus.
+    /// @return Its visibility.
+    [[nodiscard]] platform::SessionVisibility sessionVisibility(TerminalSession const& session) const;
+
+    /// The label the tab strip shows for the tab hosting @p session -- read back through the strip's
+    /// own TitleRole, so a notification names the tab exactly as the user sees it.
+    /// @param session The session whose tab to name.
+    /// @return The label, or empty when no tab hosts @p session.
+    [[nodiscard]] std::string tabTitleForSession(TerminalSession const& session) const;
+
+    /// Brings @p session in front of the user: makes its pane and then its tab active, leaving the
+    /// settings page if it covers the window, then restores, raises and activates the window. What
+    /// clicking a finish notification does. A no-op for a session no tab hosts.
+    /// @param session The session to reveal.
+    void revealSession(TerminalSession const& session);
+
+    /// Shows a tray message through the window hosting @p session (platforms without a desktop
+    /// Notifier). Routed through the window because a session in a background tab has no SessionChrome
+    /// of its own. A no-op for a session no window hosts.
+    /// @param session   The session the message is about.
+    /// @param title     The message title.
+    /// @param body      The message body.
+    /// @param onClicked What a click on the message does, besides bringing its window forward.
+    void requestWindowNotification(TerminalSession const& session,
+                                   QString const& title,
+                                   QString const& body,
+                                   std::function<void()> onClicked);
+
+    /// Plays a bell sound in the window hosting @p session, routed as requestWindowNotification is.
+    /// @param session The session ringing.
+    /// @param source  The sound's URL (TerminalSession::getBellSource()); empty plays nothing.
+    /// @param volume  0.0 (silent) .. 1.0 (loudest).
+    void requestWindowBell(TerminalSession const& session, QString const& source, double volume);
+
+    /// Flashes the taskbar entry of the window hosting @p session, routed as requestWindowNotification is.
+    /// @param session The session asking for attention.
+    void requestWindowAlert(TerminalSession const& session);
 
     void update() { updateStatusLine(); }
 
@@ -669,6 +799,30 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void contextMenuRequested(TerminalSession* acting);
 
   private:
+    /// Splits the acting session's tab's active pane, running @p command in the new leaf (a shell when
+    /// none). The local half of splitActivePane(), shared with openCommandPane().
+    /// @param acting The session whose tab to split (its pane, when it is a leaf of that tab).
+    /// @param direction The split's orientation.
+    /// @param ratio The new split's first-child space share, in (0, 1).
+    /// @param command The program to run in the new leaf, or std::nullopt for the profile's shell.
+    /// @param role What the new leaf's program is to the user.
+    /// @return The new leaf's session, or nullptr when no split happened.
+    TerminalSession* splitPane(TerminalSession* acting,
+                               vtworkspace::SplitState direction,
+                               double ratio,
+                               std::optional<vtpty::Process::ExecInfo> const& command,
+                               SessionRole role);
+
+    /// Starts watching the configuration file when live_config asks for it; called as sessions are
+    /// created, because the file is not loaded yet when the manager is constructed. One watcher for
+    /// the whole app, so a save is read once rather than once per session.
+    void watchConfigFile();
+
+    /// The watcher's change notification: watches the path again (an editor that saves by replacing
+    /// the file makes the watcher drop it) and schedules one reload.
+    /// @param path The file that changed.
+    void onConfigFileChanged(QString const& path);
+
     /// Closes @p window if a tab transplant just emptied it — an empty window (no tabs) is not a valid
     /// state. Called after a cross-window tab move; MUST run after the transplant so removeWindow (via
     /// closeWindow) never tears down the moved tab's now-relocated sessions.
@@ -691,6 +845,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param controller The window whose active tab/pane just changed.
     void syncFocusForWindow(window::WindowController* controller);
 
+    /// Tells the focused session that the user is looking at it, when it is on screen and focus did
+    /// not move to say so: its window was activated again, or restored. @see TerminalSession::paneSeen
+    void focusedSessionSeen();
+
     /// Creates a TerminalSession backing the given vtworkspace session id, registers it in the
     /// SessionId<->TerminalSession maps, and claims C++ ownership. Does NOT touch the model (the
     /// caller has already created the corresponding tab or split leaf).
@@ -702,12 +860,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param commandOverride Command to launch instead of the profile's configured shell, if any.
     /// @param profileName Profile to run this session under, if any; @c std::nullopt (the default)
     ///                    selects the application's default profile.
+    /// @param role What the session's program is to the user.
     TerminalSession* createBackingSession(
         vtworkspace::SessionId sessionId,
         std::optional<std::string> cwd,
         std::optional<vtbackend::PageSize> pageSize = std::nullopt,
         std::optional<vtpty::Process::ExecInfo> const& commandOverride = std::nullopt,
-        std::optional<std::string> const& profileName = std::nullopt);
+        std::optional<std::string> const& profileName = std::nullopt,
+        SessionRole role = SessionRole::Shell);
 
     /// Looks up a layout by name in the app's (inline + file) layout map, logging a miss.
     /// @param name    The layout name to find.
@@ -768,20 +928,60 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// session is unknown to the registries or has no model tab.
     /// @param session The backing session whose hosting tab to locate.
     /// @return The hosting tab, or nullptr.
-    [[nodiscard]] vtworkspace::Tab* tabHostingSession(TerminalSession* session) const noexcept
+    [[nodiscard]] vtworkspace::Tab* tabHostingSession(TerminalSession const* session) const noexcept
     {
         if (session == nullptr)
             return nullptr;
         return findTabHostingSession(session->modelSessionId());
     }
 
+    /// Where a session sits: its tab, that tab's window, and the window's controller. Each link is
+    /// nullptr when the one before it is, or when it does not resolve.
+    struct SessionHost
+    {
+        vtworkspace::Tab* tab = nullptr;                ///< The tab hosting the session.
+        vtworkspace::Window* window = nullptr;          ///< The window holding @ref tab.
+        window::WindowController* controller = nullptr; ///< The controller of @ref window.
+    };
+
+    /// Resolves tab, window and controller for @p session in one walk: the single rule every
+    /// "which window is this session in" question shares.
+    /// @param session The backing session to locate (nullptr resolves nothing).
+    /// @return Its host; every member is nullptr when no tab hosts @p session.
+    [[nodiscard]] SessionHost hostOf(TerminalSession const* session) const noexcept
+    {
+        auto* tab = tabHostingSession(session);
+        auto* win = tab != nullptr ? _model->window(_model->windowOfTab(tab->id())) : nullptr;
+        return SessionHost { .tab = tab,
+                             .window = win,
+                             .controller = win != nullptr ? controllerFor(win->id()) : nullptr };
+    }
+
+    /// The leaf of @p tab that @p session backs.
+    /// @param tab     The tab to search.
+    /// @param session The backing session to find.
+    /// @return The leaf, or nullptr when @p session is not one of @p tab's panes.
+    [[nodiscard]] static vtworkspace::Pane* leafOfSession(vtworkspace::Tab const& tab,
+                                                          TerminalSession const& session)
+    {
+        return tab.rootPane() != nullptr ? tab.rootPane()->findLeaf(session.modelSessionId()) : nullptr;
+    }
+
+    /// Makes @p session's pane the active pane of @p tab; a no-op when it is not one of @p tab's panes.
+    /// @param tab     The tab hosting @p session.
+    /// @param session The session whose pane to activate.
+    void activateSessionPane(vtworkspace::Tab const& tab, TerminalSession const& session)
+    {
+        if (auto const* leaf = leafOfSession(tab, session); leaf != nullptr)
+            activatePane(tab.id(), leaf->id());
+    }
+
     /// Resolves the model window hosting @p session (through its tab), or nullptr.
     /// @param session The backing session whose hosting window to locate.
     /// @return The hosting window, or nullptr.
-    [[nodiscard]] vtworkspace::Window* windowHostingSession(TerminalSession* session) const noexcept
+    [[nodiscard]] vtworkspace::Window* windowHostingSession(TerminalSession const* session) const noexcept
     {
-        auto* tab = tabHostingSession(session);
-        return tab != nullptr ? _model->window(_model->windowOfTab(tab->id())) : nullptr;
+        return hostOf(session).window;
     }
 
     /// Resolves the QML-facing controller of the window hosting @p session, or nullptr.
@@ -792,10 +992,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The backing session that received the keybinding.
     /// @return The hosting window's controller, or nullptr when the session has no window (or no
     ///         controller has been registered for it).
-    [[nodiscard]] window::WindowController* controllerHostingSession(TerminalSession* session) const noexcept
+    [[nodiscard]] window::WindowController* controllerHostingSession(
+        TerminalSession const* session) const noexcept
     {
-        auto* win = windowHostingSession(session);
-        return win != nullptr ? controllerFor(win->id()) : nullptr;
+        return hostOf(session).controller;
     }
 
     /// Shared move primitive for the public move-tab entry points: reorders the tab hosting @p session to
@@ -843,6 +1043,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     SessionFactory& _sessionFactory;
     config::LayoutStore& _layoutStore;
     command::CommandHistoryStore& _commandHistoryStore;
+    std::string _homeDirectory; ///< The user's home, read once by the composition root.
     /// The app-wide most-recently-used command list. Seeded from the store on the first palette open
     /// (see openCommandPalette()); every window's palette model reads it, and recordCommand() writes it
     /// back through the store.
@@ -851,6 +1052,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// done in the constructor because the configured capacity is not known that early — see there.
     bool _commandHistoryLoaded = false;
     std::chrono::seconds _earlyExitThreshold;
+    /// The live_config watcher, created by watchConfigFile() once the configuration is loaded.
+    std::unique_ptr<QFileSystemWatcher> _configFileWatcher;
+    /// Coalesces the change notifications of one save -- an editor writing in steps, and platforms
+    /// that report a write as several changes -- into one reload.
+    QTimer _configReloadTimer;
     // The process-wide "focused display". Session->display ownership lives on the pane tree; this is only
     // The single session that currently holds terminal (VT) focus across all windows, or nullptr.
     // setFocusedSession() is the only mutator that NOTIFIES (the symmetric focus-out/focus-in pair);

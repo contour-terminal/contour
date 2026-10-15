@@ -13,13 +13,23 @@
 #include <contour/command/ContextMenu.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/session/SearchStatus.hpp>
+#include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/DisplayHarness.hpp>
+#include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/TabColorScheme.hpp>
+
+#include <vtbackend/shell/ScrollbarMarks.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
+
+#include <vtpty/ChannelPty.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
@@ -47,10 +57,15 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <ranges>
+#include <string>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
@@ -286,6 +301,14 @@ class MockSession: public QObject
     // Mirrors TerminalSession's hyperlink tooltip pair. Both change together, so one signal serves them.
     Q_PROPERTY(QString hyperlinkTooltipText READ hyperlinkTooltipText NOTIFY hyperlinkHoverChanged)
     Q_PROPERTY(QRectF hyperlinkTooltipAnchor READ hyperlinkTooltipAnchor NOTIFY hyperlinkHoverChanged)
+    // Mirrors TerminalSession's block-column tooltip: the anchor, and the invocable its text is read
+    // through whenever the anchor moves.
+    Q_PROPERTY(
+        QRectF commandBlockTooltipAnchor READ commandBlockTooltipAnchor NOTIFY commandBlockHoverChanged)
+    // Mirrors TerminalSession's scrollbar marks: ticks as { position, kind, targetLine } and one colour per
+    // kind. Both change together, so one signal serves them.
+    Q_PROPERTY(QVariantList scrollbarMarks READ scrollbarMarks NOTIFY scrollbarMarksChanged)
+    Q_PROPERTY(QVariantList scrollbarMarkColors READ scrollbarMarkColors NOTIFY scrollbarMarksChanged)
 
   public:
     [[nodiscard]] int pageLineCount() const { return _lines; }
@@ -305,6 +328,8 @@ class MockSession: public QObject
     [[nodiscard]] bool isScrollbarVisible() const { return _scrollbarVisible; }
     [[nodiscard]] QString hyperlinkTooltipText() const { return _hyperlinkTooltipText; }
     [[nodiscard]] QRectF hyperlinkTooltipAnchor() const { return _hyperlinkTooltipAnchor; }
+    [[nodiscard]] QRectF commandBlockTooltipAnchor() const { return _commandBlockTooltipAnchor; }
+    Q_INVOKABLE [[nodiscard]] QString commandBlockTooltip() const { return _commandBlockTooltipText; }
 
     /// Publishes a hovered hyperlink, the way TerminalSession does on a real cell transition.
     void setHyperlinkHover(QString text, QRectF anchor)
@@ -313,6 +338,34 @@ class MockSession: public QObject
         _hyperlinkTooltipAnchor = anchor;
         emit hyperlinkHoverChanged();
     }
+
+    /// Publishes a hovered command block, the way TerminalSession does when the pointer reaches one.
+    void setCommandBlockHover(QString text, QRectF anchor)
+    {
+        _commandBlockTooltipText = std::move(text);
+        _commandBlockTooltipAnchor = anchor;
+        emit commandBlockHoverChanged();
+    }
+
+    [[nodiscard]] QVariantList scrollbarMarks() const { return _scrollbarMarks; }
+    [[nodiscard]] QVariantList scrollbarMarkColors() const { return _scrollbarMarkColors; }
+
+    /// Publishes ticks, as TerminalSession::refreshScrollbarMarks() does.
+    void setScrollbarMarks(QVariantList marks, QVariantList colors)
+    {
+        _scrollbarMarks = std::move(marks);
+        _scrollbarMarkColors = std::move(colors);
+        emit scrollbarMarksChanged();
+    }
+
+    /// Records the track height the chrome reports, so a test can assert the session was told.
+    Q_INVOKABLE void setScrollbarMarkTrackPixels(int pixels) { trackPixels = pixels; }
+
+    /// Records each jump the chrome asks for, so a click on a tick is observable.
+    Q_INVOKABLE void scrollToScrollbarMark(qint64 targetLine) { jumpedTo.push_back(targetLine); }
+
+    int trackPixels = 0;          ///< The track height the chrome last reported.
+    std::vector<qint64> jumpedTo; ///< Every tick target the chrome asked to jump to, in order.
 
     // Drivers: mutate state and fire the NOTIFY the QML binds to, reproducing a live resize / opacity change.
     void setPageSize(int columns, int lines)
@@ -366,6 +419,8 @@ class MockSession: public QObject
     void isScrollbarRightChanged();
     void isScrollbarVisibleChanged();
     void hyperlinkHoverChanged();
+    void commandBlockHoverChanged();
+    void scrollbarMarksChanged();
     void opacityChanged();
     void dimUnfocusedChanged();
     void onBell();
@@ -385,6 +440,10 @@ class MockSession: public QObject
     bool _scrollbarVisible = false;
     QString _hyperlinkTooltipText;
     QRectF _hyperlinkTooltipAnchor;
+    QString _commandBlockTooltipText;
+    QRectF _commandBlockTooltipAnchor;
+    QVariantList _scrollbarMarks;
+    QVariantList _scrollbarMarkColors;
     float _opacity = 1.0F;
     float _dimUnfocused = 0.0F;
 };
@@ -906,6 +965,25 @@ enum class TabStripAt : std::uint8_t
     Bottom //!< `tab_bar_position: Bottom`: the tab's bottom edge IS the window's bottom edge.
 };
 
+/// Deletes a QML test host once it has drawn one more frame and run what that frame queued.
+///
+/// A tab under the pointer grabs its drag image when its window first shows -- offscreen the pointer rests
+/// on the origin, where most hosts put their tab -- and the grab lands on the window's next frame. Nothing
+/// owns a grab still in flight, so a window destroyed before that frame would leak it.
+struct SettleThenDelete
+{
+    void operator()(QObject* host) const
+    {
+        if (auto* window = qobject_cast<QQuickWindow*>(host))
+            std::ignore = window->grabWindow();
+        QCoreApplication::processEvents();
+        delete host;
+    }
+};
+
+/// A QML test host, destroyed only once it has settled.
+using QmlHost = std::unique_ptr<QObject, SettleThenDelete>;
+
 /// Builds @p source as a QML component and instantiates it, failing the test on any QML error.
 ///
 /// Every host in this file is the same three steps — hand the engine the source, wait out the load (which
@@ -916,9 +994,7 @@ enum class TabStripAt : std::uint8_t
 /// @param source The QML source of the host, whose root must be a Window.
 /// @param name   A file name used for the component URL and in the failure message; it need not exist.
 /// @return The instantiated root object.
-[[nodiscard]] std::unique_ptr<QObject> buildQmlHost(QQmlEngine& engine,
-                                                    QString const& source,
-                                                    QString const& name)
+[[nodiscard]] QmlHost buildQmlHost(QQmlEngine& engine, QString const& source, QString const& name)
 {
     QQmlComponent component(&engine);
     component.setData(source.toUtf8(), QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/%1").arg(name)));
@@ -928,7 +1004,7 @@ enum class TabStripAt : std::uint8_t
     INFO(name.toStdString() << " errors: " << component.errorString().toStdString());
     REQUIRE(component.isReady());
 
-    std::unique_ptr<QObject> host(component.create());
+    auto host = QmlHost(component.create());
     REQUIRE(host != nullptr);
     QCoreApplication::processEvents();
     return host;
@@ -962,10 +1038,10 @@ constexpr auto TabItemBindings = "    controller: terminalSessions\n"
 /// @param stripAt    Where in the window to put the tab (mirrors the `tab_bar_position` option).
 /// @param windowWidth The host window's width; a narrow one is what makes a right-edge overflow testable.
 /// @return The host Window; the TabItem is reachable as its `tabItem` property.
-[[nodiscard]] std::unique_ptr<QObject> makeTabItemHost(QQmlEngine& engine,
-                                                       MockTabController& controller,
-                                                       TabStripAt stripAt = TabStripAt::Top,
-                                                       int windowWidth = 800)
+[[nodiscard]] QmlHost makeTabItemHost(QQmlEngine& engine,
+                                      MockTabController& controller,
+                                      TabStripAt stripAt = TabStripAt::Top,
+                                      int windowWidth = 800)
 {
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
@@ -1837,6 +1913,505 @@ TEST_CASE("SessionChrome scrollbar stays a thin edge overlay, whatever the sessi
         QCoreApplication::processEvents();
         CHECK_FALSE(host.bar->isVisible());
     }
+
+    INFO("QML messages:\n" << warnings.messages().join(QStringLiteral("\n")).toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// The tick items a SessionChrome's mark layer currently shows, top first.
+[[nodiscard]] std::vector<QQuickItem*> markTicksOf(QQuickItem const& layer)
+{
+    auto ticks = std::vector<QQuickItem*> {};
+    for (auto* item: layer.childItems())
+        if (item->objectName() == QStringLiteral("scrollbarMark"))
+            ticks.push_back(item);
+    std::ranges::sort(ticks, std::ranges::less {}, &QQuickItem::y);
+    return ticks;
+}
+
+/// A tick as TerminalSession publishes it.
+[[nodiscard]] QVariantMap markEntry(double position, vtbackend::ScrollbarMarkKind kind, qint64 targetLine)
+{
+    return QVariantMap { { QStringLiteral("position"), position },
+                         { QStringLiteral("kind"), static_cast<int>(kind) },
+                         { QStringLiteral("targetLine"), targetLine } };
+}
+
+/// One colour per ScrollbarMarkKind, in enumerator order: Command, UserMark, Running, Failure.
+[[nodiscard]] QVariantList markColors()
+{
+    return QVariantList { QVariant::fromValue(QColor(Qt::gray)),
+                          QVariant::fromValue(QColor(Qt::cyan)),
+                          QVariant::fromValue(QColor(Qt::yellow)),
+                          QVariant::fromValue(QColor(Qt::red)) };
+}
+
+/// The centre of @p item, in its window's coordinates.
+[[nodiscard]] QPoint centreOf(QQuickItem const& item)
+{
+    return item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint();
+}
+
+/// A MockSession whose viewport scrolls, as TerminalSession's does: the chrome writes the offset when the bar
+/// moves, and is told whenever it moved.
+class ScrollingMockSession final: public MockSession
+{
+    Q_OBJECT
+    Q_PROPERTY(int scrollOffset READ scrollOffset WRITE setScrollOffset NOTIFY scrollOffsetChanged)
+
+  public:
+    [[nodiscard]] int scrollOffset() const { return _scrollOffset; }
+
+    /// Moves the viewport, announcing it only when it moved, as the terminal's viewport does.
+    void setScrollOffset(int value)
+    {
+        if (value == _scrollOffset)
+            return;
+        _scrollOffset = value;
+        emit scrollOffsetChanged();
+    }
+
+  signals:
+    void scrollOffsetChanged();
+
+  private:
+    int _scrollOffset = 0;
+};
+
+/// A MockSession whose viewport glides, as TerminalSession's does: the session moves its own view frame by
+/// frame and announces each move, and a write from the chrome is the user's scroll, which ends a glide.
+class GlidingMockSession final: public MockSession
+{
+    Q_OBJECT
+    Q_PROPERTY(int scrollOffset READ scrollOffset WRITE setScrollOffset NOTIFY scrollOffsetChanged)
+
+  public:
+    [[nodiscard]] int scrollOffset() const { return _scrollOffset; }
+
+    /// The chrome's write: the user's scroll, as TerminalSession::setScrollOffset() takes it.
+    void setScrollOffset(int value)
+    {
+        written.push_back(value);
+        moveTo(value);
+    }
+
+    /// One frame of a glide: the session moves its own view, and announces it.
+    void glideTo(int value) { moveTo(value); }
+
+    std::vector<int> written; ///< Every offset the chrome wrote, in order.
+
+  signals:
+    void scrollOffsetChanged();
+
+  private:
+    void moveTo(int value)
+    {
+        if (value == _scrollOffset)
+            return;
+        _scrollOffset = value;
+        emit scrollOffsetChanged();
+    }
+
+    int _scrollOffset = 0;
+};
+} // namespace
+
+TEST_CASE("SessionChrome draws the scrollbar's marks, and a click on one jumps there (offscreen)",
+          "[contour][gui][qml][scrollbar-marks]")
+{
+    // The tick layer over the scrollbar: one thin line per published mark, at its fraction of the track, in
+    // its kind's colour -- and a click on one asks the session to bring that line to the top.
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto host = createChromeInWindow(engine);
+    auto* layer = host.bar->findChild<QQuickItem*>(QStringLiteral("scrollbarMarkLayer"));
+    REQUIRE(layer != nullptr);
+    auto* window = qobject_cast<QQuickWindow*>(host.window.get());
+    REQUIRE(window != nullptr);
+
+    auto session = createScrollableSession();
+    session->setScrollbarMarks(QVariantList { markEntry(0.1, vtbackend::ScrollbarMarkKind::Failure, 42),
+                                              markEntry(0.5, vtbackend::ScrollbarMarkKind::Command, 4242) },
+                               markColors());
+    auto const bind = [&](MockSession& bound) {
+        host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(&bound)));
+        QCoreApplication::processEvents();
+    };
+
+    // At the bottom of 1000 rows of history under a 25-row page, the page is the track's last 2.4 %: far
+    // below the handle's minimum size, so the handle is drawn over the track's last tenth. A tick at 0.95,
+    // the head of a block some 25 rows above the page, lies under the drawn handle. Binds @p deep so, and
+    // returns where that tick is, in the window's coordinates.
+    auto const bindAtTheBottomOfADeepHistory = [&](ScrollingMockSession& deep) {
+        deep.setScrollbarVisible(true);
+        deep.setHistoryLineCount(1000);
+        deep.setScrollbarMarks(QVariantList { markEntry(0.95, vtbackend::ScrollbarMarkKind::Failure, 950) },
+                               markColors());
+        bind(deep);
+        auto const position = host.bar->property("position").toReal();
+        REQUIRE(position == Catch::Approx(1.0 - host.bar->property("size").toReal()));
+        REQUIRE(0.95 < position); // a row off the screen
+
+        auto const ticks = markTicksOf(*layer);
+        REQUIRE(ticks.size() == 1);
+        auto const onTheTick = centreOf(*ticks[0]);
+        auto const* handle = host.bar->property("contentItem").value<QQuickItem*>();
+        REQUIRE(handle != nullptr);
+        REQUIRE(handle->contains(handle->mapFromScene(QPointF(onTheTick))));
+        return onTheTick;
+    };
+
+    SECTION("one tick per mark, at its fraction of the track, in its kind's colour")
+    {
+        bind(*session);
+        auto const ticks = markTicksOf(*layer);
+        REQUIRE(ticks.size() == 2);
+        CHECK(ticks[0]->y() == Catch::Approx(std::round(0.1 * layer->height())));
+        CHECK(ticks[1]->y() == Catch::Approx(std::round(0.5 * layer->height())));
+        CHECK(ticks[0]->width() == Catch::Approx(layer->width()));
+        CHECK(ticks[0]->property("color").value<QColor>() == QColor(Qt::red));  // Failure
+        CHECK(ticks[1]->property("color").value<QColor>() == QColor(Qt::gray)); // Command
+
+        // The session was told the track's height, so its pixel buckets are the pixels drawn here.
+        CHECK(session->trackPixels == qRound(layer->height()));
+
+        // Above the bar, which would otherwise take every press first, and below the handle, which is drawn
+        // over the ticks it passes.
+        auto const* handle = host.bar->property("contentItem").value<QQuickItem*>();
+        REQUIRE(handle != nullptr);
+        CHECK(layer->z() >= 0.0);
+        CHECK(handle->z() > layer->z());
+    }
+
+    SECTION("a mark on the track's last pixel is drawn inside the track")
+    {
+        session->setScrollbarMarks(QVariantList { markEntry(1.0, vtbackend::ScrollbarMarkKind::Command, 7) },
+                                   markColors());
+        bind(*session);
+        auto const ticks = markTicksOf(*layer);
+        REQUIRE(ticks.size() == 1);
+        CHECK(ticks[0]->y() + ticks[0]->height() <= layer->height());
+    }
+
+    SECTION("a click on a tick asks the session to bring its line to the top")
+    {
+        bind(*session);
+        host.bar->setProperty("position", 0.9); // the handle well clear of the tick at 0.1
+        QCoreApplication::processEvents();
+
+        auto const ticks = markTicksOf(*layer);
+        REQUIRE(ticks.size() == 2);
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centreOf(*ticks[0]));
+        QCoreApplication::processEvents();
+
+        CHECK(session->jumpedTo == std::vector<qint64> { 42 });
+        // The tick kept the press: the bar did not move to it.
+        CHECK(host.bar->property("position").toReal() == Catch::Approx(0.9));
+    }
+
+    SECTION("a click on a tick under the enlarged handle still jumps, and leaves the bar where it was")
+    {
+        auto deep = ScrollingMockSession {};
+        auto const onTheTick = bindAtTheBottomOfADeepHistory(deep);
+
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, onTheTick);
+        QCoreApplication::processEvents();
+
+        CHECK(deep.jumpedTo == std::vector<qint64> { 950 });
+        CHECK(deep.scrollOffset() == 0);
+    }
+
+    SECTION("a drag that starts on a tick under the enlarged handle moves the handle, and jumps nowhere")
+    {
+        auto deep = ScrollingMockSession {};
+        auto const onTheTick = bindAtTheBottomOfADeepHistory(deep);
+
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, onTheTick);
+        for (auto const step: std::views::iota(1, 5))
+            QTest::mouseMove(window, onTheTick - QPoint(0, 25 * step));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, onTheTick - QPoint(0, 100));
+        QCoreApplication::processEvents();
+
+        CHECK(deep.scrollOffset() > 0);
+        CHECK(deep.jumpedTo.empty());
+    }
+
+    SECTION("no marks: no ticks, and the bar is exactly the bar it was")
+    {
+        auto plain = createScrollableSession();
+        bind(*plain);
+        CHECK(markTicksOf(*layer).empty());
+        CHECK(host.bar->isVisible());
+        CHECK(host.bar->width() == Catch::Approx(host.thin));
+        CHECK(host.bar->x() == Catch::Approx(host.paneWidth - host.thin));
+    }
+
+    SECTION("an offset the session reports echoes back unchanged while the pointer rests on the bar")
+    {
+        // After a click on a tick the pointer still rests on the bar, so the offset the jump set comes back
+        // through the bar's position: rows above over rows in all, times rows in all. That can land a hair
+        // under the integer -- 16 rows of history under a 25-row page, two rows up, give 1.9999999999999982
+        // -- and written back truncated it would name the row below. The bar is made active by holding its
+        // handle, since an offscreen window gets no hover.
+        auto scrolling = ScrollingMockSession {};
+        scrolling.setScrollbarVisible(true);
+        scrolling.setHistoryLineCount(16);
+        bind(scrolling);
+        auto const* handle = host.bar->property("contentItem").value<QQuickItem*>();
+        REQUIRE(handle != nullptr);
+        auto const onTheHandle = centreOf(*handle);
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, onTheHandle);
+        QCoreApplication::processEvents();
+        REQUIRE(host.bar->property("active").toBool());
+
+        scrolling.setScrollOffset(2);
+        QCoreApplication::processEvents();
+        CHECK(scrolling.scrollOffset() == 2);
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, onTheHandle);
+    }
+
+    SECTION("hiding the bar -- position: Hidden, or hide_in_alt_screen -- hides its ticks")
+    {
+        bind(*session);
+        auto const ticks = markTicksOf(*layer);
+        REQUIRE(ticks.size() == 2);
+        REQUIRE(ticks[0]->isVisible());
+
+        session->setScrollbarVisible(false);
+        QCoreApplication::processEvents();
+        CHECK_FALSE(ticks[0]->isVisible());
+    }
+
+    INFO("QML messages:\n" << warnings.messages().join(QStringLiteral("\n")).toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SessionChrome lets a glide finish with the pointer on the scrollbar (offscreen)",
+          "[contour][gui][qml][scrollbar]")
+{
+    // With the pointer on the bar, the bar is active, and a move of its own is the user's: the chrome writes
+    // it back, and the session ends a glide to take it. A glide's frames move the bar too, to follow the
+    // view; written back as well, they ended the glide at its first frame. The bar is made active by holding
+    // its handle, since an offscreen window gets no hover.
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto host = createChromeInWindow(engine);
+    auto* window = qobject_cast<QQuickWindow*>(host.window.get());
+    REQUIRE(window != nullptr);
+    auto session = GlidingMockSession {};
+    session.setScrollbarVisible(true);
+    session.setHistoryLineCount(1000);
+    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(&session)));
+    QCoreApplication::processEvents();
+
+    auto const* handle = host.bar->property("contentItem").value<QQuickItem*>();
+    REQUIRE(handle != nullptr);
+    auto const onTheHandle = centreOf(*handle);
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, onTheHandle);
+    QCoreApplication::processEvents();
+    REQUIRE(host.bar->property("active").toBool());
+
+    for (auto const frame: { 3, 7, 12 })
+    {
+        session.glideTo(frame);
+        QCoreApplication::processEvents();
+    }
+    CHECK(session.written.empty());
+    CHECK(session.scrollOffset() == 12);
+
+    // A step of the bar's own is still the user's, and written back.
+    REQUIRE(QMetaObject::invokeMethod(host.bar, "increase"));
+    QCoreApplication::processEvents();
+    CHECK(session.written == std::vector { 11 });
+
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, onTheHandle);
+    INFO("QML messages:\n" << warnings.messages().join(QStringLiteral("\n")).toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// A live session in an offscreen window, wired as TerminalPane.qml wires one: a DisplayHarness's real
+/// TerminalDisplay bound to a real TerminalSession (over a ChannelPty, so whatever the terminal answers can
+/// be read back), with the real SessionChrome laid over it.
+///
+/// Torn down in the reverse of its members' order: the chrome first, while the session it names still runs;
+/// then the display harness, in the order production uses; then the engine the chrome came from, once
+/// nothing it made is left.
+struct LiveChromeHarness
+{
+    QQmlEngine engine;
+    MockTabController tabs;
+    contour::test::DisplayHarness live { contour::test::HarnessWindow::Unrendered };
+    std::unique_ptr<QObject> chrome;
+    QQuickItem* bar = nullptr;
+
+    LiveChromeHarness()
+    {
+        engine.rootContext()->setContextProperty("terminalSessions", &tabs);
+        contour::test::installChromeStyle(engine);
+
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SessionChrome.qml")));
+        while (component.status() == QQmlComponent::Loading)
+            QCoreApplication::processEvents();
+        INFO("SessionChrome errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+        chrome.reset(component.createWithInitialProperties(
+            { { QStringLiteral("session"), QVariant::fromValue(static_cast<QObject*>(live.session.get())) },
+              { QStringLiteral("displayItem"),
+                QVariant::fromValue(static_cast<QObject*>(live.display.get())) } }));
+        auto* chromeItem = qobject_cast<QQuickItem*>(chrome.get());
+        REQUIRE(chromeItem != nullptr);
+        chromeItem->setParentItem(live.display.get());
+
+        QCoreApplication::processEvents();
+        bar = chromeItem->findChild<QQuickItem*>(QStringLiteral("verticalScrollBar"));
+        REQUIRE(bar != nullptr);
+    }
+
+    /// Whether the terminal has a selection under way or made.
+    [[nodiscard]] bool hasSelection() const
+    {
+        auto const lock = std::scoped_lock { live.session->terminal() };
+        return live.session->terminal().selector() != nullptr;
+    }
+
+    /// Presses the left button at @p point, in the window's coordinates, and lets the press land.
+    void press(QPoint point) const
+    {
+        QTest::mousePress(live.window.get(), Qt::LeftButton, Qt::NoModifier, point);
+        QCoreApplication::processEvents();
+    }
+
+    /// Releases the left button at @p point, in the window's coordinates.
+    void release(QPoint point) const
+    {
+        QTest::mouseRelease(live.window.get(), Qt::LeftButton, Qt::NoModifier, point);
+        QCoreApplication::processEvents();
+    }
+
+    /// Whether the scrollbar holds the press.
+    [[nodiscard]] bool isBarPressed() const { return bar->property("pressed").toBool(); }
+};
+
+/// @p count numbered lines of output, each terminated: enough of them push rows into the history.
+[[nodiscard]] std::string numberedLines(int count)
+{
+    auto lines = std::string {};
+    for (auto const i: std::views::iota(0, count))
+        lines += std::format("line {}\r\n", i);
+    return lines;
+}
+} // namespace
+
+TEST_CASE("SessionChrome over a live session: the scrollbar's strip is the bar's, the cell beside it the "
+          "terminal's (offscreen)",
+          "[contour][gui][qml][scrollbar-marks]")
+{
+    // The scrollbar is shown on the right by default, as an overlay that takes no column from the page: its
+    // strip covers the edge of the grid. A press there must go to the bar alone, while a press one cell to
+    // its left must reach the terminal as it always did -- a selection, or a report to the application.
+    contour::test::QmlMessageCapture const warnings;
+    LiveChromeHarness const h;
+
+    auto& terminal = h.live.session->terminal();
+    terminal.writeToScreen(numberedLines(100));
+
+    // The travel that shows the bar is published a frame after the output, by the refresh it asks for.
+    REQUIRE(QTest::qWaitFor([&] { return h.bar->isVisible(); }, 1000));
+    CHECK(h.bar->x() + h.bar->width() == Catch::Approx(h.live.display->width()));
+
+    auto const cellWidth =
+        static_cast<double>(unbox(h.live.display->cellSize().width)) / h.live.display->devicePixelRatio();
+
+    // A strip, not a band: whatever it covers of the grid is the edge of the last column or two.
+    CHECK(h.bar->width() < 2 * cellWidth);
+    auto const middle = h.bar->height() / 2;
+    auto const onTheBar = h.bar->mapToScene(QPointF(h.bar->width() / 2, middle)).toPoint();
+    auto const besideTheBar = h.bar->mapToScene(QPointF(-cellWidth / 2, middle)).toPoint();
+
+    SECTION("selection: the bar's strip starts none, the cell beside it does")
+    {
+        // Asked while the button is down: a press released where it went down is a click, which clears the
+        // selection it started.
+        h.press(onTheBar);
+        CHECK(h.isBarPressed());
+        CHECK_FALSE(h.hasSelection());
+        h.release(onTheBar);
+
+        h.press(besideTheBar);
+        CHECK_FALSE(h.isBarPressed());
+        CHECK(h.hasSelection());
+        h.release(besideTheBar);
+    }
+
+    SECTION("mouse reporting: the application hears nothing of the bar's strip, and the cell beside it")
+    {
+        terminal.writeToScreen("\033[?1000h\033[?1006h");
+        QCoreApplication::processEvents();
+        auto const before = h.live.pty->stdinSnapshot();
+
+        h.press(onTheBar);
+        CHECK(h.isBarPressed());
+        h.release(onTheBar);
+        CHECK(h.live.pty->stdinSnapshot() == before);
+
+        h.press(besideTheBar);
+        CHECK_FALSE(h.isBarPressed());
+        h.release(besideTheBar);
+        CHECK(h.live.pty->stdinSnapshot().size() > before.size());
+        CHECK(h.live.pty->stdinSnapshot().substr(before.size()).starts_with("\033[<0;"));
+        CHECK_FALSE(h.hasSelection());
+    }
+
+    INFO("QML messages:\n" << warnings.messages().join(QStringLiteral("\n")).toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SessionChrome over a live session: a click on a tick puts its block's head on the top row "
+          "(offscreen)",
+          "[contour][gui][qml][scrollbar-marks]")
+{
+    // End to end: the session publishes the ticks on its frame timer for the track the chrome reported, the
+    // chrome draws them, and a click on one scrolls the viewport -- which the bar, still under the pointer,
+    // echoes back as an offset that must name the same row.
+    contour::test::QmlMessageCapture const warnings;
+    LiveChromeHarness const h;
+
+    auto& terminal = h.live.session->terminal();
+    terminal.writeToScreen(vtbackend::test::commandRun("make", { "out 1", "out 2", "out 3" }, 2));
+    terminal.writeToScreen(vtbackend::test::commandRun("ls", { "out 1", "out 2", "out 3" }, 0));
+    terminal.writeToScreen(numberedLines(300));
+
+    auto* layer = h.bar->findChild<QQuickItem*>(QStringLiteral("scrollbarMarkLayer"));
+    REQUIRE(layer != nullptr);
+    auto ticks = markTicksOf(*layer);
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 200))
+    {
+        if (ticks.size() == 2)
+            break;
+        QTest::qWait(5);
+        ticks = markTicksOf(*layer);
+    }
+    REQUIRE(ticks.size() == 2);
+    auto const target =
+        h.live.session->scrollbarMarks().at(1).toMap().value(QStringLiteral("targetLine")).toLongLong();
+
+    QTest::mouseClick(h.live.window.get(), Qt::LeftButton, Qt::NoModifier, centreOf(*ticks[1]));
+    QCoreApplication::processEvents();
+
+    auto const lock = std::scoped_lock { terminal };
+    CHECK(terminal.primaryScreen().grid().stableLineIdOf(terminal.viewport().topLine()) == target);
 
     INFO("QML messages:\n" << warnings.messages().join(QStringLiteral("\n")).toStdString());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
@@ -3576,6 +4151,61 @@ TEST_CASE("SessionChrome shows the hyperlink tooltip only while there is a link 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("SessionChrome shows the command block tooltip only while a block is hovered",
+          "[contour][gui][qml][gutter]")
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto host = createChromeInWindow(engine);
+    auto session = createScrollableSession();
+    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(session.get())));
+    QCoreApplication::processEvents();
+
+    auto* tip = host.chrome->findChild<QQuickItem*>(QStringLiteral("commandBlockTooltip"));
+    REQUIRE(tip != nullptr);
+    CHECK(tip->property("tipText").toString().isEmpty());
+
+    SECTION("a hovered block publishes its text, beside its gutter cell")
+    {
+        session->setCommandBlockHover("Exit code 2\n$ make", QRectF(4, 80, 8, 16));
+        QCoreApplication::processEvents();
+
+        CHECK(tip->property("tipText").toString() == "Exit code 2\n$ make");
+        CHECK(tip->x() == Catch::Approx(12)); // on the grid side of the cell, not over the strip
+    }
+
+    SECTION("another block entered at the same cell is read afresh")
+    {
+        // New output scrolls the page under a stationary pointer without moving the viewport, so the
+        // next block can be entered at the very cell the last one was: the anchor does not change, and
+        // the text must be read again all the same.
+        session->setCommandBlockHover("Exit code 2", QRectF(4, 80, 8, 16));
+        QCoreApplication::processEvents();
+        REQUIRE(tip->property("tipText").toString() == "Exit code 2");
+
+        session->setCommandBlockHover("Exit code 0", QRectF(4, 80, 8, 16));
+        QCoreApplication::processEvents();
+        CHECK(tip->property("tipText").toString() == "Exit code 0");
+    }
+
+    SECTION("leaving the block withdraws it")
+    {
+        session->setCommandBlockHover("Exit code 2", QRectF(4, 80, 8, 16));
+        QCoreApplication::processEvents();
+        REQUIRE_FALSE(tip->property("tipText").toString().isEmpty());
+
+        session->setCommandBlockHover(QString(), QRectF());
+        QCoreApplication::processEvents();
+        CHECK(tip->property("tipText").toString().isEmpty());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 namespace
 {
 /// How a posted gesture finishes.
@@ -3623,6 +4253,19 @@ void postGesture(
     return { item.mapToScene(QPointF(0, 0)), QSizeF(item.width(), item.height()) };
 }
 
+/// Skips the running test unless it runs on the offscreen platform, which ctest always selects.
+///
+/// For a test that presses a ResizeBorder zone: the zone hands the press to QWindow::startSystemResize(),
+/// which on a real windowing system gives the pointer to the window manager -- on Windows a modal sizing
+/// loop that waits for the user's own mouse or keyboard, which posted events never reach -- so the test
+/// would hang until someone at the desk ended it. Offscreen, the platform declines the resize and the
+/// press goes on to the items beneath, which is the overlap these tests are about.
+void skipUnlessOffscreen()
+{
+    if (QGuiApplication::platformName() != QStringLiteral("offscreen"))
+        SKIP("presses a resize zone, which a real windowing system hands to the user's own pointer");
+}
+
 /// Whether @p scenePoint lies inside one of the resize border's eight hit zones.
 ///
 /// This is the NON-VACUITY check every assertion below needs: "no drag started" is equally true of a
@@ -3652,8 +4295,7 @@ void postGesture(
 /// @param engine     The engine to build in.
 /// @param controller The mock the tab binds to.
 /// @return The host Window; the tab is reachable as its `tabItem` property.
-[[nodiscard]] std::unique_ptr<QObject> makeTabItemUnderResizeBorderHost(QQmlEngine& engine,
-                                                                        MockTabController& controller)
+[[nodiscard]] QmlHost makeTabItemUnderResizeBorderHost(QQmlEngine& engine, MockTabController& controller)
 {
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
@@ -3694,7 +4336,7 @@ void postGesture(
 ///                           leaves the drag region real width and "left of the tabs" and "right of
 ///                           the drag region" are genuinely different places to be.
 /// @return The host Window; the bar is reachable via findChild("titleBar").
-[[nodiscard]] std::unique_ptr<QObject> makeTitleBarHost(
+[[nodiscard]] QmlHost makeTitleBarHost(
     QQmlEngine& engine,
     MockTabController& controller,
     contour::config::UiStyle uiStyle = contour::config::UiStyle::Native,
@@ -3731,9 +4373,57 @@ void postGesture(
 }
 } // namespace
 
+TEST_CASE("A TabItem grabs its drag image only while a drag can start from it (offscreen)",
+          "[contour][gui][qml]")
+{
+    // A tab's drag image is an asynchronous grab. Each one holds its image until the garbage collector
+    // frees it, and one still in flight when its window or engine goes away is never freed at all. A tab
+    // the pointer is not on has no drag to start, so its title changing grabs nothing; with the pointer
+    // on it, the next change does.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+
+    auto const host = makeTabItemHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    auto* tab = host->property("tabItem").value<QQuickItem*>();
+    REQUIRE(tab != nullptr);
+
+    // A frame drawn after each change, as a live window draws one: a grab started lands on it.
+    auto const retitle = [&](int build) {
+        tab->setProperty("tabTitle", QStringLiteral("build %1").arg(build));
+        std::ignore = window->grabWindow();
+        QCoreApplication::processEvents();
+    };
+
+    // The pointer off the window. Where an earlier test left it the tab may sit under it, and so have
+    // grabbed once already: that grab is let land, and its image set aside.
+    auto const away = QPoint(-1000, -1000);
+    QTest::mouseMove(window, away);
+    std::ignore = window->grabWindow();
+    QCoreApplication::processEvents();
+    tab->setProperty("dragImage", QUrl());
+
+    for (auto const build: std::views::iota(0, 5))
+        retitle(build);
+    CHECK(tab->property("dragImage").toUrl().isEmpty());
+
+    QTest::mouseMove(window, sceneRectOf(*tab).center().toPoint());
+    retitle(5);
+    CHECK_FALSE(tab->property("dragImage").toUrl().isEmpty());
+
+    // The pointer leaves the window, or the next test's tab could open under it and grab.
+    QTest::mouseMove(window, away);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("A resize-border press over a tab does not start a tab drag (offscreen)",
           "[contour][gui][qml][resize]")
 {
+    skipUnlessOffscreen();
+
     // Issue #1997. ResizeBorder fills the window at z:1000, so its 6px handles lie over the chrome a
     // frameless window draws for itself, and the top-left corner one lands exactly on the first tab. A
     // DragHandler takes a PASSIVE grab on press, so it sees the moves whoever is on top; while it could
@@ -3788,6 +4478,8 @@ TEST_CASE("A resize-border press over a tab does not start a tab drag (offscreen
 TEST_CASE("A resize-border press over the title bar does not start a window move (offscreen)",
           "[contour][gui][qml][resize]")
 {
+    skipUnlessOffscreen();
+
     // The bar's empty stretch drags the window (startSystemMove), and it too lies under the border's top
     // edge zone — so the same press that began a resize went on to ask for a move as well. Same cause as
     // the tab-drag half of #1997, different victim.

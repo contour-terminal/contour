@@ -81,13 +81,12 @@ struct HintPattern
 {
     std::string name;
     std::regex regex;
-    /// Optional post-match validator. When set, only matches for which
-    /// this returns true are kept. Used e.g. to check filesystem existence.
-    std::function<bool(std::string const&)> validator;
-    /// Optional post-match transformer. When set, the matched text is rewritten
-    /// before being stored in HintMatch. Used e.g. to resolve relative paths
-    /// to absolute paths. The overlay still shows the original terminal text.
-    std::function<std::string(std::string const&)> transformer;
+    /// Optional: what a match stands for. Given the matched text and the grid row the match starts on --
+    /// what a match means can depend on where it was printed (a path, on the directory its command ran
+    /// in) -- it returns the text the hint carries, e.g. a relative path resolved to an absolute one, or
+    /// nullopt to drop the match, e.g. one that names no existing file. The overlay still shows the
+    /// original terminal text. Unset, every match is kept as written.
+    std::function<std::optional<std::string>(std::string const&, LineOffset)> resolve;
 };
 
 /// What one hint-mode activation should scan and do.

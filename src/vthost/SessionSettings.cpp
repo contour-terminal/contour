@@ -51,6 +51,7 @@ vtbackend::Settings hostedSessionSettings(vtbackend::Settings settings)
 
     // Not a preference the daemon honours -- @see the declaration.
     settings.goodImageProtocol = true;
+    settings.inputWriter = vtbackend::InputWriter::ReaderThread;
 
     return settings;
 }
@@ -70,6 +71,8 @@ proto::WireSessionSettings toWireSessionSettings(vtbackend::Settings const& sett
         .graphemeClustering = static_cast<uint8_t>(settings.graphemeClustering ? 1 : 0),
         .allowReflowOnResize = static_cast<uint8_t>(settings.primaryScreen.allowReflowOnResize ? 1 : 0),
         .maxImageRegisterCount = settings.maxImageRegisterCount,
+        .sixelScrolling =
+            static_cast<uint8_t>(settings.sixelScrolling == vtbackend::SixelScrolling::Enabled ? 1 : 0),
         .wordDelimiters = unicode::convert_to<char>(std::u32string_view { settings.wordDelimiters }),
     };
 
@@ -108,6 +111,8 @@ vtbackend::Settings fromWireSessionSettings(proto::WireSessionSettings const& wi
     settings.graphemeClustering = wire.graphemeClustering != 0;
     settings.primaryScreen.allowReflowOnResize = wire.allowReflowOnResize != 0;
     settings.maxImageRegisterCount = wire.maxImageRegisterCount;
+    settings.sixelScrolling =
+        wire.sixelScrolling != 0 ? vtbackend::SixelScrolling::Enabled : vtbackend::SixelScrolling::Disabled;
     settings.wordDelimiters = unicode::from_utf8(wire.wordDelimiters);
 
     // REPLACES rather than merges: the client stated its complete set, so a client that freezes

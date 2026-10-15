@@ -10,6 +10,8 @@
 #include <utility>
 
 #ifdef _WIN32
+    #include <core/WideString.hpp>
+
     #include <Windows.h>
 #else
     #include <algorithm>
@@ -46,16 +48,17 @@ namespace
 /// rejects them outright (concurrency-mt-unsafe). What LiveEnvironment consults on POSIX is the
 /// environment block itself, so the test installs its own -- the original entries plus one -- and
 /// restores the original pointer on the way out. Windows keeps a separate block that
-/// SetEnvironmentVariableA writes and LiveEnvironment reads, so there it simply writes that.
+/// SetEnvironmentVariableW writes and LiveEnvironment reads, so there it simply writes that, in
+/// UTF-16: SetEnvironmentVariableA read the name and value in the ANSI code page.
 class ScopedVariable
 {
   public:
-    /// @param name Name of the variable to make visible.
-    /// @param value The value it should read as.
+    /// @param name Name of the variable to make visible, in UTF-8.
+    /// @param value The value it should read as, in UTF-8.
     ScopedVariable(std::string name, std::string const& value): _name { std::move(name) }
     {
 #ifdef _WIN32
-        SetEnvironmentVariableA(_name.c_str(), value.c_str());
+        SetEnvironmentVariableW(wide(_name).c_str(), wide(value).c_str());
 #else
         // Appended to a copy of the existing block rather than replacing it, so everything else the
         // process (and the rest of this suite) reads from the environment survives.
@@ -75,7 +78,7 @@ class ScopedVariable
     ~ScopedVariable()
     {
 #ifdef _WIN32
-        SetEnvironmentVariableA(_name.c_str(), nullptr);
+        SetEnvironmentVariableW(wide(_name).c_str(), nullptr);
 #else
         processEnviron() = _saved;
 #endif
@@ -87,6 +90,11 @@ class ScopedVariable
     ScopedVariable& operator=(ScopedVariable&&) = delete;
 
   private:
+#ifdef _WIN32
+    /// @return @p text, in UTF-8, as the UTF-16 the block holds. Every caller's text is UTF-8.
+    [[nodiscard]] static std::wstring wide(std::string const& text) { return core::toUtf16(text).value(); }
+#endif
+
     std::string _name;
 #ifndef _WIN32
     std::string _entry;
@@ -161,6 +169,23 @@ TEST_CASE("LiveEnvironment observes what a cache cannot", "[environment]")
     }
 
     // ...and it observes the removal just as promptly.
+    CHECK(!live.get(Name).has_value());
+}
+
+TEST_CASE("LiveEnvironment reads a name and a value beyond ASCII as UTF-8", "[environment]")
+{
+    // A profile under C:\Users\Jürgen, or a value in no ANSI code page at all (core-cpp#7): on
+    // Windows the block is UTF-16, and the name goes in and the value comes out as UTF-8. Characters
+    // of two, three and four UTF-8 bytes.
+    auto constexpr Name = "CORE_CPP_ENVIRONMENT_TEST_\xC3\x9C";
+    auto constexpr Value = "C:\\Users\\J\xC3\xBCrgen\\\xE6\x97\xA5-\xF0\x9F\x98\x80";
+    auto const live = core::LiveEnvironment {};
+
+    {
+        auto const variable = ScopedVariable { Name, Value };
+        CHECK(live.get(Name) == Value);
+    }
+
     CHECK(!live.get(Name).has_value());
 }
 

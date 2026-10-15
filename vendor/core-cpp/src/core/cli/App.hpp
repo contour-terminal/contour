@@ -24,10 +24,12 @@ class App
     /// @param env    The process environment to read from. It must outlive this object, and is the
     ///               one every part of the application derives its own from -- an app is the
     ///               process's composition root, so this is where the choice is made once.
-    /// @param appName    Program name, as the CLI spells it.
+    /// @param appName    Program name, as the CLI spells it, in UTF-8.
     /// @param appTitle   Human-readable title.
     /// @param appVersion Version string.
     /// @param appLicense SPDX license identifier.
+    /// @throws std::system_error on Windows if @p appName is not UTF-8: it is a literal of the
+    ///         program, so a defect rather than an input (core::pathFromTrustedUtf8()).
     App(Environment const& env,
         std::string appName,
         std::string appTitle,
@@ -87,7 +89,8 @@ class App
     /// verb the two copies had already drifted — only one of them reported a mistyped tag.
     /// @param optionPrefix The verb's dotted flag prefix, e.g. "tool.serve".
     /// @param showProcessId Whether to prefix each line with the emitting process id.
-    /// @return Nothing, or why the log file could not be opened.
+    /// @return Nothing, or why the log file could not be opened -- or used at all, a `--log-file`
+    ///         that is not UTF-8 on Windows, which leaves the current destination installed.
     [[nodiscard]] std::expected<void, std::string> installLogging(std::string const& optionPrefix,
                                                                   bool showProcessId = false);
 

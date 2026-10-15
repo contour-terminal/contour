@@ -187,7 +187,7 @@ color_schemes:
 ```
 
 ### `fold_marker`
-Defines the colors of the fold column drawn in the one-column gutter left of the grid, when output
+Defines the colors of the fold markers drawn in the gutter's block column, left of the grid, when output
 folding is enabled (see `folding.show_markers`). Two independent sections, `default` and `hover`,
 each with `foreground` and `background`; `hover` applies to the whole run of the fold the pointer is
 currently over, not just the row under it.
@@ -216,6 +216,66 @@ color_schemes:
 this scheme's own background to keep the gutter transparent along with the rest of the window. <br/>
 :octicons-horizontal-rule-16: ==hover== Colors of the fold run under the pointer — the whole run of
 the hovered fold, not just the row beneath it. <br/>
+
+### `block_status`
+Defines the colors of a command block's marks by how its command ended (see
+[Command blocks](../demo/command-blocks.md)): what the gutter's block column draws beside it while
+`gutter.exit_status` is on (the default), and its tick on the scrollbar. Each is a single color, and all
+three are **optional**, left unset by default. A missing one is derived from this scheme, so a scheme that
+has never heard of them still shows them legibly:
+
+- `success` — a command that exited with 0, or whose exit status is unknown. Derived from the fold
+  marker's color, so a successful block looks exactly as the fold column always has.
+- `failure` — a command that exited non-zero, or was killed. Derived from this scheme's normal red
+  (normal color 1).
+- `running` — a command that has not finished yet. Derived from this scheme's normal yellow (normal
+  color 3).
+
+Under the pointer, `failure` and `running` — and a `success` set here — are lifted halfway toward the text
+color; an unset `success` comes up to full strength, as the fold column does.
+
+``` yaml
+color_schemes:
+  default:
+    block_status:
+        success: '#7E7C7C'
+        failure: '#C63939'
+        running: '#A0A000'
+```
+
+The values shown are what the default scheme derives.
+
+### `gutter_text`
+The color of the gutter's line numbers and timestamps, and of the label a collapsed fold carries
+(`⋯ 1,234 lines`). **Optional**, and unset by default: it is then this scheme's foreground faded toward its
+background, as the resting fold markers are, so the numbers stay quieter than the text beside them.
+
+``` yaml
+color_schemes:
+  default:
+    gutter_text: '#7E7C7C'
+```
+
+### `sticky_header`
+Defines the colors of the sticky command header (see the profile key `sticky_header`): the band pinned
+over the top row while you read a command's output with the command itself scrolled out of view, and
+the one-pixel line along its bottom edge.
+
+Both are **optional**, and unset by default. A missing one is derived from this scheme's own `default`
+colors: the band is the background lifted a tenth of the way toward the foreground, the line about a
+third of the way — quiet in every theme, yet distinct from the page.
+
+``` yaml
+color_schemes:
+  default:
+    sticky_header:
+        background: '#2C2928'
+        separator: '#595757'
+```
+
+:octicons-horizontal-rule-16: ==background== The band's color. The command copied into it keeps its own
+colors; only the cells the shell left on the default background take this one. <br/>
+:octicons-horizontal-rule-16: ==separator== The one-pixel line along the band's bottom edge. <br/>
 
 ### Palette Presets 
 When choosing a palette from a preset as the color scheme  (in `profiles`) it is possible to tweak any configuration:
@@ -277,7 +337,7 @@ Bright colors
 ``` yaml
 color_schemes:
   default:
-    normal:
+    bright:
       black:   '#707070'
       red:     '#ff0000'
       green:   '#00ff00'
@@ -287,6 +347,18 @@ color_schemes:
       cyan:    '#00ffff'
       white:   '#ffffff'
 ```
+
+### Writing a palette
+`normal`, `bright` and `dim` each take their eight colors either by name, as above, or as a list in the
+order black, red, green, yellow, blue, magenta, cyan, white:
+``` yaml
+color_schemes:
+  default:
+    bright: ['#707070', '#ff0000', '#00ff00', '#ffff00', '#0000ff', '#ff00ff', '#00ffff', '#ffffff']
+```
+A list may stop short: the colors it leaves out keep their values. Either way, each color is written as
+`'#rrggbb'` (quoted, since `#` would otherwise start a YAML comment) or as `0xrrggbb`. A bare decimal number
+is not a color, and leaves its slot as it was.
 
 ## Default color scheme
 
@@ -364,6 +436,14 @@ color_schemes:
         #     hover:
         #         foreground: '#d0d0d0'
         #         background: '#1a1716'
+        # block_status:
+        #     success: '#7E7C7C'
+        #     failure: '#C63939'
+        #     running: '#A0A000'
+        # gutter_text: '#7E7C7C'
+        # sticky_header:
+        #     background: '#2C2928'
+        #     separator: '#595757'
         input_method_editor:
             foreground: '#FFFFFF'
             background: '#FF0000'

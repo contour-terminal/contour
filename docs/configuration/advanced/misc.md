@@ -21,7 +21,7 @@ Default: auto
 
 The most bytes taken from the PTY in one read, and so the most parsed in one go. Larger batches parse
 output faster; smaller ones show a flood of it in smaller steps. This is an advanced option. Use with
-care!
+care! A change applies to sessions opened afterwards.
 
 Default: 65536
 
@@ -42,6 +42,7 @@ Default: `false`
 # Text reflow on resize
 
 Whether or not to reflow the lines on terminal resize events.
+A change applies to sessions opened afterwards.
 
 Default: `true`
 

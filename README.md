@@ -87,7 +87,8 @@ Click the following button to install Contour from the Flathub store.
 In order to configure Contour, it is necessary to modify the configuration file
 `contour.yml`, which is initially generated in the `$HOME/.config/contour`
 directory. Some features also require shell integration. These can be generated
-via the CLI (see below), these currently exist for zsh, fish and tcsh.
+via the CLI (see below) for bash, zsh, fish, tcsh and PowerShell (`pwsh`);
+Nushell integrates natively.
 
 ## Persistent sessions (daemon mode)
 

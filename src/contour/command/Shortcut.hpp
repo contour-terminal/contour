@@ -87,4 +87,12 @@ static_assert(std::ranges::all_of(ShortcutModifierTable,
 [[nodiscard]] std::unordered_map<std::string, std::string> shortcutIndex(
     config::InputMappings const& mappings);
 
+/// @copydoc shortcutIndex(config::InputMappings const&)
+///
+/// Indexes the built-in fallback rows @p config enables after the user's own bindings, so a built-in
+/// chord such as Ctrl+Shift+G is advertised too. A fallback row whose chord the user's table binds is
+/// left out: the user's binding is found first, so that chord never reaches the fallback.
+/// @param config The configuration: its input mappings and the options that enable fallback rows.
+[[nodiscard]] std::unordered_map<std::string, std::string> shortcutIndex(config::Config const& config);
+
 } // namespace contour::command

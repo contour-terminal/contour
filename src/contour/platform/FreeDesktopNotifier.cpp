@@ -61,14 +61,18 @@ void FreeDesktopNotifier::sendNotification(vtbackend::DesktopNotification const&
     auto const replacesId = _router.replacementFor(notification.identifier);
 
     auto const identifier = notification.identifier;
+    _router.onSending(identifier);
     _transport->notify(notification,
                        replacesId,
                        [this, identifier, replacesId](std::optional<NotificationRouter::ServerId> serverId) {
-                           if (!serverId.has_value())
-                               return;
+                           if (serverId.has_value())
+                               notifierLog()("Notification sent: id='{}' -> {}", identifier, *serverId);
 
-                           notifierLog()("Notification sent: id='{}' -> {}", identifier, *serverId);
-                           _router.onSent(identifier, *serverId, replacesId);
+                           // A close requested while this send was in flight, or an earlier send under
+                           // the same identifier that this one could not name as its replacement,
+                           // is withdrawn only now that the reply has put an id to it.
+                           if (auto const withdrawn = _router.onSent(identifier, serverId, replacesId))
+                               _transport->close(*withdrawn);
                        });
 }
 

@@ -8,6 +8,7 @@ set(_header_files
     GlyphScaling.hpp
     GlyphSlicing.hpp
     GridMetrics.hpp
+    GutterCells.hpp
     ImageRenderer.hpp
     Pixmap.hpp
     RenderTarget.hpp
@@ -43,6 +44,7 @@ set(_test_files
     GlyphAdvance_test.cpp
     GlyphScaling_test.cpp
     GlyphSlicing_test.cpp
+    GutterCells_test.cpp
     ImageRenderer_test.cpp
     ReGISFontRasterizer_test.cpp
     TextRenderer_test.cpp
@@ -70,6 +72,7 @@ if(CONTOUR_TESTING)
     target_sources(vtrasterizer_test PRIVATE ${_test_files})
     target_link_libraries(vtrasterizer_test vtrasterizer core::testing Catch2::Catch2)
     add_test(NAME vtrasterizer_test COMMAND $<TARGET_FILE:vtrasterizer_test>)
+    vtbackend_force_include_test_printers(vtrasterizer_test)
     if(NOT WIN32)
         target_compile_options(vtrasterizer_test PRIVATE -Wno-c2y-extensions)
     endif()

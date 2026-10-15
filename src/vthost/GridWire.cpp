@@ -2,6 +2,7 @@
 #include <vthost/GridWire.hpp>
 
 #include <vtbackend/core/CellFlags.hpp>
+#include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/grid/SoAClusterWriter.hpp>
 
@@ -37,6 +38,7 @@ namespace
         std::pair { vtbackend::LineFlag::DoubleHeightBottom, 6 },
         std::pair { vtbackend::LineFlag::CommandEnd, 7 },
         std::pair { vtbackend::LineFlag::PromptEnd, 8 },
+        std::pair { vtbackend::LineFlag::UserMark, 9 },
     };
 
     constexpr auto PinnedCellFlagBits = std::array {
@@ -60,6 +62,7 @@ namespace
         std::pair { vtbackend::CellFlag::WideCharContinuation, 17 },
         std::pair { vtbackend::CellFlag::CharacterProtectedISO, 18 },
         std::pair { vtbackend::CellFlag::MulticellContinuation, 19 },
+        std::pair { vtbackend::CellFlag::WrapPadding, 20 },
     };
 
     template <typename Flag, std::size_t N>
@@ -181,7 +184,7 @@ void applyWireLine(vtbackend::Line& line,
     // columns their color, and it puts the row into the blank state when nothing travelled — which
     // is what makes a uniformly-filled row as cheap on this side as it was on the wire.
     line.reset(flags, fillAttrsOf(wire));
-    // After the reset, never before: Line::reset() clears both offsets.
+    // After the reset, never before: Line::reset() clears an offset whose flag it does not keep.
     line.setPromptEndOffset(vtbackend::ColumnOffset(wire.promptEndOffset));
     line.setCommandEndOffset(vtbackend::ColumnOffset(wire.commandEndOffset));
     // Translated, never copied: the id is the SENDER's, and this terminal mints its own. An id with
@@ -191,6 +194,16 @@ void applyWireLine(vtbackend::Line& line,
     if (wire.contextId != 0)
         if (auto const it = contexts.find(wire.contextId); it != contexts.end())
             line.adoptContext(it->second.local);
+    // Copied, never translated — the opposite of the context id above, and deliberately so: the
+    // mirror's record store holds only what the host replicated, under the host's own ids, so there
+    // is no second id space to map into. The reset above cleared the id, and a zero adopts nothing.
+    line.adoptBlock(vtbackend::CommandBlockId { wire.blockId });
+    // The host's stamp verbatim: seconds since the HOST's session began, so it names an instant only
+    // against the host's epoch, never this terminal's. Saturated rather than trusted: the line keeps
+    // 24 bits and the wire field has 32, and stampBornAt() clamps to Line::MaxBornAt — the "born, but
+    // when is unknown" stamp — instead of wrapping round to a plausible time. A zero, a row the host
+    // never stamped, stamps nothing.
+    line.stampBornAt(wire.bornAt);
     if (wire.cells.empty())
         return;
 
@@ -224,6 +237,8 @@ proto::WireLine toWireLine(vtbackend::Grid const& grid,
     wire.stableId = grid.stableLineIdOf(offset);
     wire.flags = static_cast<uint16_t>(line.flags().value());
     wire.contextId = unbox<uint16_t>(line.contextId());
+    wire.blockId = line.blockId().value;
+    wire.bornAt = line.bornAt();
     wire.promptEndOffset = unbox<int32_t>(line.promptEndOffset());
     wire.commandEndOffset = unbox<int32_t>(line.commandEndOffset());
     wire.columns = unbox<uint32_t>(line.size());

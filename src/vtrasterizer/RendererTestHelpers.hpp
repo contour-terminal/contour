@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/Primitives.hpp>
+
 #include <vtrasterizer/RenderTarget.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <format>
 #include <optional>
 #include <ostream>
@@ -161,11 +165,34 @@ class MockRenderTarget: public vtrasterizer::RenderTarget
     MockAtlasBackend& getMockBackend() { return _textureScheduler; }
     MockImageTextureBackend& getMockImageBackend() { return _imageScheduler; }
 
-    void renderRectangle(int, int, vtbackend::Width, vtbackend::Height, vtbackend::RGBAColor) override {}
+    /// One renderRectangle() call, in the order it was issued.
+    struct RecordedRectangle
+    {
+        int x = 0;                     ///< Left edge, in pixels.
+        int y = 0;                     ///< Top edge, in pixels.
+        vtbackend::Width width {};     ///< Its width.
+        vtbackend::Height height {};   ///< Its height.
+        vtbackend::RGBAColor color {}; ///< Its fill.
+
+        /// How many execute() calls preceded it. Each execute() is one compositing step, and a step draws
+        /// all its rectangles before any of its glyphs -- so only a rectangle in a LATER step than some
+        /// glyphs can cover them.
+        size_t step = 0;
+    };
+
+    std::vector<RecordedRectangle> rectangles; ///< Every rectangle drawn, in order.
+    size_t executeCount = 0;                   ///< How many steps were executed.
+
+    void renderRectangle(
+        int x, int y, vtbackend::Width width, vtbackend::Height height, vtbackend::RGBAColor color) override
+    {
+        rectangles.push_back(RecordedRectangle {
+            .x = x, .y = y, .width = width, .height = height, .color = color, .step = executeCount });
+    }
     void setScissorRect(int, int, int, int) override {}
     void clearScissorRect() override {}
     void scheduleScreenshot(ScreenshotCallback) override {}
-    void execute(std::chrono::steady_clock::time_point) override {}
+    void execute(std::chrono::steady_clock::time_point) override { ++executeCount; }
     void clearCache() override {}
     std::optional<vtrasterizer::AtlasTextureScreenshot> readAtlas() override { return std::nullopt; }
     void inspect(std::ostream&) const override {}

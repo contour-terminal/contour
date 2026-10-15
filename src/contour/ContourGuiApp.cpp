@@ -16,6 +16,7 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/GuiTheme.hpp>
 #include <contour/platform/Notifier.hpp>
+#include <contour/platform/QtInvoke.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RemoteLayout.hpp>
@@ -31,20 +32,26 @@
 #include <vtbackend/vt/DesktopNotification.hpp>
 
 #include <vtpty/Process.hpp>
+#include <vtpty/SandboxInfo.hpp>
 
 #include <text_shaper/FontLocator.hpp>
 
 #include <crispy/ScopedTimer.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/cli/CLI.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/log/LogStore.hpp>
+#include <core/platform/NativeFileSystem.hpp>
+#include <core/platform/PathUtils.hpp>
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QEventLoop>
 #include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
+#include <QtNetwork/QHostInfo>
 #include <QtQml/qqmlextensionplugin.h>
 
 #include <vthost/Daemon.hpp>
@@ -206,18 +213,42 @@ namespace
     {
         return QFileInfo(platform::toQString(path)).isExecutable();
     }
+
+    /// The production CommandOutputFiles: the native filesystem, in a directory named after this process.
+    /// @param env The process environment, which names the runtime directory.
+    /// @param liveness What tells whose leftover directories may go. Borrowed: it must outlive the files.
+    [[nodiscard]] std::unique_ptr<session::CommandOutputFiles> makeCommandOutputFiles(
+        core::Environment const& env, session::ProcessLiveness const& liveness)
+    {
+        auto ec = std::error_code {};
+        auto temporary = fs::temp_directory_path(ec);
+        if (ec)
+            temporary.clear();
+        return std::make_unique<session::CommandOutputFiles>(
+            core::platform::NativeFileSystem::instance(),
+            liveness,
+            session::commandOutputDirectory(
+                env, vtpty::currentSandbox(), temporary, QCoreApplication::applicationPid()));
+    }
+
+    /// This machine as every session judges locality by it: its machine id and its host name.
+    [[nodiscard]] vtbackend::HostIdentity thisMachineIdentity()
+    {
+        return vtbackend::readHostIdentity(core::platform::NativeFileSystem::instance(),
+                                           QHostInfo::localHostName().toStdString());
+    }
 } // namespace
 
 VerbatimCommand classifyVerbatimCommand(std::string_view token, ProgramReachablePredicate isReachable)
 {
+    auto const path = core::pathFromUtf8(token).value_or(fs::path {});
     auto ec = std::error_code {};
-    auto const status = fs::status(token, ec);
+    auto const status = fs::status(path, ec);
 
     if (fs::is_regular_file(status))
     {
         // An executable file names itself; a plain file names the directory it lives in, which is
         // what `contour terminal ~/notes.txt` (a file manager's "open terminal here") asks for.
-        auto const path = fs::path(token);
         if (namesAnExecutableFile(path))
             return VerbatimCommand { .kind = VerbatimCommandKind::Program, .workingDirectory = {} };
         return VerbatimCommand { .kind = VerbatimCommandKind::WorkingDirectory,
@@ -225,7 +256,7 @@ VerbatimCommand classifyVerbatimCommand(std::string_view token, ProgramReachable
     }
 
     if (fs::is_directory(status))
-        return VerbatimCommand { .kind = VerbatimCommandKind::WorkingDirectory, .workingDirectory = token };
+        return VerbatimCommand { .kind = VerbatimCommandKind::WorkingDirectory, .workingDirectory = path };
 
     // Nothing on disk under that name -- but `contour terminal echo hello` names its program the way
     // anyone names one, and the spawn resolves it through execvp()'s PATH search. Ask the same
@@ -241,7 +272,10 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<platform::ExternalLauncher> externalLauncher,
                              std::unique_ptr<config::LayoutStore> layoutStore,
                              std::unique_ptr<command::CommandHistoryStore> commandHistoryStore,
-                             std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer):
+                             std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer,
+                             std::unique_ptr<session::CommandOutputFiles> commandOutputFiles,
+                             vtbackend::TerminalClocks terminalClocks,
+                             std::optional<vtbackend::HostIdentity> hostIdentity):
     ContourApp { env },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeStatusLineCommandExecutor()),
@@ -255,13 +289,26 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
                                              : std::make_unique<command::FileCommandHistoryStore>()),
     _speechSynthesizer(speechSynthesizer ? std::move(speechSynthesizer) : platform::makeSpeechSynthesizer()),
-    _sessionManager(*this, *_sessionFactory, *_layoutStore, *_commandHistoryStore),
+    _commandOutputFiles(commandOutputFiles ? std::move(commandOutputFiles)
+                                           : makeCommandOutputFiles(env, _processLiveness)),
+    _terminalClocks(terminalClocks),
+    // Read once, for every session, rather than by each one on the GUI thread as it is built.
+    _hostIdentity(hostIdentity ? std::move(*hostIdentity) : thisMachineIdentity()),
+    // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
+    // tooltip's paths arrive in, which the environment's native separators would not match.
+    _sessionManager(
+        *this, *_sessionFactory, *_layoutStore, *_commandHistoryStore, QDir::homePath().toStdString()),
     _gpuInventory { display::makePlatformGpuInventory() }
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
     link("contour.info.config", bind(&ContourGuiApp::checkConfig, this));
     link("contour.client", bind(&ContourGuiApp::clientAction, this));
+}
+
+core::platform::FileSystem const& ContourGuiApp::fileSystem() const noexcept
+{
+    return core::platform::NativeFileSystem::instance();
 }
 
 ContourGuiApp::~ContourGuiApp()
@@ -376,7 +423,7 @@ void ContourGuiApp::relaunchOnAutomaticGpu()
 
     auto arguments = QStringList {};
     for (auto const index: std::views::iota(1, _argc))
-        arguments.push_back(QString::fromLocal8Bit(_argv[index]));
+        arguments.push_back(QString::fromUtf8(_argv[index]));
 
     auto process = QProcess {};
     process.setProgram(QCoreApplication::applicationFilePath());
@@ -611,7 +658,7 @@ int ContourGuiApp::clientAction()
             };
             if (!tlsCaPath.empty())
             {
-                auto const path = std::filesystem::path(tlsCaPath);
+                auto const path = core::pathFromUtf8(tlsCaPath).value_or(fs::path {});
                 // An empty CA read must hard-fail exactly like the thin client:
                 // makeTlsClientContext treats "" as the TOFU/no-verify posture, so
                 // accepting it would silently strip the pinning the user asked for.
@@ -631,27 +678,29 @@ int ContourGuiApp::clientAction()
         else
         {
             auto const controlPath = vthost::muxSocketPath(label, socketOption);
-            endpointLabel = controlPath.string();
+            endpointLabel = core::pathToUtf8(controlPath);
             endpoint = vthost::UnixEndpoint { .socketPath = controlPath };
         }
 
-        // The emulation settings we ask the daemon to give the sessions WE create. Loaded here
-        // rather than read from config(), because the re-parse that makes the attach profile
-        // visible to config() runs further down — after the controller has already connected.
+        // The emulation settings we ask the daemon to give the sessions WE create. At attach they are
+        // loaded from the file, because the re-parse that makes the attach profile visible to config()
+        // runs further down — after the controller has already connected — and it loads that same file.
         //
         // A failure is a warning, not a verb failure: the re-parse below reports a broken
         // configuration with far better context, and hosting under the daemon's own resolved
         // profile is a sane thing to do meanwhile.
-        auto sessionSettings = std::optional<vtbackend::Settings> {};
+        auto attachSettings = std::optional<vtbackend::Settings> {};
         if (auto resolved = config::resolveEmulationSettings(attachConfig, attachProfile); resolved)
-            sessionSettings = *std::move(resolved);
+            attachSettings = *std::move(resolved);
         else
             cerr << std::format("contour client: {}; the daemon's own profile will be used for new "
                                 "sessions.\n",
                                 resolved.error());
 
-        _nativeController =
-            std::make_unique<remote::NativeController>(std::move(endpoint), std::move(sessionSettings));
+        // Every session created after that takes them from the configuration in memory, exactly as a
+        // local new tab does, so a reload reaches remote and local tabs alike.
+        _nativeController = std::make_unique<remote::NativeController>(
+            std::move(endpoint), std::move(attachSettings), [this] { return currentEmulationSettings(); });
         if (auto connected = _nativeController->connectAndWait(std::chrono::seconds(5)); !connected)
         {
             cerr << std::format("contour client: {} ({})\n", connected.error(), endpointLabel);
@@ -945,6 +994,11 @@ std::chrono::seconds ContourGuiApp::earlyExitThreshold() const
     return std::chrono::seconds(config::documentation::DefaultEarlyExitThreshold);
 }
 
+std::expected<vtbackend::Settings, std::string> ContourGuiApp::currentEmulationSettings() const
+{
+    return config::emulationSettingsFor(_config, profileName());
+}
+
 string ContourGuiApp::profileName() const
 {
     if (auto profile = parameters().get<string>("contour.terminal.profile"); !profile.empty())
@@ -969,9 +1023,10 @@ std::string ContourGuiApp::layoutName() const
 std::optional<fs::path> ContourGuiApp::dumpStateAtExit() const
 {
     auto const path = parameters().get<std::string>("contour.terminal.dump-state-at-exit");
-    if (path.empty())
+    auto file = core::pathFromUtf8(path);
+    if (path.empty() || !file)
         return std::nullopt;
-    return fs::path(path);
+    return *std::move(file);
 }
 
 void ContourGuiApp::onExit(session::TerminalSession& session)
@@ -1060,11 +1115,7 @@ void ContourGuiApp::applyWindowControlStyle(config::WindowControlStyle style)
 
 int ContourGuiApp::checkConfig()
 {
-    auto const& flags = parameters();
-    auto const configPath = QString::fromStdString(flags.get<string>("contour.terminal.config"));
-
-    _config = configPath.isEmpty() ? contour::config::loadConfig()
-                                   : contour::config::loadConfigFromFile(configPath.toStdString());
+    _config = contour::config::loadConfigNamed(parameters().get<string>("contour.terminal.config"));
 
     contour::config::compareEntries(
         _config, core::log::Category("", "Console Logger", core::log::Category::State::Enabled));
@@ -1089,7 +1140,14 @@ bool ContourGuiApp::loadConfig(string const& target)
         return fromLog.empty() ? flags.get<string>(prefix + "debug") : fromLog;
     }();
 
-    auto const logFile = core::log::parseLogFileSpec(flags.get<string>(prefix + "log-file"));
+    auto const logFileSpec = flags.get<string>(prefix + "log-file");
+    auto const parsedLogFile = core::log::parseLogFileSpec(logFileSpec);
+    if (!parsedLogFile)
+        cerr << std::format("contour: cannot use log file '{}': {}\n",
+                            core::escape(logFileSpec),
+                            parsedLogFile.error().message());
+    // The file to log to; none for standard error, which is also where a spec that is not UTF-8 leaves it.
+    auto const logFile = parsedLogFile.value_or(std::nullopt);
 
     // A destination is worth installing for EITHER half: a filter needs somewhere to write, and
     // `--log-file` alone is a request to redirect whatever $LOG already enabled. Gating the whole
@@ -1146,10 +1204,7 @@ bool ContourGuiApp::loadConfig(string const& target)
                                 unmatched);
     }
 
-    auto const configPath = QString::fromStdString(flags.get<string>(prefix + "config"));
-
-    _config = configPath.isEmpty() ? contour::config::loadConfig()
-                                   : contour::config::loadConfigFromFile(configPath.toStdString());
+    _config = contour::config::loadConfigNamed(flags.get<string>(prefix + "config"));
 
     _config.live.value() = _config.live.value() || parameters().boolean("contour.terminal.live-config");
 
@@ -1167,7 +1222,8 @@ bool ContourGuiApp::loadConfig(string const& target)
     }
 
     if (auto const wd = flags.get<string>("contour.terminal.working-directory"); !wd.empty())
-        _config.profile(profileName())->shell.value().workingDirectory = fs::path(wd);
+        _config.profile(profileName())->shell.value().workingDirectory =
+            core::pathFromUtf8(wd).value_or(fs::path {});
 
     config::TerminalProfile* profile = _config.profile(profileName());
     if (!profile)
@@ -1487,8 +1543,8 @@ int ContourGuiApp::terminalGuiAction()
             errorLog()("Ignoring the QML overrides in '{}': the interface is loaded as a QML module "
                        "now. Move them into '{}', alongside a qmldir naming each component, to have "
                        "them apply again.",
-                       (configHome / "ui").generic_string(),
-                       uiModuleOverrideDirectory(configHome).generic_string());
+                       core::platform::normalizePath(configHome / "ui"),
+                       core::platform::normalizePath(uiModuleOverrideDirectory(configHome)));
         _qmlEngine->addImportPath(platform::toQString(configHome));
 
         QQmlContext* context = _qmlEngine->rootContext();
@@ -1538,8 +1594,7 @@ int ContourGuiApp::terminalGuiAction()
     auto multimediaWarmupThread = std::thread([this, &multimediaWarmedUp, anyProfileHasAudibleBell] {
         if (anyProfileHasAudibleBell)
             QMediaDevices::audioOutputs();
-        QMetaObject::invokeMethod(
-            &_sessionManager, [this] { _sessionManager.setMultimediaReady(true); }, Qt::QueuedConnection);
+        platform::postToObject(&_sessionManager, [this] { _sessionManager.setMultimediaReady(true); });
         multimediaWarmedUp.store(true, std::memory_order_release);
     });
 

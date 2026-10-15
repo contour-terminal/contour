@@ -7,8 +7,11 @@
     #include <contour/platform/NotificationTransport.hpp>
 
     #include <QtCore/QObject>
+    #include <QtCore/QStringList>
     #include <QtCore/QVariantList>
     #include <QtDBus/QDBusConnection>
+
+    #include <cstdint>
 
 namespace contour::platform
 {
@@ -27,17 +30,35 @@ namespace contour::platform
     return 1;
 }
 
+/// How a notification server reads the body of a Notify call: its `body-markup` capability.
+enum class NotificationBodyFormat : uint8_t
+{
+    PlainText = 0, ///< Shown as it is.
+    Markup,        ///< Read as markup, a subset of HTML: `&`, `<` and `>` must be escaped to show as written.
+};
+
+/// The body format of a server whose GetCapabilities answered @p capabilities.
+/// @param capabilities What org.freedesktop.Notifications.GetCapabilities returned.
+/// @return Markup when they name `body-markup`, else PlainText.
+[[nodiscard]] NotificationBodyFormat notificationBodyFormatOf(QStringList const& capabilities);
+
 /// Builds the positional argument tuple for org.freedesktop.Notifications.Notify.
 ///
 /// A free function rather than a member, because it is the one part of this transport a headless
 /// test can check head-on: no bus, no daemon, no waiting -- just the notification in and the wire
 /// tuple out.
 ///
+/// The body is whatever an application wrote (OSC 99), or names what it set (a tab title, an OSC 7
+/// directory), so it is escaped for a server that reads it as markup: shown as written, never as a link
+/// or an image to fetch. The summary is plain text on every server.
+///
 /// @param notification The notification to send.
 /// @param replacesId A live server id this supersedes, or 0 for a fresh notification.
+/// @param bodyFormat How the server reads the body.
 /// @return The eight Notify arguments, in wire order.
 [[nodiscard]] QVariantList buildFreedesktopNotifyArguments(vtbackend::DesktopNotification const& notification,
-                                                           NotificationTransport::ServerId replacesId);
+                                                           NotificationTransport::ServerId replacesId,
+                                                           NotificationBodyFormat bodyFormat);
 
 /// Speaks org.freedesktop.Notifications over the session bus, asynchronously.
 ///
@@ -56,6 +77,9 @@ class DBusNotificationTransport final: public QObject, public NotificationTransp
     Q_OBJECT
 
   public:
+    /// Asks the server for its capabilities, without waiting for the answer: until it arrives, the body
+    /// is escaped as for a server that reads markup.
+    /// @param parent The QObject parent.
     explicit DBusNotificationTransport(QObject* parent = nullptr);
 
     void notify(vtbackend::DesktopNotification const& notification,
@@ -82,6 +106,11 @@ class DBusNotificationTransport final: public QObject, public NotificationTransp
     /// The subscription handlers.
     ClosedHandler _onClosed;
     ActivatedHandler _onActivated;
+
+    /// How the server reads a body, as its capabilities said. Markup until they arrive, as on nearly every
+    /// server (GNOME Shell, Plasma, dunst, mako): escaped text a plain-text server shows costs an `&amp;`,
+    /// whereas unescaped text a markup server reads can become a link.
+    NotificationBodyFormat _bodyFormat = NotificationBodyFormat::Markup;
 };
 
 } // namespace contour::platform

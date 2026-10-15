@@ -7,14 +7,19 @@
 add_library(contour_config STATIC
     Actions.cpp Actions.hpp
     AtomicFileWrite.cpp AtomicFileWrite.hpp
+    BlockActionEnums.hpp
     Config.cpp Config.hpp
     ConfigDocumentation.hpp
     ConfigEnum.hpp
+    ConfigEnumInfo.hpp
+    FinishNotificationConfig.hpp
+    GlobalOverrides.cpp GlobalOverrides.hpp
     GpuSelector.cpp GpuSelector.hpp
     GuiConfigStore.cpp GuiConfigStore.hpp
     LayoutBuilder.cpp LayoutBuilder.hpp
     LayoutStore.cpp LayoutStore.hpp
     ModifierNames.hpp
+    SingleQuoted.hpp
     TabBarMode.hpp
     UiStyle.hpp
     WindowControlStyle.cpp WindowControlStyle.hpp

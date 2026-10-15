@@ -345,6 +345,33 @@ void moveColumns(LineSoA& line, size_t srcCol, size_t dstCol, size_t count);
 /// @return Number of used columns (0 if line is empty).
 [[nodiscard]] size_t trimBlankRight(LineSoA const& line, size_t cols);
 
+/// Like trimBlankRight(), but a wide character's continuation cells count as text: their codepoint is
+/// zero, yet cutting them off leaves the character's head without the columns it claims. What a reflow
+/// measures a row's text by.
+/// @return Number of used columns, the continuation cells of a trailing wide character included.
+[[nodiscard]] size_t trimBlankRightKeepingWideCharacters(LineSoA const& line, size_t cols);
+
+/// Where a part of @p line that starts at @p start and could run to @p end ends, so that it does not cut a
+/// wide character in two: at @p end, or, where @p end falls on a wide character's continuation, at the
+/// character's head, which then starts the next part. A character that begins the part fits no part
+/// better and is cut at @p end as before.
+/// @return The column the part ends at, greater than @p start.
+[[nodiscard]] size_t wideCharacterSafeEnd(LineSoA const& line, size_t start, size_t end) noexcept;
+
+/// Whether the cell at @p col of @p line, which stores its cells, is padding: an empty cell a wide character
+/// left at the end of its row when it moved on to the next. No part of the text.
+[[nodiscard]] inline bool isWrapPadding(LineSoA const& line, size_t col) noexcept
+{
+    return line.codepoints[col] == 0 && line.sgr[col].flags.contains(CellFlag::WrapPadding);
+}
+
+/// Whether the cell at @p col of @p line, which stores its cells, holds no text of its own (NoTextCellFlags):
+/// a wide character's second half, the lower part of a tall text-sizing block, or padding.
+[[nodiscard]] inline bool holdsNoText(LineSoA const& line, size_t col) noexcept
+{
+    return line.sgr[col].flags.any(NoTextCellFlags);
+}
+
 /// Iterate over all codepoints of a grapheme cluster at the given column.
 /// @param line The LineSoA to read from.
 /// @param col  Column index.

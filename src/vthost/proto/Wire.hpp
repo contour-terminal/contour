@@ -27,18 +27,22 @@ namespace vthost::proto
 
 /// The protocol revision exchanged in the Hello handshake before anything else.
 ///
-/// **Pinned at 1 while this protocol is unreleased, and deliberately NOT bumped per change.**
-/// Nothing outside this source tree speaks it, so there is no peer for a version number to be
-/// compatible with: the counter had reached 13 above a changelog of twelve revisions no reader could
-/// ever have observed, which is bookkeeping, not compatibility. Field additions, removals and
-/// renames all land without touching this constant.
+/// **Experimental since 0.7.0**, which shipped revision 1. Experimental means no compatibility
+/// across revisions: the handshake admits only its own and refuses any other, and each end reports
+/// the other's version. A daemon keeps running across an upgrade, so that refusal is what a user
+/// meets, and it must stay readable to every revision: each hello keeps a layout rule for it.
+/// @see ClientHello
+/// @see ServerHello
 ///
-/// The price is that two binaries built from different commits pass the exact-match handshake and
-/// then disagree about the bytes, instead of being rejected with a diagnostic — so rebuild the
-/// daemon and its clients together. Once the protocol ships, versioning resumes here and the
-/// per-change bump becomes real: at that point every wire change needs a new number and a line
-/// saying what moved.
-constexpr uint32_t CodecVersion = 1;
+/// It moves once per release whose wire differs from the release before, not once per change: no
+/// peer outside this tree speaks the revision in flight. Two builds from between releases can pass
+/// the handshake and then disagree about the bytes, so rebuild the daemon and its clients together
+/// while developing.
+///
+/// - 1: contour 0.7.0.
+/// - 2: every wire change since 0.7.0 -- OSC 3008 contexts, command blocks, the daemon's machine
+///   and engine operations among them -- and the hello layout 0.7.0 reads.
+constexpr uint32_t CodecVersion = 2;
 
 /// The largest frame payload the decoder will accept. A peer-declared length
 /// beyond this is rejected outright (FrameTooLarge) rather than treated as

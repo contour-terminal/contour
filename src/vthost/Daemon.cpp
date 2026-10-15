@@ -12,13 +12,22 @@
 
 #include <vthost/Daemon.hpp>
 
+#include <vtbackend/core/TerminalContext.hpp>
+
+#include <vtpty/ProgramLookup.hpp>
+#include <vtpty/WindowsCommandLine.hpp>
+
 #include <core/Environment.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
+#include <core/WideString.hpp>
 #include <core/async/WhenAll.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
 #include <core/net/Sockets.hpp>
 #include <core/net/Tls.hpp>
+#include <core/platform/NativeFileSystem.hpp>
+#include <core/platform/SystemInfo.hpp>
 
 #include <atomic>
 #include <charconv>
@@ -62,6 +71,13 @@ namespace vthost
 
 namespace
 {
+    /// The machine this daemon runs on, read once from the OS for every session it will host.
+    [[nodiscard]] vtbackend::HostIdentity thisHostIdentity()
+    {
+        return vtbackend::readHostIdentity(core::platform::NativeFileSystem::instance(),
+                                           core::platform::hostName());
+    }
+
     /// Drives every protocol server's accept loop on the one reactor.
     core::async::Task<void> serveAll(std::vector<ConnectionAcceptor*> servers)
     {
@@ -112,12 +128,14 @@ namespace
     }
 
     /// Reads the whole file at @p path, or nullopt if it cannot be opened.
+    /// @param path The file, in UTF-8.
     [[nodiscard]] std::optional<std::string> readFileToString(std::string const& path)
     {
+        auto const file = core::pathFromUtf8(path);
         std::error_code ec;
-        if (!std::filesystem::exists(path, ec))
+        if (!file || !std::filesystem::exists(*file, ec))
             return std::nullopt;
-        return core::readFileAsString(path);
+        return core::readFileAsString(*file);
     }
 
     /// Builds the TLS server context for the native TCP listener: an ephemeral
@@ -265,22 +283,6 @@ namespace
         return loop.blockOn(core::net::connectUnix(&loop, path)).has_value();
     }
 
-#ifndef _WIN32
-    // The production halves of @ref resolveExecutablePath, needed only where exec does not search
-    // PATH itself. CreateProcess does, so Windows never resolves anything.
-
-    /// Whether @p path names a file this process may execute — kept out of the search so the search
-    /// itself needs no filesystem, which is what makes it testable.
-    /// @param path The candidate path.
-    /// @return True when it is a regular file this process has execute permission for.
-    [[nodiscard]] bool isExecutableFile(std::filesystem::path const& path)
-    {
-        auto ec = std::error_code {};
-        return std::filesystem::is_regular_file(path, ec) && ::access(path.c_str(), X_OK) == 0;
-    }
-
-#endif
-
     /// Starts the daemon described by @p args detached from this process, so the client may exit
     /// without taking the daemon down with it.
     ///
@@ -298,8 +300,9 @@ namespace
         // is what the daemon's `ps` line and its own commandLine() replay should show.
         // core::Environment, not getenv: this runs on a client that already has a live reactor
         // thread, and the snapshot exists precisely so an environment read is not racing it.
-        auto const image = resolveExecutablePath(
-            args[0], core::defaultEnvironment().get("PATH").value_or(""), isExecutableFile);
+        auto const image = vtpty::resolveExecutablePath(args[0],
+                                                        core::defaultEnvironment().get("PATH").value_or(""),
+                                                        core::platform::NativeFileSystem::instance());
 
         auto argv = std::vector<char*> {};
         argv.reserve(args.size() + 1);
@@ -342,14 +345,16 @@ namespace
         return true;
 #else
         // CreateProcess parses its command line in place and may write to it, so the buffer must be
-        // mutable. joinCommandLine quotes every argument, argv[0] included: either can hold spaces
+        // mutable. joinCommandLine quotes an argument, argv[0] included, where it holds a space
         // (`C:\Program Files\...`), which an unquoted command line would split.
-        auto commandLine = joinCommandLine(args);
-        auto startupInfo = STARTUPINFOA {};
+        auto commandLine = core::toUtf16(joinCommandLine(args));
+        if (!commandLine)
+            return false;
+        auto startupInfo = STARTUPINFOW {};
         startupInfo.cb = sizeof(startupInfo);
         auto processInfo = PROCESS_INFORMATION {};
-        if (!::CreateProcessA(nullptr,
-                              commandLine.data(),
+        if (!::CreateProcessW(nullptr,
+                              commandLine->data(),
                               nullptr,
                               nullptr,
                               FALSE,
@@ -417,7 +422,8 @@ core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, std::string
 {
     if (auto const* unixEp = std::get_if<UnixEndpoint>(&endpoint))
     {
-        auto socket = co_await core::net::connectUnix(loop, nativeSocketPath(unixEp->socketPath).string());
+        auto socket =
+            co_await core::net::connectUnix(loop, core::pathToUtf8(nativeSocketPath(unixEp->socketPath)));
         if (!socket)
             co_return std::unexpected(socket.error().toString());
         co_return std::move(*socket);
@@ -446,7 +452,7 @@ std::vector<std::string> daemonSpawnArgs(std::string_view daemonBinary,
     auto args = std::vector<std::string> {
         std::string { daemonBinary },
         "daemon",
-        std::format("--socket={}", socketPath.string()),
+        std::format("--socket={}", core::pathToUtf8(socketPath)),
     };
     // A daemon we spawned belongs to the client that spawned it, so it must not outlive the
     // sessions it was started for.
@@ -467,75 +473,11 @@ std::vector<std::string> daemonSpawnArgs(std::string_view daemonBinary,
     return args;
 }
 
-std::string resolveExecutablePath(std::string_view program,
-                                  std::string_view searchPath,
-                                  std::function<bool(std::filesystem::path const&)> const& isExecutable)
-{
-    auto const named = std::filesystem::path { program };
-    // A name carrying a directory is already a path — execvp's rule, and what keeps `./contour`
-    // and `/usr/bin/contour` meaning exactly what they say rather than being searched for.
-    if (program.empty() || named.has_parent_path())
-        return std::string { program };
-
-    for (auto const entry: std::views::split(searchPath, PathListSeparator))
-    {
-        auto const directory = std::string_view { entry };
-        // POSIX reads an empty PATH entry as the current directory; deliberately skipped, because
-        // resolving argv[0] against the cwd is the ambiguity this function exists to remove.
-        if (directory.empty())
-            continue;
-        if (auto candidate = std::filesystem::path { directory } / named; isExecutable(candidate))
-            return candidate.string();
-    }
-    return std::string { program };
-}
-
-namespace
-{
-    /// Appends @p arg to @p line quoted the way `CommandLineToArgvW` un-quotes.
-    ///
-    /// Backslashes are literal EXCEPT immediately before a `"`, where a run of n is read as n/2
-    /// backslashes and the quote is escaped if n was odd. So a run that would land against the
-    /// closing quote must be doubled, and an embedded quote needs its run doubled plus one more
-    /// backslash. Wrapping the argument in quotes and hoping is how `--config=C:\dir\` came to end
-    /// its own quoting and glue the remainder of the command line into itself.
-    /// @param line The command line being built.
-    /// @param arg The argument to append.
-    void appendQuoted(std::string& line, std::string_view arg)
-    {
-        line += '"';
-        auto backslashes = std::size_t { 0 };
-        for (auto const ch: arg)
-        {
-            if (ch == '\\')
-            {
-                ++backslashes;
-                continue;
-            }
-            // A run before a quote is doubled and the quote escaped; before anything else it is
-            // literal and travels as-is.
-            line.append(ch == '"' ? (backslashes * 2) + 1 : backslashes, '\\');
-            backslashes = 0;
-            line += ch;
-        }
-        // The closing quote is a quote too: double whatever run reached it.
-        line.append(backslashes * 2, '\\');
-        line += '"';
-    }
-} // namespace
-
 std::string joinCommandLine(std::span<std::string const> args)
 {
-    auto line = std::string {};
-    for (auto const& arg: args)
-    {
-        if (!line.empty())
-            line += ' ';
-        // Quote every argument whole, unconditionally: CommandLineToArgv strips the quotes, and
-        // quoting only the ones that look like they need it is how argv[0] came to be left bare.
-        appendQuoted(line, arg);
-    }
-    return line;
+    if (args.empty())
+        return {};
+    return vtpty::buildWindowsCommandLine(args.front(), args.subspan(1));
 }
 
 std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec)
@@ -572,14 +514,15 @@ int runDaemon(DaemonConfig const& config)
                                   config.shell, config.escapeSandbox, config.socketPath, config.placement),
                               config.settings,
                               core::defaultEnvironment(),
-                              /*startPumps=*/true,
-                              config.sizePolicy,
-                              config.startupLayout };
+                              SessionHostConfig { .pumping = SessionPumping::Threaded,
+                                                  .sizePolicy = config.sizePolicy,
+                                                  .startupLayout = config.startupLayout,
+                                                  .identity = thisHostIdentity() } };
     // Declared after the host: every connection flow the servers below spawn subscribes to it, so
     // those flows must end before it is destroyed, not in ~EventLoop after it.
     auto const drain = LoopDrain { loop };
 
-    auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
+    auto listener = bindDaemonEndpoint(loop, core::pathToUtf8(config.socketPath));
     if (!listener)
         return listener.error();
     auto server = ConnectionAcceptor {
@@ -587,7 +530,7 @@ int runDaemon(DaemonConfig const& config)
     };
 
     // The native cells+deltas protocol listens beside the control-mode socket.
-    auto const nativePath = nativeSocketPath(config.socketPath).string();
+    auto const nativePath = core::pathToUtf8(nativeSocketPath(config.socketPath));
     auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
         return nativeListener.error();
@@ -596,7 +539,7 @@ int runDaemon(DaemonConfig const& config)
 
     // The imsg endpoint serves the REAL tmux client binary
     // (`tmux -S <socket>-tmux -C attach-session`).
-    auto const imsgPath = tmuxSocketPath(config.socketPath).string();
+    auto const imsgPath = core::pathToUtf8(tmuxSocketPath(config.socketPath));
     auto imsgListener = bindDaemonEndpoint(loop, imsgPath);
     if (!imsgListener)
         return imsgListener.error();
@@ -676,7 +619,8 @@ int runDaemon(DaemonConfig const& config)
         loop.post([&, sig] { requestDaemonShutdown(loop, servers, std::format("signal {} received", sig)); });
     } };
 
-    daemonLog()("serving on {} (native: {}, tmux: {})", config.socketPath.string(), nativePath, imsgPath);
+    daemonLog()(
+        "serving on {} (native: {}, tmux: {})", core::pathToUtf8(config.socketPath), nativePath, imsgPath);
     loop.blockOn(serveAll(servers));
 
     // Unblock the sigwait thread when the shutdown came from elsewhere — the last-session
@@ -708,7 +652,7 @@ int ensureDaemon(AttachEndpoint const& endpoint,
     // Unix socket: probe the native socket beside the control socket. One reactor
     // serves the initial probe and every poll that follows.
     auto const& unixEp = std::get<UnixEndpoint>(endpoint);
-    auto const nativePath = nativeSocketPath(unixEp.socketPath).string();
+    auto const nativePath = core::pathToUtf8(nativeSocketPath(unixEp.socketPath));
 
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
@@ -729,7 +673,7 @@ int runDaemonDetached(std::vector<std::string> commandLine,
 {
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
-    return spawnAndAwaitDaemon(loop, commandLine, nativeSocketPath(socketPath).string(), timeout);
+    return spawnAndAwaitDaemon(loop, commandLine, core::pathToUtf8(nativeSocketPath(socketPath)), timeout);
 }
 
 #ifdef _WIN32
@@ -762,21 +706,22 @@ int runDaemon(DaemonConfig const& config)
                                   config.shell, config.escapeSandbox, config.socketPath, config.placement),
                               config.settings,
                               core::defaultEnvironment(),
-                              /*startPumps=*/true,
-                              config.sizePolicy,
-                              config.startupLayout };
+                              SessionHostConfig { .pumping = SessionPumping::Threaded,
+                                                  .sizePolicy = config.sizePolicy,
+                                                  .startupLayout = config.startupLayout,
+                                                  .identity = thisHostIdentity() } };
     // Declared after the host: every connection flow the servers below spawn subscribes to it, so
     // those flows must end before it is destroyed, not in ~EventLoop after it.
     auto const drain = LoopDrain { loop };
 
-    auto listener = bindDaemonEndpoint(loop, config.socketPath.string());
+    auto listener = bindDaemonEndpoint(loop, core::pathToUtf8(config.socketPath));
     if (!listener)
         return listener.error();
     auto server = ConnectionAcceptor {
         loop, "control", std::move(*listener), tmux::makeControlModeHandler(loop, host)
     };
 
-    auto const nativePath = nativeSocketPath(config.socketPath).string();
+    auto const nativePath = core::pathToUtf8(nativeSocketPath(config.socketPath));
     auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
         return nativeListener.error();
@@ -824,7 +769,7 @@ int runDaemon(DaemonConfig const& config)
     consoleShutdown = &shutdown;
     ::SetConsoleCtrlHandler(consoleCtrlHandler, TRUE);
 
-    daemonLog()("serving on {} (native: {})", config.socketPath.string(), nativePath);
+    daemonLog()("serving on {} (native: {})", core::pathToUtf8(config.socketPath), nativePath);
     loop.blockOn(serveAll(servers));
 
     ::SetConsoleCtrlHandler(consoleCtrlHandler, FALSE);

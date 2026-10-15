@@ -48,7 +48,8 @@ class FreeDesktopNotifier final: public Notifier
     /// that means on the wire. Runs on this object's own thread.
     void sendNotification(vtbackend::DesktopNotification const& notification);
 
-    /// Resolves @p identifier to a live server id and asks the transport to withdraw it, if any.
+    /// Resolves @p identifier to a live server id and asks the transport to withdraw it, if any. A
+    /// send under @p identifier still awaiting its reply is withdrawn once that reply arrives.
     void sendClose(std::string const& identifier);
 
     /// The transport-independent OSC-id <-> server-id bookkeeping and urgency policy. Only ever

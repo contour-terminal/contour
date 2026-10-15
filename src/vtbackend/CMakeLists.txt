@@ -14,14 +14,22 @@ option(LIBTERMINAL_BUILD_BENCH_HEADLESS "Builds bench-headless CLI tool to bench
 set(vtbackend_HEADERS
     screen/AsciiText.hpp
     vt/Capabilities.hpp
+    testing/CatchStringMakers.hpp
     core/CellFlags.hpp
     grid/CellProxy.hpp
     grid/CellUtil.hpp
     vt/Charset.hpp
     core/Color.hpp
     core/ContextId.hpp
+    core/CommandBlockId.hpp
+    core/CommandBlockOutcome.hpp
     core/ColorPalette.hpp
-    shell/CommandBlocks.hpp
+    shell/CommandBlock.hpp
+    shell/CommandBlockAddress.hpp
+    shell/CommandBlockRows.hpp
+    shell/CommandBlockPaths.hpp
+    shell/CommandLineSanitizer.hpp
+    shell/CommandLineText.hpp
     vt/ControlCode.hpp
     screen/Cursor.hpp
     vt/DesktopNotification.hpp
@@ -30,10 +38,14 @@ set(vtbackend_HEADERS
     vt/Functions.hpp
     core/GraphicsAttributes.hpp
     grid/Grid.hpp
+    screen/Gutter.hpp
+    screen/GutterSettings.hpp
     vt/HierarchicalContext.hpp
+    vt/JsonString.hpp
     input/vi/HintModeHandler.hpp
     core/Hyperlink.hpp
     core/Image.hpp
+    input/ClickCounter.hpp
     input/InputBinding.hpp
     input/InputGenerator.hpp
     input/InputHandler.hpp
@@ -43,7 +55,10 @@ set(vtbackend_HEADERS
     grid/Line.hpp
     core/LineFlags.hpp
     grid/LineSoA.hpp
+    shell/LivePromptMarks.hpp
+    screen/LocalTime.hpp
     Logging.hpp
+    vt/MacroDefinition.hpp
     shell/MarkArbiter.hpp
     input/MatchModes.hpp
     graphics/MessageParser.hpp
@@ -57,31 +72,41 @@ set(vtbackend_HEADERS
     vt/RectangularAreaChecksum.hpp
     render/RenderBuffer.hpp
     screen/RenderBufferBuilder.hpp
+    core/RowMove.hpp
     screen/Screen.hpp
     screen/ScreenTestFixtures.hpp
+    shell/ScrollbarMarks.hpp
     input/vi/Selector.hpp
     shell/SemanticBlockTracker.hpp
+    vt/SemanticPrompt.hpp
     vt/Sequence.hpp
     vt/SequenceBuilder.hpp
     screen/Settings.hpp
     vt/SgrWriter.hpp
-    shell/ShellIntegration.hpp
     graphics/SixelParser.hpp
     grid/SoAClusterWriter.hpp
+    shell/StableIdSet.hpp
     screen/StatusLineBuilder.hpp
+    core/SteadyClockRef.hpp
+    shell/StickyHeader.hpp
+    core/StickyHeaderKind.hpp
     screen/StatusLineCommandCache.hpp
     screen/Terminal.hpp
+    screen/TerminalClocks.hpp
     screen/TerminalTestFixtures.hpp
     testing/TestHelpers.hpp
     core/TerminalContext.hpp
     core/TextScale.hpp
+    core/Utf8Prefix.hpp
     vt/TextSizing.hpp
+    shell/UserMarkIndex.hpp
     vt/VTType.hpp
     vt/VTWriter.hpp
     input/vi/ViCommands.hpp
     input/vi/ViInputHandler.hpp
     screen/Viewport.hpp
     core/WindowSizeStack.hpp
+    grid/WordWalk.hpp
     core/WorkingDirectory.hpp
     testing/Workloads.hpp
     graphics/regis/ReGISColor.hpp
@@ -102,18 +127,29 @@ set(vtbackend_SOURCES
     core/ColorPalette.cpp
     core/TerminalContext.cpp
     vt/HierarchicalContext.cpp
+    vt/JsonString.cpp
     core/WorkingDirectory.cpp
-    shell/CommandBlocks.cpp
+    shell/CommandBlock.cpp
+    shell/CommandBlockRows.cpp
+    shell/CommandBlockPaths.cpp
+    shell/CommandLineSanitizer.cpp
     shell/Folding.cpp
     shell/PromptRegion.cpp
+    shell/ScrollbarMarks.cpp
+    shell/StickyHeader.cpp
     vt/Functions.cpp
     grid/Grid.cpp
+    screen/Gutter.cpp
     core/FileUrl.cpp
     input/vi/HintModeHandler.cpp
     core/Image.cpp
+    input/ClickCounter.cpp
     input/InputGenerator.cpp
     grid/Line.cpp
     grid/LineSoA.cpp
+    shell/LivePromptMarks.cpp
+    screen/LocalTime.cpp
+    vt/MacroDefinition.cpp
     graphics/MessageParser.cpp
     testing/MockTerm.cpp
     render/RenderBuffer.cpp
@@ -123,6 +159,7 @@ set(vtbackend_SOURCES
     vt/TextSizing.cpp
     screen/Screen.cpp
     shell/SemanticBlockTracker.cpp
+    vt/SemanticPrompt.cpp
     input/vi/Selector.cpp
     grid/SoAClusterWriter.cpp
     vt/Sequence.cpp
@@ -171,6 +208,7 @@ target_link_libraries(vtbackend PUBLIC
     core::base
     core::cli
     core::log
+    core::platform
     crispy::core
     unicode::unicode
     vtparser
@@ -191,6 +229,20 @@ if(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE AND NOT(WIN32))
     target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE=1)
 endif()
 
+# Makes Catch2 print UTF-32 text readably in the failure output of every file of test binary TARGET.
+#
+# Force-included rather than included by the tests that want it: a printer that only some files of a
+# binary see is an ODR violation the linker settles by keeping one definition for all of them (see
+# testing/CatchStringMakers.hpp). Outside the testing block below, as other modules' tests call it too.
+function(vtbackend_force_include_test_printers target)
+    set(printers "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/testing/CatchStringMakers.hpp")
+    if(MSVC)
+        target_compile_options(${target} PRIVATE "/FI${printers}")
+    else()
+        target_compile_options(${target} PRIVATE "SHELL:-include ${printers}")
+    endif()
+endfunction()
+
 # ----------------------------------------------------------------------------
 if(LIBTERMINAL_TESTING)
     enable_testing()
@@ -203,14 +255,29 @@ if(LIBTERMINAL_TESTING)
         core/ColorPalette_test.cpp
         core/TerminalContext_test.cpp
         vt/HierarchicalContext_test.cpp
+        vt/JsonString_test.cpp
         screen/Screen_context_test.cpp
         shell/MarkArbiter_test.cpp
         core/WorkingDirectory_test.cpp
-        shell/CommandBlocks_test.cpp
+        shell/CommandBlock_test.cpp
+        shell/CommandBlockRows_test.cpp
+        shell/CommandBlockPaths_test.cpp
+        shell/CommandLineSanitizer_test.cpp
+        shell/CommandLineText_test.cpp
         shell/Folding_test.cpp
+        screen/Gutter_test.cpp
         shell/PromptRegion_test.cpp
+        shell/ScrollbarMarks_test.cpp
+        shell/StableIdSet_test.cpp
+        shell/UserMarkIndex_test.cpp
+        shell/StickyHeader_test.cpp
+        render/RenderBuffer_test.cpp
+        screen/RenderBufferBuilder_test.cpp
+        screen/Terminal_stickyheader_test.cpp
+        shell/Osc133Reporting_test.cpp
         graphics/GoodImageProtocol_test.cpp
         graphics/XtSmGraphics_test.cpp
+        input/ClickCounter_test.cpp
         input/InputGenerator_test.cpp
         input/vi/Selector_test.cpp
         vt/Functions_test.cpp
@@ -218,11 +285,13 @@ if(LIBTERMINAL_TESTING)
         core/FileUrl_test.cpp
         input/vi/HintModeHandler_test.cpp
         grid/Line_test.cpp
+        shell/LivePromptMarks_test.cpp
         graphics/MessageParser_test.cpp
         vt/ModifyKeys_test.cpp
         vt/VTType_test.cpp
         vt/RectangularAreaChecksum_test.cpp
         vt/KittyClipboard_test.cpp
+        vt/MacroDefinition_test.cpp
         vt/PointerShape_test.cpp
         graphics/KittyGraphics_test.cpp
         vt/TextSizing_test.cpp
@@ -238,6 +307,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_multipage_test.cpp
         core/Image_test.cpp
         core/Search_test.cpp
+        vt/SemanticPrompt_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp
         screen/StatusLineCommandCache_test.cpp
@@ -245,7 +315,12 @@ if(LIBTERMINAL_TESTING)
         screen/Terminal_test.cpp
         screen/Terminal_scroll_test.cpp
         screen/Terminal_selection_test.cpp
+        screen/Terminal_block_actions_test.cpp
         screen/Terminal_input_test.cpp
+        screen/Terminal_scrollbar_marks_test.cpp
+        screen/Terminal_gutter_test.cpp
+        screen/Terminal_mirrorSeams_test.cpp
+        screen/Terminal_blocks_test.cpp
         screen/BulkScan_test.cpp
         shell/ShellIntegration_test.cpp
         grid/LineSoA_test.cpp
@@ -264,6 +339,7 @@ if(LIBTERMINAL_TESTING)
     )
     target_link_libraries(vtbackend_test Catch2::Catch2 core::testing vtbackend)
     add_test(NAME vtbackend_test COMMAND $<TARGET_FILE:vtbackend_test>)
+    vtbackend_force_include_test_printers(vtbackend_test)
 
     if(NOT WIN32)
         target_compile_options(vtbackend_test PRIVATE -Wno-c2y-extensions)

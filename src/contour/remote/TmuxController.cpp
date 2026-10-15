@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/remote/TmuxController.hpp>
+#include <contour/session/HostedOperation.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 
@@ -129,6 +130,14 @@ std::string tmuxKillPaneCommand(uint64_t pane)
 std::string tmuxNewWindowCommand()
 {
     return "new-window";
+}
+
+std::optional<std::string> tmuxOperationCommand(contour::session::HostedOperation operation, uint64_t pane)
+{
+    auto const command = contour::session::rowOf(operation).tmuxCommand;
+    if (command.empty())
+        return std::nullopt;
+    return std::format("{} -t %{}", command, pane);
 }
 
 /// The model-owned pane sink: buffers bytes until a local pty is bound, then
@@ -441,6 +450,33 @@ void TmuxController::requestRemoteClose(vtpty::Pty const* pty)
         if (_gateway != nullptr)
             _gateway->sendCommand(tmuxKillPaneCommand(pane));
     });
+}
+
+contour::session::HostedOperationRoute TmuxController::requestHostedOperation(
+    vtpty::Pty const* pty, contour::session::HostedOperationRequest const& request)
+{
+    auto const pane = [&] {
+        auto const lock = std::lock_guard { _mutex };
+        return paneForPtyLocked(pty);
+    }();
+    using contour::session::HostedOperationRoute;
+    if (!pane)
+        return HostedOperationRoute::RunHere; // not one of ours
+    auto const route = contour::session::routeOf(request.operation, contour::session::RemoteHostKind::Tmux);
+    if (route == HostedOperationRoute::Refused)
+        return route;
+    // The server's half, where tmux has one; the local terminal, which parses the pane's output, performs
+    // the rest. Without a connection the server's half cannot happen, so neither does the local one.
+    if (auto command = tmuxOperationCommand(request.operation, *pane))
+    {
+        if (!isConnected())
+            return HostedOperationRoute::Unreachable;
+        _reactor.post([this, command = std::move(*command)]() mutable {
+            if (_gateway != nullptr)
+                _gateway->sendCommand(std::move(command));
+        });
+    }
+    return route;
 }
 
 void TmuxController::unbindPane(uint64_t pane)

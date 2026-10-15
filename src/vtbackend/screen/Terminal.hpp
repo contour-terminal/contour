@@ -3,11 +3,15 @@
 
 #include <vtbackend/Logging.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/RowMove.hpp>
 #include <vtbackend/core/Search.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/grid/Grid.hpp>
+#include <vtbackend/input/ClickCounter.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/InputHandler.hpp>
 #include <vtbackend/input/vi/HintModeHandler.hpp>
@@ -19,12 +23,19 @@
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
+#include <vtbackend/screen/TerminalClocks.hpp>
 #include <vtbackend/screen/Viewport.hpp>
+#include <vtbackend/shell/CommandBlock.hpp>
+#include <vtbackend/shell/CommandBlockPaths.hpp>
+#include <vtbackend/shell/CommandBlockRows.hpp>
 #include <vtbackend/shell/Folding.hpp>
 #include <vtbackend/shell/MarkArbiter.hpp>
+#include <vtbackend/shell/ScrollbarMarks.hpp>
 #include <vtbackend/shell/SemanticBlockTracker.hpp>
-#include <vtbackend/shell/ShellIntegration.hpp>
+#include <vtbackend/shell/StickyHeader.hpp>
+#include <vtbackend/shell/UserMarkIndex.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
+#include <vtbackend/vt/MacroDefinition.hpp>
 #include <vtbackend/vt/PointerShape.hpp>
 #include <vtbackend/vt/ProgressState.hpp>
 #include <vtbackend/vt/Sequence.hpp>
@@ -36,10 +47,12 @@
 
 #include <crispy/Animation.hpp>
 #include <crispy/BufferObject.hpp>
+#include <crispy/LifetimeAnnotatedMutex.hpp>
 
 #include <core/Assert.hpp>
 #include <core/Defines.hpp>
 #include <core/Environment.hpp>
+#include <core/platform/FileSystem.hpp>
 
 #include <gsl/pointers>
 
@@ -48,18 +61,20 @@
 #include <bitset>
 #include <chrono>
 #include <cmath>
+#include <concepts>
 #include <condition_variable>
 #include <deque>
+#include <expected>
 #include <format>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <numbers>
 #include <optional>
-#include <queue>
 #include <span>
 #include <stack>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -80,6 +95,38 @@ enum class SmoothScrollResult : uint8_t
     InvalidCellSize, ///< Cell pixel size is zero or negative; cannot compute scroll.
 };
 
+/// Why Terminal::scrollToCommandBlockHead() could not bring a block's head to the top.
+enum class CommandBlockJumpError : uint8_t
+{
+    UnknownBlock = 0, ///< No record carries the id: it never existed, or the store's bound dropped it.
+    HeadEvicted,      ///< The record outlives its head row, which the scrollback no longer holds.
+    /// The record's head was placed in another row generation than this grid's -- a daemon mirror's record
+    /// before the rows that head it arrive -- so where it is is not known yet, which is not the same as gone.
+    HeadNotPlaced,
+    /// The viewport cannot bring the primary page's history into view: another page is on display, or the
+    /// cursor is on one while the primary page is shown (DECPCCM reset).
+    NotScrollable,
+};
+
+/// Why Terminal::revealStableLineAtTop() could not bring a line to the top.
+enum class RevealError : uint8_t
+{
+    Evicted = 0, ///< The id names no row any more: the scrollback dropped it.
+    /// The id was read in another stable-id generation than the grid's: after a reflow or a reset it names
+    /// some other row, and scrolling there would be worse than doing nothing.
+    OtherGeneration,
+    /// The viewport cannot bring the primary page's history into view: another page is on display, or the
+    /// cursor is on one while the primary page is shown (DECPCCM reset).
+    NotScrollable,
+};
+
+/// What new output does to a view scrolled back into the history. @see Terminal::Events::outputFollowing
+enum class OutputFollowing : uint8_t
+{
+    Stay = 0, ///< The view stays where it was put: output scrolling the page keeps it on the lines it shows.
+    Follow,   ///< The view comes down to the output, where Settings::autoScrollOnUpdate asks for it.
+};
+
 /// Platform-independent scroll gesture phase, mapped from Qt::ScrollPhase.
 enum class ScrollPhase : uint8_t
 {
@@ -88,6 +135,24 @@ enum class ScrollPhase : uint8_t
     Update,   ///< Touchpad gesture is ongoing (finger moving).
     End,      ///< Touchpad gesture ended (finger lifted).
     Momentum, ///< OS-generated momentum phase (we implement our own).
+};
+
+/// Whether a terminal replicates one a daemon hosts, and if so where the daemon runs: what every locality
+/// the terminal judges is relative to.
+enum class ReplicaRole : uint8_t
+{
+    None = 0,         ///< No replica: its own application writes to it, and localities are judged here.
+    SameMachine = 1,  ///< A daemon's terminal replicated on the daemon's machine: judged as its own.
+    OtherMachine = 2, ///< A daemon's terminal replicated on another machine: no directory its application
+                      ///< reports is one here, so every locality is ContextLocality::Foreign.
+};
+
+/// The answer to an application's request for the host-writable status line (DECSSDT 2).
+/// @see Terminal::answerHostWritableStatusLineRequest
+enum class HostWritableStatusLineAnswer : uint8_t
+{
+    Denied = 0, ///< The line stays hidden; what the application writes there may go to the window title.
+    Shown,      ///< The line is put up.
 };
 
 /// Helping information to visualize IME text that has not been committed yet.
@@ -105,7 +170,13 @@ struct InputMethodData
 class Modes
 {
   public:
-    void set(AnsiMode mode, bool enabled) { _ansi.set(static_cast<size_t>(mode), enabled); }
+    void set(AnsiMode mode, bool enabled)
+    {
+        if (enabled)
+            _ansi.fetch_or(bitOf(mode), std::memory_order_relaxed);
+        else
+            _ansi.fetch_and(~bitOf(mode), std::memory_order_relaxed);
+    }
 
     bool set(DECMode mode, bool enabled)
     {
@@ -114,12 +185,22 @@ class Modes
             errorLog()("Attempt to change frozen DEC mode {}. Ignoring.", mode);
             return false;
         }
-        _dec.set(static_cast<size_t>(mode), enabled);
+        auto& word = _dec[wordOf(mode)];
+        if (enabled)
+            word.fetch_or(bitOf(mode), std::memory_order_relaxed);
+        else
+            word.fetch_and(~bitOf(mode), std::memory_order_relaxed);
         return true;
     }
 
-    [[nodiscard]] bool enabled(AnsiMode mode) const noexcept { return _ansi[static_cast<size_t>(mode)]; }
-    [[nodiscard]] bool enabled(DECMode mode) const noexcept { return _dec[static_cast<size_t>(mode)]; }
+    [[nodiscard]] bool enabled(AnsiMode mode) const noexcept
+    {
+        return (_ansi.load(std::memory_order_relaxed) & bitOf(mode)) != 0;
+    }
+    [[nodiscard]] bool enabled(DECMode mode) const noexcept
+    {
+        return (_dec[wordOf(mode)].load(std::memory_order_relaxed) & bitOf(mode)) != 0;
+    }
 
     [[nodiscard]] bool frozen(DECMode mode) const noexcept
     {
@@ -163,9 +244,44 @@ class Modes
         }
     }
 
+    /// Resets every mode, and forgets which were frozen and which saved: what a hard reset leaves.
+    void reset()
+    {
+        _ansi.store(0, std::memory_order_relaxed);
+        for (auto& word: _dec)
+            word.store(0, std::memory_order_relaxed);
+        _decFrozen.reset();
+        _savedModes.clear();
+    }
+
   private:
-    std::bitset<32> _ansi;                                              // AnsiMode
-    std::bitset<static_cast<size_t>(DECMode::DECModeCount)> _dec;       // DECMode
+    [[nodiscard]] static constexpr uint32_t bitOf(AnsiMode mode) noexcept
+    {
+        return uint32_t { 1 } << static_cast<unsigned>(mode);
+    }
+
+    /// The DEC modes are kept 64 to a word.
+    static constexpr auto DecModesPerWord = size_t { 64 };
+
+    [[nodiscard]] static constexpr size_t wordOf(DECMode mode) noexcept
+    {
+        return static_cast<size_t>(mode) / DecModesPerWord;
+    }
+
+    [[nodiscard]] static constexpr uint64_t bitOf(DECMode mode) noexcept
+    {
+        return uint64_t { 1 } << (static_cast<size_t>(mode) % DecModesPerWord);
+    }
+
+    /// The ANSI modes, a bit each. Atomic: the GUI thread reads KAM and SRM without the terminal lock as a
+    /// key is typed (Terminal::allowInput(), Terminal::flushInput()), so that typing waits for no parse,
+    /// while the parser thread sets them under that lock. Relaxed, as no other state is published through
+    /// them.
+    std::atomic<uint32_t> _ansi = 0;
+    /// The DEC modes, a bit each, atomic for the reason the ANSI modes are: a key repeat reads DECARM.
+    std::array<std::atomic<uint64_t>,
+               (static_cast<size_t>(DECMode::DECModeCount) + DecModesPerWord - 1) / DecModesPerWord>
+        _dec {};
     std::bitset<static_cast<size_t>(DECMode::DECModeCount)> _decFrozen; // DECMode
     std::map<DECMode, std::vector<bool>> _savedModes;                   // saved DEC modes
 };
@@ -220,11 +336,31 @@ enum class ExecutionMode : uint8_t
     // TODO: BreakAtFrame,
 };
 
-enum class WrapPending : uint8_t
+/// Whether a mouse binding took a press before the terminal's own multi-click selection saw it.
+enum class MousePressClaim : uint8_t
 {
-    Yes,
-    No,
+    Unclaimed = 0, ///< The terminal handles the press as it always has.
+    Claimed,       ///< A binding acts on it: the terminal neither selects nor starts a drag.
 };
+
+/// What the left mouse button's press does while the button is held.
+enum class LeftButtonPress : uint8_t
+{
+    Released = 0, ///< The button is up.
+    Selecting,    ///< The press went to the terminal's own selection, which a drag extends.
+    Claimed,      ///< A binding claimed the press: no drag, but the action it runs may select.
+};
+
+/// Where the pointer stands, for what it hovers.
+enum class PointerPlacement : uint8_t
+{
+    OnGrid = 0, ///< On the grid cell the last move or press named.
+    OffGrid,    ///< On no cell: beside the grid, over something drawn on top of it, or outside the terminal.
+};
+
+/// Asked, with a press's click count (1..ClickCounter::MaxClickCount), whether a binding takes the press.
+/// @see Terminal::sendMousePressEvent
+using MousePressClaimant = std::function<MousePressClaim(uint8_t clickCount)>;
 
 // Implements Trace mode handling for the given controls.
 //
@@ -272,6 +408,16 @@ class TraceHandler: public SequenceHandler
 
   private:
     void flushOne(PendingSequence const& pendingSequence);
+
+    /// Where a macro's body goes while one runs: straight to the display. The body is part of the one DECINVM
+    /// being stepped through, and runs with it; queued instead, it would land in the very queue being
+    /// flushed.
+    ///
+    /// Asked here, by the handler the trace modes route through, rather than by Terminal::sequenceHandler(),
+    /// which the parser asks for every event it raises in every mode.
+    /// @return The display while a macro runs, otherwise null: the event is queued.
+    [[nodiscard]] SequenceHandler* macroBodyDisplay() const noexcept;
+
     gsl::not_null<Terminal*> _terminal;
     PendingSequenceQueue _pendingSequences = {};
 };
@@ -313,6 +459,18 @@ class Terminal
         /// synchronously; hand the work to the thread that owns it instead.
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
+
+        /// The page was resized, so any row may have moved: a change of width reflowed every row under
+        /// new stable ids, and a change of height moved rows between the page and the history. What is
+        /// drawn from rows' places -- the scrollbar's travel and its ticks -- is stale, even when no output
+        /// follows.
+        ///
+        /// Raised by resizeScreen() when the page's size changed, not for a call that only brings new pixel
+        /// sizes. With Terminal::_stateMutex held by its caller -- the GUI thread for a window, font or
+        /// status-line change, the parser thread for DECCOLM --, and with the consequence progressChanged()
+        /// documents: do not read terminal state here; defer to the GUI thread.
+        virtual void pageResized() {}
+
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*fontSpec*/) {}
         virtual void copyToClipboard(std::string_view /*data*/) {}
@@ -327,6 +485,13 @@ class Terminal
         virtual void openDocument(std::string_view /*fileOrUrl*/) = 0;
         virtual void inspect() {}
         virtual void notify(std::string_view /*title*/, std::string_view /*body*/) {}
+        /// An application raised an OSC 99 notification, whatever its occasion (`o=`): whether to show it
+        /// is the listener's decision, for only the frontend knows where the pane is. It is listed as live
+        /// already (`p=alive`), so a listener that declines it removes it again through
+        /// DesktopNotificationManager::removeActiveNotification().
+        ///
+        /// Raised on the parser thread with Terminal::_stateMutex ALREADY HELD.
+        /// @param notification The notification as the application assembled it.
         virtual void showDesktopNotification(DesktopNotification const& /*notification*/) {}
         virtual void discardDesktopNotification(std::string_view /*identifier*/) {}
 
@@ -349,6 +514,65 @@ class Terminal
         /// prompt for no change.
         /// @param activeContext The context now in effect; a zero id means the ancestry is empty.
         virtual void contextChanged(ContextId /*activeContext*/) {}
+
+        /// A shell command block finished with a REPORTED end (OSC 133;D, or an OSC 3008 `end=` while OSC
+        /// 3008 owns the marks) -- never for a block a newer prompt closed implicitly, such as the `ssh`
+        /// the user is still inside.
+        ///
+        /// Raised on the parser thread with Terminal::_stateMutex ALREADY HELD, with the consequence
+        /// progressChanged() documents: do not read terminal state here; defer to the GUI thread. The
+        /// summary is a value copy and safe to carry across threads.
+        /// @param summary What a frontend needs to announce the finish.
+        virtual void commandBlockFinished(CommandBlockSummary const& /*summary*/) {}
+
+        /// A command block's record changed what it says, for any cause: its command started, or
+        /// finished -- with a reported end, or implicitly when a newer prompt superseded it --, an OSC 3008
+        /// `end=` told how it ended after the fact, a repeated OSC 133;C filled in its command line, or a
+        /// daemon's newer copy of it was adopted. What a view showing a record -- the gutter's block tooltip
+        /// -- re-reads it on, so that none of those leaves it showing what the record used to say.
+        ///
+        /// Not raised for a record's birth at a new prompt, for one the store forgets (evicted, retired, or
+        /// cleared by RIS), nor when only its head row moved or left the grid: only a change of what it says,
+        /// so only from what changes the store, never from a read of it.
+        ///
+        /// commandBlockFinished() is the announcement, raised for a reported end alone; this is the change. A
+        /// reported end raises this first and that second.
+        ///
+        /// Raised on the parser thread with Terminal::_stateMutex ALREADY HELD, with the consequence
+        /// progressChanged() documents: do not read terminal state here -- the store included: what a
+        /// frontend needs of it travels in @p change --; defer to the GUI thread.
+        /// @param change The block whose record changed, and the newest block that ran a command.
+        virtual void commandBlockChanged(CommandBlockChange const& /*change*/) {}
+
+        /// The user placed or took off a user mark (vi `mm`) on a replica, whose marks are its host's
+        /// (Terminal::toggleUserMark): the terminal leaves its line alone, and the listener asks the host,
+        /// whose row brings the mark back.
+        ///
+        /// Raised with Terminal::_stateMutex ALREADY HELD, on the thread handling the key, with the
+        /// consequence progressChanged() documents: do not read terminal state here; defer instead.
+        /// @param request The row, by this terminal's own stable id, and what to do to its line.
+        virtual void userMarkRequested(UserMarkRequest const& /*request*/) {}
+
+        /// This machine's identity, for deciding whether the directory a block ran in is local.
+        ///
+        /// Read on the parser thread with Terminal::_stateMutex held, at every OSC 133;C: an
+        /// implementation answers from data fixed at construction. The default knows nothing, which makes
+        /// only an OSC 7 URL with no host provably local -- the conservative answer.
+        /// @return Views that stay valid for the listener's lifetime.
+        [[nodiscard]] virtual LocalIdentity localIdentity() const noexcept { return {}; }
+
+        /// What new output does to a view scrolled back into the history. The default leaves the view where
+        /// it is, as a headless terminal wants it; a frontend brings it down to the output, except where the
+        /// user parked it on something they went looking for.
+        ///
+        /// Asked under Terminal::_stateMutex, on the thread applying the output, and only while the view is
+        /// scrolled back in Insert mode with Settings::autoScrollOnUpdate set: answer from what is lock-free.
+        /// @see Terminal::followOutput
+        [[nodiscard]] virtual OutputFollowing outputFollowing() const noexcept
+        {
+            return OutputFollowing::Stay;
+        }
+
         virtual void focusTerminalWindow() {}
         virtual void onClosed() {}
         virtual void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) {}
@@ -399,9 +623,8 @@ class Terminal
         /// Insert mode, or the find bar's term being emptied.
         ///
         /// A frontend showing search state has to hear about it: the matches it had lit are gone, and
-        /// anything displaying the pattern is now displaying one the terminal no longer has. Narrower
-        /// than screenUpdated() on purpose -- that one also auto-scrolls the viewport to the bottom,
-        /// which would throw away the position the user was reading.
+        /// anything displaying the pattern is now displaying one the terminal no longer has. A hook of
+        /// its own rather than screenUpdated(), which reports that what is on screen changed.
         virtual void searchCleared() {}
 
         /// The user asked for the search prompt -- by the SearchReverse action, or by `/` in vi mode.
@@ -432,6 +655,7 @@ class Terminal
         void bufferChanged(ScreenType) override {}
         void renderBufferUpdated() override {}
         void screenUpdated() override {}
+        void pageResized() override {}
         FontDef getFontDef() override { return {}; }
         void setFontDef(FontDef const& /*fontSpec*/) override {}
         void copyToClipboard(std::string_view /*data*/) override {}
@@ -443,6 +667,13 @@ class Terminal
         void discardDesktopNotification(std::string_view /*identifier*/) override {}
         void progressChanged(Progress /*progress*/) override {}
         void contextChanged(ContextId /*activeContext*/) override {}
+        void commandBlockFinished(CommandBlockSummary const& /*summary*/) override {}
+        void commandBlockChanged(CommandBlockChange const& /*change*/) override {}
+        [[nodiscard]] LocalIdentity localIdentity() const noexcept override { return {}; }
+        [[nodiscard]] OutputFollowing outputFollowing() const noexcept override
+        {
+            return OutputFollowing::Stay;
+        }
         void focusTerminalWindow() override {}
         void onClosed() override {}
         void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) override {}
@@ -467,19 +698,29 @@ class Terminal
     /// @param env             The process environment. Read here and only here: what this terminal
     ///                        takes from it (`$HOME`, `$CONTOUR_SYNC_PTY_OUTPUT`) describes how the
     ///                        session was launched, so it is resolved once, at construction.
+    /// @param fileSystem      Where a path printed on the screen is looked up: the one under the pointer,
+    ///                        a hint's target. Borrowed: it must outlive the terminal. Production passes
+    ///                        the native one.
     /// @param pty             The pseudo-terminal this drives.
     /// @param factorySettings The settings a hard reset (RIS) restores.
     /// @param commandServices Who runs `{Command}` status-line items, and where; nullopt for a host
     ///                        that runs none (such items then render empty). The lifetime rules are
     ///                        those of StatusLineCommandServices: the capture must outlive in-flight
     ///                        runs, so the executor is joined before the capture is destroyed.
-    /// @param now             The current time, as the caller's clock reads it.
+    /// @param clocks          Every clock the terminal reads: its own time starts at what the steady one
+    ///                        says now, and command durations and row birth times are read from them.
+    ///                        Borrowed: the caller keeps them alive for the terminal's whole life.
+    ///                        Production passes TerminalClocks::system().
+    /// @param sessionTokens   Where the token of each DEC mode 2034 reader session comes from.
+    ///                        Production passes randomSemanticBlockTokens().
     Terminal(Events& eventListener,
              core::Environment const& env,
+             core::platform::FileSystem const& fileSystem,
              std::unique_ptr<vtpty::Pty> pty,
              Settings factorySettings,
              std::optional<StatusLineCommandServices> commandServices,
-             std::chrono::steady_clock::time_point now /* = std::chrono::steady_clock::now()*/);
+             TerminalClocks clocks,
+             SemanticBlockTokenSource sessionTokens);
     ~Terminal() = default;
 
     void start();
@@ -535,20 +776,59 @@ class Terminal
     ControlTransmissionMode c1TransmissionMode() const noexcept { return _c1TransmissionMode; }
 
     // {{{ Text Macros (DECDMAC / DECINVM)
-    static constexpr int MaxMacroCount = 64;
-    static constexpr int MaxMacroRecursionDepth = 16;
+    static constexpr int MaxMacroCount = MacroCount;
 
-    /// Defines a macro with the given ID and body.
-    void defineMacro(int id, bool deleteAll, std::string body);
+    /// How deep macros may nest: DEC STD 070, "Macros can invoke other macros with up to 16 levels of
+    /// nesting, but cannot invoke themselves recursively."
+    static constexpr int MaxMacroNestingDepth = 16;
 
-    /// Invokes a previously defined macro by ID (queues for deferred execution).
+    /// How many bytes the bodies of all macros may take between them: DEC STD 070, "6k bytes of RAM is
+    /// available for storage of macro definitions" (the VT510 manual's DECDMAC: "6 Kbytes of memory").
+    static constexpr size_t MacroSpaceBytes = size_t { 6 } * 1024;
+
+    /// How many bytes of macro bodies one invocation from the stream may run, its own body and every body it
+    /// invokes, however deep: Windows Terminal's bound in MacroBuffer::InvokeMacro, whose MAX_SPACE this is.
+    ///
+    /// Nesting alone does not bound the work: a body may invoke the next macro many times over, and each of
+    /// those the one after it. The count starts afresh with each invocation from the stream, which costs the
+    /// host the bytes that ask for it -- and so does not depend on how the stream was split into reads.
+    static constexpr size_t MaxMacroBytesPerInvocation = size_t { 256 } * 1024;
+
+    /// DECDMAC: defines macro @p id as @p body, after deleting what @p deletion says. A body that does not
+    /// fit the room then left in MacroSpaceBytes is ignored whole, as DEC STD 070 has it; an empty one
+    /// defines nothing.
+    /// @param id The macro's id; one outside [0, MaxMacroCount) defines and deletes nothing.
+    /// @param deletion Which definitions go first (Pdt).
+    /// @param body The decoded body.
+    void defineMacro(int id, MacroDeletion deletion, std::string body);
+
+    /// The room left for macro bodies, which DECMSR reports.
+    /// @return MacroSpaceBytes less the bytes the defined bodies take.
+    [[nodiscard]] size_t macroSpaceAvailable() const noexcept;
+
+    /// The room a DECDMAC defining macro @p id has for its body, once @p deletion has deleted what it does.
+    /// @param id The macro being defined.
+    /// @param deletion Which definitions go first (Pdt).
+    /// @return macroSpaceAvailable() and what the deletion frees.
+    [[nodiscard]] size_t macroSpaceFor(int id, MacroDeletion deletion) const noexcept;
+
+    /// The checksum of the macro definitions, which DECCKSR reports.
+    /// @return Every byte of every definition, negated and summed in 16 bits.
+    [[nodiscard]] uint16_t macroChecksum() const noexcept;
+
+    /// DECINVM: runs the macro @p id where the invocation stands, as though its body had been received in
+    /// its place (DEC STD 070): during a parse, once the main parser has finished the DECINVM. Ignored for a
+    /// macro not defined, one already running (recursion), past MaxMacroNestingDepth, or whose body would
+    /// take the invocation from the stream it runs under past MaxMacroBytesPerInvocation.
+    /// @param id The macro to run.
     void invokeMacro(int id);
 
-    /// Processes any pending macro invocations queued by invokeMacro().
-    void processPendingMacros();
+    /// Whether a macro body is being run right now.
+    [[nodiscard]] bool isMacroRunning() const noexcept { return !_runningMacros.empty(); }
 
-    /// Clears all defined macros.
-    void clearMacros() noexcept { _macros.clear(); }
+    /// Clears all defined macros. The macro bodies running meanwhile end there, every one of them: Windows
+    /// Terminal's ClearMacrosIfInUse voids them along with the definitions.
+    void clearMacros() noexcept;
 
     /// Returns the macro body for the given ID, or nullopt if not defined.
     [[nodiscard]] std::optional<std::string_view> macroBody(int id) const noexcept
@@ -567,8 +847,12 @@ class Terminal
     void programUDK(bool clearAll, bool locked, std::string_view data);
 
     /// Returns the programmed string for a UDK key ID, or nullopt if not programmed.
-    [[nodiscard]] std::optional<std::string> udkString(int keyId) const noexcept
+    ///
+    /// Read under the input lock, which the parser thread programs the keys under: a function key looks its
+    /// string up without the state lock, so as not to wait for a parse.
+    [[nodiscard]] std::optional<std::string> udkString(int keyId) const
     {
+        auto const _ = std::scoped_lock { _inputMutex };
         if (auto const it = _userDefinedKeys.find(keyId); it != _userDefinedKeys.end())
             return it->second;
         return std::nullopt;
@@ -577,11 +861,12 @@ class Terminal
     /// Checks if a UDK is defined for the given function key and returns its string.
     /// @param key the Key enum value (e.g., Key::F6)
     /// @return the programmed string or nullopt if no UDK is defined.
-    [[nodiscard]] std::optional<std::string> udkStringForKey(Key key) const noexcept;
+    [[nodiscard]] std::optional<std::string> udkStringForKey(Key key) const;
 
     /// Clears all user-defined keys.
-    void clearUDKs() noexcept
+    void clearUDKs()
     {
+        auto const _ = std::scoped_lock { _inputMutex };
         _userDefinedKeys.clear();
         _udkLocked = false;
     }
@@ -851,13 +1136,40 @@ class Terminal
                           .columns = ColumnCount::cast_from(unbox(screen.width) / unbox(cell.width)) };
     }
 
-    /// Retrieves the time point this terminal instance has been spawned.
-    [[nodiscard]] std::chrono::steady_clock::time_point currentTime() const noexcept { return _currentTime; }
+    /// The terminal's clock: the time the frame being built is built at. @see tick()
+    [[nodiscard]] std::chrono::steady_clock::time_point currentTime() const noexcept
+    {
+        return _currentTime.load(std::memory_order_relaxed);
+    }
 
     /// The last output of a `{Command}` status-line item; never blocks (the cache refreshes it off thread).
     /// @param item The status-line command item.
     /// @return Its last displayed text; empty before the first result, or without command services.
     [[nodiscard]] std::string statusLineCommandOutput(StatusLineDefinitions::Command const& item) const;
+
+    /// @p when in local civil time, through the converter the terminal was constructed with.
+    /// @see TerminalClocks::localTime
+    [[nodiscard]] std::chrono::local_seconds localTimeOf(
+        std::chrono::system_clock::time_point when) const noexcept
+    {
+        return _clocks.localTime(when);
+    }
+
+    /// The current time in local civil time, read from the wall clock and through the converter the
+    /// terminal was constructed with.
+    /// @return The wall clock's present instant, in local civil time to the second.
+    /// @see TerminalClocks::wall, TerminalClocks::localTime
+    [[nodiscard]] std::chrono::local_seconds localTimeNow() const noexcept
+    {
+        return _clocks.localTime(_clocks.wall.now());
+    }
+
+    /// @return The wall clock's present instant, from the clock the terminal was constructed with.
+    /// @see TerminalClocks::wall
+    [[nodiscard]] std::chrono::system_clock::time_point wallTimeNow() const noexcept
+    {
+        return _clocks.wall.now();
+    }
 
     /// Retrieves reference to the underlying PTY device.
     [[nodiscard]] vtpty::Pty& device() noexcept { return *_pty; }
@@ -876,18 +1188,24 @@ class Terminal
 
     [[nodiscard]] ImageSize pixelSize() const noexcept { return cellPixelSize() * totalPageSize(); }
 
-    // Returns number of lines for the currently displayed status line,
-    // or 0 if status line is currently not displayed.
+    /// How many lines a status line takes, the indicator and the host-writable one alike. The status screens
+    /// are made this tall, and statusLineHeight() answers from it rather than from their grids.
+    static constexpr auto StatusLineHeight = LineCount(1);
+
+    /// How many lines the status line on display takes: none without one. From the status display type alone,
+    /// which is race-free to read, as the renderer asks each frame without the state lock; the status
+    /// screens' grids are rewritten by a resize.
+    /// @return The status line's height.
     [[nodiscard]] LineCount statusLineHeight() const noexcept
     {
-        switch (_statusDisplayType)
-        {
-            case StatusDisplayType::None: return LineCount(0);
-            case StatusDisplayType::Indicator: return _indicatorStatusScreen.pageSize().lines;
-            case StatusDisplayType::HostWritable: return _hostWritableStatusLineScreen.pageSize().lines;
-        }
-        core::unreachable();
+        return _statusDisplayType.get() == StatusDisplayType::None ? LineCount(0) : StatusLineHeight;
     }
+
+    /// The main page's size, read race-free: the total page size without the status line, which is what
+    /// the main page is laid out at. Unlike the PTY's page size (@see pageSize()), which another thread
+    /// rewrites as it resizes, and which stops following the window once the PTY has closed.
+    /// @return The main page's size.
+    [[nodiscard]] PageSize mainPageSize() const noexcept { return totalPageSize() - statusLineHeight(); }
 
     /// The screen row the MAIN page starts on.
     ///
@@ -947,15 +1265,33 @@ class Terminal
                           KeyboardModifiers modifiers,
                           KeyboardEventType eventType,
                           Timestamp now);
+    /// Handles a mouse press, first offering it, with its click count, to @p claimant.
+    ///
+    /// The claimant is asked only when the press would reach the terminal's own selection -- no mouse
+    /// protocol, or one the bypass modifier overrides -- so a binding never takes a click an application
+    /// asked for. A claimed press starts no selection and no drag; everything else (hyperlink hover,
+    /// DEC locator, passive tracking) proceeds as for any press.
+    /// @param uiHandledHint A pre-existing bool; turning it into an enum means turning every caller at once.
+    /// @param claimant Asked at most once, under the caller's lock; it must not take the lock itself. An
+    ///                 empty one claims nothing.
+    /// @return Whether the press was handled by the application.
     Handled sendMousePressEvent(Modifiers modifiers,
                                 MouseButton button,
                                 CellLocation newPosition,
                                 PixelCoordinate pixelPosition,
-                                bool uiHandledHint);
+                                bool uiHandledHint,
+                                MousePressClaimant const& claimant = {});
     void sendMouseMoveEvent(Modifiers modifiers,
                             CellLocation newPosition,
                             PixelCoordinate pixelPosition,
                             bool uiHandledHint);
+
+    /// Takes the pointer off the grid: it now stands on no cell -- over the gutter, over the sticky header
+    /// drawn on top of row 0, or outside the terminal. Nothing is hovered there, so the hyperlink it was on
+    /// stops being drawn as hovered, and nothing answers for the pointer's cell, until the next move or press
+    /// lands on one -- the cell it left included. Nothing is reported to the application.
+    void sendMouseLeaveEvent();
+
     Handled sendMouseReleaseEvent(Modifiers modifiers,
                                   MouseButton button,
                                   PixelCoordinate pixelPosition,
@@ -963,10 +1299,15 @@ class Terminal
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
     void sendPaste(std::string_view text); // Sends verbatim text in bracketed mode to application.
-    void sendPasteFromClipboard(unsigned count, bool strip)
-    {
-        _eventListener.pasteFromClipboard(count, strip);
-    }
+
+    /// Asks the frontend to paste its clipboard. @see Events::pasteFromClipboard.
+    ///
+    /// Asked from the key path, which holds the state lock, the request goes out once that lock is released:
+    /// the frontend reads its clipboard, a round trip to whichever process owns it, and the parser thread
+    /// must not wait for that.
+    /// @param count How many times to paste it.
+    /// @param strip Whether to strip the text: a pre-existing bool, as the frontend's hook has it.
+    void sendPasteFromClipboard(unsigned count, bool strip);
     void sendRawInput(std::string_view text);
 
     void inputModeChanged(ViMode mode) { _eventListener.inputModeChanged(mode); }
@@ -986,7 +1327,19 @@ class Terminal
     bool applicationKeypad() const noexcept { return _inputGenerator.applicationKeypad(); }
 
     bool hasInput() const;
+
+    /// Writes the input queued so far to the PTY, or, under InputWriter::ReaderThread on any thread but the
+    /// PTY's reader, wakes the reader to write it. Under the state lock, sent once it is released.
     void flushInput();
+
+    /// Names @p reader as the thread that reads the PTY, before it first reads: under
+    /// InputWriter::ReaderThread the only one that writes to it from then on. Its first read names it as
+    /// well; named as it starts, no input queued in between is written by the thread queuing it.
+    /// @param reader The thread that reads the PTY.
+    void setReaderThread(std::thread::id reader) noexcept
+    {
+        _readerThread.store(reader, std::memory_order_relaxed);
+    }
 
     /// Returns a copy of the input queued but not yet flushed to the PTY.
     [[nodiscard]] std::string peekInput() const;
@@ -997,9 +1350,10 @@ class Terminal
 
     /// Echoes @p bytes onto our own screen, as SRM (reset) asks for.
     ///
-    /// The bytes cannot always be parsed on the spot: flushInput() is also reached from *inside* the
-    /// parser, by every sequence handler that replies, and the parser is not safe to re-enter. Those
-    /// bytes are deferred to processPendingLocalEcho() instead, which runs once the parse has unwound.
+    /// The bytes cannot always be parsed on the spot: a flush can run while a parse is on this thread's
+    /// stack -- where the parse lets go of the state lock mid-batch, as a smooth-scrolling linefeed does --
+    /// and the parser is not safe to re-enter. Those bytes are deferred to processPendingLocalEcho()
+    /// instead, which runs once the parse has unwound.
     /// This is what xterm does with its deferred area. @see Terminal::flushInput().
     void echoLocally(std::string_view bytes);
 
@@ -1013,9 +1367,6 @@ class Terminal
     /// Requires _stateMutex to be held. Marks the parser as running for as long as it is on the stack,
     /// so that a reply issued from a sequence handler defers its echo rather than re-entering here.
     void parseFragmentChunked(std::string_view vtStream);
-
-    /// Writes a given VT-sequence to screen - but without acquiring the lock (must be already acquired).
-    void writeToScreenInternal(std::string_view vtStream);
 
     /// Writes a given VT-sequence to screen - but without acquiring the lock (must be already acquired).
     /// This version of the function is used to write to the status line and should not be used by the shell.
@@ -1091,6 +1442,17 @@ class Terminal
         return _displayedPage == PageIndex(0);
     }
 
+    /// Whether a line of the primary screen's scrollback can be brought into view: that screen is the page
+    /// on display, and the viewport may scroll, which it may not while the cursor stands on another page.
+    ///
+    /// The one question the scrollbar's ticks (scrollbarMarkInputs()) and the reveal a click on one performs
+    /// (revealStableLineAtTop()) both ask, so a tick is offered exactly where a click on it lands. With
+    /// DECPCCM reset the page on display and the cursor's part ways, and either can leave the other.
+    [[nodiscard]] bool canRevealScrollback() const noexcept
+    {
+        return foldingAppliesToDisplayedPage() && !_viewport.scrollingDisabled();
+    }
+
     /// Drops fold state the grid can no longer account for: heads evicted from the scrollback, and
     /// everything at all when a reflow destroyed row identity wholesale.
     ///
@@ -1104,7 +1466,7 @@ class Terminal
     /// per-cell coordinate translation reaches it -- the guard is what runs, not the work.
     void refreshFoldState() const;
 
-    /// Discards the cached fold ranges, a semantic mark having been stamped or cleared.
+    /// Discards the cached fold ranges, a shell mark (ShellMarkLineFlags) having been stamped or cleared.
     ///
     /// The grid's own identity cannot stand in for this: a mark arriving on a page that has not
     /// scrolled moves neither the generation nor the stable base, so a cache keyed on those alone would
@@ -1112,6 +1474,18 @@ class Terminal
     /// The bump is the whole invalidation: the revision is a field of both cache keys, so neither can
     /// hit again until the caches are rebuilt against the new one.
     void invalidateFoldRanges() noexcept { ++_semanticMarkRevision; }
+
+    /// A scroll on the primary screen is about to move or drop what rows of command blocks hold under their
+    /// stable ids (@see RowMove): the heads among those ids are looked at again on the next read of
+    /// commandBlocks(), as after an erase.
+    /// @param move What the scroll does, in the ids as they stand before it.
+    void commandBlockRowsMoved(RowMove const& move) noexcept;
+
+    /// A scroll on the primary screen is about to move or drop rows that carry shell marks under their
+    /// stable ids (@see RowMove): a collapsed fold follows its prompt line, and the cached ranges are
+    /// dropped.
+    /// @param move What the scroll does, in the ids as they stand before it.
+    void foldRowsMoved(RowMove const& move);
 
     /// What the gutter shows on @p gridLine: which part of a fold's column, if any, that row carries.
     ///
@@ -1133,8 +1507,13 @@ class Terminal
     [[nodiscard]] std::optional<FoldRange> foldContaining(LineOffset gridLine) const;
 
     /// Collapses or expands the fold covering @p gridLine, wherever in the block that line sits.
+    ///
+    /// Refused while folding is unavailable (Settings::foldingAvailability), as every verb here that can
+    /// hide output is: the toggles and the collapses, autoCollapseOnNewPrompt() among them. Only the
+    /// expands -- expandFoldContaining() and expandAllFolds() -- run regardless, so switching folding off
+    /// never strands output behind it.
     /// @param gridLine A grid line (0 = page top, negative = into the scrollback).
-    /// @return Whether a fold was found and toggled.
+    /// @return Whether a fold was found and toggled; false while folding is unavailable.
     bool toggleFoldContaining(LineOffset gridLine);
 
     /// Expands the fold covering @p gridLine, if a collapsed one does.
@@ -1146,7 +1525,16 @@ class Terminal
     /// @return Whether anything changed.
     bool expandFoldContaining(LineOffset gridLine);
 
+    /// Collapses the fold covering @p gridLine, leaving an already-collapsed one alone -- vim's `zc`,
+    /// which unlike a toggle never opens what it is pointed at. Refused while folding is unavailable.
+    /// @param gridLine A grid line (0 = page top, negative = into the scrollback).
+    void collapseFoldContaining(LineOffset gridLine);
+
     /// Collapses or expands the most recently FINISHED command's fold.
+    ///
+    /// This verb and the three below act only while the primary page is on display
+    /// (foldingAppliesToDisplayedPage()), as foldContaining() does. It and the two collapses below are
+    /// also refused while folding is unavailable.
     /// @return Whether there was one to toggle.
     bool toggleLastFold();
 
@@ -1162,8 +1550,8 @@ class Terminal
     /// @return Whether anything changed.
     bool expandAllFolds();
 
-    /// Collapses the command that just finished, when configured to (@see
-    /// Settings::autoCollapseFoldOnNewCommand). Called as a new prompt starts.
+    /// Collapses the command that just finished, when Settings::autoCollapseFoldOnNewCommand asks for it
+    /// and folding is available. Called as a new prompt starts.
     void autoCollapseOnNewPrompt();
 
     /// The id runs collapsed folds currently hide, ascending and disjoint.
@@ -1220,6 +1608,139 @@ class Terminal
     ///
     /// @param gridLine The grid line the pointer is over in the gutter, or nullopt when it left.
     void setGutterHoverLine(std::optional<LineOffset> gridLine);
+
+    // }}}
+
+    // {{{ Sticky command header (OSC 133 blocks)
+
+    /// The block the sticky header covered row 0 with on the last frame, if it showed one -- what a press
+    /// on row 0 lands on.
+    ///
+    /// Published with the frame, when it is swapped to the front, rather than decided again here: the user
+    /// clicks what was DRAWN, and a fresh decision after the viewport moved under the pointer would answer
+    /// for a frame nobody saw -- as would a fill that never reached the screen.
+    /// Nullopt whenever the displayed page is not the primary one, so a press on a full-screen
+    /// application's first row is never taken for one on a header the previous page showed.
+    /// @return The block, or nullopt when the frame in front drew no header.
+    [[nodiscard]] std::optional<CommandBlockId> stickyHeaderBlock() const noexcept
+    {
+        auto const block = _renderBuffer.frontStickyHeaderBlock.load();
+        if (!foldingAppliesToDisplayedPage() || block == CommandBlockId {})
+            return std::nullopt;
+        return block;
+    }
+
+    /// Scrolls the viewport so block @p id's head is its top row, expanding the fold that hangs off it.
+    ///
+    /// What a press on the sticky header does. The head is located through the record's cached position,
+    /// so the jump costs the same for a block a million rows up. It lands the way a click on a scrollbar
+    /// tick does, through the one reveal path.
+    /// @see revealStableLineAtTop()
+    /// @param id The block to jump to.
+    /// @return Nothing once the viewport moved (or already showed the head as high as it can); why not
+    ///         otherwise, in which case nothing changed.
+    [[nodiscard]] std::expected<void, CommandBlockJumpError> scrollToCommandBlockHead(CommandBlockId id);
+
+    // }}}
+
+    // {{{ Scrollbar marks
+
+    /// The marks the scrollbar may draw as ticks: one per command block whose head is a row of the grid,
+    /// then one per vi user mark.
+    ///
+    /// Positions are VISIBLE rows counted from the oldest history row -- the range the scrollbar itself
+    /// spans (Viewport::scrollableLineCount() plus the page) -- so a collapsed fold counts as its one head
+    /// row, and a user mark a fold hides stands on that head. O(runs + (records + marks) log runs), runs
+    /// being the hidden runs of the collapsed folds: heads come from each record's cached headStableId and
+    /// marks from userMarks(), never from a walk of the grid, and each is placed by binary searches into
+    /// the runs.
+    ///
+    /// Left out: blocks still at their prompt (no command yet), heads evicted from the grid or recorded in
+    /// another stable-id generation (a daemon mirror's record before its head row is placed), and
+    /// everything while no click could reveal them (canRevealScrollback()): the alternate screen is up, or
+    /// another page is on display.
+    ///
+    /// Caller holds the terminal lock.
+    /// @return The marks, records oldest first and then user marks top-down; neither bucketed nor filtered
+    ///         by the sources a frontend shows (@see scrollbarMarks()).
+    [[nodiscard]] std::vector<ScrollbarMarkInput> scrollbarMarkInputs() const;
+
+    /// A counter that moves whenever what scrollbarMarkInputs() returns may have: a block's record or head,
+    /// a vi mark, a fold, rows evicted or renamed, or whether a tick can be revealed at all. A frontend keys
+    /// the ticks it keeps on this, and on what it adds itself (the track, the kinds it shows, their colours,
+    /// the rows the scrollbar spans), so a refresh that finds it unmoved copies nothing out.
+    ///
+    /// Reconciles each store with the grid first, as scrollbarMarkInputs() does, so a read that changes
+    /// nothing finds the same revision the next time. Caller holds the terminal lock.
+    /// @return The revision.
+    [[nodiscard]] uint64_t scrollbarMarksRevision() const;
+
+    /// The stable ids of the primary screen's user-marked lines, reconciled against the grid first.
+    ///
+    /// Rebuilt by one scan of the grid when the stable-id generation moved since it was last current (a
+    /// reflow, a reset, a history-limit change); then rid of ids whose rows left the grid: evicted below
+    /// Grid::stableRangeFloor(), or cut off below a page that shrank. A mark placed, erased or moved is
+    /// reported as it happens, so a read never looks at a line. const for the reason refreshFoldState() is:
+    /// reconciling a cache is not a change of state.
+    ///
+    /// Caller holds the terminal lock.
+    /// @return The reconciled index.
+    [[nodiscard]] UserMarkIndex const& userMarks() const;
+
+    /// Places the user mark (vi `mm`) on the logical line the current screen's row @p line belongs to, or
+    /// takes it off where the line carries one.
+    ///
+    /// A replica's marks are its host's (bindReplica): on the primary screen it asks for the change
+    /// (Events::userMarkRequested) and leaves its line alone, which takes the mark when the host's row comes
+    /// back -- so a mark is the session's, the same for every client of it, and it follows the host's reflow.
+    ///
+    /// Caller holds the terminal lock.
+    /// @param line The row, on the current screen.
+    void toggleUserMark(LineOffset line);
+
+    /// Places or takes off the user mark on the logical line of the primary screen's row @p request names: a
+    /// replica's request (Events::userMarkRequested), arriving at the terminal it replicates. One whose
+    /// stable-id generation is gone, or whose row has left the grid, is passed over: its id may name another
+    /// row now.
+    ///
+    /// Caller holds the terminal lock.
+    /// @param request The row, by its stable id in this terminal's primary grid, and what to do to its line.
+    void placeUserMark(UserMarkRequest const& request);
+
+    /// Tells the user-mark index that the logical line headed by @p headStableId gained or lost
+    /// LineFlag::UserMark on the primary screen.
+    ///
+    /// Called through Screen::noteUserMarkChange(): for every mark written through the funnel
+    /// Screen::setLogicalLineFlags(), and for every one a row rewritten whole takes or brings
+    /// (Screen::noteRowRewritten(): an erase, a daemon mirror's host row).
+    ///
+    /// Caller holds the terminal lock.
+    /// @param headStableId The logical line's head, by stable id.
+    /// @param change Whether the mark was placed or removed.
+    void userMarkChanged(int64_t headStableId, UserMarkChange change);
+
+    /// A scroll on the primary screen is about to move or drop user-marked rows under their stable ids
+    /// (@see RowMove): each mark is held under the id its line moves to.
+    ///
+    /// Caller holds the terminal lock.
+    /// @param move What the scroll does, in the ids as they stand before it.
+    void userMarkRowsMoved(RowMove const& move);
+
+    /// Scrolls the viewport so the line @p stableId names is its top row, opening first the collapsed fold
+    /// that hides that line or hangs off it.
+    ///
+    /// What a click on a scrollbar tick does, and a press on the sticky header (scrollToCommandBlockHead()).
+    /// Refused, rather than guessed at, for an id read in another stable-id generation: after a reflow it
+    /// names some other row. Asks whether the viewport can scroll at all before it touches a fold, so a
+    /// reveal that cannot land changes nothing.
+    ///
+    /// Caller holds the terminal lock.
+    /// @param stableId The line's stable id on the primary screen.
+    /// @param stableIdGeneration The Grid::stableIdGeneration() @p stableId was read in.
+    /// @return Nothing once the line is on top, or as near to it as the scrollback allows; why not
+    ///         otherwise, in which case nothing changed.
+    [[nodiscard]] std::expected<void, RevealError> revealStableLineAtTop(int64_t stableId,
+                                                                         uint64_t stableIdGeneration);
 
     // }}}
 
@@ -1294,10 +1815,13 @@ class Terminal
     // {{{ Screen Render Proxy
     std::optional<std::chrono::milliseconds> nextRender() const;
 
-    /// Updates the internal clock to the given time point,
-    /// and ensures internal time-dependant state is updated.
+    /// Sets the terminal's clock to @p now, and advances what runs on it between frames: the cursor's blink
+    /// and a momentum glide. The render thread's alone, before and after each frame, and a test's: no other
+    /// thread ticks, so what it advances has one owner. Takes the state lock while a glide is armed, so it is
+    /// never called with that lock held.
+    /// @param now The time of the frame.
     void tick(std::chrono::steady_clock::time_point now) noexcept;
-    void tick(std::chrono::milliseconds delta) { tick(_currentTime + delta); }
+    void tick(std::chrono::milliseconds delta) { tick(currentTime() + delta); }
     // }}}
 
     // {{{ RenderBuffer synchronization API
@@ -1356,8 +1880,41 @@ class Terminal
     void updateInputMethodPreeditString(std::string preeditString);
     // }}}
 
-    void lock() const { _stateMutex.lock(); }
-    void unlock() const { _stateMutex.unlock(); }
+    /// Takes the state lock as a frontend does, to change what the parser thread changes. Until unlock(), the
+    /// hold keeps back what must not run under the lock: the input flush, as a PTY write can block while the
+    /// parser thread waits for the lock, and with SRM reset the local echo parses, which takes the lock
+    /// again; a clipboard paste, a round trip to another process that pastes through a flush; and the opening
+    /// of a document, which hands it to another process. Records the calling thread as the lock's holder.
+    void lock() { acquireState(HoldBack::Yes); }
+
+    /// Releases the state lock taken by lock(), then sends the input queued meanwhile -- the reports a change
+    /// raised, say -- or leaves it to the PTY's reader, as Settings::inputWriter says, and asks for
+    /// what the hold kept back. Never throws, as a lock guard's destructor calls it, on unwind too: a failure
+    /// is logged.
+    void unlock() noexcept;
+
+    /// Takes the state lock to read. A const holder changes nothing, so it holds nothing back.
+    void lock() const { acquireState(HoldBack::No); }
+
+    /// Releases the state lock taken to read.
+    void unlock() const { releaseState(); }
+
+    /// Runs @p command under the state lock, as lock() takes it, and returns what it returns: for a frontend
+    /// that wants a value out of the hold, or that may run where its thread holds the lock already. There,
+    /// @p command runs at once under that hold, which then sends what it queues: a frontend hook raised under
+    /// the lock may answer synchronously, as the QML scrollbar writes back the offset a scroll announces.
+    /// @param command What to run under the lock. It must not take the lock itself.
+    /// @return What @p command returns.
+    template <typename Command>
+        requires std::invocable<Command const&>
+    std::invoke_result_t<Command const&> runUnderStateLock(Command const& command)
+    {
+        if (isStateLockHeldByThisThread())
+            return command();
+
+        auto const _ = std::scoped_lock { *this };
+        return command();
+    }
 
     [[nodiscard]] ColorPalette const& colorPalette() const noexcept { return _colorPalette; }
     [[nodiscard]] ColorPalette& colorPalette() noexcept { return _colorPalette; }
@@ -1370,18 +1927,16 @@ class Terminal
 
     void setColorPalette(ColorPalette const& palette) noexcept;
     void resetColorPalette() noexcept { setColorPalette(defaultColorPalette()); }
+
+    /// Re-seeds the palette, and the defaults a reset returns to, from @p colors.
+    ///
+    /// With DEC mode 2031 set, reports the update only when @p colors differs from the palette in effect.
+    /// @param colors The configured palette.
     void resetColorPalette(ColorPalette const& colors);
 
     void pushColorPalette(size_t slot);
     void popColorPalette(size_t slot);
     void reportColorPaletteStack();
-
-    [[nodiscard]] ShellIntegration& shellIntegration() noexcept { return *_shellIntegration; }
-    [[nodiscard]] ShellIntegration const& shellIntegration() const noexcept { return *_shellIntegration; }
-    void setShellIntegration(std::unique_ptr<ShellIntegration> newShellIntegration)
-    {
-        _shellIntegration = std::move(newShellIntegration);
-    }
 
     /// The application's hierarchical context ancestry (OSC 3008), for reading.
     /// Mutated only through applyContextCommand().
@@ -1398,8 +1953,133 @@ class Terminal
     /// Adopts a context record replicated from a daemon host. @see ContextStack::adopt.
     void adoptContext(TerminalContext record);
 
-    /// Replaces the ancestry with @p ids, for the same mirroring reason as @ref adoptContext.
+    /// Replaces the ancestry with @p ids, for the same mirroring reason as @ref adoptContext, and announces
+    /// the new active context through Events::contextChanged when it moved.
+    ///
+    /// Never makes it the context the rows the cursor reaches are stamped with, as applyContextCommand()
+    /// does: a mirror's rows carry the contexts the host gave them, and a row the mirror stamped itself --
+    /// the one its cursor stood on when the chain moved, or one it reached afterwards -- could differ from
+    /// the host's.
     void setContextChain(std::span<ContextId const> ids);
+
+    /// Makes this terminal a replica of one a daemon hosts, @p role saying whether the daemon runs on this
+    /// machine: the one switch every locality this terminal judges follows -- the records it adopts
+    /// (adoptCommandBlock()), its OSC 3008 contexts and its OSC 7 working directory
+    /// (resolveWorkingDirectory()), and the `file://` URLs its application writes (fileUrlLocalHost()).
+    ///
+    /// A documented attach-style call (AGENT.md, cyclic wiring), not configuration at construction: the
+    /// terminal is built around its pty before the mirror that binds to it exists, and only that binding
+    /// knows where the daemon runs. Called once, by the mirror; lock-free, for the reason
+    /// adoptCommandBlock() gives. The role is published last, and atomically, for fileUrlLocalHost().
+    /// @param role What this terminal replicates.
+    /// @param identity This machine's identity as the daemon's contexts spell a machine -- a daemon sends no
+    ///        machine id as it read it, but one derived from it -- which a ReplicaRole::SameMachine replica
+    ///        judges every context against, in place of localIdentity(). Unused by the other roles.
+    void bindReplica(ReplicaRole role, HostIdentity identity) noexcept
+    {
+        _replicaIdentity = std::move(identity);
+        _replicaRole.store(role, std::memory_order_release);
+    }
+
+    /// The host name the authority of a `file://` URL this terminal's application wrote -- an OSC 8 link's
+    /// target -- must name for the URL to be a path on this machine (vtbackend::isLocalHost): this machine's
+    /// (localIdentity()). None on a replica of another machine's terminal (ReplicaRole::OtherMachine), whose
+    /// application names a path on the daemon's machine whatever authority it writes, the empty one and
+    /// `localhost` included.
+    ///
+    /// Lock-free, unlike the rest of the replica's judgements: the GUI asks it on its own thread, of a link
+    /// it already holds. The role is read atomically, and localIdentity() names data fixed at construction.
+    /// @return The host name, or nullopt when no `file://` URL names a path here.
+    [[nodiscard]] std::optional<std::string_view> fileUrlLocalHost() const noexcept;
+
+    /// Adopts a command-block record replicated from a daemon host, and raises
+    /// Events::commandBlockFinished when the store reports the adoption as a finish: the mirror's
+    /// counterpart of OSC 133;D, beside adoptContext().
+    ///
+    /// On a replica of another machine's terminal (ReplicaRole::OtherMachine) the record's working
+    /// directory is held Foreign, whatever the daemon judged it: it names a directory there. Its start
+    /// instants are moved onto this terminal's clock there, by the difference adoptHostClock() measured.
+    ///
+    /// Never makes the record the block the rows the cursor reaches are stamped with, as beginCommandBlock()
+    /// does: a mirror's rows carry the ids the host gave them, and a row the mirror stamped itself could
+    /// differ from the host's.
+    ///
+    /// Lock-free like adoptContext(): the mirror calls it with the terminal lock already held, so the
+    /// event is raised under that lock exactly as the parser thread raises it.
+    /// @see Events::commandBlockFinished for what that obliges a listener to do.
+    /// @param record The record, under the HOST's id.
+    /// @param mode Snapshot for history, which never raises; Live for news.
+    void adoptCommandBlock(CommandBlockRecord record, AdoptMode mode);
+
+    /// Heads each of @p blocks that has no head in the primary grid's stable-id generation, by the rule a
+    /// reflow re-heads every block by: at its lowest row carrying LineFlag::Marked, else its lowest carrying
+    /// LineFlag::OutputStart, else its topmost row unless that is the first row the grid holds -- where a
+    /// head that scrolled out of the history looks no different. A block with no such row is left without
+    /// one: its rows may yet arrive.
+    ///
+    /// A daemon mirror's counterpart of the head OSC 133;A records. A record adoptCommandBlock() takes has
+    /// no head here -- the host's names a row in the HOST's grid -- and a mirror writes rows straight into
+    /// the grid, so once it has written a batch of them it names each block it adopted and each a row it
+    /// wrote may head. Only the named blocks are looked for, so a record whose rows never reach this grid
+    /// costs a walk once, not on every batch. Heads a write took from their blocks are re-headed first, as
+    /// any read of commandBlocks() does.
+    ///
+    /// Does NOT take the lock, for the reason commandBlocks() gives. Allocates nothing: a mirror calls it for
+    /// every update that rewrites a head-marked row, which every keystroke at a prompt does.
+    /// @param blocks The blocks to head, in any order, repeated or not; an id with no record, or whose record
+    ///        has a head in this generation, is passed over. Sorted in place: the caller's buffer is the
+    ///        scratch space the call works in, and holds no particular order afterwards.
+    void placeCommandBlockHeads(std::span<CommandBlockId> blocks);
+
+    /// Records each of @p blocks that has no head in the primary grid's stable-id generation as evicted, as
+    /// a reflow records a block none of whose rows it found: what a daemon mirror does with a block its host
+    /// says has lost its head row. The mirror cannot tell that from a head row that has yet to arrive, and
+    /// without it such a block is never headed, so neither its sticky header nor its placeholder shows.
+    ///
+    /// A block headed in this generation keeps its head: the mirror holds the row the host let go of, and
+    /// will see it leave as the host did. Call it before placeCommandBlockHeads(), which then passes the
+    /// retired blocks over. Does NOT take the lock, for the reason commandBlocks() gives.
+    /// @param blocks The blocks whose host head is gone, in any order; an id with no record is passed over.
+    void retireCommandBlockHeads(std::span<CommandBlockId const> blocks);
+
+    /// @return The wall-clock instant this terminal's line birth stamps count from, to the second.
+    /// @see lineBirthTime()
+    [[nodiscard]] std::chrono::system_clock::time_point sessionEpoch() const noexcept;
+
+    /// Re-anchors line birth stamps on @p epoch, floored to the second as the terminal's own epoch is.
+    ///
+    /// A documented rebinding seam (AGENT.md, configuration at construction time) with one caller: a
+    /// daemon mirror copies the host's stamps verbatim, and they name the right instants only when counted
+    /// from the HOST's epoch. Lock-free, for the reason adoptCommandBlock() gives.
+    ///
+    /// The epoch is held to the range this terminal computes with (heldInstant()) here, whoever produced
+    /// it: a birth time adds to it and a stamp subtracts it from this terminal's clock, either of which
+    /// overflows near the clock's limits. A value outside the range lands on the edge it overshot.
+    /// @param epoch The host's session epoch.
+    void adoptSessionEpoch(std::chrono::system_clock::time_point epoch) noexcept;
+
+    /// Measures how far this terminal's wall clock is from a daemon host's, by what the host's read as it
+    /// stated @p hostNow. On a replica of another machine's terminal (ReplicaRole::OtherMachine) every
+    /// command-block record adopted from here on has its start instants moved by that much
+    /// (adoptCommandBlock()), and every row's time is read moved by it (lineBirthTime()), so a running
+    /// command's time, a block's start and its rows' times read the same here as on the host however the
+    /// two machines' clocks are set. A replica on the daemon's own machine reads the same clock, and moves
+    /// nothing.
+    ///
+    /// A documented rebinding seam (AGENT.md, configuration at construction time) with one caller, the
+    /// daemon mirror, which states each new reading as it arrives. The time the reading took to arrive
+    /// counts as skew: a few milliseconds over a local socket. Lock-free, for the reason
+    /// adoptCommandBlock() gives. Both instants are held to the range this terminal computes with
+    /// (heldInstant()), which bounds the difference.
+    /// @param hostNow The host's wall clock, as it read it just before it was sent.
+    void adoptHostClock(std::chrono::system_clock::time_point hostNow) noexcept;
+
+    /// @p hostInstant, read by a daemon host's clock, as this terminal's clock reads it: moved by the
+    /// difference adoptHostClock() measured on a replica of another machine's terminal, else as it is.
+    /// @param hostInstant An instant the host's clock read.
+    /// @return The same instant on this terminal's clock.
+    [[nodiscard]] std::chrono::system_clock::time_point onThisClock(
+        std::chrono::system_clock::time_point hostInstant) const noexcept;
 
     /// Mirrors the active context id into every screen, so lines written next carry it.
     void publishActiveContext() noexcept;
@@ -1521,13 +2201,16 @@ class Terminal
                             .from = {}, .to = boxed_cast<ColumnOffset>(pageSize.columns) - 1 } };
     }
 
-    /// Returns true if a screen crossfade transition is currently active.
-    [[nodiscard]] bool isScreenTransitionActive() const noexcept { return _screenTransition.active; }
+    /// Returns true while a screen crossfade transition runs, at the terminal's clock.
+    [[nodiscard]] bool isScreenTransitionActive() const noexcept
+    {
+        return _screenTransition.active && !_screenTransition.isComplete(currentTime());
+    }
 
     /// Returns the current transition progress in [0, 1], or 1.0 if no transition is active.
     [[nodiscard]] float screenTransitionProgress() const noexcept
     {
-        return _screenTransition.progress(_currentTime);
+        return _screenTransition.progress(currentTime());
     }
 
     /// Immediately ends any active screen transition.
@@ -1581,9 +2264,11 @@ class Terminal
     [[nodiscard]] CellLocation currentMousePosition() const noexcept { return _currentMousePosition; }
 
     /// Not noexcept: the coordinate translation goes through the fold projection, which allocates.
+    /// @return The grid cell under the pointer; nullopt while the pointer is on none (@see
+    /// sendMouseLeaveEvent).
     [[nodiscard]] std::optional<CellLocation> currentMouseGridPosition() const
     {
-        if (_currentScreen->contains(_currentMousePosition))
+        if (_pointerPlacement == PointerPlacement::OnGrid && _currentScreen->contains(_currentMousePosition))
             return _viewport.translateScreenToGridCoordinate(_currentMousePosition);
         return std::nullopt;
     }
@@ -1605,12 +2290,12 @@ class Terminal
     CursorShape cursorShape() const noexcept { return _settings.cursorShape; }
     void setCursorShape(CursorShape shape);
 
-    bool cursorBlinkActive() const noexcept { return _cursorBlinkState; }
+    bool cursorBlinkActive() const noexcept { return cursorBlink().phase == CursorBlinkPhase::Shown; }
 
     bool cursorCurrentlyVisible() const noexcept
     {
         return isModeEnabled(DECMode::VisibleCursor)
-               && (cursorDisplay() == CursorDisplay::Steady || _cursorBlinkState);
+               && (cursorDisplay() == CursorDisplay::Steady || cursorBlinkActive());
     }
 
     /// Returns the predicted animation progress for a cursor at the given grid position.
@@ -1618,27 +2303,25 @@ class Terminal
     /// so that Block cursor cell inversion is suppressed during animation.
     [[nodiscard]] float cursorAnimationProgress(CellLocation cursorGridPosition) const noexcept
     {
-        if (_cursorMotion.active && !_cursorMotion.isComplete(_currentTime))
-            return _cursorMotion.progress(_currentTime);
+        auto const now = currentTime();
+        if (_cursorMotion.active && !_cursorMotion.isComplete(now))
+            return _cursorMotion.progress(now);
         if (cursorGridPosition != _cursorMotion.toPosition
             && _settings.cursorMotionAnimationDuration.count() > 0)
             return 0.0f;
         return 1.0f;
     }
 
-    bool isBlinkOnScreen() const noexcept { return _lastRenderPassHints.containsBlinkingCells; }
-
-    std::chrono::steady_clock::time_point lastCursorBlink() const noexcept { return _lastCursorBlink; }
-
-    constexpr void setCursorBlinkingInterval(std::chrono::milliseconds value)
+    bool isBlinkOnScreen() const noexcept
     {
-        _settings.cursorBlinkInterval = value;
+        return _lastRenderPassHints.load(std::memory_order_relaxed).containsBlinkingCells;
     }
 
-    constexpr std::chrono::milliseconds cursorBlinkInterval() const noexcept
-    {
-        return _settings.cursorBlinkInterval;
-    }
+    std::chrono::steady_clock::time_point lastCursorBlink() const noexcept { return cursorBlink().since; }
+
+    void setCursorBlinkingInterval(std::chrono::milliseconds value) { _settings.cursorBlinkInterval = value; }
+
+    std::chrono::milliseconds cursorBlinkInterval() const noexcept { return _settings.cursorBlinkInterval; }
     // }}}
 
     // {{{ selection management
@@ -1720,10 +2403,10 @@ class Terminal
     /// @param line The absolute grid line offset to test.
     /// @return true if a highlight range is active and spans @p line.
     [[nodiscard]] bool isHighlighted(LineOffset line) const noexcept;
-    float blinkState() const noexcept { return _slowBlinker.opacity(_currentTime, _settings.blinkStyle); }
+    float blinkState() const noexcept { return _slowBlinker.opacity(currentTime(), _settings.blinkStyle); }
     float rapidBlinkState() const noexcept
     {
-        return _rapidBlinker.opacity(_currentTime, _settings.blinkStyle);
+        return _rapidBlinker.opacity(currentTime(), _settings.blinkStyle);
     }
 
     /// Sets or resets to a new selection.
@@ -1736,7 +2419,10 @@ class Terminal
     void selectAll();
 
     /// Whether the left mouse button is currently held down, i.e. a selection drag may be in progress.
-    [[nodiscard]] bool leftMouseButtonPressed() const noexcept { return _leftMouseButtonPressed; }
+    [[nodiscard]] bool leftMouseButtonPressed() const noexcept
+    {
+        return _leftButtonPress == LeftButtonPress::Selecting;
+    }
 
     bool visualizeSelectedWord() const noexcept { return _settings.visualizeSelectedWord; }
     void setVisualizeSelectedWord(bool enabled) noexcept { _settings.visualizeSelectedWord = enabled; }
@@ -1745,23 +2431,225 @@ class Terminal
     [[nodiscard]] std::string extractSelectionText() const;
     [[nodiscard]] std::string extractLastMarkRange() const;
 
-    /// The most recently finished shell command, reconstructed from the OSC 133 marks its shell left.
-    ///
-    /// Always read from the PRIMARY screen — that is where the history and the shell's prompt live — so it
-    /// keeps answering while an alt-screen app (vim, less) is on top.
-    ///
-    /// @return The block, or nullopt when the scrollback holds no finished command.
-    [[nodiscard]] std::optional<CommandBlockText> lastCommandBlock() const;
-
     /// Where the shell's LIVE prompt sits — the one the user is typing at right now.
     ///
-    /// Unlike lastCommandBlock(), this is answered for the screen actually on display: while an alt-screen
-    /// application (vim, less) is up there is no shell prompt to speak of, and saying so is the point.
+    /// Unlike the block actions (commandBlockText()), which always read the primary screen, this is answered
+    /// for the screen actually on display: while an alt-screen application (vim, less) is up there is no
+    /// shell prompt to speak of, and saying so is the point.
     ///
-    /// Does NOT take the lock — the caller holds it, the same contract lastCommandBlock() has.
+    /// Does NOT take the lock — the caller holds it.
     ///
     /// @return The span, or why there is no live prompt.
     [[nodiscard]] std::expected<LivePromptSpan, PromptRegionError> livePromptSpan() const;
+
+    /// When the cursor first reached @p line, by the wall clock this terminal was given.
+    ///
+    /// Read from the 24-bit stamp the line carries: nullopt for a line the cursor never reached, a line of
+    /// a screen that is not stamped (the alternate screen), and a line stamped past the ~194-day horizon,
+    /// whose saturated stamp no longer says when. A replica of another machine's terminal reads its host's
+    /// stamps on its own clock (@see adoptHostClock).
+    ///
+    /// Does NOT take the lock: the parser thread writes the stamp under it, so the caller holds the lock for
+    /// as long as it holds @p line -- the same contract livePromptSpan() has.
+    /// @see Line::bornAt
+    /// @param line A line of this terminal's primary screen.
+    /// @return The instant, to the second.
+    [[nodiscard]] std::optional<std::chrono::system_clock::time_point> lineBirthTime(
+        Line const& line) const noexcept;
+
+    // {{{ Command blocks (OSC 133, and OSC 3008 standing in for it)
+
+    /// Every shell command block of the primary screen, oldest first.
+    ///
+    /// Every record's head is current: a read first re-records them all when row identity died since the
+    /// last read, and those an erase or a new prompt took from their blocks or a scroll inside margins moved,
+    /// so read records through here, never through the member.
+    ///
+    /// Does NOT take the lock: the parser thread feeds the store under it, so the caller holds the lock
+    /// for as long as it reads the store -- the same contract lineBirthTime() has.
+    /// @see CommandBlockStore
+    /// @see syncCommandBlockHeads
+    [[nodiscard]] CommandBlockStore& commandBlocks() noexcept;
+
+    /// @copydoc commandBlocks()
+    [[nodiscard]] CommandBlockStore const& commandBlocks() const noexcept;
+
+    /// How much re-recording the blocks' heads has looked at since this terminal was built: every record it
+    /// examined, and every grid row it walked. The work behind a commandBlocks() read that found rows
+    /// changed, and behind placeCommandBlockHeads().
+    ///
+    /// A test seam -- nothing in production reads it: what pins the cost of a read, and that the events a
+    /// flood of OSC 133 raises leave none of that work to the thread parsing it.
+    /// @return The count, which only ever grows.
+    [[nodiscard]] uint64_t commandBlockHeadWork() const noexcept { return _commandBlockHeadWork; }
+
+    /// The block the primary screen's row @p gridLine belongs to.
+    ///
+    /// A row an erase took the block from, while the cursor was elsewhere, belongs to the block of the fold
+    /// it lies in: the gutter colours it as that block, and every other consumer sees the same block. Outside
+    /// every fold it belongs to the block still unfinished when it lies between that block's head and the
+    /// primary cursor, which has passed it; a block gets its fold only once it finishes.
+    ///
+    /// Does NOT take the lock, for the reason commandBlocks() gives; the fold lookup reads the fold ranges
+    /// under the same contract.
+    /// @param gridLine A grid row (negative addresses the scrollback).
+    /// @return Its record, or nullptr when the row is outside the grid, belongs to no block, or its block's
+    ///         record has been evicted from the store.
+    [[nodiscard]] CommandBlockRecord const* commandBlockAt(LineOffset gridLine) const;
+
+    /// The rows of one part of the block the primary screen's row @p anchor belongs to.
+    ///
+    /// Every row is attributed as commandBlockAt() attributes it, the anchor included, so an action names the
+    /// block the gutter and the tooltip show there: a row an erase blanked inside a block's fold is that
+    /// block's, one outside every fold is the unfinished block's between its head and the cursor, and no
+    /// block's elsewhere. The parts are commandBlockRows()'s.
+    ///
+    /// Does NOT take the lock, for the reason commandBlocks() gives. May walk to the top of the history, so
+    /// it runs once per user action, never per frame.
+    /// @param anchor A grid row (negative addresses the scrollback).
+    /// @param part Which part of the block.
+    /// @return The rows, or why there are none.
+    [[nodiscard]] std::expected<CommandBlockRows, CommandBlockActionError> commandBlockRowsAt(
+        LineOffset anchor, CommandBlockPart part) const;
+
+    /// The row a block's lookup stands on: its lowest row that commandBlockAt() names it for.
+    ///
+    /// Does NOT take the lock, for the reason commandBlocks() gives. Walks up from the bottom of the page.
+    /// @param record The block.
+    /// @return The row, or nullopt when none of the block's rows is left in the grid.
+    [[nodiscard]] std::optional<LineOffset> commandBlockAnchor(CommandBlockRecord const& record) const;
+
+    /// The rows of one part of the block a target names, on the primary screen.
+    ///
+    /// Blocks live on the primary screen only, so every target resolves there; Pointer resolves to nothing
+    /// while an alternate screen is up, because the pointer is over that screen. The rows are
+    /// commandBlockRowsAt()'s for the target's row, less the blank lines that end them -- read up to where
+    /// the part ends on them -- though never above the part's first line.
+    ///
+    /// Does NOT take the lock, for the reason commandBlocks() gives. May walk to the top of the history, so
+    /// it runs once per user action, never per frame.
+    /// @param target Which block: under the pointer, at the cursor (the vi cursor outside Insert mode), or
+    ///               the most recently finished one.
+    /// @param part Which part of the block.
+    /// @param pinned When non-zero, this block regardless of @p target (a context-menu row's block).
+    /// @return The rows, or why there are none.
+    [[nodiscard]] std::expected<CommandBlockRows, CommandBlockActionError> commandBlockRows(
+        CommandBlockTarget target, CommandBlockPart part, CommandBlockId pinned = {}) const;
+
+    /// Whether the block a target names still has a row on the primary screen: whether an action on it has
+    /// anything to act on, asked without reading its rows.
+    ///
+    /// A row the pointer or the cursor stands on answers at once. A block named by its record (Last, or
+    /// @p pinned) answers by its head row while that is on the grid, else by its lowest row, looked for from
+    /// the bottom up (commandBlockAnchor()); its own rows are never walked.
+    ///
+    /// Does NOT take the lock, for the reason commandBlocks() gives.
+    /// @param target Which block, as for commandBlockRows().
+    /// @param pinned When non-zero, this block regardless of @p target.
+    /// @return Whether a row of the block is left, its head's or any other.
+    [[nodiscard]] bool hasCommandBlockRows(CommandBlockTarget target, CommandBlockId pinned = {}) const;
+
+    /// Selects one part of a command block as whole lines, completed as a mouse selection would be. Where an
+    /// end mark splits a line of the part (CommandBlockRows), the selection is linear from where the part
+    /// starts to where it ends, which still takes every row between them whole.
+    /// @param target Which block, as for commandBlockRows().
+    /// @param part Which part of the block.
+    /// @param pinned When non-zero, this block regardless of @p target.
+    /// @return Nothing on success; NoBlock while an alternate screen is up (the selection would land on
+    ///         the screen on display, not the one holding the block), else why there are no rows. A failure
+    ///         leaves the selection as it was.
+    [[nodiscard]] std::expected<void, CommandBlockActionError> selectCommandBlock(CommandBlockTarget target,
+                                                                                  CommandBlockPart part,
+                                                                                  CommandBlockId pinned = {});
+
+    /// The text of one part of a command block, a line per logical line: the rows a soft wrap continues are
+    /// joined to their head with the blanks that end them kept (they are content), as the semantic-block
+    /// query reply reads them (Grid::logicalLineText()).
+    /// @param target Which block, as for commandBlockRows().
+    /// @param part Which part of the block.
+    /// @param rendition Plain text, or text with the SGR sequences its cells wear (for `less -R`).
+    /// @param pinned When non-zero, this block regardless of @p target.
+    /// @return The text without a trailing newline, or why there is none.
+    [[nodiscard]] std::expected<std::string, CommandBlockActionError> commandBlockText(
+        CommandBlockTarget target,
+        CommandBlockPart part,
+        CaptureRendition rendition,
+        CommandBlockId pinned = {}) const;
+
+    /// The record of the block a target names. Last and a pinned id answer from the store, so they keep
+    /// answering after the block's rows have left the grid; Pointer and Cursor need a row to stand on.
+    /// @param target Which block, as for commandBlockRows().
+    /// @param pinned When non-zero, the stored record with this id, even if its rows have left the grid.
+    /// @return The record, or nullptr.
+    [[nodiscard]] CommandBlockRecord const* targetedCommandBlock(CommandBlockTarget target,
+                                                                 CommandBlockId pinned = {}) const;
+
+    /// Drops every row above the head of the prompt the primary cursor is at -- scrollback and page alike.
+    /// A head on the page moves to its top, with a running command's output below it; a head in the
+    /// scrollback stays where it is and becomes the oldest row kept, the page unchanged.
+    ///
+    /// The head row stays whole, even where the previous command's output ended on it. The rows leave through
+    /// the grid's own bookkeeping, so the eviction count, the stable floor and the fold state follow as on
+    /// any eviction; the block records stay, as they do for ED 3.
+    ///
+    /// Does NOT take the lock -- the caller holds it.
+    /// @return Nothing on success; NoBlock while an alternate screen is up or when the cursor's row belongs
+    ///         to no block (no shell integration), EmptyPart when the block's prompt has left the grid.
+    [[nodiscard]] std::expected<void, CommandBlockActionError> clearToPrompt();
+
+    /// OSC 133;A (or its OSC 3008 stand-in) on the main display: closes or discards the current block per
+    /// the store's rules, mints a new one headed at the primary cursor's logical line, and stamps that line.
+    void beginCommandBlock();
+
+    /// OSC 133;C (or its OSC 3008 stand-in) on the main display: the current block's command starts, in
+    /// the OSC 3008 context active now.
+    /// @param commandLine The command line, when one is known.
+    /// @param source Where it came from; CommandLineSource::None leaves the record without one.
+    void beginCommand(std::optional<std::string> commandLine, CommandLineSource source);
+
+    /// OSC 133;D (or an OSC 3008 `end=` while OSC 3008 owns the marks): the running command finished.
+    /// Raises Events::commandBlockFinished when something did finish.
+    /// @param exitCode The exit code reported.
+    /// @param outcome How it ended, when OSC 3008 said.
+    void endCommand(int exitCode, ContextOutcome outcome);
+
+    /// An OSC 3008 command context started while OSC 133 owns the marks: it may be the running command's
+    /// own.
+    /// @see CommandBlockStore::commandContextStarted
+    /// @param started The command context, still on the ancestry.
+    void commandContextStarted(ContextId started);
+
+    /// An OSC 3008 command context ended while OSC 133 owns the marks: records HOW the command ended on
+    /// the block whose command it was, if any, without closing or announcing anything.
+    /// @see CommandBlockStore::enrichOutcome
+    /// @param ended The command context that ended.
+    /// @param outcome The ENDFIELDs the `end=` carried.
+    void enrichCommandOutcome(ContextId ended, ContextOutcome outcome);
+
+    /// The working directory a command starting now runs in: the OSC 3008 ancestry first, then OSC 7,
+    /// with its locality.
+    /// @see resolveWorkingDirectory, CwdPurpose::Display
+    /// @return The snapshot; empty when nothing reported a directory.
+    [[nodiscard]] WorkingDirectorySnapshot workingDirectorySnapshot() const;
+
+    /// The working directory for @p purpose: the OSC 3008 ancestry first, then OSC 7, judged against this
+    /// machine (localIdentity()) -- as the daemon's contexts spell it on a replica of a terminal on this
+    /// machine (ReplicaRole::SameMachine), and not at all on a replica of another machine's
+    /// (ReplicaRole::OtherMachine), whose every directory is Foreign: shown, never opened or spawned into.
+    ///
+    /// Does NOT take the lock: it reads the ancestry and the OSC 7 URL, so the caller holds it.
+    /// @see vtbackend::resolveWorkingDirectory, bindReplica
+    /// @param purpose What the directory is wanted for.
+    /// @return The directory, or nullopt when no source could answer for @p purpose.
+    [[nodiscard]] std::optional<ResolvedWorkingDirectory> resolveWorkingDirectory(CwdPurpose purpose) const;
+
+    /// This machine's identity, as the listener states it: what a locality in this terminal's records
+    /// means "local" to, and what a daemon mirror holds a host's verdict against.
+    /// @see Events::localIdentity, whose contract (data fixed at construction) makes this safe from any
+    ///      thread holding the terminal lock.
+    /// @return Views valid for the listener's lifetime.
+    [[nodiscard]] LocalIdentity localIdentity() const noexcept { return _eventListener.localIdentity(); }
+    // }}}
 
     HyperlinkStorage& hyperlinks() noexcept { return _hyperlinks; }
     HyperlinkStorage const& hyperlinks() const noexcept { return _hyperlinks; }
@@ -1781,11 +2669,35 @@ class Terminal
         return {};
     }
 
-    /// Returns the local filesystem path under the mouse cursor, if any.
-    [[nodiscard]] std::optional<std::string> localPathAtMousePosition() const;
+    /// The word under the mouse cursor that reads as a filesystem path, as the screen shows it, whether
+    /// or not it names a file anywhere.
+    /// @see localPathAtMousePosition
+    [[nodiscard]] std::optional<std::string> pathTextAtMousePosition() const;
+
+    /// The existing local file or directory the path under the mouse cursor names, resolved against the
+    /// directory of the command that printed its row (localPathBaseAt()) and the home directory, if any.
+    ///
+    /// Refused on a replica of another machine's terminal (ReplicaRole::OtherMachine), as for the `file://`
+    /// URLs its application writes (fileUrlLocalHost()): its paths name files on the daemon's machine, and
+    /// one that exists here too is another file. Refused likewise where the command that printed the row
+    /// ran on another machine.
+    ///
+    /// The caller holds the lock: the row's block is read from the block store and the fold cache, which
+    /// the parser thread changes as output arrives.
+    /// @return The file's path; nullopt where the pointer rests on no path, or on one that names no existing
+    ///         file; why, where a path is there but names a file on another machine.
+    [[nodiscard]] std::expected<std::optional<std::string>, PathRefusal> localPathAtMousePosition() const;
 
     [[nodiscard]] ExecutionMode executionMode() const noexcept { return _executionMode; }
     void setExecutionMode(ExecutionMode mode);
+
+    /// The modes a key or mouse binding can ask for (MatchModes::Flag), read without the state lock.
+    ///
+    /// A key reads them as it arrives, and must not wait for the parser thread, which holds that lock for a
+    /// whole batch. The vi mode and the execution mode are atomic themselves; the screen, the cursor keys and
+    /// keypad modes, the selection and the search are published as one word by whoever changes them.
+    /// @return The flags that hold.
+    [[nodiscard]] uint8_t bindingModes() const noexcept;
 
     bool processInputOnce();
 
@@ -1800,7 +2712,31 @@ class Terminal
     void bell();
     void bufferChanged(ScreenType);
     void scrollbackBufferCleared();
+
+    /// Brings everything that names a primary-screen row along after rows above the page's top left the
+    /// grid (ED 3, ClearToPrompt): the vi cursor moves with its row and, like the viewport, onto the new top
+    /// when its row is gone; a hint session over the history ends; the search highlight and the gutter
+    /// hover go; then as scrollbackBufferCleared(). Called only when rows were dropped, or when a mirror's
+    /// discarding replay rewrites them all.
+    /// @param pageShift How far the page rows moved up (Screen::dropRowsAbove()); zero when only history
+    ///                  rows went.
+    void rowsDropped(LineCount pageShift);
     void screenUpdated();
+
+    /// Brings a view scrolled back into the history down to the output just applied, as
+    /// Settings::autoScrollOnUpdate asks in Insert mode, where the listener follows output
+    /// (@see Events::outputFollowing). Called with the state lock held, where output is applied and before it
+    /// is published: by the parse batch, and by a mirror applying a remote screen's update.
+    void followOutput();
+
+    /// Runs @p pause with the parser thread's hold of the state lock released, and takes the lock back as
+    /// that thread's own. For a linefeed under smooth scrolling (DECSCLM), which shows the output so far and
+    /// waits before the next line, while the frame is built under the lock; what the batch asked to send so
+    /// far goes out as the lock is released. Taken back as a frontend's, the hold would keep back what the
+    /// rest of the batch sends.
+    /// @param pause What runs with the lock released.
+    void runWithOwnStateLockReleased(std::function<void()> const& pause);
+
     void renderBufferUpdated();
     [[nodiscard]] FontDef getFontDef();
     void setFontDef(FontDef const& fontDef);
@@ -1867,11 +2803,7 @@ class Terminal
     template <typename... Ts>
     void reply(std::string_view message, Ts const&... args)
     {
-#if defined(__APPLE__) || defined(_MSC_VER)
         reply(std::vformat(message, std::make_format_args(args...)));
-#else
-        reply(std::vformat(message, std::make_format_args(args...)));
-#endif
     }
 
     void requestWindowResize(PageSize);
@@ -2079,13 +3011,16 @@ class Terminal
     /// is held automatically extends the selection without requiring mouse movement.
     void extendSelectionAfterScroll();
 
-    /// @returns either an empty string or a file:// URL of the last set working directory.
+    /// @returns either an empty string or a file:// URL of the last set working directory, as reported.
     [[nodiscard]] std::string const& currentWorkingDirectory() const noexcept
     {
-        return _currentWorkingDirectory;
+        return _currentWorkingDirectory.url;
     }
 
-    void setCurrentWorkingDirectory(std::string text) { _currentWorkingDirectory = std::move(text); }
+    /// Takes @p url as the working directory the application reports (OSC 7), unless its path holds a NUL:
+    /// such a report names no directory, not a shorter one, so the previous one stays.
+    /// @param url A file:// URL, a bare path, or empty for none.
+    void setCurrentWorkingDirectory(std::string const& url);
 
     void verifyState();
 
@@ -2097,14 +3032,18 @@ class Terminal
         return _currentPtyBuffer;
     }
 
-    /// Returns the buffer currently being parsed by parseFragment().
-    /// This is used to ensure BufferFragment holds the correct buffer reference
-    /// when creating TrivialLineBuffer entries during parsing.
-    /// @return A reference to the member that holds it, valid until parsing ends or the buffer is
-    ///         replaced; copy it to keep it longer.
-    [[nodiscard]] crispy::BufferObjectPtr<char> const& parsingBuffer() const noexcept
+    /// Returns the buffer currently being parsed by parseFragment(), whose hot end Screen::writeText() moves
+    /// past the text it wrote.
+    /// @return The buffer, owned by the member that holds it and valid until parsing ends or the buffer is
+    ///         replaced. Null while a macro's body is parsed: that is parsed out of a copy of its own, not
+    ///         out of any pty buffer.
+    [[nodiscard]] crispy::BufferObject<char>* parsingBuffer() const noexcept
     {
-        return _parsingBuffer ? _parsingBuffer : _currentPtyBuffer;
+        // A raw pointer rather than a reference to a shared one: the macro's null would then have to be a
+        // static, and a static shared_ptr, with its destructor to register, costs a guard on every call.
+        if (isMacroRunning()) [[unlikely]]
+            return nullptr;
+        return (_parsingBuffer ? _parsingBuffer : _currentPtyBuffer).get();
     }
 
     [[nodiscard]] vtbackend::SelectionHelper& selectionHelper() noexcept { return _selectionHelper; }
@@ -2121,9 +3060,20 @@ class Terminal
     [[nodiscard]] ViInputHandler& inputHandler() noexcept { return _inputHandler; }
     [[nodiscard]] ViInputHandler const& inputHandler() const noexcept { return _inputHandler; }
 
-    [[nodiscard]] ExtendedKeyboardInputGenerator& keyboardProtocol() noexcept
+    /// The Kitty keyboard protocol's state, for a reader holding the state lock or the input lock: every
+    /// change takes both. @see changeKeyboardProtocol()
+    [[nodiscard]] ExtendedKeyboardInputGenerator const& keyboardProtocol() const noexcept
     {
         return _inputGenerator.keyboardProtocol();
+    }
+
+    /// Changes the Kitty keyboard protocol's state, under the input lock as well as the state lock the caller
+    /// holds, as every change to what a key is encoded with is. @see changeInputEncoding()
+    /// @param change What to do to the protocol's state.
+    template <typename Change>
+    void changeKeyboardProtocol(Change const& change)
+    {
+        changeInputEncoding([&](InputGenerator& input) { change(input.keyboardProtocol()); });
     }
 
     void resetHighlight();
@@ -2136,6 +3086,8 @@ class Terminal
     void pushStatusDisplay(StatusDisplayType statusDisplayType);
     void popStatusDisplay();
 
+    /// Whether the keyboard is unlocked (KAM reset). Needs no lock: the ANSI modes are atomic, as a key reads
+    /// this on the GUI thread while the parser thread may set them.
     bool allowInput() const noexcept { return !isModeEnabled(AnsiMode::KeyboardAction); }
 
     void setAllowInput(bool enabled);
@@ -2190,6 +3142,16 @@ class Terminal
 
     [[nodiscard]] Settings& factorySettings() noexcept { return _factorySettings; }
     [[nodiscard]] Settings const& factorySettings() const noexcept { return _factorySettings; }
+
+    /// Makes @p configured the state the resets restore: RIS's operating level and status display,
+    /// DECSCUSR 0's cursor, and whatever else they read from the factory settings.
+    ///
+    /// A setter on purpose, because a configuration reload is the feature: it changes what the terminal
+    /// is configured as, and a reset returns to that, not to what the terminal was born as. The page size
+    /// and the color palette keep the values the resize and resetColorPalette() maintain.
+    /// @param configured The settings the terminal would be constructed with now.
+    void reconfigureFactorySettings(Settings configured);
+
     [[nodiscard]] Settings const& settings() const noexcept { return _settings; }
     [[nodiscard]] Settings& settings() noexcept { return _settings; }
 
@@ -2259,15 +3221,20 @@ class Terminal
     void setImageDecoder(ImageDecoderCallback decoder) noexcept { _imageDecoder = std::move(decoder); }
     ImageDecoderCallback const& imageDecoder() const noexcept { return _imageDecoder; }
 
-    bool syncWindowTitleWithHostWritableStatusDisplay() const noexcept
-    {
-        return _syncWindowTitleWithHostWritableStatusDisplay;
-    }
+    /// Takes the frontend's answer to the application's request for the host-writable status line.
+    ///
+    /// Shown puts the line up. Denied keeps it hidden, and has the next return to the main display (DECSASD
+    /// 0) hand what the application wrote there to the window title, once, should
+    /// Settings::syncWindowTitleWithHostWritableStatusDisplay ask for it then: the setting is read where it
+    /// acts, so one reloaded between the answer and that return is the one in force.
+    /// @param answer What the user, or the frontend's policy, decided.
+    /// @see Events::requestShowHostWritableStatusLine
+    void answerHostWritableStatusLineRequest(HostWritableStatusLineAnswer answer);
 
-    void setSyncWindowTitleWithHostWritableStatusDisplay(bool value) noexcept
-    {
-        _syncWindowTitleWithHostWritableStatusDisplay = value;
-    }
+    /// DECSASD 0, before the main display is selected: hands the host-writable status line's text to the
+    /// window title, should a denial have left that owed and the configuration still ask for it.
+    /// @see answerHostWritableStatusLineRequest
+    void syncWindowTitleWithDeniedStatusLine();
 
     [[nodiscard]] std::optional<StatusDisplayType> savedStatusDisplayType() const noexcept
     {
@@ -2323,6 +3290,126 @@ class Terminal
     /// @param output Whether the displayed text changed.
     void onStatusLineCommandCompleted(StatusLineCommandOutput output);
 
+    /// One batch's birth stamp, in force on the primary screen for exactly as long as this lives.
+    ///
+    /// Rows the cursor first reaches meanwhile are born with it. When it ends the stamp is withdrawn, so a
+    /// row the cursor reaches between batches -- a reset or resize the GUI asked for -- stays unstamped
+    /// rather than taking a stale time, and the next batch stamps it.
+    /// @see Screen::setLineBirthStamp
+    class BatchClock
+    {
+      public:
+        /// Puts @p stamp in force on @p primary.
+        /// @param primary The primary screen.
+        /// @param stamp The batch's birth stamp: seconds since the session began, plus one.
+        BatchClock(Screen& primary, uint32_t stamp) noexcept;
+
+        /// Withdraws the stamp.
+        ~BatchClock();
+
+        BatchClock(BatchClock const&) = delete;
+        BatchClock(BatchClock&&) = delete;
+        BatchClock& operator=(BatchClock const&) = delete;
+        BatchClock& operator=(BatchClock&&) = delete;
+
+      private:
+        Screen& _primary;
+    };
+
+    /// Reads the wall clock ONCE for the batch about to be parsed: no clock read per line.
+    /// Requires _stateMutex to be held for as long as the returned scope lives.
+    /// @return The scope every row the cursor first reaches during the batch is born in.
+    [[nodiscard]] BatchClock sampleBatchClock() noexcept;
+
+    /// Runs one parse batch, the shape every entry point that parses output shares: under _stateMutex and
+    /// the batch's clock, @p parse, then what it deferred (local echo) and, outside the lock, screenUpdated()
+    /// unless synchronized output holds the frame back.
+    /// @param lock  Holds _stateMutex already: the caller takes it, so that processInputOnce() can read ahead
+    ///              while another thread holds it. Released once the batch is parsed.
+    /// @param parse Parses the batch's bytes; called with _stateMutex held.
+    template <typename Mutex, typename Parse>
+    void runParseBatch(std::unique_lock<Mutex> lock, Parse const& parse);
+
+    /// Offers a key to hint mode and the Vi input handler, under _stateMutex: their commands write the grid's
+    /// line flags, the fold set, the user-mark index, the viewport and the selection, which the parser thread
+    /// and a mirror's reactor thread write under that lock too.
+    ///
+    /// An Insert-mode key goes to the application without waiting for the lock, as no command wants it.
+    /// What the commands produce for the PTY, and what they ask of the frontend, goes out once the lock is
+    /// released. @see runUnderStateLock().
+    /// @param dispatch Offers the key; called with _stateMutex held.
+    /// @return What @p dispatch returned: whether hint mode or a Vi command consumed the key.
+    template <typename Dispatch>
+    [[nodiscard]] Handled offerToViInput(Dispatch const& dispatch);
+
+    /// Runs @p action now, or, while this thread holds the state lock as a frontend does, once that releases
+    /// it.
+    /// @see lock()
+    /// @param action What reaches outside the terminal: a request to the frontend that must not run under the
+    ///        lock.
+    void runOutsideStateLock(std::function<void()> action);
+
+    /// A macro a DECINVM invoked, with a copy of its body: a hard reset in the body clears the definition.
+    struct MacroInvocation
+    {
+        int id = 0;       ///< The macro, recorded as running while its body does.
+        std::string body; ///< What it runs.
+    };
+
+    /// Parses @p input through the main parser, running the body of each macro a DECINVM in it invokes right
+    /// after that DECINVM -- where DEC STD 070 substitutes the body for it.
+    /// @param input The bytes, from the host or from a macro body.
+    void parseExpandingMacros(std::string_view input);
+
+    /// Runs a macro's body through the main parser, as the bytes the host would have sent in its place.
+    /// @param invocation The macro and its body.
+    void runMacro(MacroInvocation const& invocation);
+
+    /// Re-records every block's head after row identity was destroyed (a column resize, a history-limit
+    /// change, a reset), and within one generation the heads an erase or a new prompt may have taken from
+    /// their blocks (Screen::blockRowChanges()) or a scroll inside margins moved (commandBlockRowsMoved()): a
+    /// no-op unless one of those happened since the last call, and it fronts both commandBlocks() overloads,
+    /// so no reader ever sees a head from a dead generation or a row its block lost. The same lazy shape as
+    /// refreshFoldState(). A head the history let go of since the last call, or one whose block an erase left
+    /// no row of, counts as a change of its record (CommandBlockStore::headsLeft()).
+    void syncCommandBlockHeads() const noexcept;
+
+    /// The re-recording syncCommandBlockHeads() does, without what it does once the heads are recorded.
+    /// @return The blocks it found no row of within one generation, and so recorded as evicted, ascending.
+    [[nodiscard]] std::vector<CommandBlockId> reheadCommandBlocks() const noexcept;
+
+    /// Where a block starting at the cursor is headed, as the store records a head.
+    struct BlockHeadRow
+    {
+        int64_t stableId {};    ///< The head row's Grid::stableLineIdOf().
+        uint64_t generation {}; ///< The Grid::stableIdGeneration() that id is valid in.
+    };
+
+    /// @return The head of the logical line the primary screen's cursor is on.
+    [[nodiscard]] BlockHeadRow cursorBlockHead() const noexcept;
+
+    /// The block still unfinished, for a primary-screen row that carries no block and lies in no fold.
+    ///
+    /// Such a row between that block's head and the primary cursor is the block's: an erase blanked it
+    /// while the cursor was elsewhere (ED 1 above the cursor, or ED 2 and a redraw that skips blank rows),
+    /// and the cursor has passed it since. Below the cursor a row is not the block's yet.
+    /// @param gridLine A row of the primary screen's grid.
+    /// @return The newest record while it is unfinished and @p gridLine lies within its reach, else nullptr.
+    [[nodiscard]] CommandBlockRecord const* unfinishedBlockReaching(LineOffset gridLine) const;
+
+    /// The primary-screen row a block target resolves to, as commandBlockRows() resolves it.
+    /// @param target Which block.
+    /// @param pinned When non-zero, this block regardless of @p target.
+    /// @return The row, or nullopt when the target names none.
+    [[nodiscard]] std::optional<LineOffset> commandBlockAnchor(CommandBlockTarget target,
+                                                               CommandBlockId pinned) const;
+
+    /// Hands the primary screen the store's current block to stamp rows with, after a transition that may
+    /// have minted it. If minting started the ids over since @p idEpochBefore, every row's block id is taken
+    /// away first: a row stamped before would name a block minted after.
+    /// @param idEpochBefore CommandBlockStore::idEpoch() as it was before the transition.
+    void publishActiveBlock(uint64_t idEpochBefore) noexcept;
+
     /// Scroll the viewport to the bottom if `settings().autoScrollOnUpdate` is enabled.
     /// Intended for PTY/app-caused code paths only (e.g. key/char forwarding,
     /// scrollback clears). User-initiated transitions should call
@@ -2350,7 +3437,31 @@ class Terminal
     LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const noexcept;
+
+    /// Shows the cursor and starts its blink over, as a key does.
+    /// @param now When the key was pressed.
+    void restartCursorBlink(Timestamp now) noexcept
+    {
+        _cursorBlink.store(CursorBlink { .since = now, .phase = CursorBlinkPhase::Shown }.packed(),
+                           std::memory_order_relaxed);
+    }
     void updateHoveringHyperlinkState();
+
+    /// Changes what the input generator encodes keys with: a mode, the mouse protocol, the Kitty flags. Under
+    /// the input lock as well as the state lock the caller holds, because a key is encoded under the input
+    /// lock alone, so that typing waits for no parse.
+    /// @param change What to do to the generator.
+    template <typename Change>
+    void changeInputEncoding(Change const& change)
+    {
+        auto const _ = std::scoped_lock { _inputMutex };
+        change(_inputGenerator);
+    }
+
+    /// Publishes the binding modes that are not atomic themselves, for bindingModes() to read without the
+    /// state lock. Called by every writer of the state they name -- the screen, DECCKM, DECNKM, the
+    /// selection and the search -- once it has changed it, under that lock.
+    void publishBindingModes() noexcept;
 
     struct TheSelectionHelper: public vtbackend::SelectionHelper
     {
@@ -2362,7 +3473,46 @@ class Terminal
         [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override;
     };
     void triggerWordWiseSelection(CellLocation startPos, TheSelectionHelper const& selectionHelper);
-    bool handleMouseSelection(Modifiers modifiers);
+    bool handleMouseSelection(Modifiers modifiers, uint8_t clickCount);
+
+    /// Selects the whole lines [@p top, @p bottom] of the current screen, completed in Insert mode.
+    /// @param top The first row.
+    /// @param bottom The last row; not above @p top.
+    void selectLines(LineOffset top, LineOffset bottom);
+
+    /// The directories a relative path printed on @p row resolves against: those of the command that printed
+    /// it (localPathBaseFor()), and outside any block the working directory for opening locally.
+    ///
+    /// The block is commandBlockAt()'s, as for every other action on a row, so the row an output tail shares
+    /// with the next prompt resolves against that prompt's command. Does NOT take the lock, for the reason
+    /// commandBlocks() gives.
+    /// @param row A grid row of the current screen; a row of an alternate screen belongs to no block.
+    /// @return Where to look, first to last; none when there is nowhere. Why, when no path printed there
+    ///         names a file on this machine: its command ran on another one, or this terminal replicates
+    ///         another machine's.
+    [[nodiscard]] std::expected<PathBases, PathRefusal> localPathBaseAt(LineOffset row) const;
+
+    /// The block whose command printed what a path on @p row names: commandBlockAt()'s, and none on an
+    /// alternate screen, whose rows belong to no block. Does NOT take the lock.
+    /// @param row A grid row of the current screen.
+    /// @return The block's record, or nullptr.
+    [[nodiscard]] CommandBlockRecord const* pathBlockAt(LineOffset row) const;
+
+    /// The terminal's own working directory as a path base weighs it (localPathBaseFor()). Does NOT take the
+    /// lock.
+    /// @return The directory; ReplicaOfAnotherMachine on a replica of another machine's terminal, whose
+    ///         paths all name files there.
+    [[nodiscard]] std::expected<TerminalDirectory, PathRefusal> terminalDirectory() const;
+
+    /// Tells the block store when the directory the application reports now lies on another machine
+    /// (CommandBlockStore::foreignDirectoryReported()). A replica's records carry its host's verdict, so it
+    /// tells nothing.
+    void recordForeignDirectory();
+
+    /// Selects from where @p selector starts through @p to, completed in Insert mode.
+    /// @param selector The selection to install, started where it begins.
+    /// @param to The cell it extends to.
+    void selectThrough(std::unique_ptr<Selection> selector, CellLocation to);
 
     /// Tests if the text selection should be extended by the given mouse position or not.
     ///
@@ -2440,9 +3590,6 @@ class Terminal
     void releaseReadAhead(crispy::BufferObject<char>& buffer,
                           std::span<vtpty::Pty::ReadResult const> batch) noexcept;
 
-    // Writes partially or all input data to the PTY buffer object and returns a string view to it.
-    [[nodiscard]] std::string_view lockedWriteToPtyBuffer(std::string_view data);
-
     // private data
     //
 
@@ -2452,8 +3599,12 @@ class Terminal
     /// recognizes on screen. Empty when the environment names none.
     std::string _homeDirectory;
 
-    /// Whether a reply is flushed to the PTY before this call returns (`$CONTOUR_SYNC_PTY_OUTPUT`).
-    /// A test-harness knob: it makes replies observable in the order they were generated.
+    /// Where the paths this terminal recognizes on screen are looked up. @see Terminal()
+    core::platform::FileSystem const& _fileSystem;
+
+    /// Whether a reply the parser raises is flushed to the PTY as soon as the parse lets go of the state
+    /// lock, before the parse returns, rather than with the next flush (`$CONTOUR_SYNC_PTY_OUTPUT`). A
+    /// test-harness knob: it makes replies observable in the order they were generated. @see reply()
     bool _syncPtyOutput;
 
     // configuration state
@@ -2469,50 +3620,205 @@ class Terminal
     std::atomic<PageSize> _atomicTotalPageSize { _settings.pageSize };
 
     // synchronization
-    // TracyLockable, not a bare std::mutex: this is the lock the parser thread and the render path
+    //
+    // A Terminal's mutexes are each a crispy::LifetimeAnnotatedMutex, so that ThreadSanitizer forgets their
+    // lock orders with the Terminal rather than join them with those of the next one built at its address.
+
+    // TracyLockable, not a bare mutex: this is the lock the parser thread and the render path
     // contend for, so with CONTOUR_TRACY=ON its wait times are what show whether a frame is being
     // spent waiting on the parser -- the one question the GUI-side zones cannot answer alone.
-    // Expands to a plain `std::mutex _stateMutex` when profiling is off. tracy::Lockable exposes
-    // lock()/unlock(), so lock()/unlock() above and the std::lock_guard CTAD call sites are
-    // unaffected by the change of type.
-    mutable TracyLockable(std::mutex, _stateMutex);
+    // Expands to a plain `crispy::LifetimeAnnotatedMutex _stateMutex` when profiling is off.
+    // tracy::Lockable exposes lock()/unlock(), so lock()/unlock() above and the std::lock_guard CTAD
+    // call sites are unaffected by the change of type.
+    mutable TracyLockable(crispy::LifetimeAnnotatedMutex, _stateMutex);
 
-    // Guards _inputGenerator's pending byte queue, and admits one flushInput() at a time from taking the
-    // queue's head through consuming what was written, so that no two flushes send the same bytes. The
-    // parser thread queues every reply and flushes some on the spot (DSR 996, the GIP replies, DECLRP, the
-    // in-band resize report, CONTOUR_SYNC_PTY_OUTPUT); the GUI thread queues and flushes key, mouse, focus
-    // and paste input. _stateMutex cannot serve here: the parser thread already holds it when it replies,
-    // and it is non-recursive.
+    /// Whether a hold of the state lock keeps back, until it is released, what must not run under it.
+    enum class HoldBack : uint8_t
+    {
+        No = 0, ///< The terminal's own threads, which flush where they always have, and readers.
+        Yes,    ///< A frontend's. @see lock()
+    };
+
+    /// The thread holding _stateMutex; no thread while it is free. Only ever compared with the calling
+    /// thread's id, which only that thread stores, so relaxed suffices. @see isStateLockHeldByThisThread()
+    mutable std::atomic<std::thread::id> _stateLockOwner {};
+
+    /// What the current hold keeps back. Written by its holder as it takes the lock, and read only by its
+    /// holder: holdsBack() asks for the holder first.
+    mutable HoldBack _stateHoldBack = HoldBack::No;
+
+    /// Whether the terminal's own hold of the state lock owes a flush once it is released.
+    enum class OwedFlush : uint8_t
+    {
+        None = 0, ///< Nothing was asked for under it.
+        Owed,     ///< A flush was asked for under it, and is sent once it is released. @see releaseOwnState()
+    };
+
+    /// Written by flushInput() under the terminal's own hold, and read and cleared as it is released: by the
+    /// holder only. A reader's hold asks for no flush, as it changes nothing.
+    OwedFlush _owedFlush = OwedFlush::None;
+
+    /// Whether the calling thread holds the state lock.
+    [[nodiscard]] bool isStateLockHeldByThisThread() const noexcept
+    {
+        return _stateLockOwner.load(std::memory_order_relaxed) == std::this_thread::get_id();
+    }
+
+    /// Whether the calling thread holds the state lock as a frontend does, which keeps back until it is
+    /// released what must not run under it.
+    [[nodiscard]] bool holdsBack() const noexcept
+    {
+        return isStateLockHeldByThisThread() && _stateHoldBack == HoldBack::Yes;
+    }
+
+    /// Takes the state lock, and records the calling thread as its holder.
+    /// @param holdBack What the hold keeps back.
+    void acquireState(HoldBack holdBack) const;
+
+    /// Takes the state lock if it is free, and records the calling thread as its holder.
+    /// @param holdBack What the hold keeps back.
+    /// @return Whether the lock was taken.
+    [[nodiscard]] bool tryAcquireState(HoldBack holdBack) const;
+
+    /// Releases the state lock, and forgets its holder.
+    void releaseState() const;
+
+    /// Releases the terminal's own hold of the state lock, then sends what a flush asked for under it, on
+    /// this thread: in order with everything else queued, and with no lock held across the write.
+    void releaseOwnState();
+
+    /// The state lock as the terminal's own threads take it: the parser thread for a batch, the render thread
+    /// for a frame and a glide. It records the holder as lock() does, and keeps back only the PTY write: a
+    /// flush asked for under it -- a reply some sequences send on the spot -- is sent by the same thread once
+    /// it has let go of the lock (@see releaseOwnState()). Everything else runs where it always has. A
+    /// Lockable, so the standard's lock guards take it.
+    class OwnStateLock
+    {
+      public:
+        explicit OwnStateLock(Terminal* terminal) noexcept: _terminal { terminal } {}
+        void lock() const;
+        void unlock() const;
+        /// @return Whether the lock was taken.
+        [[nodiscard]] bool try_lock() const; // NOLINT(readability-identifier-naming)
+
+      private:
+        gsl::not_null<Terminal*> _terminal;
+    };
+
+    /// @see OwnStateLock
+    OwnStateLock _ownStateLock { this };
+
+    // Guards _inputGenerator: its pending byte queue, and the modes it generates input in. The parser thread
+    // queues every reply, and asks for some to be flushed on the spot (DSR 996, the GIP replies, DECLRP, the
+    // in-band resize report, CONTOUR_SYNC_PTY_OUTPUT); the GUI thread queues key, mouse, focus and paste
+    // input. _stateMutex cannot serve here: the parser thread already holds it when it replies, and it is
+    // non-recursive.
     //
-    // Held across the PTY write, which UnixPty::write() turns blocking once a write comes up short, so a
-    // reply queued meanwhile waits for that write -- as the parser thread's next read already does, on the
-    // PTY's own lock. Never held across echoLocally(), which parses and can therefore reply.
-    mutable std::mutex _inputMutex;
+    // Held only to queue, to copy the queue's head and to consume what was written -- never across the PTY
+    // write, so that a thread that only queues, as a daemon's loop thread does reporting a resize, never
+    // waits for a write the application leaves parked. @see _flushMutex
+    mutable crispy::LifetimeAnnotatedMutex _inputMutex;
 
-    // terminal clock
-    std::chrono::steady_clock::time_point _currentTime;
+    // Admits one flushInput() at a time from taking the queue's head through consuming what was written, so
+    // that no two flushes send the same bytes. Held across the PTY write, which UnixPty::write() turns
+    // blocking once a write comes up short; never with _stateMutex held (@see flushInput()), and never across
+    // echoLocally(), which parses and can therefore reply.
+    crispy::LifetimeAnnotatedMutex _flushMutex;
+
+    /// The terminal's clock: the time the frame being built is built at. Set by the render thread's tick(),
+    /// before and after each frame, and by the parser thread where a synchronized update ends, as the frame
+    /// it builds there is built at that time. Atomic, as the frames built on both threads read it.
+    std::atomic<std::chrono::steady_clock::time_point> _currentTime;
+
+    /// The clocks this terminal reads -- never std::chrono::*::now() directly, so a test drives them all.
+    /// @see TerminalClocks
+    TerminalClocks _clocks;
+
+    /// What the wall clock read when this terminal was built, floored to the second. Line::bornAt() counts
+    /// whole seconds from here, which is what lets a row's time fit the three bytes of padding it has; a
+    /// whole-second epoch keeps that time in the second the row was born in, never up to one before it.
+    /// Rebindable only through adoptSessionEpoch(), for a daemon mirror.
+    std::chrono::system_clock::time_point _sessionEpoch;
+
+    /// How far this terminal's wall clock is ahead of a daemon host's (negative: behind), as last measured
+    /// by adoptHostClock(); zero for any other terminal. Added to the instants of every record adopted.
+    std::chrono::system_clock::duration _hostClockOffset {};
+
+    /// What this terminal replicates, as the mirror bound it. Atomic, as fileUrlLocalHost() reads it without
+    /// the lock. @see bindReplica
+    std::atomic<ReplicaRole> _replicaRole { ReplicaRole::None };
+    /// This machine's identity as a daemon's replicated contexts spell machines, as the mirror bound it:
+    /// what a ReplicaRole::SameMachine replica judges a context against. @see bindReplica
+    HostIdentity _replicaIdentity;
 
     // {{{ PTY and PTY read buffer management
     crispy::BufferObjectPool<char> _ptyBufferPool;
     crispy::BufferObjectPtr<char> _currentPtyBuffer;
     crispy::BufferObjectPtr<char> _parsingBuffer; // Buffer currently being parsed (set during parseFragment)
     size_t _ptyReadBufferSize;
+
+    /// The thread that last read the PTY: under InputWriter::ReaderThread, the only one that writes to it
+    /// once set. No thread until the first read. @see flushInput()
+    std::atomic<std::thread::id> _readerThread {};
     std::unique_ptr<vtpty::Pty> _pty;
     // }}}
 
     // {{{ mouse related state (helpers for detecting double/triple clicks)
-    std::chrono::steady_clock::time_point _lastClick {};
-    unsigned int _speedClicks = 0;
+    ClickCounter _clickCounter; ///< Multi-click sequences (drag, word, extended word, line).
     vtbackend::CellLocation _currentMousePosition {}; // current mouse position
+    /// Whether _currentMousePosition is where the pointer stands, or only where it last was on the grid.
+    PointerPlacement _pointerPlacement = PointerPlacement::OnGrid;
     vtbackend::PixelCoordinate _lastMousePixelPositionOnLeftClick {};
-    bool _leftMouseButtonPressed = false; // tracks left-mouse button pressed state (used for cell selection).
+    LeftButtonPress _leftButtonPress = LeftButtonPress::Released; ///< What the held left button does.
+    /// Moves on whenever a selection is installed or cleared, so a release can tell whether the action a
+    /// claimed press ran selected anything.
+    uint64_t _selectionGeneration = 0;
+    uint64_t _claimedPressGeneration = 0; ///< _selectionGeneration as a claimed press found it.
     bool _respectMouseProtocol = true;    // shift-click can disable that, button release sets it back to true
     bool _isAutoScrolling = false;        // suppresses extendSelectionAfterScroll during performAutoScroll
     // }}}
 
     // {{{ blinking state helpers
-    mutable std::chrono::steady_clock::time_point _lastCursorBlink;
-    mutable unsigned _cursorBlinkState = 1;
+    /// Whether the blinking cursor is shown in its current phase.
+    enum class CursorBlinkPhase : uint8_t
+    {
+        Hidden = 0,
+        Shown,
+    };
+
+    /// The cursor's blink: whether it is shown, and since when.
+    struct CursorBlink
+    {
+        Timestamp since; ///< When the phase began: the last blink, or the key that restarted it.
+        CursorBlinkPhase phase = CursorBlinkPhase::Hidden; ///< Whether the cursor is shown in it.
+
+        /// @return Both in one integer, the time doubled and the phase in its lowest bit, for one atomic.
+        [[nodiscard]] int64_t packed() const noexcept
+        {
+            return (since.time_since_epoch().count() * 2) + (phase == CursorBlinkPhase::Shown ? 1 : 0);
+        }
+
+        /// @param word What packed() made.
+        /// @return The blink @p word holds.
+        [[nodiscard]] static CursorBlink unpacked(int64_t word) noexcept
+        {
+            return CursorBlink { .since = Timestamp { Timestamp::duration { word >> 1 } },
+                                 .phase =
+                                     (word & 1) != 0 ? CursorBlinkPhase::Shown : CursorBlinkPhase::Hidden };
+        }
+    };
+
+    /// The cursor's blink, packed (@see CursorBlink::packed()): one word, as a key restarts the blink on the
+    /// GUI thread and the render thread advances it as it ticks, neither under the state lock. Kept apart, a
+    /// tick that read the time before the key wrote both would flip the phase the key had just set, hiding
+    /// the cursor for a whole interval right after the key.
+    mutable std::atomic<int64_t> _cursorBlink;
+
+    /// @return The cursor's blink, as last published.
+    [[nodiscard]] CursorBlink cursorBlink() const noexcept
+    {
+        return CursorBlink::unpacked(_cursorBlink.load(std::memory_order_relaxed));
+    }
 
     /// Computes blink opacity based on the configured BlinkStyle.
     struct BlinkerState
@@ -2561,6 +3867,9 @@ class Terminal
         std::vector<RenderCell> snapshotCells {};
         std::optional<RenderCursor> snapshotCursor {};
     };
+    /// Guarded by _stateMutex. Started where the screens switch (the parser thread), advanced and ended by
+    /// the render-buffer fill (the render thread, or the parser thread where a synchronized update ends), and
+    /// ended on a resize (the GUI thread). nextRender() reads _animationsEnd instead.
     ScreenTransitionState _screenTransition;
     // }}}
 
@@ -2573,7 +3882,18 @@ class Terminal
         RGBColor fromColor {}; ///< Cursor color at the animation source position.
         RGBColor toColor {};   ///< Cursor color at the animation target position.
     };
+    /// Guarded by _stateMutex. Started, advanced and ended by the render-buffer fill, on whichever thread
+    /// builds the frame, and cancelled where the page switches (the parser thread) or resizes (the GUI
+    /// thread). nextRender() reads _animationsEnd instead.
     CursorMotionState _cursorMotion;
+
+    /// When the later of the cursor motion and the screen transition ends, as the state lock last left them;
+    /// min() while neither runs. Atomic, for nextRender() to read on the render thread without that lock.
+    std::atomic<std::chrono::steady_clock::time_point> _animationsEnd =
+        std::chrono::steady_clock::time_point::min();
+
+    /// Publishes _animationsEnd after a change to either animation. Under the state lock.
+    void publishAnimationsEnd() noexcept;
     // }}}
 
     // {{{ Momentum scrolling state
@@ -2648,8 +3968,15 @@ class Terminal
         static constexpr float StartThreshold = 50.0f; ///< Touchpad: px/s required to start momentum.
     };
 
+    /// Guarded by _stateMutex, as the view a glide moves is: armed on the GUI thread, advanced by the render
+    /// thread's tick(), and cancelled by whichever thread resets the view.
     ScrollMomentumState _scrollMomentum;
     VelocityTracker _scrollVelocityTracker;
+
+    /// Whether a glide is armed: _scrollMomentum.active, published for what reads it without the state lock.
+    /// tick() takes that lock to advance a glide only while this is set, so a frame without one takes none;
+    /// nextRender() and the GUI thread's wheel handling read it as well.
+    std::atomic<bool> _isGliding = false;
 
     /// Starts (or reseeds) a momentum glide at @p velocity with the given @p tuning and wakes the
     /// render loop. Shared by the touchpad (handleScrollPhase) and mouse-wheel (injectWheelMomentum)
@@ -2660,6 +3987,11 @@ class Terminal
     void armMomentum(float velocity,
                      MomentumTuning const& tuning,
                      std::chrono::steady_clock::time_point now) noexcept;
+
+    /// Moves the view on by the armed glide's velocity over the time since its last step, and slows it. Ends
+    /// the glide once it falls below its stop threshold or no longer moves the view. Under the state lock.
+    /// @param now The time of the frame the step is for.
+    void advanceMomentumGlide(std::chrono::steady_clock::time_point now);
     // }}}
 
     // {{{ Displays this terminal manages
@@ -2686,19 +4018,19 @@ class Terminal
 
     // {{{ tabs info
     TabsInfo _guiTabInfoForStatusLine;
-    /// Guards _guiTabInfoForStatusLine. Dedicated (not _stateMutex) so the GUI-thread writer
-    /// (setGuiTabInfoForStatusLine) does not block on the heavily-contended _stateMutex held by the parser
-    /// thread during output bursts. Held only for the small copy in the accessor/mutator.
     /// When the currently open synchronized-output block began.
     ///
-    /// steady_clock rather than `_currentTime`: the terminal's own clock only advances when a frame
+    /// The steady clock rather than `_currentTime`: the terminal's own clock only advances when a frame
     /// is painted, and a display that has stopped painting is precisely the state this deadline
     /// exists to break out of. Atomic because the parser thread writes it and the render thread
     /// reads it, the same reason `_renderBufferUpdateEnabled` is. Only meaningful while that flag
     /// is clear.
     std::atomic<std::chrono::steady_clock::time_point> _synchronizedOutputSince {};
 
-    std::mutex mutable _guiTabInfoMutex;
+    /// Guards _guiTabInfoForStatusLine. Dedicated (not _stateMutex) so the GUI-thread writer
+    /// (setGuiTabInfoForStatusLine) does not block on the heavily-contended _stateMutex held by the parser
+    /// thread during output bursts. Held only for the small copy in the accessor/mutator.
+    crispy::LifetimeAnnotatedMutex mutable _guiTabInfoMutex;
     // }}}
 
     // {{{ selection states
@@ -2715,21 +4047,37 @@ class Terminal
     // screenUpdated(), which runs OUTSIDE _stateMutex on purpose (it calls back into the GUI), while
     // the GUI/render thread reads and clears it in readFromPty()/fillRenderBuffer().
     std::atomic<bool> _screenDirty = false; // TODO: just inc _changes and delete this instead.
-    RefreshInterval _refreshInterval;
+    /// The time between two frames. Set by the frontend as the display's refresh rate is known, and read by
+    /// the render thread as it asks when the next frame is due and by the parser thread as it refreshes the
+    /// render buffer, none under the state lock. @see RelaxedAtomic
+    RelaxedAtomic<RefreshInterval> _refreshInterval;
     RenderDoubleBuffer _renderBuffer {};
     std::atomic<uint64_t> _lastFrameID = 0;
-    RenderPassHints _lastRenderPassHints {};
+    /// What the last frame built found on screen. Atomic: written by the fill on whichever thread builds the
+    /// frame, and read by nextRender() on the render thread without the state lock.
+    std::atomic<RenderPassHints> _lastRenderPassHints {};
     // }}}
 
     InputMethodData _inputMethodData {};
+
+    /// Guards _inputMethodData. The GUI thread writes the composition as it changes, without the state lock,
+    /// which composing does not wait for, as typing does not; the fill copies it under that lock.
+    mutable crispy::LifetimeAnnotatedMutex _inputMethodMutex;
+
+    /// @return A copy of the composition, taken under _inputMethodMutex.
+    [[nodiscard]] InputMethodData inputMethodData() const;
     std::atomic<HyperlinkId> _hoveringHyperlinkId = HyperlinkId {};
     std::atomic<bool> _renderBufferUpdateEnabled = true; // for "Synchronized Updates" feature
     std::optional<HighlightRange> _highlightRange = std::nullopt;
     SupportedSequences _supportedVTSequences;
 
+    /// The binding modes that are not atomic themselves -- the screen, DECCKM, DECNKM, the selection and the
+    /// search -- as publishBindingModes() last read them. @see bindingModes()
+    std::atomic<uint8_t> _publishedBindingModes = 0;
+
     // Execution Trace mode
     std::atomic<ExecutionMode> _executionMode = ExecutionMode::Normal;
-    std::mutex _breakMutex;
+    crispy::LifetimeAnnotatedMutex _breakMutex;
     std::condition_variable _breakCondition;
     TraceHandler _traceHandler;
 
@@ -2766,13 +4114,31 @@ class Terminal
     std::bitset<TitleModeFeatureCount> _titleModes {};
 
     std::unordered_map<int, std::string> _macros;
-    std::queue<std::string> _pendingMacroInvocations;
-    int _macroRecursionDepth = 0;
+
+    /// The macros running right now, outermost first: one invoking the next runs it in place.
+    std::vector<int> _runningMacros;
+
+    /// The macro a DECINVM just invoked, until the main parser returns after that DECINVM to run it.
+    std::optional<MacroInvocation> _pendingMacroInvocation;
+
+    /// Whether the macro bodies in _runningMacros were voided by clearMacros(): each ends where it stands.
+    bool _areRunningMacrosVoid = false;
+
+    /// The bytes of macro bodies the latest invocation from the stream has run, of
+    /// MaxMacroBytesPerInvocation.
+    size_t _macroBytesRun = 0;
 
     /// Local echo (SRM, reset) that was produced while the parser was running, and so could not be
     /// parsed on the spot. Written and drained only under _stateMutex. @see echoLocally().
     std::string _pendingLocalEcho;
 
+    /// What was asked of the frontend while a frontend held _stateMutex, to be asked once that releases it.
+    /// Written and taken only under _stateMutex. @see runOutsideStateLock(), unlock().
+    std::vector<std::function<void()>> _outsideStateLock;
+
+    /// The strings DECUDK programmed, by key. Written by the parser thread (DECUDK, RIS) under _inputMutex,
+    /// and read under it by the GUI thread as a function key is pressed, which does not wait for the state
+    /// lock: an unordered map being rewritten cannot be read alongside. @see sendKeyEvent(), udkString().
     std::unordered_map<int, std::string> _userDefinedKeys;
     bool _udkLocked = false;
 
@@ -2816,16 +4182,26 @@ class Terminal
 
     std::vector<ColumnOffset> _tabs;
 
-    ScreenType _currentScreenType = ScreenType::Primary;
-    StatusDisplayType _statusDisplayType = StatusDisplayType::None;
-    bool _syncWindowTitleWithHostWritableStatusDisplay = false;
+    /// Switched by the parser thread under the state lock, and read without it by the renderer each frame.
+    /// @see RelaxedAtomic
+    RelaxedAtomic<ScreenType> _currentScreenType = ScreenType::Primary;
+    /// Set by DECSSDT and the frontend under the state lock, and read without it by the render thread as it
+    /// asks when the indicator's clock is due next. @see RelaxedAtomic
+    RelaxedAtomic<StatusDisplayType> _statusDisplayType = StatusDisplayType::None;
+
+    /// Whether a denied host-writable status line still owes its text to the window title.
+    /// @see answerHostWritableStatusLineRequest
+    enum class DeniedStatusLineTitle : uint8_t
+    {
+        Settled = 0, ///< Nothing owed: no denial, or its one sync has happened.
+        Owed,        ///< Denied; the next DECSASD 0 syncs, if the configuration asks for it then.
+    };
+    DeniedStatusLineTitle _deniedStatusLineTitle = DeniedStatusLineTitle::Settled;
+
     std::optional<StatusDisplayType> _savedStatusDisplayType = std::nullopt;
     ActiveStatusDisplay _activeStatusDisplay = ActiveStatusDisplay::Main;
 
     Search _search;
-
-    CursorDisplay _cursorDisplay = CursorDisplay::Steady;
-    CursorShape _cursorShape = CursorShape::Block;
 
     /// XTCHECKSUM state; reset to Settings::checksumExtension by DECSTR and RIS alike.
     ChecksumFlags _checksumExtension = _settings.checksumExtension;
@@ -2835,7 +4211,7 @@ class Terminal
     /// i.e. on a soft reset as well as a hard one.
     UserPreferredSupplementalSet _userPreferredSupplementalSet = _settings.userPreferredSupplementalSet;
 
-    std::string _currentWorkingDirectory = {};
+    FileUrl _currentWorkingDirectory {};
 
     unsigned _maxImageRegisterCount = 256;
     bool _usePrivateColorRegisters = false;
@@ -2926,12 +4302,60 @@ class Terminal
     /// logical lines so a pattern wrapped across the boundary is still matched in full.
     [[nodiscard]] HintScanArea collectHintScanArea(HintScope scope, LineCount scrollbackLimit) const;
 
-    std::unique_ptr<ShellIntegration> _shellIntegration;
     SemanticBlockTracker _semanticBlockTracker;
 
+    /// Every shell command block of the primary screen. Limits and clocks are fixed at construction: a
+    /// session configured differently is a different session, so there is no setter. Cleared by RIS.
+    ///
+    /// Mutable for the reason _foldState is: syncCommandBlockHeads() reconciles it lazily from const readers.
+    mutable CommandBlockStore _commandBlocks { _settings.commandBlockLimits,
+                                               _clocks.steady,
+                                               _clocks.wall,
+                                               [this](CommandBlockChange const& change) {
+                                                   _eventListener.commandBlockChanged(change);
+                                               } };
+
+    /// @see commandBlockHeadWork
+    mutable uint64_t _commandBlockHeadWork = 0;
+
+    /// Everything scrollbarMarkInputs() is a function of, as scrollbarMarksRevision() last saw it.
+    struct ScrollbarMarksInputs
+    {
+        uint64_t blockRevision = 0;                    ///< CommandBlockStore::revision()
+        uint64_t userMarkRevision = 0;                 ///< UserMarkIndex::revision()
+        uint64_t foldRevision = 0;                     ///< FoldState::revision()
+        uint64_t stableIdGeneration = 0;               ///< What the heads' and marks' ids mean
+        int64_t stableFloor = 0;                       ///< Eviction moves every row up
+        PageIndex displayedPage {};                    ///< canRevealScrollback(): the page on display...
+        ScreenType cursorScreen = ScreenType::Primary; ///< ...and whether the viewport may scroll
+
+        bool operator==(ScrollbarMarksInputs const&) const = default;
+    };
+
+    /// @see scrollbarMarksRevision
+    mutable ScrollbarMarksInputs _scrollbarMarksInputs {};
+
+    /// @see scrollbarMarksRevision
+    mutable uint64_t _scrollbarMarksRevision = 0;
+
+    /// The Grid::stableIdGeneration() the heads in _commandBlocks were last recorded in.
+    mutable uint64_t _commandBlockHeadsGeneration = 0;
+
+    /// The primary screen's Screen::blockRowChanges() when the heads in _commandBlocks were last looked at.
+    mutable uint64_t _commandBlockHeadsRowChanges = 0;
+
+    /// The primary grid's Grid::stableRangeFloor() when the heads in _commandBlocks were last looked at: a
+    /// head between it and the floor now has left the history since.
+    mutable int64_t _commandBlockHeadsFloor = 0;
+
+    /// The stable ids whose contents a scroll moved or dropped since the heads were last looked at, as one
+    /// span (@see commandBlockRowsMoved): the heads within it are looked at again. Mutable because the lazy
+    /// sync consumes it.
+    mutable std::optional<StableIdSpan> _commandBlockRowsMoved;
+
     /// The application's hierarchical context ancestry (OSC 3008), and the records the scrollback still
-    /// points at. Limits are fixed at construction; a session configured differently is a different
-    /// session, so there is no setter.
+    /// points at. Its limits are seeded from the settings here and replaced only by a configuration
+    /// reload (ContextStack::setLimits).
     ///
     /// Deliberately NOT reset by RIS or DECSTR. @see hardReset().
     ContextStack _contexts { _settings.contextLimits };
@@ -2986,7 +4410,7 @@ class Terminal
     mutable std::vector<FoldRange> _foldRanges;
     mutable std::optional<FoldRangesKey> _foldRangesKey;
 
-    /// Bumped whenever a semantic mark is stamped or cleared (@see invalidateFoldRanges).
+    /// Bumped whenever a shell mark is stamped or cleared (@see invalidateFoldRanges).
     uint64_t _semanticMarkRevision = 0;
 
     /// Everything the projection is a function of. Cached as one key rather than rebuilt per call,
@@ -3062,11 +4486,41 @@ class Terminal
     /// to make rather than a checklist to remember.
     void onFoldStateChanged();
 
-    /// Fills @p output's gutter with one marker per visible row that a fold hangs off.
+    /// Collapses the most recently FINISHED command's fold, whichever page is on display: the engine of
+    /// collapseLastFold(), and of the automatic collapse at a new prompt, which the primary screen's shell
+    /// drives whatever is being shown.
+    /// @return Whether there was one to collapse.
+    bool collapseNewestFold();
+
+    /// Whether a verb that can hide output may run: the one place Settings::foldingAvailability is
+    /// enforced, for the vi `z` keys, the actions, the gutter and auto-collapse alike.
+    [[nodiscard]] bool isFoldingAvailable() const noexcept
+    {
+        return _settings.foldingAvailability == FoldingAvailability::Enabled;
+    }
+
+    /// Fills @p output's gutter: per drawn row its timestamp, line number and block-column glyph, each at
+    /// its own negative column, as GutterLayout places them and appendGutterCells() paints them.
     /// @param output The buffer being built.
     /// @param baseLine The screen row the main page starts at -- non-zero with a top status line, and
     ///                 the same shift RenderBufferBuilder applies to every cell it emits.
     void fillGutter(RenderBuffer& output, LineOffset baseLine) const;
+
+    /// Fills @p output's annotations with the `⋯ N lines` label of every collapsed fold on display, after
+    /// the text of the fold's prompt line -- on the last row of that line where a long command wrapped it.
+    /// @param output The buffer being built.
+    /// @param baseLine As for fillGutter().
+    void fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const;
+
+    /// How many screen rows down the main page rows are drawn: the whole page, or fewer where collapsed
+    /// folds hide more rows than the history can backfill and the rest of the page is blank.
+    /// @return The number of drawn rows, as a screen row: every row above it is drawn.
+    [[nodiscard]] LineOffset drawnRowLimit() const;
+
+    /// The cursor the user is looking at, in grid coordinates: the Vi cursor in a Vi mode, the terminal
+    /// cursor otherwise. What the cursor animation follows and relative line numbers count from.
+    /// @return A position on the current screen's grid.
+    [[nodiscard]] CellLocation gridCursorPosition() const noexcept;
 
     mutable std::vector<LineOffset> _foldProjection;
 
@@ -3079,6 +4533,50 @@ class Terminal
 
     /// The grid line the pointer hovers in the gutter, if any (@see setGutterHoverLine).
     std::optional<LineOffset> _gutterHoverLine;
+    // }}}
+
+    // {{{ Sticky command header
+
+    /// Builds this frame's sticky command header into @p output when stickyHeaderFor() decides on one. The
+    /// block it names reaches stickyHeaderBlock() with the frame, once swapBuffers() puts it in front.
+    ///
+    /// Its cost does not grow with the block's output: the head comes from the record's cached position, the
+    /// input row from a walk of at most MaxPromptScanLines rows down from the head, and the copy is one row.
+    ///
+    /// @param output The buffer being built.
+    /// @param baseLine The screen row the main page starts at, as for fillGutter().
+    void fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const;
+
+    /// What one frame's sticky header is decided from, and what the fill reads back from it rather than
+    /// looking it up a second time.
+    struct GatheredStickyHeader
+    {
+        StickyHeaderInput input;                    ///< What stickyHeaderFor() decides on.
+        CommandBlockRecord const* record = nullptr; ///< The top row's block; set exactly when input.block is.
+        /// The row the block's command was typed on; set exactly when its head is StickyHeadPosition::Above.
+        std::optional<LineOffset> inputLine;
+    };
+
+    /// What stickyHeaderFor() reads about this frame, gathered without scanning the output: one lookup of
+    /// the top row's block, one of its head, and one walk down its prompt.
+    ///
+    /// Not noexcept: the top row's block is commandBlockAt()'s, which may build the fold ranges.
+    /// @return The decision's input, the record and the input row; the input's block is nullopt when no
+    ///         block could get a header here (@see stickyHeaderPossible), when the top row belongs to no
+    ///         known block, or to one whose head this grid cannot place yet (a daemon mirror's record before
+    ///         its rows).
+    [[nodiscard]] GatheredStickyHeader stickyHeaderInput() const;
+
+    // }}}
+
+    // {{{ Scrollbar marks
+    /// The user-marked lines, by stable id (@see userMarks). Mutable for the reason _foldState is: the
+    /// const read reconciles it against the grid.
+    mutable UserMarkIndex _userMarks;
+
+    /// How many changes userMarkChanged() has heard of, in any generation. While none, no line carries a
+    /// mark, and userMarks() skips the rescan a generation bump would otherwise cost.
+    uint64_t _userMarkChanges = 0;
     // }}}
 
     DesktopNotificationManager _desktopNotificationManager;

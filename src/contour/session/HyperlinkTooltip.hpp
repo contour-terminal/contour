@@ -4,6 +4,8 @@
 #include <vtbackend/core/Primitives.hpp>
 
 #include <cstddef>
+#include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -29,13 +31,17 @@ namespace contour::session
 /// A local file:// URI shows its decoded path, because the scheme and the authority naming this very
 /// machine are noise to someone looking at a path they may want to open. Everything else shows the URI as
 /// written: for a remote target the scheme and host are exactly the part worth reading before clicking.
+/// Either is made safe to show (vtbackend::SanitizePurpose::Display), so a control or bidi override it
+/// holds is replaced rather than obeyed.
 ///
 /// @param uri       The hyperlink's target, as the application set it.
-/// @param localHost This machine's host name, against which the URI's authority is measured.
+/// @param localHost This machine's host name, against which the URI's authority is measured; nullopt when
+///                  no file:// URI names a path here -- a pane replicating another machine's daemon
+///                  (vtbackend::Terminal::fileUrlLocalHost).
 /// @param maxLength Maximum number of codepoints to show.
 /// @return The tooltip text, or empty when there is nothing worth showing.
 [[nodiscard]] std::string hyperlinkTooltipText(std::string_view uri,
-                                               std::string_view localHost,
+                                               std::optional<std::string_view> localHost,
                                                size_t maxLength);
 
 /// Tracks which hyperlink the pointer is over, and says when a tooltip should appear or vanish.
@@ -45,8 +51,14 @@ namespace contour::session
 class HyperlinkHoverTracker
 {
   public:
-    /// @param localHost This machine's host name, telling a local file:// target from a remote one.
-    explicit HyperlinkHoverTracker(std::string localHost): _localHost { std::move(localHost) } {}
+    /// Says, when asked, the host name a file:// target must name to be a path on this machine, or nullopt
+    /// when none does. @see hyperlinkTooltipText
+    using LocalHostSource = std::function<std::optional<std::string_view>()>;
+
+    /// @param localHost Asked at each link the pointer enters, telling a local file:// target from a remote
+    ///        one -- asked, not told once, as a pane becomes a replica of another machine's terminal only
+    ///        after it is built (vtbackend::Terminal::fileUrlLocalHost).
+    explicit HyperlinkHoverTracker(LocalHostSource localHost): _localHost { std::move(localHost) } {}
 
     /// What the GUI should do about the tooltip, if anything.
     struct Change
@@ -75,7 +87,7 @@ class HyperlinkHoverTracker
     [[nodiscard]] Change clear();
 
   private:
-    std::string _localHost {};
+    LocalHostSource _localHost;
     std::string _uri {};
     vtbackend::CellLocation _anchor {};
 };

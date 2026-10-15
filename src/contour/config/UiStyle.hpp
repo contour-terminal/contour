@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/config/ConfigEnum.hpp>
+#include <contour/config/ConfigEnumInfo.hpp>
 
 #include <array>
 #include <cstddef>

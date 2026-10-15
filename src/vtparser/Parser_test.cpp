@@ -64,6 +64,27 @@ std::u32string decodedAsTheStateMachineDoes(std::string_view text)
             codepoints += *codepoint;
     return codepoints;
 }
+
+/// Records the text and the CSIs it is handed, and asks the parser to return after each CSI.
+class ReturningAfterCsiEvents final: public vtparser::NullParserEvents
+{
+  public:
+    vtparser::Parser<vtparser::ParserEvents>* parser = nullptr;
+    std::string events;
+
+    void print(char32_t ch) override { events += unicode::convert_to<char>(ch); }
+    size_t print(std::string_view s, size_t /*cellCount*/) override
+    {
+        events += s;
+        return 0;
+    }
+
+    void dispatchCSI(char function) override
+    {
+        events += std::format("<CSI {}>", function);
+        parser->returnAfterCurrentByte();
+    }
+};
 } // namespace
 
 TEST_CASE("Parser.utf8_single", "[Parser]")
@@ -320,6 +341,30 @@ TEST_CASE("Parser.BulkText_CombiningMarkSplitAcrossCalls", "[Parser]")
 
     p.parseFragment("\xCC\x81"sv);
     CHECK(listener.text == "e\xCC\x81");
+}
+
+TEST_CASE("Parser.parseFragment.returnAfterCurrentByte", "[Parser]")
+{
+    // Asked while a CSI is dispatched, the parser hands back control with that sequence finished and itself
+    // in Ground: the caller acts at that point of the input, then parses on from there. The per-byte
+    // reference path honours it as the bulk scanners do.
+    auto const bulkScan = GENERATE(vtparser::BulkScan::Enabled, vtparser::BulkScan::Disabled);
+    auto listener = ReturningAfterCsiEvents {};
+    auto parser = vtparser::Parser<vtparser::ParserEvents>(listener, bulkScan);
+    listener.parser = &parser;
+    auto input = "a\033[1mb\033[2mc"sv;
+
+    CHECK(parser.parseFragment(input) == 5);
+    CHECK(listener.events == "a<CSI m>");
+    CHECK(parser.state() == vtparser::State::Ground);
+
+    input.remove_prefix(5);
+    CHECK(parser.parseFragment(input) == 5);
+    CHECK(listener.events == "a<CSI m>b<CSI m>");
+
+    input.remove_prefix(5);
+    CHECK(parser.parseFragment(input) == 1);
+    CHECK(listener.events == "a<CSI m>b<CSI m>c");
 }
 
 TEST_CASE("Parser.precedingGraphicCharacter.ascii", "[Parser]")

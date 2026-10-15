@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/log/LogSink.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/log/detail/LocalTime.hpp>
 #include <core/log/detail/ProcessId.hpp>
@@ -116,12 +117,16 @@ namespace
     }
 } // namespace
 
-std::optional<std::filesystem::path> parseLogFileSpec(std::string_view spec)
+std::expected<std::optional<std::filesystem::path>, std::error_code> parseLogFileSpec(std::string_view spec)
 {
     // "-" is the established spelling for a standard stream.
     if (spec.empty() || spec == "-")
-        return std::nullopt;
-    return std::filesystem::path { spec };
+        return std::optional<std::filesystem::path> {};
+    // As UTF-8: the narrow constructor reads the ANSI code page on Windows, and opened a different
+    // file for any name beyond ASCII. A command-line value is text from outside, so one that is not
+    // UTF-8 is an answer for the caller to report.
+    return core::pathFromUtf8(spec).transform(
+        [](std::filesystem::path file) { return std::optional<std::filesystem::path> { std::move(file) }; });
 }
 
 Category::Formatter makeStandardFormatter(FormatterOptions options)
@@ -192,7 +197,7 @@ std::expected<std::unique_ptr<ScopedOutput>, std::string> ScopedOutput::create(O
                                     ? std::system_category().message(errno)
                                     : std::string { "cannot be opened for appending" };
             return std::unexpected(
-                std::format("cannot open log file '{}': {}", config.file->string(), reason));
+                std::format("cannot open log file '{}': {}", core::pathToUtf8(*config.file), reason));
         }
     }
     return std::make_unique<ScopedOutput>(std::move(config), std::move(file));

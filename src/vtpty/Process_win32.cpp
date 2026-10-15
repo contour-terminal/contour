@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/CommandLine.hpp>
 #include <vtpty/ConPty.hpp>
+#include <vtpty/EnvironmentBlock.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/SpawnLadder.hpp>
+#include <vtpty/WindowsCommandLine.hpp>
 
 #include <core/Assert.hpp>
+#include <core/Environment.hpp>
 #include <core/Overloaded.hpp>
+#include <core/Utf8Path.hpp>
+#include <core/WideString.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 
+#include <array>
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
@@ -15,15 +23,16 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <map>
 #include <mutex>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
 
 #include <Windows.h>
 #include <direct.h>
-#include <errno.h>
 
 using namespace std;
 
@@ -34,72 +43,26 @@ namespace vtpty
 
 namespace
 {
-    string getLastErrorAsString()
+    /// @return This process's environment, as "NAME=VALUE" entries in UTF-8, the "=C:" ones that say each
+    ///         drive's directory among them.
+    [[nodiscard]] std::vector<std::string> inheritedEnvironment()
     {
-        DWORD errorMessageID = GetLastError();
-        if (errorMessageID == 0)
-            return "";
-
-        LPSTR messageBuffer = nullptr;
-        size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM
-                                         | FORMAT_MESSAGE_IGNORE_INSERTS,
-                                     nullptr,
-                                     errorMessageID,
-                                     MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                                     (LPSTR) &messageBuffer,
-                                     0,
-                                     nullptr);
-
-        string message(messageBuffer, size);
-
-        LocalFree(messageBuffer);
-
-        return message;
+        auto entries = std::vector<std::string> {};
+        auto* const block = GetEnvironmentStringsW();
+        if (block == nullptr)
+            return entries;
+        auto const* entry = block;
+        while (*entry != L'\0')
+        {
+            auto const length = std::wcslen(entry);
+            entries.push_back(core::toUtf8(std::wstring_view { entry, length }));
+            entry += length + 1;
+        }
+        FreeEnvironmentStringsW(block);
+        return entries;
     }
 
-    class InheritingEnvBlock
-    {
-      public:
-        using Environment = vtpty::Process::Environment;
-
-        explicit InheritingEnvBlock(Environment const& newValues)
-        {
-            for (auto const& env: newValues)
-            {
-                if (env.first == "TERM")
-                {
-                    // Do not pass TERM to child process, as it might cause problems with some applications
-                    // (e.g. git diff) We are currently only using ConPTY here which does not require TERM to
-                    // be set.
-                    errorLog()("Ignoring TERM environment variable for child process.");
-                    continue;
-                }
-
-                if (auto len = GetEnvironmentVariable(env.first.c_str(), nullptr, 0); len != 0)
-                {
-                    vector<char> buf;
-                    buf.resize(len);
-                    GetEnvironmentVariable(env.first.c_str(), &buf[0], len);
-                    oldValues_[env.first] = string(&buf[0], len - 1);
-                }
-                if (!env.second.empty())
-                    SetEnvironmentVariable(env.first.c_str(), env.second.c_str());
-                else
-                    SetEnvironmentVariable(env.first.c_str(), nullptr);
-            }
-        }
-
-        ~InheritingEnvBlock()
-        {
-            for (auto const& env: oldValues_)
-                SetEnvironmentVariable(env.first.c_str(), env.second.c_str());
-        }
-
-      private:
-        Environment oldValues_;
-    };
-
-    HRESULT initializeStartupInfoAttachedToPTY(STARTUPINFOEX& startupInfoEx, ConPty& pty)
+    HRESULT initializeStartupInfoAttachedToPTY(STARTUPINFOEXW& startupInfoEx, ConPty& pty)
     {
         // Initializes the specified startup info struct with the required properties and
         // updates its thread attribute list with the specified ConPTY handle
@@ -108,10 +71,16 @@ namespace
 
         size_t attrListSize {};
 
-        startupInfoEx.StartupInfo.cb = sizeof(STARTUPINFOEX);
+        startupInfoEx.StartupInfo.cb = sizeof(STARTUPINFOEXW);
+
+        // Standard handles left null, and named as the ones to use, so that the child takes the
+        // pseudoconsole's. Without the flag a console child is handed ours whenever they are
+        // redirected -- Contour run under ctest, from a script, or as a daemon logging to a file --
+        // and writes there, past the terminal. Windows Terminal, alacritty and wezterm do the same.
+        startupInfoEx.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
 
         // Get the size of the thread attribute list.
-        InitializeProcThreadAttributeList(NULL, 1, 0, &attrListSize);
+        InitializeProcThreadAttributeList(nullptr, 1, 0, &attrListSize);
 
         // Allocate a thread attribute list of the correct size
         startupInfoEx.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(malloc(attrListSize));
@@ -142,17 +111,6 @@ namespace
         }
         return hr;
     }
-
-    char** createArgv(string const& arg0, vector<string> const& args, size_t i = 0)
-    {
-        auto const argCount = args.size(); // factor out in order to avoid false-positive by static analyzers.
-        char** argv = new char*[argCount + 2 - i];
-        argv[0] = const_cast<char*>(arg0.c_str());
-        for (size_t i = 0; i < argCount; ++i)
-            argv[i + 1] = const_cast<char*>(args[i].c_str());
-        argv[argCount + 1] = nullptr;
-        return argv;
-    }
 } // anonymous namespace
 
 struct Process::Private
@@ -163,13 +121,18 @@ struct Process::Private
     Environment env;
     vector<string> removedEnvironment;
     std::unique_ptr<Pty> pty {};
+    /// Held for the Process's lifetime only: a ConPTY child has no cgroup to leave.
+    std::shared_ptr<ProcessPlacement> placement {};
 
     mutable std::mutex exitStatusMutex {};
     mutable std::optional<Process::ExitStatus> exitStatus {};
-    std::optional<std::thread> exitWatcher;
+    std::optional<std::thread> exitWatcher {};
+    /// Set by ~Process to end exitWatcher's wait without the child: manual-reset, or null when it could
+    /// not be made, in which case the watcher waits for the child alone.
+    HANDLE stopWatching = CreateEventW(nullptr, TRUE, FALSE, nullptr);
 
     PROCESS_INFORMATION processInfo {};
-    STARTUPINFOEX startupInfo {};
+    STARTUPINFOEXW startupInfo {};
 
     [[nodiscard]] optional<Process::ExitStatus> checkStatus(bool waitForExit) const;
 };
@@ -181,12 +144,19 @@ Process::Process(string const& path,
                  vector<string> removedEnvironment,
                  bool escapeSandbox,
                  std::unique_ptr<Pty> pty,
-                 std::shared_ptr<ProcessPlacement> placement):
-    _d(new Private { path, args, cwd, env, std::move(removedEnvironment), std::move(pty) },
+                 std::shared_ptr<ProcessPlacement> placement,
+                 HangupGrace hangupGrace):
+    _d(new Private { .path = path,
+                     .args = args,
+                     .cwd = cwd,
+                     .env = env,
+                     .removedEnvironment = std::move(removedEnvironment),
+                     .pty = std::move(pty),
+                     .placement = std::move(placement) },
        [](Private* p) { delete p; })
 {
-    core::ignoreUnused(escapeSandbox);
-    core::ignoreUnused(placement); // a ConPTY child has no cgroup to leave
+    // No sandbox to escape, and no grace to give: closing the pseudoconsole ends the child outright.
+    core::ignoreUnused(escapeSandbox, hangupGrace);
 }
 
 bool Process::isFlatpak()
@@ -203,32 +173,41 @@ StartResult Process::start()
 
     initializeStartupInfoAttachedToPTY(_d->startupInfo, static_cast<ConPty&>(*_d->pty));
 
-    string cmd = _d->path;
-    for (size_t i = 0; i < _d->args.size(); ++i)
-    {
-        cmd += ' ';
-        if (_d->args[i].find(' ') != std::string::npos)
-            cmd += '\"' + _d->args[i] + '\"';
-        else
-            cmd += _d->args[i];
-    }
+    // The child's environment is handed to it, as on POSIX, rather than set in this process's own for the
+    // child to inherit: any other thread reading that meanwhile -- the daemon, a second tab spawning, a log
+    // sink -- would read the child's values.
+    auto const inherited = inheritedEnvironment();
+    auto const environment =
+        buildWindowsEnvironment(std::vector<std::string_view> { inherited.begin(), inherited.end() },
+                                _d->env,
+                                _d->removedEnvironment);
+    auto environmentBlock = windowsEnvironmentBlock(environment);
+    if (!environmentBlock)
+        return std::unexpected(StartFailure { .error = StartError::SpawnFailed,
+                                              .detail = "The environment configured for it is not UTF-8." });
 
-    // In case of PATH environment variable, extend it rather then overwriting it.
-    auto env = _d->env;
-    // An empty value unsets the variable for the child (see InheritingEnvBlock).
-    for (auto const& name: _d->removedEnvironment)
-        env.try_emplace(name, std::string {});
-    for (auto const& [name, value]: _d->env)
-    {
-        if (core::toUpper(name) == "PATH")
-        {
-            char buf[1024];
-            size_t len = 0;
-            if (getenv_s(&len, buf, sizeof(buf), "PATH") == 0)
-                env[name] = std::format("{};{}", value, buf);
-        }
-    }
-    auto const envScope = InheritingEnvBlock { env };
+    // What runs: the program as configured -- or, where it names no program but holds whitespace
+    // ("wsl.exe -d Ubuntu"), the command line it spells -- looked up on the PATH the child is given. A
+    // relative path names a file in this process's directory, not the child's: CreateProcess finds the
+    // program before the child has a directory of its own.
+    auto const searchPath = std::string {
+        environmentValue(environment, "PATH", EnvironmentNames::CaseInsensitive).value_or(std::string_view {})
+    };
+    auto const search = ProgramSearch { .path = searchPath,
+                                        .workingDirectory = {},
+                                        .fileSystem = core::platform::NativeFileSystem::instance() };
+    auto invocation = invocationToRun(_d->path, _d->args, programsIn(search));
+
+    // A bare name runs as found on the child's PATH, as POSIX's execvp() finds it once the child has its
+    // environment: CreateProcess would search this process's own PATH, which a configured one is not on.
+    if (auto const named = core::pathFromUtf8(invocation.program); named && !named->has_parent_path())
+        if (auto found = findProgram(invocation.program, search))
+            invocation.program = std::move(*found);
+
+    // Quoted so that a program under "Program Files" is the one that runs, rather than a "C:\Program.exe",
+    // and so that the child's C runtime splits an argument holding a space or a double quote back into
+    // what it was given.
+    auto const cmd = buildWindowsCommandLine(invocation);
 
     // POSIX walks its fallback ladder in the child, after fork(); with no fork to hide behind, we walk
     // ours here. Each rung gives up strictly more than the one before -- first the working directory,
@@ -236,9 +215,9 @@ StartResult Process::start()
     // issue #1711) costs the user their inherited cwd rather than their new tab.
     auto const loginShellArgs = loginShell(false);
     auto ladder = buildSpawnLadder(
-        cmd, _d->cwd.generic_string(), loginShellArgs.empty() ? std::string {} : loginShellArgs.front());
+        cmd, core::pathToUtf8(_d->cwd), loginShellArgs.empty() ? std::string {} : loginShellArgs.front());
 
-    // Captured at each failure site: FormatMessageA/LocalFree (inside getLastErrorAsString) and the
+    // Captured at each failure site: FormatMessageW/LocalFree (inside systemErrorMessage) and the
     // logging below both overwrite the thread's last-error, so reading it once after the loop would
     // report something other than why the spawn failed -- and that reason is what the user reads.
     auto lastError = "No spawn attempt was made."s;
@@ -247,30 +226,45 @@ StartResult Process::start()
     {
         ptyLog()("Creating process for command line: {}", attempt.commandLine);
 
-        // CreateProcessA may write to lpCommandLine in place, so it is handed the string's own
+        auto commandLine = core::toUtf16(attempt.commandLine);
+        auto const workingDirectory = core::toUtf16(attempt.workingDirectory);
+        if (!commandLine || !workingDirectory)
+        {
+            lastError = std::format("The command line or its working directory is not UTF-8: {} in \"{}\".",
+                                    attempt.commandLine,
+                                    attempt.workingDirectory);
+            ptyLog()("Failed to create process: {}", lastError);
+            continue;
+        }
+
+        // CreateProcessW may write to lpCommandLine in place, so it is handed the string's own
         // writable storage rather than a const_cast of c_str().
         auto const succeeded =
-            CreateProcess(nullptr,                         // No module name - use Command Line
-                          attempt.commandLine.data(),      // Command Line
-                          nullptr,                         // Process handle not inheritable
-                          nullptr,                         // Thread handle not inheritable
-                          FALSE,                           // Inherit handles
-                          EXTENDED_STARTUPINFO_PRESENT,    // Creation flags
-                          nullptr,                         // Use parent's environment block
-                          attempt.workingDirectory.empty() // Empty: use parent's starting directory
-                              ? nullptr
-                              : attempt.workingDirectory.data(),
-                          &_d->startupInfo.StartupInfo, // Pointer to STARTUPINFO
-                          &_d->processInfo);            // Pointer to PROCESS_INFORMATION
+            CreateProcessW(nullptr,             // No module name - use Command Line
+                           commandLine->data(), // Command Line
+                           nullptr,             // Process handle not inheritable
+                           nullptr,             // Thread handle not inheritable
+                           FALSE,               // Inherit handles
+                           EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, // Creation flags
+                           environmentBlock->data(), // The child's environment
+                           workingDirectory->empty() // Empty: use parent's starting directory
+                               ? nullptr
+                               : workingDirectory->c_str(),
+                           &_d->startupInfo.StartupInfo, // Pointer to STARTUPINFO
+                           &_d->processInfo);            // Pointer to PROCESS_INFORMATION
 
         if (!succeeded)
         {
-            lastError = getLastErrorAsString();
+            lastError = core::systemErrorMessage(GetLastError());
             ptyLog()("Failed to create process: {}", lastError);
             continue;
         }
 
         _d->exitWatcher = std::thread([this]() {
+            auto const handles = std::array { _d->processInfo.hProcess, _d->stopWatching };
+            auto const count = _d->stopWatching != nullptr ? DWORD { 2 } : DWORD { 1 };
+            if (WaitForMultipleObjects(count, handles.data(), FALSE, INFINITE) != WAIT_OBJECT_0)
+                return; // told to stop, by a Process going away whose child is still ending
             if (auto const status = wait(); status.has_value())
                 ptyLog()("Process terminated with exit code {}.", *status);
             else
@@ -285,6 +279,12 @@ StartResult Process::start()
 
     return std::unexpected(StartFailure { .error = StartError::SpawnFailed,
                                           .detail = "Could not create process. "s + std::move(lastError) });
+}
+
+void Process::close()
+{
+    // Closing the pseudoconsole is what ends the child here: the console host sends it the close.
+    _d->pty->close();
 }
 
 void Process::waitForClosed()
@@ -307,8 +307,16 @@ Pty const& Process::pty() const noexcept
 
 Process::~Process()
 {
+    // Once its pseudoconsole is closed, the console host ends the child by itself, in the child's own time
+    // -- seconds, for one that handles the close -- and there is nothing left to watch for. Waiting for it
+    // here would hold up whoever frees the Process, the GUI thread among them. Before that close, the
+    // child is waited for, as ever.
+    if (_d->stopWatching != nullptr && _d->pty->isClosed())
+        SetEvent(_d->stopWatching);
     if (_d->exitWatcher)
         _d->exitWatcher.value().join();
+    if (_d->stopWatching != nullptr)
+        CloseHandle(_d->stopWatching);
 
     // Only what start() got as far as creating: a Process that never spawned holds no handles.
     if (_d->processInfo.hThread != nullptr)
@@ -341,14 +349,14 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) co
 
     // The process's handle, not its primary thread's: a process can outlive its first thread.
     if (waitForExit && WaitForSingleObject(processInfo.hProcess, INFINITE) != WAIT_OBJECT_0)
-        ptyLog()("WaitForSingleObject() failed: {}", getLastErrorAsString());
+        ptyLog()("WaitForSingleObject() failed: {}", core::systemErrorMessage(GetLastError()));
 
     // Neither a failed query nor STILL_ACTIVE is an exit, so neither records one -- nor throws, which
     // would leave alive() through its noexcept.
     auto exitCode = DWORD {};
     if (!GetExitCodeProcess(processInfo.hProcess, &exitCode))
     {
-        ptyLog()("GetExitCodeProcess() failed: {}", getLastErrorAsString());
+        ptyLog()("GetExitCodeProcess() failed: {}", core::systemErrorMessage(GetLastError()));
         return nullopt;
     }
     if (exitCode == STILL_ACTIVE)
@@ -390,18 +398,21 @@ vector<string> Process::loginShell(bool escapeSandbox)
 
 std::string Process::userName()
 {
-    if (char const* p = getenv("USERNAME"); p && *p)
-        return p;
+    if (auto name = core::defaultEnvironment().get("USERNAME"); name && !name->empty())
+        return std::move(*name);
 
     return "unknown"s;
 }
 
 fs::path Process::homeDirectory()
 {
-    if (char const* p = getenv("USERPROFILE"); p && *p)
-        return fs::path(p);
+    if (auto const profile = core::defaultEnvironment().get("USERPROFILE"); profile && !profile->empty())
+    {
+        if (auto path = core::pathFromUtf8(*profile))
+            return std::move(*path);
+    }
 
-    return fs::path("/");
+    return { "/" };
 }
 
 string Process::workingDirectory() const

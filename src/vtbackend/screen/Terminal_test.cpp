@@ -9,24 +9,32 @@
 
 #include <vtpty/CommandCapture.hpp>
 #include <vtpty/MockPty.hpp>
+#include <vtpty/test/NonAsciiSample.hpp>
 
 #include <core/Escape.hpp>
 #include <core/Times.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/async/testing/ManualExecutor.hpp>
 #include <core/cli/App.hpp>
+#include <core/platform/NativeFileSystem.hpp>
+#include <core/platform/PathUtils.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 #include <core/testing/Environment.hpp>
+#include <core/testing/ScopedTempDir.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <condition_variable>
 #include <deque>
 #include <expected>
 #include <filesystem>
@@ -35,9 +43,12 @@
 #include <future>
 #include <latch>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <semaphore>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -106,7 +117,8 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
     auto& terminal = mc.terminal;
 
     // Enable ReportAllKeysAsEscapeCodes (kitty keyboard protocol)
-    terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::ReportAllKeysAsEscapeCodes);
+    terminal.changeKeyboardProtocol(
+        [](auto& protocol) { protocol.enter(vtbackend::KeyboardEventFlag::ReportAllKeysAsEscapeCodes); });
 
     // Fill terminal and generate scrollback history
     mc.writeToScreen("line1\r\n"
@@ -127,7 +139,7 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
         terminal.sendKeyEvent(vtbackend::Key::LeftShift,
                               vtbackend::Modifiers { vtbackend::Modifier::Shift },
                               vtbackend::KeyboardEventType::Press,
-                              std::chrono::steady_clock::now());
+                              mc.steadyClock.now());
 
         // Viewport should remain scrolled
         CHECK(terminal.viewport().scrolled());
@@ -142,7 +154,7 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
         terminal.sendKeyEvent(vtbackend::Key::Enter,
                               vtbackend::Modifiers { vtbackend::Modifier::None },
                               vtbackend::KeyboardEventType::Press,
-                              std::chrono::steady_clock::now());
+                              mc.steadyClock.now());
 
         // Viewport should scroll to bottom
         CHECK(!terminal.viewport().scrolled());
@@ -170,10 +182,44 @@ TEST_CASE("Terminal.ModifierKeysDoNotScrollViewport", "[terminal]")
             terminal.sendKeyEvent(modKey,
                                   vtbackend::Modifiers { vtbackend::Modifier::None },
                                   vtbackend::KeyboardEventType::Press,
-                                  std::chrono::steady_clock::now());
+                                  mc.steadyClock.now());
 
             CHECK(terminal.viewport().scrolled());
         }
+    }
+}
+
+TEST_CASE("Terminal.sendMouseLeaveEvent.hoversNothingUntilThePointerIsBack", "[terminal][hyperlink]")
+{
+    // Off the grid the pointer is on no cell: the link it left is no longer the hovered one -- which is what
+    // the frame underlines -- and nothing answers for the pointer's cell. Back on the grid, on the very cell
+    // it left from too, it hovers again.
+    auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen("\033]8;;https://example.com/\033\\link\033]8;;\033\\");
+    auto const onLink = CellLocation { .line = LineOffset(0), .column = ColumnOffset(1) };
+    terminal.sendMouseMoveEvent(Modifier::None, onLink, vtbackend::PixelCoordinate {}, false);
+    REQUIRE(terminal.isMouseHoveringHyperlink());
+
+    terminal.sendMouseLeaveEvent();
+    CHECK_FALSE(terminal.isMouseHoveringHyperlink());
+    CHECK(terminal.tryGetHoveringHyperlink() == nullptr);
+    CHECK_FALSE(terminal.currentMouseGridPosition().has_value());
+
+    SECTION("a move back onto the cell it left from")
+    {
+        terminal.sendMouseMoveEvent(Modifier::None, onLink, vtbackend::PixelCoordinate {}, false);
+        CHECK(terminal.isMouseHoveringHyperlink());
+        CHECK(terminal.tryGetHoveringHyperlink() != nullptr);
+        CHECK(terminal.currentMouseGridPosition() == onLink);
+    }
+
+    SECTION("a press there")
+    {
+        std::ignore = terminal.sendMousePressEvent(
+            Modifier::None, vtbackend::MouseButton::Left, onLink, vtbackend::PixelCoordinate {}, false);
+        CHECK(terminal.isMouseHoveringHyperlink());
+        CHECK(terminal.currentMouseGridPosition() == onLink);
     }
 }
 
@@ -181,16 +227,14 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
 {
     namespace fs = std::filesystem;
 
-    auto const tmpRoot =
-        fs::temp_directory_path()
-        / std::format("contour-local-path-{}", std::chrono::steady_clock::now().time_since_epoch().count());
+    auto const tmpDir = core::testing::ScopedTempDir { "contour-local-path" };
+    auto const& tmpRoot = tmpDir.path();
     fs::create_directories(tmpRoot / "nested");
     {
         auto file = std::ofstream(tmpRoot / "nested" / "file.txt");
         file << "test";
     }
 
-    auto const cleanup = core::Finally { [&]() { fs::remove_all(tmpRoot); } };
     auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
     auto constexpr UiHandledHint = false;
 
@@ -263,6 +307,29 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
         CHECK(*path == expectedTildeFile);
     }
 
+    SECTION("relative path in a working directory beyond ASCII")
+    {
+        // OSC 7 reports the directory in UTF-8. Read as a narrow path, Windows took it in the ANSI code page
+        // and found no file in it.
+        auto const directory = tmpRoot / vtpty::testing::NonAsciiName;
+        fs::create_directories(directory / "nested");
+        std::ofstream(directory / "nested" / "file.txt") << "test";
+
+        auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
+        auto& terminal = mc.terminal;
+        terminal.setCurrentWorkingDirectory(fileUrlOf(directory));
+        mc.writeToScreen("open nested/file.txt now");
+
+        terminal.sendMouseMoveEvent(Modifier::None,
+                                    CellLocation { .line = LineOffset(0), .column = ColumnOffset(10) },
+                                    PixelCoordinate,
+                                    UiHandledHint);
+
+        auto const path = terminal.localPathAtMousePosition().value_or(std::nullopt);
+        REQUIRE(path.has_value());
+        CHECK(core::pathFromUtf8(*path) == (directory / "nested" / "file.txt").lexically_normal());
+    }
+
     SECTION("missing path")
     {
         auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
@@ -275,7 +342,49 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
                                     PixelCoordinate,
                                     UiHandledHint);
 
-        CHECK_FALSE(terminal.localPathAtMousePosition().has_value());
+        CHECK(terminal.localPathAtMousePosition() == std::nullopt);
+    }
+
+    SECTION("a working directory on another host resolves no relative path here")
+    {
+        // file://otherhost/dir names otherhost's directory: one of that name here is another directory.
+        auto const generic = tmpRoot.generic_string();
+        auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
+        auto& terminal = mc.terminal;
+        terminal.setCurrentWorkingDirectory("file://otherhost.invalid"
+                                            + (generic.starts_with('/') ? "" : "/"s) + generic);
+        mc.writeToScreen("open nested/file.txt now");
+
+        terminal.sendMouseMoveEvent(Modifier::None,
+                                    CellLocation { .line = LineOffset(0), .column = ColumnOffset(10) },
+                                    PixelCoordinate,
+                                    UiHandledHint);
+
+        CHECK(terminal.pathTextAtMousePosition() == "nested/file.txt");
+        CHECK(terminal.localPathAtMousePosition() == std::nullopt);
+    }
+
+    SECTION("a replica resolves a path here only when its daemon runs on this machine")
+    {
+        // On another machine, the path names a file there: one that exists here too is another file.
+        auto const role = GENERATE(vtbackend::ReplicaRole::OtherMachine, vtbackend::ReplicaRole::SameMachine);
+        auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
+        auto& terminal = mc.terminal;
+        terminal.bindReplica(role, vtbackend::HostIdentity {});
+        terminal.setCurrentWorkingDirectory(tmpRootUrl);
+        mc.writeToScreen("open nested/file.txt now");
+
+        terminal.sendMouseMoveEvent(Modifier::None,
+                                    CellLocation { .line = LineOffset(0), .column = ColumnOffset(10) },
+                                    PixelCoordinate,
+                                    UiHandledHint);
+
+        CHECK(terminal.pathTextAtMousePosition() == "nested/file.txt");
+        if (role == vtbackend::ReplicaRole::OtherMachine)
+            CHECK(terminal.localPathAtMousePosition()
+                  == std::unexpected(vtbackend::PathRefusal::ReplicaOfAnotherMachine));
+        else
+            CHECK(terminal.localPathAtMousePosition() == expectedFile);
     }
 }
 
@@ -304,10 +413,8 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
 
-        terminal.sendKeyEvent(vtbackend::Key::Enter,
-                              anyModifiers,
-                              vtbackend::KeyboardEventType::Press,
-                              std::chrono::steady_clock::now());
+        terminal.sendKeyEvent(
+            vtbackend::Key::Enter, anyModifiers, vtbackend::KeyboardEventType::Press, mc.steadyClock.now());
 
         CHECK(!terminal.viewport().scrolled());
     }
@@ -318,10 +425,8 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
 
-        terminal.sendKeyEvent(vtbackend::Key::Enter,
-                              anyModifiers,
-                              vtbackend::KeyboardEventType::Press,
-                              std::chrono::steady_clock::now());
+        terminal.sendKeyEvent(
+            vtbackend::Key::Enter, anyModifiers, vtbackend::KeyboardEventType::Press, mc.steadyClock.now());
 
         CHECK(!terminal.viewport().scrolled());
     }
@@ -337,7 +442,7 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
                                vtbackend::KeyIdentity { .unshiftedKey = U'a' },
                                anyModifiers,
                                vtbackend::KeyboardEventType::Press,
-                               std::chrono::steady_clock::now());
+                               mc.steadyClock.now());
 
         CHECK(!terminal.viewport().scrolled());
     }
@@ -352,7 +457,7 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
                                vtbackend::KeyIdentity { .unshiftedKey = U'a' },
                                anyModifiers,
                                vtbackend::KeyboardEventType::Press,
-                               std::chrono::steady_clock::now());
+                               mc.steadyClock.now());
 
         CHECK(!terminal.viewport().scrolled());
     }
@@ -372,10 +477,8 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         // the release assertion below is not vacuous.
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
-        terminal.sendKeyEvent(vtbackend::Key::UpArrow,
-                              anyModifiers,
-                              vtbackend::KeyboardEventType::Press,
-                              std::chrono::steady_clock::now());
+        terminal.sendKeyEvent(
+            vtbackend::Key::UpArrow, anyModifiers, vtbackend::KeyboardEventType::Press, mc.steadyClock.now());
         REQUIRE(!terminal.viewport().scrolled());
 
         // The release generates input too, but must leave the viewport parked where the user put it.
@@ -386,7 +489,7 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
         terminal.sendKeyEvent(vtbackend::Key::UpArrow,
                               anyModifiers,
                               vtbackend::KeyboardEventType::Release,
-                              std::chrono::steady_clock::now());
+                              mc.steadyClock.now());
 
         CHECK(terminal.viewport().scrolled());
         CHECK(terminal.viewport().scrollOffset() == offsetBefore);
@@ -404,22 +507,23 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
                                vtbackend::KeyIdentity { .unshiftedKey = U'a' },
                                anyModifiers,
                                vtbackend::KeyboardEventType::Release,
-                               std::chrono::steady_clock::now());
+                               mc.steadyClock.now());
 
         CHECK(terminal.viewport().scrolled());
         CHECK(terminal.viewport().scrollOffset() == offsetBefore);
     }
 
-    SECTION("scrollbackBufferCleared (CSI 3 J) honors autoScrollOnUpdate=false")
+    SECTION("CSI 3 J leaves no offset into the rows it dropped, even with autoScrollOnUpdate=false")
     {
+        // Not scrolling on output does not keep the viewport on history that is gone: the offset is held
+        // to what is left of it, here nothing.
         terminal.settings().autoScrollOnUpdate = false;
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
-        auto const offsetBefore = terminal.viewport().scrollOffset();
 
         mc.writeToScreen("\x1b[3J");
 
-        CHECK(terminal.viewport().scrollOffset() == offsetBefore);
+        CHECK(terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
     }
 
     // Note: we exercise `bufferChanged` directly rather than feeding DECSET 1049,
@@ -777,6 +881,38 @@ TEST_CASE("Terminal.DECCOLM.resizesGridSynchronously", "[terminal]")
     CHECK(mc.terminal.pageSize().columns == ColumnCount(80));
 }
 
+TEST_CASE("Terminal.DECCOLM.homesTheCursor", "[terminal]")
+{
+    using namespace vtbackend;
+
+    // DEC STD 070: selecting either column mode sets the Active Position to the display origin (1,1).
+    auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
+    mc.writeToScreen("\033[?40h"); // allow the 80<->132 switch
+    auto const& screen = mc.terminal.primaryScreen();
+
+    SECTION("switching to 132 columns")
+    {
+        mc.writeToScreen("\033[5;10H\033[?3h");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+    }
+
+    SECTION("switching back to 80 from past column 80 wraps no row")
+    {
+        // vttest's "Bug C: wide to narrow screen": the cursor at column 81 of a 132-column page, then 80
+        // columns. Nothing on the page may be left continuing onto a row below.
+        mc.writeToScreen("\033[?3h\033[1;81H\033[?3l");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+        for (auto const line: std::views::iota(0, 24))
+            CHECK_FALSE(screen.grid().lineAt(LineOffset(line)).wrapped());
+    }
+
+    SECTION("with DECNCSM keeping the page")
+    {
+        mc.writeToScreen("\033[?95h\033[5;10H\033[?3h");
+        CHECK(screen.cursor().position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+    }
+}
+
 TEST_CASE("Terminal.RIS.resetsDECCOLM", "[terminal]")
 {
     using namespace vtbackend;
@@ -834,8 +970,9 @@ TEST_CASE("Terminal.SynchronizedOutputTimesOut", "[terminal]")
     // still report it enabled, because that is what the application asked for.
     constexpr auto BatchOn = "\033[?2026h"sv;
 
-    auto const now = chrono::steady_clock::now();
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    mc.steadyClock.advance(1s); // a second into the session: past the render throttle's interval
+    auto const now = mc.steadyClock.now();
 
     mc.writeToScreen(BatchOn);
     mc.writeToScreen("Hello");
@@ -856,13 +993,27 @@ TEST_CASE("Terminal.SynchronizedOutputTimesOut", "[terminal]")
     CHECK(trimmedTextScreenshot(mc) == "Hello");
 }
 
+TEST_CASE("Terminal.SynchronizedOutputTimesOutByTheTerminalsSteadyClock", "[terminal]")
+{
+    // The deadline is kept on the steady clock the terminal was given, like every other time it keeps, so
+    // whoever drives that clock moves the deadline -- a test need not wait it out in real time.
+    auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+
+    mc.writeToScreen("\033[?2026h");
+    REQUIRE(mc.terminal.isRenderingSuppressed());
+
+    mc.steadyClock.advance(mc.terminal.settings().synchronizedOutputTimeout);
+    CHECK_FALSE(mc.terminal.isRenderingSuppressed());
+}
+
 TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
 {
     constexpr auto BatchOn = "\033[?2026h"sv;
     constexpr auto BatchOff = "\033[?2026l"sv;
 
-    auto const now = chrono::steady_clock::now();
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    mc.steadyClock.advance(1s); // a second into the session: past the render throttle's interval
+    auto const now = mc.steadyClock.now();
 
     mc.writeToScreen(BatchOn);
     mc.writeToScreen("Hello ");
@@ -1443,8 +1594,9 @@ TEST_CASE("Terminal.UnderlineStyleClearing", "[terminal]")
 {
     // Each subsequent underline style should clear the former if present.
 
-    auto const now = chrono::steady_clock::now();
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    mc.steadyClock.advance(1s); // a second into the session: past the render throttle's interval
+    auto const now = mc.steadyClock.now();
 
     mc.writeToScreen("\033[4:1mAB\033[21mCD\033[4:3mEF\033[24mGH\033[4:2mIJ\033[mKL");
     mc.terminal.tick(now);
@@ -1531,8 +1683,9 @@ TEST_CASE("Terminal.a_one_column_selection_still_breaks_lines", "[terminal]")
 
 TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
 {
-    auto const now = chrono::steady_clock::now();
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    mc.steadyClock.advance(1s); // a second into the session: past the render throttle's interval
+    auto const now = mc.steadyClock.now();
 
     mc.writeToScreen("\033[4:3mAB\033[mCD");
     mc.terminal.tick(now);
@@ -1561,14 +1714,14 @@ TEST_CASE("Terminal.ParsingBuffer", "[terminal]")
     auto& terminal = mock.terminal;
 
     // Initially, parsingBuffer() should return currentPtyBuffer() since _parsingBuffer is not set
-    CHECK(terminal.parsingBuffer() == terminal.currentPtyBuffer());
+    CHECK(terminal.parsingBuffer() == terminal.currentPtyBuffer().get());
 
     // Write some text - this will exercise the parsing path
     mock.writeToScreen("Hello");
 
     // After parsing completes, parsingBuffer() should still return currentPtyBuffer()
     // because _parsingBuffer is reset after each parse
-    CHECK(terminal.parsingBuffer() == terminal.currentPtyBuffer());
+    CHECK(terminal.parsingBuffer() == terminal.currentPtyBuffer().get());
 }
 
 TEST_CASE("Terminal.TrivialLineBufferIntegrity", "[terminal]")
@@ -1700,6 +1853,73 @@ TEST_CASE("Terminal.resizeScreen.minimal_one_by_one.with_status_line", "[termina
     // And it can grow back from the degenerate size.
     REQUIRE_NOTHROW(terminal.resizeScreen(PageSize { LineCount { 10 }, ColumnCount { 20 } }));
     CHECK(terminal.pageSize().lines == LineCount { 9 }); // 10 total - 1 status line
+}
+
+TEST_CASE("Terminal.resizeScreen.narrowing_keeps_the_status_line_cursor_on_its_row", "[terminal]")
+{
+    // The status lines' grids were resized behind their screens' backs, so a status-line cursor beyond the
+    // new right margin stayed there, and the screen's cached cursor line was never re-pointed.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    auto const& statusLine = terminal.hostWritableStatusLineDisplay();
+    mc.writeToScreen("\033[2$~");   // DECSSDT: show the host-writable status line
+    mc.writeToScreen("\033[1$}");   // DECSASD: write to it
+    mc.writeToScreen("\033[16GAB"); // CHA 16, then two cells: the cursor ends at column 17
+    mc.writeToScreen("\033[0$}");   // back to the main display
+
+    terminal.resizeScreen(PageSize { LineCount { 5 }, ColumnCount { 10 } });
+
+    CHECK(statusLine.cursor().position.column < ColumnOffset { 10 });
+    CHECK(&statusLine.currentLine() == &statusLine.grid().lineAt(statusLine.cursor().position.line));
+
+    mc.writeToScreen("\033[1$}X\033[0$}"); // lands on the status line, within it
+    CHECK(statusLine.grid().lineText(LineOffset { 0 }).contains('X'));
+}
+
+TEST_CASE("Terminal.answerHostWritableStatusLineRequest.a_denied_line_titles_the_window", "[terminal]")
+{
+    // With the host-writable status line denied, what the application writes there goes to the window
+    // title as it returns to the main display (DECSASD 0) -- once per denial, and only while the
+    // configuration asks for it at that moment.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    terminal.settings().syncWindowTitleWithHostWritableStatusDisplay = true;
+    terminal.setWindowTitle("before");
+    auto const writeStatus = [&](std::string_view text) {
+        mc.writeToScreen(std::format("\033[1$}}\033[2K\033[G{}\033[0$}}", text));
+    };
+
+    SECTION("denied: the next return titles the window, and only that one")
+    {
+        terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Denied);
+        writeStatus("first");
+        CHECK(terminal.windowTitle() == "first");
+        writeStatus("second");
+        CHECK(terminal.windowTitle() == "first");
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+    }
+
+    SECTION("the configuration is read at the return, not at the denial")
+    {
+        terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Denied);
+        terminal.settings().syncWindowTitleWithHostWritableStatusDisplay = false;
+        writeStatus("status");
+        CHECK(terminal.windowTitle() == "before");
+
+        // Still owed: the setting turned back on is honoured at the next return.
+        terminal.settings().syncWindowTitleWithHostWritableStatusDisplay = true;
+        writeStatus("status");
+        CHECK(terminal.windowTitle() == "status");
+    }
+
+    SECTION("shown: the line keeps its text to itself")
+    {
+        terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Denied);
+        terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Shown);
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
+        writeStatus("status");
+        CHECK(terminal.windowTitle() == "before");
+    }
 }
 
 TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
@@ -2238,9 +2458,19 @@ TEST_CASE("Terminal.GraphemeCluster.aWideCellOnTheLastColumnKeepsItsWidth", "[te
     // character on the last writable column stays on a line the batched path still claims, as a
     // TWO-column cell. The selection fallback must measure it the same way the batched path does;
     // reporting one column shrinks the selection background and any underline behind the glyph.
+    //
+    // Text written there no longer leaves such a cell -- the character moves on to the next row, or
+    // is dropped without autowrap -- so the cell is put in place the way that write used to put it.
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(0) };
-    mock.writeToScreen("\033[1;5H\u4E16"sv); // last column of a 5-column page
-    mock.writeToScreen("\033[2;1H"sv);       // cursor off the line under test
+    mock.terminal.primaryScreen()
+        .grid()
+        .lineAt(LineOffset(0))
+        .useCellAt(ColumnOffset(4))
+        .write(vtbackend::GraphicsAttributes {},
+               U'\u4E16',
+               2,
+               vtbackend::HyperlinkId {}); // last column of a 5-column page
+    mock.writeToScreen("\033[2;1H"sv);     // cursor off the line under test
 
     REQUIRE(mock.terminal.primaryScreen().grid().lineAt(LineOffset(0)).isTrivialBuffer());
     REQUIRE(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(4)).width() == 2);
@@ -2265,7 +2495,7 @@ TEST_CASE("Terminal.GraphemeCluster.batchedFallbackDoesNotInheritTheCursor", "[t
     //
     // Asserted against a control that differs only in the previous line's last cell, so no palette
     // value is hard-coded.
-    auto const colorsOfSecondLine = [](std::string_view lastCellOfFirstLine) {
+    auto const colorsOfSecondLine = [](std::string_view lastCellOfFirstLine, ColumnOffset cursorColumn) {
         auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(0) };
         auto constexpr ClockBase = chrono::steady_clock::time_point();
         mock.terminal.tick(ClockBase);
@@ -2277,11 +2507,11 @@ TEST_CASE("Terminal.GraphemeCluster.batchedFallbackDoesNotInheritTheCursor", "[t
         mock.writeToScreen("\033[2;1H"sv);
         mock.writeToScreen("xyz"sv);                       // line 1: uniform text
         mock.writeToScreen("\033[1;1H\033[31mab\033[m"sv); // line 0: mixed SGR -> per-cell path
-        mock.writeToScreen(std::format("\033[1;5H{}", lastCellOfFirstLine));
+        mock.writeToScreen(lastCellOfFirstLine);
 
-        // The cursor must end ON line 0's last cell, so renderCell leaves _prevHasCursor set.
+        // The cursor must end ON the glyph that ends line 0, so renderCell leaves _prevHasCursor set.
         REQUIRE(mock.terminal.primaryScreen().cursor().position
-                == CellLocation { .line = LineOffset(0), .column = ColumnOffset(4) });
+                == CellLocation { .line = LineOffset(0), .column = cursorColumn });
         // Line 1 is selected in part, which sends it to renderTrivialLine's fallback; columns 0..2
         // are outside the selection, so nothing may recolor them.
         selectColumns(mock.terminal, LineOffset(1), ColumnOffset(3), ColumnOffset(4));
@@ -2296,8 +2526,9 @@ TEST_CASE("Terminal.GraphemeCluster.batchedFallbackDoesNotInheritTheCursor", "[t
         return result;
     };
 
-    auto const afterWideGlyph = colorsOfSecondLine("\u4E16"sv); // two columns, cursor on it
-    auto const afterNarrowGlyph = colorsOfSecondLine("Z"sv);    // one column, cursor on it
+    // Two columns ending the line, the cursor on its head; one column, the cursor on it.
+    auto const afterWideGlyph = colorsOfSecondLine("\033[1;4H\u4E16"sv, ColumnOffset(3));
+    auto const afterNarrowGlyph = colorsOfSecondLine("\033[1;5HZ"sv, ColumnOffset(4));
 
     REQUIRE(afterNarrowGlyph.size() == 3);
     CHECK(afterWideGlyph == afterNarrowGlyph);
@@ -2759,6 +2990,17 @@ TEST_CASE("Terminal.hint_mode_dispatches_each_action", "[terminal][hintmode]")
         CHECK(mock.replyData() == "https://example.com");
     }
 
+    SECTION("Paste, under bracketed paste")
+    {
+        // A hint is pasted, as the clipboard is: the application sees it as one paste, not as keys.
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        mock.writeToScreen("\033[?2004hgo https://example.com now");
+        mock.terminal.flushInput();
+        mock.resetReplyData();
+        activate(mock, vtbackend::HintAction::Paste);
+        CHECK(mock.replyData() == "\033[200~https://example.com\033[201~");
+    }
+
     SECTION("CopyAndPaste")
     {
         auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
@@ -2794,15 +3036,13 @@ TEST_CASE("Terminal.hint_mode_validates_and_resolves_paths_against_the_working_d
     // memoized per activation, so a name repeated across rows is stat()ed once.
     namespace fs = std::filesystem;
 
-    auto const tmpRoot =
-        fs::temp_directory_path()
-        / std::format("contour-hint-cwd-{}", std::chrono::steady_clock::now().time_since_epoch().count());
+    auto const tmpDir = core::testing::ScopedTempDir { "contour-hint-cwd" };
+    auto const& tmpRoot = tmpDir.path();
     fs::create_directories(tmpRoot);
     {
         auto file = std::ofstream(tmpRoot / "Makefile");
         file << "all:\n";
     }
-    auto const cleanup = core::Finally { [&]() { fs::remove_all(tmpRoot); } };
 
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(60) }, LineCount(10) };
     mock.terminal.setCurrentWorkingDirectory("file://" + tmpRoot.generic_string());
@@ -2818,12 +3058,164 @@ TEST_CASE("Terminal.hint_mode_validates_and_resolves_paths_against_the_working_d
         .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
 
     auto const& matches = mock.terminal.hintMatches();
-    auto const expected = (tmpRoot / "Makefile").generic_string();
+    auto const expected = (tmpRoot / "Makefile").lexically_normal().string(); // as the mouse spells it
     REQUIRE(matches.size() == 2); // the two Makefile mentions, not the missing name
     CHECK(matches[0].matchedText == expected);
     CHECK(matches[1].matchedText == expected);
     CHECK(std::ranges::none_of(matches, [](auto const& m) { return m.matchedText.contains("Nonexistent"); }));
 }
+
+TEST_CASE("Terminal.hint_mode_resolves_a_path_as_the_mouse_does", "[terminal][hintmode]")
+{
+    // Hint mode and the Ctrl+mouse lookup resolve the same text against the same directory, so they name
+    // the same file, spelt the same way: normalised, without the "./" or ".." the text was written with.
+    namespace fs = std::filesystem;
+
+    auto const tmpDir = core::testing::ScopedTempDir { "contour-hint-mouse" };
+    auto const& tmpRoot = tmpDir.path();
+    fs::create_directories(tmpRoot / "src");
+    std::ofstream(tmpRoot / "Makefile") << "all:\n";
+
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(60) }, LineCount(10) };
+    mock.terminal.setCurrentWorkingDirectory("file://" + tmpRoot.generic_string());
+    mock.writeToScreen("edit src/../Makefile please");
+    mock.terminal.flushInput();
+
+    mock.terminal.sendMouseMoveEvent(Modifier::None,
+                                     CellLocation { .line = LineOffset(0), .column = ColumnOffset(8) },
+                                     vtbackend::PixelCoordinate {},
+                                     false);
+    auto const byMouse = mock.terminal.localPathAtMousePosition();
+    REQUIRE(byMouse == (tmpRoot / "Makefile").lexically_normal().string());
+
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    auto const& matches = mock.terminal.hintMatches();
+    REQUIRE(matches.size() == 1);
+    CHECK(matches[0].matchedText == *byMouse);
+}
+
+TEST_CASE("Terminal.hint_mode_resolves_no_path_in_another_hosts_working_directory", "[terminal][hintmode]")
+{
+    // file://otherhost/dir names otherhost's directory. A directory of that name here is another one, so its
+    // files are not offered as hints.
+    namespace fs = std::filesystem;
+
+    auto const tmpDir = core::testing::ScopedTempDir { "contour-hint-remote" };
+    auto const& tmpRoot = tmpDir.path();
+    fs::create_directories(tmpRoot);
+    std::ofstream(tmpRoot / "Makefile") << "all:\n";
+
+    auto const generic = tmpRoot.generic_string();
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(60) }, LineCount(10) };
+    mock.terminal.setCurrentWorkingDirectory("file://otherhost.invalid"
+                                             + (generic.starts_with('/') ? "" : "/"s) + generic);
+    mock.writeToScreen("edit Makefile please");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+
+    CHECK(mock.terminal.hintMatches().empty());
+}
+
+TEST_CASE("Terminal.hint_mode_resolves_paths_in_a_working_directory_beyond_ascii", "[terminal][hintmode]")
+{
+    // OSC 7 reports the directory in UTF-8. Read as a narrow path, Windows took it in the ANSI code page,
+    // found none of its files, and offered no hint for them.
+    namespace fs = std::filesystem;
+
+    auto const tmpDir = core::testing::ScopedTempDir { "contour-hint-utf8" };
+    auto const& tmpRoot = tmpDir.path();
+    auto const directory = tmpRoot / vtpty::testing::NonAsciiName;
+    fs::create_directories(directory);
+    std::ofstream(directory / "Makefile") << "all:\n";
+
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(60) }, LineCount(10) };
+    mock.terminal.setCurrentWorkingDirectory(fileUrlOf(directory));
+    mock.writeToScreen("edit Makefile please");
+    mock.terminal.flushInput();
+
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+
+    auto const& matches = mock.terminal.hintMatches();
+    REQUIRE(matches.size() == 1);
+    CHECK(core::pathFromUtf8(matches[0].matchedText) == (directory / "Makefile").lexically_normal());
+}
+
+#ifndef _WIN32 // no control character is legal in a Windows file name
+TEST_CASE("Terminal.hint_mode_types_no_path_a_shell_would_read_as_keys", "[terminal][hintmode]")
+{
+    // A directory name may hold ESC, BEL or a line feed, and OSC 7 reports it percent-encoded, which the
+    // terminal decodes. Hint mode resolves a bare file name against that directory: typed raw, the path
+    // would reach the shell as keys. It is still copied, but it is not typed.
+    namespace fs = std::filesystem;
+
+    auto const tmpDir = core::testing::ScopedTempDir { "contour-hint-keys" };
+    auto const& tmpRoot = tmpDir.path();
+
+    struct Typed
+    {
+        std::string input;     ///< What reached the PTY.
+        std::string clipboard; ///< What was copied.
+    };
+    auto bracketed = std::string_view {}; // what the shell turned on before the hint was picked
+    auto const pickIn = [&](std::string const& directoryName, vtbackend::HintAction action) {
+        auto const directory = tmpRoot / directoryName;
+        fs::create_directories(directory);
+        std::ofstream(directory / "notes.txt") << "x\n";
+
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+        mock.writeToScreen(bracketed);
+        mock.writeToScreen(
+            std::format("\033]7;file://{}\033\\", core::platform::percentEncodeUriPath(directory.string())));
+        mock.writeToScreen("see notes.txt");
+        mock.terminal.flushInput();
+        mock.resetReplyData();
+        mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+            .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = action });
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+        mock.sendCharEvent(U'a');
+        return Typed { .input = mock.replyData(), .clipboard = mock.clipboardData };
+    };
+
+    SECTION("a plain directory: the path is typed")
+    {
+        auto const expected = (tmpRoot / "plain" / "notes.txt").string();
+        CHECK(pickIn("plain", vtbackend::HintAction::Paste).input == expected);
+    }
+
+    SECTION("ESC and BEL in the directory: copied, not typed")
+    {
+        auto const name = std::string { "esc\x1b]2;x\x07" };
+        auto const picked = pickIn(name, vtbackend::HintAction::CopyAndPaste);
+        CHECK(picked.input.empty());
+        CHECK(picked.clipboard == (tmpRoot / name / "notes.txt").string());
+    }
+
+    SECTION("a line feed in the directory: not typed")
+    {
+        CHECK(pickIn("lf\nrm -rf x", vtbackend::HintAction::Paste).input.empty());
+    }
+
+    SECTION("under bracketed paste, a line feed in the directory is pasted as text")
+    {
+        // Inside the brackets the shell inserts a line feed rather than running what precedes it.
+        bracketed = "\033[?2004h";
+        auto const expected = (tmpRoot / "lf\nrm -rf x" / "notes.txt").string();
+        CHECK(pickIn("lf\nrm -rf x", vtbackend::HintAction::Paste).input
+              == std::format("\033[200~{}\033[201~", expected));
+    }
+
+    SECTION("under bracketed paste, ESC in the directory: still not typed")
+    {
+        // The paste would drop the ESC, and a path with a character taken out names another file.
+        bracketed = "\033[?2004h";
+        CHECK(pickIn("esc\x1b]2;x\x07", vtbackend::HintAction::Paste).input.empty());
+    }
+}
+#endif
 
 TEST_CASE("Terminal.hint_mode_extends_the_scan_past_the_viewport_to_finish_a_wrapped_line",
           "[terminal][hintmode]")
@@ -3003,8 +3395,14 @@ TEST_CASE("Terminal reports the identity its settings named", "[terminal]")
     settings.terminalId = vtbackend::VTType::VT340;
 
     auto const environment = core::testing::FakeEnvironment {};
-    auto terminal = vtbackend::Terminal { events,   environment,  std::make_unique<vtpty::MockPty>(pageSize),
-                                          settings, std::nullopt, std::chrono::steady_clock::now() };
+    auto terminal = vtbackend::Terminal { events,
+                                          environment,
+                                          core::platform::NativeFileSystem::instance(),
+                                          std::make_unique<vtpty::MockPty>(pageSize),
+                                          settings,
+                                          std::nullopt,
+                                          vtbackend::TerminalClocks::system(),
+                                          vtbackend::randomSemanticBlockTokens() };
 
     CHECK(terminal.terminalId() == vtbackend::VTType::VT340);
     // The operating level follows the identity at birth, as setTerminalId() also makes it do -- a
@@ -3034,8 +3432,14 @@ TEST_CASE("a terminal constructed below VT525 narrows its sequence table too", "
         auto settings = vtbackend::Settings {};
         settings.pageSize = pageSize;
         settings.terminalId = id;
-        return vtbackend::Terminal { events,   environment,  std::make_unique<vtpty::MockPty>(pageSize),
-                                     settings, std::nullopt, std::chrono::steady_clock::time_point() };
+        return vtbackend::Terminal { events,
+                                     environment,
+                                     core::platform::NativeFileSystem::instance(),
+                                     std::make_unique<vtpty::MockPty>(pageSize),
+                                     settings,
+                                     std::nullopt,
+                                     vtbackend::TerminalClocks::system(),
+                                     vtbackend::randomSemanticBlockTokens() };
     };
 
     SECTION("a VT220 identity excludes the VT420-only sequences")
@@ -3059,6 +3463,53 @@ TEST_CASE("a terminal constructed below VT525 narrows its sequence table too", "
 }
 
 // NOLINTEND(misc-const-correctness)
+
+TEST_CASE("Terminal.sixelScrolling.is_DECSDM_at_power_up_and_after_RIS", "[terminal][sixel]")
+{
+    // A configured setting, not DECSDM's own reset state: xterm 407, measured with its sixelScrolling
+    // resource off, starts with DECSDM set and sets it again on RIS after a program reset it, while DECSTR
+    // leaves the mode as the program left it.
+    auto events = vtbackend::Terminal::NullEvents {};
+    auto const pageSize = vtbackend::PageSize { vtbackend::LineCount(5), vtbackend::ColumnCount(20) };
+    auto const environment = core::testing::FakeEnvironment {};
+    auto const makeTerminal = [&](vtbackend::SixelScrolling sixelScrolling) {
+        auto settings = vtbackend::Settings {};
+        settings.pageSize = pageSize;
+        settings.sixelScrolling = sixelScrolling;
+        return std::make_unique<vtbackend::Terminal>(events,
+                                                     environment,
+                                                     core::platform::NativeFileSystem::instance(),
+                                                     std::make_unique<vtpty::MockPty>(pageSize),
+                                                     settings,
+                                                     std::nullopt,
+                                                     vtbackend::TerminalClocks::system(),
+                                                     vtbackend::randomSemanticBlockTokens());
+    };
+    auto const scrollingDisabled = [](vtbackend::Terminal const& terminal) {
+        return terminal.isModeEnabled(vtbackend::DECMode::NoSixelScrolling);
+    };
+
+    SECTION("configured off")
+    {
+        auto const terminal = makeTerminal(vtbackend::SixelScrolling::Disabled);
+        CHECK(scrollingDisabled(*terminal));
+
+        terminal->writeToScreen("\033[?80l\033[!p"); // DECRST 80, then DECSTR
+        CHECK_FALSE(scrollingDisabled(*terminal));
+
+        terminal->writeToScreen("\033c");
+        CHECK(scrollingDisabled(*terminal));
+    }
+
+    SECTION("configured on, the default")
+    {
+        auto const terminal = makeTerminal(vtbackend::SixelScrolling::Enabled);
+        CHECK_FALSE(scrollingDisabled(*terminal));
+
+        terminal->writeToScreen("\033[?80h\033c"); // DECSET 80, then RIS
+        CHECK_FALSE(scrollingDisabled(*terminal));
+    }
+}
 
 // {{{ block-atomic history eviction: the consumers a shrinking history reaches (issue #836)
 namespace
@@ -3478,6 +3929,26 @@ TEST_CASE("Terminal.processInputOnce.readAheadKeepsTheScreenExactWhileRendering"
     CHECK(screenText(threaded.terminal.primaryScreen()) == screenText(reference.terminal.primaryScreen()));
 }
 
+TEST_CASE("Terminal.processInputOnce.sizesItsReadByAWidthAnotherThreadResizes", "[terminal][threading]")
+{
+    // The parser thread looks at the page width to size its read before it takes the terminal's state;
+    // the GUI thread, holding that state, resizes the page meanwhile. The resize waits for the read
+    // ahead through a relaxed count, which orders nothing, so under the clang-tsan tree the width the
+    // parser looked at must be one published for readers without the lock.
+    auto mock = MockTerm<PiecewisePty<8>> { PageSize { LineCount(3), ColumnCount(40) }, LineCount(10), 1024 };
+    mock.mockPty().appendStdOutBuffer("0123456789abcdef"); // two pieces of eight
+
+    mock.terminal.lock(); // the GUI thread's hold
+    auto parse = std::async(std::launch::async, [&mock] { return mock.terminal.processInputOnce(); });
+    while (mock.mockPty().readsAhead() == 0)
+        std::this_thread::yield();
+    mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(30) }, std::nullopt);
+    mock.terminal.unlock();
+    REQUIRE(parse.get());
+
+    CHECK(mock.terminal.primaryScreen().grid().lineText(LineOffset(0)).starts_with("0123456789abcdef"));
+}
+
 TEST_CASE("Terminal.flushInput.concurrentFlushesDeliverEveryReplyExactlyOnce", "[terminal][input][threading]")
 {
     // Both threads flush the input queue: the parser thread from reportInBandWindowResize() (enabling
@@ -3493,20 +3964,11 @@ TEST_CASE("Terminal.flushInput.concurrentFlushesDeliverEveryReplyExactlyOnce", "
     auto mc = MockTerm { TermSize, LineCount(10) };
     auto& terminal = mc.terminal;
 
-    auto stop = std::atomic<bool> { false };
-    auto gui = std::thread { [&]() {
-        while (!stop.load(std::memory_order_acquire))
-        {
-            terminal.flushInput();
-            std::this_thread::yield();
-        }
-    } };
-
-    for ([[maybe_unused]] auto const i: std::views::iota(0, Iterations))
-        mc.writeToScreen(Queries);
-
-    stop.store(true, std::memory_order_release);
-    gui.join();
+    {
+        auto const gui = vtbackend::test::writeOnOwnThread([&] { terminal.flushInput(); });
+        for ([[maybe_unused]] auto const i: std::views::iota(0, Iterations))
+            mc.writeToScreen(Queries);
+    }
     terminal.flushInput();
 
     // The queue is first in, first out, so however the flushes interleave, the wire must carry exactly
@@ -3575,7 +4037,7 @@ void parseDuringKeyPressWrite(MockTerm<GatedPty>& mock, std::string_view vt)
         mock.terminal.sendKeyEvent(vtbackend::Key::UpArrow,
                                    vtbackend::KeyboardModifiers {},
                                    vtbackend::KeyboardEventType::Press,
-                                   chrono::steady_clock::now());
+                                   mock.steadyClock.now());
     });
     if (!mock.mockPty().awaitFirstWrite(5s))
     {
@@ -3803,4 +4265,411 @@ TEST_CASE("Terminal.replacingTheStatusLineDefinitionForgetsOverdueCommands", "[t
         terminal.resetStatusLineDefinition(); // back to the settings' default, which has no commands
         CHECK(terminal.nextRender().value_or(1h) > 0ms);
     }
+}
+
+TEST_CASE("Terminal.resetColorPalette.reportsOnlyAPaletteThatChanged", "[terminal][colors]")
+{
+    // A reload re-seeds the palette whatever else it changed. An application that subscribed to DEC mode 2031
+    // answers each report by querying its colours again and redrawing, so a reload that changed no colour
+    // must not send one.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("\033[?2031h");
+    REQUIRE(mock.terminal.isModeEnabled(vtbackend::DECMode::ReportColorPaletteUpdated));
+    auto const original = mock.terminal.colorPalette();
+
+    mock.terminal.resetColorPalette(original);
+    CHECK(e(mock.replyData()).empty());
+
+    auto changed = original;
+    changed.defaultForeground = vtbackend::RGBColor { 0x10, 0x20, 0x30 };
+    mock.terminal.resetColorPalette(changed);
+    CHECK(e(mock.replyData()) == e(std::string { "\033[?997;2n" }));
+    mock.resetReplyData();
+
+    mock.terminal.resetColorPalette(changed);
+    CHECK(e(mock.replyData()).empty());
+
+    // A colour a program set is part of what the application sees, so restoring the configured one is a
+    // change it must hear about.
+    mock.writeToScreen("\033]10;rgb:ff/ff/ff\033\\");
+    mock.discardPendingReplies();
+    mock.terminal.resetColorPalette(changed);
+    CHECK(e(mock.replyData()) == e(std::string { "\033[?997;2n" }));
+}
+
+TEST_CASE(
+    "Terminal.a reply raised outside the parser under CONTOUR_SYNC_PTY_OUTPUT waits for the lock's release",
+    "[terminal]")
+{
+    // The knob flushes a reply as it is raised, which the parser can afford: it defers the local echo of what
+    // it flushes until it has unwound. Outside the parser the caller may hold the state lock, as a frontend
+    // selecting text does, and with SRM reset the flush would echo, which parses and takes that lock again.
+    auto events = vtbackend::Terminal::NullEvents {};
+    auto const pageSize = vtbackend::PageSize { vtbackend::LineCount(5), vtbackend::ColumnCount(20) };
+    auto settings = vtbackend::Settings {};
+    settings.pageSize = pageSize;
+    auto const environment = core::testing::FakeEnvironment { { { "CONTOUR_SYNC_PTY_OUTPUT", "1" } } };
+    auto terminal = vtbackend::Terminal { events,
+                                          environment,
+                                          core::platform::NativeFileSystem::instance(),
+                                          std::make_unique<vtpty::MockPty>(pageSize),
+                                          settings,
+                                          std::nullopt,
+                                          vtbackend::TerminalClocks::system(),
+                                          vtbackend::randomSemanticBlockTokens() };
+    auto& pty = static_cast<vtpty::MockPty&>(terminal.device());
+    terminal.writeToScreen("\033[12l\033[?2030h");
+
+    // Inside the parser, the reply to DA1 is on the PTY before the parse returns.
+    terminal.writeToScreen("\033[c");
+    CHECK(pty.stdinBuffer().starts_with("\033[?"));
+    pty.stdinBuffer().clear();
+
+    // Outside it, selecting reports the selection (DECSET 2030) under the lock, and the report waits for the
+    // lock's release, where its echo can take the lock again.
+    {
+        auto const _ = std::scoped_lock { terminal };
+        terminal.selectAll();
+        CHECK(pty.stdinBuffer().empty());
+    }
+    CHECK(pty.stdinBuffer().starts_with("\033[>"));
+}
+
+TEST_CASE("Terminal.a report raised under a frontend's lock goes out once the lock is released", "[terminal]")
+{
+    // A frontend changes what the parser thread changes under the state lock, and a change can raise a
+    // report: here a selection, with DECSET 2030 on. What the hold queued goes out as the lock is released,
+    // whichever way the frontend took it.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mc.writeToScreen("\033[?2030h");
+    mc.discardPendingReplies();
+    {
+        auto const _ = std::scoped_lock { mc.terminal };
+        mc.terminal.selectAll();
+        CHECK(mc.replyData().empty());
+    }
+    CHECK(mc.replyData().starts_with("\033[>"));
+}
+
+TEST_CASE("Terminal.what a frontend's lock held back goes out when an exception unwinds it", "[terminal]")
+{
+    // An exception thrown under the lock releases it on the way out, and what the hold kept back goes out
+    // then: the report it raised, and the document it asked to open.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mc.writeToScreen("\033[?2030h");
+    mc.discardPendingReplies();
+    auto const holdAndThrow = [&] {
+        auto const _ = std::scoped_lock { mc.terminal };
+        mc.terminal.selectAll();
+        mc.terminal.openDocument("file:///tmp/held-back");
+        CHECK(mc.openedDocument.empty());
+        throw std::runtime_error("unwound");
+    };
+    CHECK_THROWS_AS(holdAndThrow(), std::runtime_error);
+    CHECK(mc.replyData().starts_with("\033[>"));
+    CHECK(mc.openedDocument == "file:///tmp/held-back");
+}
+
+namespace
+{
+/// A PTY that, at every write, asks another thread to take its terminal's state lock, and counts the
+/// writes for which that thread could not: a write made with the lock held, which parks every thread
+/// waiting for the lock for as long as the application leaves its input unread.
+class LockProbingPty final: public vtpty::MockPty
+{
+  public:
+    using MockPty::MockPty;
+
+    /// @param terminal The terminal whose lock is probed from now on.
+    void probe(vtbackend::Terminal const& terminal) { _terminal = &terminal; }
+
+    /// @return How many writes found the state lock held.
+    [[nodiscard]] int writesUnderLock() const noexcept { return _writesUnderLock; }
+
+    [[nodiscard]] int write(std::string_view data) override
+    {
+        if (_terminal != nullptr)
+        {
+            auto taken = std::async(std::launch::async, [terminal = _terminal] {
+                auto const _ = std::scoped_lock { *terminal };
+            });
+            if (taken.wait_for(std::chrono::seconds { 1 }) != std::future_status::ready)
+                ++_writesUnderLock;
+            // Kept rather than dropped, as dropping it waits for the lock, which this write's caller holds.
+            _probes.push_back(std::move(taken));
+        }
+        return MockPty::write(data);
+    }
+
+  private:
+    vtbackend::Terminal const* _terminal = nullptr;
+    int _writesUnderLock = 0;
+    std::vector<std::future<void>> _probes;
+};
+
+/// A PTY whose next write, once armed, parks until released: an application that leaves its input unread.
+class ParkingPty final: public vtpty::MockPty
+{
+  public:
+    using MockPty::MockPty;
+
+    /// Makes the next write park.
+    void arm()
+    {
+        auto const _ = std::scoped_lock { _mutex };
+        _armed = true;
+    }
+
+    /// Waits until a write is parked.
+    void waitUntilParked()
+    {
+        auto lock = std::unique_lock { _mutex };
+        _changed.wait(lock, [this] { return _parked; });
+    }
+
+    /// Lets the parked write through.
+    void release()
+    {
+        {
+            auto const _ = std::scoped_lock { _mutex };
+            _armed = false;
+        }
+        _changed.notify_all();
+    }
+
+    [[nodiscard]] int write(std::string_view data) override
+    {
+        {
+            auto lock = std::unique_lock { _mutex };
+            _parked = _armed;
+            _changed.notify_all();
+            _changed.wait(lock, [this] { return !_armed; });
+            _parked = false;
+        }
+        return MockPty::write(data);
+    }
+
+  private:
+    std::mutex _mutex;
+    std::condition_variable _changed;
+    bool _armed = false;
+    bool _parked = false;
+};
+
+/// A PTY whose reader waits for output that never comes -- a read parks until it is woken, or until its
+/// timeout has passed -- and which has no room for the first write it is handed, as a PTY whose program
+/// reads slowly.
+class PushingBackPty final: public vtpty::MockPty
+{
+  public:
+    using MockPty::MockPty;
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& /*storage*/,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t /*size*/) override
+    {
+        auto lock = std::unique_lock { _mutex };
+        auto const woken = [this] {
+            return _wakeups > 0;
+        };
+        if (timeout)
+            std::ignore = _wake.wait_for(lock, *timeout, woken);
+        else
+            _wake.wait(lock, woken);
+        if (_wakeups > 0)
+            --_wakeups;
+        errno = EAGAIN;
+        return std::nullopt;
+    }
+
+    void wakeupReader() override
+    {
+        {
+            auto const _ = std::scoped_lock { _mutex };
+            ++_wakeups;
+        }
+        _wake.notify_all();
+    }
+
+    [[nodiscard]] int write(std::string_view data) override
+    {
+        auto const _ = std::scoped_lock { _mutex };
+        if (!_pushedBack)
+        {
+            _pushedBack = true;
+            errno = EAGAIN;
+            return -1;
+        }
+        _written += data;
+        return static_cast<int>(data.size());
+    }
+
+    /// @return What was written so far.
+    [[nodiscard]] std::string written() const
+    {
+        auto const _ = std::scoped_lock { _mutex };
+        return _written;
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    std::condition_variable _wake;
+    int _wakeups = 0;
+    bool _pushedBack = false;
+    std::string _written;
+};
+} // namespace
+
+TEST_CASE("Terminal.a reply sent on the spot is written once the state lock is released",
+          "[terminal][threading]")
+{
+    // Some sequences send their reply on the spot rather than with the next flush. Written inside the parse,
+    // under the state lock, the reply parked the parsing thread once the application left its input unread,
+    // and every thread waiting for the lock with it: a GUI's, a daemon's loop building a client's delta. The
+    // parse's own hold owes the flush instead, and the same thread sends it once it has let go of the lock.
+    struct OnTheSpot
+    {
+        std::string_view name;    ///< The sequence, for the section's name.
+        std::string_view request; ///< What the application writes.
+        std::string_view reply;   ///< What the reply contains.
+    };
+    auto constexpr Rows = std::array {
+        OnTheSpot { .name = "DSR 996", .request = "\033[?996n", .reply = "\033[?997;" },
+        OnTheSpot { .name = "GIP query", .request = "\033P!go=q\033\\", .reply = "\033P!gs=8," },
+        OnTheSpot { .name = "DECRQLP", .request = "\033[0'|", .reply = "&w" },
+        OnTheSpot { .name = "DECSET 2048", .request = "\033[?2048h", .reply = "\033[48;" },
+    };
+    for (auto const& row: Rows)
+    {
+        DYNAMIC_SECTION(row.name)
+        {
+            auto mc = MockTerm<LockProbingPty> { PageSize { LineCount(5), ColumnCount(20) } };
+            mc.mockPty().probe(mc.terminal);
+            mc.writeToScreen(row.request);
+            CHECK(mc.mockPty().writesUnderLock() == 0);
+            CHECK(mc.replyData().contains(row.reply));
+        }
+    }
+}
+
+TEST_CASE("Terminal.queueing a reply waits for no write in progress", "[terminal][threading]")
+{
+    // A flush keeps other flushes out across the PTY write, which parks while the application leaves its
+    // input unread. A thread that only queues -- a daemon's loop thread reporting a resize -- waited for that
+    // write as well, and every client of the daemon with it. Only another flush waits now.
+    auto mc = MockTerm<ParkingPty> { PageSize { LineCount(5), ColumnCount(20) } };
+    mc.terminal.reply("first");
+    mc.mockPty().arm();
+    auto flusher = std::jthread { [&mc] { mc.terminal.flushInput(); } };
+    mc.mockPty().waitUntilParked();
+
+    auto queued = std::async(std::launch::async, [&mc] { mc.terminal.reply("second"); });
+    auto const status = queued.wait_for(std::chrono::seconds { 1 });
+    mc.mockPty().release();
+    flusher.join();
+    queued.get();
+    CHECK(status == std::future_status::ready);
+
+    mc.terminal.flushInput();
+    CHECK(mc.replyData() == "firstsecond");
+}
+
+TEST_CASE("Terminal.input the PTY pushed back on is written again by its reader", "[terminal][threading]")
+{
+    // Under InputWriter::ReaderThread only the PTY's reader writes, and a write the PTY had no room for
+    // leaves the input queued. The reader writes it again after a short wait rather than after the next
+    // output, which a program waiting for that input may never write.
+    auto mc = MockTerm<PushingBackPty> { PageSize { LineCount(5), ColumnCount(20) } };
+    mc.terminal.settings().inputWriter = vtbackend::InputWriter::ReaderThread;
+    auto& pty = mc.mockPty();
+    auto stop = std::atomic<bool> { false };
+    auto reader = std::jthread { [&mc, &stop] {
+        while (!stop.load() && mc.terminal.processInputOnce())
+            mc.terminal.flushInput();
+    } };
+    mc.terminal.setReaderThread(reader.get_id());
+
+    mc.terminal.sendRawInput("x");
+    for ([[maybe_unused]] auto const tick: std::views::iota(0, 200))
+    {
+        if (pty.written() == "x")
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
+    }
+    // Read before the reader is stopped: the wakeup that stops it would let it write the byte as well.
+    auto const written = pty.written();
+    stop.store(true);
+    pty.wakeupReader();
+    reader.join();
+    CHECK(written == "x");
+}
+
+TEST_CASE("Terminal.DECSCUSR sets the cursor a frame is drawn with", "[terminal]")
+{
+    // What a program asks of the cursor reaches the render buffer, and the blink it asks for reaches the
+    // terminal's display of the cursor, which the frame's blink follows.
+    struct Row
+    {
+        std::string_view sequence;
+        vtbackend::CursorShape shape;
+        vtbackend::CursorDisplay display;
+    };
+    using vtbackend::CursorDisplay;
+    using vtbackend::CursorShape;
+    auto const rows = std::array {
+        Row { .sequence = "\033[1 q", .shape = CursorShape::Block, .display = CursorDisplay::Blink },
+        Row { .sequence = "\033[2 q", .shape = CursorShape::Block, .display = CursorDisplay::Steady },
+        Row { .sequence = "\033[3 q", .shape = CursorShape::Underscore, .display = CursorDisplay::Blink },
+        Row { .sequence = "\033[4 q", .shape = CursorShape::Underscore, .display = CursorDisplay::Steady },
+        Row { .sequence = "\033[5 q", .shape = CursorShape::Bar, .display = CursorDisplay::Blink },
+        Row { .sequence = "\033[6 q", .shape = CursorShape::Bar, .display = CursorDisplay::Steady },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(core::escape(row.sequence));
+        auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+        (void) mc.terminal.sendFocusInEvent();
+        mc.writeToScreen(row.sequence);
+        (void) mc.terminal.refreshRenderBuffer();
+        auto const frame = mc.terminal.renderBuffer();
+        REQUIRE(frame.get().cursor.has_value());
+        CHECK(frame.get().cursor->shape == row.shape);
+        CHECK(mc.terminal.cursorDisplay() == row.display);
+    }
+}
+
+TEST_CASE("Terminal looks a printed path up in the filesystem it was given", "[terminal][path]")
+{
+    // Whether a path on the screen names a file is asked of the filesystem the terminal was constructed
+    // with: the one file here exists only in memory, so only the injected filesystem can find it.
+    auto const directory = std::filesystem::temp_directory_path() / "contour-in-memory-only" / "proj";
+    auto const file = directory / "doc.txt";
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    REQUIRE(files.createDirectories(directory).has_value());
+    files.addFile(file, "x");
+    REQUIRE_FALSE(std::filesystem::exists(file));
+
+    auto events = vtbackend::Terminal::NullEvents {};
+    auto const pageSize = PageSize { LineCount(2), ColumnCount(80) };
+    auto settings = vtbackend::Settings {};
+    settings.pageSize = pageSize;
+    auto const environment = core::testing::FakeEnvironment {};
+    auto terminal = vtbackend::Terminal { events,
+                                          environment,
+                                          files,
+                                          std::make_unique<vtpty::MockPty>(pageSize),
+                                          settings,
+                                          std::nullopt,
+                                          vtbackend::TerminalClocks::system(),
+                                          vtbackend::randomSemanticBlockTokens() };
+
+    terminal.setCurrentWorkingDirectory(fileUrlOf(directory));
+    terminal.writeToScreen("open doc.txt now");
+    terminal.sendMouseMoveEvent(Modifier::None,
+                                CellLocation { .line = LineOffset(0), .column = ColumnOffset(6) },
+                                vtbackend::PixelCoordinate {},
+                                /*uiHandledHint=*/false);
+
+    REQUIRE(terminal.pathTextAtMousePosition() == "doc.txt");
+    CHECK(terminal.localPathAtMousePosition() == core::pathToUtf8(file.lexically_normal()));
 }

@@ -6,11 +6,16 @@
 #include <contour/command/CommandHistoryStore.hpp>
 #include <contour/config/LayoutStore.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
+#include <contour/platform/Notifier.hpp>
+#include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/LauncherFixtures.hpp>
 #include <contour/window/WindowController.hpp>
+
+#include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/screen/TerminalClocks.hpp>
 
 #include <vtpty/ChannelPty.hpp>
 #include <vtpty/MockPty.hpp>
@@ -18,28 +23,50 @@
 #include <vtpty/Pty.hpp>
 
 #include <core/Environment.hpp>
+#include <core/platform/Clock.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
 #include <QtCore/QTemporaryDir>
+#include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <initializer_list>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <vtworkspace/Primitives.hpp>
 
 namespace contour::test
 {
+
+/// The notifier every session a test makes raises through, unless the test wants another.
+///
+/// It raises nothing. The platform's own on Linux is a FreeDesktopNotifier over the machine's session
+/// bus, and no test may reach that bus: test_main.cpp fails a run that does. Pass it as a session's
+/// notifier wherever a test constructs a TerminalSession itself; the factories below hand it out.
+/// @return The notifier.
+[[nodiscard]] inline std::unique_ptr<contour::platform::Notifier> makeTestNotifier()
+{
+    return std::make_unique<contour::platform::NullNotifier>();
+}
 
 /// In-memory SessionFactory: every created session is backed by a vtpty::MockPty, so the manager's
 /// session-creation paths (new tab, new split pane) run headlessly — no process is spawned, and a
@@ -71,6 +98,34 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
         return pty;
     }
 
+    [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
+    {
+        return reportedHosting;
+    }
+
+    [[nodiscard]] std::unique_ptr<contour::platform::Notifier> createNotifier() override
+    {
+        return makeNotifier ? makeNotifier() : nullptr;
+    }
+
+    [[nodiscard]] contour::session::HostedOperationRoute requestHostedOperation(
+        vtpty::Pty const* /*pty*/, contour::session::HostedOperationRequest const& request) override
+    {
+        requestedHostedOperations.push_back(request);
+        return hostedOperationRoute;
+    }
+
+    /// What hosting() reports: Remote stands in for an attach-mode factory, which runs no command here.
+    contour::session::SessionHosting reportedHosting = contour::session::SessionHosting::Local;
+    /// How createNotifier() makes each session's notifier: makeTestNotifier() unless a test says
+    /// otherwise. A test that wants the platform's own -- the window's tray, off Linux -- unsets it.
+    std::function<std::unique_ptr<contour::platform::Notifier>()> makeNotifier = makeTestNotifier;
+    /// What requestHostedOperation() answers: RunOnHost stands in for a daemon, Refused for a tmux pane
+    /// that has no command for the operation.
+    contour::session::HostedOperationRoute hostedOperationRoute =
+        contour::session::HostedOperationRoute::RunHere;
+    /// Every request requestHostedOperation() was asked about, in order.
+    std::vector<contour::session::HostedOperationRequest> requestedHostedOperations;
     std::vector<std::optional<std::string>> requestedCwds;
     /// The @c pageSize argument of each createPty() call (nullopt when the caller requested the default).
     std::vector<std::optional<vtbackend::PageSize>> requestedPageSizes;
@@ -80,6 +135,125 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     std::vector<std::optional<std::string>> requestedProfileNames;
     /// Non-owning observation pointers; valid while the owning session lives.
     std::vector<vtpty::MockPty*> createdPtys;
+};
+
+/// A TerminalSession a test builds itself, outside any session factory: over @p pty, raising through
+/// @p notifier, or makeTestNotifier() when it is given none -- never the platform's own.
+/// @param manager     The manager it reports to.
+/// @param pty         Its PTY (owned from here on).
+/// @param app         The application it runs in.
+/// @param profileName The profile it runs under; empty takes the app's default one.
+/// @param notifier    The notifier to raise through; null takes makeTestNotifier().
+/// @return The session; the caller owns it.
+[[nodiscard]] inline std::unique_ptr<contour::session::TerminalSession> makeTestSession(
+    contour::session::TerminalSessionManager* manager,
+    std::unique_ptr<vtpty::Pty> pty,
+    contour::ContourGuiApp& app,
+    std::string profileName = {},
+    std::unique_ptr<contour::platform::Notifier> notifier = nullptr)
+{
+    return std::make_unique<contour::session::TerminalSession>(manager,
+                                                               std::move(pty),
+                                                               app,
+                                                               std::move(profileName),
+                                                               std::nullopt,
+                                                               std::nullopt,
+                                                               notifier ? std::move(notifier)
+                                                                        : makeTestNotifier());
+}
+
+/// A real session factory with every call passed through, except that a session it would hand the
+/// platform's own notifier raises through makeTestNotifier() instead.
+///
+/// For the factories a test cannot otherwise give a notifier: the remote controllers the attach tests
+/// drive are the real ones, and final. TestApp wraps every factory but the harness's own in one.
+class TestNotifierSessionFactory final: public contour::session::SessionFactory
+{
+  public:
+    /// @param factory The factory every call is passed to (owned).
+    explicit TestNotifierSessionFactory(std::unique_ptr<contour::session::SessionFactory> factory):
+        _factory { std::move(factory) }
+    {
+    }
+
+    [[nodiscard]] std::unique_ptr<contour::platform::Notifier> createNotifier() override
+    {
+        if (auto notifier = _factory->createNotifier())
+            return notifier;
+        return makeTestNotifier();
+    }
+
+    [[nodiscard]] std::unique_ptr<vtpty::Pty> createPty(
+        std::optional<std::string> cwd,
+        std::optional<vtbackend::PageSize> pageSize = std::nullopt,
+        std::optional<vtpty::Process::ExecInfo> commandOverride = std::nullopt,
+        std::optional<std::string> profileName = std::nullopt) override
+    {
+        return _factory->createPty(
+            std::move(cwd), pageSize, std::move(commandOverride), std::move(profileName));
+    }
+
+    [[nodiscard]] bool canCreateSession() const noexcept override { return _factory->canCreateSession(); }
+
+    [[nodiscard]] contour::session::SessionHosting hosting() const noexcept override
+    {
+        return _factory->hosting();
+    }
+
+    [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty) override
+    {
+        return _factory->requestRemoteTab(actingPty);
+    }
+
+    [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical) override
+    {
+        return _factory->requestRemoteSplit(actingPty, vertical);
+    }
+
+    void reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio) override
+    {
+        _factory->reportSplitRatio(firstPty, secondPty, ratio);
+    }
+
+    [[nodiscard]] bool requestRemoteWindow() override { return _factory->requestRemoteWindow(); }
+
+    void requestRemoteClose(vtpty::Pty const* pty) override { _factory->requestRemoteClose(pty); }
+
+    [[nodiscard]] contour::session::HostedOperationRoute requestHostedOperation(
+        vtpty::Pty const* pty, contour::session::HostedOperationRequest const& request) override
+    {
+        return _factory->requestHostedOperation(pty, request);
+    }
+
+    void bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& terminal) override
+    {
+        _factory->bindTerminal(pty, terminal);
+    }
+
+  private:
+    std::unique_ptr<contour::session::SessionFactory> _factory;
+};
+
+/// @p factory as TestApp installs it: the harness's own MockPtySessionFactory decides each session's
+/// notifier itself, and any other is wrapped in a TestNotifierSessionFactory.
+/// @param factory The factory a test handed TestApp, or null for the application's own.
+/// @return The factory to install.
+[[nodiscard]] inline std::unique_ptr<contour::session::SessionFactory> withTestNotifier(
+    std::unique_ptr<contour::session::SessionFactory> factory)
+{
+    if (factory == nullptr || dynamic_cast<MockPtySessionFactory const*>(factory.get()) != nullptr)
+        return factory;
+    return std::make_unique<TestNotifierSessionFactory>(std::move(factory));
+}
+
+/// A ProcessLiveness that can tell nothing about any process.
+class UnknownProcessLiveness final: public contour::session::ProcessLiveness
+{
+  public:
+    [[nodiscard]] contour::session::ProcessState stateOf(int64_t /*processId*/) const override
+    {
+        return contour::session::ProcessState::Unknown;
+    }
 };
 
 /// The MockPty backing @p session, for seeding output and inspecting the bytes the terminal wrote
@@ -222,7 +396,8 @@ class TestApp
 {
   public:
     /// @param factory Optional PTY factory override; pass a MockPtySessionFactory (keep a raw
-    ///                observation pointer first) to run session-creation paths headlessly.
+    ///                observation pointer first) to run session-creation paths headlessly. Any other
+    ///                is installed inside a TestNotifierSessionFactory, @see withTestNotifier().
     /// @param layoutStore Optional layout-persistence override; pass an InMemoryLayoutStore (keep a
     ///                raw observation pointer first) to drive SaveLayout without touching the disk.
     /// @param commandHistoryStore Optional command-history override; pass an
@@ -232,16 +407,21 @@ class TestApp
     /// @param speech Optional speech override; pass a RecordingSpeechSynthesizer (keep a raw
     ///                observation pointer first) to drive the read-aloud path. @see defaultSpeech()
     ///                for what a test app gets without one.
+    /// @param identity The machine the app's sessions run on. @see testHostIdentity() for the default.
     explicit TestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
                      std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
                      std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
-                     std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr):
+                     std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr,
+                     vtbackend::HostIdentity identity = testHostIdentity()):
         _app(_environment,
-             std::move(factory),
+             withTestNotifier(std::move(factory)),
              makeRecordingLauncher(),
              std::move(layoutStore),
              std::move(commandHistoryStore),
-             speech ? std::move(speech) : defaultSpeech())
+             speech ? std::move(speech) : defaultSpeech(),
+             makeOutputFiles(),
+             clocks(),
+             std::move(identity))
     {
         char const* argv[] = { "contour", "terminal" };
         // Parse the "terminal" subcommand so parameters() carries every contour.terminal.* default
@@ -249,12 +429,27 @@ class TestApp
         REQUIRE(_app.parseParametersForTesting(2, argv));
     }
 
+    /// A test app whose sessions run on @p identity: for a test of what counts as this machine.
+    /// @param identity The machine the app's sessions run on.
+    explicit TestApp(vtbackend::HostIdentity identity):
+        TestApp(nullptr, nullptr, nullptr, nullptr, std::move(identity))
+    {
+    }
+
     /// Parses an explicit argv so a test can drive a non-"terminal" subcommand (e.g. font-locator,
     /// info, documentation) whose action reads its own contour.<cmd>.* parameters.
     /// @param args The command tokens after the program name (e.g. {"font-locator"}).
     explicit TestApp(std::initializer_list<char const*> args,
                      std::unique_ptr<contour::session::SessionFactory> factory = nullptr):
-        _app(_environment, std::move(factory), makeRecordingLauncher(), nullptr, nullptr, defaultSpeech())
+        _app(_environment,
+             withTestNotifier(std::move(factory)),
+             makeRecordingLauncher(),
+             nullptr,
+             nullptr,
+             defaultSpeech(),
+             makeOutputFiles(),
+             clocks(),
+             testHostIdentity())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);
@@ -264,6 +459,11 @@ class TestApp
         REQUIRE(_app.parseParametersForTesting(static_cast<int>(argv.size()), argv.data()));
     }
 
+    TestApp(TestApp const&) = delete;
+    TestApp& operator=(TestApp const&) = delete;
+    TestApp(TestApp&&) = delete;
+    TestApp& operator=(TestApp&&) = delete;
+
     [[nodiscard]] contour::ContourGuiApp& app() noexcept { return _app; }
     [[nodiscard]] contour::session::TerminalSessionManager& manager() noexcept
     {
@@ -271,6 +471,29 @@ class TestApp
     }
     /// The recording launcher wired into this app (records URL-open / process-spawn requests).
     [[nodiscard]] RecordingExternalLauncher& launcher() noexcept { return *_launcher; }
+
+    /// Where OpenCommandOutput's files go in a test app: a directory on the in-memory filesystem.
+    static constexpr std::string_view OutputDirectory = "/run/contour-test-output";
+
+    /// The host name of the machine a test app's sessions run on, unless the test names another.
+    static constexpr std::string_view HostName = "contour-test-host";
+
+    /// The machine a test app's sessions run on, unless the test names another: a fixed one, so that what
+    /// counts as this machine does not depend on the machine the suite runs on.
+    [[nodiscard]] static vtbackend::HostIdentity testHostIdentity()
+    {
+        return vtbackend::HostIdentity { .machineId = "0123456789abcdef0123456789abcdef",
+                                         .hostname = std::string { HostName } };
+    }
+
+    /// The in-memory filesystem the app's command output files are written to.
+    [[nodiscard]] core::platform::testing::InMemoryFileSystem& fileSystem() noexcept { return _fileSystem; }
+
+    /// The steady clock every session's terminal reads: it moves only when a test advances it.
+    [[nodiscard]] core::platform::ManualClock& steadyClock() noexcept { return _steadyClock; }
+
+    /// The wall clock every session's terminal reads: it moves only when a test advances it.
+    [[nodiscard]] core::platform::ManualWallClock& wallClock() noexcept { return _wallClock; }
 
   private:
     /// The synthesizer a test app gets when the test does not name one.
@@ -285,11 +508,29 @@ class TestApp
         return std::make_unique<contour::platform::NullSpeechSynthesizer>();
     }
 
+    /// The app's command output files, on the fixture's in-memory filesystem.
+    [[nodiscard]] std::unique_ptr<contour::session::CommandOutputFiles> makeOutputFiles() const
+    {
+        return std::make_unique<contour::session::CommandOutputFiles>(
+            _fileSystem, _processLiveness, std::filesystem::path(OutputDirectory));
+    }
+
+    /// The clocks the app's sessions read: the fixture's manual ones, in this process's time zone.
+    [[nodiscard]] vtbackend::TerminalClocks clocks() noexcept
+    {
+        return vtbackend::TerminalClocks { .steady = _steadyClock,
+                                           .wall = _wallClock,
+                                           .localTime = &vtbackend::systemLocalTime };
+    }
+
     /// Builds the recording launcher, stashing a raw observation pointer before handing ownership to
     /// the app. Runs in the member-initializer list, so _launcher is set before _app is constructed.
     std::unique_ptr<contour::platform::ExternalLauncher> makeRecordingLauncher()
     {
         auto launcher = std::make_unique<RecordingExternalLauncher>();
+        launcher->readInput = [this](std::filesystem::path const& file) {
+            return _fileSystem.readFile(file).value_or(std::string {});
+        };
         _launcher = launcher.get();
         return launcher;
     }
@@ -298,7 +539,43 @@ class TestApp
     /// The process's own environment: what the fixture exercises is the GUI, not what any variable
     /// reads as. A test that cares injects a core::testing::FakeEnvironment instead.
     core::LiveEnvironment _environment;
+    /// Declared before _app, whose sessions borrow them. They start at the time the app is made, so that
+    /// times read from them look like times the suite runs at.
+    core::platform::ManualClock _steadyClock { core::platform::defaultSteadyClock().now() };
+    core::platform::ManualWallClock _wallClock { core::platform::defaultSystemWallClock().now() };
+    /// Declared before _app, which borrows it for its command output files.
+    core::platform::testing::InMemoryFileSystem _fileSystem { core::platform::testing::FileEntry {
+        .path = "/run", .isDirectory = true } };
+    /// What the app's command output files are told about other processes: nothing, so they keep
+    /// whatever they find.
+    UnknownProcessLiveness _processLiveness;
     contour::ContourGuiApp _app;
+};
+
+/// A TestApp whose configuration is a file of its own, in a directory that lives as long as the app: what a
+/// test that reloads the configuration from disk needs.
+class ConfiguredTestApp
+{
+  public:
+    /// @param factory Optional PTY factory override, as TestApp takes it.
+    explicit ConfiguredTestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr):
+        _testApp { std::move(factory) },
+        _configFile { std::filesystem::path(_configDir.path().toStdU16String()) / "contour.yml" }
+    {
+        REQUIRE(_configDir.isValid());
+        _testApp.app().config().configFile = _configFile;
+    }
+
+    [[nodiscard]] contour::ContourGuiApp& app() noexcept { return _testApp.app(); }
+    [[nodiscard]] contour::session::TerminalSessionManager& manager() noexcept { return _testApp.manager(); }
+
+    /// @return The file the app's configuration is read from.
+    [[nodiscard]] std::filesystem::path const& configFile() const noexcept { return _configFile; }
+
+  private:
+    QTemporaryDir _configDir; ///< First, so it outlives the app that reads from it.
+    TestApp _testApp;
+    std::filesystem::path _configFile;
 };
 
 /// Owns one manager-minted WindowController for a test's lifetime. Production deletes controllers
@@ -328,5 +605,81 @@ struct ScopedController
     [[nodiscard]] contour::window::WindowController* operator->() const noexcept { return controller; }
     [[nodiscard]] contour::window::WindowController& operator*() const noexcept { return *controller; }
 };
+
+/// The OS window half of @ref ScopedControllerWithOsWindow, a base of its own so that it is built
+/// before the controller and destroyed after it.
+struct OsWindowHolder
+{
+    std::unique_ptr<QQuickWindow> osWindow = std::make_unique<QQuickWindow>(); ///< Never shown.
+};
+
+/// A @ref ScopedController with an OS window it may be bound to (`bindWindow(osWindow.get())`), for a
+/// test that needs the window's own state -- minimised, active. The controller keeps a raw pointer to
+/// the window once bound, so the window outlives it: OsWindowHolder is the first base.
+struct ScopedControllerWithOsWindow: OsWindowHolder, ScopedController
+{
+    explicit ScopedControllerWithOsWindow(contour::session::TerminalSessionManager& m): ScopedController(m) {}
+};
+
+/// Closes every tab of @p window, last first, so the sessions wind down as a user closing them would.
+inline void closeAllTabs(contour::window::WindowController& window)
+{
+    for (auto const row: std::views::iota(0, window.count()) | std::views::reverse)
+        window.closeTabAtIndex(row);
+}
+
+/// Whether an action ran to its end while another thread held a lock.
+enum class UnderLock : uint8_t
+{
+    Waited = 0, ///< It could finish only once the lock was let go.
+    Finished,   ///< It finished while the lock was held.
+};
+
+/// Runs @p action while another thread holds @p lockable -- as a parser holds its terminal across a whole
+/// write -- and tells whether it finished without waiting for that thread.
+///
+/// The holder lets go as soon as @p action returns, or once @p bound has passed: a regression costs the
+/// bound rather than hanging the suite, and a pass costs nothing.
+/// @param lockable What the other thread holds.
+/// @param action   What must not wait for it.
+/// @param bound    The longest the other thread holds on while @p action has not returned.
+/// @return Finished when @p action returned while the lock was still held.
+template <typename Lockable, typename Action>
+[[nodiscard]] UnderLock runWhileHeld(Lockable& lockable,
+                                     Action&& action,
+                                     std::chrono::milliseconds bound = std::chrono::milliseconds { 500 })
+{
+    auto mutex = std::mutex {};
+    auto changed = std::condition_variable {};
+    auto held = false;
+    auto done = false;
+    auto released = std::atomic<bool> { false };
+
+    auto holder = std::thread { [&]() {
+        auto const hold = std::scoped_lock { lockable };
+        {
+            auto lock = std::unique_lock { mutex };
+            held = true;
+            changed.notify_all();
+            changed.wait_for(lock, bound, [&]() { return done; });
+        }
+        released.store(true, std::memory_order_release);
+    } };
+
+    {
+        auto lock = std::unique_lock { mutex };
+        changed.wait(lock, [&]() { return held; });
+    }
+    std::forward<Action>(action)();
+    auto const outcome = released.load(std::memory_order_acquire) ? UnderLock::Waited : UnderLock::Finished;
+
+    {
+        auto const lock = std::scoped_lock { mutex };
+        done = true;
+    }
+    changed.notify_all();
+    holder.join();
+    return outcome;
+}
 
 } // namespace contour::test

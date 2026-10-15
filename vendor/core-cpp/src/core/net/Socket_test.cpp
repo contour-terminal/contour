@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/Utf8Path.hpp>
 #include <core/async/Task.hpp>
 #include <core/async/WhenAll.hpp>
 #include <core/net/EventLoop.hpp>
@@ -428,7 +429,7 @@ Task<void> unixProbe(EventLoop* loop, core::net::IListener* listener, std::strin
 /// point that exists() tries to follow and cannot, so it THROWS ERROR_CANT_ACCESS_FILE on
 /// exactly the files this asks about. Reading the parent directory's entries answers from the
 /// name alone, which is why the Windows path claim (`windows/UnixSocketPath.cpp`) reaches for
-/// FindFirstFileA rather than a stat too.
+/// FindFirstFileW rather than a stat too.
 [[nodiscard]] bool socketFileExists(std::filesystem::path const& path)
 {
     auto ec = std::error_code {};
@@ -501,9 +502,10 @@ TEST_CASE("unix-domain listen + connect echo a request", "[net][afunix]")
         {
             auto loop = EventLoop { *source };
 
-            auto const path = (std::filesystem::temp_directory_path()
-                               / std::format("contour-net-{}", std::random_device {}()) / "echo.sock")
-                                  .string();
+            // In UTF-8, as listenUnix() takes it: path::string() is the ANSI code page on Windows.
+            auto const path =
+                core::pathToUtf8(std::filesystem::temp_directory_path()
+                                 / std::format("contour-net-{}", std::random_device {}()) / "echo.sock");
             auto listener = core::net::listenUnix(loop, path);
             if (!listener.has_value())
             {
@@ -540,7 +542,7 @@ TEST_CASE("closing a unix listener removes its socket file", "[net][afunix]")
             auto loop = EventLoop { *source };
 
             auto const dir = makeSocketDir();
-            auto const path = (dir / "closing.sock").string();
+            auto const path = core::pathToUtf8(dir / "closing.sock");
             auto listener = core::net::listenUnix(loop, path);
             if (!listener.has_value())
             {
@@ -577,7 +579,7 @@ TEST_CASE("a live server on the path is not hijacked", "[net][afunix]")
             auto loop = EventLoop { *source };
 
             auto const dir = makeSocketDir();
-            auto const path = (dir / "default").string();
+            auto const path = core::pathToUtf8(dir / "default");
             auto first = core::net::listenUnix(loop, path);
             if (!first.has_value())
             {

@@ -18,6 +18,8 @@
 #include <optional>
 #include <utility>
 
+#include <vthost/HostIdentity.hpp>
+#include <vthost/WireEnum.hpp>
 #include <vthost/proto/Pdu.hpp>
 
 namespace vthost
@@ -28,17 +30,14 @@ namespace vthost
 [[nodiscard]] constexpr std::optional<vtbackend::ContextType> contextTypeOf(uint8_t value) noexcept
 {
     // The enumerators are contiguous from None, so the bound is the last row of the type table.
-    constexpr auto Last = static_cast<uint8_t>(vtbackend::ContextTypeList.back());
-    return value <= Last ? std::optional { static_cast<vtbackend::ContextType>(value) } : std::nullopt;
+    return enumUpTo(value, vtbackend::ContextTypeList.back());
 }
 
 /// @param value A ContextExit as the wire spells it.
 /// @return The exit kind it names, or nullopt for a value no enumerator has.
 [[nodiscard]] constexpr std::optional<vtbackend::ContextExit> contextExitOf(uint8_t value) noexcept
 {
-    return value <= std::to_underlying(vtbackend::ContextExit::Interrupt)
-               ? std::optional { static_cast<vtbackend::ContextExit>(value) }
-               : std::nullopt;
+    return enumUpTo(value, vtbackend::ContextExit::Interrupt);
 }
 
 /// @param value A ContextSignal as the wire spells it -- a Linux signal NUMBER, not an index.
@@ -55,9 +54,8 @@ namespace vthost
 /// @param value A ContextFields mask as the wire spells it.
 /// @return The mask with any bit the field table does not assign cleared.
 ///
-/// Masked rather than rejected: an unknown bit is an unknown FIELD, and the protocol's own rule for
-/// one of those is to ignore it and keep the rest -- so a peer built from a newer commit that gained
-/// a sixteenth field degrades to the fifteen this build understands.
+/// A decoded record names no such bit -- the codec refuses one (@ref proto::ContextPresentMask) -- so the
+/// mask only keeps this conversion total for a WireContext built any other way.
 [[nodiscard]] constexpr vtbackend::ContextFields contextFieldsOf(uint16_t value) noexcept
 {
     return vtbackend::ContextFields { static_cast<vtbackend::ContextField>(
@@ -172,6 +170,11 @@ static_assert(vtbackend::ContextFieldMask == proto::ContextPresentMask,
 }
 
 /// The wire form of @p record, for a host replicating it.
+///
+/// Its `machineid=` travels derived for this application (appSpecificMachineId), as the daemon's own
+/// does: it is, as a rule, the very machine id machine-id(5) asks to keep confidential, read off the
+/// system the context ran on. One that is no machine id travels empty, and stays unknown. A mirror on the
+/// machine it names compares it with its own id derived the same way (vtbackend::Terminal::bindReplica).
 [[nodiscard]] inline proto::WireContext toWireContext(vtbackend::TerminalContext const& record)
 {
     auto wire = proto::WireContext {};
@@ -182,7 +185,7 @@ static_assert(vtbackend::ContextFieldMask == proto::ContextPresentMask,
     wire.present = record.present.value();
     wire.user = record.user;
     wire.hostname = record.hostname;
-    wire.machineId = record.machineId;
+    wire.machineId = appSpecificMachineId(record.machineId);
     wire.bootId = record.bootId;
     wire.comm = record.comm;
     wire.workingDirectory = record.workingDirectory;

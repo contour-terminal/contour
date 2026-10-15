@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/AtomicFileWrite.hpp>
 
+#include <core/Utf8Path.hpp>
+
 #include <format>
 #include <fstream>
 
@@ -9,13 +11,14 @@ namespace contour::config
 
 std::expected<void, std::string> atomicWriteFile(std::filesystem::path const& path, std::string_view content)
 {
-    auto const tmp = path.string() + ".tmp";
+    auto tmp = path;
+    tmp += ".tmp";
 
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     if (ec)
         return std::unexpected(
-            std::format("Failed to create {}: {}", path.parent_path().string(), ec.message()));
+            std::format("Failed to create {}: {}", core::pathToUtf8(path.parent_path()), ec.message()));
 
     // Drops the temp file unless the write completes: a leftover .tmp would otherwise accumulate on
     // every failed save.
@@ -34,7 +37,7 @@ std::expected<void, std::string> atomicWriteFile(std::filesystem::path const& pa
         if (out.fail())
         {
             discardTemp();
-            return std::unexpected(std::format("Failed to write {}", tmp));
+            return std::unexpected(std::format("Failed to write {}", core::pathToUtf8(tmp)));
         }
     }
 
@@ -42,7 +45,7 @@ std::expected<void, std::string> atomicWriteFile(std::filesystem::path const& pa
     if (ec)
     {
         discardTemp();
-        return std::unexpected(std::format("Failed to write {}: {}", path.string(), ec.message()));
+        return std::unexpected(std::format("Failed to write {}: {}", core::pathToUtf8(path), ec.message()));
     }
 
     return {};

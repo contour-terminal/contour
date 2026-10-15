@@ -8,19 +8,38 @@
 
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/ConfigEnum.hpp>
 #include <contour/config/GpuSelector.hpp>
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/config/ModifierNames.hpp>
+#include <contour/config/SingleQuoted.hpp>
 #include <contour/platform/GuiTheme.hpp>
+#include <contour/test/CoreFixtures.hpp>
 
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/core/CommandBlockOutcome.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
+#include <vtbackend/screen/GutterSettings.hpp>
+#include <vtbackend/shell/ScrollbarMarks.hpp>
+#include <vtbackend/shell/StickyHeader.hpp>
+
+#include <vtpty/test/NonAsciiSample.hpp>
 
 #include <text_shaper/Font.hpp>
 
+#include <crispy/StrongHash.hpp>
+
+#include <core/Environment.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/log/LogStore.hpp>
+#include <core/testing/EnvHelper.hpp>
+#include <core/testing/ScopedTempDir.hpp>
+
+#include <yaml-cpp/yaml.h>
 
 #include <QtCore/QTemporaryDir>
 
@@ -28,10 +47,19 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <bit>
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <map>
+#include <optional>
+#include <span>
+#include <string>
 #include <string_view>
+#include <tuple>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -43,7 +71,7 @@ namespace
 /// Writes @p yaml to a fresh file inside @p dir and returns its path.
 [[nodiscard]] std::filesystem::path writeConfig(QTemporaryDir& dir, std::string_view yaml)
 {
-    auto const path = std::filesystem::path(dir.path().toStdString()) / "contour.yml";
+    auto const path = std::filesystem::path(dir.path().toStdU16String()) / "contour.yml";
     {
         auto out = std::ofstream(path);
         out << yaml;
@@ -59,11 +87,21 @@ namespace
     return config;
 }
 
+/// The main profile's color scheme, which @p config must give as a single scheme rather than a dark/light
+/// pair.
+[[nodiscard]] vtbackend::ColorPalette schemeOf(contour::config::Config const& config)
+{
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    REQUIRE(std::holds_alternative<contour::config::SimpleColorConfig>(profile->colors.value()));
+    return std::get<contour::config::SimpleColorConfig>(profile->colors.value()).colors;
+}
+
 /// Writes @p content to a GUI side file at @p relativePath under @p dir (the config directory),
 /// creating intermediate directories (e.g. `profiles/`, `colorschemes/`) as needed.
 void writeSideFile(QTemporaryDir& dir, std::filesystem::path const& relativePath, std::string_view content)
 {
-    auto const path = std::filesystem::path(dir.path().toStdString()) / relativePath;
+    auto const path = std::filesystem::path(dir.path().toStdU16String()) / relativePath;
     std::filesystem::create_directories(path.parent_path());
     auto out = std::ofstream(path);
     out << content;
@@ -393,27 +431,11 @@ layouts:
     auto const& work = layouts.at("work");
     REQUIRE(work.tabs.size() == 1);
     REQUIRE(work.tabs[0].root.directory.has_value());
-    CHECK(*work.tabs[0].root.directory == std::filesystem::path { "/tmp/naïve project" });
+    // UTF-8, as the file is: a narrow path would read it in the ANSI code page on Windows.
+    CHECK(*work.tabs[0].root.directory == std::filesystem::path { u8"/tmp/naïve project" });
 }
 
-TEST_CASE("Config: shellSplit tokenizes a command line respecting quotes", "[config][layout]")
-{
-    using contour::config::shellSplit;
-    using V = std::vector<std::string>;
-    CHECK(shellSplit("emacs -nw") == V { "emacs", "-nw" });
-    CHECK(shellSplit("  git   log --oneline ") == V { "git", "log", "--oneline" });
-    CHECK(shellSplit("nvim") == V { "nvim" });
-    CHECK(shellSplit("").empty());
-    CHECK(shellSplit("   ").empty());
-    // Double quotes group spaces into one token; the quotes themselves are stripped.
-    CHECK(shellSplit(R"("/opt/my app/emacs" -nw)") == V { "/opt/my app/emacs", "-nw" });
-    // Single quotes are literal (no inner processing).
-    CHECK(shellSplit(R"(sh -c 'echo hi there')") == V { "sh", "-c", "echo hi there" });
-    // A backslash escapes the next character outside quotes.
-    CHECK(shellSplit(R"(a\ b c)") == V { "a b", "c" });
-}
-
-TEST_CASE("Config: a layout command is shell-split into program and arguments", "[config][layout]")
+TEST_CASE("Config: a layout command is kept as written, its arguments after it", "[config][layout]")
 {
     QTemporaryDir dir;
     auto const config = loadFromYaml(dir, R"(
@@ -423,22 +445,27 @@ layouts:
             - command: "/usr/bin/emacs -nw"
             - command: "git log --oneline"
               arguments: ["--graph"]
+            - command: 'C:\tools\vim.exe -u NONE'
+            - command: " \t"
 )"sv);
     auto const& work = config.layouts.value().at("work");
-    REQUIRE(work.tabs.size() == 2);
+    REQUIRE(work.tabs.size() == 4);
 
-    // The command string is split: the first word is the program, the rest are arguments.
+    // The spawn reads it, as it reads a profile's `shell:`, by this platform's rules.
     REQUIRE(work.tabs[0].root.command.has_value());
-    CHECK(*work.tabs[0].root.command == "/usr/bin/emacs");
-    REQUIRE(work.tabs[0].root.arguments.size() == 1);
-    CHECK(work.tabs[0].root.arguments[0] == "-nw");
+    CHECK(*work.tabs[0].root.command == "/usr/bin/emacs -nw");
+    CHECK(work.tabs[0].root.arguments.empty());
 
-    // Words from `command` come first, then any explicit `arguments:` entries are appended.
-    CHECK(*work.tabs[1].root.command == "git");
-    REQUIRE(work.tabs[1].root.arguments.size() == 3);
-    CHECK(work.tabs[1].root.arguments[0] == "log");
-    CHECK(work.tabs[1].root.arguments[1] == "--oneline");
-    CHECK(work.tabs[1].root.arguments[2] == "--graph");
+    // Explicit `arguments:` entries go after the words of `command`.
+    CHECK(*work.tabs[1].root.command == "git log --oneline");
+    CHECK(work.tabs[1].root.arguments == std::vector<std::string> { "--graph" });
+
+    // On Windows a backslash separates directories, where a POSIX shell's reading at load took it for an
+    // escape and ran "C:toolsvim.exe".
+    CHECK(work.tabs[2].root.command == std::optional<std::string> { R"(C:\tools\vim.exe -u NONE)" });
+
+    // A blank one names nothing: the pane runs the shell.
+    CHECK_FALSE(work.tabs[3].root.command.has_value());
 }
 
 TEST_CASE("Config: a layout tab with recursive splits parses", "[config][layout]")
@@ -468,11 +495,9 @@ layouts:
     REQUIRE(root.children.size() == 2);
 
     CHECK(root.children[0].isLeaf());
-    // `command` is shell-split into the program and its arguments.
-    CHECK(*root.children[0].command == "npm");
-    REQUIRE(root.children[0].arguments.size() == 2);
-    CHECK(root.children[0].arguments[0] == "run");
-    CHECK(root.children[0].arguments[1] == "dev");
+    // `command` is kept as written, for the spawn to read.
+    CHECK(*root.children[0].command == "npm run dev");
+    CHECK(root.children[0].arguments.empty());
     REQUIRE(root.children[0].ratio.has_value());
     CHECK(*root.children[0].ratio == Catch::Approx(0.6));
     // The unspecified sibling stays unset (it shares the remaining space at realization time).
@@ -484,9 +509,8 @@ layouts:
     REQUIRE(nested.children.size() == 2);
     CHECK(*nested.children[0].command == "htop");
     CHECK(nested.children[0].arguments.empty());
-    CHECK(*nested.children[1].command == "journalctl");
-    REQUIRE(nested.children[1].arguments.size() == 1);
-    CHECK(nested.children[1].arguments[0] == "-f");
+    CHECK(*nested.children[1].command == "journalctl -f");
+    CHECK(nested.children[1].arguments.empty());
 }
 
 TEST_CASE("Config: a split with a single child collapses into a plain leaf", "[config][layout]")
@@ -535,7 +559,7 @@ layouts:
             - command: "inline-shell"
 )"sv);
     {
-        auto const siblingPath = std::filesystem::path(dir.path().toStdString()) / "layouts.yml";
+        auto const siblingPath = std::filesystem::path(dir.path().toStdU16String()) / "layouts.yml";
         std::ofstream(siblingPath) << R"(
 layouts:
     work:
@@ -795,13 +819,6 @@ TEST_CASE("Config: the fold column's colors load and are written back", "[config
 {
     QTemporaryDir dir;
 
-    auto const schemeOf = [](contour::config::Config const& config) {
-        auto const* profile = config.profile("main");
-        REQUIRE(profile != nullptr);
-        REQUIRE(std::holds_alternative<contour::config::SimpleColorConfig>(profile->colors.value()));
-        return std::get<contour::config::SimpleColorConfig>(profile->colors.value()).colors;
-    };
-
     SECTION("unset by default, so the column derives from the scheme")
     {
         // Deliberately optional: a scheme that says nothing about folding must not have to, and gets
@@ -900,6 +917,50 @@ color_schemes:
     }
 }
 
+TEST_CASE("Config: a scheme's context tints are written back", "[config]")
+{
+    // A tint row carries two values, the context type and its colour. The writer used to take a first value
+    // that was a std::string_view for the name of a configuration entry and drop it, so the row reached
+    // std::vformat one argument short and threw: no scheme that set a tint could be written at all.
+    QTemporaryDir dir;
+    auto const elevate = static_cast<size_t>(vtbackend::ContextType::Elevate);
+    auto const tint = vtbackend::RGBColor(0x2A, 0x1A, 0x1A);
+
+    auto const setCount = [](auto const& tints) {
+        return std::ranges::count_if(tints, [](auto const& color) { return color.has_value(); });
+    };
+
+    SECTION("in the configuration file")
+    {
+        auto config = contour::config::Config {};
+        config.colorschemes.value()["default"].contextTints[elevate] = tint;
+
+        auto const tints =
+            schemeOf(
+                loadFromYaml(dir, contour::config::createString<contour::config::YAMLConfigWriter>(config)))
+                .contextTints;
+        CHECK(tints[elevate] == tint);
+        CHECK(setCount(tints) == 1);
+    }
+
+    SECTION("in a scheme's own file")
+    {
+        auto palette = vtbackend::ColorPalette {};
+        palette.contextTints[elevate] = tint;
+        writeSideFile(dir, "colorschemes/tinted.yml", contour::config::emitColorSchemeYaml(palette));
+
+        auto const tints = schemeOf(loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        colors: tinted
+)"))
+                               .contextTints;
+        CHECK(tints[elevate] == tint);
+        CHECK(setCount(tints) == 1);
+    }
+}
+
 TEST_CASE("Config: findProfile reports a missing profile instead of asserting", "[config]")
 {
     // findProfile() is the fallible lookup for runtime input (a keybinding naming a removed
@@ -983,6 +1044,148 @@ profiles:
     CHECK(profile->permissions.value().changeFont == contour::config::Permission::Allow);
     CHECK(profile->permissions.value().captureBuffer == contour::config::Permission::Deny);
     CHECK(profile->permissions.value().displayHostWritableStatusLine == contour::config::Permission::Ask);
+}
+
+TEST_CASE("Config: scrollbar.marks loads a list of mark sources", "[config][scrollbar-marks]")
+{
+    using vtbackend::ScrollbarMarkSource;
+    using vtbackend::ScrollbarMarkSources;
+    QTemporaryDir dir;
+
+    // The profile's scrollbar.marks after loading a scrollbar block whose marks line is @p marksLine.
+    auto const marksAfter = [&](std::string_view marksLine) {
+        auto const config = loadFromYaml(dir,
+                                         std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        scrollbar:
+            position: Right
+            {}
+)",
+                                                     marksLine));
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        return profile->scrollbar.value().marks;
+    };
+
+    SECTION("absent: every source, the default")
+    {
+        CHECK(marksAfter("") == vtbackend::AllScrollbarMarkSources);
+    }
+
+    SECTION("a list names exactly the sources it lists, in any case")
+    {
+        CHECK(marksAfter("marks: [failures, user_marks]")
+              == ScrollbarMarkSources { ScrollbarMarkSource::Failures, ScrollbarMarkSource::UserMarks });
+        CHECK(marksAfter("marks: [Commands]") == ScrollbarMarkSources { ScrollbarMarkSource::Commands });
+    }
+
+    SECTION("[] switches every tick off")
+    {
+        CHECK(marksAfter("marks: []").none());
+    }
+
+    SECTION("an unknown token is reported by its key path and skipped; the rest still load")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        CHECK(marksAfter("marks: [failures, sparkles]")
+              == ScrollbarMarkSources { ScrollbarMarkSource::Failures });
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.contains("sparkles"));
+        CHECK(capture.contains("profiles.main.scrollbar.marks"));
+    }
+
+    SECTION("an item other than a word is reported and skipped; the rest still load")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        CHECK(marksAfter("marks: [[commands], user_marks]")
+              == ScrollbarMarkSources { ScrollbarMarkSource::UserMarks });
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.contains("profiles.main.scrollbar.marks"));
+    }
+
+    SECTION("a scalar is not a list: reported, and the setting is left alone")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        CHECK(marksAfter("marks: failures") == vtbackend::AllScrollbarMarkSources);
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.contains("profiles.main.scrollbar.marks"));
+    }
+}
+
+TEST_CASE("Config: scrollbar.marks round-trips through the writer", "[config][scrollbar-marks]")
+{
+    using vtbackend::ScrollbarMarkSource;
+    using vtbackend::ScrollbarMarkSources;
+
+    // `contour generate config` spells the default out, so a user editing it sees every token.
+    CHECK(contour::config::defaultConfigString().contains("marks: [failures, commands, user_marks]"));
+
+    auto const cases = std::array {
+        ScrollbarMarkSources {},
+        ScrollbarMarkSources { ScrollbarMarkSource::Failures },
+        ScrollbarMarkSources { ScrollbarMarkSource::Commands, ScrollbarMarkSource::UserMarks },
+        vtbackend::AllScrollbarMarkSources,
+    };
+    for (auto const marks: cases)
+    {
+        INFO("marks bits: " << static_cast<int>(marks.value()));
+        QTemporaryDir dir;
+        auto const source = loadFromYaml(dir, "default_profile: main\n");
+        auto profile = *source.findProfile("main");
+        profile.scrollbar.value().marks = marks;
+        writeSideFile(dir, "profiles/roundtrip.yml", contour::config::emitProfileYaml(profile));
+
+        auto const reloaded = loadFromYaml(dir, "default_profile: main\n");
+        auto const* roundTripped = reloaded.findProfile("roundtrip");
+        REQUIRE(roundTripped != nullptr);
+        CHECK(roundTripped->scrollbar.value().marks == marks);
+    }
+}
+
+TEST_CASE("Config: the scrollbar is shown on the right by default", "[config][scrollbar-marks]")
+{
+    // The scrollbar -- and with it the command marks -- is visible out of the box. `position: hidden` in a
+    // profile, or the settings page, turns it off.
+    using contour::config::ScrollBarPosition;
+
+    CHECK(contour::config::ScrollBarConfig {}.position == ScrollBarPosition::Right);
+    CHECK(contour::config::TerminalProfile {}.scrollbar.value().position == ScrollBarPosition::Right);
+
+    // A profile that never mentions the scrollbar gets it ...
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->scrollbar.value().position == ScrollBarPosition::Right);
+
+    // ... `contour generate config` writes it out, so a user editing the file sees where it is ...
+    auto const defaults = contour::config::Config {};
+    auto const generated = YAML::Load(contour::config::defaultConfigString());
+    auto const position = generated["profiles"][defaults.defaultProfileName.value()]["scrollbar"]["position"];
+    REQUIRE(position.IsScalar());
+    // The writer's spelling (std::formatter<ScrollBarPosition>); the reader ignores case.
+    CHECK(position.as<std::string>() == "Right");
+
+    // ... and `hidden` still turns it off.
+    auto const hidden = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        scrollbar:
+            position: hidden
+)"sv);
+    auto const* hiddenProfile = hidden.profile("main");
+    REQUIRE(hiddenProfile != nullptr);
+    CHECK(hiddenProfile->scrollbar.value().position == ScrollBarPosition::Hidden);
 }
 
 TEST_CASE("Config: folding loads from YAML and reaches the emulation settings", "[config]")
@@ -1140,7 +1343,58 @@ profiles:
     CHECK(config.oscContext.value().tinting == vtbackend::ContextTintScope::Boundaries);
 }
 
-TEST_CASE("Config: folding defaults, and disabling it never auto-collapses", "[config]")
+TEST_CASE("Config: command_blocks loads from YAML and reaches the emulation settings", "[config]")
+{
+    QTemporaryDir dir;
+    // GLOBAL, like folding: it says how the terminal reads the protocol a shell speaks.
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+command_blocks:
+    max_records: 250
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(config.commandBlocks.value().maxRecords == 250);
+
+    auto const settings = contour::config::emulationSettings(config, *profile);
+    CHECK(settings.commandBlockLimits.maxRecords == 250);
+}
+
+TEST_CASE("Config: command_blocks defaults to a thousand records and is written back", "[config]")
+{
+    auto const defaults = contour::config::Config {};
+    CHECK(defaults.commandBlocks.value().maxRecords == 1000);
+
+    auto const& profile = defaults.profiles.value().at(defaults.defaultProfileName.value());
+    CHECK(contour::config::emulationSettings(defaults, profile).commandBlockLimits.maxRecords == 1000);
+
+    auto const generated = contour::config::defaultConfigString();
+    CHECK(generated.contains("command_blocks:"));
+    CHECK(generated.contains("max_records: 1000"));
+}
+
+TEST_CASE("Config: command_blocks.max_records is clamped to a usable range", "[config]")
+{
+    auto const load = [](std::string_view value) {
+        QTemporaryDir dir;
+        auto const yaml = contour::test::profileConfigYaml(
+            "main", std::format("command_blocks:\n    max_records: {}\n", value));
+        return loadFromYaml(dir, yaml).commandBlocks.value().maxRecords;
+    };
+
+    // The current block must always resolve, so a store of none is a store of one...
+    CHECK(load("0") == 1);
+    // ...a negative count is not a reason to throw or wrap to "unbounded"...
+    CHECK(load("-5") == 1);
+    // ...and a flood of OSC 133 must not be able to cost unbounded memory through the configuration.
+    CHECK(load("99999999999") == static_cast<size_t>(contour::config::MaxCommandBlockRecords));
+}
+
+TEST_CASE("Config: folding defaults, and auto-collapse travels beside its switch", "[config]")
 {
     QTemporaryDir dir;
     auto const config = loadFromYaml(dir, R"(
@@ -1160,9 +1414,46 @@ profiles:
     CHECK(config.folding.value().showMarkers == true);
     CHECK(config.folding.value().onJumpIntoFold == vtbackend::FoldJumpBehavior::Expand);
 
-    // `enabled: false` wins over `auto_collapse_on_new_command: true`: a feature that is off does not
-    // get to fold anything away behind the user's back.
-    CHECK(contour::config::emulationSettings(config, *profile).autoCollapseFoldOnNewCommand == false);
+    // `auto_collapse_on_new_command` travels as itself, beside the switch: the terminal refuses every
+    // collapse while folding is off, the automatic one included, so `enabled: false` still wins.
+    auto const settings = contour::config::emulationSettings(config, *profile);
+    CHECK(settings.autoCollapseFoldOnNewCommand);
+    CHECK(settings.foldingAvailability == vtbackend::FoldingAvailability::Disabled);
+}
+
+TEST_CASE("Config: folding decides the block column's fold controls, not whether the column is there",
+          "[config]")
+{
+    // The fold switch reaches the terminal as its gutter's fold controls. The block column itself stays
+    // for as long as exit status or user marks still draw in it, and goes only once nothing does.
+    struct Case
+    {
+        std::string_view folding;
+        bool foldMarkers;
+        int gutterColumns;
+    };
+    auto const cases = std::array {
+        Case { .folding = "", .foldMarkers = true, .gutterColumns = 1 },
+        Case { .folding = "folding:\n    show_markers: false\n", .foldMarkers = false, .gutterColumns = 1 },
+        Case { .folding = "folding:\n    enabled: false\n", .foldMarkers = false, .gutterColumns = 1 },
+        Case { .folding = "folding:\n    show_markers: false\n"
+                          "gutter:\n    exit_status: false\n    user_marks: false\n",
+               .foldMarkers = false,
+               .gutterColumns = 0 },
+    };
+    for (auto const& testCase: cases)
+    {
+        CAPTURE(testCase.folding);
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, contour::test::profileConfigYaml("main", testCase.folding));
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+
+        auto const gutter = contour::config::emulationSettings(config, *profile).gutter;
+        CHECK(gutter.foldMarkers == testCase.foldMarkers);
+        CHECK(gutter.foldMarkers == config.folding.value().markersVisible());
+        CHECK(vtbackend::gutterLayoutFor(gutter).totalColumns == testCase.gutterColumns);
+    }
 }
 
 TEST_CASE("Config: an unknown on_jump_into_fold value keeps the default", "[config]")
@@ -1178,6 +1469,50 @@ profiles:
 )"sv);
 
     CHECK(config.folding.value().onJumpIntoFold == vtbackend::FoldJumpBehavior::Expand);
+}
+
+TEST_CASE("Config: folding.enabled reaches the engine as its availability", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+folding:
+    enabled: false
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    CHECK(contour::config::FoldingConfig {}.availability() == vtbackend::FoldingAvailability::Enabled);
+    CHECK(config.folding.value().availability() == vtbackend::FoldingAvailability::Disabled);
+    // The vi `z` keys reach the engine without passing the session's gate, so the engine is told.
+    CHECK(contour::config::emulationSettings(config, *profile).foldingAvailability
+          == vtbackend::FoldingAvailability::Disabled);
+}
+
+TEST_CASE("Config: images.sixel_scrolling reaches the emulation settings", "[config]")
+{
+    // Through the emulation settings, so a daemon-hosted session -- which gets nothing else -- starts with it
+    // and returns to it on RIS, as a local one does.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+images:
+    sixel_scrolling: false
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(contour::config::emulationSettings(config, *profile).sixelScrolling
+          == vtbackend::SixelScrolling::Disabled);
+    CHECK(contour::config::emulationSettings(contour::config::Config {}, *profile).sixelScrolling
+          == vtbackend::SixelScrolling::Enabled);
 }
 
 TEST_CASE("Config: cursor, bell, mouse and modes load from YAML", "[config]")
@@ -1559,6 +1894,7 @@ input_mapping:
     - { mods: [Alt], key: Enter, action: SendChars, chars: "hello\r" }
     - { mods: [Control], key: 'C', action: CopySelection, format: HTML }
     - { mods: [Control], key: 'B', action: CopySelection, format: bogus }
+    - { mods: [Control], key: 'D', action: CopySelection, format: png }
     - { mods: [Control], mouse: Left, action: FollowHyperlink }
     - { mods: [], key: F5, action: ScreenshotVT }
 )"sv);
@@ -1597,7 +1933,7 @@ input_mapping:
         CHECK(std::get<contour::actions::SendChars>(sendCharsKey->binding.at(0)).chars == "hello\r");
     }
 
-    // CopySelection format parsing: HTML parses; an invalid format falls back to Text.
+    // CopySelection format parsing: HTML parses, png ignoring its case; an invalid format falls back to Text.
     auto copyFormats = std::vector<contour::actions::CopyFormat> {};
     for (auto const& m: mappings.charMappings)
         if (std::holds_alternative<contour::actions::CopySelection>(m.binding.at(0)))
@@ -1607,6 +1943,7 @@ input_mapping:
             copyFormats.push_back(std::get<contour::actions::CopySelection>(m.binding.at(0)).format);
     CHECK(std::ranges::count(copyFormats, contour::actions::CopyFormat::HTML) == 1);
     CHECK(std::ranges::count(copyFormats, contour::actions::CopyFormat::Text) == 1);
+    CHECK(std::ranges::count(copyFormats, contour::actions::CopyFormat::PNG) == 1);
 
     // The mouse binding landed in the mouse mapping table.
     CHECK(std::ranges::any_of(mappings.mouseMappings, [](auto const& m) {
@@ -1740,6 +2077,31 @@ input_mapping:
     CHECK(std::get<SetTabColor>(action).color == red); // what went out came back
 }
 
+TEST_CASE("Config: a CopySelection format survives the round-trip through the config it writes", "[config]")
+{
+    // The writer once wrote no `format:` at all, so a bound `format: HTML` came back as text after the first
+    // config save. Feeding the writer's own output to the reader is what catches that.
+    using namespace contour::actions;
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir,
+                                     std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - {{ mods: [Control], key: F2, action: {} }}
+)",
+                                                 Action { CopySelection { .format = CopyFormat::HTML } }));
+
+    auto const& mappings = config.inputMappings.value();
+    REQUIRE(mappings.keyMappings.size() == 1);
+    auto const& action = mappings.keyMappings.at(0).binding.at(0);
+    REQUIRE(std::holds_alternative<CopySelection>(action));
+    CHECK(std::get<CopySelection>(action).format == CopyFormat::HTML);
+}
+
 TEST_CASE("Config: a nameless SaveLayout binding is kept and round-trips as 'SaveLayout'", "[config]")
 {
     // The layout-side mirror of the SetTabColor round-trip. A nameless SaveLayout opens the save-as prompt,
@@ -1817,6 +2179,45 @@ profiles:
     CHECK(profile->hintScrollbackLines.value() == vtbackend::LineCount(250));
 
     CHECK(profile->mouse.value().hideWhileTyping == false);
+}
+
+TEST_CASE("Config: a hint pattern's quotes survive a write and a read", "[config]")
+{
+    // The regex is written single-quoted, whose one escape is a doubled quote: a quote at either end and a
+    // run of two must each come back as written.
+    QTemporaryDir dir;
+    auto config = contour::config::Config {};
+    auto const regex = std::string { "'[^']*''x'" };
+    config.profile("main")->hintPatterns.value() = { contour::config::HintPatternConfig { .name = "quoted",
+                                                                                          .regex = regex } };
+
+    auto const reloaded =
+        loadFromYaml(dir, contour::config::createString<contour::config::YAMLConfigWriter>(config));
+    auto const* profile = reloaded.profile("main");
+    REQUIRE(profile != nullptr);
+    REQUIRE(profile->hintPatterns.value().size() == 1);
+    CHECK(profile->hintPatterns.value().at(0).regex == regex);
+}
+
+TEST_CASE("Config: a hint pattern's name survives a write and a read", "[config]")
+{
+    // Written as a plain scalar, ` #` would start a comment and `: ` a nested mapping -- the first silently
+    // shortens the name, the second makes the whole file unreadable.
+    for (auto const name: { "url #1"sv, "key: value"sv, "'quoted'"sv })
+    {
+        CAPTURE(name);
+        QTemporaryDir dir;
+        auto config = contour::config::Config {};
+        config.profile("main")->hintPatterns.value() = { contour::config::HintPatternConfig {
+            .name = std::string { name }, .regex = "x" } };
+
+        auto const reloaded =
+            loadFromYaml(dir, contour::config::createString<contour::config::YAMLConfigWriter>(config));
+        auto const* profile = reloaded.profile("main");
+        REQUIRE(profile != nullptr);
+        REQUIRE(profile->hintPatterns.value().size() == 1);
+        CHECK(profile->hintPatterns.value().at(0).name == name);
+    }
 }
 
 TEST_CASE("Config: dual (dark/light) color scheme selection loads both palettes", "[config]")
@@ -1958,6 +2359,10 @@ color_schemes:
     // Named-map palette form (dark) and sequence palette form (light) both land in the palettes.
     CHECK(dual.darkMode.normalColor(1) == vtbackend::RGBColor(0xAA, 0x00, 0x00));
     CHECK(dual.lightMode.brightColor(2) == vtbackend::RGBColor(0x00, 0xFF, 0x00));
+    // A colour no default palette carries, so the list is proven read rather than left at its defaults,
+    // and into the bright slots rather than the normal ones.
+    CHECK(dual.lightMode.brightColor(0) == vtbackend::RGBColor(0x10, 0x10, 0x10));
+    CHECK(dual.lightMode.normalColor(0) == vtbackend::ColorPalette {}.normalColor(0));
 
     // history.limit: -1 selects the Infinite arm of MaxHistoryLineCount.
     CHECK(std::holds_alternative<vtbackend::Infinite>(profile->history.value().maxHistoryLineCount));
@@ -1993,6 +2398,62 @@ input_mapping:
     CHECK(mappings.mouseMappings.size() == 3); // Left, WheelUp, WheelDown
 }
 
+TEST_CASE("Config: a single-quoted scalar doubles the quotes inside it", "[config]")
+{
+    using contour::config::SingleQuoted;
+    CHECK(std::format("{}", SingleQuoted { "" }) == "''");
+    CHECK(std::format("{}", SingleQuoted { "%H:%M" }) == "'%H:%M'");
+    CHECK(std::format("{}", SingleQuoted { "it's" }) == "'it''s'");
+    CHECK(std::format("{}", SingleQuoted { "'" }) == "''''");
+}
+
+TEST_CASE("Config: the key named BACKSLASH binds the backslash", "[config][input-mapping]")
+{
+    // One of the names the documentation offers for a character YAML makes awkward to write.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control], key: BACKSLASH, action: ScreenshotVT }
+)"sv);
+
+    auto const& charMappings = config.inputMappings.value().charMappings;
+    REQUIRE(charMappings.size() == 1);
+    CHECK(charMappings.front().input == U'\\');
+}
+
+TEST_CASE("Config: a character key binding round-trips through the generated config", "[config]")
+{
+    // The writer single-quotes every key, so a quote must be written doubled -- `'''` is no YAML at all --
+    // and a character beyond ASCII as its UTF-8, not as the one byte a cast to char leaves of it.
+    auto const keys = std::array { U'\'', U'ö', U'€' }; // ', ö, €
+    auto const modifiers = vtbackend::Modifiers { vtbackend::Modifier::Control }
+                           | vtbackend::Modifiers { vtbackend::Modifier::Alt };
+    auto config = contour::config::Config {};
+    for (auto const key: keys)
+        config.inputMappings.value().charMappings.push_back(
+            contour::config::CharInputMapping { .modes = {},
+                                                .modifiers = modifiers,
+                                                .input = key,
+                                                .binding = { { contour::actions::ScreenshotVT {} } } });
+
+    QTemporaryDir dir;
+    auto const reloaded =
+        loadFromYaml(dir, contour::config::createString<contour::config::YAMLConfigWriter>(config));
+
+    auto const& charMappings = reloaded.inputMappings.value().charMappings;
+    for (auto const key: keys)
+    {
+        CAPTURE(static_cast<uint32_t>(key));
+        CHECK(std::ranges::any_of(charMappings, [&](auto const& mapping) {
+            return mapping.input == key && mapping.modifiers == modifiers;
+        }));
+    }
+}
+
 TEST_CASE("Config: invalid enum values fall back and do not abort loading", "[config]")
 {
     QTemporaryDir dir;
@@ -2016,8 +2477,9 @@ renderer:
 
     auto const* profile = config.profile("main");
     REQUIRE(profile != nullptr);
-    // Unknown enum literals leave the compiled-in defaults in place.
-    CHECK(profile->scrollbar.value().position == contour::config::ScrollBarPosition::Hidden);
+    // Unknown enum literals leave the compiled-in defaults in place. Compared with the default itself, not a
+    // literal: which edge that is, is pinned once, by "the scrollbar is shown on the right by default".
+    CHECK(profile->scrollbar.value().position == contour::config::ScrollBarConfig {}.position);
     CHECK(profile->statusLine.value().position == vtbackend::StatusDisplayPosition::Bottom);
     CHECK(profile->permissions.value().changeFont == contour::config::Permission::Ask);
 }
@@ -2039,6 +2501,57 @@ profiles:
     auto const cwd = profile->shell.value().workingDirectory.string();
     CHECK(!cwd.contains('~'));
     CHECK_FALSE(cwd.empty());
+}
+
+TEST_CASE("Config: a path in the configuration file is read as UTF-8", "[config]")
+{
+    constexpr auto Awkward = vtpty::testing::NonAsciiName;
+    auto const awkward = std::string { vtpty::testing::NonAsciiNameUtf8 };
+    auto const loadWorkingDirectory = [](std::string const& spelled) {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(
+            dir, std::format("profiles:\n    main:\n        initial_working_directory: \"{}\"\n", spelled));
+        return config.profile("main")->shell.value().workingDirectory;
+    };
+
+    CHECK(loadWorkingDirectory("/tmp/" + awkward) == std::filesystem::path { u8"/tmp/" } / Awkward);
+    CHECK(loadWorkingDirectory("~/" + awkward) == vtpty::Process::homeDirectory() / Awkward);
+
+    // A profile that names none inherits the default profile's, resolved once more on the way.
+    QTemporaryDir dir;
+    auto const config =
+        loadFromYaml(dir,
+                     std::format("profiles:\n    main:\n        initial_working_directory: \"/tmp/{}\"\n"
+                                 "    other:\n        shell: /bin/sh\n",
+                                 awkward));
+    REQUIRE(config.profile("other") != nullptr);
+    CHECK(config.profile("other")->shell.value().workingDirectory
+          == std::filesystem::path { u8"/tmp/" } / Awkward);
+
+    // A background image: where it is, and the hash it is cached under, which is of its path in UTF-8.
+    QTemporaryDir imageDir;
+    auto const imageConfig =
+        loadFromYaml(imageDir,
+                     std::format("profiles:\n    main:\n        colors: awkward\n"
+                                 "color_schemes:\n    awkward:\n        background_image:\n"
+                                 "            path: '/tmp/{}.png'\n",
+                                 awkward));
+    auto const& colors = imageConfig.profile("main")->colors.value();
+    REQUIRE(std::holds_alternative<contour::config::SimpleColorConfig>(colors));
+    auto const& image = std::get<contour::config::SimpleColorConfig>(colors).colors.backgroundImage;
+    REQUIRE(image != nullptr);
+    CHECK(std::get<std::filesystem::path>(image->location)
+          == std::filesystem::path { u8"/tmp/" } / (std::u8string { Awkward } + u8".png"));
+    CHECK(image->hash == crispy::StrongHash::compute(std::format("/tmp/{}.png", awkward)));
+}
+
+TEST_CASE("Config: a background image's path is formatted in UTF-8", "[config]")
+{
+    // As the configuration log formats it. path::string() spelled it in the ANSI code page on Windows, and
+    // threw for a name beyond it.
+    auto image = vtbackend::BackgroundImage {};
+    image.location = std::filesystem::path { u8"/tmp/" } / vtpty::testing::NonAsciiName;
+    CHECK(std::format("{}", image) == std::format("/tmp/{}", vtpty::testing::NonAsciiNameUtf8));
 }
 
 TEST_CASE("Config: deprecated image max size keys are accepted and ignored", "[config]")
@@ -2320,40 +2833,49 @@ TEST_CASE("GuiTheme: buildThemePalette forces a legible dark/light chrome palett
     CHECK(dark.color(QPalette::Disabled, QPalette::Text) != dark.color(QPalette::Normal, QPalette::Text));
 }
 
+namespace
+{
+
+/// Every enumerator of @p Enum has a row in its table, and no other row exists.
+///
+/// The table is the single source the YAML reader, the config writer, the settings page and any menu
+/// offering these values all read from. An enumerator missing a row could therefore not be written,
+/// read back, or shown -- so pin that every one of them has a row with a label, and that a row's token
+/// survives the round trip the config file depends on. Walking the enumerators rather than the rows
+/// names the enumerator that has none.
+/// @param enumerators Every enumerator of @p Enum.
+template <typename Enum, size_t Count>
+void checkEnumerators(std::array<Enum, Count> const& enumerators)
+{
+    using namespace contour::config;
+    CHECK(configEnumValues<Enum>().size() == Count);
+    for (auto const value: enumerators)
+    {
+        auto const token = configEnumToken(value);
+        INFO("enumerator: " << static_cast<int>(value) << ", token: " << token);
+        CHECK(!token.empty());
+        CHECK(!configEnumLabel(value).empty());
+        CHECK(configEnumFromToken<Enum>(token) == value);
+    }
+}
+
+} // namespace
+
 TEST_CASE("Config: every tab bar mode is described by its table", "[config]")
 {
     using namespace contour::config;
 
-    // The table is the single source the YAML reader, the config writer, the settings page and any
-    // menu offering these modes all read from. An enumerator missing a row could therefore not be
-    // written, read back, or shown -- so pin that every one of them has a row, and that a row's token
-    // survives the round trip the config file depends on.
-    auto const checkModes = [](auto&& modes, auto&& enumerators) {
-        CHECK(modes.size() == enumerators.size());
-        for (auto const mode: enumerators)
-        {
-            using Mode = std::remove_cvref_t<decltype(mode)>;
-            auto const token = configEnumToken(mode);
-            CHECK(!token.empty());
-            CHECK(!configEnumLabel(mode).empty());
-            CHECK(configEnumFromToken<Mode>(token) == mode);
-        }
-    };
-
-    checkModes(configEnumValues<TabBarPosition>(),
-               std::array { TabBarPosition::Top, TabBarPosition::Bottom });
-    checkModes(configEnumValues<TabBarVisibility>(),
-               std::array { TabBarVisibility::Always, TabBarVisibility::Never, TabBarVisibility::Multiple });
-    checkModes(configEnumValues<UiStyle>(), std::array { UiStyle::Native, UiStyle::Terminal });
-    checkModes(configEnumValues<WindowControlStyle>(),
-               std::array { WindowControlStyle::Auto,
-                            WindowControlStyle::Windows,
-                            WindowControlStyle::MacOS,
-                            WindowControlStyle::Plasma });
-    checkModes(configEnumValues<vtbackend::SearchCaseSensitivity>(),
-               std::array { vtbackend::SearchCaseSensitivity::Smart,
-                            vtbackend::SearchCaseSensitivity::Insensitive,
-                            vtbackend::SearchCaseSensitivity::Sensitive });
+    checkEnumerators(std::array { TabBarPosition::Top, TabBarPosition::Bottom });
+    checkEnumerators(
+        std::array { TabBarVisibility::Always, TabBarVisibility::Never, TabBarVisibility::Multiple });
+    checkEnumerators(std::array { UiStyle::Native, UiStyle::Terminal });
+    checkEnumerators(std::array { WindowControlStyle::Auto,
+                                  WindowControlStyle::Windows,
+                                  WindowControlStyle::MacOS,
+                                  WindowControlStyle::Plasma });
+    checkEnumerators(std::array { vtbackend::SearchCaseSensitivity::Smart,
+                                  vtbackend::SearchCaseSensitivity::Insensitive,
+                                  vtbackend::SearchCaseSensitivity::Sensitive });
 
     // The reader is case-insensitive, and refuses what no row carries.
     CHECK(configEnumFromToken<TabBarVisibility>("MULTIPLE") == TabBarVisibility::Multiple);
@@ -2365,6 +2887,75 @@ TEST_CASE("Config: every tab bar mode is described by its table", "[config]")
     // would be indistinguishable in a menu even though the modes differ.
     CHECK(configEnumLabel(TabBarVisibility::Always) != configEnumLabel(TabBarVisibility::Never));
     CHECK(configEnumLabel(TabBarVisibility::Never) != configEnumLabel(TabBarVisibility::Multiple));
+}
+
+namespace
+{
+
+/// Every row of every table in @p Enums formats as the token it carries.
+template <typename... Enums>
+void checkFormatsAsToken()
+{
+    auto const checkRow = [](auto const& row) {
+        INFO("token: " << row.token);
+        CHECK(std::format("{}", row.value) == row.token);
+    };
+    (std::ranges::for_each(contour::config::configEnumValues<Enums>(), checkRow), ...);
+}
+
+} // namespace
+
+TEST_CASE("Config: every configuration enum is written as its table's token", "[config]")
+{
+    using namespace contour::config;
+
+    // What the writer emits must be what the reader accepts. One formatter serves every enum with a
+    // table; vtbackend's own formatters for the enums it owns must agree with the table as well.
+    checkFormatsAsToken<TabBarPosition,
+                        TabBarVisibility,
+                        UiStyle,
+                        WindowControlStyle,
+                        ShadowSize,
+                        NotifyWhen,
+                        NotifyOutcome,
+                        NotifyAction,
+                        NotifyClearOn,
+                        contour::actions::CopyFormat,
+                        contour::actions::CopyFallback,
+                        contour::actions::OutputPlacement,
+                        contour::actions::OutputFormat,
+                        vtbackend::CommandBlockTarget,
+                        vtbackend::CommandBlockPart,
+                        vtbackend::FoldJumpBehavior,
+                        vtbackend::ContextMarkPolicy,
+                        vtbackend::ContextTintScope,
+                        vtbackend::SearchCaseSensitivity,
+                        vtbackend::LineNumberMode,
+                        vtbackend::StickyHeaderMode,
+                        vtbackend::ScrollbarMarkSource>();
+}
+
+TEST_CASE("Config: every scrollbar mark source is described by its table", "[config][scrollbar-marks]")
+{
+    using namespace contour::config;
+    using vtbackend::ScrollbarMarkSource;
+
+    checkEnumerators(std::array {
+        ScrollbarMarkSource::Failures, ScrollbarMarkSource::Commands, ScrollbarMarkSource::UserMarks });
+    // The spellings the documentation promises.
+    CHECK(configEnumToken(ScrollbarMarkSource::Failures) == "failures");
+    CHECK(configEnumToken(ScrollbarMarkSource::Commands) == "commands");
+    CHECK(configEnumToken(ScrollbarMarkSource::UserMarks) == "user_marks");
+
+    // The default shows every source the table offers, and nothing it does not: a row added without its
+    // bit in AllScrollbarMarkSources would be a tick no profile shows unless it lists the token.
+    auto const rows = configEnumValues<ScrollbarMarkSource>();
+    for (auto const& row: rows)
+    {
+        INFO("token: " << row.token);
+        CHECK(vtbackend::AllScrollbarMarkSources.test(row.value));
+    }
+    CHECK(std::cmp_equal(std::popcount(vtbackend::AllScrollbarMarkSources.value()), rows.size()));
 }
 
 TEST_CASE("Config: tab_bar_position and tab_bar_visibility parse each value (ignore-case)", "[config]")
@@ -2689,7 +3280,7 @@ TEST_CASE("Config: createDefaultConfig writes a loadable file into a fresh direc
     // document. Point it at a nested path that does not exist yet so the create_directories branch
     // runs, then load it back to prove the written file round-trips.
     QTemporaryDir const dir;
-    auto const path = std::filesystem::path(dir.path().toStdString()) / "nested" / "sub" / "contour.yml";
+    auto const path = std::filesystem::path(dir.path().toStdU16String()) / "nested" / "sub" / "contour.yml";
 
     auto const ec = contour::config::createDefaultConfig(path);
     CHECK_FALSE(ec);
@@ -2705,7 +3296,7 @@ TEST_CASE("Config: loadConfigFromFile creates the file when it does not exist", 
     // is materialized with the default config, so loading a not-yet-existent path yields a usable
     // config AND leaves the file on disk.
     QTemporaryDir const dir;
-    auto const path = std::filesystem::path(dir.path().toStdString()) / "created" / "contour.yml";
+    auto const path = std::filesystem::path(dir.path().toStdU16String()) / "created" / "contour.yml";
     REQUIRE_FALSE(std::filesystem::exists(path));
 
     auto const config = contour::config::loadConfigFromFile(path);
@@ -3423,7 +4014,7 @@ TEST_CASE("Config: a profiles/<name>.yml with CRLF line endings still loads", "[
     // to exercise the CRLF path on every platform, not just Windows.
     QTemporaryDir dir;
     {
-        auto const path = std::filesystem::path(dir.path().toStdString()) / "profiles" / "crlf.yml";
+        auto const path = std::filesystem::path(dir.path().toStdU16String()) / "profiles" / "crlf.yml";
         std::filesystem::create_directories(path.parent_path());
         auto out = std::ofstream(path, std::ios::binary);
         // A bool and a string value, both terminated by CRLF. The string is the sharp test: a stray
@@ -3442,10 +4033,10 @@ TEST_CASE("Config: a profiles/<name>.yml with CRLF line endings still loads", "[
 TEST_CASE("Config: an in-place reload drops a removed side-file profile and its stale origin",
           "[config][gui]")
 {
-    // Production reloads config in place (reloadAllSessions reuses the live Config object), unlike a fresh
-    // load. A profiles map that only ever accreted entries — and a provenance map that only ever emplaced
-    // — would keep a GUI profile alive after its side file was deleted, so the settings page would still
-    // offer it and a later Save would shadow contour.yml. The loader must reconcile both on every load.
+    // A caller may reload into a Config it already loaded, unlike a fresh load. A profiles map that only ever
+    // accreted entries — and a provenance map that only ever emplaced — would keep a GUI profile alive after
+    // its side file was deleted, so the settings page would still offer it and a later Save would shadow
+    // contour.yml. The loader must reconcile both on every load.
     QTemporaryDir dir;
     writeSideFile(dir, "profiles/work.yml", "show_title_bar: false\n");
     auto const configPath = writeConfig(dir, R"(
@@ -3461,7 +4052,7 @@ profiles:
     REQUIRE(config.profileOrigins.at("work") == contour::config::SettingsOrigin::SideFile);
 
     // Delete the side file and reload INTO THE SAME Config object.
-    std::filesystem::remove(std::filesystem::path(dir.path().toStdString()) / "profiles" / "work.yml");
+    std::filesystem::remove(std::filesystem::path(dir.path().toStdU16String()) / "profiles" / "work.yml");
     contour::config::loadConfigFromFile(config, configPath);
 
     CHECK(config.findProfile("work") == nullptr);   // no longer in the profiles map
@@ -3479,7 +4070,7 @@ TEST_CASE("Config: a settings.yml with CRLF line endings still applies", "[confi
     QTemporaryDir dir;
     writeSideFile(dir, "profiles/work.yml", "show_title_bar: false\n");
     {
-        auto const path = std::filesystem::path(dir.path().toStdString()) / "settings.yml";
+        auto const path = std::filesystem::path(dir.path().toStdU16String()) / "settings.yml";
         auto out = std::ofstream(path, std::ios::binary);
         out << "default_profile: work\r\n"
                "read_buffer_size: 32768\r\n";
@@ -3539,7 +4130,7 @@ TEST_CASE("Config: a profile round-trips through emitProfileYaml and the side-fi
     auto const source = loadFromYaml(dir, "default_profile: main\n");
     auto profile = *source.findProfile("main");
     profile.showTitleBar = false;
-    profile.dimUnfocused = true;
+    profile.dimUnfocused = 1.0;
 
     writeSideFile(dir, "profiles/roundtrip.yml", contour::config::emitProfileYaml(profile));
 
@@ -3547,7 +4138,7 @@ TEST_CASE("Config: a profile round-trips through emitProfileYaml and the side-fi
     auto const* rt = reloaded.findProfile("roundtrip");
     REQUIRE(rt != nullptr);
     CHECK(rt->showTitleBar.value() == false);
-    CHECK(rt->dimUnfocused.value() == true);
+    CHECK(rt->dimUnfocused.value() == 1.0);
 }
 
 TEST_CASE("Config: a colorschemes/<name>.yml written via emitColorSchemeYaml is resolved by a profile",
@@ -3576,7 +4167,7 @@ TEST_CASE("Config: GUI settings round-trip through emitGuiSettingsYaml / loadGui
           "[config][gui]")
 {
     QTemporaryDir const dir;
-    auto const path = std::filesystem::path(dir.path().toStdString()) / "settings.yml";
+    auto const path = std::filesystem::path(dir.path().toStdU16String()) / "settings.yml";
     {
         auto out = std::ofstream(path);
         out << contour::config::emitGuiSettingsYaml({ .defaultProfile = "work", .globalOverrides = {} });
@@ -3588,8 +4179,8 @@ TEST_CASE("Config: GUI settings round-trip through emitGuiSettingsYaml / loadGui
     CHECK(loaded->defaultProfile.value() == "work");
 
     // A missing file is default (all-unset), not an error.
-    auto const missing = contour::config::loadGuiSettingsFile(std::filesystem::path(dir.path().toStdString())
-                                                              / "does-not-exist.yml");
+    auto const missing = contour::config::loadGuiSettingsFile(
+        std::filesystem::path(dir.path().toStdU16String()) / "does-not-exist.yml");
     REQUIRE(missing.has_value());
     CHECK_FALSE(missing->defaultProfile.has_value());
 }
@@ -3597,7 +4188,7 @@ TEST_CASE("Config: GUI settings round-trip through emitGuiSettingsYaml / loadGui
 TEST_CASE("Config: GUI settings round-trip dotted keys as nested YAML", "[config][gui][gpu]")
 {
     QTemporaryDir const dir;
-    auto const path = std::filesystem::path(dir.path().toStdString()) / "settings.yml";
+    auto const path = std::filesystem::path(dir.path().toStdU16String()) / "settings.yml";
     auto const yaml = contour::config::emitGuiSettingsYaml(
         { .defaultProfile = std::nullopt,
           .globalOverrides = { { "renderer.gpu", "10de:2820" }, { "theme", "dark" } } });
@@ -3642,6 +4233,25 @@ TEST_CASE("Config: a scalar renderer in settings.yml is ignored, not fatal", "[c
     auto const cfg = loadFromYaml(dir, yaml);
     CHECK(cfg.theme.value() == contour::config::GuiTheme::Dark);
     CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Integrated);
+}
+
+TEST_CASE("Config: a GPU set over a scalar renderer in settings.yml replaces it and applies",
+          "[config][gui][gpu]")
+{
+    // The settings page re-saves what it loaded plus its edit, so a hand-edited `renderer: foo` comes back
+    // as a flat override beside the new nested renderer.gpu. Written as two `renderer` keys, the scalar
+    // would shadow the section on the next load and the GPU would never apply.
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "renderer: foo\ntheme: dark\n");
+    auto const yaml = "profiles:\n    main:\n        shell: /bin/sh\n"sv;
+    auto settings = loadFromYaml(dir, yaml).guiManagedSettings;
+    settings.globalOverrides["renderer.gpu"] = "discrete";
+    writeSideFile(dir, "settings.yml", contour::config::emitGuiSettingsYaml(settings));
+
+    auto const cfg = loadFromYaml(dir, yaml);
+    CHECK(cfg.renderer.value().gpu.preference == contour::config::GpuPreference::Discrete);
+    CHECK(cfg.theme.value() == contour::config::GuiTheme::Dark);
+    CHECK_FALSE(cfg.guiManagedSettings.globalOverrides.contains("renderer"));
 }
 
 TEST_CASE("Config: a non-scalar key in settings.yml is skipped, its siblings still apply",
@@ -3695,7 +4305,7 @@ TEST_CASE("Config: a flat settings.yml written by an older Contour still loads",
 TEST_CASE("Config: FileGuiConfigStore writes and removes side files the loader picks up", "[config][gui]")
 {
     QTemporaryDir dir;
-    auto const configDir = std::filesystem::path(dir.path().toStdString());
+    auto const configDir = std::filesystem::path(dir.path().toStdU16String());
 
     auto const base = loadFromYaml(dir, "default_profile: main\n");
     auto profile = *base.findProfile("main");
@@ -3718,6 +4328,244 @@ TEST_CASE("Config: FileGuiConfigStore writes and removes side files the loader p
     REQUIRE(store.deleteProfile("saved").has_value());
     auto const afterDelete = loadFromYaml(dir, "default_profile: main\n");
     CHECK(afterDelete.findProfile("saved") == nullptr);
+}
+
+TEST_CASE("Config: the configuration is found and kept under a directory beyond ASCII", "[config]")
+{
+    // A profile directory such as C:\Users\李 on Windows.
+    auto const dir = core::testing::ScopedTempDir { "contour-config-home" };
+    auto const home = dir.path() / vtpty::testing::NonAsciiName;
+    std::filesystem::create_directories(home);
+#ifdef _WIN32
+    auto const variable = core::testing::ScopedEnv { "LOCALAPPDATA", core::pathToUtf8(home) };
+#else
+    auto const variable = core::testing::ScopedEnv { "XDG_CONFIG_HOME", core::pathToUtf8(home) };
+#endif
+
+    // Found where the environment says, and created there when it is not yet.
+    auto const expected = home / "contour" / "contour.yml";
+    CHECK(contour::config::configHome() == expected.parent_path());
+    CHECK(core::pathFromUtf8(contour::config::defaultConfigFilePath()) == expected);
+    auto const loaded = contour::config::loadConfig();
+    CHECK(loaded.configFile == expected);
+    CHECK(std::filesystem::exists(expected));
+
+    // A side file is named for its profile, and read back under that name.
+    auto const name = std::string { "\xe6\x9d\x8e" }; // U+674E
+    auto store = contour::config::FileGuiConfigStore(expected.parent_path());
+    REQUIRE(store.saveProfile(name, *loaded.findProfile(loaded.defaultProfileName.value())).has_value());
+    CHECK(
+        std::filesystem::exists(expected.parent_path() / "profiles" / std::u8string_view { u8"\u674e.yml" }));
+    CHECK(contour::config::loadConfig().findProfile(name) != nullptr);
+}
+
+TEST_CASE("Config: a nested settings.yml override replaces one leaf and keeps its siblings", "[config][gui]")
+{
+    // The settings page writes only the leaves the user changed. Each section loader writes only the
+    // children present into a struct contour.yml already filled (Config.hpp's ConfigEntry overload loads
+    // into the live value), so what the GUI did not touch keeps contour.yml's value -- not the default.
+    QTemporaryDir dir;
+    auto const settings = contour::config::emitGuiSettingsYaml(contour::config::GuiManagedSettings {
+        .defaultProfile = std::nullopt,
+        .globalOverrides = { { "folding.enabled", "false" },
+                             { "gutter.line_numbers", "relative" },
+                             { "command_blocks.pager", "most" } },
+    });
+    INFO("settings.yml:\n" << settings);
+    // Written the way the settings page writes it: nested, as contour.yml spells it. A literal
+    // `folding.enabled:` key is one no section loader ever looks up.
+    REQUIRE(YAML::Load(settings)["folding"].IsMap());
+    writeSideFile(dir, "settings.yml", settings);
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+folding:
+    show_markers: false
+    auto_collapse_on_new_command: true
+gutter:
+    timestamps: true
+    timestamp_format: "%H:%M"
+    line_number_width: 8
+command_blocks:
+    max_records: 250
+)");
+
+    // What the GUI set wins ...
+    CHECK(config.folding.value().enabled == false);
+    CHECK(config.gutter.value().lineNumbers == vtbackend::LineNumberMode::Relative);
+    CHECK(config.commandBlocks.value().pager == "most");
+
+    // ... and every sibling it did not set keeps what contour.yml said.
+    CHECK(config.folding.value().showMarkers == false);
+    CHECK(config.folding.value().autoCollapseOnNewCommand == true);
+    CHECK(config.gutter.value().timestamps == true);
+    CHECK(config.gutter.value().timestampFormat == "%H:%M");
+    CHECK(config.gutter.value().lineNumberWidth == 8);
+    CHECK(config.commandBlocks.value().maxRecords == size_t { 250 });
+}
+
+TEST_CASE("Config: a malformed folding or command_blocks entry in settings.yml is skipped, not fatal",
+          "[config][gui]")
+{
+    // settings.yml is hand-editable. A scalar where a section belongs overrides no leaf of it, and a leaf of
+    // the wrong shape keeps the value it had: neither costs the load. Each malformed section keeps one
+    // well-formed leaf, and that leaf applies, so the merge did run the section's loader.
+    QTemporaryDir dir;
+    writeSideFile(dir,
+                  "settings.yml",
+                  "folding:\n    enabled: [x]\n    show_markers: false\n"
+                  "gutter: off\n"
+                  "command_blocks:\n    max_records: [y]\n    pager: most\n"
+                  "theme: dark\n");
+    auto const config = loadFromYaml(dir, "profiles:\n    main:\n        shell: /bin/sh\n"sv);
+
+    CHECK(config.folding.value().enabled == true);
+    CHECK(config.folding.value().showMarkers == false);
+    CHECK(config.gutter.value() == contour::config::GutterConfig {});
+    CHECK(config.commandBlocks.value().maxRecords == size_t { 1000 });
+    CHECK(config.commandBlocks.value().pager == "most");
+    CHECK(config.theme.value() == contour::config::GuiTheme::Dark);
+}
+
+TEST_CASE("Config: a malformed settings.yml entry is reported by the file and its key path there",
+          "[config][gui]")
+{
+    // settings.yml spells its keys as contour.yml does, so the key path alone would send the user looking
+    // in contour.yml, which holds no such value. A section and a top-level key both name the file.
+    QTemporaryDir dir;
+    writeSideFile(
+        dir, "settings.yml", "folding:\n    enabled: [x]\n    show_markers: false\nreflow_on_resize: [y]\n");
+    auto capture = core::log::ScopedCapture { "error" };
+    std::ignore = loadFromYaml(dir, "profiles:\n    main:\n        shell: /bin/sh\n"sv);
+
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().contains("settings.yml: folding"));
+    CHECK(capture.text().contains("line 2, column 14"));
+    CHECK(capture.text().contains("settings.yml: reflow_on_resize"));
+    CHECK(capture.text().contains("line 4, column 19"));
+}
+
+TEST_CASE("Config: a malformed entry of a profile side file is reported by the file and its key path there",
+          "[config][gui]")
+{
+    // A profile side file's root is the profile's body, so its key path alone is a bare `cursor`: no file, no
+    // profile, and a line number in a file the message does not name. The file is named for its profile.
+    QTemporaryDir dir;
+    writeSideFile(dir,
+                  "profiles/work.yml",
+                  "cursor: block\nnotify_on_command_finish:\n    when: [always]\n    outcome: failure\n");
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config =
+        loadFromYaml(dir, "default_profile: main\nprofiles:\n    main:\n        shell: /bin/sh\n"sv);
+
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().contains("work.yml: cursor"));
+    CHECK(capture.text().contains("line 1, column 9"));
+    CHECK(capture.text().contains("work.yml: notify_on_command_finish.when"));
+    CHECK(capture.text().contains("line 3, column 11"));
+    // The bad values cost only themselves: the profile still loads, with the key read after them.
+    auto const* work = config.findProfile("work");
+    REQUIRE(work != nullptr);
+    CHECK(work->notifyOnCommandFinish.value().outcome == contour::config::NotifyOutcome::Failure);
+}
+
+TEST_CASE("Config: a scalar where a settings.yml section belongs is ignored, not read as the section",
+          "[config][gui]")
+{
+    // A section's loader runs only when settings.yml overrides one of its leaves, a `<section>.<leaf>` key.
+    // A bare scalar under a section's name overrides none -- the flat reader keeps it as a key no row
+    // writes -- so it is skipped quietly rather than subscripted into a logged error.
+    QTemporaryDir dir;
+    writeSideFile(dir, "settings.yml", "gutter: off\nfolding: true\ntheme: dark\n");
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir, "profiles:\n    main:\n        shell: /bin/sh\n"sv);
+
+    INFO("captured error log:\n" << capture.text());
+    CHECK_FALSE(capture.text().contains("gutter"));
+    CHECK_FALSE(capture.text().contains("folding"));
+    CHECK(config.gutter.value() == contour::config::GutterConfig {});
+    CHECK(config.theme.value() == contour::config::GuiTheme::Dark);
+}
+
+TEST_CASE("Config: a wrong-typed leaf of a section costs only that leaf", "[config][gui]")
+{
+    // `timestamps: maybe` is no boolean. Read under its own guard, it keeps the value it had, and the line
+    // numbers set beside it still apply: the settings page marks both rows overridden, and the one that is
+    // well formed must be in effect. The same holds where contour.yml sets the section.
+    auto const sections = "gutter:\n    line_numbers: relative\n    timestamps: maybe\n"
+                          "folding:\n    show_markers: false\n    enabled: [x]\n"
+                          "command_blocks:\n    max_records: [y]\n    pager: most\n"
+                          "renderer:\n    tile_cache_count: lots\n    gpu: discrete\n"sv;
+    auto const profiles = "profiles:\n    main:\n        shell: /bin/sh\n"sv;
+    QTemporaryDir dir;
+
+    SECTION("in settings.yml, over what contour.yml sets")
+    {
+        writeSideFile(dir, "settings.yml", sections);
+        auto const config = loadFromYaml(
+            dir,
+            std::format("gutter:\n    timestamps: true\ncommand_blocks:\n    max_records: 250\n{}",
+                        profiles));
+
+        CHECK(config.gutter.value().lineNumbers == vtbackend::LineNumberMode::Relative);
+        CHECK(config.gutter.value().timestamps == true);
+        CHECK(config.folding.value().showMarkers == false);
+        CHECK(config.folding.value().enabled == true);
+        CHECK(config.commandBlocks.value().pager == "most");
+        CHECK(config.commandBlocks.value().maxRecords == size_t { 250 });
+        CHECK(config.renderer.value().gpu.preference == contour::config::GpuPreference::Discrete);
+    }
+
+    SECTION("in contour.yml")
+    {
+        auto const config = loadFromYaml(dir, std::format("{}{}", sections, profiles));
+
+        CHECK(config.gutter.value().lineNumbers == vtbackend::LineNumberMode::Relative);
+        CHECK(config.gutter.value().timestamps == false);
+        CHECK(config.folding.value().showMarkers == false);
+        CHECK(config.folding.value().enabled == true);
+        CHECK(config.commandBlocks.value().pager == "most");
+        CHECK(config.commandBlocks.value().maxRecords == size_t { 1000 });
+        CHECK(config.renderer.value().gpu.preference == contour::config::GpuPreference::Discrete);
+    }
+}
+
+TEST_CASE("Config: a side file whose document is no map is skipped, not fatal", "[config][gui]")
+{
+    // A side file holds a map of settings. A bare word parses as a document too, and the readers subscript
+    // it: that threw out of the whole load for settings.yml and a profile's file, and was blamed on the
+    // profile's `colors` entry for a colour scheme's file.
+    auto const yaml = "read_buffer_size: 16384\nprofiles:\n    main:\n        colors: word\n"sv;
+    QTemporaryDir dir;
+
+    SECTION("settings.yml")
+    {
+        writeSideFile(dir, "settings.yml", "dark\n");
+        auto const config = loadFromYaml(dir, yaml);
+        CHECK(config.ptyReadBufferSize.value() == 16384);
+        CHECK(config.guiManagedSettings.globalOverrides.empty());
+    }
+
+    SECTION("a profile's file")
+    {
+        writeSideFile(dir, "profiles/listed.yml", "- dark\n");
+        writeSideFile(dir, "profiles/word.yml", "dark\n");
+        writeSideFile(dir, "profiles/empty.yml", "# nothing set yet\n");
+        auto const config = loadFromYaml(dir, yaml);
+        CHECK(config.findProfile("listed") == nullptr);
+        CHECK(config.findProfile("word") == nullptr);
+        CHECK(config.findProfile("empty") != nullptr); // an empty document is a profile of defaults
+        CHECK(config.findProfile("main") != nullptr);
+    }
+
+    SECTION("a colour scheme's file")
+    {
+        writeSideFile(dir, "colorschemes/word.yml", "dark\n");
+        auto capture = core::log::ScopedCapture { "error" };
+        std::ignore = loadFromYaml(dir, yaml);
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.text().contains("word.yml"));
+        CHECK_FALSE(capture.text().contains("profiles.main.colors"));
+    }
 }
 
 // }}}
@@ -4163,6 +5011,72 @@ profiles:
     CHECK_FALSE(settings.error().empty());
 }
 
+TEST_CASE("Config: tryLoadConfigFromFile loads a file or says why it could not", "[config]")
+{
+    QTemporaryDir dir;
+
+    SECTION("a file that loads")
+    {
+        auto const loaded = contour::config::tryLoadConfigFromFile(writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        terminal_id: VT340
+)"sv));
+        REQUIRE(loaded.has_value());
+        CHECK(loaded->profile("main")->terminalId.value() == vtbackend::VTType::VT340);
+    }
+
+    SECTION("a file that does not parse")
+    {
+        auto const loaded = contour::config::tryLoadConfigFromFile(writeConfig(dir, R"(
+profiles:
+    main:
+  bad_indentation: [unclosed
+)"sv));
+        REQUIRE_FALSE(loaded.has_value());
+        CHECK(loaded.error().starts_with("cannot load config: "));
+    }
+}
+
+TEST_CASE("Config: emulationSettingsFor resolves a profile of a configuration in memory", "[config]")
+{
+    // What `contour client` states for each session it creates: the configuration it holds, as a reload
+    // left it, resolved and refused as resolveEmulationSettings resolves and refuses the file.
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        terminal_id: VT340
+    work:
+        terminal_id: VT220
+)"sv);
+    auto const config = contour::config::loadConfigFromFile(path);
+
+    SECTION("no name is the configuration's default profile")
+    {
+        auto const settings = contour::config::emulationSettingsFor(config, "");
+        REQUIRE(settings.has_value());
+        CHECK(settings->terminalId == vtbackend::VTType::VT340);
+    }
+
+    SECTION("a profile by name")
+    {
+        auto const settings = contour::config::emulationSettingsFor(config, "work");
+        REQUIRE(settings.has_value());
+        CHECK(settings->terminalId == vtbackend::VTType::VT220);
+    }
+
+    SECTION("an unknown profile is refused in the words the file's resolution uses")
+    {
+        auto const settings = contour::config::emulationSettingsFor(config, "nope");
+        REQUIRE_FALSE(settings.has_value());
+        CHECK(settings.error() == contour::config::resolveEmulationSettings(path.string(), "nope").error());
+        CHECK(settings.error().contains(path.string()));
+    }
+}
+
 TEST_CASE("Config: resolveSessionConfig carries a profile's shell, sandbox policy and presentation "
           "fields",
           "[config]")
@@ -4343,7 +5257,7 @@ layouts:
     REQUIRE_FALSE(serversTab.root.isLeaf());
     CHECK(serversTab.root.orientation == vtworkspace::SplitState::Vertical);
     REQUIRE(serversTab.root.children.size() == 2);
-    CHECK(*serversTab.root.children[0].command == "npm");
+    CHECK(*serversTab.root.children[0].command == "npm run dev");
     CHECK(*serversTab.root.children[1].command == "htop");
 }
 
@@ -4485,4 +5399,1850 @@ TEST_CASE("Config: history.hard_limit survives a write/read round-trip", "[confi
 
     CHECK(reloadedProfile->history.value().limits() == profile->history.value().limits());
 }
+// }}}
+
+namespace
+{
+/// The colour @p palette's scheme set for @p outcome's blocks; unset when it set none.
+[[nodiscard]] std::optional<vtbackend::RGBColor> blockStatusIn(vtbackend::ColorPalette const& palette,
+                                                               vtbackend::CommandBlockOutcome outcome)
+{
+    return palette.blockStatus[static_cast<size_t>(outcome)];
+}
+} // namespace
+
+TEST_CASE("Config: the gutter's status and text colors load and are written back", "[config]")
+{
+    QTemporaryDir dir;
+
+    SECTION("unset by default, so vtbackend derives them")
+    {
+        auto const scheme = schemeOf(loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: coverage
+color_schemes:
+    coverage:
+        default:
+            background: '#102030'
+            foreground: '#D0D0D0'
+)"sv));
+        CHECK_FALSE(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Success).has_value());
+        CHECK_FALSE(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Failure).has_value());
+        CHECK_FALSE(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Running).has_value());
+        CHECK_FALSE(scheme.gutterText.has_value());
+    }
+
+    SECTION("every key loads")
+    {
+        auto const scheme = schemeOf(loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: coverage
+color_schemes:
+    coverage:
+        default:
+            background: '#102030'
+            foreground: '#D0D0D0'
+        block_status:
+            success: '#20A020'
+            failure: '#E02020'
+            running: '#E0E020'
+        gutter_text: '#606060'
+)"sv));
+        CHECK(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Success)
+              == vtbackend::RGBColor(0x20, 0xA0, 0x20));
+        CHECK(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Failure)
+              == vtbackend::RGBColor(0xE0, 0x20, 0x20));
+        CHECK(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Running)
+              == vtbackend::RGBColor(0xE0, 0xE0, 0x20));
+        CHECK(scheme.gutterText == vtbackend::RGBColor(0x60, 0x60, 0x60));
+    }
+
+    SECTION("one key alone loads, and the others stay unset")
+    {
+        auto const scheme = schemeOf(loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: coverage
+color_schemes:
+    coverage:
+        default:
+            background: '#102030'
+            foreground: '#D0D0D0'
+        block_status:
+            failure: '#E02020'
+)"sv));
+        CHECK_FALSE(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Success).has_value());
+        CHECK(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Failure)
+              == vtbackend::RGBColor(0xE0, 0x20, 0x20));
+        CHECK_FALSE(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Running).has_value());
+        CHECK_FALSE(scheme.gutterText.has_value());
+    }
+
+    SECTION("the writer emits what was set, and only that")
+    {
+        auto config = contour::config::Config {};
+        auto& scheme = config.colorschemes.value()["default"];
+        scheme.blockStatus[static_cast<size_t>(vtbackend::CommandBlockOutcome::Failure)] =
+            vtbackend::RGBColor(0xE0, 0x20, 0x20);
+        scheme.gutterText = vtbackend::RGBColor(0x60, 0x60, 0x60);
+
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        REQUIRE(written.contains("block_status:"));
+
+        auto const reloaded = schemeOf(loadFromYaml(dir, written));
+        CHECK(blockStatusIn(reloaded, vtbackend::CommandBlockOutcome::Failure)
+              == vtbackend::RGBColor(0xE0, 0x20, 0x20));
+        CHECK(reloaded.gutterText == vtbackend::RGBColor(0x60, 0x60, 0x60));
+        // Writing back a derived colour would pin what the scheme deliberately left to the palette.
+        CHECK_FALSE(blockStatusIn(reloaded, vtbackend::CommandBlockOutcome::Success).has_value());
+        CHECK_FALSE(blockStatusIn(reloaded, vtbackend::CommandBlockOutcome::Running).has_value());
+    }
+
+    SECTION("the generated default config carries the commented examples")
+    {
+        auto const generated = contour::config::defaultConfigString();
+        CHECK(generated.contains("# block_status:"));
+        CHECK(generated.contains("# gutter_text:"));
+    }
+}
+
+namespace
+{
+/// The palette's colour for @p Outcome, as a slot a table of colour keys can name.
+template <vtbackend::CommandBlockOutcome Outcome>
+std::optional<vtbackend::RGBColor>& blockStatusOf(vtbackend::ColorPalette& palette)
+{
+    return palette.blockStatus[static_cast<size_t>(Outcome)];
+}
+} // namespace
+
+TEST_CASE("Config: each gutter color a scheme sets is written back on its own", "[config]")
+{
+    // One key at a time, so a key the writer skips, or spells as another, shows up as exactly that key.
+    using Slot = std::optional<vtbackend::RGBColor>& (*) (vtbackend::ColorPalette&);
+    auto constexpr Slots = std::array {
+        std::pair { "block_status.success"sv,
+                    Slot { &blockStatusOf<vtbackend::CommandBlockOutcome::Success> } },
+        std::pair { "block_status.failure"sv,
+                    Slot { &blockStatusOf<vtbackend::CommandBlockOutcome::Failure> } },
+        std::pair { "block_status.running"sv,
+                    Slot { &blockStatusOf<vtbackend::CommandBlockOutcome::Running> } },
+        std::pair { "gutter_text"sv,
+                    Slot { [](vtbackend::ColorPalette& palette) -> std::optional<vtbackend::RGBColor>& {
+                        return palette.gutterText;
+                    } } },
+    };
+    auto const color = vtbackend::RGBColor(0x12, 0x34, 0x56);
+    QTemporaryDir dir;
+
+    for (auto const& [name, slot]: Slots)
+    {
+        INFO("set: " << name);
+        auto config = contour::config::Config {};
+        slot(config.colorschemes.value()["default"]) = color;
+
+        auto const reloaded =
+            loadFromYaml(dir, contour::config::createString<contour::config::YAMLConfigWriter>(config));
+        auto scheme = schemeOf(reloaded);
+
+        for (auto const& [readName, readSlot]: Slots)
+        {
+            INFO("read: " << readName);
+            auto const expected =
+                readSlot == slot ? std::optional { color } : std::optional<vtbackend::RGBColor> {};
+            CHECK(readSlot(scheme) == expected);
+        }
+    }
+}
+
+TEST_CASE("Config: the gutter colors the generated config quotes are what the default scheme derives",
+          "[config]")
+{
+    // The commented examples say so, so they are held to it here: retuning a derivation in ColorPalette
+    // fails this rather than leaving the generated config quoting the old color.
+    auto const generated = contour::config::defaultConfigString();
+    auto const palette = vtbackend::ColorPalette {};
+    using vtbackend::CommandBlockOutcome;
+
+    CHECK(generated.contains(
+        std::format("#     success: {}\n", palette.blockStatusColor(CommandBlockOutcome::Success))));
+    CHECK(generated.contains(
+        std::format("#     failure: {}\n", palette.blockStatusColor(CommandBlockOutcome::Failure))));
+    CHECK(generated.contains(
+        std::format("#     running: {}\n", palette.blockStatusColor(CommandBlockOutcome::Running))));
+    CHECK(generated.contains(std::format("# gutter_text: {}\n", palette.gutterTextColor())));
+}
+
+TEST_CASE("Config: the gutter section loads from YAML", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+gutter:
+    exit_status: false
+    user_marks: false
+    line_numbers: hybrid
+    line_number_width: 8
+    timestamps: true
+    timestamp_format: '%H:%M'
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const& gutter = config.gutter.value();
+    CHECK(gutter.exitStatus == false);
+    CHECK(gutter.userMarks == false);
+    CHECK(gutter.lineNumbers == vtbackend::LineNumberMode::Hybrid);
+    CHECK(gutter.lineNumberWidth == 8);
+    CHECK(gutter.timestamps == true);
+    CHECK(gutter.timestampFormat == "%H:%M");
+}
+
+TEST_CASE("Config: gutter defaults keep the one column the fold markers always took", "[config]")
+{
+    auto const config = contour::config::Config {};
+    auto const& gutter = config.gutter.value();
+    CHECK(gutter.exitStatus);
+    CHECK(gutter.userMarks);
+    CHECK(gutter.lineNumbers == vtbackend::LineNumberMode::Off);
+    CHECK(gutter.lineNumberWidth == 6);
+    CHECK_FALSE(gutter.timestamps);
+    CHECK(gutter.timestampFormat == "%H:%M:%S");
+
+    // Nobody's column count changes on upgrade: exit status and user marks share the fold column.
+    CHECK(vtbackend::gutterLayoutFor(contour::config::gutterSettingsFor(config)).totalColumns == 1);
+}
+
+TEST_CASE("Config: an unusable gutter width or timestamp format keeps the default and says why", "[config]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+gutter:
+    line_numbers: absolute
+    line_number_width: 40
+    timestamp_format: '%K'
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const& gutter = config.gutter.value();
+    CHECK(gutter.lineNumbers == vtbackend::LineNumberMode::Absolute); // the siblings still load
+    CHECK(gutter.lineNumberWidth == 6);
+    CHECK(gutter.timestampFormat == "%H:%M:%S");
+    CHECK(capture.text().contains("line_number_width"));
+    CHECK(capture.text().contains("timestamp_format"));
+}
+
+TEST_CASE("Config: gutter.line_number_width takes 3 to 10 columns", "[config]")
+{
+    struct Case
+    {
+        std::string_view width;
+        int expected;
+    };
+    auto const cases = std::array {
+        Case { .width = "3", .expected = 3 },  Case { .width = "10", .expected = 10 },
+        Case { .width = "2", .expected = 6 },  Case { .width = "11", .expected = 6 },
+        Case { .width = "-4", .expected = 6 },
+    };
+    for (auto const& testCase: cases)
+    {
+        CAPTURE(testCase.width);
+        QTemporaryDir dir;
+        auto const config =
+            loadFromYaml(dir,
+                         contour::test::profileConfigYaml(
+                             "main", std::format("gutter:\n    line_number_width: {}\n", testCase.width)));
+        CHECK(config.gutter.value().lineNumberWidth == testCase.expected);
+    }
+}
+
+TEST_CASE("Config: a gutter timestamp format must begin with a conversion and spell one column a character",
+          "[config]")
+{
+    // Refused by the gutter's own measure (measureTimestampFormat), so the file is held to exactly what the
+    // gutter can draw, and the log says why in the gutter's words.
+    struct Case
+    {
+        std::string_view format;
+        vtbackend::TimestampFormatError error;
+    };
+    auto const cases = std::array {
+        // A leading literal.
+        Case { .format = "[%H:%M]", .error = vtbackend::TimestampFormatError::NoLeadingConversion },
+        // A leading width and a leading alignment, which std::format would take as padding.
+        Case { .format = "8%H", .error = vtbackend::TimestampFormatError::NoLeadingConversion },
+        Case { .format = ">%H:%M", .error = vtbackend::TimestampFormatError::NoLeadingConversion },
+        // U+6642 takes two columns.
+        Case { .format = "%H\xE6\x99\x82%M",
+               .error = vtbackend::TimestampFormatError::WideOrZeroWidthCharacter },
+        // U+0301 COMBINING ACUTE ACCENT takes none.
+        Case { .format = "%H:%M\xCC\x81",
+               .error = vtbackend::TimestampFormatError::WideOrZeroWidthCharacter },
+    };
+    for (auto const& testCase: cases)
+    {
+        CAPTURE(testCase.format);
+        QTemporaryDir dir;
+        auto capture = core::log::ScopedCapture { "error" };
+        auto const config =
+            loadFromYaml(dir,
+                         contour::test::profileConfigYaml(
+                             "main", std::format("gutter:\n    timestamp_format: '{}'\n", testCase.format)));
+
+        CHECK(config.gutter.value().timestampFormat == vtbackend::DefaultTimestampFormat);
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.text().contains("timestamp_format"));
+        CHECK(capture.text().contains(vtbackend::timestampFormatErrorText(testCase.error)));
+    }
+}
+
+TEST_CASE("Config: an unknown line_numbers value keeps the default", "[config]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+gutter:
+    line_numbers: sideways
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+    CHECK(config.gutter.value().lineNumbers == vtbackend::LineNumberMode::Off);
+    CHECK(config.gutter.value() == contour::config::GutterConfig {}); // and every key it did not name
+    CHECK(capture.text().contains("sideways"));
+}
+
+TEST_CASE("Config: gutterSettingsFor joins the gutter section and the fold switch", "[config]")
+{
+    auto config = contour::config::Config {};
+    config.gutter.value().lineNumbers = vtbackend::LineNumberMode::Relative;
+    config.gutter.value().lineNumberWidth = 4;
+    config.gutter.value().timestamps = true;
+    config.gutter.value().timestampFormat = "%H:%M";
+
+    auto const settings = contour::config::gutterSettingsFor(config);
+    CHECK(settings.foldMarkers); // folding.enabled and folding.show_markers, both on by default
+    CHECK(settings.exitStatus);
+    CHECK(settings.userMarks);
+    CHECK(settings.lineNumbers == vtbackend::LineNumberMode::Relative);
+    CHECK(settings.lineNumberWidth == 4);
+    CHECK(settings.timestamps);
+    CHECK(settings.timestampFormat == "%H:%M");
+
+    config.folding.value().enabled = false;
+    CHECK_FALSE(contour::config::gutterSettingsFor(config).foldMarkers);
+}
+
+TEST_CASE("Config: the gutter section survives a write and a read", "[config]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+
+    SECTION("the generated defaults read back as the defaults")
+    {
+        auto const generated = contour::config::defaultConfigString();
+        REQUIRE(generated.contains("\ngutter:\n"));
+        CHECK(loadFromYaml(dir, generated).gutter.value() == contour::config::GutterConfig {});
+    }
+
+    SECTION("set values, a quote in the format among them, read back as set")
+    {
+        auto config = contour::config::Config {};
+        config.gutter.value() =
+            contour::config::GutterConfig { .exitStatus = false,
+                                            .userMarks = true,
+                                            .lineNumbers = vtbackend::LineNumberMode::Relative,
+                                            .lineNumberWidth = 9,
+                                            .timestamps = true,
+                                            .timestampFormat = "%H:%M 'x'" };
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        CHECK(loadFromYaml(dir, written).gutter.value() == config.gutter.value());
+    }
+
+    CHECK(capture.text().empty());
+}
+
+TEST_CASE("Config: the terminal draws the gutter the window geometry reserves", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+folding:
+    show_markers: false
+gutter:
+    line_numbers: absolute
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const settings = contour::config::emulationSettings(config, *profile);
+    CHECK(settings.gutter == contour::config::gutterSettingsFor(config));
+    CHECK(settings.gutter.lineNumbers == vtbackend::LineNumberMode::Absolute);
+    CHECK_FALSE(settings.gutter.foldMarkers);
+    CHECK(settings.gutter.exitStatus); // the block column outlives the fold markers
+}
+
+namespace
+{
+/// The action of type @p BoundAction bound to @p key.
+/// @param config The loaded configuration.
+/// @param key The key the binding is for.
+/// @return The action, or nullopt when the key has no binding (the reader dropped it).
+template <typename BoundAction>
+[[nodiscard]] std::optional<BoundAction> boundAction(contour::config::Config const& config,
+                                                     vtbackend::Key key)
+{
+    auto const* mapping = keyMappingFor(config, key);
+    if (mapping == nullptr || mapping->binding.empty())
+        return std::nullopt;
+    return std::get<BoundAction>(mapping->binding.at(0));
+}
+} // namespace
+
+TEST_CASE("Config: SelectCommandBlock reads its target, part and pinned block", "[config][semanticblocks]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control], key: 'F1', action: SelectCommandBlock }
+    - { mods: [Control], key: 'F2', action: SelectCommandBlock, target: cursor, part: input }
+    - { mods: [Control], key: 'F3', action: SelectCommandBlock, target: POINTER, part: all, block: 7 }
+    - { mods: [Control], key: 'F4', action: SelectCommandBlock, part: bogus }
+)"sv);
+
+    auto const bound = [&](vtbackend::Key key) {
+        return boundAction<contour::actions::SelectCommandBlock>(config, key);
+    };
+
+    auto const plain = bound(vtbackend::Key::F1);
+    REQUIRE(plain.has_value());
+    CHECK(plain->target == vtbackend::CommandBlockTarget::Last);
+    CHECK(plain->part == vtbackend::CommandBlockPart::Output);
+    CHECK(plain->block.value == 0);
+
+    auto const atCursor = bound(vtbackend::Key::F2);
+    REQUIRE(atCursor.has_value());
+    CHECK(atCursor->target == vtbackend::CommandBlockTarget::Cursor);
+    CHECK(atCursor->part == vtbackend::CommandBlockPart::Prompt);
+
+    auto const pinned = bound(vtbackend::Key::F3);
+    REQUIRE(pinned.has_value());
+    CHECK(pinned->target == vtbackend::CommandBlockTarget::Pointer); // tokens ignore case
+    CHECK(pinned->part == vtbackend::CommandBlockPart::PromptAndOutput);
+    CHECK(pinned->block.value == 7);
+
+    // A misspelt part drops the binding rather than silently selecting something else.
+    CHECK_FALSE(bound(vtbackend::Key::F4).has_value());
+}
+
+TEST_CASE("Config: a block that names no block id drops the binding", "[config][semanticblocks]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control], key: 'F1', action: SelectCommandBlock, block: abc }
+    - { mods: [Control], key: 'F2', action: SelectCommandBlock, block: -1 }
+    - { mods: [Control], key: 'F3', action: SelectCommandBlock, block: 4294967296 }
+    - { mods: [Control], key: 'F4', action: SelectCommandBlock, block: [7] }
+    - { mods: [Control], key: 'F5', action: SelectCommandBlock, block: 0 }
+    - { mods: [Control], key: 'F6', action: SelectCommandBlock, block: 4294967295 }
+    - { mods: [Control], key: 'F7', action: SelectCommandBlock, block: 7 }
+    - { mods: [Control], key: 'F8', action: SelectCommandBlock, part: bogus }
+    - { mods: [Control], key: 'F9', action: SelectCommandBlock, block: 0x7 }
+)"sv);
+
+    auto const bound = [&](vtbackend::Key key) {
+        return boundAction<contour::actions::SelectCommandBlock>(config, key);
+    };
+
+    // None of these is a block id written as Contour writes one. Read as some id anyway -- "not pinned", or
+    // the digits before the junk -- each would quietly act on another block, so each drops the binding, as
+    // a misspelt part does.
+    CHECK_FALSE(bound(vtbackend::Key::F1).has_value()); // not a number
+    CHECK_FALSE(bound(vtbackend::Key::F2).has_value()); // negative
+    CHECK_FALSE(bound(vtbackend::Key::F3).has_value()); // past the id's range
+    CHECK_FALSE(bound(vtbackend::Key::F4).has_value()); // not a scalar
+    CHECK_FALSE(bound(vtbackend::Key::F9).has_value()); // not decimal: digits with more after them
+
+    // Zero is "not pinned"; every other id the type holds pins.
+    auto const unpinned = bound(vtbackend::Key::F5);
+    REQUIRE(unpinned.has_value());
+    CHECK(unpinned->block.value == 0);
+
+    auto const largest = bound(vtbackend::Key::F6);
+    REQUIRE(largest.has_value());
+    CHECK(largest->block.value == 4294967295U);
+
+    auto const pinned = bound(vtbackend::Key::F7);
+    REQUIRE(pinned.has_value());
+    CHECK(pinned->block.value == 7);
+
+    // A dropped block says so in the words a dropped part uses.
+    CHECK_FALSE(bound(vtbackend::Key::F8).has_value());
+    auto const& log = capture.text();
+    INFO("captured error log:\n" << log);
+    CHECK(log.contains("Invalid part 'bogus' in action 'SelectCommandBlock'; ignoring the binding."));
+    CHECK(log.contains("Invalid block 'abc' in action 'SelectCommandBlock'; ignoring the binding."));
+    CHECK(log.contains("Invalid block '' in action 'SelectCommandBlock'; ignoring the binding.")); // [7]
+}
+
+TEST_CASE("Config: the block copy actions read back what the config writer writes",
+          "[config][semanticblocks]")
+{
+    using namespace contour::actions;
+    using vtbackend::CommandBlockId;
+    using vtbackend::CommandBlockPart;
+    using vtbackend::CommandBlockTarget;
+
+    // The writer's own output, fed to the reader: what Contour writes is by construction what it reads.
+    auto const copyPrompt = CopyCommandBlock { .target = CommandBlockTarget::Pointer,
+                                               .part = CommandBlockPart::Prompt,
+                                               .block = CommandBlockId(4) };
+    auto const copyLine =
+        CopyCommandLine { .target = CommandBlockTarget::Cursor, .block = CommandBlockId(2) };
+
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir,
+                                     std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - {{ mods: [Control], key: 'F1', action: CopyCommandBlock }}
+    - {{ mods: [Control], key: 'F2', action: {} }}
+    - {{ mods: [Control], key: 'F3', action: CopyCommandLine }}
+    - {{ mods: [Control], key: 'F4', action: {} }}
+    - {{ mods: [Control], key: 'F5', action: CopyCommandBlock, part: bogus }}
+    - {{ mods: [Control], key: 'F6', action: CopyCommandLine, target: nowhere }}
+    - {{ mods: [Control], key: 'F7', action: CopyCommandLine, block: abc }}
+)",
+                                                 Action { copyPrompt },
+                                                 Action { copyLine }));
+
+    auto const plainBlock = boundAction<CopyCommandBlock>(config, vtbackend::Key::F1);
+    REQUIRE(plainBlock.has_value());
+    CHECK(plainBlock->target == CommandBlockTarget::Last);
+    CHECK(plainBlock->part == CommandBlockPart::Output);
+    CHECK(plainBlock->block.value == 0);
+
+    auto const prompt = boundAction<CopyCommandBlock>(config, vtbackend::Key::F2);
+    REQUIRE(prompt.has_value());
+    CHECK(prompt->target == copyPrompt.target);
+    CHECK(prompt->part == copyPrompt.part);
+    CHECK(prompt->block == copyPrompt.block);
+
+    auto const plainLine = boundAction<CopyCommandLine>(config, vtbackend::Key::F3);
+    REQUIRE(plainLine.has_value());
+    CHECK(plainLine->target == CommandBlockTarget::Last);
+    CHECK(plainLine->block.value == 0);
+
+    auto const line = boundAction<CopyCommandLine>(config, vtbackend::Key::F4);
+    REQUIRE(line.has_value());
+    CHECK(line->target == copyLine.target);
+    CHECK(line->block == copyLine.block);
+
+    // A misspelt argument drops the binding, in the words SelectCommandBlock's use.
+    CHECK_FALSE(boundAction<CopyCommandBlock>(config, vtbackend::Key::F5).has_value());
+    CHECK_FALSE(boundAction<CopyCommandLine>(config, vtbackend::Key::F6).has_value());
+    CHECK_FALSE(boundAction<CopyCommandLine>(config, vtbackend::Key::F7).has_value());
+    auto const& log = capture.text();
+    INFO("captured error log:\n" << log);
+    CHECK(log.contains("Invalid part 'bogus' in action 'CopyCommandBlock'; ignoring the binding."));
+    CHECK(log.contains("Invalid target 'nowhere' in action 'CopyCommandLine'; ignoring the binding."));
+    CHECK(log.contains("Invalid block 'abc' in action 'CopyCommandLine'; ignoring the binding."));
+}
+
+TEST_CASE("Config: CopySelection reads its fallback", "[config][semanticblocks]")
+{
+    using contour::actions::CopyFallback;
+    using contour::actions::CopyFormat;
+    using contour::actions::CopySelection;
+
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(
+        dir,
+        std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - {{ mods: [Control], key: 'F1', action: CopySelection, fallback: last_command_output }}
+    - {{ mods: [Control], key: 'F2', action: CopySelection, format: HTML }}
+    - {{ mods: [Control], key: 'F3', action: CopySelection, fallback: everything }}
+    - {{ mods: [Control], key: 'F4', action: {} }}
+)",
+                    contour::actions::Action { CopySelection {
+                        .format = CopyFormat::HTML, .fallback = CopyFallback::LastCommandOutput } }));
+
+    auto const fallback = boundAction<CopySelection>(config, vtbackend::Key::F1);
+    REQUIRE(fallback.has_value());
+    CHECK(fallback->fallback == CopyFallback::LastCommandOutput);
+    CHECK(fallback->format == CopyFormat::Text);
+
+    auto const html = boundAction<CopySelection>(config, vtbackend::Key::F2);
+    REQUIRE(html.has_value());
+    CHECK(html->format == CopyFormat::HTML);
+    CHECK(html->fallback == CopyFallback::None);
+
+    // A misspelt fallback drops the binding: guessing would either empty the clipboard or fill it with a
+    // build log the user never asked for.
+    CHECK_FALSE(boundAction<CopySelection>(config, vtbackend::Key::F3).has_value());
+    auto const& log = capture.text();
+    INFO("captured error log:\n" << log);
+    CHECK(log.contains("Invalid fallback 'everything' in action 'CopySelection'; ignoring the binding."));
+
+    // What the config writer writes reads back.
+    auto const both = boundAction<CopySelection>(config, vtbackend::Key::F4);
+    REQUIRE(both.has_value());
+    CHECK(both->format == CopyFormat::HTML);
+    CHECK(both->fallback == CopyFallback::LastCommandOutput);
+}
+
+TEST_CASE("Config: a mouse binding may name a click count", "[config][semanticblocks]")
+{
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    using vtbackend::MouseButton;
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control], mouse: Left, action: FollowHyperlink }
+    - { mods: [Control], mouse: Left, clicks: 3, action: SelectCommandBlock, target: pointer }
+    - { mods: [Control], mouse: Left, clicks: 9, action: SelectAll }
+    - { mods: [Control], key: 'F5', clicks: 2, action: SelectAll }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value();
+
+    // The click-count row is a binding of its own, not a second action on the plain Ctrl+Left one; the
+    // out-of-range count and the count on a key are dropped.
+    REQUIRE(mappings.mouseMappings.size() == 2);
+    CHECK(mappings.keyMappings.empty());
+
+    auto const ctrl = Modifiers { Modifier::Control };
+    auto const* plain =
+        contour::config::apply(mappings.mouseMappings, MouseButton::Left, ctrl, uint8_t { 0 });
+    REQUIRE(plain != nullptr);
+    CHECK(std::holds_alternative<contour::actions::FollowHyperlink>(plain->at(0)));
+
+    auto const* third =
+        contour::config::apply(mappings.mouseMappings, MouseButton::Left, ctrl, uint8_t { 0 }, uint8_t { 3 });
+    REQUIRE(third != nullptr);
+    REQUIRE(std::holds_alternative<contour::actions::SelectCommandBlock>(third->at(0)));
+    CHECK(std::get<contour::actions::SelectCommandBlock>(third->at(0)).target
+          == vtbackend::CommandBlockTarget::Pointer);
+
+    CHECK(
+        contour::config::apply(mappings.mouseMappings, MouseButton::Left, ctrl, uint8_t { 0 }, uint8_t { 2 })
+        == nullptr);
+}
+
+TEST_CASE("Config: a malformed click count drops the binding", "[config][semanticblocks]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control], mouse: Left, clicks: 0, action: SelectAll }
+    - { mods: [Control], mouse: Left, clicks: 5, action: SelectAll }
+    - { mods: [Control], mouse: Left, clicks: -1, action: SelectAll }
+    - { mods: [Control], mouse: Left, clicks: three, action: SelectAll }
+    - { mods: [Control], mouse: Left, clicks: 0x3, action: SelectAll }
+    - { mods: [Control], mouse: Left, clicks: 256, action: SelectAll }
+    - { mods: [Control], mouse: Left, clicks: [3], action: SelectAll }
+    - { mods: [Control], key: 'F5', clicks: 2, action: SelectAll }
+    - { mods: [Control], key: 'F6', mouse: Left, clicks: 2, action: SelectAll }
+    - { mods: [Control], mouse: WheelUp, clicks: 1, action: SelectAll }
+    - { mods: [Control], mouse: Middle, clicks: 2, action: SelectCommandBlock, part: bogus }
+    - { mods: [Control], mouse: Right, clicks: 4, action: SelectCommandBlock, target: cursor }
+)"sv);
+
+    // Every count above but the last's is no count, or one no press carries. Read as some count anyway --
+    // the digits before the junk, the count wrapped into range, "any count" -- each would quietly bind
+    // another click, so each drops the binding, as a misspelt modifier does. A count on a key or a wheel
+    // names a click that never comes. The action's own arguments are read as on any other row.
+    auto const& mappings = config.inputMappings.value();
+    CHECK(mappings.keyMappings.empty());
+    REQUIRE(mappings.mouseMappings.size() == 1);
+    auto const& kept = mappings.mouseMappings.front();
+    CHECK(kept.input == vtbackend::MouseButton::Right);
+    CHECK(kept.clickCount == uint8_t { 4 });
+    REQUIRE(std::holds_alternative<contour::actions::SelectCommandBlock>(kept.binding.at(0)));
+    CHECK(std::get<contour::actions::SelectCommandBlock>(kept.binding.at(0)).target
+          == vtbackend::CommandBlockTarget::Cursor);
+
+    auto const& log = capture.text();
+    INFO("captured error log:\n" << log);
+    for (auto const* count: { "0", "5", "-1", "three", "0x3", "256" })
+    {
+        INFO("clicks: " << count);
+        CHECK(log.contains(
+            std::format("Dropping input_mapping entry [action: SelectAll, mouse: Left, clicks: {}]: "
+                        "could not parse its clicks (expected 1 to 4).",
+                        count)));
+    }
+    CHECK(log.contains("Dropping input_mapping entry [action: SelectAll, mouse: Left]: could not parse its "
+                       "clicks (expected 1 to 4).")); // [3]
+    CHECK(
+        log.contains("Dropping input_mapping entry [action: SelectAll, key: F5, clicks: 2]: 'clicks' applies "
+                     "to the Left, Middle and Right mouse buttons only."));
+    CHECK(log.contains("Dropping input_mapping entry [action: SelectAll, key: F6, mouse: Left, clicks: 2]: "
+                       "'clicks' applies to the Left, Middle and Right mouse buttons only."));
+    CHECK(
+        log.contains("Dropping input_mapping entry [action: SelectAll, mouse: WheelUp, clicks: 1]: 'clicks' "
+                     "applies to the Left, Middle and Right mouse buttons only."));
+    CHECK(log.contains("Invalid part 'bogus' in action 'SelectCommandBlock'; ignoring the binding."));
+}
+
+TEST_CASE("Config: Ctrl+triple-click selects the output under the pointer by default",
+          "[config][semanticblocks]")
+{
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    using vtbackend::MouseButton;
+
+    auto const config = contour::config::Config {};
+    auto const ctrl = Modifiers { Modifier::Control };
+
+    auto const* bound =
+        contour::config::applyBuiltinFallback(config, MouseButton::Left, ctrl, uint8_t { 0 }, uint8_t { 3 });
+    REQUIRE(bound != nullptr);
+    REQUIRE(std::holds_alternative<contour::actions::SelectCommandBlock>(bound->at(0)));
+    auto const& select = std::get<contour::actions::SelectCommandBlock>(bound->at(0));
+    CHECK(select.target == vtbackend::CommandBlockTarget::Pointer);
+    CHECK(select.part == vtbackend::CommandBlockPart::Output);
+
+    // Only the third click: a plain Ctrl+click and a Ctrl+double-click are not claimed by it, nor is a
+    // triple-click without Ctrl or of another button.
+    CHECK(contour::config::applyBuiltinFallback(config, MouseButton::Left, ctrl, uint8_t { 0 }) == nullptr);
+    CHECK(contour::config::applyBuiltinFallback(config, MouseButton::Left, ctrl, uint8_t { 0 }, uint8_t { 2 })
+          == nullptr);
+    CHECK(contour::config::applyBuiltinFallback(
+              config, MouseButton::Left, Modifiers { Modifier::None }, uint8_t { 0 }, uint8_t { 3 })
+          == nullptr);
+    CHECK(
+        contour::config::applyBuiltinFallback(config, MouseButton::Middle, ctrl, uint8_t { 0 }, uint8_t { 3 })
+        == nullptr);
+
+    // A fallback, not a default (see builtinFallbackMouseMappings): no default row names a click count.
+    CHECK(std::ranges::none_of(config.inputMappings.value().mouseMappings,
+                               [](auto const& mapping) { return mapping.clickCount.has_value(); }));
+}
+
+TEST_CASE("Config: Ctrl+triple-click leaves the alternate screen's extended word alone",
+          "[config][semanticblocks]")
+{
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    using vtbackend::MouseButton;
+
+    // There are no blocks on the alternate screen, so the row would claim the click only to refuse it,
+    // and the terminal's own extended-word selection would be lost.
+    auto const config = contour::config::Config {};
+    auto const ctrl = Modifiers { Modifier::Control };
+    auto const alternateScreen = uint8_t { vtbackend::MatchModes::AlternateScreen };
+    CHECK(
+        contour::config::applyBuiltinFallback(config, MouseButton::Left, ctrl, alternateScreen, uint8_t { 3 })
+        == nullptr);
+    CHECK(contour::config::applyBuiltinFallback(config, MouseButton::Left, ctrl, uint8_t { 0 }, uint8_t { 3 })
+          != nullptr);
+}
+
+TEST_CASE("Config: a mouse binding's mode survives the writer", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Alt], mouse: Middle, action: SelectAll, mode: '~Select' }
+)");
+    auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+    REQUIRE(written.contains("mode: '~Select'"));
+
+    QTemporaryDir reloadDir;
+    auto const reloaded = loadFromYaml(reloadDir, written);
+    auto const& mappings = reloaded.inputMappings.value().mouseMappings;
+    REQUIRE(mappings.size() == 1);
+    CHECK(mappings.front().modes == vtbackend::MatchModes { 0, vtbackend::MatchModes::Select });
+}
+
+TEST_CASE("Config: a click count survives the writer", "[config][semanticblocks]")
+{
+    QTemporaryDir dir;
+    auto config = contour::config::Config {};
+    auto mappings = config.inputMappings.value();
+    mappings.mouseMappings.push_back(
+        contour::config::MouseInputMapping { .modes { vtbackend::MatchModes {} },
+                                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
+                                             .input = vtbackend::MouseButton::Middle,
+                                             .binding = { { contour::actions::SelectAll {} } },
+                                             .clickCount = uint8_t { 2 } });
+    config.inputMappings = mappings;
+
+    auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+    REQUIRE(written.contains("clicks: 2"));
+
+    auto const reloaded = loadFromYaml(dir, written);
+    CHECK(std::ranges::any_of(reloaded.inputMappings.value().mouseMappings, [](auto const& mapping) {
+        return mapping.input == vtbackend::MouseButton::Middle && mapping.clickCount == uint8_t { 2 };
+    }));
+}
+
+TEST_CASE("Config: command_blocks.pager", "[config][semanticblocks]")
+{
+    QTemporaryDir dir;
+
+    SECTION("defaults to the platform's pager")
+    {
+        auto const config = contour::config::Config {};
+#ifdef _WIN32
+        CHECK(config.commandBlocks.value().pager == "more");
+#else
+        CHECK(config.commandBlocks.value().pager == "less -R");
+#endif
+        CHECK(config.commandBlocks.value().pager == contour::config::defaultCommandOutputPager());
+    }
+
+    SECTION("pager_format defaults to sgr, which less -R and Windows more both render")
+    {
+        CHECK(contour::config::Config {}.commandBlocks.value().pagerFormat
+              == contour::actions::OutputFormat::Sgr);
+    }
+
+    SECTION("pager_format is read, and survives the writer")
+    {
+        auto const config = loadFromYaml(dir,
+                                         "command_blocks:\n"
+                                         "    pager: 'pg'\n"
+                                         "    pager_format: plain\n"
+                                         "profiles:\n  main:\n    shell: \"/bin/bash\"\n");
+        CHECK(config.commandBlocks.value().pagerFormat == contour::actions::OutputFormat::Plain);
+
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        REQUIRE(written.contains("pager_format: plain"));
+        QTemporaryDir reloadDir;
+        CHECK(loadFromYaml(reloadDir, written).commandBlocks.value().pagerFormat
+              == contour::actions::OutputFormat::Plain);
+    }
+
+    SECTION("the format follows the program unless the binding names one")
+    {
+        using contour::actions::OpenCommandOutput;
+        using contour::actions::OutputFormat;
+        using contour::config::outputFormatFor;
+        auto blocks = contour::config::CommandBlocksConfig {};
+        blocks.pagerFormat = OutputFormat::Plain;
+
+        // The configured pager's format; a named program is assumed to render SGR, as less -R does.
+        CHECK(outputFormatFor(OpenCommandOutput {}, blocks) == OutputFormat::Plain);
+        CHECK(outputFormatFor(OpenCommandOutput { .program = "less -R" }, blocks) == OutputFormat::Sgr);
+        // The binding's own format wins either way.
+        CHECK(outputFormatFor(OpenCommandOutput { .format = OutputFormat::Sgr }, blocks)
+              == OutputFormat::Sgr);
+        CHECK(outputFormatFor(OpenCommandOutput { .program = "pg", .format = OutputFormat::Plain }, blocks)
+              == OutputFormat::Plain);
+    }
+
+    SECTION("is read from command_blocks")
+    {
+        auto const config = loadFromYaml(dir,
+                                         "command_blocks:\n"
+                                         "    pager: 'bat --paging=always'\n"
+                                         "profiles:\n  main:\n    shell: \"/bin/bash\"\n");
+        CHECK(config.commandBlocks.value().pager == "bat --paging=always");
+    }
+
+    SECTION("round-trips through the generated config")
+    {
+        auto config = contour::config::Config {};
+        auto blocks = config.commandBlocks.value();
+        blocks.pager = "most -s";
+        config.commandBlocks = blocks;
+
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        REQUIRE(written.contains("pager: 'most -s'"));
+        CHECK(loadFromYaml(dir, written).commandBlocks.value().pager == "most -s");
+    }
+
+    SECTION("round-trips a quote, a colon and a hash")
+    {
+        auto config = contour::config::Config {};
+        auto blocks = config.commandBlocks.value();
+        blocks.pager = "less --prompt='page: #%d'";
+        config.commandBlocks = blocks;
+
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        CHECK(loadFromYaml(dir, written).commandBlocks.value().pager == "less --prompt='page: #%d'");
+    }
+}
+
+TEST_CASE("Config: OpenCommandOutput reads its arguments", "[config][semanticblocks]")
+{
+    using contour::actions::OpenCommandOutput;
+    using contour::actions::OutputFormat;
+    using contour::actions::OutputPlacement;
+
+    // The writer's own output, fed to the reader: what Contour writes is by construction what it reads.
+    auto const written = OpenCommandOutput { .target = vtbackend::CommandBlockTarget::Pointer,
+                                             .program = "less --prompt='x'",
+                                             .placement = OutputPlacement::Tab,
+                                             .format = OutputFormat::Plain,
+                                             .block = vtbackend::CommandBlockId(4) };
+
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir,
+                                     std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - {{ mods: [Control], key: 'F1', action: OpenCommandOutput }}
+    - {{ mods: [Control], key: 'F2', action: OpenCommandOutput, program: 'wl-copy', placement: detached, format: plain }}
+    - {{ mods: [Control], key: 'F3', action: {} }}
+    - {{ mods: [Control], key: 'F4', action: OpenCommandOutput, placement: window }}
+    - {{ mods: [Control], key: 'F5', action: OpenCommandOutput, format: html }}
+    - {{ mods: [Control], key: 'F6', action: OpenCommandOutput, target: nowhere }}
+    - {{ mods: [Control], key: 'F7', action: OpenCommandOutput, block: abc }}
+    - {{ mods: [Control], key: 'F8', action: OpenCommandOutput, program: [less, -R] }}
+)",
+                                                 contour::actions::Action { written }));
+
+    auto const plain = boundAction<OpenCommandOutput>(config, vtbackend::Key::F1);
+    REQUIRE(plain.has_value());
+    CHECK(plain->target == vtbackend::CommandBlockTarget::Last);
+    CHECK(plain->program.empty());
+    CHECK(plain->placement == OutputPlacement::Split);
+    CHECK_FALSE(plain->format.has_value()); // the program's own format applies
+    CHECK(plain->block.value == 0);
+
+    auto const piped = boundAction<OpenCommandOutput>(config, vtbackend::Key::F2);
+    REQUIRE(piped.has_value());
+    CHECK(piped->program == "wl-copy");
+    CHECK(piped->placement == OutputPlacement::Detached);
+    CHECK(piped->format == OutputFormat::Plain);
+
+    auto const readBack = boundAction<OpenCommandOutput>(config, vtbackend::Key::F3);
+    REQUIRE(readBack.has_value());
+    CHECK(readBack->target == written.target);
+    CHECK(readBack->program == written.program);
+    CHECK(readBack->placement == written.placement);
+    CHECK(readBack->format == written.format);
+    CHECK(readBack->block == written.block);
+
+    // A misspelt argument drops the binding, in the words the other block actions use: guessing would turn
+    // the binding into one that does something else. A program that is no scalar is no program either.
+    CHECK_FALSE(boundAction<OpenCommandOutput>(config, vtbackend::Key::F4).has_value());
+    CHECK_FALSE(boundAction<OpenCommandOutput>(config, vtbackend::Key::F5).has_value());
+    CHECK_FALSE(boundAction<OpenCommandOutput>(config, vtbackend::Key::F6).has_value());
+    CHECK_FALSE(boundAction<OpenCommandOutput>(config, vtbackend::Key::F7).has_value());
+    CHECK_FALSE(boundAction<OpenCommandOutput>(config, vtbackend::Key::F8).has_value());
+    auto const& log = capture.text();
+    INFO("captured error log:\n" << log);
+    CHECK(log.contains("Invalid placement 'window' in action 'OpenCommandOutput'; ignoring the binding."));
+    CHECK(log.contains("Invalid format 'html' in action 'OpenCommandOutput'; ignoring the binding."));
+    CHECK(log.contains("Invalid target 'nowhere' in action 'OpenCommandOutput'; ignoring the binding."));
+    CHECK(log.contains("Invalid block 'abc' in action 'OpenCommandOutput'; ignoring the binding."));
+    CHECK(log.contains("Invalid program '' in action 'OpenCommandOutput'; ignoring the binding."));
+}
+
+TEST_CASE("Config: Ctrl+Shift+G opens the last command's output by default", "[config][semanticblocks]")
+{
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+
+    auto const config = contour::config::Config {};
+    auto const ctrlShift = Modifiers { Modifier::Control, Modifier::Shift };
+
+    auto const* bound = contour::config::applyBuiltinFallback(config, U'G', ctrlShift, uint8_t { 0 });
+    REQUIRE(bound != nullptr);
+    REQUIRE(std::holds_alternative<contour::actions::OpenCommandOutput>(bound->at(0)));
+    auto const& open = std::get<contour::actions::OpenCommandOutput>(bound->at(0));
+    CHECK(open.target == vtbackend::CommandBlockTarget::Last);
+    CHECK(open.program.empty()); // command_blocks.pager
+    CHECK(open.placement == contour::actions::OutputPlacement::Split);
+
+    // Exactly the chord: not Ctrl+G, which the shell owns.
+    CHECK(contour::config::applyBuiltinFallback(config, U'G', Modifiers { Modifier::Control }, uint8_t { 0 })
+          == nullptr);
+
+    // A fallback, not a default -- it must reach users whose contour.yml lists the defaults.
+    CHECK(std::ranges::none_of(config.inputMappings.value().charMappings,
+                               [](auto const& mapping) { return mapping.input == U'G'; }));
+}
+
+// {{{ notify_on_command_finish
+
+TEST_CASE("Config: notify_on_command_finish is on by default for unfocused commands of ten seconds",
+          "[config][notification]")
+{
+    auto const policy = contour::config::TerminalProfile {}.notifyOnCommandFinish.value();
+    CHECK(policy.when == contour::config::NotifyWhen::Unfocused);
+    CHECK(policy.minDuration == std::chrono::seconds { 10 });
+    CHECK(policy.outcome == contour::config::NotifyOutcome::Any);
+    CHECK(policy.action == contour::config::NotifyAction::Notify);
+    CHECK(policy.clearOn == contour::config::NotifyClearOn::Focus);
+}
+
+TEST_CASE("Config: notify_on_command_finish loads every key from a profile", "[config][notification]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        notify_on_command_finish:
+            when: hidden
+            min_duration: 42
+            outcome: failure
+            action: notify_bell
+            clear_on: next
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const expected = contour::config::FinishNotificationConfig {
+        .when = contour::config::NotifyWhen::Hidden,
+        .minDuration = std::chrono::seconds { 42 },
+        .outcome = contour::config::NotifyOutcome::Failure,
+        .action = contour::config::NotifyAction::NotifyBell,
+        .clearOn = contour::config::NotifyClearOn::Next,
+    };
+    CHECK(profile->notifyOnCommandFinish.value() == expected);
+}
+
+TEST_CASE("Config: an unknown notify_on_command_finish value keeps the default and is reported",
+          "[config][notification]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        notify_on_command_finish:
+            when: sometimes
+            min_duration: -5
+            action: shout
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& policy = profile->notifyOnCommandFinish.value();
+    CHECK(policy.when == contour::config::NotifyWhen::Unfocused);
+    CHECK(policy.action == contour::config::NotifyAction::Notify);
+    // A negative floor reads as "every command", which is what zero already says.
+    CHECK(policy.minDuration == std::chrono::seconds { 0 });
+    CHECK(capture.text().contains("sometimes"));
+    CHECK(capture.text().contains("shout"));
+}
+
+TEST_CASE("Config: a min_duration that is no number keeps the default and is reported",
+          "[config][notification]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        notify_on_command_finish:
+            min_duration: soon
+            clear_on: next
+)"sv);
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& policy = profile->notifyOnCommandFinish.value();
+    CHECK(policy.minDuration == std::chrono::seconds { 10 });
+    // One bad value costs only itself: the keys after it are still read.
+    CHECK(policy.clearOn == contour::config::NotifyClearOn::Next);
+    CHECK(capture.text().contains("soon"));
+}
+
+namespace
+{
+
+/// A configuration entry given a value of the wrong shape: a scalar where a map belongs, or a list where
+/// one word belongs.
+struct MalformedEntryCase
+{
+    std::string_view topLevel;  ///< Lines at the document's top level; empty for none.
+    std::string_view inProfile; ///< Lines inside the main profile, indented by eight spaces; empty for none.
+    std::string_view key;       ///< The key the diagnostic must name, spelled out from the document's root.
+    /// Whether the entry still holds its default (or, for a nested value, what its siblings say).
+    bool (*keptDefault)(contour::config::Config const& config);
+};
+
+/// The main profile of @p config, which every malformed-entry document defines.
+[[nodiscard]] contour::config::TerminalProfile const& mainProfile(contour::config::Config const& config)
+{
+    auto const* profile = config.findProfile("main");
+    REQUIRE(profile != nullptr);
+    return *profile;
+}
+
+/// The palette of the `broken` scheme the main profile of @p config uses, once its sibling map after the
+/// malformed one was read; nullptr when the profile lost the scheme, or the sibling was not read.
+[[nodiscard]] vtbackend::ColorPalette const* brokenScheme(contour::config::Config const& config)
+{
+    auto const* colors = std::get_if<contour::config::SimpleColorConfig>(&mainProfile(config).colors.value());
+    if (colors == nullptr || colors->colorScheme != "broken"
+        || colors->colors.gutterText != vtbackend::RGBColor { 0x123456 })
+        return nullptr;
+    return &colors->colors;
+}
+
+constexpr auto MalformedEntryCases = std::array {
+    // A map-valued key given a scalar.
+    MalformedEntryCase { .topLevel = {},
+                         .inProfile = "        notify_on_command_finish: never\n",
+                         .key = "profiles.main.notify_on_command_finish",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return mainProfile(config).notifyOnCommandFinish.value()
+                                        == contour::config::FinishNotificationConfig {};
+                             } },
+    MalformedEntryCase { .topLevel = "command_blocks: true\n",
+                         .inProfile = {},
+                         .key = "command_blocks",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return config.commandBlocks.value().maxRecords
+                                        == contour::config::CommandBlocksConfig {}.maxRecords;
+                             } },
+    MalformedEntryCase { .topLevel = "osc_context: off\n",
+                         .inProfile = {},
+                         .key = "osc_context",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return config.oscContext.value().enabled
+                                        == contour::config::OscContextConfig {}.enabled;
+                             } },
+    MalformedEntryCase { .topLevel = {},
+                         .inProfile = "        scrollbar: left\n",
+                         .key = "profiles.main.scrollbar",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return mainProfile(config).scrollbar.value().position
+                                        == contour::config::ScrollBarConfig {}.position;
+                             } },
+    // A list-valued key given one word: it costs the list, not its siblings.
+    MalformedEntryCase { .topLevel = {},
+                         .inProfile = "        scrollbar:\n"
+                                      "            position: left\n"
+                                      "            marks: failures\n",
+                         .key = "profiles.main.scrollbar.marks",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 auto const& scrollbar = mainProfile(config).scrollbar.value();
+                                 return scrollbar.marks == vtbackend::AllScrollbarMarkSources
+                                        && scrollbar.position == contour::config::ScrollBarPosition::Left;
+                             } },
+    MalformedEntryCase { .topLevel = {},
+                         .inProfile = "        sticky_header: always\n",
+                         .key = "profiles.main.sticky_header",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return mainProfile(config).stickyHeader.value()
+                                        == contour::config::StickyHeaderConfig {};
+                             } },
+    // A colour map of a scheme given a scalar: it costs that map, whose palette slot keeps its default, and
+    // the profile keeps the scheme -- the map after it is still read.
+    MalformedEntryCase { .topLevel = "color_schemes:\n"
+                                     "    broken:\n"
+                                     "        sticky_header: '#202830'\n"
+                                     "        gutter_text: '#123456'\n",
+                         .inProfile = "        colors: broken\n",
+                         .key = "color_schemes.broken.sticky_header",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 auto const* scheme = brokenScheme(config);
+                                 return scheme != nullptr && !scheme->stickyHeaderBackground
+                                        && !scheme->stickyHeaderSeparator;
+                             } },
+    MalformedEntryCase { .topLevel = "color_schemes:\n"
+                                     "    broken:\n"
+                                     "        fold_marker: '#202830'\n"
+                                     "        gutter_text: '#123456'\n",
+                         .inProfile = "        colors: broken\n",
+                         .key = "color_schemes.broken.fold_marker",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 auto const* scheme = brokenScheme(config);
+                                 return scheme != nullptr && !scheme->foldMarker && !scheme->foldMarkerHover;
+                             } },
+    MalformedEntryCase { .topLevel = "color_schemes:\n"
+                                     "    broken:\n"
+                                     "        block_status: '#202830'\n"
+                                     "        gutter_text: '#123456'\n",
+                         .inProfile = "        colors: broken\n",
+                         .key = "color_schemes.broken.block_status",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 auto const* scheme = brokenScheme(config);
+                                 return scheme != nullptr
+                                        && std::ranges::none_of(scheme->blockStatus,
+                                                                [](auto const& c) { return c.has_value(); });
+                             } },
+    MalformedEntryCase { .topLevel = "color_schemes:\n"
+                                     "    broken:\n"
+                                     "        tint: '#202830'\n"
+                                     "        gutter_text: '#123456'\n",
+                         .inProfile = "        colors: broken\n",
+                         .key = "color_schemes.broken.tint",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 auto const* scheme = brokenScheme(config);
+                                 return scheme != nullptr && !scheme->hasContextTints();
+                             } },
+    // A map whose malformed key comes after a good one: the map is put back whole, not left half read.
+    MalformedEntryCase { .topLevel = "color_schemes:\n"
+                                     "    broken:\n"
+                                     "        sticky_header:\n"
+                                     "            background: '#202830'\n"
+                                     "            separator: [1, 2]\n"
+                                     "        gutter_text: '#123456'\n",
+                         .inProfile = "        colors: broken\n",
+                         .key = "color_schemes.broken.sticky_header",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 auto const* scheme = brokenScheme(config);
+                                 return scheme != nullptr && !scheme->stickyHeaderBackground
+                                        && !scheme->stickyHeaderSeparator;
+                             } },
+    // So are the palette's own colour maps.
+    MalformedEntryCase { .topLevel = "color_schemes:\n"
+                                     "    broken:\n"
+                                     "        gutter_text: '#123456'\n"
+                                     "        normal:\n"
+                                     "            red: [1, 2]\n",
+                         .inProfile = "        colors: broken\n",
+                         .key = "color_schemes.broken.normal",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 auto const* scheme = brokenScheme(config);
+                                 return scheme != nullptr
+                                        && scheme->palette[1] == vtbackend::ColorPalette {}.palette[1];
+                             } },
+    // The scheme's older maps are guarded the same way.
+    MalformedEntryCase { .topLevel = "color_schemes:\n"
+                                     "    broken:\n"
+                                     "        cursor: block\n"
+                                     "        gutter_text: '#123456'\n",
+                         .inProfile = "        colors: broken\n",
+                         .key = "color_schemes.broken.cursor",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 auto const* scheme = brokenScheme(config);
+                                 return scheme != nullptr
+                                        && scheme->cursor.color == vtbackend::ColorPalette {}.cursor.color;
+                             } },
+    // A map whose malformed key comes after a good one: the entry is put back whole, not left half read.
+    MalformedEntryCase { .topLevel = {},
+                         .inProfile = "        history:\n"
+                                      "            limit: 4242\n"
+                                      "            auto_scroll_on_update: [yes]\n",
+                         .key = "profiles.main.history",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return mainProfile(config).history.value().maxHistoryLineCount
+                                        == contour::config::HistoryConfig {}.maxHistoryLineCount;
+                             } },
+    // An enum key given a list.
+    MalformedEntryCase { .topLevel = "tab_bar_position: [bottom]\n",
+                         .inProfile = {},
+                         .key = "tab_bar_position",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return config.tabBarPosition.value() == contour::config::TabBarPosition::Top;
+                             } },
+    MalformedEntryCase { .topLevel = "ui_style: [terminal]\n",
+                         .inProfile = {},
+                         .key = "ui_style",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return config.uiStyle.value() == contour::config::UiStyle::Native;
+                             } },
+    MalformedEntryCase { .topLevel = {},
+                         .inProfile = "        search_case_sensitivity: [sensitive]\n",
+                         .key = "profiles.main.search_case_sensitivity",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return mainProfile(config).searchCaseSensitivity.value()
+                                        == vtbackend::SearchCaseSensitivity::Smart;
+                             } },
+    // Nested: the bad value costs only itself, so its sibling after it is still read.
+    MalformedEntryCase { .topLevel = {},
+                         .inProfile = "        notify_on_command_finish:\n"
+                                      "            when: [always]\n"
+                                      "            outcome: failure\n",
+                         .key = "profiles.main.notify_on_command_finish.when",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 auto const& policy = mainProfile(config).notifyOnCommandFinish.value();
+                                 return policy.when == contour::config::NotifyWhen::Unfocused
+                                        && policy.outcome == contour::config::NotifyOutcome::Failure;
+                             } },
+    // Nested map-valued keys that are no config entries of their own: each costs itself, not its profile.
+    MalformedEntryCase { .topLevel = {},
+                         .inProfile = "        cursor: block\n",
+                         .key = "profiles.main.cursor",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return mainProfile(config).modeInsert.value().cursor.cursorShape
+                                        == vtbackend::CursorShape::Bar;
+                             } },
+    MalformedEntryCase { .topLevel = {},
+                         .inProfile = "        normal_mode: block\n",
+                         .key = "profiles.main.normal_mode",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return mainProfile(config).modeNormal.value().cursor.cursorShape
+                                        == vtbackend::CursorShape::Block;
+                             } },
+    MalformedEntryCase { .topLevel = {},
+                         .inProfile = "        visual_mode:\n"
+                                      "            cursor: underscore\n",
+                         .key = "profiles.main.visual_mode.cursor",
+                         .keptDefault =
+                             [](contour::config::Config const& config) {
+                                 return mainProfile(config).modeVisual.value().cursor.cursorShape
+                                        == vtbackend::CursorShape::Block;
+                             } },
+};
+
+} // namespace
+
+TEST_CASE("Config: a value of the wrong shape costs only its own entry", "[config][notification]")
+{
+    // yaml-cpp throws when a value has another shape than its reader expects. Uncaught, that throw ended
+    // the whole load, and every entry read after it silently kept its default.
+    for (auto const& testCase: MalformedEntryCases)
+    {
+        INFO("key: " << testCase.key);
+        QTemporaryDir dir;
+        auto capture = core::log::ScopedCapture { "error" };
+        auto const config = loadFromYaml(dir,
+                                         std::format(R"(default_profile: main
+{}profiles:
+    main:
+        shell: /bin/sh
+{}        terminal_id: VT420
+    second:
+        shell: /bin/sh
+layouts:
+    work:
+        tabs:
+            - title: "editor"
+input_mapping:
+    - {{ mods: [Control], key: 'J', action: ScreenshotVT }}
+)",
+                                                     testCase.topLevel,
+                                                     testCase.inProfile));
+
+        CHECK(testCase.keptDefault(config));
+        // Read after the malformed entry: in the same profile, in another profile, and at the top level.
+        CHECK(mainProfile(config).terminalId.value() == vtbackend::VTType::VT420);
+        CHECK(config.findProfile("second") != nullptr);
+        CHECK(config.layouts.value().contains("work"));
+        CHECK(config.inputMappings.value().charMappings.size() == 1);
+
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.text().contains(testCase.key));
+    }
+}
+
+TEST_CASE("Config: a malformed entry is reported by its key path and its place in the file", "[config]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir, R"(default_profile: main
+profiles:
+    main:
+        cursor: block
+        notify_on_command_finish:
+            when: [always]
+        search_case_sensitivity: [sensitive]
+)");
+
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().contains("profiles.main.cursor"));
+    CHECK(capture.text().contains("line 4, column 17"));
+    CHECK(capture.text().contains("profiles.main.notify_on_command_finish.when (line 6, column 19)"));
+    CHECK(capture.text().contains("profiles.main.search_case_sensitivity (line 7, column 34)"));
+}
+
+TEST_CASE("Config: a malformed map of a colour scheme is reported where the scheme is written", "[config]")
+{
+    // The profile only names the scheme: the map is somewhere else, and that is where to look for it.
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+
+    SECTION("in a scheme file: by the file and the key path in it")
+    {
+        writeSideFile(dir, "colorschemes/broken.yml", "gutter_text: '#123456'\nsticky_header: '#202830'\n");
+        std::ignore = loadFromYaml(dir, R"(default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: broken
+)");
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.text().contains("broken.yml: sticky_header"));
+        CHECK(capture.text().contains("line 2, column 16"));
+        CHECK_FALSE(capture.text().contains("profiles.main.colors"));
+    }
+
+    SECTION("in the configuration: by the key path from its root")
+    {
+        std::ignore = loadFromYaml(dir, R"(default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: broken
+color_schemes:
+    broken:
+        sticky_header: '#202830'
+)");
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.text().contains("color_schemes.broken.sticky_header"));
+        CHECK(capture.text().contains("line 8, column 24"));
+    }
+}
+
+TEST_CASE("Config: after a colour scheme's file, the profile's entries are reported by its key path again",
+          "[config]")
+{
+    // The scheme's file is read with the key path rooted at that file, and the profile's own path is put
+    // back afterwards: an entry the profile sets after `colors` is found in contour.yml, not in the file.
+    QTemporaryDir dir;
+    writeSideFile(dir, "colorschemes/broken.yml", "sticky_header: '#202830'\n");
+    auto capture = core::log::ScopedCapture { "error" };
+    std::ignore = loadFromYaml(dir, R"(default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: broken
+        hint_scrollback_lines: [x]
+)");
+
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().contains("broken.yml: sticky_header"));
+    CHECK(capture.text().contains("profiles.main.hint_scrollback_lines: yaml-cpp: error at line 6"));
+}
+
+TEST_CASE("Config: notify_on_command_finish round-trips through a profile side file",
+          "[config][notification]")
+{
+    QTemporaryDir dir;
+    auto const source = loadFromYaml(dir, "default_profile: main\n");
+    auto const* base = source.findProfile("main");
+    REQUIRE(base != nullptr);
+    auto profile = *base;
+    auto const policy = contour::config::FinishNotificationConfig {
+        .when = contour::config::NotifyWhen::Always,
+        .minDuration = std::chrono::seconds { 3 },
+        .outcome = contour::config::NotifyOutcome::Failure,
+        .action = contour::config::NotifyAction::Bell,
+        .clearOn = contour::config::NotifyClearOn::Never,
+    };
+    profile.notifyOnCommandFinish = policy;
+
+    writeSideFile(dir, "profiles/roundtrip.yml", contour::config::emitProfileYaml(profile));
+
+    auto const reloaded = loadFromYaml(dir, "default_profile: main\n");
+    auto const* roundTripped = reloaded.findProfile("roundtrip");
+    REQUIRE(roundTripped != nullptr);
+    CHECK(roundTripped->notifyOnCommandFinish.value() == policy);
+}
+
+TEST_CASE("Config: the generated config spells out notify_on_command_finish and reads it back",
+          "[config][notification]")
+{
+    QTemporaryDir dir;
+    auto const rendered = contour::config::defaultConfigString();
+    CHECK(rendered.contains("notify_on_command_finish:"));
+    CHECK(rendered.contains("when: unfocused"));
+    CHECK(rendered.contains("min_duration: 10"));
+    CHECK(rendered.contains("clear_on: focus"));
+
+    auto const defaults = contour::config::Config {};
+    auto const reloaded = loadFromYaml(dir, rendered);
+    auto const* profile = reloaded.profile(defaults.defaultProfileName.value());
+    REQUIRE(profile != nullptr);
+    CHECK(profile->notifyOnCommandFinish.value() == contour::config::FinishNotificationConfig {});
+}
+
+TEST_CASE("Config: every notify_on_command_finish value has one token that reads back",
+          "[config][notification]")
+{
+    using namespace contour::config;
+    checkEnumerators(
+        std::array { NotifyWhen::Never, NotifyWhen::Unfocused, NotifyWhen::Hidden, NotifyWhen::Always });
+    checkEnumerators(std::array { NotifyOutcome::Any, NotifyOutcome::Failure });
+    checkEnumerators(std::array { NotifyAction::Notify, NotifyAction::Bell, NotifyAction::NotifyBell });
+    checkEnumerators(std::array { NotifyClearOn::Focus, NotifyClearOn::Next, NotifyClearOn::Never });
+}
+
+// }}}
+
+// {{{ sticky_header
+
+TEST_CASE("Config: every sticky header mode is described by its table", "[config][stickyheader]")
+{
+    using namespace contour::config;
+    using vtbackend::StickyHeaderMode;
+
+    checkEnumerators(
+        std::array { StickyHeaderMode::Never, StickyHeaderMode::Scrolled, StickyHeaderMode::Always });
+    // The spellings the documentation promises, and the reader's case-insensitivity.
+    CHECK(configEnumToken(StickyHeaderMode::Never) == "never");
+    CHECK(configEnumToken(StickyHeaderMode::Scrolled) == "scrolled");
+    CHECK(configEnumToken(StickyHeaderMode::Always) == "always");
+    CHECK(configEnumFromToken<StickyHeaderMode>("ALWAYS") == StickyHeaderMode::Always);
+}
+
+TEST_CASE("Config: sticky_header loads from YAML and reaches the session settings", "[config][stickyheader]")
+{
+    QTemporaryDir dir;
+
+    SECTION("defaults: scrolled, with the evicted placeholder shown")
+    {
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->stickyHeader.value().mode == vtbackend::StickyHeaderMode::Scrolled);
+        CHECK(profile->stickyHeader.value().showEvicted);
+        CHECK(
+            contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark).stickyHeader
+            == vtbackend::StickyHeaderSettings {});
+    }
+
+    SECTION("explicit values reach vtbackend, the YAML bool as the engine's enum")
+    {
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        sticky_header:
+            mode: always
+            show_evicted: false
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(
+            contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark).stickyHeader
+            == vtbackend::StickyHeaderSettings { .mode = vtbackend::StickyHeaderMode::Always,
+                                                 .evictedPlaceholder =
+                                                     vtbackend::EvictedPlaceholder::Hidden });
+    }
+
+    SECTION("an unknown mode keeps the default, and its sibling still loads")
+    {
+        auto capture = core::log::ScopedCapture { "error" };
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        sticky_header:
+            mode: sometimes
+            show_evicted: false
+)"sv);
+        auto const* profile = config.profile("main");
+        REQUIRE(profile != nullptr);
+        CHECK(profile->stickyHeader.value().mode == vtbackend::StickyHeaderMode::Scrolled);
+        CHECK_FALSE(profile->stickyHeader.value().showEvicted);
+        CHECK(capture.text().contains("sometimes"));
+    }
+
+    SECTION("a profile round-trips through the writer")
+    {
+        auto const source = loadFromYaml(dir, "default_profile: main\n");
+        auto const* base = source.findProfile("main");
+        REQUIRE(base != nullptr);
+        auto profile = *base;
+        auto const written = contour::config::StickyHeaderConfig { .mode = vtbackend::StickyHeaderMode::Never,
+                                                                   .showEvicted = false };
+        profile.stickyHeader = written;
+        writeSideFile(dir, "profiles/roundtrip.yml", contour::config::emitProfileYaml(profile));
+
+        auto const reloaded = loadFromYaml(dir, "default_profile: main\n");
+        auto const* roundTripped = reloaded.findProfile("roundtrip");
+        REQUIRE(roundTripped != nullptr);
+        CHECK(roundTripped->stickyHeader.value() == written);
+    }
+}
+
+TEST_CASE("Config: the generated config spells out sticky_header and reads it back", "[config][stickyheader]")
+{
+    QTemporaryDir dir;
+    auto const rendered = contour::config::defaultConfigString();
+
+    // The profile key's own lines -- not the colour scheme's commented example, which names the key too.
+    auto const key = rendered.find("\n        sticky_header:\n");
+    REQUIRE(key != std::string::npos);
+    auto const section = std::string_view { rendered }.substr(key, rendered.find("\n\n", key + 1) + 1 - key);
+    CHECK(section.contains("\n            mode: scrolled\n"));
+    CHECK(section.contains("\n            show_evicted: true\n"));
+    // What a header needs: the prompt's own mark. An integration that marks only the command gets none.
+    CHECK(section.contains("Needs prompt marks"));
+    CHECK(section.contains("(OSC 133;A)"));
+
+    auto const defaults = contour::config::Config {};
+    auto const reloaded = loadFromYaml(dir, rendered);
+    auto const* profile = reloaded.profile(defaults.defaultProfileName.value());
+    REQUIRE(profile != nullptr);
+    CHECK(profile->stickyHeader.value() == contour::config::StickyHeaderConfig {});
+}
+
+namespace
+{
+/// A configuration whose one profile reads the colour scheme `coverage`: a background, a foreground, and then
+/// @p stickyHeader.
+/// @param stickyHeader The scheme's further keys, indented as its own -- its sticky_header map, if any.
+/// @return The YAML.
+[[nodiscard]] std::string schemeWithStickyHeader(std::string_view stickyHeader)
+{
+    return std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: coverage
+color_schemes:
+    coverage:
+        default:
+            background: '#102030'
+            foreground: '#D0D0D0'
+{})",
+                       stickyHeader);
+}
+} // namespace
+
+TEST_CASE("Config: the sticky header's colors load and are written back", "[config][stickyheader]")
+{
+    QTemporaryDir dir;
+
+    SECTION("unset by default, so both derive from the scheme")
+    {
+        auto const scheme = schemeOf(loadFromYaml(dir, schemeWithStickyHeader("")));
+        CHECK_FALSE(scheme.stickyHeaderBackground.has_value());
+        CHECK_FALSE(scheme.stickyHeaderSeparator.has_value());
+    }
+
+    SECTION("both slots load")
+    {
+        auto const scheme =
+            schemeOf(loadFromYaml(dir,
+                                  schemeWithStickyHeader("        sticky_header:\n"
+                                                         "            background: '#202830'\n"
+                                                         "            separator: '#506070'\n")));
+        CHECK(scheme.stickyHeaderBackground == vtbackend::RGBColor(0x20, 0x28, 0x30));
+        CHECK(scheme.stickyHeaderSeparator == vtbackend::RGBColor(0x50, 0x60, 0x70));
+    }
+
+    SECTION("one slot alone loads, and the other stays unset")
+    {
+        auto const scheme =
+            schemeOf(loadFromYaml(dir,
+                                  schemeWithStickyHeader("        sticky_header:\n"
+                                                         "            separator: '#506070'\n")));
+        CHECK_FALSE(scheme.stickyHeaderBackground.has_value());
+        CHECK(scheme.stickyHeaderSeparator == vtbackend::RGBColor(0x50, 0x60, 0x70));
+    }
+
+    SECTION("the writer emits what was set, and only that")
+    {
+        auto config = contour::config::Config {};
+        config.colorschemes.value()["default"].stickyHeaderSeparator = vtbackend::RGBColor(0x50, 0x60, 0x70);
+
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
+        // The commented example stands in for a map the scheme does not set, and only for that.
+        CHECK_FALSE(written.contains("# sticky_header:"));
+
+        auto const reloaded = schemeOf(loadFromYaml(dir, written));
+        CHECK(reloaded.stickyHeaderSeparator == vtbackend::RGBColor(0x50, 0x60, 0x70));
+        // Writing back a derived colour would pin what the scheme deliberately left to the palette.
+        CHECK_FALSE(reloaded.stickyHeaderBackground.has_value());
+    }
+
+    SECTION("a colour scheme file carries both through the side-file loader")
+    {
+        auto palette = vtbackend::ColorPalette {};
+        palette.stickyHeaderBackground = vtbackend::RGBColor(0x20, 0x28, 0x30);
+        palette.stickyHeaderSeparator = vtbackend::RGBColor(0x50, 0x60, 0x70);
+        auto const written = contour::config::emitColorSchemeYaml(palette);
+        REQUIRE(written.contains("\nsticky_header:\n"));
+        writeSideFile(dir, "colorschemes/banded.yml", written);
+
+        auto const reloaded = schemeOf(loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        colors: banded
+)"sv));
+        CHECK(reloaded.stickyHeaderBackground == vtbackend::RGBColor(0x20, 0x28, 0x30));
+        CHECK(reloaded.stickyHeaderSeparator == vtbackend::RGBColor(0x50, 0x60, 0x70));
+    }
+}
+
+TEST_CASE("Config: the sticky header colors the generated config quotes are what the default scheme derives",
+          "[config][stickyheader]")
+{
+    // The commented example says so, so it is held to it here: retuning a lift in ColorPalette fails this
+    // rather than leaving the generated config quoting the old colour.
+    auto const generated = contour::config::defaultConfigString();
+    auto const palette = vtbackend::ColorPalette {};
+    CHECK(generated.contains("# sticky_header:\n"));
+    CHECK(generated.contains(std::format("#     background: {}\n", palette.stickyHeaderBackgroundColor())));
+    CHECK(generated.contains(std::format("#     separator: {}\n", palette.stickyHeaderSeparatorColor())));
+}
+
+// }}}
+
+// {{{ The generated config and the reference documentation
+
+namespace
+{
+
+/// Whether @p node has a defined child at @p path, walked one segment at a time: yaml-cpp throws on
+/// indexing below a missing node, so a chained lookup could not report a missing section.
+[[nodiscard]] bool hasPath(YAML::Node const& node, std::span<std::string const> path)
+{
+    if (path.empty())
+        return node.IsDefined();
+    if (!node.IsDefined() || !node.IsMap())
+        return false;
+    return hasPath(node[path.front()], path.subspan(1));
+}
+
+/// The entry of @p section in reference page @p doc, from its heading to the next one; empty when it has
+/// none. A leaf is looked for there, as its `==term==`: a bare word such as `marks` or `pager` turns up in
+/// other entries' prose, and in its own entry's YAML example besides.
+[[nodiscard]] std::string_view referenceEntry(std::string_view doc, std::string_view section)
+{
+    auto const heading = std::format("### `{}`\n", section);
+    auto const begin = doc.find(heading);
+    if (begin == std::string_view::npos)
+        return {};
+    // Without a next heading, the length is npos less a little, and substr() stops at the page's end.
+    return doc.substr(begin, doc.find("### `", begin + heading.size()) - begin);
+}
+
+} // namespace
+
+TEST_CASE("Config: the generated config and the reference docs carry every command-block key", "[config]")
+{
+    // A key that `contour generate config` does not write, or the website does not document, is a key
+    // nobody discovers. Each section's leaves are listed so a dropped one names itself.
+    auto const text = contour::config::defaultConfigString();
+    auto const generated = YAML::Load(text);
+    auto const defaults = contour::config::Config {};
+    auto const profile = generated["profiles"][defaults.defaultProfileName.value()];
+    auto const globalDoc = contour::config::documentationGlobalConfig();
+    auto const profileDoc = contour::config::documentationProfileConfig();
+
+    using Sections = std::vector<std::pair<std::string, std::vector<std::string>>>;
+    auto const globalSections = Sections {
+        { "gutter",
+          { "exit_status",
+            "user_marks",
+            "line_numbers",
+            "line_number_width",
+            "timestamps",
+            "timestamp_format" } },
+        { "command_blocks", { "max_records", "pager", "pager_format" } },
+        { "folding", { "enabled", "show_markers", "auto_collapse_on_new_command", "on_jump_into_fold" } },
+    };
+    auto const profileSections = Sections {
+        { "scrollbar", { "marks" } },
+        { "sticky_header", { "mode", "show_evicted" } },
+        { "notify_on_command_finish", { "when", "min_duration", "outcome", "action", "clear_on" } },
+    };
+    auto const checkSections = [](std::string_view scope,
+                                  YAML::Node const& written,
+                                  std::string_view reference,
+                                  Sections const& sections) {
+        for (auto const& [section, leaves]: sections)
+            for (auto const& leaf: leaves)
+            {
+                INFO(scope << ": " << section << "." << leaf);
+                CHECK(hasPath(written, std::array { section, leaf }));
+                CHECK(referenceEntry(reference, section).contains(std::format("=={}==", leaf)));
+            }
+    };
+    checkSections("global", generated, globalDoc, globalSections);
+    checkSections("profile", profile, profileDoc, profileSections);
+
+    // The colour-scheme slots are optional, so the generated scheme carries them as commented examples, as
+    // it does fold_marker: present in the text, absent from the parsed tree.
+    auto const schemes = text.substr(text.find("\ncolor_schemes:"));
+    for (auto const* key: { "block_status", "gutter_text", "sticky_header" })
+    {
+        INFO("generated colour scheme: " << key);
+        CHECK(schemes.contains(key));
+    }
+
+    // The scrollbar is shown on the right by default: the generated config spells the default out, and the
+    // profile reference -- docs/configuration/profiles.md -- shows and states it.
+    CHECK(profile["scrollbar"]["position"].as<std::string>() == "Right");
+    CHECK(profileDoc.contains("position: Right"));
+    CHECK(profileDoc.contains("The default is Right"));
+}
+
 // }}}

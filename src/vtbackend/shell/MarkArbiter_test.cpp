@@ -2,6 +2,7 @@
 #include <vtbackend/shell/MarkArbiter.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 using namespace vtbackend;
 
@@ -12,7 +13,7 @@ TEST_CASE("MarkArbiter.a fresh session lets OSC 3008 mark but not notify", "[mar
     auto const arbiter = MarkArbiter {};
     CHECK(arbiter.owner() == MarkOwner::Undecided);
     CHECK(arbiter.contextMayMark());
-    CHECK(!arbiter.contextMayNotify());
+    CHECK(!arbiter.contextMayFeedBlocks());
 }
 
 TEST_CASE("MarkArbiter.the first OSC 133 sequence settles the session", "[markarbiter]")
@@ -22,7 +23,7 @@ TEST_CASE("MarkArbiter.the first OSC 133 sequence settles the session", "[markar
 
     CHECK(arbiter.owner() == MarkOwner::ShellIntegration);
     CHECK(!arbiter.contextMayMark());
-    CHECK(!arbiter.contextMayNotify());
+    CHECK(!arbiter.contextMayFeedBlocks());
 }
 
 TEST_CASE("MarkArbiter.one completed 3008 command cycle hands over the session", "[markarbiter]")
@@ -30,13 +31,13 @@ TEST_CASE("MarkArbiter.one completed 3008 command cycle hands over the session",
     auto arbiter = MarkArbiter {};
     arbiter.observedContextCommandStart();
     CHECK(arbiter.owner() == MarkOwner::Undecided);
-    CHECK(!arbiter.contextMayNotify()); // still mid-cycle: OSC 133 could yet appear
+    CHECK(!arbiter.contextMayFeedBlocks()); // still mid-cycle: OSC 133 could yet appear
 
     arbiter.observedContextCommandEnd();
 
     CHECK(arbiter.owner() == MarkOwner::ContextSignalling);
     CHECK(arbiter.contextMayMark());
-    CHECK(arbiter.contextMayNotify());
+    CHECK(arbiter.contextMayFeedBlocks());
 }
 
 TEST_CASE("MarkArbiter.an end without a matching start does not complete a cycle", "[markarbiter]")
@@ -47,7 +48,7 @@ TEST_CASE("MarkArbiter.an end without a matching start does not complete a cycle
     arbiter.observedContextCommandEnd();
 
     CHECK(arbiter.owner() == MarkOwner::Undecided);
-    CHECK(!arbiter.contextMayNotify());
+    CHECK(!arbiter.contextMayFeedBlocks());
 }
 
 TEST_CASE("MarkArbiter.OSC 133 arriving mid-cycle still wins", "[markarbiter]")
@@ -99,7 +100,7 @@ TEST_CASE("MarkArbiter.ContextMarkPolicy::Never silences OSC 3008 entirely", "[m
 
     // The owner still moves -- the policy gates the ACT, not the observation -- but nothing is stamped.
     CHECK(!arbiter.contextMayMark());
-    CHECK(!arbiter.contextMayNotify());
+    CHECK(!arbiter.contextMayFeedBlocks());
 }
 
 TEST_CASE("MarkArbiter.repeated cycles keep the session with context signalling", "[markarbiter]")
@@ -111,5 +112,21 @@ TEST_CASE("MarkArbiter.repeated cycles keep the session with context signalling"
         arbiter.observedContextCommandEnd();
     }
     CHECK(arbiter.owner() == MarkOwner::ContextSignalling);
-    CHECK(arbiter.contextMayNotify());
+    CHECK(arbiter.contextMayFeedBlocks());
+}
+
+TEST_CASE("MarkArbiter.OSC 3008 enriches only the blocks OSC 133 owns", "[markarbiter]")
+{
+    // Metadata is what OSC 3008 still contributes once OSC 133 owns the session; while it feeds the blocks
+    // itself, its end= closes them with the outcome, and before the decision it touches no block at all.
+    auto const policy = GENERATE(ContextMarkPolicy::WhenAlone, ContextMarkPolicy::Never);
+    auto arbiter = MarkArbiter { policy };
+    CHECK(!arbiter.contextMayEnrich());
+
+    arbiter.observedContextCommandStart();
+    arbiter.observedContextCommandEnd();
+    CHECK(!arbiter.contextMayEnrich());
+
+    arbiter.observedShellIntegration();
+    CHECK(arbiter.contextMayEnrich()); // a mark policy withholds marks, not how a command ended
 }

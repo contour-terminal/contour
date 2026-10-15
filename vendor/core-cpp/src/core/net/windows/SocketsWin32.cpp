@@ -12,6 +12,7 @@
 #include <core/net/Sockets.hpp>
 #include <core/net/windows/InvalidSocket.hpp>
 #include <core/net/windows/IocpSocket.hpp>
+#include <core/net/windows/UnixSocketPath.hpp>
 #include <core/platform/WinsockInit.hpp>
 
 #include <cassert>
@@ -84,9 +85,13 @@ std::expected<std::unique_ptr<IListener>, NetError> listenUnix(EventLoop& loop,
 {
     platform::ensureWinsockInitialized();
     // The parent directory is created but NOT permission-hardened: NTFS ACLs
-    // (the user's profile/temp tree) govern access, not POSIX mode bits.
+    // (the user's profile/temp tree) govern access, not POSIX mode bits. It is named in UTF-8, as
+    // AF_UNIX reads `sun_path` (bindUnix), never through the ANSI code page the narrow constructor reads.
+    auto const file = detail::unixSocketFile(path);
+    if (!file)
+        return std::unexpected(file.error());
     auto ec = std::error_code {};
-    std::filesystem::create_directories(std::filesystem::path { std::string { path } }.parent_path(), ec);
+    std::filesystem::create_directories(file->parent_path(), ec);
     if (loop.completionPort() == nullptr)
         return std::unexpected(needsCompletionPort("listenUnix"));
     return IocpListener::bindUnix(loop, path, backlog)

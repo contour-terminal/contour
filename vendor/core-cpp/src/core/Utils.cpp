@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #ifdef _WIN32
+    #include <core/WideString.hpp>
+
     #include <windows.h>
 #elifdef __EMSCRIPTEN__
 // Single-threaded WebAssembly: one thread, and no name to give it.
@@ -27,16 +29,8 @@ std::string threadName()
     if (FAILED(hr))
         return ""s;
 
-    // One exit past this point, so the description is always freed. A conversion that fails
-    // answers 0, and `len - 1` as a std::size_t underflowed: resize() threw length_error, and
-    // the LocalFree() below it never ran.
-    auto result = ""s;
-    if (int const len = WideCharToMultiByte(CP_UTF8, 0, pwsz, -1, nullptr, 0, nullptr, nullptr); len > 0)
-    {
-        result.resize(static_cast<std::size_t>(len));
-        WideCharToMultiByte(CP_UTF8, 0, pwsz, -1, result.data(), len, nullptr, nullptr);
-        result.resize(static_cast<std::size_t>(len - 1)); // drop the NUL the conversion wrote
-    }
+    // One exit past this point, so the description is always freed.
+    auto result = toUtf8(pwsz);
     LocalFree(pwsz);
     return result;
 #elifdef __EMSCRIPTEN__

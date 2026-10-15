@@ -30,6 +30,27 @@ Rectangle {
     // always exists — a fresh install has no GUI-owned profile or colour scheme to show instead.
     property string editorMode: "globals"
 
+    // Why the controller last refused what the page asked of it -- a value the configuration would reject,
+    // a name already taken, a file it could not write -- kept until the next change it saves, or until the
+    // pane or the draft it was about changes. The controller reports a refusal only through errorOccurred,
+    // and every change it saves (and every reopening of the page) through changed().
+    property string errorMessage: ""
+
+    Connections {
+        target: root.controller
+        function onErrorOccurred(message) {
+            root.errorMessage = message
+            // Said as well as shown: a screen reader hears the edited value revert, and otherwise not why.
+            // The message's name changes only when the reason does, and a name change is not read out.
+            errorMessageLabel.Accessible.announce(message)
+        }
+        function onChanged() { root.errorMessage = "" }
+        function onDraftChanged() { root.errorMessage = "" }
+        function onSchemeDraftChanged() { root.errorMessage = "" }
+        function onEditingSchemeChanged() { root.errorMessage = "" }
+    }
+    onEditorModeChanged: root.errorMessage = ""
+
     // Live OS palette handle, so the whole page follows dark/light in realtime (see CommandPalette.qml).
     SystemPalette {
         id: sys
@@ -72,7 +93,7 @@ Rectangle {
         if (root.editorMode === "globals")
             return qsTr("Application-wide overrides — saved to settings.yml.")
         if (root.editorMode === "keybindings")
-            return qsTr("Configured in contour.yml (read-only here).")
+            return qsTr("Configured in contour.yml, then the built-in bindings it leaves free (read-only here).")
         return ""
     }
 
@@ -493,6 +514,41 @@ Rectangle {
                     }
                 }
 
+                // The reason for the last refusal, above whichever editor is open: a refused value leaves
+                // its row showing the stored value again, so this is the only place the page says why.
+                Rectangle {
+                    objectName: "settingsErrorBanner"
+                    visible: root.errorMessage.length > 0
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: errorRow.implicitHeight + 20
+                    radius: 8
+                    color: Qt.rgba(chromeStyle.errorColor.r, chromeStyle.errorColor.g, chromeStyle.errorColor.b, 0.10)
+                    border.width: 1
+                    border.color: Qt.rgba(chromeStyle.errorColor.r, chromeStyle.errorColor.g, chromeStyle.errorColor.b, 0.45)
+
+                    RowLayout {
+                        id: errorRow
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 8
+                        Label {
+                            text: "⚠"
+                            color: chromeStyle.errorColor
+                            Accessible.ignored: true // the message below says it all
+                        }
+                        Label {
+                            id: errorMessageLabel
+                            objectName: "settingsErrorMessage"
+                            Layout.fillWidth: true
+                            text: root.errorMessage
+                            wrapMode: Text.WordWrap
+                            color: sys.windowText
+                            Accessible.role: Accessible.AlertMessage
+                            Accessible.name: text
+                        }
+                    }
+                }
+
                 // The editors: mutually exclusive, visible-toggled, each anchored to fill this pane.
                 Item {
                     id: rightPane
@@ -848,6 +904,15 @@ Rectangle {
                                         text: modelData.mode
                                         color: root.subtleText
                                         Layout.preferredWidth: 90
+                                    }
+                                    // A binding no input_mapping row lists: Contour's own, in effect until
+                                    // contour.yml binds the same chord.
+                                    Label {
+                                        text: qsTr("built-in")
+                                        visible: modelData.builtIn === true
+                                        color: root.subtleText
+                                        font.pointSize: 9
+                                        Layout.preferredWidth: 60
                                     }
                                 }
                                 Rectangle {

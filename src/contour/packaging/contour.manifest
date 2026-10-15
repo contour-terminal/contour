@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  contour.exe's application manifest, and no test executable's. It takes the place of the one
+  qt_add_executable() would generate, so it says what that one said as well: Windows 10 and 11
+  supported, long paths understood. The linker adds the requested execution level (asInvoker).
+
+  The process code page is UTF-8, so that a narrow string is read as UTF-8 wherever it reaches a
+  code-page API or a narrow std::filesystem::path: in third-party code that opens files by a narrow
+  name (libssh2, yaml-cpp), and in a call site that was missed. Contour's own code still converts
+  explicitly at every such site: Windows before 10 version 1903 ignores this setting, and ConPTY
+  runs on 1809. The test executables keep the system's code page, so that their suites go on
+  proving those conversions.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 and Windows 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

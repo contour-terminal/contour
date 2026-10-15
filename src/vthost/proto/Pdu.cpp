@@ -8,6 +8,7 @@
 #include <expected>
 #include <ranges>
 #include <span>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -195,6 +196,14 @@ namespace
     {
         return std::to_underlying(PduType::ResizeSplit);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(SessionSettingsChanged const&) noexcept
+    {
+        return std::to_underlying(PduType::SessionSettingsChanged);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(PerformOperation const&) noexcept
+    {
+        return std::to_underlying(PduType::PerformOperation);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -227,6 +236,7 @@ namespace
         out.u8(settings.graphemeClustering);
         out.u8(settings.allowReflowOnResize);
         out.u32(settings.maxImageRegisterCount);
+        out.u8(settings.sixelScrolling);
         out.string(settings.wordDelimiters);
         out.varint(settings.frozenModes.size());
         for (auto const& frozen: settings.frozenModes)
@@ -236,19 +246,45 @@ namespace
         }
     }
 
+    void encodeOptionalSessionSettings(Writer& out, std::optional<WireSessionSettings> const& settings)
+    {
+        // A presence byte, so a client with no preference of its own costs exactly one byte rather
+        // than a block of wire defaults the server would have to tell apart from real values.
+        out.u8(settings.has_value() ? 1 : 0);
+        if (settings)
+            encodeSessionSettings(out, *settings);
+    }
+
+    /// The version, then this revision's fields as one blob, then a zero byte.
+    ///
+    /// The blob and the zero are for one reader: the daemon of contour 0.7.0, which reads a hello whole
+    /// before it checks the version, and refuses a byte too many or too few. It reads the blob as its
+    /// token and the zero as "no session settings", so it reads every later revision's hello and answers
+    /// with its version, where a layout of its own would have it drop the connection on a decode error.
+    /// Every revision keeps this shape for as long as such a daemon may still be running.
     void encodeBody(Writer& out, ClientHello const& pdu)
     {
         out.u32(pdu.codecVersion);
-        out.string(pdu.token);
-        // A presence byte, so a client with no preference of its own costs exactly one byte rather
-        // than a block of wire defaults the server would have to tell apart from real values.
-        out.u8(pdu.sessionSettings.has_value() ? 1 : 0);
-        if (pdu.sessionSettings)
-            encodeSessionSettings(out, *pdu.sessionSettings);
+        auto fields = Writer {};
+        fields.string(pdu.token);
+        encodeOptionalSessionSettings(fields, pdu.sessionSettings);
+        out.blob(fields.view());
+        out.u8(0);
+    }
+
+    void encodeBody(Writer& out, SessionSettingsChanged const& pdu)
+    {
+        encodeOptionalSessionSettings(out, pdu.sessionSettings);
     }
     void encodeBody(Writer& out, ServerHello const& pdu)
     {
         out.u32(pdu.codecVersion);
+        // A hello naming no machine -- every refusal -- is its version alone: all of a ServerHello that
+        // contour 0.7.0 reads.
+        if (pdu.machineId.empty() && pdu.hostname.empty())
+            return;
+        out.string(pdu.machineId);
+        out.string(pdu.hostname);
     }
 
     void encodeBody(Writer& out, Input const& pdu)
@@ -348,6 +384,37 @@ namespace
         out.varint(context.status);
     }
 
+    /// The optional fields of a command-block record, in WIRE ORDER, with the presence bit each is
+    /// gated on — ONE table for both directions, for the reason ContextStringFields gives.
+    constexpr auto CommandBlockOptionalFields = std::array {
+        std::pair { CommandBlockHasPromptStart, &WireCommandBlock::promptStartedAt },
+        std::pair { CommandBlockHasExitCode, &WireCommandBlock::exitCode },
+        std::pair { CommandBlockHasCommandStart, &WireCommandBlock::commandStartedAt },
+        std::pair { CommandBlockHasDuration, &WireCommandBlock::duration },
+    };
+
+    /// Encodes one command-block record, writing only the optionals its `present` mask names.
+    void encodeCommandBlock(Writer& out, WireCommandBlock const& block)
+    {
+        out.varint(block.id);
+        out.u8(block.state);
+        out.u8(block.end);
+        out.u8(block.commandLineSource);
+        out.u8(block.locality);
+        out.u8(block.present);
+        out.string(block.commandLine);
+        out.string(block.workingDirectory);
+        out.u8(block.endLocality);
+        out.string(block.endWorkingDirectory);
+        out.u8(block.foreignDirectory);
+        out.u8(block.outcomeExit);
+        out.u8(block.outcomeSignal);
+        out.varint(block.outcomeStatus);
+        for (auto const& [bit, member]: CommandBlockOptionalFields)
+            if ((block.present & bit) != 0)
+                out.svarint(block.*member);
+    }
+
     void encodeBody(Writer& out, SessionState const& pdu)
     {
         out.varint(pdu.session);
@@ -378,6 +445,13 @@ namespace
         out.varint(pdu.contextChain.size());
         for (auto const id: pdu.contextChain)
             out.u16(id);
+        out.svarint(pdu.sessionEpoch);
+        out.svarint(pdu.hostTime);
+        out.varint(pdu.commandBlockIdEpoch);
+        out.varint(pdu.commandBlocksFloor);
+        out.varint(pdu.commandBlocks.size());
+        for (auto const& block: pdu.commandBlocks)
+            encodeCommandBlock(out, block);
     }
 
     void encodeCell(Writer& out, WireCell const& cell)
@@ -401,6 +475,8 @@ namespace
         out.svarint(line.stableId);
         out.u16(line.flags);
         out.u16(line.contextId);
+        out.varint(line.blockId);
+        out.varint(line.bornAt);
         out.svarint(line.promptEndOffset);
         out.svarint(line.commandEndOffset);
         out.varint(line.columns);
@@ -422,6 +498,7 @@ namespace
         out.u8(pdu.snapshotPart);
         out.svarint(pdu.stableViewportBase);
         out.svarint(pdu.stableFloor);
+        out.varint(pdu.evictedRowCount);
         out.svarint(pdu.cursorLine);
         out.svarint(pdu.cursorColumn);
 
@@ -487,6 +564,14 @@ namespace
         out.varint(pdu.contexts.size());
         for (auto const& context: pdu.contexts)
             encodeContext(out, context);
+        out.varint(pdu.commandBlockIdEpoch);
+        out.varint(pdu.stableIdGeneration);
+        out.varint(pdu.commandBlocks.size());
+        for (auto const& block: pdu.commandBlocks)
+            encodeCommandBlock(out, block);
+        out.varint(pdu.retiredCommandBlocks.size());
+        for (auto const id: pdu.retiredCommandBlocks)
+            out.varint(id);
     }
 
     void encodeBody(Writer& out, SessionBell const& pdu)
@@ -499,6 +584,7 @@ namespace
         out.varint(pdu.session);
         out.string(pdu.title);
         out.string(pdu.body);
+        out.u8(std::to_underlying(pdu.occasion));
     }
 
     void encodeBody(Writer& out, SessionClipboard const& pdu)
@@ -527,6 +613,15 @@ namespace
     void encodeBody(Writer& out, ClosePane const& pdu)
     {
         out.varint(pdu.session);
+    }
+
+    void encodeBody(Writer& out, PerformOperation const& pdu)
+    {
+        out.varint(pdu.session);
+        out.u8(std::to_underlying(pdu.operation));
+        out.string(pdu.text);
+        out.svarint(pdu.row.stableId);
+        out.varint(pdu.row.generation);
     }
 
     void encodeBody(Writer& out, ResizeSplit const& pdu)
@@ -578,6 +673,7 @@ namespace
             || !assign(in.u8(), settings.graphemeClustering, error)
             || !assign(in.u8(), settings.allowReflowOnResize, error)
             || !assign(in.u32(), settings.maxImageRegisterCount, error)
+            || !assign(in.u8(), settings.sixelScrolling, error)
             || !assign(in.string(), settings.wordDelimiters, error))
             return std::unexpected(error);
         if (auto const decoded =
@@ -598,30 +694,89 @@ namespace
         return settings;
     }
 
+    /// The inverse of encodeOptionalSessionSettings.
+    [[nodiscard]] std::expected<std::optional<WireSessionSettings>, DecodeError>
+    decodeOptionalSessionSettings(Reader& in)
+    {
+        auto present = uint8_t {};
+        auto error = DecodeError {};
+        if (!assign(in.u8(), present, error))
+            return std::unexpected(error);
+        if (present == 0)
+            return std::nullopt;
+        return decodeSessionSettings(in).transform(
+            [](WireSessionSettings settings) { return std::optional { std::move(settings) }; });
+    }
+
+    /// Whose layout the fields after a hello's version follow.
+    enum class HelloRevision : uint8_t
+    {
+        Other = 0, ///< Another revision's: consumed whole, and left unread.
+        Ours,      ///< This one's: left for the caller to read.
+    };
+
+    /// Reads a hello's version, the one field every revision's hello shares, into @p version. The rest of a
+    /// hello of another revision is consumed whole: what follows its version is that revision's own.
+    /// @return Whose layout the rest follows.
+    [[nodiscard]] std::expected<HelloRevision, DecodeError> readHelloVersion(Reader& in, uint32_t& version)
+    {
+        auto error = DecodeError {};
+        if (!assign(in.u32(), version, error))
+            return std::unexpected(error);
+        if (version == CodecVersion)
+            return HelloRevision::Ours;
+        std::ignore = in.bytes(in.remaining()); // cannot fail: it takes exactly what is left
+        return HelloRevision::Other;
+    }
+
+    /// The inverse of encodeBody(ClientHello), which says why the fields travel in a blob.
     DecodeResult decodeClientHello(Reader& in)
     {
         auto pdu = ClientHello {};
+        auto const revision = readHelloVersion(in, pdu.codecVersion);
+        if (!revision)
+            return std::unexpected(revision.error());
+        if (*revision == HelloRevision::Other)
+            return pdu;
+        auto const fields = in.blob();
+        if (!fields)
+            return std::unexpected(fields.error());
+        auto inner = Reader { *fields };
         auto error = DecodeError {};
-        if (!assign(in.u32(), pdu.codecVersion, error) || !assign(in.string(), pdu.token, error))
+        if (!assign(inner.string(), pdu.token, error))
             return std::unexpected(error);
-        auto present = uint8_t {};
-        if (!assign(in.u8(), present, error))
+        auto settings = decodeOptionalSessionSettings(inner);
+        if (!settings)
+            return std::unexpected(settings.error());
+        if (inner.remaining() != 0)
+            return std::unexpected(DecodeError::TrailingBytes);
+        pdu.sessionSettings = *std::move(settings);
+        auto closing = uint8_t {};
+        if (!assign(in.u8(), closing, error))
             return std::unexpected(error);
-        if (present != 0)
-        {
-            auto settings = decodeSessionSettings(in);
-            if (!settings)
-                return std::unexpected(settings.error());
-            pdu.sessionSettings = *std::move(settings);
-        }
+        if (closing != 0)
+            return std::unexpected(DecodeError::MalformedPdu);
         return pdu;
+    }
+
+    DecodeResult decodeSessionSettingsChanged(Reader& in)
+    {
+        return decodeOptionalSessionSettings(in).transform([](std::optional<WireSessionSettings> settings) {
+            return DecodedPdu { SessionSettingsChanged { .sessionSettings = std::move(settings) } };
+        });
     }
 
     DecodeResult decodeServerHello(Reader& in)
     {
         auto pdu = ServerHello {};
+        auto const revision = readHelloVersion(in, pdu.codecVersion);
+        if (!revision)
+            return std::unexpected(revision.error());
+        // The version alone names no machine, as encodeBody(ServerHello) writes it.
+        if (*revision == HelloRevision::Other || in.remaining() == 0)
+            return pdu;
         auto error = DecodeError {};
-        if (!assign(in.u32(), pdu.codecVersion, error))
+        if (!assign(in.string(), pdu.machineId, error) || !assign(in.string(), pdu.hostname, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -705,11 +860,10 @@ namespace
             || !assign(in.u16(), context.present, error))
             return std::unexpected(error);
 
-        // Any bit this build does not assign is cleared, so the reads below cannot go looking for a
-        // field there is no member for and desynchronize the stream. Masked rather than rejected: an
-        // unknown bit is an unknown FIELD, and the protocol's rule for one of those is to ignore it and
-        // keep the rest, so a peer built from a newer commit degrades to the fields this build knows.
-        context.present = static_cast<uint16_t>(context.present & ContextPresentMask);
+        // A bit this build does not assign is refused rather than read past, for the reason
+        // ContextPresentMask gives.
+        if ((context.present | ContextPresentMask) != ContextPresentMask)
+            return std::unexpected(DecodeError::MalformedPdu);
 
         for (auto const& [bit, member]: ContextStringFields)
             if ((context.present & bit) && !assign(in.string(), context.*member, error))
@@ -723,6 +877,43 @@ namespace
             return std::unexpected(error);
 
         return context;
+    }
+
+    /// Decodes one command-block record, reading only the optionals its `present` mask names, and refusing
+    /// a mask that names a bit this build does not assign, for the reason ContextPresentMask gives.
+    /// Enum-ish bytes are carried through raw, for the consumer to judge.
+    /// @see vthost::fromWireCommandBlock
+    [[nodiscard]] std::expected<WireCommandBlock, DecodeError> decodeCommandBlock(Reader& in)
+    {
+        auto block = WireCommandBlock {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), block.id, error) || !assign(in.u8(), block.state, error)
+            || !assign(in.u8(), block.end, error) || !assign(in.u8(), block.commandLineSource, error)
+            || !assign(in.u8(), block.locality, error) || !assign(in.u8(), block.present, error)
+            || !assign(in.string(), block.commandLine, error)
+            || !assign(in.string(), block.workingDirectory, error)
+            || !assign(in.u8(), block.endLocality, error)
+            || !assign(in.string(), block.endWorkingDirectory, error)
+            || !assign(in.u8(), block.foreignDirectory, error) || !assign(in.u8(), block.outcomeExit, error)
+            || !assign(in.u8(), block.outcomeSignal, error)
+            || !assign(in.varint(), block.outcomeStatus, error))
+            return std::unexpected(error);
+        if ((block.present | CommandBlockPresentMask) != CommandBlockPresentMask)
+            return std::unexpected(DecodeError::MalformedPdu);
+        for (auto const& [bit, member]: CommandBlockOptionalFields)
+            if ((block.present & bit) != 0 && !assign(in.svarint(), block.*member, error))
+                return std::unexpected(error);
+        return block;
+    }
+
+    /// One host command-block id, range-checked into its 32 bits.
+    [[nodiscard]] std::expected<uint32_t, DecodeError> decodeBlockId(Reader& in)
+    {
+        auto id = uint32_t {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), id, error))
+            return std::unexpected(error);
+        return id;
     }
 
     DecodeResult decodeSessionState(Reader& in)
@@ -759,6 +950,12 @@ namespace
                 decodeVector(in, pdu.contextChain, [](Reader& reader) { return reader.u16(); });
             !decoded)
             return std::unexpected(decoded.error());
+        if (!assign(in.svarint(), pdu.sessionEpoch, error) || !assign(in.svarint(), pdu.hostTime, error)
+            || !assign(in.varint(), pdu.commandBlockIdEpoch, error)
+            || !assign(in.varint(), pdu.commandBlocksFloor, error))
+            return std::unexpected(error);
+        if (auto const decoded = decodeVector(in, pdu.commandBlocks, decodeCommandBlock); !decoded)
+            return std::unexpected(decoded.error());
         return pdu;
     }
 
@@ -789,7 +986,8 @@ namespace
         auto line = WireLine {};
         auto error = DecodeError {};
         if (!assign(in.svarint(), line.stableId, error) || !assign(in.u16(), line.flags, error)
-            || !assign(in.u16(), line.contextId, error) || !assign(in.svarint(), line.promptEndOffset, error)
+            || !assign(in.u16(), line.contextId, error) || !assign(in.varint(), line.blockId, error)
+            || !assign(in.varint(), line.bornAt, error) || !assign(in.svarint(), line.promptEndOffset, error)
             || !assign(in.svarint(), line.commandEndOffset, error)
             || !assign(in.varint(), line.columns, error))
             return std::unexpected(error);
@@ -809,8 +1007,9 @@ namespace
             || !assign(in.varint(), pdu.seqno, error) || !assign(in.u8(), pdu.snapshot, error)
             || !assign(in.u8(), pdu.snapshotPart, error)
             || !assign(in.svarint(), pdu.stableViewportBase, error)
-            || !assign(in.svarint(), pdu.stableFloor, error) || !assign(in.svarint(), pdu.cursorLine, error)
-            || !assign(in.svarint(), pdu.cursorColumn, error))
+            || !assign(in.svarint(), pdu.stableFloor, error)
+            || !assign(in.varint(), pdu.evictedRowCount, error)
+            || !assign(in.svarint(), pdu.cursorLine, error) || !assign(in.svarint(), pdu.cursorColumn, error))
             return std::unexpected(error);
 
         if (auto const decoded = decodeVector(in, pdu.lines, decodeLine); !decoded)
@@ -878,6 +1077,13 @@ namespace
             return std::unexpected(error);
         if (auto const decoded = decodeVector(in, pdu.contexts, decodeContext); !decoded)
             return std::unexpected(decoded.error());
+        if (!assign(in.varint(), pdu.commandBlockIdEpoch, error)
+            || !assign(in.varint(), pdu.stableIdGeneration, error))
+            return std::unexpected(error);
+        if (auto const decoded = decodeVector(in, pdu.commandBlocks, decodeCommandBlock); !decoded)
+            return std::unexpected(decoded.error());
+        if (auto const decoded = decodeVector(in, pdu.retiredCommandBlocks, decodeBlockId); !decoded)
+            return std::unexpected(decoded.error());
         return pdu;
     }
 
@@ -894,9 +1100,13 @@ namespace
     {
         auto pdu = SessionNotify {};
         auto error = DecodeError {};
+        auto occasion = uint8_t { 0 };
         if (!assign(in.varint(), pdu.session, error) || !assign(in.string(), pdu.title, error)
-            || !assign(in.string(), pdu.body, error))
+            || !assign(in.string(), pdu.body, error) || !assign(in.u8(), occasion, error))
             return std::unexpected(error);
+        // Carried, not judged: an occasion this build does not know is the client's to read as unstated,
+        // rather than a malformed frame that would end the connection over one notification.
+        pdu.occasion = static_cast<NotifyOccasion>(occasion);
         return pdu;
     }
 
@@ -948,6 +1158,21 @@ namespace
         auto error = DecodeError {};
         if (!assign(in.varint(), pdu.session, error))
             return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodePerformOperation(Reader& in)
+    {
+        auto pdu = PerformOperation {};
+        auto error = DecodeError {};
+        auto operation = uint8_t { 0 };
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), operation, error)
+            || !assign(in.string(), pdu.text, error) || !assign(in.svarint(), pdu.row.stableId, error)
+            || !assign(in.varint(), pdu.row.generation, error))
+            return std::unexpected(error);
+        // Carried, not judged: an operation this build does not know is the host's to refuse, as an
+        // unknown PDU is, rather than a malformed frame that would end the connection.
+        pdu.operation = static_cast<EngineOperation>(operation);
         return pdu;
     }
 
@@ -1053,6 +1278,8 @@ namespace
         DecodeRow { PduType::ClosePane, decodeClosePane },
         DecodeRow { PduType::NewWindow, decodeNewWindow },
         DecodeRow { PduType::ResizeSplit, decodeResizeSplit },
+        DecodeRow { PduType::SessionSettingsChanged, decodeSessionSettingsChanged },
+        DecodeRow { PduType::PerformOperation, decodePerformOperation },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with
@@ -1066,11 +1293,23 @@ std::size_t estimatedEncodedSize(WireLine const& line) noexcept
 {
     // encodeCell writes a varint codepoint, a varint extras count, two u8, two u16 and four u32 —
     // 22 fixed bytes plus a 1..4 byte codepoint and whatever clusterExtras adds. encodeLine's own
-    // header is two svarints, a u16, two varints and four u32. Both are rounded up to a round
-    // number rather than computed exactly: @see the header for why an estimate is the point.
+    // header is three svarints, two u16, four varints (the block id and birth stamp among them) and
+    // four u32. Both are rounded up to a round number rather than computed exactly; the declaration
+    // says why an estimate is the point.
     constexpr auto BytesPerCell = std::size_t { 24 };
-    constexpr auto BytesPerRowHeader = std::size_t { 24 };
+    constexpr auto BytesPerRowHeader = std::size_t { 32 };
     return BytesPerRowHeader + (line.cells.size() * BytesPerCell);
+}
+
+std::size_t estimatedEncodedSize(WireCommandBlock const& block) noexcept
+{
+    // encodeCommandBlock writes at most: a 5-byte varint id, six u8, three string lengths (5-byte
+    // varints for any string shorter than 32 GiB), three u8, a 10-byte varint status and four 10-byte
+    // svarint optionals = 79, plus the three strings' bytes. Every term is its widest encoding: this one
+    // must never under-count.
+    constexpr auto FixedBytes = std::size_t { 79 };
+    return FixedBytes + block.commandLine.size() + block.workingDirectory.size()
+           + block.endWorkingDirectory.size();
 }
 
 std::vector<SnapshotPiece> partitionSnapshotRows(std::span<WireLine const> lines, std::size_t budget)

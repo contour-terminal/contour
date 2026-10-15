@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <utility>
 #include <variant>
 
 namespace vthost::proto
@@ -43,6 +44,7 @@ namespace
         TraceRow { PduType::ServerHello,
                    "ServerHello",
                    +[](DecodedPdu const& pdu) {
+                       // The daemon's machine id and host name name a machine: left out altogether.
                        return std::format("version={}", std::get<ServerHello>(pdu).codecVersion);
                    } },
         TraceRow { PduType::Input,
@@ -94,9 +96,11 @@ namespace
                        // title/cwd are screen-derived content; their LENGTHS are the diagnostic.
                        // Context records carry user, hostname, cwd and cmdline: a COUNT is the
                        // diagnostic, and the fields themselves must never reach a trace log.
+                       // Command-block records carry command lines and directories: counted, never
+                       // shown.
                        return std::format(
                            "session={} {}x{} screen={} title={}ch cwd={}ch progress={}/{} contexts={} "
-                           "chain={}",
+                           "chain={} blocks={}",
                            value.session,
                            value.columns,
                            value.lines,
@@ -106,7 +110,8 @@ namespace
                            value.progressState,
                            value.progressPercentage,
                            value.contexts.size(),
-                           value.contextChain.size());
+                           value.contextChain.size(),
+                           value.commandBlocks.size());
                    } },
         TraceRow { PduType::Delta,
                    "Delta",
@@ -116,7 +121,7 @@ namespace
                        // SessionState row above.
                        return std::format("session={} gen={} seq={} snapshot={}/{} lines={} links={} "
                                           "imagecells={} statuslines={} progress={}/{} contexts={} "
-                                          "activecontext={}",
+                                          "activecontext={} blocks={} retired={}",
                                           value.session,
                                           value.generation,
                                           value.seqno,
@@ -129,7 +134,9 @@ namespace
                                           value.progressChanged != 0 ? value.progressState : 0,
                                           value.progressChanged != 0 ? value.progressPercentage : 0,
                                           value.contexts.size(),
-                                          value.contextChanged != 0 ? value.activeContext : 0);
+                                          value.contextChanged != 0 ? value.activeContext : 0,
+                                          value.commandBlocks.size(),
+                                          value.retiredCommandBlocks.size());
                    } },
         TraceRow { PduType::SessionBell,
                    "SessionBell",
@@ -141,10 +148,11 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<SessionNotify>(pdu);
                        // A notification's text is the user's content: sizes only, never the bytes.
-                       return std::format("session={} title={}ch body={}ch",
+                       return std::format("session={} title={}ch body={}ch occasion={}",
                                           value.session,
                                           value.title.size(),
-                                          value.body.size());
+                                          value.body.size(),
+                                          std::to_underlying(value.occasion));
                    } },
         TraceRow { PduType::SessionClipboard,
                    "SessionClipboard",
@@ -194,6 +202,26 @@ namespace
                                           value.firstSession,
                                           value.secondSession,
                                           value.ratio);
+                   } },
+        TraceRow { PduType::SessionSettingsChanged,
+                   "SessionSettingsChanged",
+                   +[](DecodedPdu const& pdu) {
+                       // Summarized, never transcribed, as ClientHello's are.
+                       return std::format("settings={}",
+                                          std::get<SessionSettingsChanged>(pdu).sessionSettings ? "yes"
+                                                                                                : "no");
+                   } },
+        TraceRow { PduType::PerformOperation,
+                   "PerformOperation",
+                   +[](DecodedPdu const& pdu) {
+                       // The text is sized, never transcribed: it is what lands on the user's screen.
+                       auto const& value = std::get<PerformOperation>(pdu);
+                       return std::format("session={} operation={} text={}B row={}@{}",
+                                          value.session,
+                                          std::to_underlying(value.operation),
+                                          value.text.size(),
+                                          value.row.stableId,
+                                          value.row.generation);
                    } },
     };
 

@@ -116,3 +116,134 @@ TEST_CASE("ColorPalette.foldMarker.defaultSchemeMatchesTheDocumentedColors", "[C
     CHECK(hover.foreground == 0xd0d0d0_rgb);
     CHECK(hover.background == 0x1a1716_rgb);
 }
+
+TEST_CASE("ColorPalette.blockStatus.derivesWhenUnset", "[ColorPalette]")
+{
+    auto const palette = ColorPalette {};
+
+    // A success looks like the fold column always did; a failure and a running command take the
+    // palette's own red and yellow, which every scheme already tunes to read on its background.
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Success) == palette.foldMarkerColors().foreground);
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Failure) == palette.normalColor(1));
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == palette.normalColor(3));
+
+    // Line numbers and timestamps are as quiet as the resting fold column.
+    CHECK(palette.gutterTextColor() == palette.foldMarkerColors().foreground);
+}
+
+TEST_CASE("ColorPalette.blockStatus.followsThePalettesOwnColours", "[ColorPalette]")
+{
+    auto palette = ColorPalette {};
+    palette.palette[1] = RGBColor(0x11, 0x22, 0x33);
+    palette.palette[3] = RGBColor(0x44, 0x55, 0x66);
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Failure) == RGBColor(0x11, 0x22, 0x33));
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == RGBColor(0x44, 0x55, 0x66));
+}
+
+TEST_CASE("ColorPalette.blockStatus.followsTheSchemesForegroundAndBackground", "[ColorPalette]")
+{
+    // The default scheme alone cannot tell a derivation from a constant that happens to equal it, so
+    // move the scheme's own text and page colours and require the unset slots to move with them.
+    auto palette = ColorPalette {};
+    palette.defaultForeground = RGBColor(0x20, 0x20, 0x20);
+    palette.defaultBackground = RGBColor(0xF0, 0xF0, 0xF0);
+    auto const faded =
+        mixColor(palette.defaultForeground, palette.defaultBackground, ColorPalette::FoldMarkerRestFade);
+
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Success) == faded);
+    CHECK(palette.gutterTextColor() == faded);
+}
+
+TEST_CASE("ColorPalette.blockStatus.successFollowsAConfiguredFoldColumn", "[ColorPalette]")
+{
+    auto palette = ColorPalette {};
+    palette.foldMarker =
+        RGBColorPair { .foreground = RGBColor(0x0D, 0x0E, 0x0F), .background = palette.defaultBackground };
+
+    // A success is drawn as the fold column is, so it follows the scheme's choice for that column ...
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Success) == RGBColor(0x0D, 0x0E, 0x0F));
+
+    // ... while the gutter's text stays the faded foreground: a coloured fold column is not a request
+    // to colour the line numbers and timestamps too.
+    CHECK(
+        palette.gutterTextColor()
+        == mixColor(palette.defaultForeground, palette.defaultBackground, ColorPalette::FoldMarkerRestFade));
+}
+
+TEST_CASE("ColorPalette.blockStatus.explicitColorsBypassTheDerivation", "[ColorPalette]")
+{
+    auto palette = ColorPalette {};
+    // Indexed by the outcome: success, failure, running.
+    palette.blockStatus = { RGBColor(0x01, 0x02, 0x03),
+                            RGBColor(0x04, 0x05, 0x06),
+                            RGBColor(0x07, 0x08, 0x09) };
+    palette.gutterText = RGBColor(0x0A, 0x0B, 0x0C);
+
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Success) == RGBColor(0x01, 0x02, 0x03));
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Failure) == RGBColor(0x04, 0x05, 0x06));
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == RGBColor(0x07, 0x08, 0x09));
+    CHECK(palette.gutterTextColor() == RGBColor(0x0A, 0x0B, 0x0C));
+}
+
+TEST_CASE("ColorPalette.gutterTextColors.putTheTextOnThePagesOwnBackground", "[ColorPalette]")
+{
+    auto palette = ColorPalette {};
+    palette.gutterText = RGBColor(0x0A, 0x0B, 0x0C);
+    palette.defaultBackground = RGBColor(0xF0, 0xF0, 0xF0);
+    CHECK(palette.gutterTextColors()
+          == RGBColorPair { .foreground = RGBColor(0x0A, 0x0B, 0x0C),
+                            .background = RGBColor(0xF0, 0xF0, 0xF0) });
+}
+
+TEST_CASE("ColorPalette.blockStatus.defaultSchemeMatchesTheDocumentedColors", "[ColorPalette]")
+{
+    // The commented examples `contour generate config` writes (ConfigDocumentation.hpp's BlockStatusConfig
+    // and GutterTextConfig) quote these values, and Config_test.cpp holds them to this palette. Naming the
+    // colours here as well means retuning a derivation fails in vtbackend's own suite too.
+    auto const palette = ColorPalette {};
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Success) == RGBColor(0x7E, 0x7C, 0x7C));
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Failure) == RGBColor(0xC6, 0x39, 0x39));
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == RGBColor(0xA0, 0xA0, 0x00));
+    CHECK(palette.gutterTextColor() == RGBColor(0x7E, 0x7C, 0x7C));
+}
+
+TEST_CASE("ColorPalette.stickyHeader.derivesWhenUnset", "[ColorPalette][stickyheader]")
+{
+    auto const palette = ColorPalette {};
+    REQUIRE_FALSE(palette.stickyHeaderBackground.has_value());
+    REQUIRE_FALSE(palette.stickyHeaderSeparator.has_value());
+
+    // A band, not the page: lifted off the background toward the text colour, and an edge further still.
+    CHECK(palette.stickyHeaderBackgroundColor() != palette.defaultBackground);
+    CHECK(palette.stickyHeaderSeparatorColor() != palette.stickyHeaderBackgroundColor());
+
+    // The commented example `contour generate config` writes (ConfigDocumentation.hpp's
+    // StickyHeaderColorsConfig) and docs/configuration/colors.md quote these values, and Config_test.cpp
+    // holds the former to this palette. Naming them here as well means retuning a lift fails in vtbackend's
+    // own suite too.
+    CHECK(palette.stickyHeaderBackgroundColor() == 0x2c2928_rgb);
+    CHECK(palette.stickyHeaderSeparatorColor() == 0x595757_rgb);
+}
+
+TEST_CASE("ColorPalette.stickyHeader.explicitColorsBypassTheDerivation", "[ColorPalette][stickyheader]")
+{
+    auto palette = ColorPalette {};
+    palette.stickyHeaderBackground = 0x010203_rgb;
+    CHECK(palette.stickyHeaderBackgroundColor() == 0x010203_rgb);
+    // The other stays derived: two independent slots, not one block.
+    CHECK(palette.stickyHeaderSeparatorColor() == 0x595757_rgb);
+}
+
+TEST_CASE("ColorPalette.stickyHeader.isDistinctInTheBuiltinSchemes", "[ColorPalette][stickyheader]")
+{
+    for (auto const name: defaultColorPaletteNames())
+    {
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        INFO("scheme: " << name);
+
+        // The band must read as a band on the page, and the separator as an edge on the band.
+        CHECK(distance(palette.stickyHeaderBackgroundColor(), palette.defaultBackground) > 6.0);
+        CHECK(distance(palette.stickyHeaderSeparatorColor(), palette.stickyHeaderBackgroundColor()) > 15.0);
+    }
+}

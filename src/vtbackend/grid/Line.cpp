@@ -37,21 +37,24 @@ LineSoA Line::reflow(ColumnCount newColumnCount)
                 auto const newCols = unbox<size_t>(newColumnCount);
                 auto const oldCols = unbox<size_t>(_columns);
 
-                // Trim trailing blank cells
-                auto reflowEnd = oldCols;
-                while (reflowEnd > newCols && _storage.codepoints[reflowEnd - 1] == 0)
-                    --reflowEnd;
+                // A wide character the new edge would cut in two goes to the overflow whole, as foot and
+                // kitty move it; the cells it leaves are padding, which a later widening drops again.
+                auto const cut = wideCharacterSafeEnd(_storage, 0, newCols);
+                auto const reflowEnd = trimBlankRightKeepingWideCharacters(_storage, oldCols);
 
-                auto const overflowCount = reflowEnd - newCols;
-                if (overflowCount > 0)
+                if (reflowEnd > cut)
                 {
                     // Copy overflow columns into a new LineSoA
+                    auto const overflowCount = reflowEnd - cut;
                     LineSoA overflow;
                     initializeLineSoA(overflow, ColumnCount::cast_from(overflowCount));
-                    copyColumns(_storage, newCols, overflow, 0, overflowCount);
+                    copyColumns(_storage, cut, overflow, 0, overflowCount);
 
                     // Shrink this line
                     resizeLineSoA(_storage, newColumnCount);
+                    if (cut < newCols)
+                        clearRange(
+                            _storage, cut, newCols - cut, GraphicsAttributes {}.with(CellFlag::WrapPadding));
                     _columns = newColumnCount;
                     return overflow;
                 }
@@ -113,7 +116,13 @@ std::string Line::toUtf8(ColumnOffset begin, ColumnOffset end, ContinuationCell 
             continue;
         }
         if (_storage.clusterSize[i] == 0)
-            str += ' ';
+        {
+            // A cell with no text of its own -- padding a wide character left at the end of the row, or the
+            // lower part of a tall text-sizing block -- is no text, as a continuation cell is none: a space
+            // only where the caller wants a codepoint per grid column.
+            if (continuation == ContinuationCell::Pad || !holdsNoText(_storage, i))
+                str += ' ';
+        }
         else
         {
             forEachCodepoint(_storage, i, [&](char32_t cp) {
@@ -159,6 +168,8 @@ std::string Line::toUtf8WithSgr(ColumnOffset begin, ColumnOffset end) const
             --skipCount; // a wide char's trailing cells share the lead cell's rendition
             continue;
         }
+        if (_storage.clusterSize[i] == 0 && holdsNoText(_storage, i))
+            continue; // padding, or a tall block's lower part: no text, so no rendition either
         if (auto const& attrs = _storage.sgr[i]; attrs != current)
         {
             str += makeSgrSequence(attrs);

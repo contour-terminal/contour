@@ -22,6 +22,9 @@ T.ToolTip {
 
     contentItem: Text {
         text: control.text
+        // Never AutoText: a tooltip's text may be what an application wrote (a link's URI, a tab title, a
+        // command line), and AutoText renders it as rich text whenever its first line looks like markup.
+        textFormat: Text.PlainText
         font: chromeStyle.font
         color: control.palette.toolTipText
         wrapMode: Text.WordWrap

@@ -29,6 +29,10 @@ namespace
     value.lines = 24;
     value.title = "secret-project";
     value.cwd = "file:///home/user/secret";
+    auto block = WireCommandBlock {};
+    block.commandLine = "secret-command";
+    block.workingDirectory = "/home/user/secret-dir";
+    value.commandBlocks = { block };
     return value;
 }
 
@@ -40,6 +44,10 @@ namespace
     value.generation = 3;
     value.seqno = 98;
     value.lines = std::vector<WireLine>(1);
+    auto block = WireCommandBlock {};
+    block.commandLine = "secret-command";
+    value.commandBlocks = { block };
+    value.retiredCommandBlocks = { 3 };
     return value;
 }
 
@@ -57,7 +65,9 @@ namespace
                                      .sessionSettings =
                                          WireSessionSettings { .historyLineCount = 5000,
                                                                .wordDelimiters = "secret-delimiters" } } } },
-        { PduType::ServerHello, DecodedPdu { ServerHello { .codecVersion = 12 } } },
+        { PduType::ServerHello,
+          DecodedPdu { ServerHello {
+              .codecVersion = 12, .machineId = "secret-machine-id", .hostname = "secret-host" } } },
         { PduType::Input,
           DecodedPdu {
               Input { .session = 4, .data = { std::byte { 'h' }, std::byte { 'i' }, std::byte { '!' } } } } },
@@ -83,6 +93,12 @@ namespace
         { PduType::NewWindow, DecodedPdu { NewWindow {} } },
         { PduType::ResizeSplit,
           DecodedPdu { ResizeSplit { .firstSession = 4, .secondSession = 7, .ratio = 6000 } } },
+        { PduType::SessionSettingsChanged,
+          DecodedPdu { SessionSettingsChanged {
+              .sessionSettings = WireSessionSettings { .wordDelimiters = "secret-delimiters" } } } },
+        { PduType::PerformOperation,
+          DecodedPdu { PerformOperation {
+              .session = 4, .operation = EngineOperation::WriteScreen, .text = "secret-screen-text" } } },
     };
 }
 } // namespace
@@ -133,6 +149,8 @@ TEST_CASE("summarize renders each PDU's identifying fields", "[vthost][proto]")
         CHECK(text.contains("gen=3"));
         CHECK(text.contains("seq=98"));
         CHECK(text.contains("lines=1"));
+        CHECK(text.contains("blocks=1"));
+        CHECK(text.contains("retired=1"));
     }
 
     SECTION("Input reports a byte count")
@@ -178,6 +196,11 @@ TEST_CASE("summarize renders each PDU's identifying fields", "[vthost][proto]")
         CHECK(summaryOf(PduType::NewWindow).empty());
     }
 
+    SECTION("PerformOperation names its session and operation and sizes its text")
+    {
+        CHECK(summaryOf(PduType::PerformOperation) == "session=4 operation=3 text=18B row=0@0");
+    }
+
     SECTION("CreateTab names the window it targets")
     {
         // Not payloadless any more: it carries the session whose window the tab belongs in, and a
@@ -201,8 +224,14 @@ TEST_CASE("the PDU trace never reveals payload contents", "[vthost][proto]")
         CHECK_FALSE(text.contains("/home/user/secret")); // the OSC 7 working directory
         // NOT the bare word "body": SessionNotify's own summary labels a field that way, so a
         // sentinel has to be one no field NAME can match.
-        CHECK_FALSE(text.contains("secret-title")); // a desktop notification's title
-        CHECK_FALSE(text.contains("secret-body"));  // a desktop notification's body
+        CHECK_FALSE(text.contains("secret-title"));       // a desktop notification's title
+        CHECK_FALSE(text.contains("secret-body"));        // a desktop notification's body
+        CHECK_FALSE(text.contains("secret-command"));     // a command line a shell reported
+        CHECK_FALSE(text.contains("secret-dir"));         // the directory it ran in
+        CHECK_FALSE(text.contains("secret-screen-text")); // what a client asked the host to write
+        // The daemon's machine id and host name: they say which machine a session runs on.
+        CHECK_FALSE(text.contains("secret-machine-id"));
+        CHECK_FALSE(text.contains("secret-host"));
     }
 
     // The token's PRESENCE is still reported — that is what makes an auth failure diagnosable, and

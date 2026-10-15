@@ -338,3 +338,72 @@ TEST_CASE("collectCommands merges the sources without offering anything twice", 
         CHECK_FALSE(collectCommands(withNull).empty());
     }
 }
+
+TEST_CASE("A block action's id carries its target, part and pinned block",
+          "[contour][palette][semanticblocks]")
+{
+    using contour::command::commandId;
+    namespace actions = contour::actions;
+
+    // The default instance is the catalog's row: its id is its bare name.
+    CHECK(commandId(actions::SelectCommandBlock {}) == "SelectCommandBlock");
+
+    // Anything else is a different command, and a pinned row differs from an unpinned one.
+    CHECK(commandId(actions::SelectCommandBlock { .target = vtbackend::CommandBlockTarget::Pointer })
+          == "SelectCommandBlock:pointer:output:0");
+    CHECK(commandId(actions::SelectCommandBlock { .target = vtbackend::CommandBlockTarget::Pointer,
+                                                  .block = vtbackend::CommandBlockId(7) })
+          == "SelectCommandBlock:pointer:output:7");
+    // Pinning alone is enough: a row pinned to a block is never the catalog's unpinned one.
+    CHECK(commandId(actions::SelectCommandBlock { .block = vtbackend::CommandBlockId(7) })
+          == "SelectCommandBlock:last:output:7");
+}
+
+TEST_CASE("The block copy commands carry their target in their id", "[contour][palette][semanticblocks]")
+{
+    using contour::command::commandId;
+    namespace actions = contour::actions;
+
+    CHECK(commandId(actions::CopyCommandBlock {}) == "CopyCommandBlock");
+    CHECK(commandId(actions::CopyCommandBlock { .part = vtbackend::CommandBlockPart::Prompt })
+          == "CopyCommandBlock:last:input:0");
+    CHECK(commandId(actions::CopyCommandLine {}) == "CopyCommandLine");
+    CHECK(commandId(actions::CopyCommandLine { .block = vtbackend::CommandBlockId(3) })
+          == "CopyCommandLine:last:3");
+}
+
+TEST_CASE("CopySelection's fallback is part of its identity", "[contour][palette][semanticblocks]")
+{
+    using contour::command::commandId;
+    namespace actions = contour::actions;
+
+    CHECK(commandId(actions::CopySelection {}) == "CopySelection");
+    CHECK(commandId(actions::CopySelection { .format = actions::CopyFormat::HTML }) == "CopySelection:HTML");
+    CHECK(commandId(actions::CopySelection { .fallback = actions::CopyFallback::LastCommandOutput })
+          == "CopySelection:Text:last_command_output");
+}
+
+TEST_CASE("OpenCommandOutput's arguments are part of its identity", "[contour][palette][semanticblocks]")
+{
+    using contour::command::commandId;
+    using contour::command::commandTitle;
+    namespace actions = contour::actions;
+
+    CHECK(commandId(actions::OpenCommandOutput {}) == "OpenCommandOutput");
+    CHECK(commandId(actions::OpenCommandOutput { .placement = actions::OutputPlacement::Tab })
+          == "OpenCommandOutput:last:0:tab::");
+    CHECK(commandId(actions::OpenCommandOutput { .program = "wl-copy",
+                                                 .placement = actions::OutputPlacement::Detached })
+          == "OpenCommandOutput:last:0:detached::wl-copy");
+    CHECK(commandId(actions::OpenCommandOutput { .format = actions::OutputFormat::Plain })
+          == "OpenCommandOutput:last:0:split:plain:");
+    CHECK(commandId(actions::OpenCommandOutput { .block = vtbackend::CommandBlockId(5) })
+          == "OpenCommandOutput:last:5:split::");
+
+    CHECK(commandTitle(actions::OpenCommandOutput {}) == "Open Command Output");
+    CHECK(commandTitle(actions::OpenCommandOutput { .placement = actions::OutputPlacement::Tab })
+          == "Open Command Output (last, tab)");
+    CHECK(commandTitle(actions::OpenCommandOutput { .program = "wl-copy",
+                                                    .placement = actions::OutputPlacement::Detached })
+          == "Open Command Output: wl-copy (last, detached)");
+}

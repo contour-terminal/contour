@@ -18,6 +18,11 @@
 #include <unordered_map>
 #include <vector>
 
+namespace core::platform
+{
+class FileSystem;
+} // namespace core::platform
+
 namespace vtbackend
 {
 
@@ -200,38 +205,54 @@ enum class ContextExit : uint8_t
     return ContextExit::Unknown;
 }
 
-/// Every signal `signal=` may name, with the number Linux gives it.
+/// Whether every system numbers a signal the way Linux does -- and so whether a shell's 128 + n exit code
+/// may be read as that signal, wherever the shell runs.
+enum class SignalNumbering : uint8_t
+{
+    LinuxOnly = 0, ///< Linux's number; macOS, the BSDs, Solaris or Linux on MIPS give this signal another.
+    Portable,      ///< The same number on Linux, macOS, FreeBSD, NetBSD, OpenBSD, DragonFly, Solaris and AIX.
+};
+
+/// Every signal `signal=` may name, with the number Linux gives it, and whether that number is portable.
 ///
 /// The numbers are Linux's, hard-coded rather than taken from <signal.h>, and that is deliberate: a
 /// context may describe a process on ANOTHER machine (`type=remote`, `type=vm`), so `SIGSEGV` has to
 /// mean 11 regardless of the platform Contour itself was built for. Including the host's header would
-/// make the same sequence decode differently on Windows.
-#define VTBACKEND_CONTEXT_SIGNALS(_) \
-    _(Hup, "SIGHUP", 1)              \
-    _(Int, "SIGINT", 2)              \
-    _(Quit, "SIGQUIT", 3)            \
-    _(Ill, "SIGILL", 4)              \
-    _(Trap, "SIGTRAP", 5)            \
-    _(Abrt, "SIGABRT", 6)            \
-    _(Bus, "SIGBUS", 7)              \
-    _(Fpe, "SIGFPE", 8)              \
-    _(Kill, "SIGKILL", 9)            \
-    _(Usr1, "SIGUSR1", 10)           \
-    _(Segv, "SIGSEGV", 11)           \
-    _(Usr2, "SIGUSR2", 12)           \
-    _(Pipe, "SIGPIPE", 13)           \
-    _(Alrm, "SIGALRM", 14)           \
-    _(Term, "SIGTERM", 15)           \
-    _(Xcpu, "SIGXCPU", 24)           \
-    _(Xfsz, "SIGXFSZ", 25)           \
-    _(Sys, "SIGSYS", 31)
+/// make the same sequence decode differently on Windows. They are wire values too (the daemon carries a
+/// signal as its number), so a row is never renumbered.
+///
+/// The last column is checked against Linux's `asm-generic/signal.h` and glibc's
+/// `bits/signum-generic.h` / `bits/signum-arch.h`, and against Go's `syscall/zerrors_*.go` tables, which
+/// `cgo -godefs` generates from each system's own headers (darwin, freebsd, netbsd, openbsd, dragonfly,
+/// solaris, aix, and linux on amd64, arm64, ppc64 and mips64). The twelve Portable rows agree on all of
+/// them. SIGBUS (7 or 10), SIGUSR1 (10, 30 or 16), SIGUSR2 (12, 31 or 17) and SIGSYS (31 or 12) differ
+/// outright; SIGXCPU and SIGXFSZ agree on x86 Linux and the BSDs but are 30 and 31 on Linux/MIPS and Solaris.
+#define VTBACKEND_CONTEXT_SIGNALS(_)  \
+    _(Hup, "SIGHUP", 1, Portable)     \
+    _(Int, "SIGINT", 2, Portable)     \
+    _(Quit, "SIGQUIT", 3, Portable)   \
+    _(Ill, "SIGILL", 4, Portable)     \
+    _(Trap, "SIGTRAP", 5, Portable)   \
+    _(Abrt, "SIGABRT", 6, Portable)   \
+    _(Bus, "SIGBUS", 7, LinuxOnly)    \
+    _(Fpe, "SIGFPE", 8, Portable)     \
+    _(Kill, "SIGKILL", 9, Portable)   \
+    _(Usr1, "SIGUSR1", 10, LinuxOnly) \
+    _(Segv, "SIGSEGV", 11, Portable)  \
+    _(Usr2, "SIGUSR2", 12, LinuxOnly) \
+    _(Pipe, "SIGPIPE", 13, Portable)  \
+    _(Alrm, "SIGALRM", 14, Portable)  \
+    _(Term, "SIGTERM", 15, Portable)  \
+    _(Xcpu, "SIGXCPU", 24, LinuxOnly) \
+    _(Xfsz, "SIGXFSZ", 25, LinuxOnly) \
+    _(Sys, "SIGSYS", 31, LinuxOnly)
 
 /// The signal a crashed context died of. @see VTBACKEND_CONTEXT_SIGNALS.
 enum class ContextSignal : uint8_t
 {
     None = 0, ///< No `signal=` was given, or its symbolic name is not one we know.
 
-#define VTBACKEND_CONTEXT_SIGNAL_ENUMERATOR(Name, Spelling, Number) Name = (Number),
+#define VTBACKEND_CONTEXT_SIGNAL_ENUMERATOR(Name, Spelling, Number, Numbering) Name = (Number),
     VTBACKEND_CONTEXT_SIGNALS(VTBACKEND_CONTEXT_SIGNAL_ENUMERATOR)
 #undef VTBACKEND_CONTEXT_SIGNAL_ENUMERATOR
 };
@@ -241,7 +262,7 @@ enum class ContextSignal : uint8_t
 {
     switch (signal)
     {
-#define VTBACKEND_CONTEXT_SIGNAL_NAME(Name, Spelling, Number) \
+#define VTBACKEND_CONTEXT_SIGNAL_NAME(Name, Spelling, Number, Numbering) \
     case ContextSignal::Name: return Spelling;
         VTBACKEND_CONTEXT_SIGNALS(VTBACKEND_CONTEXT_SIGNAL_NAME)
 #undef VTBACKEND_CONTEXT_SIGNAL_NAME
@@ -250,11 +271,27 @@ enum class ContextSignal : uint8_t
     return {};
 }
 
+/// Whether @p signal's number is the same on every system. @see VTBACKEND_CONTEXT_SIGNALS.
+/// @param signal The signal.
+/// @return Its row's numbering; @ref SignalNumbering::LinuxOnly for @ref ContextSignal::None.
+[[nodiscard]] constexpr SignalNumbering signalNumberingOf(ContextSignal signal) noexcept
+{
+    switch (signal)
+    {
+#define VTBACKEND_CONTEXT_SIGNAL_NUMBERING(Name, Spelling, Number, Numbering) \
+    case ContextSignal::Name: return SignalNumbering::Numbering;
+        VTBACKEND_CONTEXT_SIGNALS(VTBACKEND_CONTEXT_SIGNAL_NUMBERING)
+#undef VTBACKEND_CONTEXT_SIGNAL_NUMBERING
+        case ContextSignal::None: break;
+    }
+    return SignalNumbering::LinuxOnly;
+}
+
 /// The signal @p name spells, or @ref ContextSignal::None when it spells none.
 [[nodiscard]] constexpr ContextSignal contextSignalFrom(std::string_view name) noexcept
 {
-#define VTBACKEND_CONTEXT_SIGNAL_FROM(Name, Spelling, Number) \
-    if (name == (Spelling))                                   \
+#define VTBACKEND_CONTEXT_SIGNAL_FROM(Name, Spelling, Number, Numbering) \
+    if (name == (Spelling))                                              \
         return ContextSignal::Name;
     VTBACKEND_CONTEXT_SIGNALS(VTBACKEND_CONTEXT_SIGNAL_FROM)
 #undef VTBACKEND_CONTEXT_SIGNAL_FROM
@@ -267,12 +304,38 @@ enum class ContextSignal : uint8_t
 {
     if (value == 0)
         return true;
-#define VTBACKEND_CONTEXT_SIGNAL_KNOWN(Name, Spelling, Number) \
-    if (value == (Number))                                     \
+#define VTBACKEND_CONTEXT_SIGNAL_KNOWN(Name, Spelling, Number, Numbering) \
+    if (value == (Number))                                                \
         return true;
     VTBACKEND_CONTEXT_SIGNALS(VTBACKEND_CONTEXT_SIGNAL_KNOWN)
 #undef VTBACKEND_CONTEXT_SIGNAL_KNOWN
     return false;
+}
+
+/// What a POSIX shell adds to a signal's number to report the command it ended: 128 + n.
+inline constexpr auto SignalExitBase = 128;
+
+/// The largest exit code a shell reports.
+inline constexpr auto MaxExitCode = 255;
+
+/// The signal a shell's 128 + n exit code names -- how every POSIX shell spells a signal death, though a
+/// program may exit with such a code itself. The inverse of ContextOutcome::asShellExitCode().
+///
+/// Only a portably numbered signal is read out of a code: the shell may run on any system, and 138 is
+/// SIGUSR1 on Linux but SIGBUS on macOS. Any other code is a plain exit code.
+/// @param exitCode The reported exit code, if any.
+/// @return The signal it names, or ContextSignal::None when it names no portably numbered one.
+[[nodiscard]] constexpr ContextSignal signalOfExitCode(std::optional<int> exitCode) noexcept
+{
+    if (!exitCode || *exitCode <= SignalExitBase || *exitCode > MaxExitCode)
+        return ContextSignal::None;
+    auto const number = static_cast<uint8_t>(*exitCode - SignalExitBase);
+    if (!isKnownContextSignal(number))
+        return ContextSignal::None;
+    auto const signal = static_cast<ContextSignal>(number);
+    if (signalNumberingOf(signal) != SignalNumbering::Portable)
+        return ContextSignal::None;
+    return signal;
 }
 
 /// The single source for every STARTFIELD: one row each, giving the enumerator, its bit, the wire
@@ -352,18 +415,38 @@ struct ContextOutcome
     [[nodiscard]] constexpr int asShellExitCode() const noexcept
     {
         if (signal != ContextSignal::None)
-            return 128 + static_cast<int>(signal);
+            return SignalExitBase + static_cast<int>(signal);
         switch (exit)
         {
             case ContextExit::Success: return 0;
             case ContextExit::Failure: return static_cast<int>(status & 0xFF);
-            case ContextExit::Crash: return 128 + static_cast<int>(ContextSignal::Segv);
-            case ContextExit::Interrupt: return 128 + static_cast<int>(ContextSignal::Int);
+            case ContextExit::Crash: return SignalExitBase + static_cast<int>(ContextSignal::Segv);
+            case ContextExit::Interrupt: return SignalExitBase + static_cast<int>(ContextSignal::Int);
             case ContextExit::Unknown: break;
         }
         return 0;
     }
 };
+
+/// The signal that ended a command, as every surface names it -- the gutter tooltip, the finish
+/// notification: the one OSC 3008 named, and otherwise the one a shell's 128 + n exit code names.
+///
+/// The code is only a heuristic -- a program may exit with 130 itself -- so it speaks only while OSC 3008
+/// gave no verdict at all. Once it said `exit=failure`, `crash` or `interrupt` without naming a signal,
+/// or `exit=success`, no signal ended the command as far as anyone can tell.
+/// @see signalOfExitCode
+/// @param exitCode The reported exit code, if any.
+/// @param outcome What OSC 3008 said about the end.
+/// @return The signal, or ContextSignal::None when neither names one.
+[[nodiscard]] constexpr ContextSignal signalThatEnded(std::optional<int> exitCode,
+                                                      ContextOutcome const& outcome) noexcept
+{
+    if (outcome.signal != ContextSignal::None)
+        return outcome.signal;
+    if (outcome.exit != ContextExit::Unknown)
+        return ContextSignal::None;
+    return signalOfExitCode(exitCode);
+}
 
 /// One hierarchical context: what the application told us about a level of its own nesting.
 ///
@@ -521,7 +604,7 @@ struct ContextTransition
 /// How deep the ancestry may go and how much history is kept.
 ///
 /// A struct rather than two parameters because a third limit would then be a field rather than a
-/// signature change, and because @ref ContextStack takes its limits at construction and never after.
+/// signature change.
 struct ContextStackLimits
 {
     /// The deepest ancestry the terminal will track. A push beyond it is REFUSED -- the spec's "keep
@@ -548,6 +631,79 @@ struct LocalIdentity
     std::string_view machineId;
     std::string_view hostname;
 };
+
+/// Where systemd keeps the machine's identity (machine-id(5)).
+constexpr inline std::string_view MachineIdPath = "/etc/machine-id";
+
+/// This machine's identity, owned: LocalIdentity only views one, and a terminal asks its listener for it
+/// on the parser thread at every OSC 133;C, so the strings must live as long as the listener does.
+///
+/// A default-constructed identity knows nothing, which makes only an OSC 7 URL with no host provably
+/// local: the conservative answer.
+struct HostIdentity
+{
+    std::string machineId; ///< The first line of @ref MachineIdPath, trimmed; empty where there is none.
+    std::string hostname;  ///< The machine's host name; empty when unknown.
+
+    /// @return Views into this identity, valid while it lives unchanged.
+    [[nodiscard]] LocalIdentity view() const noexcept
+    {
+        return LocalIdentity { .machineId = machineId, .hostname = hostname };
+    }
+
+    bool operator==(HostIdentity const&) const = default;
+};
+
+/// Reads this machine's identity.
+/// @param files The filesystem @ref MachineIdPath is read through.
+/// @param hostname The machine's host name, as the caller learned it (gethostname(2), QHostInfo).
+/// @return The identity. Its machineId is empty where the file is absent — Windows, a system without
+///         systemd — and the host name then carries the locality test alone.
+[[nodiscard]] HostIdentity readHostIdentity(core::platform::FileSystem const& files, std::string hostname);
+
+/// Whether @p id is a machine id: exactly 32 hexadecimal digits, the form machine-id(5) gives it.
+///
+/// Anything else names no machine and is held unknown: an empty id, a UUID spelled with dashes, and
+/// `uninitialized`, which systemd writes as a placeholder until a container's first boot completes --
+/// two machines both reporting it are not thereby one.
+/// @param id A machine id as reported.
+/// @return Whether @p id names a machine.
+[[nodiscard]] bool isMachineId(std::string_view id) noexcept;
+
+/// What it means that an identity names no machine id: whether the identity is a machine's complete
+/// account of itself or a claim whose author chose what to put in it.
+enum class MissingMachineId : uint8_t
+{
+    /// The machine has none. An identity a machine states of itself -- a daemon's, this machine's own --
+    /// names every id it has, so one without names a machine without: Windows, a system without systemd.
+    Absent = 0,
+    /// The identity left it out. An OSC 3008 context names what its emitter chose to, and `machineid=` is
+    /// optional to it, so a context without one says nothing about it: its host name is all it claims.
+    Omitted,
+};
+
+/// Whether @p other names the machine @p self describes: the one rule both a context's locality and a
+/// daemon's are decided by.
+///
+///   - Both machine ids known (@ref isMachineId): equal ids, as numbers, are one machine, whatever each
+///     calls itself; any other pair is two.
+///   - Only @p other's known: two machines. A machine id belongs to an installation, and this one has
+///     none, so @p other comes from another install -- a daemon in, or a shell of, the WSL distribution on
+///     the Windows desktop @p self is, the two sharing a host name.
+///   - Only @p self's known: two machines when @p missing is MissingMachineId::Absent, for the same reason;
+///     when it is MissingMachineId::Omitted, @p other merely did not say, and the host names decide.
+///   - Neither known: the host names decide, compared whole and ignoring case. An empty name, or the
+///     loopback name every machine answers to (@ref isLoopbackHost), proves nothing, so the answer is two
+///     machines.
+///
+/// Two machines is the conservative answer: it never takes one machine's path for another's.
+/// @param other The identity judged: a daemon's, or what a context claims.
+/// @param missing What it means that @p other names no machine id.
+/// @param self This machine's identity.
+/// @return Whether the identities prove one machine.
+[[nodiscard]] bool sameMachine(LocalIdentity const& other,
+                               MissingMachineId missing,
+                               LocalIdentity const& self) noexcept;
 
 /// Whether a path named by a context can be opened on this machine.
 enum class ContextLocality : uint8_t
@@ -592,10 +748,17 @@ class ContextStack
         std::shared_ptr<TerminalContext> record;
     };
 
-    /// @param limits How deep the ancestry may go and how much history is kept. Fixed for the object's
-    ///        lifetime: a session configured differently is a different session. Requires
+    /// @param limits How deep the ancestry may go and how much history is kept. Requires
     ///        `limits.maxRetained >= limits.maxDepth`.
     explicit ContextStack(ContextStackLimits limits = {}) noexcept;
+
+    /// Replaces the limits, for a configuration reload: live reconfiguration is the feature.
+    ///
+    /// Nothing is migrated. A lower depth refuses the next push and leaves an ancestry already deeper
+    /// than it as it is, exactly as reaching the limit does; a lower retention evicts the oldest records
+    /// the next time one is stored.
+    /// @param limits As for the constructor, with the same requirement.
+    void setLimits(ContextStackLimits limits) noexcept;
 
     // -- mutation ---------------------------------------------------------------------------------
 
@@ -701,8 +864,12 @@ class ContextStack
     ///   2. Does `machineid=` match this machine's? This is the strong one and it is free: systemd's
     ///      shim emits it. It catches ssh-to-a-similar-host -- where NOTHING emits a `remote` context
     ///      and the remote shell's own sequences look entirely local -- plus containers sharing a
-    ///      hostname and VMs, all with no heuristics.
-    ///   3. Does `hostname=` name this machine?
+    ///      hostname and VMs, all with no heuristics. A context naming one on a machine that has none
+    ///      comes from another install.
+    ///   3. Failing a `machineid=`, does `hostname=` name this machine?
+    /// The last two are one question, @ref sameMachine, asked of every context on the way down that
+    /// names a machine, as of a claim (MissingMachineId::Omitted): a daemon's client asks it of the
+    /// daemon by the same rule, as of a complete identity.
     ///
     /// An ANONYMOUS context -- no boundary, no machineid, no hostname -- is Unknown, NOT Local. That is
     /// the conservative answer and it degrades to exactly the behaviour before OSC 3008 existed.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/grid/CellUtil.hpp>
+#include <vtbackend/input/MatchModes.hpp>
 #include <vtbackend/input/vi/HintModeHandler.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/screen/TerminalTestFixtures.hpp>
@@ -23,9 +24,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
+#include <latch>
 #include <mutex>
 #include <ranges>
 #include <string>
@@ -148,8 +152,10 @@ TEST_CASE("Terminal.KittyKeyRelease.sendKeyEvent", "[terminal]")
     auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
     auto& terminal = mc.terminal;
 
-    terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
-    terminal.keyboardProtocol().flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes);
+    terminal.changeKeyboardProtocol(
+        [](auto& protocol) { protocol.enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes); });
+    terminal.changeKeyboardProtocol(
+        [](auto& protocol) { protocol.flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes); });
 
     auto constexpr Now = std::chrono::steady_clock::time_point {};
 
@@ -170,8 +176,10 @@ TEST_CASE("Terminal.KittyKeyRelease.sendCharEvent", "[terminal]")
     auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
     auto& terminal = mc.terminal;
 
-    terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
-    terminal.keyboardProtocol().flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes);
+    terminal.changeKeyboardProtocol(
+        [](auto& protocol) { protocol.enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes); });
+    terminal.changeKeyboardProtocol(
+        [](auto& protocol) { protocol.flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes); });
 
     auto constexpr Now = std::chrono::steady_clock::time_point {};
 
@@ -198,7 +206,8 @@ TEST_CASE("Terminal.KittyKeyRelease.NoOutputWithoutFlag", "[terminal]")
     auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
     auto& terminal = mc.terminal;
 
-    terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
+    terminal.changeKeyboardProtocol(
+        [](auto& protocol) { protocol.enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes); });
 
     auto constexpr Now = std::chrono::steady_clock::time_point {};
 
@@ -224,8 +233,10 @@ TEST_CASE("Terminal.KittyKeyRelease.RepeatStillWorks", "[terminal]")
     auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };
     auto& terminal = mc.terminal;
 
-    terminal.keyboardProtocol().enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes);
-    terminal.keyboardProtocol().flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes);
+    terminal.changeKeyboardProtocol(
+        [](auto& protocol) { protocol.enter(vtbackend::KeyboardEventFlag::DisambiguateEscapeCodes); });
+    terminal.changeKeyboardProtocol(
+        [](auto& protocol) { protocol.flags().enable(vtbackend::KeyboardEventFlag::ReportEventTypes); });
 
     auto constexpr Now = std::chrono::steady_clock::time_point {};
 
@@ -322,7 +333,7 @@ TEST_CASE("Terminal.kitty_keyboard_protocol_reports_lock_modifiers", "[terminal]
                                 vtbackend::KeyIdentity { .unshiftedKey = U'a' },
                                 CapsLockOnly,
                                 vtbackend::KeyboardEventType::Press,
-                                std::chrono::steady_clock::now());
+                                mock.steadyClock.now());
 
     CHECK(e(mock.replyData()) == e("\033[97;65u"));
 }
@@ -335,7 +346,7 @@ TEST_CASE("Terminal.win32_input_mode_reports_unicode_for_escape_and_numpad", "[t
     mock.writeToScreen("\033[?9001h");
     mock.terminal.flushInput();
 
-    auto const now = std::chrono::steady_clock::now();
+    auto const now = mock.steadyClock.now();
 
     SECTION("Escape carries its Unicode char 0x1B")
     {
@@ -403,7 +414,6 @@ TEST_CASE("Terminal.IME queries answered under the state lock survive concurrent
     auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) }, LineCount(100) };
     auto& terminal = mc.terminal;
 
-    auto stop = std::atomic<bool> { false };
     auto observed = std::atomic<size_t> { 0 };
 
     // The production bounds guard (imeCursorAddressable, in the frontend) forwards to
@@ -414,41 +424,37 @@ TEST_CASE("Terminal.IME queries answered under the state lock survive concurrent
         return strictlyContains(cursor, terminal.pageSize());
     };
 
-    // Catch2 assertion macros are not thread-safe: the reader only collects, the main thread asserts.
-    auto imeReader = std::thread { [&]() {
-        while (!stop.load(std::memory_order_relaxed))
-        {
-            auto const lock = std::lock_guard { terminal };
-            if (!terminal.isCursorInViewport())
-                continue;
-            auto const cursor = terminal.currentScreen().cursor().position;
-            if (!addressable(cursor))
-                continue;
-            // Summed into the atomic so the grid reads stay observable — the reads ARE the test.
-            auto const cellWidth = terminal.currentScreen().cellWidthAt(cursor);
-            observed.fetch_add(terminal.currentScreen().lineTextAt(cursor.line).size() + cellWidth,
-                               std::memory_order_relaxed);
-        }
-    } };
-
     // The writer half mirrors production: parsing mutates the grid under the state lock
     // (processInputOnce), and the frontend resizes under an explicit lock (TerminalSession).
     auto const usableSizes = std::array { PageSize { LineCount(6), ColumnCount(20) },
                                           PageSize { LineCount(24), ColumnCount(80) } };
-    for (auto const round: std::views::iota(0, 200))
     {
-        mc.writeToScreen("wide \u4E16界 and combining ᬦᬸ e\u0301\r\n");
-        if (round % 25 == 24)
-        {
-            auto const usable = usableSizes[static_cast<size_t>((round / 25) % 2)];
+        // Catch2 assertion macros are not thread-safe: the reader only collects, the main thread asserts.
+        auto const imeReader = vtbackend::test::writeOnOwnThread([&] {
             auto const lock = std::lock_guard { terminal };
-            terminal.resizeScreen(
-                PageSize { .lines = usable.lines + terminal.statusLineHeight(), .columns = usable.columns });
+            if (!terminal.isCursorInViewport())
+                return;
+            auto const cursor = terminal.currentScreen().cursor().position;
+            if (!addressable(cursor))
+                return;
+            // Summed into the atomic so the grid reads stay observable — the reads ARE the test.
+            auto const cellWidth = terminal.currentScreen().cellWidthAt(cursor);
+            observed.fetch_add(terminal.currentScreen().lineTextAt(cursor.line).size() + cellWidth,
+                               std::memory_order_relaxed);
+        });
+
+        for (auto const round: std::views::iota(0, 200))
+        {
+            mc.writeToScreen("wide \u4E16界 and combining ᬦᬸ e\u0301\r\n");
+            if (round % 25 == 24)
+            {
+                auto const usable = usableSizes[static_cast<size_t>((round / 25) % 2)];
+                auto const lock = std::lock_guard { terminal };
+                terminal.resizeScreen(PageSize { .lines = usable.lines + terminal.statusLineHeight(),
+                                                 .columns = usable.columns });
+            }
         }
     }
-
-    stop = true;
-    imeReader.join();
 
     // The same query sequence once more, deterministically: the cursor of a live main page must be
     // addressable, and both grid reads must answer.
@@ -460,5 +466,464 @@ TEST_CASE("Terminal.IME queries answered under the state lock survive concurrent
     CHECK(terminal.currentScreen().cellWidthAt(cursor) <= 2);
     CHECK(terminal.currentScreen().lineTextAt(cursor.line).size() <= 4uz * 80);
 }
+
+// {{{ The Vi key path and the state lock
+TEST_CASE("Terminal.a Vi command waits for the state lock", "[terminal][vi][threading]")
+{
+    // `mm` writes a row's flags and the user-mark index, `za` the fold set, and the parser thread moves both
+    // under the state lock whenever output scrolls the rows they name. So the key path runs a Vi command
+    // under that lock too. Asserted as the contract rather than raced: with the lock held as the parser
+    // thread holds it, `mm` has to wait for it.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) }, LineCount(100) };
+    mc.writeToScreen("one\r\ntwo\033[H");
+    mc.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+
+    auto parserHold = std::unique_lock { mc.terminal };
+    auto started = std::atomic<bool> { false };
+    auto completed = std::atomic<bool> { false };
+    auto worker = std::thread { [&]() {
+        started.store(true, std::memory_order_release);
+        mc.sendCharSequence("mm");
+        completed.store(true, std::memory_order_release);
+    } };
+
+    // Running first, so that the check below cannot pass merely because the thread was not scheduled yet.
+    while (!started.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    std::this_thread::sleep_for(200ms);
+    CHECK_FALSE(completed.load(std::memory_order_acquire));
+
+    parserHold.unlock();
+    worker.join();
+
+    CHECK(completed.load(std::memory_order_acquire));
+    CHECK(mc.terminal.primaryScreen().isLineFlagEnabledAt(LineOffset(0), vtbackend::LineFlag::UserMark));
+}
+
+TEST_CASE("Terminal.a key typed in Insert mode does not wait for the state lock", "[terminal][vi][threading]")
+{
+    // No Vi command wants the key: it is encoded and written to the application, which needs nothing the
+    // parser guards. So it must not queue behind a long parse.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+
+    auto parserHold = std::unique_lock { mc.terminal };
+    auto completed = std::atomic<bool> { false };
+    auto worker = std::thread { [&]() {
+        mc.sendCharEvent(U'a');
+        completed.store(true, std::memory_order_release);
+    } };
+
+    // Bounded, so that a key that does wait fails the check rather than hanging the test.
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 500))
+    {
+        if (completed.load(std::memory_order_acquire))
+            break;
+        std::this_thread::sleep_for(10ms);
+    }
+    auto const typedWhileHeld = completed.load(std::memory_order_acquire);
+
+    parserHold.unlock();
+    worker.join();
+
+    CHECK(typedWhileHeld);
+    CHECK(mc.replyData() == "a");
+}
+
+TEST_CASE("Terminal.a Vi paste reaches the frontend after the state lock is released",
+          "[terminal][vi][threading]")
+{
+    // A frontend answers `p` by reading its clipboard, which it must not do under the terminal's lock (a
+    // clipboard owned by another process is a round trip), and by pasting through sendPaste(). The key path
+    // holds that lock while the Vi command runs, so the request is raised once it is released.
+    struct PastingTerm final: MockTerm<>
+    {
+        using MockTerm<>::MockTerm;
+
+        void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) override
+        {
+            atPaste.probe(terminal);
+            terminal.sendPaste("pasted");
+        }
+
+        LockProbe atPaste;
+    };
+
+    auto mc = PastingTerm { PageSize { LineCount(10), ColumnCount(40) } };
+    mc.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+
+    mc.sendCharEvent(U'p');
+
+    CHECK(mc.atPaste.lockWasFree());
+    CHECK(mc.replyData() == "pasted");
+}
+
+TEST_CASE("Terminal.a hint pasted with local echo on does not deadlock the key path", "[terminal][hintmode]")
+{
+    // Picking a hint with the Paste action pastes it from inside the key path, under the state lock. With SRM
+    // reset the paste echoes, and echoing parses, which takes that lock: the bytes go out once it is
+    // released.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(80) } };
+    mock.writeToScreen("\033[12lgo https://example.com now");
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Paste });
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+
+    failOnDeadlock(std::chrono::seconds(10), [&] { mock.sendCharEvent(U'a'); });
+
+    CHECK(mock.replyData() == "https://example.com");
+    CHECK(mock.terminal.primaryScreen()
+              .grid()
+              .lineText(LineOffset(0))
+              .starts_with("go https://example.com nowhttps://example.com"));
+}
+
+TEST_CASE("Terminal.leaving Vi normal mode with local echo on does not deadlock the key path",
+          "[terminal][vi]")
+{
+    // `i` takes the indicator status line away, which resizes the page, and with in-band resize reports on
+    // the resize writes a report from inside the key path, under the state lock. With SRM reset the report
+    // echoes, and echoing parses, which takes that lock: the report goes out once it is released.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+    mock.writeToScreen("\033[12l\033[?2048h");
+    mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    mock.terminal.flushInput();
+    mock.resetReplyData();
+
+    failOnDeadlock(std::chrono::seconds(10), [&] { mock.sendCharEvent(U'i'); });
+
+    CHECK(mock.terminal.inputHandler().mode() == vtbackend::ViMode::Insert);
+    CHECK(mock.replyData().starts_with("\033[48;10;40;"));
+}
+
+TEST_CASE(
+    "Terminal.a document a Vi command or a hint opens reaches the frontend after the state lock is released",
+    "[terminal][vi][hintmode][threading]")
+{
+    // A frontend opens a document by handing it to the desktop, a round trip to another process that it must
+    // not make under the terminal's lock. The key path holds that lock while `oo` or a picked hint runs, so
+    // the request is raised once it is released.
+    struct OpeningTerm final: MockTerm<>
+    {
+        using MockTerm<>::MockTerm;
+
+        void openDocument(std::string_view fileOrUrl) override
+        {
+            atOpen.probe(terminal);
+            openedDocument = fileOrUrl;
+        }
+
+        LockProbe atOpen;
+    };
+
+    auto mock = OpeningTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    mock.writeToScreen("https://example.com");
+
+    SECTION("`oo` in Normal mode")
+    {
+        mock.writeToScreen("\033[H");
+        mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+        mock.sendCharSequence("oo");
+    }
+
+    SECTION("a hint picked to be opened")
+    {
+        mock.terminal.activateHintMode(
+            vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
+                                         .action = vtbackend::HintAction::Open });
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+        mock.sendCharEvent(U'a');
+    }
+
+    CHECK(mock.atOpen.lockWasFree());
+    CHECK(mock.openedDocument.starts_with("https://example.com"));
+}
+
+TEST_CASE("Terminal.typing reads the keyboard action and local echo modes without racing the parser thread",
+          "[terminal][threading]")
+{
+    // KAM locks the keyboard, and SRM decides whether what a key sends is echoed. A key typed in Insert mode
+    // reads both without the state lock, so as not to wait for a parse, while the parser thread sets the ANSI
+    // modes under it -- IRM here, which is kept beside them. The case to run under ThreadSanitizer, which
+    // reports the reads against those writes unless the modes are atomic.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+
+    auto const keys =
+        runWhileWriting([&] { mc.writeToScreen("\033[4h\033[4l"); }, [&] { mc.sendCharEvent(U'a'); });
+
+    CHECK(mc.replyData() == std::string(keys, 'a'));
+}
+
+TEST_CASE("Terminal.a function key reads its user-defined string without racing the parser thread",
+          "[terminal][threading]")
+{
+    // The parser thread programs the user-defined keys (DECUDK) -- clearing the table first here, as Pc 0
+    // asks -- while a function key looks its string up on the GUI thread. The case to run under
+    // ThreadSanitizer. Both take the input lock for it, so the lookup never finds the table half rewritten:
+    // every F6 sends the string it was programmed with.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+    auto constexpr Programming = "\033P0;1|17/41;18/42;19/43;20/44\033\\"sv;
+    mc.writeToScreen(Programming);
+
+    auto const keys =
+        runWhileWriting([&] { mc.writeToScreen(Programming); }, [&] { mc.sendKeyEvent(vtbackend::Key::F6); });
+
+    CHECK(mc.replyData() == std::string(keys, 'A'));
+}
+
+TEST_CASE("Terminal.a key does not wait for the state lock", "[terminal][threading]")
+{
+    // The parser thread holds the state lock for a whole batch, and Windows' lock is not fair: a key that
+    // waited for it could wait out a flood of output. No key does, not even F6 to F20, whose user-defined
+    // strings (DECUDK) the parser programs. Another thread holds the lock for 500 ms; each key is sent within
+    // 100 ms.
+    struct Row
+    {
+        vtbackend::Key key;
+        std::string_view sent;
+    };
+    auto const rows = std::array { Row { .key = vtbackend::Key::Enter, .sent = "\r" },
+                                   Row { .key = vtbackend::Key::F6, .sent = "A" } };
+    for (auto const& [key, sent]: rows)
+    {
+        auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+        mc.writeToScreen("\033P0;1|17/41\033\\");
+
+        auto held = std::latch { 1 };
+        auto holder = std::jthread { [&]() {
+            auto const _ = std::scoped_lock { mc.terminal };
+            held.count_down();
+            std::this_thread::sleep_for(500ms);
+        } };
+        held.wait();
+
+        auto const started = std::chrono::steady_clock::now();
+        mc.sendKeyEvent(key);
+        auto const took = std::chrono::steady_clock::now() - started;
+        holder.join();
+
+        CHECK(took < 100ms);
+        CHECK(mc.replyData() == sent);
+    }
+}
+
+TEST_CASE("Terminal.the binding modes follow every state they name", "[terminal][input]")
+{
+    // A key reads the modes a binding can ask for without the state lock, from the word each writer of the
+    // state publishes them in. A writer that forgot to would leave a binding matching on a mode that is gone,
+    // or missing one that holds. Each row turns its mode on and off again through every path that changes it.
+    using Flag = vtbackend::MatchModes::Flag;
+    struct Row
+    {
+        std::string_view path;
+        Flag flag;
+        std::function<void(MockTerm<>&)> enter;
+        std::function<void(MockTerm<>&)> leave;
+    };
+    auto const write = [](std::string_view text) {
+        return [text = std::string(text)](MockTerm<>& mc) {
+            mc.writeToScreen(text);
+        };
+    };
+    auto const rows = std::array {
+        Row { .path = "DECSET 1049",
+              .flag = Flag::AlternateScreen,
+              .enter = write("\033[?1049h"),
+              .leave = write("\033[?1049l") },
+        Row { .path = "DECCKM",
+              .flag = Flag::AppCursor,
+              .enter = write("\033[?1h"),
+              .leave = write("\033[?1l") },
+        Row { .path = "DECCKM, then RIS",
+              .flag = Flag::AppCursor,
+              .enter = write("\033[?1h"),
+              .leave = write("\033c") },
+        Row { .path = "DECKPAM", .flag = Flag::AppKeypad, .enter = write("\033="), .leave = write("\033>") },
+        Row { .path = "DECKPAM, then RIS",
+              .flag = Flag::AppKeypad,
+              .enter = write("\033="),
+              .leave = write("\033c") },
+        Row { .path = "a selection",
+              .flag = Flag::Select,
+              .enter = [](auto& mc) { mc.terminal.selectAll(); },
+              .leave = [](auto& mc) { mc.terminal.clearSelection(); } },
+        Row { .path = "a click, released where it was pressed",
+              .flag = Flag::Select,
+              .enter =
+                  [](auto& mc) {
+                      (void) mc.terminal.sendMousePressEvent(vtbackend::Modifiers {},
+                                                             vtbackend::MouseButton::Left,
+                                                             CellLocation {},
+                                                             vtbackend::PixelCoordinate {},
+                                                             /*uiHandledHint=*/false);
+                  },
+              .leave =
+                  [](auto& mc) {
+                      (void) mc.terminal.sendMouseReleaseEvent(vtbackend::Modifiers {},
+                                                               vtbackend::MouseButton::Left,
+                                                               vtbackend::PixelCoordinate {},
+                                                               /*uiHandledHint=*/false);
+                  } },
+        Row { .path = "a search",
+              .flag = Flag::Search,
+              .enter =
+                  [](auto& mc) { (void) mc.terminal.setNewSearchTerm(U"x", vtbackend::SearchOrigin::Typed); },
+              .leave = [](auto& mc) { mc.terminal.clearSearch(); } },
+        Row { .path = "Insert mode",
+              .flag = Flag::Insert,
+              .enter = [](auto& mc) { mc.terminal.inputHandler().setMode(vtbackend::ViMode::Insert); },
+              .leave = [](auto& mc) { mc.terminal.inputHandler().setMode(vtbackend::ViMode::Normal); } },
+        Row { .path = "trace mode",
+              .flag = Flag::Trace,
+              .enter =
+                  [](auto& mc) { mc.terminal.setExecutionMode(vtbackend::ExecutionMode::BreakAtEmptyQueue); },
+              .leave = [](auto& mc) { mc.terminal.setExecutionMode(vtbackend::ExecutionMode::Normal); } },
+    };
+
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto const holds = [&](Flag flag) {
+        return (mc.terminal.bindingModes() & static_cast<uint8_t>(flag)) != 0;
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.path);
+        row.leave(mc);
+        CHECK_FALSE(holds(row.flag));
+        row.enter(mc);
+        CHECK(holds(row.flag));
+        row.leave(mc);
+        CHECK_FALSE(holds(row.flag));
+    }
+}
+
+TEST_CASE("Terminal.a key reads the modes it is encoded with without racing the parser thread",
+          "[terminal][threading]")
+{
+    // What a key sends depends on modes the parser thread sets: the cursor keys and keypad modes (DECCKM,
+    // DECNKM), LNM, DECBKM, the Kitty keyboard flags, modifyOtherKeys, win32-input-mode, and for a paste,
+    // bracketed paste. A key typed in Insert mode is encoded under the input lock alone, so as not to wait
+    // for a parse. The case to run under ThreadSanitizer, which reports each read against its write unless
+    // the parser sets them under the input lock too.
+    struct Row
+    {
+        std::string_view mode;
+        std::string_view toggle;
+        std::function<void(MockTerm<>&)> type;
+    };
+    auto const rows = std::array {
+        Row { .mode = "DECCKM",
+              .toggle = "\033[?1h\033[?1l",
+              .type = [](auto& mc) { mc.sendKeyEvent(vtbackend::Key::UpArrow); } },
+        Row { .mode = "DECNKM",
+              .toggle = "\033=\033>",
+              .type = [](auto& mc) { mc.sendKeyEvent(vtbackend::Key::Numpad_Add); } },
+        Row { .mode = "LNM",
+              .toggle = "\033[20h\033[20l",
+              .type = [](auto& mc) { mc.sendKeyEvent(vtbackend::Key::Enter); } },
+        Row { .mode = "DECBKM",
+              .toggle = "\033[?67h\033[?67l",
+              .type = [](auto& mc) { mc.sendKeyEvent(vtbackend::Key::Backspace); } },
+        Row { .mode = "Kitty keyboard flags",
+              .toggle = "\033[>1u\033[<u",
+              .type = [](auto& mc) { mc.sendKeyEvent(vtbackend::Key::Escape); } },
+        Row { .mode = "modifyOtherKeys",
+              .toggle = "\033[>4;2m\033[>4;0m",
+              .type = [](auto& mc) { mc.sendCharEvent(U'a', vtbackend::Modifiers { Modifier::Control }); } },
+        Row { .mode = "win32-input-mode",
+              .toggle = "\033[?9001h\033[?9001l",
+              .type = [](auto& mc) { mc.sendCharEvent(U'a'); } },
+        Row { .mode = "bracketed paste",
+              .toggle = "\033[?2004h\033[?2004l",
+              .type = [](auto& mc) { mc.terminal.sendPaste("x"); } },
+    };
+
+    for (auto const& row: rows)
+    {
+        INFO(row.mode);
+        auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+        (void) runWhileWriting([&] { mc.writeToScreen(row.toggle); }, [&] { row.type(mc); });
+        CHECK_FALSE(mc.replyData().empty());
+    }
+}
+
+TEST_CASE("Terminal.a key repeat reads DECARM without racing the parser thread", "[terminal][threading]")
+{
+    // A repeat is dropped while DECARM is reset. A key repeat reads it without the state lock while the
+    // parser thread sets the DEC modes under it -- DECCKM here, kept in the same word. The case to run under
+    // ThreadSanitizer, which reports the read against the write unless the DEC modes are atomic.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+
+    auto const keys =
+        runWhileWriting([&] { mc.writeToScreen("\033[?1h\033[?1l"); },
+                        [&] {
+                            mc.terminal.sendCharEvent(U'a',
+                                                      vtbackend::KeyIdentity { .unshiftedKey = U'a' },
+                                                      vtbackend::KeyboardModifiers {},
+                                                      vtbackend::KeyboardEventType::Repeat,
+                                                      mc.steadyClock.now());
+                        });
+
+    CHECK(mc.replyData() == std::string(keys, 'a'));
+}
+
+TEST_CASE("Terminal.typing scrolls the view back down without racing the parser thread",
+          "[terminal][threading]")
+{
+    // A key brings a view scrolled back into the history down to the bottom. The other threads move the view
+    // under the state lock: here one scrolls it back, and output keeps a scrolled-back view on the lines it
+    // shows. A key must not wait for that lock while the view is at the bottom already. The case to run under
+    // ThreadSanitizer, which reports the key's read of the view against those writes.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
+    vtbackend::test::printLines(mc, "line", 20);
+
+    auto const keys = runWhileWriting(
+        [&] {
+            {
+                auto const _ = std::scoped_lock { mc.terminal };
+                (void) mc.terminal.viewport().scrollUp(LineCount(1));
+            }
+            mc.writeToScreen("x\r\n");
+        },
+        [&] { mc.sendCharEvent(U'a'); });
+
+    CHECK(mc.replyData() == std::string(keys, 'a'));
+}
+
+TEST_CASE("Terminal.a key restarts the cursor blink without racing the render thread",
+          "[terminal][threading]")
+{
+    // A key shows the cursor and restarts its blink, which the render thread advances as it ticks. Neither
+    // takes the state lock for it. The case to run under ThreadSanitizer, which reports the key's writes
+    // against the tick's.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+    mc.terminal.setCursorDisplay(vtbackend::CursorDisplay::Blink);
+    auto const start = std::chrono::steady_clock::now();
+
+    auto ticks = std::chrono::seconds(0);
+    auto const keys = runWhileWriting(
+        [&] {
+            ticks += std::chrono::seconds(1);
+            mc.terminal.tick(start + ticks);
+        },
+        [&] { mc.sendCharEvent(U'a'); });
+
+    CHECK(mc.replyData() == std::string(keys, 'a'));
+}
+TEST_CASE("Terminal.composing does not race the render thread", "[terminal][threading]")
+{
+    // An input method's composition is drawn at the cursor. The GUI thread hands it over as it changes,
+    // without the state lock, which composing does not wait for, as typing does not; the render thread copies
+    // it as it fills a frame, under that lock. The case to run under ThreadSanitizer, which reports the GUI
+    // thread's writes against the fill's copy unless the two share a lock.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(40) } };
+    auto const compositions = runWhileWriting([&] { (void) mc.terminal.refreshRenderBuffer(); },
+                                              [&] {
+                                                  mc.terminal.updateInputMethodPreeditString("kana");
+                                                  mc.terminal.updateInputMethodPreeditString("");
+                                              });
+    CHECK(compositions > 0);
+}
+// }}}
 
 // NOLINTEND(misc-const-correctness)

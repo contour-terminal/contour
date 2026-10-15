@@ -16,11 +16,14 @@
 
 #include <expected>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <ios>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -44,6 +47,37 @@ namespace contour::test
     auto config = contour::config::Config {};
     contour::config::loadConfigFromFile(config, path);
     return config;
+}
+
+/// A configuration file's text: @p sections, then @p profile as the default profile and the only one.
+///
+/// The profile names a placeholder shell, which no test spawns.
+/// @param profile The profile's name.
+/// @param sections Top-level sections, each line ending in a newline.
+/// @param profileEntries The profile's entries, each line indented by eight spaces and ending in a newline.
+/// @return The YAML.
+[[nodiscard]] inline std::string profileConfigYaml(std::string_view profile,
+                                                   std::string_view sections = {},
+                                                   std::string_view profileEntries = {})
+{
+    return std::format("default_profile: {0}\n"
+                       "{1}"
+                       "profiles:\n"
+                       "    {0}:\n"
+                       "        shell: /bin/sh\n"
+                       "{2}",
+                       profile,
+                       sections,
+                       profileEntries);
+}
+
+/// Replaces what @p path holds with @p text, as a user saving a configuration file does.
+/// @param path The file.
+/// @param text Its new contents.
+inline void writeConfigFile(std::filesystem::path const& path, std::string_view text)
+{
+    auto file = std::ofstream { path, std::ios::binary | std::ios::trunc };
+    file << text;
 }
 
 /// An in-memory CommandHistoryStore: the command palette's record -> persist -> reload cycle runs end

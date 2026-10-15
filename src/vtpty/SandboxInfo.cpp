@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/SandboxInfo.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 
 #include <filesystem>
+#include <utility>
 
 namespace vtpty
 {
@@ -61,6 +63,27 @@ SandboxInfo parseFlatpakInfo(std::string_view flatpakInfo)
     });
 
     return info;
+}
+
+std::optional<std::filesystem::path> sharedRuntimeDirectory(std::optional<std::string_view> xdgRuntimeDir,
+                                                            std::string_view applicationId)
+{
+    if (!xdgRuntimeDir || xdgRuntimeDir->empty())
+        return std::nullopt;
+
+    auto directory = core::pathFromUtf8(*xdgRuntimeDir);
+    if (!directory || !directory->has_root_directory())
+        return std::nullopt;
+
+    if (applicationId.empty())
+        return std::move(*directory);
+
+    // Inside the sandbox the runtime directory itself is private: only the application's own
+    // subdirectory is shared, and there is nothing to fall back to.
+    auto const application = core::pathFromUtf8(applicationId);
+    if (!application)
+        return std::nullopt;
+    return *directory / "app" / *application;
 }
 
 SandboxInfo const& currentSandbox()

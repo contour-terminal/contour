@@ -3,6 +3,7 @@
 
 #include <contour/config/Actions.hpp>
 
+#include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Primitives.hpp>
 
 #include <cstdint>
@@ -12,6 +13,28 @@
 
 namespace contour::command
 {
+
+/// Whether a block has an output part yet: its command started (OSC 133;C).
+enum class OutputPresence : std::uint8_t
+{
+    Absent = 0, ///< Still at its prompt.
+    Present,    ///< Running or finished.
+};
+
+/// Whether a block's command line is known, which is what "Copy Command" copies.
+enum class CommandLinePresence : std::uint8_t
+{
+    Absent = 0, ///< Neither reported nor recovered.
+    Present,    ///< Reported by the shell (OSC 133;C cmdline_url), or recovered from the grid.
+};
+
+/// The command block a right-click landed on, with what its rows may act on.
+struct PointedBlock
+{
+    vtbackend::CommandBlockId id {};                               ///< The block; never zero.
+    OutputPresence output = OutputPresence::Absent;                ///< Whether it has output to act on.
+    CommandLinePresence commandLine = CommandLinePresence::Absent; ///< Whether its command line is known.
+};
 
 /// The world, as the terminal pane's context menu needs to see it.
 ///
@@ -49,6 +72,13 @@ struct ContextMenuState
     /// leaves that cell the moment the user reaches for the menu row, so a row that asked again would
     /// answer about a line nobody clicked.
     std::optional<vtbackend::LineOffset> foldLine;
+
+    /// The command block whose row was right-clicked; nullopt when the click was on no block's row.
+    ///
+    /// One optional rather than an id with a zero sentinel beside its facts, for the reason foldLine is
+    /// one. Captured at click time and carried by the block rows, because the pointer leaves the block
+    /// for the menu the moment the user reaches for a row.
+    std::optional<PointedBlock> blockUnderCursor {};
 
     std::string activeProfile;             ///< The profile this session runs under.
     std::vector<std::string> profileNames; ///< Every configured profile, in a stable order.

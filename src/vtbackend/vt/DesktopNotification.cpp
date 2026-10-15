@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/vt/DesktopNotification.hpp>
 
+#include <vtbackend/core/Utf8Prefix.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <core/Base64.hpp>
 #include <core/Utils.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <format>
 #include <string>
@@ -95,6 +97,16 @@ namespace
             });
     }
 
+    /// Appends @p text to @p field, keeping @p field within NotificationLimits.textBytes. What does not fit
+    /// is dropped, and the cut never splits a code point.
+    /// @param field A title or body being assembled; it already fits.
+    /// @param text The text to append.
+    void appendCapped(string& field, string_view text)
+    {
+        auto const room = NotificationLimits.textBytes - std::min(field.size(), NotificationLimits.textBytes);
+        field.append(text.substr(0, utf8PrefixLength(text, room)));
+    }
+
     /// Applies payload text to the notification based on the current payload type.
     void applyPayload(string_view payloadText, DesktopNotification& notification)
     {
@@ -103,29 +115,14 @@ namespace
 
         switch (notification.currentPayload)
         {
-            case NotificationPayloadType::Title: notification.title += decoded; break;
-            case NotificationPayloadType::Body: notification.body += decoded; break;
+            case NotificationPayloadType::Title: appendCapped(notification.title, decoded); break;
+            case NotificationPayloadType::Body: appendCapped(notification.body, decoded); break;
             case NotificationPayloadType::Close:
             case NotificationPayloadType::Query:
             case NotificationPayloadType::Alive:
                 // These payload types don't carry text data.
                 break;
         }
-    }
-
-    /// Checks whether the notification should be displayed given the terminal's focus state.
-    [[nodiscard]] bool shouldDisplay(DesktopNotification const& notification, bool terminalFocused)
-    {
-        switch (notification.occasion)
-        {
-            case DisplayOccasion::Always: return true;
-            case DisplayOccasion::Unfocused: return !terminalFocused;
-            case DisplayOccasion::Invisible:
-                // We treat "invisible" the same as "unfocused" since we don't track
-                // window visibility state separately from focus.
-                return !terminalFocused;
-        }
-        return true;
     }
 
     /// Appends the chunk's title or body text to the notification being assembled.
@@ -135,8 +132,8 @@ namespace
     {
         switch (chunk.currentPayload)
         {
-            case NotificationPayloadType::Title: assembled.title += chunk.title; break;
-            case NotificationPayloadType::Body: assembled.body += chunk.body; break;
+            case NotificationPayloadType::Title: appendCapped(assembled.title, chunk.title); break;
+            case NotificationPayloadType::Body: appendCapped(assembled.body, chunk.body); break;
             case NotificationPayloadType::Close:
             case NotificationPayloadType::Query:
             case NotificationPayloadType::Alive:
@@ -235,11 +232,11 @@ void DesktopNotificationManager::handleOSC99(string_view payload, Terminal& term
         case NotificationPayloadType::Alive: {
             // Respond with comma-separated list of active notification IDs.
             string idList;
-            for (auto const& id: _activeNotifications)
+            for (auto const& item: _activeNotifications)
             {
                 if (!idList.empty())
                     idList += ',';
-                idList += id;
+                idList += item.key;
             }
             terminal.reply("\033]99;i={}:p=alive;{}\033\\", notification.identifier, idList);
             return;
@@ -255,37 +252,35 @@ void DesktopNotificationManager::handleOSC99(string_view payload, Terminal& term
             // Handle chunking: if d=0 (not done), store for later assembly.
             if (!notification.done)
             {
-                auto it = _pendingNotifications.find(notification.identifier);
-                if (it == _pendingNotifications.end())
+                // A subsequent chunk makes its notification the newest pending one again.
+                if (auto* assembled = _pendingNotifications.tryGet(notification.identifier))
                 {
-                    // First chunk — store the notification.
-                    _pendingNotifications.emplace(notification.identifier, std::move(notification));
+                    // Subsequent chunk — merge payload and metadata into existing notification.
+                    appendChunkPayload(*assembled, notification);
+                    mergeChunkMetadata(*assembled, notification);
                 }
                 else
                 {
-                    // Subsequent chunk — merge payload and metadata into existing notification.
-                    appendChunkPayload(it->second, notification);
-                    mergeChunkMetadata(it->second, notification);
+                    // First chunk — store the notification, dropping the oldest pending one when full.
+                    auto identifier = notification.identifier;
+                    _pendingNotifications.emplace(std::move(identifier), std::move(notification));
                 }
                 return;
             }
 
             // d=1 (or default): finalize. Check if there's a pending notification to merge.
-            if (auto it = _pendingNotifications.find(notification.identifier);
-                it != _pendingNotifications.end())
+            if (auto* assembled = _pendingNotifications.tryGet(notification.identifier))
             {
                 // Merge final chunk payload, then take the assembled notification.
-                appendChunkPayload(it->second, notification);
-                notification = std::move(it->second);
+                appendChunkPayload(*assembled, notification);
+                notification = std::move(*assembled);
                 notification.done = true;
-                _pendingNotifications.erase(it);
+                _pendingNotifications.erase(notification.identifier);
             }
 
-            // Check occasion filter.
-            if (!shouldDisplay(notification, terminal.focused()))
-                return;
-
-            // Dispatch to the terminal event listener.
+            // Dispatched whatever its occasion (`o=`): whether the user is looking at the pane is the
+            // frontend's to say, which knows where the pane is -- not only whether it has focus -- and
+            // unlists a notification it declines. @see Terminal::Events::showDesktopNotification
             addActiveNotification(notification.identifier);
             terminal.showDesktopNotification(notification);
             return;
@@ -295,7 +290,12 @@ void DesktopNotificationManager::handleOSC99(string_view payload, Terminal& term
 
 void DesktopNotificationManager::addActiveNotification(string const& identifier)
 {
-    _activeNotifications.insert(identifier);
+    // Raised again under its identifier, a notification is the newest one; a new one past the bound
+    // drops the oldest.
+    if (_activeNotifications.contains(identifier))
+        _activeNotifications.touch(identifier);
+    else
+        _activeNotifications.emplace(identifier, Live {});
 }
 
 void DesktopNotificationManager::removeActiveNotification(string const& identifier)
@@ -303,9 +303,14 @@ void DesktopNotificationManager::removeActiveNotification(string const& identifi
     _activeNotifications.erase(identifier);
 }
 
-std::unordered_set<string> const& DesktopNotificationManager::activeNotifications() const noexcept
+std::vector<string> DesktopNotificationManager::activeNotifications() const
 {
-    return _activeNotifications;
+    return _activeNotifications.keys();
+}
+
+std::vector<string> DesktopNotificationManager::pendingNotifications() const
+{
+    return _pendingNotifications.keys();
 }
 
 } // namespace vtbackend

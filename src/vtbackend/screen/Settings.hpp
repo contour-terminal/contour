@@ -4,14 +4,18 @@
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/input/InputGenerator.hpp> // Modifier
-#include <vtbackend/shell/Folding.hpp>        // FoldJumpBehavior
+#include <vtbackend/screen/GutterSettings.hpp>
+#include <vtbackend/shell/CommandBlock.hpp> // CommandBlockStoreLimits
+#include <vtbackend/shell/Folding.hpp>      // FoldJumpBehavior, FoldingAvailability
 #include <vtbackend/shell/MarkArbiter.hpp>
+#include <vtbackend/shell/StickyHeader.hpp>
 #include <vtbackend/vt/Charset.hpp>
 #include <vtbackend/vt/RectangularAreaChecksum.hpp>
 #include <vtbackend/vt/VTType.hpp>
 
 #include <vtparser/BulkScan.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <map>
 
@@ -42,6 +46,66 @@ enum class TabsNamingMode : uint8_t
 /// defaults to it too, so a host that builds Settings without a configuration reads alike.
 inline constexpr size_t DefaultPtyReadBufferSize = 65536;
 
+/// What a sixel image does at the bottom margin: DECSDM (DEC mode 80) as the terminal powers up and as RIS
+/// restores it.
+enum class SixelScrolling : uint8_t
+{
+    Enabled = 0, ///< The page scrolls up to make room for the image: DECSDM reset.
+    Disabled,    ///< The image stops at the bottom margin: DECSDM set (DECMode::NoSixelScrolling).
+};
+
+/// A value the render thread reads without the terminal's state lock -- as it ticks, and asks when the next
+/// frame is due -- while the parser thread or the frontend writes it under that lock. Each read and write is
+/// a relaxed atomic one, and a copy copies the value, so what holds it stays a value type.
+template <typename T>
+class RelaxedAtomic
+{
+  public:
+    /// @param value The value to start with.
+    constexpr RelaxedAtomic(T value) noexcept: _value { value } {}
+
+    RelaxedAtomic(RelaxedAtomic const& other) noexcept: _value { other.get() } {}
+
+    RelaxedAtomic& operator=(RelaxedAtomic const& other) noexcept
+    {
+        set(other.get());
+        return *this;
+    }
+
+    RelaxedAtomic& operator=(T value) noexcept
+    {
+        set(value);
+        return *this;
+    }
+
+    ~RelaxedAtomic() = default;
+
+    /// @return The value.
+    [[nodiscard]] T get() const noexcept { return _value.load(std::memory_order_relaxed); }
+
+    /// @param value The value to hold from now on.
+    void set(T value) noexcept { _value.store(value, std::memory_order_relaxed); }
+
+    /// @return The value, so that the setting reads as the value it holds.
+    operator T() const noexcept { return get(); }
+
+  private:
+    std::atomic<T> _value;
+};
+
+/// Which thread writes to the PTY the input another thread queues: a frontend's keys, mouse reports and
+/// pastes, and what its hold of the terminal lock raised. @see Terminal::flushInput(), Terminal::unlock()
+enum class InputWriter : uint8_t
+{
+    /// The thread queuing it writes it, or the thread releasing the lock it was queued under: for a terminal
+    /// one thread drives, as a test drives one.
+    QueueingThread = 0,
+    /// The PTY's reader writes it, woken by the thread queuing it, which then never parks on a write the
+    /// application leaves unread: a GUI's thread, or a daemon's event loop. Until the reader first reads,
+    /// the queuing thread writes it.
+    ReaderThread,
+};
+
 /// Terminal settings, enabling hardware reset to be easier implemented.
 struct Settings
 {
@@ -70,6 +134,11 @@ struct Settings
     size_t kittyImageStorageQuota = static_cast<size_t>(128 * 1024 * 1024);
     bool goodImageProtocol = false;
 
+    /// Whether sixel images scroll the page, as the terminal starts and as RIS returns it: a configured
+    /// setting, like the VT340's Graphics Set-Up feature of that name and xterm's `sixelScrolling` resource,
+    /// which DECSDM changes only until the next RIS. DECSTR leaves the mode alone.
+    SixelScrolling sixelScrolling = SixelScrolling::Enabled;
+
     /// Whether an application may read the clipboard via OSC 52 (`OSC 52 ; Pc ; ? ST`). Disabled by
     /// default: clipboard reading is a well-known exfiltration vector, so it is opt-in. Writing the
     /// clipboard via OSC 52 is unaffected by this. @see Terminal::requestClipboardRead.
@@ -80,7 +149,8 @@ struct Settings
     /// @see vtbackend::ClusterWidthPolicy.
     bool graphemeClustering = true;
     StatusDisplayType statusDisplayType = StatusDisplayType::None;
-    StatusDisplayPosition statusDisplayPosition = StatusDisplayPosition::Bottom;
+    /// Read by the renderer each frame. @see RelaxedAtomic
+    RelaxedAtomic<StatusDisplayPosition> statusDisplayPosition = StatusDisplayPosition::Bottom;
     struct
     {
         std::string left { "{VTType} │ {InputMode:Bold,Color=#C0C030}"
@@ -91,11 +161,13 @@ struct Settings
         std::string right { "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold} " };
     } indicatorStatusLine;
     bool syncWindowTitleWithHostWritableStatusDisplay = true;
-    CursorDisplay cursorDisplay = CursorDisplay::Steady;
+    /// Read by the render thread as it ticks. @see RelaxedAtomic
+    RelaxedAtomic<CursorDisplay> cursorDisplay = CursorDisplay::Steady;
     CursorShape cursorShape = CursorShape::Block;
     BellVolume warningBellVolume = BellVolume::High;
     BellVolume marginBellVolume = BellVolume::Off;
-    BlinkStyle blinkStyle = BlinkStyle::Smooth;
+    /// Read by the render thread as it asks when the next frame is due. @see RelaxedAtomic
+    RelaxedAtomic<BlinkStyle> blinkStyle = BlinkStyle::Smooth;
     ScreenTransitionStyle screenTransitionStyle = ScreenTransitionStyle::Fade;
     std::chrono::milliseconds screenTransitionDuration { 250 };
     std::chrono::milliseconds cursorMotionAnimationDuration { 80 };
@@ -117,7 +189,8 @@ struct Settings
     /// Supplemental Graphic and ISO Latin-1, and so does this.
     UserPreferredSupplementalSet userPreferredSupplementalSet = DefaultUserPreferredSupplementalSet;
 
-    std::chrono::milliseconds cursorBlinkInterval = std::chrono::milliseconds { 500 };
+    /// Read by the render thread as it ticks. @see RelaxedAtomic
+    RelaxedAtomic<std::chrono::milliseconds> cursorBlinkInterval = std::chrono::milliseconds { 500 };
 
     /// How long synchronized output (DECSET 2026) may suppress rendering before the terminal draws
     /// anyway.
@@ -155,11 +228,16 @@ struct Settings
     /// User-initiated transitions (e.g. leaving Vi mode) are not affected.
     bool autoScrollOnUpdate = true;
 
-    /// Whether a gutter column is reserved left of the grid and a fold marker drawn in it on every
-    /// foldable prompt line. The window geometry must agree: the gutter's width is taken out of the
-    /// space available to cells, so a page fitted with one and a renderer drawing without it (or vice
-    /// versa) put the grid in two different places.
-    bool foldMarkers = false;
+    /// What the strip left of the grid shows. The window geometry must agree: the gutter's width --
+    /// gutterLayoutFor(gutter).totalColumns cells -- is taken out of the space available to cells, so a
+    /// page fitted for one layout and a renderer drawing another put the grid in two different places.
+    /// @see GutterSettings
+    GutterSettings gutter {};
+
+    /// The sticky command header and the evicted-output placeholder (profile key `sticky_header`).
+    ///
+    /// Read afresh on every frame, so a profile switch or a config reload shows on the next one.
+    StickyHeaderSettings stickyHeader {};
 
     /// OSC 3008 hierarchical context signalling.
     ///
@@ -181,6 +259,15 @@ struct Settings
     /// searched for is worse than revealing the block it was found in.
     FoldJumpBehavior foldJumpBehavior = FoldJumpBehavior::Expand;
 
+    /// Whether folding is available at all (`folding.enabled`). Every fold verb that can hide output reads
+    /// it, so the vi `z` keys, the frontend's actions and the automatic collapse are refused alike.
+    FoldingAvailability foldingAvailability = FoldingAvailability::Enabled;
+
+    /// How many shell command blocks (OSC 133 / OSC 3008) the session remembers. Read once: the store takes
+    /// it at construction, so a changed value applies to sessions opened afterwards.
+    /// @see CommandBlockStore
+    CommandBlockStoreLimits commandBlockLimits {};
+
     /// Whether the terminal considers itself focused at birth. Birth state, not a runtime knob: it is
     /// read once by the constructor and thereafter only sendFocus{In,Out}Event writes the flag.
     ///
@@ -194,22 +281,24 @@ struct Settings
     // Size in bytes per PTY Buffer Object.
     //
     // Defaults to 1 MB, that's roughly 10k lines when column count is 100.
-    size_t ptyBufferObjectSize = 1024lu * 1024lu;
+    size_t ptyBufferObjectSize = 1024zu * 1024zu;
     // The most bytes taken from the PTY in one read, and so the most parsed in one hold of the terminal's
     // lock. The terminal rounds it up to a power of two.
     size_t ptyReadBufferSize = DefaultPtyReadBufferSize;
+    /// @see InputWriter
+    InputWriter inputWriter = InputWriter::QueueingThread;
     /// Whether the VT parser may skip its state machine for runs of bytes it would only pass on.
     /// Always Enabled in production. Disabled is the per-byte reference the tests compare against.
     vtparser::BulkScan parserBulkScan = vtparser::BulkScan::Enabled;
-    std::u32string wordDelimiters;
-    std::u32string extendedWordDelimiters;
+    std::u32string wordDelimiters = U" ";         ///< What ends a word a double click selects.
+    std::u32string extendedWordDelimiters = U" "; ///< What ends a word a triple click selects.
     Modifiers mouseProtocolBypassModifiers = Modifier::Shift;
     Modifiers mouseBlockSelectionModifiers = Modifier::Control;
     LineOffset copyLastMarkRangeOffset = LineOffset(0);
+    /// Whether a double-clicked word's other occurrences are highlighted too, by making the word the
+    /// search pattern (the profile's `highlight_word_and_matches_on_double_click`).
     bool visualizeSelectedWord = true;
     std::chrono::milliseconds highlightTimeout = std::chrono::milliseconds { 150 };
-    bool highlightDoubleClickedWord = true;
-    // TODO: ^^^ make also use of it. probably rename to how VScode has named it.
 
     struct PrimaryScreen
     {

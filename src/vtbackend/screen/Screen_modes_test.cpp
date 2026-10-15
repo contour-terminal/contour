@@ -60,17 +60,17 @@ TEST_CASE("DSR.Unsolicited_ColorPaletteUpdated", "[screen]")
     REQUIRE(mock.terminal.isModeEnabled(DECMode::ReportColorPaletteUpdated));
 
     // Set dark mode colors
-    mock.terminal.resetColorPalette(lightModeColors);
-
-    // This must trigger an unsolicited DSR.
-    REQUIRE(escape(mock.replyData()) == escape("\033[?997;2n"sv));
-    mock.resetReplyData();
-
-    // Set light mode colors
     mock.terminal.resetColorPalette(darkModeColors);
 
     // This must trigger an unsolicited DSR.
     REQUIRE(escape(mock.replyData()) == escape("\033[?997;1n"sv));
+    mock.resetReplyData();
+
+    // Set light mode colors
+    mock.terminal.resetColorPalette(lightModeColors);
+
+    // This must trigger an unsolicited DSR.
+    REQUIRE(escape(mock.replyData()) == escape("\033[?997;2n"sv));
     mock.resetReplyData();
 }
 
@@ -1140,36 +1140,37 @@ TEST_CASE("DECINVM: invoke undefined macro", "[screen]")
 
 TEST_CASE("DECINVM: nested macro invocation", "[screen]")
 {
+    // Hex-encoded (Pen=1): a plain body cannot hold the ESC of the invocation -- it would end the DCS.
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define macro 1 that writes "B"
-    mock.writeToScreen("\033P1;0;0!zB\033\\");
-    mock.terminal.flushInput();
-    // Define macro 0 that writes "A", invokes macro 1, then writes "C"
-    mock.writeToScreen("\033P0;0;0!zA\033[1*zC\033\\");
-    mock.terminal.flushInput();
-    // Invoke macro 0
+    mock.writeToScreen(macroDefinition(1, "B"));
+    mock.writeToScreen(macroDefinition(0, "A\033[1*zC"));
+
     mock.writeToScreen("\033[0*z");
-    mock.terminal.flushInput();
-    // Macro 0 body outputs "A" then "C" (deferred macro 1 runs after), then macro 1 outputs "B"
-    auto const text = mock.terminal.currentScreen().grid().lineText(LineOffset(0));
-    CHECK(text.contains('A'));
-    CHECK(text.contains('B'));
-    CHECK(text.contains('C'));
+
+    // Macro 1 runs where macro 0 invokes it, between the "A" and the "C" around the invocation.
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 4) == "ABC ");
 }
 
 TEST_CASE("DECINVM: recursive macro guard", "[screen]")
 {
+    // DEC STD 070: macros "cannot invoke themselves recursively" -- not directly, and not through another.
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
-    // Define macro 0 that invokes itself (infinite recursion attempt)
-    mock.writeToScreen("\033P0;0;0!z\033[0*z\033\\");
-    mock.terminal.flushInput();
-    // Invoke macro 0 — should NOT infinite loop, recursion depth is bounded
+
+    SECTION("directly")
+    {
+        mock.writeToScreen(macroDefinition(0, "x\033[0*z"));
+    }
+    SECTION("through another macro")
+    {
+        mock.writeToScreen(macroDefinition(0, "x\033[1*z"));
+        mock.writeToScreen(macroDefinition(1, "\033[0*z"));
+    }
+
     mock.writeToScreen("\033[0*z");
-    mock.terminal.flushInput();
-    // Verify the terminal is still responsive after bounded recursion
     mock.writeToScreen("OK");
-    mock.terminal.flushInput();
-    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 2) == "OK");
+
+    // One run, and the terminal goes on parsing after it.
+    CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)).substr(0, 4) == "xOK ");
 }
 
 TEST_CASE("LNM: set makes LF also return the carriage", "[screen]")
@@ -1488,9 +1489,9 @@ TEST_CASE("DECSLPP sets the page's length", "[screen]")
 
 TEST_CASE("DECDSR answers for the devices the terminal does not have", "[screen]")
 {
-    // A terminal with no printer, no user-defined keys, no macro memory and no session multiplexer still
-    // has to *say so*, in the words the standard gives it. Silence is not an answer: an application that
-    // asked is waiting, and will read whatever comes next in its place.
+    // A terminal with no printer, no user-defined keys and no session multiplexer still has to *say so*, in
+    // the words the standard gives it. Silence is not an answer: an application that asked is waiting, and
+    // will read whatever comes next in its place.
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
 
     auto const check = [&](std::string_view request, std::string_view expected) {
@@ -1506,7 +1507,7 @@ TEST_CASE("DECDSR answers for the devices the terminal does not have", "[screen]
     check("\033[?53n", "\033[?50n");       // locator status: none
     check("\033[?55n", "\033[?50n");       // locator status, xterm's spelling
     check("\033[?56n", "\033[?57;0n");     // locator type: unknown
-    check("\033[?62n", "\033[0*{");        // DECMSR: no macro space
+    check("\033[?62n", "\033[384*{");      // DECMSR: all 6144 bytes of macro space free
     check("\033[?75n", "\033[?70n");       // data integrity: no errors
     check("\033[?85n", "\033[?83n");       // sessions: not configured for multiple
 }
@@ -1527,8 +1528,8 @@ TEST_CASE("DECXCPR reports the cursor's position and its page", "[screen]")
 
 TEST_CASE("DECCKSR carries back the id it was asked with", "[screen]")
 {
-    // There is no macro memory to checksum, so the checksum is zero -- but the reply still has to carry
-    // the request's id, which is how an application with several requests in flight tells them apart.
+    // No macro is defined, so the checksum is zero -- but the reply still has to carry the request's id,
+    // which is how an application with several requests in flight tells them apart.
     auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(8) } };
 
     mock.writeToScreen("\033[?63;123n");
