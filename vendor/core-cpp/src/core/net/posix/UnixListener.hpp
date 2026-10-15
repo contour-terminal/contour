@@ -61,21 +61,22 @@ class UnixListener final: public IListener
     /// @return The socket file path this listener is bound to.
     [[nodiscard]] std::filesystem::path const& path() const noexcept { return _path; }
 
-    /// Stops accepting and unlinks the socket file.
-    void close() noexcept override;
+  protected:
+    /// Stops accepting and unlinks the socket file: @c closeWith with @c FdWakePolicy::Resume.
+    void doClose() noexcept override;
 
   private:
-    UnixListener(EventLoop& loop, int fd, std::filesystem::path path) noexcept;
+    UnixListener(EventLoop& loop, int fd, std::filesystem::path path);
 
     /// Closes the listening fd and unlinks the socket file, telling the loop first
     /// so a parked accept is resumed rather than left waiting on a descriptor the
     /// poller can no longer report.
-    /// @param policy How a parked accept observes the close. @c close() passes
+    /// @param policy How a parked accept observes the close. @c doClose() passes
     ///        @c Resume — this listener is alive, so acceptOne may re-read the @c _fd /
     ///        @c _closed it holds pointers to, once its lifetime token says the listener
     ///        still exists (an owner may destroy it before the loop resumes the accept).
     ///        The destructor passes @c Cancel, since those pointers are about to dangle.
-    void close(FdWakePolicy policy) noexcept;
+    void closeWith(FdWakePolicy policy) noexcept;
 
     EventLoop& _loop;
     int _fd;

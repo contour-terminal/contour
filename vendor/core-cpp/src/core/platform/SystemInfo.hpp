@@ -6,10 +6,18 @@
 namespace core::platform
 {
 
-/// @brief Returns the local machine's hostname.
+/// @brief Returns the local machine's hostname, as the rest of the system spells it.
 ///
-/// Encapsulates the per-platform system call (`GetComputerNameA` on Windows,
-/// `gethostname` on POSIX) so business logic stays free of platform `#ifdef`s.
+/// A caller compares it with the name another source gives the machine -- Qt's
+/// `QHostInfo::localHostName()`, the host of a shell's OSC 7 `file://host/path` URL -- so it is the
+/// name those use. Encapsulates the per-platform system call so business logic stays free of
+/// platform `#ifdef`s:
+///
+/// - POSIX: `gethostname()`.
+/// - Windows: the DNS host name, `GetComputerNameExW(ComputerNameDnsHostname)` in UTF-8, which is
+///   what Qt asks for. Not the NetBIOS name (`GetComputerNameA`): that one is upper-cased and cut to
+///   15 characters, so it matches neither source on a machine whose name is longer or has a
+///   lower-case letter.
 ///
 /// @return The hostname, or an empty string if it could not be determined.
 [[nodiscard]] std::string hostName();

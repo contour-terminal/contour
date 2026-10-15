@@ -7,6 +7,7 @@
 #include <cctype>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 using namespace core::platform;
@@ -213,4 +214,32 @@ TEST_CASE("isCaseOnlyRename compares paths the native narrow encoding cannot spe
 
     auto const otherParent = std::filesystem::path { std::u8string { u8"/tmp/\u672c/NAME" } };
     CHECK_FALSE(isCaseOnlyRename(lower, otherParent));
+}
+
+TEST_CASE("absolutePath reads its arguments as UTF-8, as it spells its result", "[platform]")
+{
+    // On Windows both arguments went through the narrow constructor, which reads the ANSI code
+    // page, and came back out through normalizePath() as UTF-8: a name beyond ASCII was spelled
+    // differently on the way out than on the way in.
+    CHECK(absolutePath("J\xc3\xbcrgen/./notes", "/home") == "/home/J\xc3\xbcrgen/notes");
+    CHECK(absolutePath("notes", "/home/J\xc3\xbcrgen") == "/home/J\xc3\xbcrgen/notes");
+    CHECK(absolutePath("/home/\xe6\x97\xa5/../J\xc3\xbcrgen", "") == "/home/J\xc3\xbcrgen");
+}
+
+TEST_CASE("absolutePath on an argument that is not UTF-8", "[platform]")
+{
+    // "Jürgen" in CP-1252: 0xFC starts no UTF-8 sequence. A path to resolve is text from outside
+    // the program, so it is an answer to report, never an exception.
+#ifdef _WIN32
+    auto const refused = [](std::string_view path, std::string_view base) {
+        auto const resolved = absolutePath(path, base);
+        return !resolved && resolved.error() == std::errc::illegal_byte_sequence;
+    };
+    CHECK(refused("J\xfcrgen/notes", "/home"));
+    CHECK(refused("notes", "/home/J\xfcrgen"));
+#else
+    // A POSIX path is bytes, so they are kept as they are.
+    CHECK(absolutePath("J\xfcrgen/./notes", "/home") == "/home/J\xfcrgen/notes");
+    CHECK(absolutePath("notes", "/home/J\xfcrgen") == "/home/J\xfcrgen/notes");
+#endif
 }

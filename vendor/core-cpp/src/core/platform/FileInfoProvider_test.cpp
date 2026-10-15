@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <core/Utf8Path.hpp>
 #include <core/platform/FileInfoProvider.hpp>
 #include <core/platform/PathUtils.hpp>
 #include <core/platform/testing/MockFileInfoProvider.hpp>
@@ -9,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
 
 #ifdef _WIN32
     #include <core/platform/windows/WindowsFileInfoProvider.hpp>
@@ -60,7 +62,7 @@ TEST_CASE("nativeFileInfoProvider is this platform's own provider, and lists a d
     tmp.createFile("file.txt", "abc");
     tmp.createSubdir("dir");
 
-    auto const entries = provider->listDirectory(tmp.path.string());
+    auto const entries = provider->listDirectory(core::pathToUtf8(tmp.path));
     REQUIRE(entries.size() == 2);
     CHECK(entries[0].name == "dir");
     CHECK(entries[0].isDir);
@@ -68,6 +70,45 @@ TEST_CASE("nativeFileInfoProvider is this platform's own provider, and lists a d
     CHECK(!entries[1].isDir);
     CHECK(entries[1].size == 3);
 }
+
+TEST_CASE("nativeFileInfoProvider lists a directory beyond ASCII by its UTF-8 name", "[platform]")
+{
+    // The provider is handed UTF-8 and answers UTF-8. On Windows it read the name it was handed in
+    // the ANSI code page, so it listed a directory that does not exist and answered nothing.
+    TempDir const tmp;
+    auto const directory = tmp.path / fs::path { u8"Jürgen" };
+    REQUIRE(fs::create_directory(directory));
+    for (auto const& [name, content]:
+         { std::pair { fs::path { u8"Ω.txt" }, "abc" }, std::pair { fs::path { "plain.md" }, "x" } })
+        std::ofstream { directory / name } << content;
+
+    auto const provider = nativeFileInfoProvider();
+    auto const listed = provider->listDirectory(core::pathToUtf8(directory));
+    REQUIRE(listed.size() == 2);
+    CHECK(listed[0].name == "plain.md"); // sorted bytewise, and 'p' is below the lead byte of 'Ω'
+    CHECK(listed[1].name == "\xCE\xA9.txt");
+    CHECK(listed[1].size == 3);
+    CHECK(listed[1].path == normalizePath(directory / fs::path { u8"Ω.txt" }));
+
+    // A glob pattern's directory is read the same way.
+    auto const matched = provider->listDirectory(core::pathToUtf8(directory / "*.txt"));
+    REQUIRE(matched.size() == 1);
+    CHECK(matched[0].name == "\xCE\xA9.txt");
+}
+
+#ifdef _WIN32
+TEST_CASE("nativeFileInfoProvider lists a path that is not UTF-8 as empty", "[platform]")
+{
+    // "Jürgen" in CP-1252: 0xFC starts no UTF-8 sequence, so on Windows the path names nothing,
+    // and lists as a path that does not exist does, rather than throwing. Both the directory and
+    // the glob are tried, beside a directory that does exist, so only the name can be missing.
+    TempDir const tmp;
+    auto const parent = core::pathToUtf8(tmp.path);
+    auto const provider = nativeFileInfoProvider();
+    CHECK(provider->listDirectory(parent + "/J\xFCrgen").empty());
+    CHECK(provider->listDirectory(parent + "/J\xFCrgen*").empty());
+}
+#endif
 
 // ===========================================================================
 // MockFileInfoProvider tests

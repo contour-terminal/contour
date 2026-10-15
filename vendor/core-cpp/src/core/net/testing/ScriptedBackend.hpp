@@ -16,6 +16,7 @@
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace core::net::testing
@@ -90,8 +91,9 @@ class ScriptedBackend: public IoBackend
         if (_refuseNextAttach)
         {
             _refuseNextAttach = false;
-            return std::unexpected { makeNetError(
-                NetErrorCode::SystemError, 0, "ScriptedBackend::attach: refused on request") };
+            return std::unexpected { std::exchange(
+                _attachRefusal,
+                makeNetError(NetErrorCode::SystemError, 0, "ScriptedBackend::attach: refused on request")) };
         }
         if (_byHandler.contains(&handler))
             return std::unexpected { makeNetError(
@@ -202,6 +204,15 @@ class ScriptedBackend: public IoBackend
     /// path without exhausting the process's descriptors to provoke it.
     void refuseNextAttach() noexcept { _refuseNextAttach = true; }
 
+    /// Makes the next @c attach refuse with @p reason, so a case can drive what a caller does with
+    /// each KIND of refusal -- exhaustion, a bad descriptor -- rather than only with one.
+    /// @param reason What the refusal says.
+    void refuseNextAttach(NetError reason)
+    {
+        _attachRefusal = std::move(reason);
+        _refuseNextAttach = true;
+    }
+
     /// Makes the next @c setInterest refuse — the kernel refusal
     /// ([fastcached#1054](https://github.com/LASTRADA-Software/fastcached/issues/1054))
     /// that a caller must not mistake for a live registration.
@@ -288,6 +299,9 @@ class ScriptedBackend: public IoBackend
     detail::ReadyBatch _batch;
     std::uint64_t _nextId = 0;            ///< Source of synthetic, never-zero ids.
     std::atomic<int> _pendingWakes { 0 }; ///< `wake()` is the one member another thread may call.
+    /// What the next refused @c attach says.
+    NetError _attachRefusal =
+        makeNetError(NetErrorCode::SystemError, 0, "ScriptedBackend::attach: refused on request");
     bool _refuseNextAttach = false;
     bool _refuseNextSetInterest = false;
 };

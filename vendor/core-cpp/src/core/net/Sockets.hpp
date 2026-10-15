@@ -159,12 +159,15 @@ struct ListenOptions
 /// Binds an AF_UNIX listener on the socket file @p path, hardening its parent
 /// directory first (see UnixListener::bind for the exact policy).
 /// @param loop The loop whose reactor drives accept readiness (not owned).
-/// @param path The socket file path.
+/// @param path The socket file path, in UTF-8: Windows' AF_UNIX reads `sun_path` as UTF-8, so the
+///        listener names its file and its parent directory that way too.
 /// @param backlog The listen backlog.
 /// On Windows the listener is an @c IocpListener handing out @c IocpSocket, as @c listen's is,
 /// and a loop whose backend lends no completion port is refused with
 /// @c NetErrorCode::Unsupported (since 0.5.0).
-/// @return The bound listener; @c NetErrorCode::Unsupported where AF_UNIX is not available.
+/// @return The bound listener; @c NetErrorCode::Unsupported where AF_UNIX is not available;
+///         @c NetErrorCode::AddressError on Windows where @p path is not UTF-8, which names no file
+///         there (core::pathFromUtf8()).
 [[nodiscard]] std::expected<std::unique_ptr<IListener>, NetError> listenUnix(EventLoop& loop,
                                                                              std::string_view path,
                                                                              int backlog = 128);
@@ -178,7 +181,7 @@ struct ListenOptions
 /// kinds of dial handles both answers until then.
 /// @param loop The loop whose reactor drives connect readiness (not owned; a
 ///        pointer, since coroutine reference parameters can dangle).
-/// @param path The socket file path.
+/// @param path The socket file path, in UTF-8, as @c listenUnix takes it.
 /// @return A task resolving to the connected socket -- on Windows an @c IocpSocket --; a
 ///         @c NetError on failure,
 ///         @c NetErrorCode::Cancelled if the flow was stopped while it waited,

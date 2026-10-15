@@ -61,23 +61,25 @@ class PosixListener final: public IListener
 
     [[nodiscard]] std::uint16_t boundPort() const noexcept override { return _boundPort; }
 
-    void close() noexcept override;
-
     /// @return The listening descriptor, or -1 once closed; for diagnostics and tests.
     [[nodiscard]] int native() const noexcept { return _fd; }
 
+  protected:
+    /// Closes with @c FdWakePolicy::Resume (@c closeWith).
+    void doClose() noexcept override;
+
   private:
-    PosixListener(EventLoop& loop, int fd, std::uint16_t boundPort) noexcept;
+    PosixListener(EventLoop& loop, int fd, std::uint16_t boundPort);
 
     /// Closes the listening fd, telling the loop first so a parked accept is
     /// resumed rather than left waiting on a descriptor the poller can no longer
     /// report.
-    /// @param policy How a parked accept observes the close. @c close() passes
+    /// @param policy How a parked accept observes the close. @c doClose() passes
     ///        @c Resume — this listener is alive, so acceptOne may re-read the @c _fd /
     ///        @c _closed it holds pointers to, once its lifetime token says the listener
     ///        still exists (an owner may destroy it before the loop resumes the accept).
     ///        The destructor passes @c Cancel, since those pointers are about to dangle.
-    void close(FdWakePolicy policy) noexcept;
+    void closeWith(FdWakePolicy policy) noexcept;
 
     EventLoop& _loop;
     int _fd;

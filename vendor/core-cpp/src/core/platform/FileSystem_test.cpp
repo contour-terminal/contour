@@ -284,6 +284,17 @@ TEST_CASE("isExecutableFile rejects a regular file without an execute bit", "[Fi
     CHECK_FALSE(fs.isExecutableFile("/usr/bin/data"));
 }
 
+#ifdef _WIN32
+TEST_CASE("NativeFileSystem::createTempFile refuses a prefix that is not UTF-8", "[FileSystem]")
+{
+    // "Jürgen" in CP-1252: 0xFC starts no UTF-8 sequence, so on Windows the prefix names no file.
+    // A caller's prefix is text from outside, and the refusal is a value: it threw before.
+    auto const created = core::platform::NativeFileSystem::instance().createTempFile("core_J\xFCrgen");
+    REQUIRE_FALSE(created.has_value());
+    CHECK(created.error() == "Temporary file prefix is not UTF-8: core_J\\xfcrgen");
+}
+#endif
+
 #ifndef _WIN32
 TEST_CASE("isExecutableFile agrees with the real filesystem on the execute bit", "[FileSystem]")
 {
@@ -1064,6 +1075,11 @@ TEST_CASE("NativeFileSystem reports a failure on a path the narrow encoding cann
     auto const listed = fs.listDirectory(missing.parent_path());
     REQUIRE_FALSE(listed.has_value());
     CHECK(listed.error().contains(spelled));
+
+    // FileSystem's own message, which every backend shares.
+    auto const walked = fs.listDirectoryRecursive(missing.parent_path());
+    REQUIRE_FALSE(walked.has_value());
+    CHECK(walked.error().contains(spelled));
 
     auto const renamed = fs.rename(missing, dir.path() / "elsewhere.txt");
     REQUIRE_FALSE(renamed.has_value());

@@ -2,7 +2,9 @@
 #include <core/cli/App.hpp>
 
 #include <core/Environment.hpp>
+#include <core/Escape.hpp>
 #include <core/UserInfo.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/log/LogStore.hpp>
@@ -15,6 +17,7 @@
 #include <iostream>
 #include <numeric>
 #include <ranges>
+#include <utility>
 
 #ifndef _WIN32
     #include <sys/ioctl.h>
@@ -85,15 +88,21 @@ unsigned screenWidth()
 /// @return The base directory this application's local state belongs under.
 fs::path xdgStateHome(core::Environment const& env)
 {
+    // Each value is UTF-8, as the environment answers it, so each goes through pathFromUtf8():
+    // the narrow constructor reads the ANSI code page on Windows. A value that is not UTF-8 names
+    // no directory there, so the next candidate is tried, as for one that is unset.
     if (auto const p = env.get("XDG_STATE_HOME"); p && !p->empty())
-        return { *p };
+        if (auto path = core::pathFromUtf8(*p))
+            return *std::move(path);
 
 #ifdef _WIN32
     if (auto const p = env.get("LOCALAPPDATA"); p && !p->empty())
-        return { *p };
+        if (auto path = core::pathFromUtf8(*p))
+            return *std::move(path);
 #else
     if (auto const home = core::userHomeDirectory(); !home.empty())
-        return fs::path(home) / ".local" / "state";
+        if (auto const path = core::pathFromUtf8(home))
+            return *path / ".local" / "state";
 #endif
 
     return fs::temp_directory_path();
@@ -124,7 +133,8 @@ App::App(Environment const& env,
     _appTitle { std::move(appTitle) },
     _appVersion { std::move(appVersion) },
     _appLicense { std::move(appLicense) },
-    _localStateDir { xdgStateHome(env) / _appName }
+    // The program's own name, a literal of the program rather than anything it read.
+    _localStateDir { xdgStateHome(env) / core::pathFromTrustedUtf8(_appName) }
 {
     if (auto const logFilterString = env.get("LOG"))
     {
@@ -282,7 +292,12 @@ int App::run(int argc, char const* argv[])
 std::expected<void, std::string> App::installLogging(std::string const& optionPrefix, bool showProcessId)
 {
     auto const filter = parameters().get<std::string>(optionPrefix + ".log");
-    auto const file = core::log::parseLogFileSpec(parameters().get<std::string>(optionPrefix + ".log-file"));
+    auto const fileSpec = parameters().get<std::string>(optionPrefix + ".log-file");
+    auto const file = core::log::parseLogFileSpec(fileSpec);
+    // Refused before the current destination is released, so logging carries on where it was.
+    if (!file)
+        return std::unexpected(
+            std::format("cannot use log file '{}': {}", core::escape(fileSpec), file.error().message()));
 
     // Released BEFORE the replacement is created. A ScopedOutput snapshots every category's sink
     // as it installs itself, and restores that snapshot when it dies: assigning the replacement
@@ -296,7 +311,7 @@ std::expected<void, std::string> App::installLogging(std::string const& optionPr
 
     auto output = core::log::ScopedOutput::create({
         .filter = filter,
-        .file = file,
+        .file = *file,
         .showProcessId = showProcessId,
     });
     if (!output)

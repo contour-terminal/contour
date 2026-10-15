@@ -9,6 +9,8 @@
 #include <vector>
 
 #ifdef _WIN32
+    #include <core/WideString.hpp>
+
     #include <Windows.h>
 #else
     #include <deque>
@@ -146,34 +148,6 @@ namespace
         block.push_back(nullptr);
         processEnviron() = published.blocks.emplace_back(std::move(block)).data();
     }
-#else
-    /// @return @p text in UTF-16, or std::nullopt where it is not UTF-8 -- which the wide API has
-    ///         no spelling for, where the code-page one took each byte as whatever character the
-    ///         machine's code page gives it.
-    [[nodiscard]] std::optional<std::wstring> toWide(std::string const& text)
-    {
-        if (text.empty())
-            return std::wstring {};
-        auto const size = static_cast<int>(text.size());
-        auto const length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), size, nullptr, 0);
-        if (length <= 0)
-            return std::nullopt;
-        auto wide = std::wstring(static_cast<std::size_t>(length), L'\0');
-        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), size, wide.data(), length);
-        return wide;
-    }
-
-    /// @return @p text in UTF-8. A lone surrogate, which UTF-8 cannot spell, reads as U+FFFD.
-    [[nodiscard]] std::string toUtf8(std::wstring const& text)
-    {
-        if (text.empty())
-            return {};
-        auto const size = static_cast<int>(text.size());
-        auto const length = WideCharToMultiByte(CP_UTF8, 0, text.data(), size, nullptr, 0, nullptr, nullptr);
-        auto utf8 = std::string(static_cast<std::size_t>(length), '\0');
-        WideCharToMultiByte(CP_UTF8, 0, text.data(), size, utf8.data(), length, nullptr, nullptr);
-        return utf8;
-    }
 #endif
 
     /// @return Whether @p name can name a variable of an environment block: it is not empty, and
@@ -190,8 +164,9 @@ std::optional<std::string> LiveEnvironment::get(std::string_view name) const
     // The wide API, converting to and from UTF-8: the block is UTF-16, and the code-page API
     // mangles whatever the machine's code page cannot spell -- a user profile path with an umlaut
     // on a machine whose code page has none, anything outside Latin on most (core-cpp#7). The
-    // conversion also gives the name the terminating NUL a string_view does not promise.
-    auto const wideName = toWide(std::string { name });
+    // conversion also gives the name the terminating NUL a string_view does not promise. A name
+    // that is not UTF-8 has no UTF-16 spelling, so no variable is named so.
+    auto const wideName = toUtf16(name);
     if (!wideName || wideName->empty())
         return std::nullopt;
 
@@ -211,7 +186,7 @@ std::optional<std::string> LiveEnvironment::get(std::string_view name) const
     auto const written = GetEnvironmentVariableW(wideName->c_str(), buffer.data(), required);
     if (written >= required || (written == 0 && GetLastError() != ERROR_SUCCESS))
         return std::nullopt;
-    return toUtf8(std::wstring { buffer.data(), written });
+    return toUtf8({ buffer.data(), written });
 #else
     // The copy has to happen under the lock, not after it: the block holds pointers that a
     // concurrent setenv() may reallocate out from under a reader.
@@ -250,9 +225,10 @@ std::expected<void, std::error_code> setProcessEnvironmentVariable(std::string_v
         return std::unexpected(std::make_error_code(std::errc::invalid_argument));
 
 #ifdef _WIN32
-    // In UTF-16, as `LiveEnvironment::get` reads it; text that is not UTF-8 has no spelling there.
-    auto const wideName = toWide(std::string { name });
-    auto const wideValue = toWide(std::string { value });
+    // In UTF-16, as `LiveEnvironment::get` reads it; text that is not UTF-8 has no spelling there,
+    // where the code-page API took each byte as whatever character the machine's code page gives it.
+    auto const wideName = toUtf16(name);
+    auto const wideValue = toUtf16(value);
     if (!wideName || !wideValue)
         return std::unexpected(std::make_error_code(std::errc::invalid_argument));
     if (SetEnvironmentVariableW(wideName->c_str(), wideValue->c_str()) == 0)
@@ -269,7 +245,7 @@ std::expected<void, std::error_code> unsetProcessEnvironmentVariable(std::string
         return std::unexpected(std::make_error_code(std::errc::invalid_argument));
 
 #ifdef _WIN32
-    auto const wideName = toWide(std::string { name });
+    auto const wideName = toUtf16(name);
     if (!wideName)
         return std::unexpected(std::make_error_code(std::errc::invalid_argument));
     if (SetEnvironmentVariableW(wideName->c_str(), nullptr) == 0)

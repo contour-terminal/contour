@@ -42,7 +42,7 @@ The layering is enforced: a module links only the modules its row in
 CPMAddPackage(
     NAME core-cpp
     GITHUB_REPOSITORY contour-terminal/core-cpp
-    GIT_TAG v0.5.0
+    GIT_TAG v0.8.0
     SYSTEM YES              # core-cpp headers never trip your -Werror
     EXCLUDE_FROM_ALL YES    # build only what you link
     OPTIONS "CORE_CPP_WITH_TUI ON" "CORE_CPP_WITH_TLS OFF")
@@ -64,7 +64,7 @@ consumes core-cpp this way:
 # Copy a tag into your tree, then commit the result as one change. The script is a core-cpp
 # checkout's, not the copy's: sync reads a repository, and the repository it reads by default is
 # the one the script itself is in.
-cmake -DMODE=sync -DREF=v0.5.0 -DDEST=vendor/core-cpp \
+cmake -DMODE=sync -DREF=v0.8.0 -DDEST=vendor/core-cpp \
       -P /path/to/core-cpp/cmake/CoreCppVendor.cmake
 
 # Verify it. Needs no git, so register it as a test of your own suite.

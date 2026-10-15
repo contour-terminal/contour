@@ -11,7 +11,7 @@ core_cpp_add_module(testing KIND STATIC
         ScopedTempDir.hpp
         ScopedWorkingDirectory.hpp
         SuppressWindowsDialogs.hpp
-    SOURCES SuppressWindowsDialogs.cpp
+    SOURCES EnvHelper.cpp SuppressWindowsDialogs.cpp
     PUBLIC_LIBS core::base)
 
 # An OBJECT library, because its one translation unit is referenced by nothing: in a static library

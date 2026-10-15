@@ -32,3 +32,14 @@ TEST_CASE("ScopedTempDir removes its directory on destruction", "[FileSystem]")
     }
     CHECK(!std::filesystem::exists(captured));
 }
+
+TEST_CASE("ScopedTempDir reads its prefix and a name as UTF-8, and spells its path in UTF-8", "[FileSystem]")
+{
+    // core-cpp's strings are UTF-8. On Windows the narrow constructor read the prefix and the name
+    // in the ANSI code page, and generic_string() spelled the path back in it, throwing for a name
+    // the code page cannot spell.
+    auto const dir = core::testing::ScopedTempDir { "core_scoped_\xCE\xA9" };
+    CHECK(dir.path().filename().u8string().starts_with(u8"core_scoped_Ω_"));
+    CHECK(dir / "J\xC3\xBCrgen" == dir.path() / std::filesystem::path { u8"Jürgen" });
+    CHECK(dir.string().contains("/core_scoped_\xCE\xA9_"));
+}

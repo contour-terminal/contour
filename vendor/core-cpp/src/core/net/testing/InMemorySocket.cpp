@@ -536,7 +536,7 @@ async::Task<AcceptResult> InMemoryListener::accept()
     };
 }
 
-void InMemoryListener::close() noexcept
+void InMemoryListener::doClose() noexcept
 {
     _closed = true;
     if (auto* const parked = std::exchange(_pending, nullptr); parked != nullptr)

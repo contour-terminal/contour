@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace core::log
@@ -52,9 +53,12 @@ struct OutputConfig
 };
 
 /// Maps a `--log-file` option value onto a destination.
-/// @param spec The raw value; both "" and "-" mean standard error.
-/// @return The file to append to, or nullopt for standard error.
-[[nodiscard]] std::optional<std::filesystem::path> parseLogFileSpec(std::string_view spec);
+/// @param spec The raw value, in UTF-8, read as core::pathFromUtf8() reads it; both "" and "-" mean
+///             standard error.
+/// @return The file to append to, or nullopt for standard error; @c std::errc::illegal_byte_sequence
+///         on Windows where @p spec is not UTF-8.
+[[nodiscard]] std::expected<std::optional<std::filesystem::path>, std::error_code> parseLogFileSpec(
+    std::string_view spec);
 
 /// Builds the standard log line formatter:
 /// `[timestamp] [pid] [category] text`, with the continuation lines of a multi-line message

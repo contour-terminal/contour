@@ -80,6 +80,7 @@ class ServedLoop
         _thread = std::thread { [this] { _loop.run(); } };
     }
 
+    [[nodiscard]] core::net::EventLoop* loop() noexcept { return &_loop; }
     [[nodiscard]] IListener* listener() const noexcept { return _listener.get(); }
     [[nodiscard]] std::uint16_t port() const noexcept { return _listener->boundPort(); }
 
@@ -130,7 +131,7 @@ Task<void> acceptAndHold(IListener* listener, ServedLoop* served)
 TEST_CASE("The health probe reads a live server's status, and 200 is the only healthy one", "[net][health]")
 {
     auto served = ServedLoop {};
-    served.run(core::net::serve(served.listener(), &healthz));
+    served.run(core::net::serve(served.loop(), served.listener(), &healthz));
 
     // The status, not a bool: the peer having answered is part of what is asserted, so a probe
     // that failed to connect cannot pass for one that read a refusal.

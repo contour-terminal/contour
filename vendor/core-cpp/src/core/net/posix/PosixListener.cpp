@@ -2,6 +2,7 @@
 #include <core/net/posix/PosixListener.hpp>
 
 #include <core/net/SocketAddress.hpp>
+#include <core/net/detail/SocketErrors.hpp>
 #include <core/net/detail/StreamSocketOptions.hpp>
 #include <core/net/posix/AcceptLoop.hpp>
 #include <core/net/posix/FdUtils.hpp>
@@ -60,7 +61,7 @@ namespace
     }
 } // namespace
 
-PosixListener::PosixListener(EventLoop& loop, int fd, std::uint16_t boundPort) noexcept:
+PosixListener::PosixListener(EventLoop& loop, int fd, std::uint16_t boundPort):
     _loop(loop), _fd(fd), _boundPort(boundPort)
 {
 }
@@ -70,15 +71,15 @@ PosixListener::~PosixListener()
     // Cancel, not Resume: acceptOne holds `int const* fd` / `bool const* closed`
     // into this object, which is about to stop existing. Unwinding via
     // OperationCancelled returns without ever dereferencing them again.
-    close(FdWakePolicy::Cancel);
+    closeWith(FdWakePolicy::Cancel);
 }
 
-void PosixListener::close() noexcept
+void PosixListener::doClose() noexcept
 {
-    close(FdWakePolicy::Resume);
+    closeWith(FdWakePolicy::Resume);
 }
 
-void PosixListener::close(FdWakePolicy policy) noexcept
+void PosixListener::closeWith(FdWakePolicy policy) noexcept
 {
     if (_closed)
         return;
@@ -130,7 +131,7 @@ std::expected<std::unique_ptr<PosixListener>, NetError> PosixListener::bind(Even
         fd = makeStreamSocket(ai->ai_family, ai->ai_protocol);
         if (fd < 0)
         {
-            lastError = makeNetError(NetErrorCode::SystemError, errno, "socket");
+            lastError = detail::socketError(errno, "socket");
             continue;
         }
 

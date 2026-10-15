@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/net/linux/EpollBackend.hpp>
 
+#include <core/net/detail/SocketErrors.hpp>
 #include <core/net/detail/WaitTimeout.hpp>
 
 #include <sys/epoll.h>
@@ -130,8 +131,7 @@ std::expected<void, NetError> EpollBackend::arm(ReadinessHandler& handler,
         {
             auto const copy = ::dup(handler.handle);
             if (copy < 0)
-                return std::unexpected { makeNetError(
-                    NetErrorCode::SystemError, errno, "EpollBackend::setInterest: dup") };
+                return std::unexpected { detail::socketError(errno, "EpollBackend::setInterest: dup") };
             registration.watched = copy;
             registration.owned = true;
         }
@@ -144,8 +144,7 @@ std::expected<void, NetError> EpollBackend::arm(ReadinessHandler& handler,
     event.data.ptr = &handler;
     auto const operation = registration.armed ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
     if (::epoll_ctl(_epollFd, operation, registration.watched, &event) != 0)
-        return std::unexpected { makeNetError(
-            NetErrorCode::SystemError, errno, "EpollBackend::setInterest: epoll_ctl") };
+        return std::unexpected { detail::socketError(errno, "EpollBackend::setInterest: epoll_ctl") };
 
     registration.armed = true;
     registration.interest = interest;

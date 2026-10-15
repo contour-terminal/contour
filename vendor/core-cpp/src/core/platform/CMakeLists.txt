@@ -68,6 +68,7 @@ core_cpp_add_module(platform KIND STATIC
         testing/InMemoryFileSystem.cpp
     SOURCES_POSIX
         ${_coreCppPlatformPosixProviders}
+        posix/PosixSystemInfo.cpp
     SOURCES_LINUX
         linux/LinuxWakeup.cpp
     SOURCES_BSD
@@ -77,6 +78,7 @@ core_cpp_add_module(platform KIND STATIC
         windows/WindowsFileInfoProvider.hpp
         windows/WindowsProcessEnvironment.cpp
         windows/WindowsProcessEnvironment.hpp
+        windows/WindowsSystemInfo.cpp
         windows/WindowsTypes.cpp
         windows/WindowsWakeup.cpp
         windows/WindowsWorkingDirectory.cpp
@@ -98,6 +100,7 @@ core_cpp_add_test(platform
         Wakeup_test.cpp
     # The Windows half of a POSIX guarantee: FD_CLOEXEC there, no inheritable handle here.
     SOURCES_WINDOWS
+        windows/DnsHostName_test.cpp
         windows/SystemPipeInheritance_test.cpp
         windows/WideEnvironment_test.cpp
     SOURCES_EMSCRIPTEN

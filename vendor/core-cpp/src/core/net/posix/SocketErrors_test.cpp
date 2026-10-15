@@ -32,12 +32,18 @@ constexpr auto Rows = std::array {
     Row { .systemCode = ECONNREFUSED, .code = NetErrorCode::ConnRefused },
     Row { .systemCode = EHOSTUNREACH, .code = NetErrorCode::HostUnreach },
     Row { .systemCode = ENETUNREACH, .code = NetErrorCode::HostUnreach },
+    Row { .systemCode = EHOSTDOWN, .code = NetErrorCode::HostUnreach },
+    Row { .systemCode = ENETDOWN, .code = NetErrorCode::HostUnreach },
+#ifdef ENONET
+    Row { .systemCode = ENONET, .code = NetErrorCode::HostUnreach },
+#endif
     Row { .systemCode = EADDRINUSE, .code = NetErrorCode::AddressInUse },
     Row { .systemCode = EADDRNOTAVAIL, .code = NetErrorCode::AddressNotAvail },
     Row { .systemCode = EACCES, .code = NetErrorCode::PermissionDenied },
     Row { .systemCode = EPERM, .code = NetErrorCode::PermissionDenied },
     Row { .systemCode = EAFNOSUPPORT, .code = NetErrorCode::Unsupported },
     Row { .systemCode = EPROTONOSUPPORT, .code = NetErrorCode::Unsupported },
+    Row { .systemCode = EOPNOTSUPP, .code = NetErrorCode::Unsupported },
     Row { .systemCode = EBADF, .code = NetErrorCode::BadHandle },
     Row { .systemCode = ENOTSOCK, .code = NetErrorCode::BadHandle },
     Row { .systemCode = EINTR, .code = NetErrorCode::Cancelled },
@@ -46,7 +52,15 @@ constexpr auto Rows = std::array {
     Row { .systemCode = EWOULDBLOCK, .code = NetErrorCode::WouldBlock },
     Row { .systemCode = EAGAIN, .code = NetErrorCode::WouldBlock },
     Row { .systemCode = EPIPE, .code = NetErrorCode::SystemError },
-    Row { .systemCode = ENOMEM, .code = NetErrorCode::SystemError },
+    // The process or the system ran out of something: transient, where `SystemError` may not be,
+    // which is what lets an accept loop back off on these and on nothing else.
+    Row { .systemCode = EMFILE, .code = NetErrorCode::ResourceExhausted },
+    Row { .systemCode = ENFILE, .code = NetErrorCode::ResourceExhausted },
+    Row { .systemCode = ENOBUFS, .code = NetErrorCode::ResourceExhausted },
+    Row { .systemCode = ENOMEM, .code = NetErrorCode::ResourceExhausted },
+#ifdef ENOSR
+    Row { .systemCode = ENOSR, .code = NetErrorCode::ResourceExhausted },
+#endif
 };
 
 } // namespace

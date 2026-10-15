@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/net/windows/UnixSocketPath.hpp>
 
+#include <core/Escape.hpp>
+#include <core/Utf8Path.hpp>
 #include <core/net/windows/InvalidSocket.hpp>
 
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <system_error>
 
 #include <windows.h>
 
@@ -30,15 +34,17 @@ namespace
     /// is never touched — bindUnix must not delete user data that happens to
     /// sit at the chosen socket path.
     /// @param address The AF_UNIX address already populated for @p path.
-    /// @param path The socket file path, for diagnostics.
+    /// @param file The socket file, by the name @p address gives it.
+    /// @param path The socket file path in UTF-8, for diagnostics.
     /// @return Nothing when the path is absent or a stale socket; a NetError otherwise.
     [[nodiscard]] std::expected<void, NetError> probeUnixSocketOwner(sockaddr_un const& address,
+                                                                     std::filesystem::path const& file,
                                                                      std::string const& path)
     {
-        // FindFirstFileA fails on an absent path and reports the reparse tag on a
+        // FindFirstFileW fails on an absent path and reports the reparse tag on a
         // present one — the single syscall answering both questions.
-        auto findData = WIN32_FIND_DATAA {};
-        auto const find = ::FindFirstFileA(path.c_str(), &findData);
+        auto findData = WIN32_FIND_DATAW {};
+        auto const find = ::FindFirstFileW(file.c_str(), &findData);
         if (find == INVALID_HANDLE_VALUE)
         {
             auto const statError = ::GetLastError();
@@ -74,7 +80,19 @@ namespace
     }
 } // namespace
 
-std::expected<sockaddr_un, NetError> claimUnixSocketPath(std::string_view path)
+std::expected<std::filesystem::path, NetError> unixSocketFile(std::string_view path)
+{
+    // AF_UNIX reads `sun_path` as UTF-8 on Windows, so the file it names is made, probed and deleted
+    // by that name, through the wide API. The `...A` calls read the ANSI code page, and named a
+    // different file for a path beyond ASCII: a stale socket was never found, so it was never reclaimed.
+    return core::pathFromUtf8(path).transform_error([path](std::error_code const&) {
+        return makeNetError(
+            NetErrorCode::AddressError, 0, "unix socket path is not UTF-8: " + core::escape(path));
+    });
+}
+
+std::expected<sockaddr_un, NetError> claimUnixSocketPath(std::string_view path,
+                                                         std::filesystem::path const& file)
 {
     auto address = sockaddr_un {};
     address.sun_family = AF_UNIX;
@@ -83,9 +101,9 @@ std::expected<sockaddr_un, NetError> claimUnixSocketPath(std::string_view path)
     std::memcpy(address.sun_path, path.data(), path.size());
 
     auto const pathString = std::string { path };
-    if (auto const probe = probeUnixSocketOwner(address, pathString); !probe)
+    if (auto const probe = probeUnixSocketOwner(address, file, pathString); !probe)
         return std::unexpected(probe.error());
-    ::DeleteFileA(pathString.c_str()); // the probe proved this absent or a stale socket
+    ::DeleteFileW(file.c_str()); // the probe proved this absent or a stale socket
     return address;
 }
 

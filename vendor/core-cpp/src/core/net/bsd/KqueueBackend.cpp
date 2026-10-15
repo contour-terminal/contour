@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <core/net/bsd/KqueueBackend.hpp>
 
+#include <core/net/detail/SocketErrors.hpp>
 #include <core/net/detail/WaitTimeout.hpp>
 
 #include <sys/event.h>
@@ -119,8 +120,7 @@ std::expected<void, NetError> KqueueBackend::arm(ReadinessHandler& handler,
         {
             auto const copy = ::dup(handler.handle);
             if (copy < 0)
-                return std::unexpected { makeNetError(
-                    NetErrorCode::SystemError, errno, "KqueueBackend::setInterest: dup") };
+                return std::unexpected { detail::socketError(errno, "KqueueBackend::setInterest: dup") };
             registration.watched = copy;
             registration.owned = true;
         }
@@ -151,8 +151,7 @@ std::expected<void, NetError> KqueueBackend::arm(ReadinessHandler& handler,
                                   static_cast<int>(results.size()),
                                   nullptr);
     if (applied < 0)
-        return std::unexpected { makeNetError(
-            NetErrorCode::SystemError, errno, "KqueueBackend::setInterest: kevent") };
+        return std::unexpected { detail::socketError(errno, "KqueueBackend::setInterest: kevent") };
 
     // With EV_RECEIPT the kernel reports one entry per submitted change, so anything
     // short means a change went unreported and the filter cannot be claimed armed.
@@ -189,8 +188,8 @@ std::expected<void, NetError> KqueueBackend::arm(ReadinessHandler& handler,
         break;
     }
     if (refused != 0)
-        return std::unexpected { makeNetError(
-            NetErrorCode::SystemError, refused, "KqueueBackend::setInterest: kevent refused a filter") };
+        return std::unexpected { detail::socketError(refused,
+                                                     "KqueueBackend::setInterest: kevent refused a filter") };
 
     registration.armed = true;
     registration.interest = interest;

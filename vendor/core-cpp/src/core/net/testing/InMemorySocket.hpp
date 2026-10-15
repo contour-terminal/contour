@@ -371,14 +371,17 @@ class InMemoryListener final: public IListener
     ///         @c connectClient rather than through an address.
     [[nodiscard]] std::uint16_t boundPort() const noexcept override { return 0; }
 
-    void close() noexcept override;
-
     /// Makes a connected pair, queues the server end for @c accept, and hands back the client end.
     /// @param maxBytesInFlight Per-direction bound on buffered bytes; zero means none.
     /// @param peerAddress What the accepted end reports as its peer.
     /// @return The client end.
     [[nodiscard]] std::unique_ptr<InMemorySocket> connectClient(std::size_t maxBytesInFlight = 0,
                                                                 std::string peerAddress = {});
+
+  protected:
+    /// Resolves a parked accept with @c NetErrorCode::Cancelled; connections already queued are
+    /// still handed out.
+    void doClose() noexcept override;
 
   private:
     /// The awaitable a parked @c accept suspends on.

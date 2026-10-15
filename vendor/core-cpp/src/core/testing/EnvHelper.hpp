@@ -6,10 +6,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <tuple>
-#ifdef _WIN32
-    #include <stdlib.h> // _putenv_s
-#endif
 
 namespace core::testing
 {
@@ -21,44 +17,32 @@ namespace core::testing
 /// process environment is shared by every thread and every test in the binary. This is for code
 /// that reads the process environment itself, or passes it on to a child process.
 ///
-/// On Windows it is `_putenv_s()`, which updates both the CRT's copy of the environment that
-/// `getenv()` reads and the operating system's block that @c core::LiveEnvironment reads and a child
-/// process inherits. An empty @p value is the one case it gets wrong for this purpose: it removes
-/// the variable from both, where an empty value is a variable that is *set*, as it is on POSIX and
-/// as @c core::LiveEnvironment::get() reports. So the Win32 entry is written again through
-/// @c core::setProcessEnvironmentVariable(). The CRT's copy cannot hold an empty value at all --
-/// no CRT setter can express one -- so there `getenv()` still reads the variable as absent.
-/// Elsewhere this is @c core::setProcessEnvironmentVariable() alone.
+/// @p name and @p value are UTF-8, as every core-cpp string is. On Windows they are written through
+/// the wide CRT, `_wputenv_s()`, converted to UTF-16: it updates both the CRT's copy of the
+/// environment (`_wgetenv()`) and the operating system's block that @c core::LiveEnvironment reads
+/// and a child process inherits, so each holds the value as written. The narrow `_putenv_s()` read
+/// both in the ANSI code page, which spells most of Unicode not at all. The CRT's narrow copy, which
+/// `getenv()` reads, still spells the value in that code page, with a `?` for each character it
+/// cannot spell. Text that is not UTF-8 has no UTF-16 spelling, so it is not written. An empty
+/// @p value is the one case `_wputenv_s()` gets wrong for this purpose: it removes the variable from
+/// both, where an empty value is a variable that is *set*, as it is on POSIX and as
+/// @c core::LiveEnvironment::get() reports. So the Win32 entry is written again through
+/// @c core::setProcessEnvironmentVariable(). The CRT's copy cannot hold an empty value at all -- no
+/// CRT setter can express one -- so there `getenv()` still reads the variable as absent. Elsewhere
+/// this is @c core::setProcessEnvironmentVariable() alone.
 ///
-/// @param name Environment variable name.
-/// @param value Environment variable value. An empty value sets the variable.
-inline void setTestEnv(char const* name, char const* value)
-{
-#ifdef _WIN32
-    _putenv_s(name, value);
-    if (*value == '\0')
-        std::ignore = core::setProcessEnvironmentVariable(name, value);
-#else
-    std::ignore = core::setProcessEnvironmentVariable(name, value);
-#endif
-}
+/// @param name Environment variable name, in UTF-8.
+/// @param value Environment variable value, in UTF-8. An empty value sets the variable.
+void setTestEnv(char const* name, char const* value);
 
 /// @brief Cross-platform unsetenv for tests.
 ///
-/// On Windows both copies have to be told: `_putenv_s(name, "")` removes the variable from the
+/// On Windows both copies have to be told: `_wputenv_s(name, L"")` removes the variable from the
 /// CRT's copy, and only from the Win32 block as well when the CRT's copy knew about it, which it
 /// does not for a variable @ref setTestEnv wrote there with an empty value.
 ///
-/// @param name Environment variable name to unset.
-inline void unsetTestEnv(char const* name)
-{
-#ifdef _WIN32
-    _putenv_s(name, "");
-    std::ignore = core::unsetProcessEnvironmentVariable(name);
-#else
-    std::ignore = core::unsetProcessEnvironmentVariable(name);
-#endif
-}
+/// @param name Environment variable name to unset, in UTF-8.
+void unsetTestEnv(char const* name);
 
 /// @brief Sets an environment variable for a scope, restoring the previous value after.
 ///
@@ -70,8 +54,8 @@ class ScopedEnv
 {
   public:
     /// @brief Sets @p name to @p value until this object goes out of scope.
-    /// @param name  Environment variable name.
-    /// @param value Value to set for the duration of the scope.
+    /// @param name  Environment variable name, in UTF-8.
+    /// @param value Value to set for the duration of the scope, in UTF-8.
     ScopedEnv(std::string_view name, std::string_view value):
         _name { name }, _previous { core::LiveEnvironment {}.get(name) }
     {

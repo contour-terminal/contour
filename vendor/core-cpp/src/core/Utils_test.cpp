@@ -4,9 +4,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <map>
+#include <system_error>
 #include <vector>
 
 using std::string;
@@ -172,6 +176,32 @@ TEST_CASE("fromHexString")
     CHECK(core::fromHexString("4162"sv).value() == "Ab"sv);
 }
 
+TEST_CASE("toHexString spells each char as two upper-case digits of the byte it holds")
+{
+    // A char is signed on most platforms, and each one from 0x80 up was widened to `unsigned`
+    // with its sign: 0x80 was spelled FFFFFF80 and 0xFF FFFFFFFF, so the spelling was longer than
+    // two digits a byte and did not decode back to the input.
+    auto const input = "\x00\x7f\x80\xff"sv;
+    CHECK(core::toHexString(input) == "007F80FF");
+    CHECK(core::fromHexString(std::string_view { core::toHexString(input) }) == std::string { input });
+    CHECK(core::toHexString("Ab"sv) == "4162");
+    STATIC_CHECK(core::toHexString("\x00\x7f\x80\xff"sv) == "007F80FF");
+}
+
+TEST_CASE("toLowerHexString spells each byte as two lower-case digits")
+{
+    // Every nibble value appears, in both halves of a byte, and 0x80 and above: a byte read as a
+    // signed char would spell those with a sign extension.
+    constexpr auto Bytes =
+        std::array { std::byte { 0x00 }, std::byte { 0x0f }, std::byte { 0x10 }, std::byte { 0x7f },
+                     std::byte { 0x80 }, std::byte { 0xa5 }, std::byte { 0xc3 }, std::byte { 0xff },
+                     std::byte { 0x12 }, std::byte { 0x34 }, std::byte { 0x56 }, std::byte { 0x9b },
+                     std::byte { 0xde } };
+    CHECK(core::toLowerHexString(Bytes) == "000f107f80a5c3ff1234569bde");
+    CHECK(core::toLowerHexString({}).empty());
+    STATIC_CHECK(core::toLowerHexString(Bytes) == "000f107f80a5c3ff1234569bde");
+}
+
 namespace
 {
 struct VariableCollector
@@ -195,14 +225,53 @@ TEST_CASE("replaceVariables")
     CHECK("${a} (b)"sv == core::replaceVariables("$${a} ${b}", VariableCollector()));
     CHECK("s/${VERSION}/1.0/"sv == core::replaceVariables("s/$${VERSION}/1.0/", VariableCollector()));
     CHECK("a $ b"sv == core::replaceVariables("a $ b", VariableCollector())); // lone '$' untouched
+
+    // Malformed markers pass through as written, and a well-formed variable beside one still expands.
+    CHECK("ab${x"sv == core::replaceVariables("ab${x", VariableCollector()));         // unterminated after text
+    CHECK("ab${x yz"sv == core::replaceVariables("ab${x yz", VariableCollector()));   // ... with text after it
+    CHECK("ab${"sv == core::replaceVariables("ab${", VariableCollector()));           // "${" at the very end
+    CHECK("ab$"sv == core::replaceVariables("ab$", VariableCollector()));             // '$' at the very end
+    CHECK("(a)${b"sv == core::replaceVariables("${a}${b", VariableCollector()));      // adjacent to a variable
+    CHECK("(a)x${b"sv == core::replaceVariables("${a}x${b", VariableCollector()));    // ... with text between
+    CHECK("${x (y)"sv == core::replaceVariables("${x ${y}", VariableCollector()));    // a variable after one
+    CHECK("${a(b)}"sv == core::replaceVariables("${a${b}}", VariableCollector()));    // nested
+    CHECK("${a${b}"sv == core::replaceVariables("${a$${b}", VariableCollector()));    // an escape after one
     // clang-format on
 }
 
 TEST_CASE("homeResolvedPath")
 {
-    CHECK(core::homeResolvedPath("", "/var/tmp").generic_string().empty());
+    CHECK(core::homeResolvedPath("", "/var/tmp").value().generic_string().empty());
 
-    CHECK("/var/tmp/workspace" == core::homeResolvedPath("~/workspace", "/var/tmp").generic_string());
+    CHECK("/var/tmp/workspace" == core::homeResolvedPath("~/workspace", "/var/tmp").value().generic_string());
+}
+
+TEST_CASE("homeResolvedPath reads its input as UTF-8")
+{
+    // A configuration value is UTF-8; on Windows the narrow constructor read it in the ANSI code page.
+    auto const home = std::filesystem::path { u8"C:/Users/Jürgen" };
+    CHECK(core::homeResolvedPath("~/\xCE\xA9-notes", home) == home / std::filesystem::path { u8"Ω-notes" });
+    CHECK(core::homeResolvedPath("D:/J\xC3\xBCrgen/notes", home)
+          == std::filesystem::path { u8"D:/Jürgen/notes" });
+}
+
+TEST_CASE("homeResolvedPath on input that is not UTF-8")
+{
+    // "Jürgen" in CP-1252: 0xFC starts no UTF-8 sequence. A configuration value comes from outside
+    // the program, so text that is not UTF-8 is an answer to report, never an exception.
+    auto const home = std::filesystem::path { "/home/user" };
+#ifdef _WIN32
+    for (auto const input: { "~/J\xFCrgen"sv, "J\xFCrgen"sv })
+    {
+        auto const resolved = core::homeResolvedPath(input, home);
+        REQUIRE_FALSE(resolved.has_value());
+        CHECK(resolved.error() == std::errc::illegal_byte_sequence);
+    }
+#else
+    // A POSIX path is bytes, so they are kept as they are.
+    CHECK(core::homeResolvedPath("~/J\xFCrgen", home).value().native() == "/home/user/J\xFCrgen");
+    CHECK(core::homeResolvedPath("J\xFCrgen", home).value().native() == "J\xFCrgen");
+#endif
 }
 
 TEST_CASE("expandEnvironmentVariables")
@@ -243,7 +312,7 @@ TEST_CASE("replaceVariables.and.homeResolvedPath.composition")
     };
 
     auto const resolve = [&](string const& input) {
-        return core::homeResolvedPath(core::replaceVariables(input, envReplacer), "/home/user");
+        return core::homeResolvedPath(core::replaceVariables(input, envReplacer), "/home/user").value();
     };
 
     // ${HOME}/path → env expansion → home resolution (no ~ involved)

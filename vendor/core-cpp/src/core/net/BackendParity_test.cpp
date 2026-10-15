@@ -43,6 +43,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <expected>
@@ -1347,8 +1348,11 @@ TEST_CASE("setInterest reports the kernel's refusal when descriptors run out", "
             else
             {
                 REQUIRE_FALSE(armed.has_value());
-                CHECK(armed.error().code == core::net::NetErrorCode::SystemError);
-                CHECK(armed.error().systemCode != 0);
+                // Out of descriptors, classified by the one socket-error table since 0.6.0: an
+                // exhaustion a caller can back off on, where it used to be an unclassified
+                // `SystemError`.
+                CHECK(armed.error().code == core::net::NetErrorCode::ResourceExhausted);
+                CHECK(armed.error().systemCode == EMFILE);
                 CHECK_FALSE(armed.error().context.empty());
             }
 

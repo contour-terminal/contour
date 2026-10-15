@@ -15,6 +15,7 @@
 #include <afunix.h>
 // clang-format on
 
+#include <core/Utf8Path.hpp>
 #include <core/async/Task.hpp>
 #include <core/async/WhenAll.hpp>
 #include <core/net/EventLoop.hpp>
@@ -36,6 +37,7 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <memory>
 #include <random>
 #include <span>
@@ -124,12 +126,12 @@ Task<void> echoOnce(EventLoop* loop, IListener* listener, std::string path, Echo
     co_await core::async::whenAll(serve(listener, echo), dial(loop, listener, std::move(path), echo));
 }
 
-/// @param path A path.
+/// @param path A path, in UTF-8 as `sun_path` is.
 /// @return Whether something is there. Asked of the entry itself: a bound AF_UNIX socket is a
 ///         reparse point, which `std::filesystem::exists` follows and then cannot answer for.
 [[nodiscard]] bool entryExists(std::string const& path)
 {
-    return ::GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+    return ::GetFileAttributesW(core::pathFromTrustedUtf8(path).c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
 /// Leaves a STALE socket file at @p path: a socket bound there and closed, as a crashed server's.
@@ -169,9 +171,12 @@ class TempDirectory
         std::filesystem::remove_all(_path, ec);
     }
 
-    /// @param name A file name.
-    /// @return Its path inside this directory.
-    [[nodiscard]] std::string file(std::string_view name) const { return (_path / name).string(); }
+    /// @param name A file name, in UTF-8.
+    /// @return Its path inside this directory, in UTF-8 as `sun_path` is.
+    [[nodiscard]] std::string file(std::string_view name) const
+    {
+        return core::pathToUtf8(_path / core::pathFromTrustedUtf8(name));
+    }
 
   private:
     std::filesystem::path _path;
@@ -213,6 +218,90 @@ TEST_CASE("A unix listener's socket file goes with it, a stale one is reclaimed 
     }
 }
 
+TEST_CASE("A unix socket path beyond ASCII is bound, deleted and reclaimed by its UTF-8 name",
+          "[net][afunix][iocp]")
+{
+    // Windows' AF_UNIX reads `sun_path` as UTF-8: measured on Windows 11 (26200) under CP-1252, the
+    // bytes C3 BC bind a file named U+00FC. listenUnix() made the parent directory, and bindUnix()
+    // probed for a stale file and deleted its own, in the ANSI code page instead, so under
+    // C:\Users\Jürgen the socket was bound into a directory nothing had made, and a listener that did
+    // bind left its file behind for the next one to trip over.
+    for (auto const& backend: BackendMatrix)
+    {
+        auto source = core::net::makeBackend(backend.kind);
+        if (!source)
+            continue;
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+            auto const directory = TempDirectory {};
+            // The parent is not there yet: listenUnix() makes it.
+            auto const path = directory.file("J\xC3\xBCrgen-\xCE\xA9/daemon.sock");
+
+            auto listener = core::net::listenUnix(loop, path);
+            if (!listener.has_value() && listener.error().code == core::net::NetErrorCode::Unsupported)
+                SKIP("AF_UNIX not supported on this platform");
+            REQUIRE(listener.has_value());
+            CHECK(entryExists(path));
+
+            // The probe finds a live server by the same name: a probe that looked elsewhere answered
+            // "absent", and the deletion that follows it took the live server's file.
+            auto second = core::net::listenUnix(loop, path);
+            REQUIRE_FALSE(second.has_value());
+            CHECK(second.error().code == core::net::NetErrorCode::AddressInUse);
+            CHECK(entryExists(path));
+
+            listener->reset();
+            CHECK_FALSE(entryExists(path)); // the file went with the listener
+
+            REQUIRE(leaveStaleSocketFile(path));
+            auto reclaimed = core::net::listenUnix(loop, path);
+            REQUIRE(reclaimed.has_value()); // the stale file was found, and reclaimed
+            reclaimed->reset();
+            CHECK_FALSE(entryExists(path));
+
+            // And a file that is not a socket is never touched.
+            auto const notes = directory.file("J\xC3\xBCrgen-\xCE\xA9/notes.txt");
+            std::ofstream { core::pathFromTrustedUtf8(notes) } << "keep";
+            auto refused = core::net::listenUnix(loop, notes);
+            REQUIRE_FALSE(refused.has_value());
+            CHECK(refused.error().code == core::net::NetErrorCode::AddressInUse);
+            CHECK(entryExists(notes));
+        }
+    }
+}
+
+TEST_CASE("A unix socket path that is not UTF-8 is refused as a value", "[net][afunix][iocp]")
+{
+    // A path that is not UTF-8 names no file AF_UNIX could bind, nor one the listener could make,
+    // probe or delete. A caller's path is text from outside the program, so it is a NetError, as a
+    // path too long for `sun_path` is; it threw std::system_error out of listenUnix() before.
+    for (auto const& backend: BackendMatrix)
+    {
+        auto source = core::net::makeBackend(backend.kind);
+        if (!source)
+            continue;
+        DYNAMIC_SECTION("backend=" << backend.name)
+        {
+            auto loop = EventLoop { *source };
+            auto const directory = TempDirectory {};
+            // "Jürgen" in CP-1252: 0xFC starts no UTF-8 sequence. The parent is not there yet, and
+            // a listener that went ahead would make it.
+            auto const parent = directory.file("sockets");
+            auto const path = parent + "\\J\xFCrgen.sock";
+
+            auto const listener = core::net::listenUnix(loop, path);
+            REQUIRE_FALSE(listener.has_value());
+            CHECK(listener.error().code == core::net::NetErrorCode::AddressError);
+            CHECK_FALSE(entryExists(parent));
+
+            auto const bound = core::net::IocpListener::bindUnix(loop, path);
+            REQUIRE_FALSE(bound.has_value());
+            CHECK(bound.error().code == core::net::NetErrorCode::AddressError);
+        }
+    }
+}
+
 TEST_CASE("listenUnix and connectUnix belong to the loop's transport family", "[net][afunix][iocp]")
 {
     for (auto const& backend: BackendMatrix)
@@ -227,7 +316,7 @@ TEST_CASE("listenUnix and connectUnix belong to the loop's transport family", "[
 
             auto const directory = std::filesystem::temp_directory_path()
                                    / std::format("core-cpp-unix-{}", std::random_device {}());
-            auto const path = (directory / "echo.sock").string();
+            auto const path = core::pathToUtf8(directory / "echo.sock");
             auto listener = core::net::listenUnix(loop, path);
             if (!listener.has_value())
             {
