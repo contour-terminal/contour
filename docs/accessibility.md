@@ -54,7 +54,7 @@ changed, so nothing is reported unless it is said explicitly. Contour announces:
 | Event | Politeness |
 |-------|-----------|
 | The bell | Polite — it waits for your screen reader to finish its sentence |
-| A desktop notification (OSC 99 / OSC 777) | Polite |
+| A desktop notification (OSC 99, OSC 777 or OSC 9) | Polite |
 | Read-only mode being switched on or off | Assertive — it interrupts, because it changes what typing does |
 
 Set `accessibility_announcements: false` in `contour.yml` to switch these off. They cost nothing while

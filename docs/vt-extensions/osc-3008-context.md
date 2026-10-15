@@ -81,7 +81,7 @@ terminal. The stack is destroyed when the session is.
 
 ## Limits
 
-Configurable through the [`osc_context`](../configuration/README.md) section: `max_depth` (default
+Configurable through the [`osc_context`](../configuration/index.md#osc_context) section: `max_depth` (default
 16) bounds the ancestry, and `max_retained_contexts` (default 256) bounds how much history is kept
 for scrolled-back output. Per the specification, hitting the depth limit drops the **newer**
 contexts, so a program deep in the ancestry cannot push out the one above it. Field lengths are
@@ -105,6 +105,13 @@ Contour draws from these sequences is an assurance. Two consequences worth stati
   force. A context that claims nothing at all is treated as unknown, not local — which matters
   because nothing emits a `remote` context for `ssh` today, so a remote host's own sequences look
   entirely local.
+
+  A `machineid=` counts only as the 32 hexadecimal digits of machine-id(5); anything else, systemd's
+  `uninitialized` placeholder included, is as if it were left out, and the `hostname=` decides. Host
+  names are compared whole, ignoring case, and `localhost` proves nothing. On a machine that has no
+  machine id of its own — Windows, a system without systemd — a context naming one is foreign: it
+  comes from another installation, such as a shell in a WSL distribution beside a Windows terminal
+  that shares its host name.
 
 To opt out of all of it: `osc_context: { enabled: false }`.
 

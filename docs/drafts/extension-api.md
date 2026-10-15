@@ -411,9 +411,10 @@ On top of those raw events the interface offers the semantics extensions actuall
 - **`command-finished`** with exit code, wall-clock duration, the command line if known, the cwd, and
   the logical line range the output occupied.
 - **Block queries** — the block at a position, the last N blocks, a block's prompt / command /
-  output text. Backed by `scanCommandBlocksBackward` and `textOf`
-  (`src/vtbackend/shell/CommandBlocks.hpp`), which are already written against a
-  `CommandBlockLineSource` DI seam and are therefore already testable without a Grid.
+  output text. Backed by the block store (`Terminal::commandBlocks()`) and the block actions over
+  it: `Terminal::targetedCommandBlock` names a block's record, and `Terminal::commandBlockText` reads
+  its parts through the one split of a block into prompt and output (`commandBlockRows()` in
+  `src/vtbackend/shell/CommandBlockRows.hpp`, testable without a Grid behind its row-source seam).
 - **The live prompt span** — where the shell's prompt is *right now*, or why there isn't one.
   Backed by `Terminal::livePromptSpan()`, which returns
   `std::expected<LivePromptSpan, PromptRegionError>` and says "an application is up, there is no
@@ -911,9 +912,11 @@ Grants are per-extension-version-and-permission, listable and revocable through
 
 Extensions are third-party, which makes this the one place where the design must *not* copy the
 daemon protocol. `vthost`'s handshake is deliberately an **exact match** — a peer one version
-away is refused — and that is correct there, because both ends are the same build (which is also why
-its `CodecVersion` need not move at all while the protocol is unreleased). Extensions cannot be the same build as the terminal, so this
-handshake **negotiates**.
+away is refused — and that is correct there, because both ends are the same build. That protocol is
+experimental since 0.7.0, which shipped `CodecVersion` 1, and the version moves once per release whose
+wire differs — it is 2 now — so a daemon and its clients are rebuilt together; only the handshake stays
+readable across revisions, so that a refusal can say which one each end speaks. Extensions cannot be
+the same build as the terminal, so this handshake **negotiates**.
 
 - **Per-world semantic version.** `contour:terminal@0.1.0` and `contour:ui@0.1.0` version
   independently, so a UI addition does not invalidate every session-side extension.

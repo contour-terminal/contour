@@ -12,6 +12,9 @@
 :material-check-bold:{.check-mark}  [Vi-like input modes](input-modes.md) for improved navigation, selection and copy'n'paste experience <br/>
 :material-check-bold:{.check-mark}  [Hint mode](demo/hint-mode.md) for keyboard-driven selection of URLs, file paths, git hashes, and more <br/>
 :material-check-bold:{.check-mark}  [Vertical Line Markers](demo/line-marks.md) (quickly jump to markers in your history!) <br/>
+:material-check-bold:{.check-mark}  [Command blocks](demo/command-blocks.md): an exit-status gutter, line numbers, per-line timestamps, folding, scrollbar marks and a sticky command header <br/>
+:material-check-bold:{.check-mark}  [Notifications](demo/command-blocks.md#finish-notifications) when a long-running command finishes in a tab you are not looking at <br/>
+:material-check-bold:{.check-mark}  [Shell integration](vt-extensions/osc-133-shell-integration.md) for bash, zsh, fish, tcsh and PowerShell <br/>
 :material-check-bold:{.check-mark}  Blurred behind transparent background when using Windows 10 or KDE window manager on Linux. <br/>
 :material-check-bold:{.check-mark}  Blurrable Background image support. <br/>
 :material-check-bold:{.check-mark}  Runtime configuration reload <br/>

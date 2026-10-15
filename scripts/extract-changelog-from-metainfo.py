@@ -85,8 +85,7 @@ def extract_changelog_from_metainfo(metainfo_file: str) -> list[Release]:
                     else:
                         pending_title = normalized(element.text)
                 elif element.tag == "ul":
-                    entries = [inline_markdown(li) for li in element.findall("li")]
-                    changes = [Change(text) for text in entries if text != ""]
+                    changes = [Change(text) for li in element.findall("li") if (text := inline_markdown(li))]
                     if len(changes) != 0:
                         sections.append(Section(pending_title, changes))
                     pending_title = ""

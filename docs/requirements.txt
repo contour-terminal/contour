@@ -1,4 +1,5 @@
-mkdocs-material
+mkdocs>=1.6 # mkdocs.yml sets validation.links.anchors, which 1.6 introduced; strict mode rejects a key it does not know
+mkdocs-material>=9.4 # mkdocs.yml names material.extensions.emoji, which 9.4 introduced
 mkdocs-exclude
 mkdocs-glightbox
 mkdocs-video

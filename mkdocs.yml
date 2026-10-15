@@ -5,6 +5,11 @@ repo_url: https://github.com/contour-terminal/contour/
 repo_name: contour-terminal/contour
 site_description: Technical Landing Page for Contour Terminal Emulator
 site_author: Christian Parpart
+# Any warning fails the build, the CI deploy's included, and a link to a heading that does not exist is one.
+strict: true
+validation:
+  links:
+    anchors: warn
 theme:
   name: material
   logo: /assets/contour-logo.png
@@ -61,8 +66,8 @@ markdown_extensions:
   - pymdownx.mark
   - pymdownx.tilde
   - pymdownx.emoji:
-      emoji_index: !!python/name:materialx.emoji.twemoji
-      emoji_generator: !!python/name:materialx.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
 plugins:
   - mkdocs-video:
@@ -107,6 +112,7 @@ nav:
     - ReGIS vector graphics: demo/regis-graphics.md
     - Input method editor (IME): demo/ime.md
     - Line marks: demo/line-marks.md
+    - Command blocks: demo/command-blocks.md
     - Status line: demo/statusline.md
     - Hint mode: demo/hint-mode.md
     - Input modes: input-modes.md

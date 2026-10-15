@@ -59,16 +59,16 @@ Contour ships with the following builtin pattern detectors:
 
 ### Smart File Path Detection
 
-When the terminal knows the current working directory (via
-[shell integration](../vt-extensions/osc-133-shell-integration.md)), Contour
-broadens its file path detection to also match:
+When the terminal knows the current working directory, or the directory a command
+ran in (via [shell integration](../vt-extensions/osc-133-shell-integration.md)),
+Contour broadens its file path detection to also match:
 
 - **Bare filenames with extensions** — `main.cpp`, `README.md`
 - **Extensionless files** — `Makefile`, `LICENSE`, `Dockerfile`, `CHANGELOG`
 - **Directory names** — `src`, `build`, `docs`
 
 These bare names are validated against the filesystem: only entries that actually
-exist in the current working directory are shown as hints. This means you can
+exist in that directory are shown as hints. This means you can
 look at `ls` output, compiler errors, or `git status` and jump directly to the
 referenced files.
 
@@ -208,9 +208,22 @@ input_mapping:
 ### Path Resolution
 
 When copying or opening file paths, Contour resolves relative paths to absolute
-using the terminal's current working directory. For example, copying a hint for
-`src/main.cpp` gives you `/home/user/project/src/main.cpp` in the clipboard, and
-opening it passes the full path to your editor or file manager.
+using the directory the command that printed them ran in, as shell integration
+recorded it, so a `cd` since then does not change what an earlier command's output
+names. Outside any command's output, the terminal's current working directory is
+used. For example, copying a hint for `src/main.cpp` gives you
+`/home/user/project/src/main.cpp` in the clipboard, and opening it passes the full
+path to your editor or file manager. Ctrl+clicking a path resolves it the same way.
+
+A command that changes directory itself, such as `cd build && make`, prints paths
+relative to where it went. The shell reports that directory only at the next
+prompt, so a path not found where the command started is looked up there too.
+
+Paths printed by a command that ran on another machine (over ssh, in a container)
+name files there, so they are neither offered as hints nor opened here. That
+includes the output of an `ssh` session whose remote shell reports its directory
+but marks no commands of its own: everything it printed belongs to the local `ssh`
+command, and stays refused after you return to the local prompt.
 
 Home-relative paths (`~/...`) are expanded using the `HOME` environment variable.
 
