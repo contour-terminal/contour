@@ -103,7 +103,7 @@ class SystemdScopePlacement final: public ProcessPlacement
 
     // A std::thread and a state rather than a std::jthread: this file is built on Linux only, and a
     // Linux build against libc++ before 20 has std::jthread only behind -fexperimental-library, which
-    // the build passes on Apple platforms alone.
+    // the build passes only where its probe in the top-level CMakeLists.txt finds the flag works.
     std::mutex _mutex;
     std::condition_variable _wakeup;
     std::deque<ParkedChild> _queue;

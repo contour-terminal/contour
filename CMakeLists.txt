@@ -89,11 +89,20 @@ if(DEFINED MSVC)
     add_compile_options(/bigobj)
 endif()
 
-if(APPLE)
-    # Apple's libc++ before 20 (Xcode 16) declares std::jthread and std::stop_token only behind
-    # -fexperimental-library; core-cpp's StopToken uses them when __cpp_lib_jthread says they exist.
-    # Xcode 26 (libc++ 20) declares them without the flag.
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexperimental-library")
+# libc++ before 20 -- Xcode 16's, and the one FreeBSD 15 ships in its base system -- declares std::jthread and
+# std::stop_token only behind -fexperimental-library. core-cpp's StopToken uses them when __cpp_lib_jthread says
+# they exist, and the threaded tests use std::jthread outright. libc++ 20 (Xcode 26), libstdc++ and Microsoft's
+# library declare them without the flag, so it is passed only where std::jthread needs it.
+include(CheckCXXSourceCompiles)
+set(_jthreadProbe "#include <thread>\nint main() { auto thread = std::jthread { [] {} }; }")
+check_cxx_source_compiles("${_jthreadProbe}" CONTOUR_STD_HAS_JTHREAD)
+if(NOT CONTOUR_STD_HAS_JTHREAD)
+    set(CMAKE_REQUIRED_FLAGS "-fexperimental-library")
+    check_cxx_source_compiles("${_jthreadProbe}" CONTOUR_STD_HAS_EXPERIMENTAL_JTHREAD)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(CONTOUR_STD_HAS_EXPERIMENTAL_JTHREAD)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexperimental-library")
+    endif()
 endif()
 
 if (CONTOUR_BUILD_WITH_MIMALLOC)
