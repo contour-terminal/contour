@@ -14,10 +14,14 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <format>
+#include <iterator>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -350,7 +354,7 @@ TEST_CASE("resize_lines_nr2_with_scrollback_moving_fully_into_page", "[grid]")
         CellLocation { .line = grid.pageSize().lines.as<LineOffset>() - 1, .column = ColumnOffset(1) };
     auto const newPageSize = PageSize { LineCount(4), ColumnCount(3) };
     auto const newCursorPos0 = CellLocation { .line = curCursorPos.line + 2, .column = curCursorPos.column };
-    CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, WrapPending::No);
     CHECK(newCursorPos.line == newCursorPos0.line);
     CHECK(newCursorPos.column == newCursorPos0.column);
     CHECK(grid.pageSize() == newPageSize);
@@ -376,7 +380,7 @@ TEST_CASE("resize_lines_nr3_with_scrollback_moving_into_page_overflow", "[grid]"
     auto const curCursorPos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
     auto const newPageSize = PageSize { LineCount(5), ColumnCount(3) };
     logGridText(grid, "BEFORE");
-    CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, WrapPending::No);
     logGridText(grid, "AFTER");
     CHECK(newCursorPos.line == LineOffset(3));
     CHECK(newCursorPos.column == curCursorPos.column);
@@ -397,7 +401,8 @@ TEST_CASE("resize_grow_lines_with_history_cursor_no_bottom", "[grid]")
 
     auto const curCursorPos = CellLocation { .line = LineOffset(0), .column = ColumnOffset(1) };
     logGridText(grid, "before resize");
-    CellLocation newCursorPos = grid.resize(PageSize { LineCount(3), ColumnCount(3) }, curCursorPos, false);
+    CellLocation newCursorPos =
+        grid.resize(PageSize { LineCount(3), ColumnCount(3) }, curCursorPos, WrapPending::No);
     logGridText(grid, "after resize");
     CHECK(newCursorPos.line == curCursorPos.line);
     CHECK(newCursorPos.column == curCursorPos.column);
@@ -415,35 +420,268 @@ TEST_CASE("Grid.resize.shrinkingColumnsKeepsTheCursorOnThePage", "[grid]")
 {
     auto const narrowed = PageSize { LineCount(3), ColumnCount(8) };
 
-    SECTION("narrowed in place")
+    SECTION("a cursor that still fits stays where it is")
     {
-        // A cursor that still fits must stay where it is, not have its column added to itself, and
-        // one past the new width must move onto the new last column.
-        auto const [cursorColumn, expectedColumn] = GENERATE(table<int, int>({
-            { 4, 4 }, // still fits
-            { 9, 7 }, // past the new width
-        }));
-        // With reflow enabled, "ABCD" leaves nothing to reflow or cut, so both narrow in place.
+        // Not have its column added to itself. With reflow enabled, "ABCD" leaves nothing to reflow
+        // or cut, so both narrow in place.
         auto const reflow = GENERATE(true, false);
-        CAPTURE(cursorColumn, reflow);
+        CAPTURE(reflow);
 
         auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, reflow, LineCount(10));
         grid.setLineText(LineOffset(1), "ABCD");
-        auto const cursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(cursorColumn) };
-        CHECK(grid.resize(narrowed, cursor, false)
-              == CellLocation { .line = cursor.line, .column = ColumnOffset(expectedColumn) });
+        auto const cursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(4) };
+        CHECK(grid.resize(narrowed, cursor, WrapPending::No) == cursor);
     }
 
-    SECTION("reflowed")
+    SECTION("without reflow, a cursor past the new width moves onto its last column")
     {
-        // Content past the new width forces a rebuild, which can move the cursor's text onto
-        // another line. The cursor does not follow it yet, so this checks only that it stays on
-        // the page.
-        auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, true, LineCount(10));
+        auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, false, LineCount(10));
         grid.setLineText(LineOffset(1), "ABCDEFGHIJ");
         auto const cursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(9) };
-        CHECK(grid.resize(narrowed, cursor, false).column < boxed_cast<ColumnOffset>(narrowed.columns));
+        CHECK(grid.resize(narrowed, cursor, WrapPending::No)
+              == CellLocation { .line = LineOffset(1), .column = ColumnOffset(7) });
     }
+}
+
+namespace
+{
+/// The character in the cell at @p location of @p grid's page.
+[[nodiscard]] char charAt(Grid const& grid, CellLocation location)
+{
+    return grid.lineText(location.line).at(unbox<size_t>(location.column));
+}
+} // namespace
+
+TEST_CASE("Grid.resize.reflowKeepsTheCursorOnItsText", "[grid]")
+{
+    // A column change that reflows moves text between rows. The cursor goes with the cell it is on --
+    // its logical line and its offset into that line -- as kitty, foot and WezTerm do, and not with the
+    // row it was on, where other text now stands.
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, true, LineCount(10));
+
+    SECTION("inside a wrapped line, narrowing and widening again")
+    {
+        grid.setLineText(LineOffset(0), "ABCDEFGHIJ");
+        grid.setLineText(LineOffset(1), "KLMNO");
+        grid.lineAt(LineOffset(1)).setWrapped(true);
+        auto const cursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) };
+        REQUIRE(charAt(grid, cursor) == 'M');
+
+        // "ABCD" "EFGH" "IJKL" "MNO": the first is pushed into the history, the blank row below given up.
+        auto const narrowed = grid.resize(PageSize { LineCount(3), ColumnCount(4) }, cursor, WrapPending::No);
+        CHECK(narrowed == CellLocation { .line = LineOffset(2), .column = ColumnOffset(0) });
+        CHECK(charAt(grid, narrowed) == 'M');
+
+        auto const widened =
+            grid.resize(PageSize { LineCount(3), ColumnCount(10) }, narrowed, WrapPending::No);
+        CHECK(widened == cursor);
+        CHECK(charAt(grid, widened) == 'M');
+    }
+
+    SECTION("past the end of its text, narrowing and widening again")
+    {
+        // The cursor keeps its offset into the logical line even where that line has no text, and the
+        // line gains the row it needs to hold the cursor -- as foot does -- so the next character typed
+        // continues the line instead of landing on its last column or on another line.
+        grid.setLineText(LineOffset(1), "ABCD");
+        auto const cursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(9) };
+
+        // The added row takes the place of the blank row below.
+        auto const narrowed = grid.resize(PageSize { LineCount(3), ColumnCount(8) }, cursor, WrapPending::No);
+        CHECK(narrowed == CellLocation { .line = LineOffset(2), .column = ColumnOffset(1) });
+        CHECK(grid.lineText(LineOffset(1)) == "ABCD    ");
+        CHECK(grid.lineAt(LineOffset(2)).isFlagEnabled(LineFlag::Wrapped));
+
+        auto const widened =
+            grid.resize(PageSize { LineCount(3), ColumnCount(10) }, narrowed, WrapPending::No);
+        CHECK(widened == cursor);
+        CHECK(grid.lineText(LineOffset(1)) == "ABCD      ");
+    }
+
+    SECTION("a pending wrap stands where the next character goes")
+    {
+        // The cursor is on the last cell, but the next character goes one past it: that is the
+        // offset to keep, or the character would overwrite the "J".
+        grid.setLineText(LineOffset(1), "ABCDEFGHIJ");
+        auto const cursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(9) };
+
+        // The blank row, "ABCD" "EFGH" "IJ": the first is pushed into the history.
+        auto const narrowed =
+            grid.resize(PageSize { LineCount(3), ColumnCount(4) }, cursor, WrapPending::Yes);
+        CHECK(narrowed == CellLocation { .line = LineOffset(2), .column = ColumnOffset(2) });
+        CHECK(grid.lineText(LineOffset(2)) == "IJ  ");
+    }
+
+    SECTION("a row that is cut rather than reflowed keeps the cursor on its last column")
+    {
+        // The narrowing reflows "abcdef" into the row below it, which may not wrap and so is cut.
+        grid.setLineText(LineOffset(0), "abcdef");
+        grid.setLineText(LineOffset(1), "ABCDEFGHIJ");
+        grid.lineAt(LineOffset(1)).setWrappable(false);
+        auto const cursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(9) };
+
+        // "abcd" "ef" "ABCD", in place of the blank row.
+        auto const narrowed = grid.resize(PageSize { LineCount(3), ColumnCount(4) }, cursor, WrapPending::No);
+        CHECK(grid.lineText(LineOffset(2)) == "ABCD");
+        CHECK(narrowed == CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) });
+    }
+
+    SECTION("on the last row, whose text wraps further")
+    {
+        grid.setLineText(LineOffset(0), "abc");
+        grid.setLineText(LineOffset(1), "xyz");
+        grid.setLineText(LineOffset(2), "KLMNOPQRST");
+        auto const cursor = CellLocation { .line = LineOffset(2), .column = ColumnOffset(7) };
+        REQUIRE(charAt(grid, cursor) == 'R');
+
+        // "abc" "xyz" "KLMN" "OPQR" "ST": the cursor's text is no longer on the last row.
+        auto const narrowed = grid.resize(PageSize { LineCount(3), ColumnCount(4) }, cursor, WrapPending::No);
+        CHECK(narrowed == CellLocation { .line = LineOffset(1), .column = ColumnOffset(3) });
+        CHECK(charAt(grid, narrowed) == 'R');
+
+        auto const widened =
+            grid.resize(PageSize { LineCount(3), ColumnCount(10) }, narrowed, WrapPending::No);
+        CHECK(widened == cursor);
+        CHECK(charAt(grid, widened) == 'R');
+    }
+}
+
+TEST_CASE("Grid.resize.leavesTheRowsFromUnreflowedFromAsTheyAre", "[grid]")
+{
+    // From the logical line it names down to the bottom of the page, a column change cuts each row at the new
+    // width or pads it instead of reflowing it, and the line stays one; the rows above reflow as ever. A
+    // cursor there keeps its row, and an offset the line carries keeps naming its cell.
+    auto grid = Grid(PageSize { LineCount(4), ColumnCount(10) }, true, LineCount(10));
+    grid.setLineText(LineOffset(0), "abcdefghij");
+    grid.setLineText(LineOffset(1), "kl");
+    grid.lineAt(LineOffset(1)).setWrapped(true);
+    grid.setLineText(LineOffset(2), "ABCDEFGHIJ");
+    grid.setLineText(LineOffset(3), "KLMNOP");
+    grid.lineAt(LineOffset(3)).setWrapped(true);
+    grid.lineAt(LineOffset(2)).setFlag(LineFlag::PromptEnd, true);
+    grid.lineAt(LineOffset(2)).setPromptEndOffset(ColumnOffset(13)); // the "N"
+    auto cursors =
+        std::array { CellLocation { .line = LineOffset(3), .column = ColumnOffset(4) } }; // the "O"
+
+    SECTION("narrowing")
+    {
+        // A continuation names the line it continues.
+        grid.resize(PageSize { LineCount(4), ColumnCount(4) }, cursors, LineOffset(3));
+
+        // "abcd" "efgh" "ijkl", the first of them pushed into the history; then the rows as they were, cut.
+        CHECK(grid.lineText(LineOffset(-1)) == "abcd");
+        CHECK(grid.lineText(LineOffset(0)) == "efgh");
+        CHECK(grid.lineText(LineOffset(1)) == "ijkl");
+        CHECK(grid.lineText(LineOffset(2)) == "ABCD");
+        CHECK(grid.lineText(LineOffset(3)) == "KLMN");
+        CHECK(grid.lineAt(LineOffset(3)).isFlagEnabled(LineFlag::Wrapped));
+        CHECK(cursors[0] == CellLocation { .line = LineOffset(3), .column = ColumnOffset(3) });
+        CHECK(grid.lineAt(LineOffset(2)).promptEndOffset() == ColumnOffset(7));
+    }
+
+    SECTION("widening")
+    {
+        grid.resize(PageSize { LineCount(4), ColumnCount(15) }, cursors, LineOffset(2));
+
+        // "abcdefghijkl" on one row; then the rows as they were, padded; then a blank row for the page.
+        CHECK(grid.lineText(LineOffset(0)) == "abcdefghijkl   ");
+        CHECK(grid.lineText(LineOffset(1)) == "ABCDEFGHIJ     ");
+        CHECK(grid.lineText(LineOffset(2)) == "KLMNOP         ");
+        CHECK(grid.lineAt(LineOffset(2)).isFlagEnabled(LineFlag::Wrapped));
+        CHECK(cursors[0] == CellLocation { .line = LineOffset(2), .column = ColumnOffset(4) });
+        CHECK(grid.lineAt(LineOffset(1)).promptEndOffset() == ColumnOffset(18));
+    }
+}
+
+TEST_CASE("Grid.resize.aColumnMarkedPastTheTextGivesItsLineNoRow", "[grid]")
+{
+    // A cursor past the end of its line's text makes the reflowed line reach it, so that it keeps its row. A
+    // column the line marks there is counted on from the end of the text instead, and the line keeps the rows
+    // its text needs.
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, true, LineCount(10));
+    grid.setLineText(LineOffset(0), "abcdefghij");
+    grid.setLineText(LineOffset(1), "AB");
+    grid.lineAt(LineOffset(1)).setWrapped(true);
+    grid.setLineText(LineOffset(2), "next");
+    auto& head = grid.lineAt(LineOffset(0));
+    head.setFlag(LineFlag::PromptEnd, true);
+    head.setPromptEndOffset(ColumnOffset(18)); // six columns past the "B"
+
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(15) },
+                       CellLocation { .line = LineOffset(2), .column = ColumnOffset(4) },
+                       WrapPending::No);
+
+    CHECK(grid.lineText(LineOffset(0)) == "abcdefghijAB   ");
+    CHECK(grid.lineText(LineOffset(1)) == "next           ");
+    CHECK(grid.lineAt(LineOffset(0)).promptEndOffset() == ColumnOffset(18)); // still six past the "B"
+}
+
+TEST_CASE("Grid.resize.rowsThatDoNotReflowHoldTheirOffsetsToTheirCells", "[grid]")
+{
+    // A row cut at the new width or padded to it, rather than re-chopped, keeps its cells on their row: a
+    // column its line's head marks on it stays on the same row, held to the row's last column where the cut
+    // took its cell.
+    SECTION("a grid that does not reflow")
+    {
+        auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, false, LineCount(10));
+        grid.setLineText(LineOffset(0), "ABCDEFGHIJ");
+        grid.setLineText(LineOffset(1), "KLMNOP");
+        grid.lineAt(LineOffset(1)).setWrapped(true);
+        auto& head = grid.lineAt(LineOffset(0));
+        head.setFlag(LineFlags { LineFlag::PromptEnd, LineFlag::CommandEnd }, true);
+        head.setPromptEndOffset(ColumnOffset(13));  // the "N", row 1 of the line
+        head.setCommandEndOffset(ColumnOffset(18)); // past the text of row 1
+
+        (void) grid.resize(PageSize { LineCount(3), ColumnCount(15) }, CellLocation {}, WrapPending::No);
+        CHECK(grid.lineAt(LineOffset(0)).promptEndOffset() == ColumnOffset(15 + 3));
+        CHECK(grid.lineAt(LineOffset(0)).commandEndOffset() == ColumnOffset(15 + 8));
+
+        (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, WrapPending::No);
+        CHECK(grid.lineAt(LineOffset(0)).promptEndOffset() == ColumnOffset(5 + 3));
+        CHECK(grid.lineAt(LineOffset(0)).commandEndOffset() == ColumnOffset(5 + 4));
+    }
+
+    SECTION("a row that may not wrap, in a narrowing that cuts nothing but blanks")
+    {
+        auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, true, LineCount(10));
+        grid.setLineText(LineOffset(0), "AB");
+        auto& head = grid.lineAt(LineOffset(0));
+        head.setWrappable(false);
+        head.setFlag(LineFlag::PromptEnd, true);
+        head.setPromptEndOffset(ColumnOffset(8));
+
+        (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, WrapPending::No);
+        CHECK(grid.lineAt(LineOffset(0)).promptEndOffset() == ColumnOffset(4));
+    }
+
+    SECTION("a row kept as it is that does not wrap either, held once")
+    {
+        // The column is row 1, column 3 of the line at 15 columns, past the one row the line has, as a reflow
+        // leaves a column past the text.
+        auto grid = Grid(PageSize { LineCount(3), ColumnCount(15) }, true, LineCount(10));
+        grid.setLineText(LineOffset(0), "abcdefgh");
+        auto& head = grid.lineAt(LineOffset(0));
+        head.setWrappable(false);
+        head.setFlag(LineFlag::PromptEnd, true);
+        head.setPromptEndOffset(ColumnOffset(15 + 3));
+        auto cursors = std::array { CellLocation { .line = LineOffset(0), .column = ColumnOffset(8) } };
+
+        grid.resize(PageSize { LineCount(3), ColumnCount(10) }, cursors, LineOffset(0));
+        CHECK(grid.lineAt(LineOffset(0)).promptEndOffset() == ColumnOffset(10 + 3));
+    }
+}
+
+TEST_CASE("Grid.unreflowedColumn.keepsTheRowAndHoldsTheColumnToIt", "[grid]")
+{
+    constexpr auto Narrowing = WidthChange { .from = ColumnCount(10), .to = ColumnCount(4) };
+    CHECK(unreflowedColumn(ColumnOffset(2), Narrowing) == ColumnOffset(2));
+    CHECK(unreflowedColumn(ColumnOffset(7), Narrowing) == ColumnOffset(3));
+    CHECK(unreflowedColumn(ColumnOffset(13), Narrowing) == ColumnOffset(7));
+    CHECK(unreflowedColumn(ColumnOffset(20), Narrowing) == ColumnOffset(8));
+
+    constexpr auto Widening = WidthChange { .from = ColumnCount(10), .to = ColumnCount(15) };
+    CHECK(unreflowedColumn(ColumnOffset(7), Widening) == ColumnOffset(7));
+    CHECK(unreflowedColumn(ColumnOffset(13), Widening) == ColumnOffset(18));
 }
 
 TEST_CASE("resize_shrink_lines_with_history", "[grid]")
@@ -460,7 +698,7 @@ TEST_CASE("resize_shrink_lines_with_history", "[grid]")
     auto const newPageSize = PageSize { LineCount(1), ColumnCount(3) };
     auto const curCursorPos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
     logGridText(grid, "BEFORE");
-    CellLocation const newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    CellLocation const newCursorPos = grid.resize(newPageSize, curCursorPos, WrapPending::No);
     logGridText(grid, "AFTER");
     CHECK(grid.pageSize().columns == ColumnCount(3));
     CHECK(grid.pageSize().lines == LineCount(1));
@@ -492,7 +730,7 @@ TEST_CASE("resize_shrink_columns_with_reflow_and_unwrappable", "[grid]")
     auto const curCursorPos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
     grid.lineAt(LineOffset(0)).setWrappable(false);
     logGridText(grid, "BEFORE");
-    auto const newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    auto const newCursorPos = grid.resize(newPageSize, curCursorPos, WrapPending::No);
     (void) newCursorPos;
     logGridText(grid, "AFTER");
 
@@ -532,11 +770,13 @@ TEST_CASE("resize_shrink_columns_with_reflow_grow_lines_and_unwrappable", "[grid
     // JK
     // L
     auto grid = setupGridForResizeTests2x3xN(LineCount(5));
-    auto const curCursorPos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) };
+    // On the "L", which the narrowing leaves on the bottom row: the added lines then come from the history.
+    auto const curCursorPos = CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) };
     grid.lineAt(LineOffset(0)).setWrappable(false);
     // logGridText(grid, "BEFORE");
-    auto const newCursorPos = grid.resize(PageSize { LineCount(4), ColumnCount(2) }, curCursorPos, false);
-    (void) newCursorPos;
+    auto const newCursorPos =
+        grid.resize(PageSize { LineCount(4), ColumnCount(2) }, curCursorPos, WrapPending::No);
+    CHECK(newCursorPos == CellLocation { .line = LineOffset(3), .column = ColumnOffset(0) });
     // logGridText(grid, "AFTER");
 
     CHECK(grid.lineText(LineOffset(-3)) == "AB");
@@ -558,6 +798,41 @@ TEST_CASE("resize_shrink_columns_with_reflow_grow_lines_and_unwrappable", "[grid
 // }}}
 
 // {{{ grid reflow
+TEST_CASE("resize_shrink_columns_cuts_an_unwrappable_line_with_nothing_to_absorb", "[grid]")
+{
+    // A line marked as not reflowing (DECRST 2028 while it was written) is cut, not reflowed, whether or
+    // not the line above it overflows into it -- here nothing does.
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, true, LineCount(10));
+    grid.setLineText(LineOffset(0), "abc");
+    grid.setLineText(LineOffset(1), "ABCDEFGHIJ");
+    grid.lineAt(LineOffset(1)).setWrappable(false);
+
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(4) }, CellLocation {}, WrapPending::No);
+
+    CHECK(grid.historyLineCount() == LineCount(0));
+    CHECK(grid.lineText(LineOffset(0)) == "abc ");
+    CHECK(grid.lineText(LineOffset(1)) == "ABCD");
+    CHECK(grid.lineText(LineOffset(2)) == "    ");
+    CHECK_FALSE(grid.lineAt(LineOffset(1)).isFlagEnabled(LineFlag::Wrappable));
+}
+
+TEST_CASE("resize_shrink_columns_leaves_the_lines_it_adds_wrappable", "[grid]")
+{
+    // A narrowing pads the ring with blank lines that a later growth brings onto the page. Text written
+    // there must reflow like any other, so they are wrappable as every other line of a reflowing grid.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(10) }, true, LineCount(10));
+    grid.setLineText(LineOffset(0), "ABCDEFGHIJ");
+
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, CellLocation {}, WrapPending::No);
+    (void) grid.resize(PageSize { LineCount(4), ColumnCount(8) }, CellLocation {}, WrapPending::No);
+
+    for (auto const line: std::views::iota(0, 4))
+    {
+        CAPTURE(line);
+        CHECK(grid.lineAt(LineOffset(line)).isFlagEnabled(LineFlag::Wrappable));
+    }
+}
+
 TEST_CASE("resize_reflow_shrink", "[grid]")
 {
     auto grid = setupGrid5x2();
@@ -566,8 +841,9 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
     // Shrink slowly from 5x2 to 4x2 to 3x2 to 2x2.
 
     // 4x2
-    (void) grid.resize(
-        PageSize { LineCount(2), ColumnCount(4) }, CellLocation { .line = {}, .column = {} }, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) },
+                       CellLocation { .line = {}, .column = {} },
+                       WrapPending::No);
     logGridText(grid, "after resize 4x2");
 
     CHECK(*grid.historyLineCount() == 2);
@@ -590,8 +866,9 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
 
     // 3x2
     std::cout << std::format("Starting resize to 3x2\n");
-    (void) grid.resize(
-        PageSize { LineCount(2), ColumnCount(3) }, CellLocation { .line = {}, .column = {} }, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) },
+                       CellLocation { .line = {}, .column = {} },
+                       WrapPending::No);
     logGridText(grid, "after resize 3x2");
 
     CHECK(*grid.historyLineCount() == 2);
@@ -602,8 +879,9 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
     CHECK(grid.lineText(LineOffset(1)) == "de ");
 
     // 2x2
-    (void) grid.resize(
-        PageSize { LineCount(2), ColumnCount(2) }, CellLocation { .line = {}, .column = {} }, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) },
+                       CellLocation { .line = {}, .column = {} },
+                       WrapPending::No);
     logGridText(grid, "after resize 2x2");
 
     CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(2) });
@@ -622,8 +900,9 @@ TEST_CASE("Grid.reflow", "[grid]")
 
     SECTION("resize 4x2")
     {
-        (void) grid.resize(
-            PageSize { LineCount(2), ColumnCount(4) }, CellLocation { .line = {}, .column = {} }, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) },
+                           CellLocation { .line = {}, .column = {} },
+                           WrapPending::No);
         logGridText(grid, "after resize");
 
         CHECK(grid.historyLineCount() == LineCount(2));
@@ -637,9 +916,9 @@ TEST_CASE("Grid.reflow", "[grid]")
 
     SECTION("resize 3x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 4x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 3x2");
 
         CHECK(grid.historyLineCount() == LineCount(2));
@@ -652,11 +931,11 @@ TEST_CASE("Grid.reflow", "[grid]")
 
     SECTION("resize 2x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 4x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 3x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 2x2");
 
         CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(2) });
@@ -671,7 +950,7 @@ TEST_CASE("Grid.reflow", "[grid]")
         SECTION("regrow 3x2")
         {
             logGridText(grid, "Before regrow to 3x2");
-            (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+            (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, WrapPending::No);
             logGridText(grid, "after regrow to 3x2");
 
             CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(3) });
@@ -683,7 +962,8 @@ TEST_CASE("Grid.reflow", "[grid]")
 
             SECTION("regrow 4x2")
             {
-                (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
+                (void) grid.resize(
+                    PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, WrapPending::No);
                 logGridText(grid, "after regrow 4x2");
 
                 CHECK(grid.historyLineCount() == LineCount(2));
@@ -696,7 +976,8 @@ TEST_CASE("Grid.reflow", "[grid]")
 
             SECTION("regrow 5x2")
             {
-                (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
+                (void) grid.resize(
+                    PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, WrapPending::No);
                 logGridText(grid, "after regrow 5x2");
 
                 CHECK(grid.historyLineCount() == LineCount(0));
@@ -715,7 +996,7 @@ TEST_CASE("Grid.reflow.shrink_many", "[grid]")
     REQUIRE(grid.lineText(LineOffset(0)) == "ABCDE"sv);
     REQUIRE(grid.lineText(LineOffset(1)) == "abcde"sv);
 
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, WrapPending::No);
     logGridText(grid, "after resize 2x2");
 
     CHECK(grid.historyLineCount() == LineCount(4));
@@ -732,16 +1013,16 @@ TEST_CASE("Grid.reflow.shrink_many_grow_many", "[grid]")
 {
     auto grid = setupGrid5x2();
 
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, WrapPending::No);
     logGridText(grid, "after resize 2x2");
 
     SECTION("smooth regrow 2->3->4->5")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 3x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 4x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 5x2");
 
         CHECK(grid.historyLineCount() == LineCount(0));
@@ -752,7 +1033,7 @@ TEST_CASE("Grid.reflow.shrink_many_grow_many", "[grid]")
 
     SECTION("hard regrow 2->5")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 5x2");
 
         CHECK(grid.historyLineCount() == LineCount(0));
@@ -767,7 +1048,7 @@ TEST_CASE("Grid.reflow.triple", "[grid]")
     // Tests reflowing text upon shrink/grow across more than two (e.g. three) wrapped lines.
     auto grid = setupGrid8x2();
 
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, WrapPending::No);
     logGridText(grid, "after resize 3x2");
 
     REQUIRE(grid.historyLineCount() == LineCount(6));
@@ -784,7 +1065,7 @@ TEST_CASE("Grid.reflow.triple", "[grid]")
 
     SECTION("grow from 2x2 to 8x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 3x2");
 
         CHECK(grid.historyLineCount() == LineCount(0));
@@ -800,7 +1081,7 @@ TEST_CASE("Grid.reflow.triple", "[grid]")
     SECTION("grow from 2x2 to 3x2 to ... to 8x2")
     {
         // {{{ 3x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 3x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(4));
@@ -822,7 +1103,7 @@ TEST_CASE("Grid.reflow.triple", "[grid]")
         // }}}
 
         // {{{ 4x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 4x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(2));
@@ -840,7 +1121,7 @@ TEST_CASE("Grid.reflow.triple", "[grid]")
         // }}}
 
         // {{{ 5x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 5x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(2));
@@ -858,7 +1139,7 @@ TEST_CASE("Grid.reflow.triple", "[grid]")
         // }}}
 
         // {{{ 7x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 7x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(2));
@@ -876,7 +1157,7 @@ TEST_CASE("Grid.reflow.triple", "[grid]")
         // }}}
 
         // {{{ 8x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, CellLocation {}, WrapPending::No);
         logGridText(grid, "after resize 8x2");
 
         REQUIRE(*grid.historyLineCount() == 0);
@@ -917,11 +1198,11 @@ TEST_CASE("Grid resize with wrap", "[grid]")
     grid.setLineText(LineOffset { 0 }, "1");
     grid.setLineText(LineOffset { 1 }, "2");
     grid.setLineText(LineOffset { 2 }, "ABCDE");
-    (void) grid.resize(PageSize { LineCount(3), ColumnCount(3) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(3) }, CellLocation {}, WrapPending::No);
     REQUIRE(grid.lineText(LineOffset(0)) == "2  ");
     REQUIRE(grid.lineText(LineOffset(1)) == "ABC");
     REQUIRE(grid.lineText(LineOffset(2)) == "DE ");
-    (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, WrapPending::No);
     REQUIRE(unbox(grid.historyLineCount()) == 0);
     REQUIRE(grid.lineText(LineOffset(0)) == "1    ");
     REQUIRE(grid.lineText(LineOffset(1)) == "2    ");
@@ -949,11 +1230,11 @@ TEST_CASE("Grid resize", "[grid]")
     // With SoA storage, all lines use LineSoA (no TrivialBuffer distinction).
     REQUIRE(grid.lineAt(LineOffset(0)).size() > ColumnCount(0));
     REQUIRE(grid.lineAt(LineOffset(1)).size() > ColumnCount(0));
-    (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(1) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(1) }, CellLocation {}, WrapPending::No);
     // With SoA storage, all lines use LineSoA (no TrivialBuffer distinction).
     REQUIRE(grid.lineAt(LineOffset(0)).size() > ColumnCount(0));
     REQUIRE(grid.lineAt(LineOffset(1)).size() > ColumnCount(0));
-    (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(-1) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(-1) }, CellLocation {}, WrapPending::No);
     // With SoA storage, all lines use LineSoA (no TrivialBuffer distinction).
     REQUIRE(grid.lineAt(LineOffset(0)).size() > ColumnCount(0));
     REQUIRE(grid.lineAt(LineOffset(1)).size() > ColumnCount(0));
@@ -976,29 +1257,30 @@ TEST_CASE("Grid resize with wrap and spaces", "[grid]")
                                              .hyperlink = HyperlinkId {},
                                              .usedColumns = width,
                                              .text = bufferFragment };
-    auto lineTrivial = Line(LineFlag::None, trivial);
+    // Wrappable, as a line written with reflow on is: one that is not would be cut instead.
+    auto lineTrivial = Line(LineFlag::Wrappable, trivial);
     grid.lineAt(LineOffset(0)) = lineTrivial;
 
-    (void) grid.resize(PageSize { LineCount(3), ColumnCount(6) }, CellLocation {}, false);
-    REQUIRE(grid.lineText(LineOffset(-1)) == "a a a ");
-    REQUIRE(grid.lineText(LineOffset(0)) == "a     ");
-    REQUIRE(grid.lineText(LineOffset(1)) == "      ");
-    (void) grid.resize(PageSize { LineCount(3), ColumnCount(7) }, CellLocation {}, false);
+    // The blank rows below the line make room for the rows a narrowing adds, so the line stays on the page.
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(6) }, CellLocation {}, WrapPending::No);
+    REQUIRE(grid.lineText(LineOffset(0)) == "a a a ");
+    REQUIRE(grid.lineText(LineOffset(1)) == "a     ");
+    REQUIRE(grid.lineText(LineOffset(2)) == "      ");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(7) }, CellLocation {}, WrapPending::No);
     REQUIRE(grid.lineText(LineOffset(0)) == "a a a a");
-    (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, false);
-    REQUIRE(grid.lineText(LineOffset(-1)) == "a a a");
-    REQUIRE(grid.lineText(LineOffset(0)) == " a   ");
-    REQUIRE(grid.lineText(LineOffset(1)) == "     ");
-    (void) grid.resize(PageSize { LineCount(3), ColumnCount(4) }, CellLocation {}, false);
-    REQUIRE(grid.lineText(LineOffset(-1)) == "a a ");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, WrapPending::No);
+    REQUIRE(grid.lineText(LineOffset(0)) == "a a a");
+    REQUIRE(grid.lineText(LineOffset(1)) == " a   ");
+    REQUIRE(grid.lineText(LineOffset(2)) == "     ");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(4) }, CellLocation {}, WrapPending::No);
     REQUIRE(grid.lineText(LineOffset(0)) == "a a ");
-    REQUIRE(grid.lineText(LineOffset(1)) == "    ");
-    (void) grid.resize(PageSize { LineCount(3), ColumnCount(3) }, CellLocation {}, false);
-    REQUIRE(grid.lineText(LineOffset(-2)) == "a a");
-    REQUIRE(grid.lineText(LineOffset(-1)) == " a ");
-    REQUIRE(grid.lineText(LineOffset(0)) == "a  ");
-    REQUIRE(grid.lineText(LineOffset(1)) == "   ");
-    (void) grid.resize(PageSize { LineCount(3), ColumnCount(7) }, CellLocation {}, false);
+    REQUIRE(grid.lineText(LineOffset(1)) == "a a ");
+    REQUIRE(grid.lineText(LineOffset(2)) == "    ");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(3) }, CellLocation {}, WrapPending::No);
+    REQUIRE(grid.lineText(LineOffset(0)) == "a a");
+    REQUIRE(grid.lineText(LineOffset(1)) == " a ");
+    REQUIRE(grid.lineText(LineOffset(2)) == "a  ");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(7) }, CellLocation {}, WrapPending::No);
     REQUIRE(grid.lineText(LineOffset(0)) == "a a a a");
 }
 
@@ -1135,7 +1417,7 @@ TEST_CASE("Grid.resizeColumnsWithLargeHistory.keepsBlank", "[grid][blank]")
     // (lazy path must not materialize any line during the resize).
     auto grid = Grid(PageSize { LineCount(24), ColumnCount(80) }, true, LineCount(500'000));
 
-    (void) grid.resize(PageSize { LineCount(24), ColumnCount(100) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(24), ColumnCount(100) }, CellLocation {}, WrapPending::No);
     CHECK(grid.pageSize().columns == ColumnCount(100));
 
     auto blankCount = size_t { 0 };
@@ -1166,17 +1448,17 @@ TEST_CASE("Grid.growLinesAfterGrowColumnsWidensTheNewPageLines", "[grid]")
     SECTION("tail lines never used")
     {
         auto grid = Grid(PageSize { LineCount(3), ColumnCount(10) }, true, LineCount(20));
-        (void) grid.resize(PageSize { LineCount(3), ColumnCount(15) }, CellLocation {}, false);
-        (void) grid.resize(PageSize { LineCount(6), ColumnCount(15) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(3), ColumnCount(15) }, CellLocation {}, WrapPending::No);
+        (void) grid.resize(PageSize { LineCount(6), ColumnCount(15) }, CellLocation {}, WrapPending::No);
         checkPageLinesAreFullWidth(grid);
     }
 
     SECTION("page lines cut off by a shrink and grown back")
     {
         auto grid = Grid(PageSize { LineCount(6), ColumnCount(10) }, true, LineCount(20));
-        (void) grid.resize(PageSize { LineCount(3), ColumnCount(10) }, CellLocation {}, false);
-        (void) grid.resize(PageSize { LineCount(3), ColumnCount(15) }, CellLocation {}, false);
-        (void) grid.resize(PageSize { LineCount(6), ColumnCount(15) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(3), ColumnCount(10) }, CellLocation {}, WrapPending::No);
+        (void) grid.resize(PageSize { LineCount(3), ColumnCount(15) }, CellLocation {}, WrapPending::No);
+        (void) grid.resize(PageSize { LineCount(6), ColumnCount(15) }, CellLocation {}, WrapPending::No);
         checkPageLinesAreFullWidth(grid);
     }
 }
@@ -1190,7 +1472,7 @@ TEST_CASE("Grid.shrinkColumnsWrapsLongLine", "[grid][blank]")
     grid.setLineText(LineOffset(0), longText);
     REQUIRE(grid.lineTextTrimmed(LineOffset(0)) == longText);
 
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(40) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(40) }, CellLocation {}, WrapPending::No);
     CHECK(grid.pageSize().columns == ColumnCount(40));
 
     // After shrink to 40 cols, 200 chars of 'A' span 5 lines of 40 cells each.
@@ -1224,7 +1506,7 @@ TEST_CASE("Grid.shrinkColumnsWrapsTextWithBlankHistory", "[grid][blank]")
     REQUIRE(grid.lineAt(LineOffset(-2)).isBlank());
     REQUIRE(grid.lineAt(LineOffset(-1)).isBlank());
 
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(40) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(40) }, CellLocation {}, WrapPending::No);
     CHECK(grid.pageSize().columns == ColumnCount(40));
 
     // Reconstruct the wide line: it should still appear contiguously in history
@@ -1366,12 +1648,14 @@ TEST_CASE("Grid.renderRange.aColouredBlankRowSurvivesTheTrim", "[grid][capture]"
     CHECK(captured.front() == "    ");
 }
 
-TEST_CASE("Grid.renderRange.staysAboveTheStableFloor", "[grid][capture][stable-id]")
+TEST_CASE("Grid.renderRange.aReverseScrollAtCapacityLeavesTheWholeHistoryCapturable",
+          "[grid][capture][stable-id]")
 {
-    // renderRange must address exactly the rows the daemon's own snapshot walk does. At capacity a
-    // reverse scroll wraps destroyed page rows into the oldest history slots WITHOUT resetting
-    // them, which is why stableRangeFloor() exists — and a capture clamped to -historyLineCount()
-    // returned those slots, so `capture-pane -S -` began with phantom rows no mirror ever held.
+    // renderRange must address exactly the rows the daemon's own snapshot walk does. A reverse scroll
+    // with the ring full once wrapped the rows it pushed off the page into the oldest history slots,
+    // which then lay below the stable floor, and a capture clamped to -historyLineCount() returned
+    // them, so `capture-pane -S -` began with phantom rows no mirror ever held. The scroll leaves
+    // the history alone now: every history row is valid, and the capture returns each one.
     auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(2));
     grid.setLineText(LineOffset(0), "AAAAA");
     grid.setLineText(LineOffset(1), "BBBBB");
@@ -1383,9 +1667,8 @@ TEST_CASE("Grid.renderRange.staysAboveTheStableFloor", "[grid][capture][stable-i
 
     grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
 
-    // The floor now sits ABOVE base - historyLineCount(): one history slot holds a destroyed row.
     auto const floorOffset = grid.stableRangeFloor() - grid.stableLineIdOf(LineOffset(0));
-    REQUIRE(floorOffset > -unbox<int64_t>(grid.historyLineCount()));
+    CHECK(floorOffset == -unbox<int64_t>(grid.historyLineCount()));
 
     auto valid = 0;
     grid.forEachValidLine([&](LineOffset, Line const&) { ++valid; });
@@ -1394,6 +1677,7 @@ TEST_CASE("Grid.renderRange.staysAboveTheStableFloor", "[grid][capture][stable-i
                                            CaptureRendition::PlainText,
                                            CaptureTrailingSpaces::Keep);
     CHECK(captured.size() == static_cast<std::size_t>(valid));
+    CHECK(captured == std::vector<std::string> { "CCCCC", "DDDDD", "     ", "     " });
 }
 
 TEST_CASE("Grid.reflow.semanticMarksStayOnTheHeadLine", "[grid]")
@@ -1435,7 +1719,7 @@ TEST_CASE("Grid.reflow.semanticMarksStayOnTheHeadLine", "[grid]")
     SECTION("shrink splits the line but not its marks")
     {
         // 30 columns of text into 10 => a head plus two continuations.
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, WrapPending::No);
         CHECK(reconstruct(grid) == text);
         soleHeadLine(grid, LineFlag::Marked);
         soleHeadLine(grid, LineFlag::OutputStart);
@@ -1447,8 +1731,8 @@ TEST_CASE("Grid.reflow.semanticMarksStayOnTheHeadLine", "[grid]")
         // Narrow first so the logical line really is wrapped, then widen to a width it still overflows:
         // 30 columns of text into 20 => a head plus one continuation. This is the case that used to stamp
         // the head's flags onto every chunk it produced.
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, false);
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(20) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, WrapPending::No);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(20) }, CellLocation {}, WrapPending::No);
         CHECK(reconstruct(grid) == text);
         soleHeadLine(grid, LineFlag::Marked);
         soleHeadLine(grid, LineFlag::OutputStart);
@@ -1457,12 +1741,153 @@ TEST_CASE("Grid.reflow.semanticMarksStayOnTheHeadLine", "[grid]")
 
     SECTION("a full round-trip leaves the line whole again, marks and all")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, false);
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(30) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, WrapPending::No);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(30) }, CellLocation {}, WrapPending::No);
         CHECK(reconstruct(grid) == text);
         soleHeadLine(grid, LineFlag::Marked);
         soleHeadLine(grid, LineFlag::OutputStart);
         soleHeadLine(grid, LineFlag::CommandEnd);
+    }
+}
+
+namespace
+{
+/// Writes @p text into the row at @p offset and attributes the row to @p block, first reached at @p bornAt.
+void writeOwnedRow(
+    Grid& grid, LineOffset offset, std::string_view text, CommandBlockId block, uint32_t bornAt)
+{
+    grid.setLineText(offset, text);
+    grid.lineAt(offset).adoptBlock(block);
+    grid.lineAt(offset).stampBornAt(bornAt);
+}
+
+/// Every non-blank row of @p grid, top first, as "text block@bornAt".
+[[nodiscard]] std::vector<std::string> rowOwners(Grid const& grid)
+{
+    auto result = std::vector<std::string> {};
+    for (auto const i: std::views::iota(-grid.historyLineCount().as<int>(), grid.pageSize().lines.as<int>()))
+    {
+        auto const offset = LineOffset::cast_from(i);
+        auto const text = grid.lineTextTrimmed(offset);
+        if (!text.empty())
+            result.push_back(
+                std::format("{} {}@{}", text, grid.lineAt(offset).blockId(), grid.lineAt(offset).bornAt()));
+    }
+    return result;
+}
+} // namespace
+
+TEST_CASE("Grid.reflow.blockIdAndBirthTimeRideOnEveryChunk", "[grid][semanticblocks]")
+{
+    // Unlike the semantic marks above, a row's block and birth time are NOT head-only: they say which
+    // command produced the row and when, and re-chopping a logical line into different physical pieces
+    // changes neither. Losing them would erase a running command's colour and timestamps the moment the
+    // window is resized.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(30) }, true, LineCount(10));
+    writeOwnedRow(grid, LineOffset(0), std::string(30, 'A'), CommandBlockId { 7 }, 42);
+    writeOwnedRow(grid, LineOffset(1), "BBBB", CommandBlockId { 8 }, 50);
+
+    SECTION("narrowing splits the line into chunks that all keep it")
+    {
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, WrapPending::No);
+        CHECK(rowOwners(grid)
+              == std::vector<std::string> {
+                  "AAAAAAAAAA 7@42", "AAAAAAAAAA 7@42", "AAAAAAAAAA 7@42", "BBBB 8@50" });
+    }
+
+    SECTION("narrowing twice rebuilds continuations that still keep it")
+    {
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, WrapPending::No);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, WrapPending::No);
+        CHECK(rowOwners(grid)
+              == std::vector<std::string> {
+                  "AAAAAAA 7@42", "AAAAAAA 7@42", "AAAAAAA 7@42", "AAAAAAA 7@42", "AA 7@42", "BBBB 8@50" });
+    }
+
+    SECTION("widening rejoins the chunks without losing it")
+    {
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(10) }, CellLocation {}, WrapPending::No);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(20) }, CellLocation {}, WrapPending::No);
+        CHECK(rowOwners(grid)
+              == std::vector<std::string> { "AAAAAAAAAAAAAAAAAAAA 7@42", "AAAAAAAAAA 7@42", "BBBB 8@50" });
+    }
+}
+
+TEST_CASE("Grid.reflow.overflowCarriesTheRowItWasCutFrom", "[grid][semanticblocks]")
+{
+    // One logical line whose rows the cursor reached at different times -- and, to tell them apart, in
+    // different blocks. Narrowing it rebuilds both continuations in place, each keeping its own values, and
+    // the columns the LAST of them can no longer hold become new rows. Those were cut from that last row,
+    // so they carry its values; the head's would make the birth times run backwards down the line.
+    //
+    // 30 columns into 7: the head keeps 7 and hands 3 on, the first continuation absorbs them and hands 6
+    // on, and the second absorbs those and is left with 9 it cannot hold -- two new rows, both cut from it.
+    auto grid = Grid(PageSize { LineCount(5), ColumnCount(10) }, true, LineCount(10));
+    auto const writeLogicalLine = [&](int top) {
+        writeOwnedRow(grid, LineOffset::cast_from(top), std::string(10, 'A'), CommandBlockId { 1 }, 10);
+        writeOwnedRow(grid, LineOffset::cast_from(top + 1), std::string(10, 'B'), CommandBlockId { 2 }, 20);
+        writeOwnedRow(grid, LineOffset::cast_from(top + 2), std::string(10, 'C'), CommandBlockId { 3 }, 30);
+        grid.lineAt(LineOffset::cast_from(top + 1)).setWrapped(true);
+        grid.lineAt(LineOffset::cast_from(top + 2)).setWrapped(true);
+    };
+
+    SECTION("before another line, which flushes the overflow")
+    {
+        writeLogicalLine(0);
+        writeOwnedRow(grid, LineOffset(3), "DDDD", CommandBlockId { 4 }, 40);
+        (void) grid.resize(PageSize { LineCount(5), ColumnCount(7) }, CellLocation {}, WrapPending::No);
+        CHECK(rowOwners(grid)
+              == std::vector<std::string> {
+                  "AAAAAAA 1@10", "AAABBBB 2@20", "BBBBBBC 3@30", "CCCCCCC 3@30", "CC 3@30", "DDDD 4@40" });
+    }
+
+    SECTION("on the bottom row, where the page end flushes the overflow")
+    {
+        writeLogicalLine(2);
+        (void) grid.resize(PageSize { LineCount(5), ColumnCount(7) }, CellLocation {}, WrapPending::No);
+        CHECK(rowOwners(grid)
+              == std::vector<std::string> {
+                  "AAAAAAA 1@10", "AAABBBB 2@20", "BBBBBBC 3@30", "CCCCCCC 3@30", "CC 3@30" });
+    }
+}
+
+TEST_CASE("Grid.reflow.aContinuationWithoutItsHeadKeepsItsOwnValues", "[grid][semanticblocks]")
+{
+    // Widening rejoins a logical line under its head's values. A continuation whose head is gone has none
+    // to take, and keeps its own -- neither defaults nor the values of whichever line came before it.
+    SECTION("the head row was erased to blank")
+    {
+        // Printing past the margin, then CUU and EL 2 over the head: the continuation stays wrapped, and the
+        // nearest non-blank head above it is an unrelated line -- a prompt, here.
+        auto grid = Grid(PageSize { LineCount(4), ColumnCount(10) }, true, LineCount(10));
+        writeOwnedRow(grid, LineOffset(0), "HHHH", CommandBlockId { 7 }, 70);
+        grid.lineAt(LineOffset(0)).setMarked(true);
+        writeOwnedRow(grid, LineOffset(2), "WWWW", CommandBlockId { 9 }, 90);
+        grid.lineAt(LineOffset(2)).setWrapped(true);
+        writeOwnedRow(grid, LineOffset(3), "FFFF", CommandBlockId { 10 }, 100);
+
+        (void) grid.resize(PageSize { LineCount(4), ColumnCount(20) }, CellLocation {}, WrapPending::No);
+        CHECK(rowOwners(grid) == std::vector<std::string> { "HHHH 7@70", "WWWW 9@90", "FFFF 10@100" });
+
+        // Nor does it take that line's semantic marks: there is still one prompt, not two.
+        REQUIRE(grid.lineTextTrimmed(LineOffset(2)) == "WWWW");
+        CHECK_FALSE(grid.lineAt(LineOffset(2)).isFlagEnabled(LineFlag::Marked));
+    }
+
+    SECTION("the head row was evicted from the history")
+    {
+        auto grid = Grid(PageSize { LineCount(2), ColumnCount(10) }, true, LineCount(1));
+        grid.setLineText(LineOffset(0), std::string(10, 'H'));
+        writeOwnedRow(grid, LineOffset(1), "WWWW", CommandBlockId { 9 }, 90);
+        grid.lineAt(LineOffset(1)).setWrapped(true);
+        grid.scrollUp(LineCount(2)); // H is evicted, and W becomes the oldest history row
+        REQUIRE(grid.historyLineCount() == LineCount(1));
+        REQUIRE(grid.lineTextTrimmed(LineOffset(-1)) == "WWWW");
+        REQUIRE(grid.lineAt(LineOffset(-1)).wrapped());
+        writeOwnedRow(grid, LineOffset(0), "FFFF", CommandBlockId { 10 }, 100);
+
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(20) }, CellLocation {}, WrapPending::No);
+        CHECK(rowOwners(grid) == std::vector<std::string> { "WWWW 9@90", "FFFF 10@100" });
     }
 }
 
@@ -1541,20 +1966,23 @@ TEST_CASE("Grid.stableId.reverseScrollOnZeroHistoryKeepsIdentity", "[grid][stabl
         CHECK(grid.lineOffsetOf(grid.stableLineIdOf(LineOffset(offset))) == LineOffset(offset));
 }
 
-TEST_CASE("Grid.stableId.reverseScrollRebuildsOnlyWhenSinkingBelowTheFloor", "[grid][stable-id]")
+TEST_CASE("Grid.stableId.aReverseScrollWithHistoryNeverRebuildsIdentity", "[grid][stable-id]")
 {
+    // With history, a full-page reverse scroll moves the page's rows and leaves the stable base where it
+    // is, so however far it scrolls, it never sinks the base below the floor and never renames a row.
     auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(5));
     grid.scrollUp(LineCount(2)); // two history rows: base 2, floor 0
     auto const generationBefore = grid.generation();
+    auto const baseBefore = grid.stableLineIdOf(LineOffset(0));
+    auto const floorBefore = grid.stableRangeFloor();
 
-    // Reverse-scrolling down TO the floor keeps row identity...
-    grid.scrollDown(LineCount(2), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
-    CHECK(grid.generation() == generationBefore);
-
-    // ...but one more line sinks the base below it: identity is rebuilt wholesale.
-    grid.scrollDown(LineCount(1), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
-    CHECK(grid.generation() == generationBefore + 1);
-    CHECK(grid.stableRangeFloor() == grid.stableLineIdOf(LineOffset(0)));
+    for (auto const count: std::array { 2, 1, 3 })
+    {
+        grid.scrollDown(LineCount(count), GraphicsAttributes {}, fullPageMargin(grid.pageSize()));
+        CHECK(grid.generation() == generationBefore);
+        CHECK(grid.stableLineIdOf(LineOffset(0)) == baseBefore);
+        CHECK(grid.stableRangeFloor() == floorBefore);
+    }
 }
 
 TEST_CASE("Grid.stableId.unscrollPullsHistoryRowsBackUnderTheirIds", "[grid][stable-id]")
@@ -1572,6 +2000,111 @@ TEST_CASE("Grid.stableId.unscrollPullsHistoryRowsBackUnderTheirIds", "[grid][sta
     CHECK(*offset == LineOffset(0));
     CHECK(grid.lineText(*offset) == "AAAAA");
     CHECK(grid.stableRangeFloor() >= floorBefore); // the floor never regresses
+}
+
+namespace
+{
+/// Which scroll a RowMove case makes.
+enum class ScrollKind : uint8_t
+{
+    Up = 0,   ///< scrollUp(n, ..., margin)
+    Down,     ///< scrollDown(n, ..., margin)
+    Unscroll, ///< unscroll(n, ...), whose margin is the whole page
+};
+
+/// One scroll, on the 6-row page Grid.stableId.rowMoveSaysWhereEachIdsContentWent sets up, rows @ref top to
+/// @ref bottom.
+struct RowMoveCase
+{
+    std::string_view name;
+    ScrollKind kind {};
+    int count = 0;
+    int top = 0;
+    int bottom = 0;
+};
+
+constexpr auto RowMoveCases = std::array {
+    RowMoveCase { .name = "the whole page up", .kind = ScrollKind::Up, .count = 1, .top = 0, .bottom = 5 },
+    RowMoveCase {
+        .name = "a region at the top, up", .kind = ScrollKind::Up, .count = 2, .top = 0, .bottom = 3 },
+    RowMoveCase {
+        .name = "a region below the top, up", .kind = ScrollKind::Up, .count = 1, .top = 1, .bottom = 4 },
+    RowMoveCase { .name = "all of a region, up", .kind = ScrollKind::Up, .count = 4, .top = 1, .bottom = 4 },
+    RowMoveCase { .name = "a region, down", .kind = ScrollKind::Down, .count = 1, .top = 1, .bottom = 4 },
+    RowMoveCase {
+        .name = "the whole page down", .kind = ScrollKind::Down, .count = 2, .top = 0, .bottom = 5 },
+    RowMoveCase { .name = "unscroll", .kind = ScrollKind::Unscroll, .count = 1, .top = 0, .bottom = 5 },
+};
+} // namespace
+
+TEST_CASE("Grid.stableId.rowMoveSaysWhereEachIdsContentWent", "[grid][stable-id]")
+{
+    // A scroll inside margins moves rows' contents while each stable id keeps naming its place, and a reverse
+    // scroll drops rows. rowMoveOfScrollUp() and rowMoveOfScrollDown() say so ahead of the scroll, for those
+    // who hold ids; checked here against what the scroll then does to every row the grid holds.
+    for (auto const& testCase: RowMoveCases)
+    {
+        INFO(testCase.name);
+        auto grid = setupGrid(PageSize { LineCount(6), ColumnCount(10) },
+                              false,
+                              LineCount(10),
+                              { "h0", "h1", "p0", "p1", "p2", "p3", "p4", "p5" });
+        auto const margin =
+            Margin { .vertical = Margin::Vertical { .from = LineOffset(testCase.top),
+                                                    .to = LineOffset(testCase.bottom) },
+                     .horizontal = Margin::Horizontal { .from = ColumnOffset(0), .to = ColumnOffset(9) } };
+        auto const n = LineCount(testCase.count);
+
+        auto before = std::vector<std::pair<int64_t, std::string>> {};
+        for (auto const row: std::views::iota(unbox<int>(grid.addressableTop()), 6))
+            before.emplace_back(grid.stableLineIdOf(LineOffset(row)), grid.lineTextTrimmed(LineOffset(row)));
+
+        auto move = std::optional<RowMove> {};
+        switch (testCase.kind)
+        {
+            case ScrollKind::Up:
+                move = grid.rowMoveOfScrollUp(n, margin);
+                grid.scrollUp(n, GraphicsAttributes {}, margin);
+                break;
+            case ScrollKind::Down:
+                move = grid.rowMoveOfScrollDown(n, margin);
+                grid.scrollDown(n, GraphicsAttributes {}, margin);
+                break;
+            case ScrollKind::Unscroll:
+                move = grid.rowMoveOfUnscroll(n);
+                grid.unscroll(n, GraphicsAttributes {});
+                break;
+        }
+
+        // Every row's text is distinct: content the move says survived is found under the id it says, and
+        // content it says went is no longer under its old id.
+        for (auto const& [id, text]: before)
+        {
+            auto const destination = move ? move->destinationOf(id) : std::optional { id };
+            INFO(std::format("{} named \"{}\", the move sends it to {}", id, text, destination.value_or(-1)));
+            if (!destination)
+            {
+                auto const offset = grid.lineOffsetOf(id);
+                CHECK((!offset || grid.lineTextTrimmed(*offset) != text));
+                continue;
+            }
+            auto const offset = grid.lineOffsetOf(*destination);
+            REQUIRE(offset.has_value());
+            CHECK(grid.lineTextTrimmed(*offset) == text);
+        }
+    }
+}
+
+TEST_CASE("Grid.stableId.aScrollBetweenLeftAndRightMarginsMovesNoRow", "[grid][stable-id]")
+{
+    // Cells move between rows there, but no row's content leaves its id: each row keeps its marks and block.
+    auto const grid = Grid(PageSize { LineCount(6), ColumnCount(10) }, false, LineCount(10));
+    auto const margin =
+        Margin { .vertical = Margin::Vertical { .from = LineOffset(1), .to = LineOffset(4) },
+                 .horizontal = Margin::Horizontal { .from = ColumnOffset(1), .to = ColumnOffset(9) } };
+
+    CHECK_FALSE(grid.rowMoveOfScrollUp(LineCount(1), margin).has_value());
+    CHECK_FALSE(grid.rowMoveOfScrollDown(LineCount(1), margin).has_value());
 }
 
 TEST_CASE("Grid.stableId.clearHistoryEvictsAllHistoryIds", "[grid][stable-id]")
@@ -1606,7 +2139,7 @@ TEST_CASE("Grid.generation.bumpsOnlyOnWholesaleRebuilds", "[grid][stable-id]")
     grid.clearHistory();
     CHECK(grid.generation() == g0); // the floor jump suffices
 
-    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(6) }, CellLocation {}, false);
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(6) }, CellLocation {}, WrapPending::No);
     CHECK(grid.generation() == g0 + 1); // reflow rebuilds the whole ring
 
     grid.setHistoryLimits(HistoryLimits::plain(LineCount(9)));
@@ -1698,7 +2231,7 @@ TEST_CASE("Grid.delta.resizeForcesOneResyncThenDeltas", "[grid][delta]")
     auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(5));
     auto cursor = drainedCursor(grid);
 
-    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, false);
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, WrapPending::No);
 
     auto reported = 0;
     CHECK(grid.forEachLineChangedSince(cursor, [&](LineOffset, Line const&) { ++reported; })
@@ -1836,7 +2369,7 @@ TEST_CASE("Grid.delta.aGenerationBumpForgetsTheHistoryWatermark", "[grid][delta]
     auto cursor = drainedCursor(grid);
     grid.changingLineAt(LineOffset(-1)).setFlag(LineFlag::CommandEnd, true);
 
-    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, false);
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, WrapPending::No);
     CHECK(grid.forEachLineChangedSince(cursor, [](LineOffset, Line const&) {})
           == GridDeltaResult::ResyncRequired);
     // The re-anchored cursor resumes plain, un-widened delta service.
@@ -1863,7 +2396,7 @@ TEST_CASE("Grid.delta.reflowShrinkKeepsItsNewHistoryAddressable", "[grid][delta]
 
     // Narrow to three columns: each six-column row reflows into two, so two rows are pushed into
     // history and the page keeps the last two.
-    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, WrapPending::No);
     REQUIRE(grid.historyLineCount() == LineCount(2));
 
     // The floor must have followed the base down, or the rows below it are unaddressable.
@@ -1900,7 +2433,7 @@ TEST_CASE("Grid.delta.reflowShrinkOverExistingHistoryStaysAddressable", "[grid][
     }
     REQUIRE(grid.historyLineCount() > LineCount(0));
 
-    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, WrapPending::No);
 
     CHECK(grid.stableRangeFloor()
           == grid.stableLineIdOf(LineOffset(0)) - unbox<int64_t>(grid.historyLineCount()));
@@ -1944,7 +2477,7 @@ TEST_CASE("Grid.delta.growColumnsKeepsItsHistoryAddressable", "[grid][delta]")
     grid.lineAt(LineOffset(1)).setWrappable(true);
     grid.scrollUp(LineCount(1));
 
-    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(6) }, CellLocation {}, false);
+    std::ignore = grid.resize(PageSize { LineCount(2), ColumnCount(6) }, CellLocation {}, WrapPending::No);
 
     CHECK(grid.stableRangeFloor()
           == grid.stableLineIdOf(LineOffset(0)) - unbox<int64_t>(grid.historyLineCount()));
@@ -2116,9 +2649,8 @@ void reverseScrollFullPage(Grid& grid, LineCount lines)
 /// The scrollback, oldest first, as one string per line.
 [[nodiscard]] std::vector<std::string> historyText(Grid const& grid)
 {
-    // Through renderRange rather than a loop from -historyLineCount(): it starts at addressableTop(),
-    // which is what keeps a wrapped garbage slot out of the answer -- the same hazard clampHistory
-    // documents at length.
+    // Through renderRange rather than a loop from -historyLineCount(): it starts at addressableTop(), the
+    // top every walk over the rows this grid has starts from, so the answer is the rows a mirror holds.
     return grid.renderRange(
         grid.addressableTop(), LineOffset(-1), CaptureRendition::PlainText, CaptureTrailingSpaces::Keep);
 }
@@ -2191,6 +2723,27 @@ TEST_CASE("Grid.historyEviction.withoutSemanticMarksBehavesExactlyAsBefore", "[g
     CHECK(historyText(withHeadroom) == historyText(plain));
 }
 
+TEST_CASE("Grid.historyEviction.aUserMarkIsNotABlockStart", "[grid][history-eviction][semanticblocks]")
+{
+    // Vi's `mm` used to stamp LineFlag::Marked, so a bookmark dropped mid-output became a place where
+    // block-atomic eviction would cut. With nothing but user marks in the scrollback, eviction must behave
+    // exactly as with no marks at all.
+    auto withUserMarks = makeGrid(LineCount(1), LineCount(4), LineCount(8));
+    auto plain = Grid(PageSize { LineCount(1), ColumnCount(5) }, false, LineCount(8));
+
+    for (auto const i: std::views::iota(0, 30))
+    {
+        appendLine(withUserMarks, 'L', i);
+        withUserMarks.lineAt(LineOffset(0)).setFlag(LineFlag::UserMark, i % 3 == 0);
+        appendLine(plain, 'L', i);
+
+        // After every line, not once at the end: a trim that snapped to a bookmark refills to capacity
+        // within a few lines, so a single final comparison can land where the two happen to agree.
+        CHECK(withUserMarks.historyLineCount() == plain.historyLineCount());
+        CHECK(historyText(withUserMarks) == historyText(plain));
+    }
+}
+
 TEST_CASE("Grid.historyEviction.aBlockLargerThanTheHeadroomFallsBackToLineWiseEviction",
           "[grid][history-eviction]")
 {
@@ -2227,12 +2780,12 @@ TEST_CASE("Grid.historyEviction.raisesTheFloorAndKeepsRowIdentity", "[grid][hist
     CHECK(grid.stableRangeFloor() > evictedId);
 }
 
-TEST_CASE("Grid.historyEviction.aWrappedGarbageSlotIsNeverMistakenForABlockStart", "[grid][history-eviction]")
+TEST_CASE("Grid.historyEviction.aReverseScrollAtCapacityLeavesNoFalseBlockStart", "[grid][history-eviction]")
 {
     auto grid = makeGrid(LineCount(2), LineCount(2), LineCount(4));
 
-    // Fill to capacity with marked rows, then reverse-scroll so destroyed page rows wrap into the
-    // oldest history slots, still carrying their Marked flag but no longer addressable.
+    // Fill to capacity with marked rows, then reverse-scroll: the marked rows pushed off the page's
+    // bottom must not turn up in the history, where the trim would read them as block starts.
     for (auto const i: std::views::iota(0, 8))
         appendLine(grid, 'L', i, BlockStart::Yes);
     reverseScrollFullPage(grid, LineCount(2));
@@ -2252,8 +2805,8 @@ TEST_CASE("Grid.historyEviction.theGuaranteeSurvivesAReverseScroll", "[grid][his
     for (auto const i: std::views::iota(0, 12))
         appendLine(grid, 'L', i, BlockStart::Yes);
 
-    // A full-page reverse scroll (RI past the top / CSI T) walks the stable base BACKWARDS, which is
-    // what a cached scan bound anchored on it would not survive.
+    // A full-page reverse scroll (RI past the top / CSI T) moves the page's rows under a stable base
+    // that stays put; the scan bound cached on that base must come through it with the guarantee kept.
     reverseScrollFullPage(grid, LineCount(2));
 
     for (auto const i: std::views::iota(0, 12))
@@ -2304,3 +2857,411 @@ TEST_CASE("Grid.scrollUp.atCapacityKeepsTheEvictedLinesStorage", "[grid]")
         CHECK(keptStorage == 1); // the evicted line; the appended one never had storage
     }
 }
+
+// {{{ evicted row count (the gutter's absolute line numbers)
+namespace
+{
+/// How many rows the grid can still address: the history above the floor plus the page.
+[[nodiscard]] uint64_t addressableRowCount(Grid const& grid)
+{
+    return static_cast<uint64_t>(unbox<int64_t>(boxed_cast<LineOffset>(grid.pageSize().lines))
+                                 - unbox<int64_t>(grid.addressableTop()));
+}
+} // namespace
+
+TEST_CASE("Grid.evictedRowCount.lineWiseEvictionAtCapacity", "[grid][evicted]")
+{
+    // Ring capacity: 2 page + 1 history = 3 slots.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(1));
+    CHECK(grid.evictedRowCount() == 0);
+
+    grid.scrollUp(LineCount(1)); // fills the one history slot
+    CHECK(grid.evictedRowCount() == 0);
+
+    grid.scrollUp(LineCount(1)); // at capacity: the oldest row goes
+    CHECK(grid.evictedRowCount() == 1);
+
+    grid.scrollUp(LineCount(3)); // three at once, all past capacity
+    CHECK(grid.evictedRowCount() == 4);
+}
+
+TEST_CASE("Grid.evictedRowCount.aScrollThatFillsAndOverflowsCountsOnlyTheOverflow", "[grid][evicted]")
+{
+    // One free history slot and a three-line scroll: one row is kept, two are dropped.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(1));
+    grid.scrollUp(LineCount(3));
+    CHECK(grid.historyLineCount() == LineCount(1));
+    CHECK(grid.evictedRowCount() == 2);
+}
+
+TEST_CASE("Grid.evictedRowCount.anInfiniteScrollbackNeverEvicts", "[grid][evicted]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, Infinite {});
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 100))
+        grid.scrollUp(LineCount(1));
+    CHECK(grid.evictedRowCount() == 0);
+}
+
+TEST_CASE("Grid.evictedRowCount.aBlockAtomicTrimCountsEveryRowItDrops", "[grid][evicted]")
+{
+    // Headroom, and a prompt every third line: the trim snaps to a block start and drops whole blocks.
+    auto grid = makeGrid(LineCount(1), LineCount(2), LineCount(6));
+    auto appended = uint64_t { 0 };
+    for (auto const i: std::views::iota(0, 30))
+    {
+        appendLine(grid, 'L', i, i % 3 == 0 ? BlockStart::Yes : BlockStart::No);
+        ++appended;
+        // Every row the grid ever held -- the page row it started with and each appended line -- is
+        // either still addressable or counted as evicted. Absolute line numbers rest on this identity.
+        CHECK(addressableRowCount(grid) + grid.evictedRowCount() == 1 + appended);
+    }
+    CHECK(grid.evictedRowCount() > 0);
+}
+
+TEST_CASE("Grid.evictedRowCount.clearingTheScrollbackCountsIt", "[grid][evicted]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(5));
+    grid.scrollUp(LineCount(3));
+    REQUIRE(grid.historyLineCount() == LineCount(3));
+
+    grid.clearHistory(); // ED 3
+    CHECK(grid.evictedRowCount() == 3);
+}
+
+TEST_CASE("Grid.evictedRowCount.shrinkingTheHistoryLimitCountsWhatFellOut", "[grid][evicted]")
+{
+    auto grid = Grid(PageSize { LineCount(1), ColumnCount(5) }, false, LineCount(3));
+    grid.scrollUp(LineCount(3));
+    REQUIRE(grid.historyLineCount() == LineCount(3));
+
+    grid.setHistoryLimits(HistoryLimits::plain(LineCount(1)));
+    CHECK(grid.historyLineCount() == LineCount(1));
+    CHECK(grid.evictedRowCount() == 2);
+}
+
+TEST_CASE("Grid.evictedRowCount.aHeightChangeKeepsEveryRowAccountedFor", "[grid][evicted]")
+{
+    auto grid = Grid(PageSize { LineCount(4), ColumnCount(5) }, false, LineCount(2));
+    grid.scrollUp(LineCount(2));
+    auto const rowsEver = uint64_t { 6 }; // the four page rows it started with, and two scrolled in
+    REQUIRE(addressableRowCount(grid) + grid.evictedRowCount() == rowsEver);
+
+    // Shrinking with the cursor on the bottom row pushes the top of the page into the scrollback.
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) },
+                       CellLocation { .line = LineOffset(3), .column = ColumnOffset(0) },
+                       WrapPending::No);
+    CHECK(addressableRowCount(grid) + grid.evictedRowCount() == rowsEver);
+
+    // Growing with the cursor at the top appends two blank rows below it.
+    (void) grid.resize(PageSize { LineCount(4), ColumnCount(5) },
+                       CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+                       WrapPending::No);
+    CHECK(addressableRowCount(grid) + grid.evictedRowCount() == rowsEver + 2);
+}
+
+namespace
+{
+/// Resizes @p grid to @p lines rows with the cursor on its bottom row, which is how a status line
+/// appearing or going away resizes the primary screen: a shrink pushes the page's top into the history,
+/// and a grow pulls the history back onto it.
+void resizeLinesWithCursorAtBottom(Grid& grid, LineCount lines)
+{
+    auto const bottom = boxed_cast<LineOffset>(grid.pageSize().lines) - 1;
+    (void) grid.resize(PageSize { lines, grid.pageSize().columns },
+                       CellLocation { .line = bottom, .column = ColumnOffset(0) },
+                       WrapPending::No);
+}
+} // namespace
+
+TEST_CASE("Grid.evictedRowCount.aShrinkBelowCapacityKeepsEveryHistoryRowAddressable", "[grid][evicted]")
+{
+    auto grid = makeGrid(LineCount(4), LineCount(10), LineCount(10));
+    for (auto const i: std::views::iota(0, 4))
+        grid.setLineText(LineOffset(i), std::format("P{}", i));
+    for (auto const i: std::views::iota(0, 2))
+        appendLine(grid, 'L', i);
+    REQUIRE(grid.historyLineCount() == LineCount(2));
+
+    resizeLinesWithCursorAtBottom(grid, LineCount(3));
+
+    // The page's top row went into the history, which had room for it: nothing left the grid.
+    CHECK(grid.historyLineCount() == LineCount(3));
+    CHECK(grid.addressableTop() == -boxed_cast<LineOffset>(grid.historyLineCount()));
+    CHECK(grid.evictedRowCount() == 0);
+    CHECK(historyText(grid) == std::vector<std::string> { "P0   ", "P1   ", "P2   " });
+}
+
+TEST_CASE("Grid.evictedRowCount.aShrinkAndGrowAtCapacityLosesNoRow", "[grid][evicted]")
+{
+    // A status line toggled on and off with the scrollback full: the ring holds the rows the shorter page
+    // pushes up, so the round trip loses none of them and counts none.
+    auto grid = makeGrid(LineCount(4), LineCount(2), LineCount(2));
+    for (auto const i: std::views::iota(0, 8))
+        appendLine(grid, 'L', i);
+    REQUIRE(grid.historyLineCount() == LineCount(2));
+    auto const evictedBefore = grid.evictedRowCount();
+    auto const historyBefore = historyText(grid);
+
+    resizeLinesWithCursorAtBottom(grid, LineCount(2));
+    CHECK(grid.addressableTop() == -boxed_cast<LineOffset>(grid.historyLineCount()));
+    CHECK(grid.evictedRowCount() == evictedBefore);
+
+    resizeLinesWithCursorAtBottom(grid, LineCount(4));
+    CHECK(grid.addressableTop() == -boxed_cast<LineOffset>(grid.historyLineCount()));
+    CHECK(grid.evictedRowCount() == evictedBefore);
+    CHECK(historyText(grid) == historyBefore);
+    CHECK(grid.lineTextTrimmed(LineOffset(0)) == "L4");
+}
+
+TEST_CASE("Grid.evictedRowCount.aShrinkAndGrowWithLessHistoryThanTheShrinkKeepsRowIdentity",
+          "[grid][evicted][stable-id]")
+{
+    // A fresh session whose output has just filled the page: the shrink pushes more rows up than the
+    // history held, and the grow brings them back under the ids they had.
+    auto grid = makeGrid(LineCount(4), LineCount(10), LineCount(10));
+    for (auto const i: std::views::iota(0, 4))
+        grid.setLineText(LineOffset(i), std::format("P{}", i));
+    auto const generationBefore = grid.stableIdGeneration();
+    auto const topRowId = grid.stableLineIdOf(LineOffset(0));
+
+    resizeLinesWithCursorAtBottom(grid, LineCount(2));
+    CHECK(grid.addressableTop() == -boxed_cast<LineOffset>(grid.historyLineCount()));
+
+    resizeLinesWithCursorAtBottom(grid, LineCount(4));
+    CHECK(grid.stableIdGeneration() == generationBefore);
+    CHECK(grid.evictedRowCount() == 0);
+    CHECK(grid.lineOffsetOf(topRowId) == LineOffset(0));
+    CHECK(grid.lineTextTrimmed(LineOffset(0)) == "P0");
+}
+
+TEST_CASE("Grid.evictedRowCount.aReflowEvictsNothing", "[grid][evicted]")
+{
+    // Ring capacity: 2 page + 2 history. Four full-width lines, so the two blank rows the page started
+    // with are what filling it evicts.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(4) }, true, LineCount(2));
+    for (auto const text: { "AAAA"sv, "BBBB"sv, "CCCC"sv, "DDDD"sv })
+        appendLine(grid, text);
+    REQUIRE(grid.evictedRowCount() == 2);
+
+    // Narrowing re-chops every line in two -- eight rows, more than the ring holds. A reflow renames
+    // rows and drops none (the overflow stays until scrolling pushes it out), so nothing is counted.
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) },
+                       CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) },
+                       WrapPending::No);
+    CHECK(grid.evictedRowCount() == 2);
+
+    // ...and the next scroll counts exactly the row it pushes out.
+    grid.scrollUp(LineCount(1));
+    CHECK(grid.evictedRowCount() == 3);
+
+    // Widening rejoins them, which renames rows again and drops none.
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) },
+                       CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) },
+                       WrapPending::No);
+    CHECK(grid.evictedRowCount() == 3);
+}
+
+TEST_CASE("Grid.evictedRowCount.aReverseScrollEvictsNothing", "[grid][evicted]")
+{
+    // At capacity, a full-page reverse scroll leaves every history row where it is, so it counts nothing,
+    // and the next line scrolled into the full ring evicts the oldest of them, as it would have anyway.
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(2));
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+        grid.scrollUp(LineCount(1));
+    REQUIRE(grid.evictedRowCount() == 2);
+
+    reverseScrollFullPage(grid, LineCount(1));
+    CHECK(grid.evictedRowCount() == 2);
+
+    grid.scrollUp(LineCount(1));
+    CHECK(grid.evictedRowCount() == 3);
+}
+
+TEST_CASE("Grid.evictedRowCount.aResetStartsOver", "[grid][evicted]")
+{
+    auto grid = Grid(PageSize { LineCount(2), ColumnCount(5) }, false, LineCount(1));
+    grid.scrollUp(LineCount(5));
+    REQUIRE(grid.evictedRowCount() > 0);
+
+    grid.reset(); // RIS
+    CHECK(grid.evictedRowCount() == 0);
+}
+// }}}
+
+// {{{ full-page reverse scroll
+namespace
+{
+/// The text of every row from @p from to the page's bottom row, each without its trailing blanks.
+///
+/// Deliberately not clamped to addressableTop(): a row the ring wraps into the history must show up here.
+/// @param grid The grid to read.
+/// @param from The topmost row to read; negative reaches into the history.
+/// @return One string per row, top first.
+[[nodiscard]] std::vector<std::string> rowsFrom(Grid const& grid, LineOffset from)
+{
+    return std::ranges::to<std::vector>(
+        std::views::iota(unbox<int>(from), unbox<int>(grid.pageSize().lines))
+        | std::views::transform([&](int row) { return grid.lineTextTrimmed(LineOffset(row)); }));
+}
+
+/// The history, oldest row first, read from -historyLineCount() rather than from addressableTop().
+/// @param grid The grid to read.
+/// @return One string per history row.
+[[nodiscard]] std::vector<std::string> wholeHistoryText(Grid const& grid)
+{
+    auto rows = rowsFrom(grid, -boxed_cast<LineOffset>(grid.historyLineCount()));
+    rows.resize(unbox<size_t>(grid.historyLineCount()));
+    return rows;
+}
+
+/// How full a ring of five history rows is before a full-page reverse scroll.
+struct HistoryFill
+{
+    std::string_view name; ///< The case, for the test's report.
+    int appended = 0;      ///< Lines appended below the page's three numbered rows.
+};
+
+constexpr auto HistoryFills = std::array {
+    HistoryFill { .name = "the ring has room", .appended = 3 },
+    HistoryFill { .name = "the ring is full", .appended = 9 },
+};
+} // namespace
+
+TEST_CASE("Grid.scrollDown.aFullPageReverseScrollLeavesTheHistoryAlone", "[grid][stable-id]")
+{
+    // SD, and RI at the top row, move the page's rows down and drop those pushed off its bottom. The rows
+    // above the page are not the scrolling region's: none of them is blanked, moved or renamed, whether the
+    // ring has room or every slot is in use.
+    for (auto const& fill: HistoryFills)
+    {
+        for (auto const count: std::array { 1, 2, 3 })
+        {
+            INFO(std::format("{}, {} line(s)", fill.name, count));
+            auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, false, LineCount(5));
+            for (auto const row: std::views::iota(0, 3))
+                grid.setLineText(LineOffset(row), std::format("I{}", row));
+            for (auto const i: std::views::iota(0, fill.appended))
+                appendLine(grid, 'L', i);
+            REQUIRE(grid.historyLineCount() == LineCount(std::min(fill.appended, 5)));
+
+            auto const historyBefore = wholeHistoryText(grid);
+            auto const pageBefore = rowsFrom(grid, LineOffset(0));
+            auto const historyLinesBefore = grid.historyLineCount();
+            auto const evictedBefore = grid.evictedRowCount();
+            auto const topBefore = grid.addressableTop();
+            auto const baseBefore = grid.stableLineIdOf(LineOffset(0));
+            auto const floorBefore = grid.stableRangeFloor();
+            auto const move = grid.rowMoveOfScrollDown(LineCount(count), fullPageMargin(grid.pageSize()));
+
+            reverseScrollFullPage(grid, LineCount(count));
+
+            // The history: every row where it was, under the id it had.
+            CHECK(wholeHistoryText(grid) == historyBefore);
+            CHECK(grid.historyLineCount() == historyLinesBefore);
+            CHECK(grid.evictedRowCount() == evictedBefore);
+            CHECK(grid.addressableTop() == topBefore);
+            CHECK(grid.stableLineIdOf(LineOffset(0)) == baseBefore);
+            CHECK(grid.stableRangeFloor() == floorBefore);
+            REQUIRE(move.has_value());
+            for (auto const row: std::views::iota(-unbox<int>(historyLinesBefore), 0))
+                CHECK(move->destinationOf(baseBefore + row) == baseBefore + row);
+
+            // The page: shifted down, its top rows blank.
+            auto pageExpected = std::vector<std::string>(static_cast<size_t>(count));
+            std::ranges::copy(pageBefore | std::views::take(3 - count), std::back_inserter(pageExpected));
+            CHECK(rowsFrom(grid, LineOffset(0)) == pageExpected);
+
+            // The rows pushed off the page's bottom are gone: nowhere in the history, nowhere on the page.
+            auto const everyRow = rowsFrom(grid, -boxed_cast<LineOffset>(grid.historyLineCount()));
+            for (auto const& pushedOff: pageBefore | std::views::drop(3 - count))
+                CHECK_FALSE(std::ranges::contains(everyRow, pushedOff));
+        }
+    }
+}
+// }}}
+
+// {{{ dropRowsAbove (ClearToPrompt)
+namespace
+{
+/// Page of 3 rows, room for 5 in the history: A and B scrolled into it, C, D, E on the page.
+[[nodiscard]] Grid fiveRowsOnAThreeRowPage()
+{
+    return setupGrid(PageSize { LineCount(3), ColumnCount(5) },
+                     false,
+                     LineCount(5),
+                     { "AAAAA", "BBBBB", "CCCCC", "DDDDD", "EEEEE" });
+}
+} // namespace
+
+TEST_CASE("Grid.dropRowsAbove.aPageHeadMovesToTheTopAndTheHistoryGoes", "[grid][semanticblocks]")
+{
+    auto grid = fiveRowsOnAThreeRowPage();
+    REQUIRE(grid.historyLineCount() == LineCount(2));
+    auto const evictedBefore = grid.evictedRowCount();
+    auto const idOfD = grid.stableLineIdOf(LineOffset(1));
+
+    CHECK(grid.dropRowsAbove(LineOffset(1)) == LineCount(1));
+
+    CHECK(grid.historyLineCount() == LineCount(0));
+    CHECK(grid.lineText(LineOffset(0)) == "DDDDD");
+    CHECK(grid.lineText(LineOffset(1)) == "EEEEE");
+    CHECK(grid.lineTextTrimmed(LineOffset(2)).empty());
+    CHECK(grid.evictedRowCount() == evictedBefore + 3); // A, B and C
+    CHECK(grid.lineOffsetOf(idOfD) == LineOffset(0));   // the kept rows keep their identity
+    CHECK(grid.stableRangeFloor() == idOfD);
+}
+
+TEST_CASE("Grid.dropRowsAbove.aHistoryAtCapacityCountsEveryRowOnce", "[grid][semanticblocks]")
+{
+    // The history is full, so the scroll that lifts the head to the top evicts its oldest row on the way.
+    auto grid = setupGrid(PageSize { LineCount(3), ColumnCount(5) },
+                          false,
+                          LineCount(2),
+                          { "AAAAA", "BBBBB", "CCCCC", "DDDDD", "EEEEE" });
+    REQUIRE(grid.historyLineCount() == LineCount(2));
+    auto const evictedBefore = grid.evictedRowCount();
+
+    CHECK(grid.dropRowsAbove(LineOffset(2)) == LineCount(2));
+
+    CHECK(grid.historyLineCount() == LineCount(0));
+    CHECK(grid.lineText(LineOffset(0)) == "EEEEE");
+    CHECK(grid.evictedRowCount() == evictedBefore + 4); // A, B, C and D
+}
+
+TEST_CASE("Grid.dropRowsAbove.aHistoryHeadDropsOnlyTheOlderRows", "[grid][semanticblocks]")
+{
+    auto grid = fiveRowsOnAThreeRowPage();
+    auto const evictedBefore = grid.evictedRowCount();
+
+    CHECK(grid.dropRowsAbove(LineOffset(-1)) == LineCount(0));
+
+    CHECK(grid.historyLineCount() == LineCount(1));
+    CHECK(grid.addressableTop() == LineOffset(-1));
+    CHECK(grid.lineText(LineOffset(-1)) == "BBBBB");
+    CHECK(grid.lineText(LineOffset(0)) == "CCCCC");
+    CHECK(grid.evictedRowCount() == evictedBefore + 1); // A
+}
+
+TEST_CASE("Grid.dropRowsAbove.theTopmostRowDropsNothing", "[grid][semanticblocks]")
+{
+    auto grid = fiveRowsOnAThreeRowPage();
+    auto const evictedBefore = grid.evictedRowCount();
+
+    CHECK(grid.dropRowsAbove(grid.addressableTop()) == LineCount(0));
+
+    CHECK(grid.historyLineCount() == LineCount(2));
+    CHECK(grid.evictedRowCount() == evictedBefore);
+}
+
+TEST_CASE("Grid.dropRowsAbove.thePageTopDropsTheHistoryOnly", "[grid][semanticblocks]")
+{
+    auto grid = fiveRowsOnAThreeRowPage();
+    auto const evictedBefore = grid.evictedRowCount();
+
+    CHECK(grid.dropRowsAbove(LineOffset(0)) == LineCount(0));
+
+    CHECK(grid.historyLineCount() == LineCount(0));
+    CHECK(grid.lineText(LineOffset(0)) == "CCCCC");
+    CHECK(grid.evictedRowCount() == evictedBefore + 2);
+}
+// }}}

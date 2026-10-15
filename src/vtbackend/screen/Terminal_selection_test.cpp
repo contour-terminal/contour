@@ -232,10 +232,149 @@ TEST_CASE("Terminal.word_selection_across_a_soft_wrap_still_updates_the_search_p
     CHECK(mock.terminal.search().origin == SearchOrigin::DoubleClick);
 }
 
+namespace
+{
+/// Double-clicks the cell at @p at, a second after any click before it, and returns the text selected.
+std::string doubleClickAt(MockTerm<vtpty::MockPty>& mock, CellLocation at)
+{
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, at, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, at, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    return mock.terminal.extractSelectionText();
+}
+} // namespace
+
+TEST_CASE("Terminal.word_selection_steps_over_wide_characters_and_wrap_padding", "[terminal]")
+{
+    // A word holds a wide character as one character: neither its second half nor the padding a narrowing
+    // leaves where it moved on to the next row ends the word, as foot's word walk steps over its spacers
+    // (selection.c:404).
+    auto mock = MockTerm { ColumnCount(10), LineCount(3) };
+    mock.terminal.setWordDelimiters(" ");
+    mock.writeToScreen("ABCD\xE4\xB8\xAD"
+                       "E F"); // U+4E2D, two columns
+
+    using namespace vtbackend;
+    auto const doubleClick = [&](CellLocation at) {
+        return doubleClickAt(mock, at);
+    };
+
+    SECTION("on one row")
+    {
+        CHECK(doubleClick(0_lineOffset + 0_columnOffset)
+              == "ABCD\xE4\xB8\xAD"
+                 "E");
+        CHECK(doubleClick(0_lineOffset + 6_columnOffset)
+              == "ABCD\xE4\xB8\xAD"
+                 "E");
+    }
+
+    SECTION("across the padding a narrowing leaves")
+    {
+        // "ABCD" and padding, then "中E F" on the row that continues it.
+        mock.terminal.resizeScreen(PageSize { LineCount(3), ColumnCount(5) });
+        REQUIRE(mock.terminal.primaryScreen()
+                    .grid()
+                    .lineAt(LineOffset(0))
+                    .storage()
+                    .sgr[4]
+                    .flags.contains(CellFlag::WrapPadding));
+
+        CHECK(doubleClick(0_lineOffset + 0_columnOffset)
+              == "ABCD\xE4\xB8\xAD"
+                 "E");
+        CHECK(doubleClick(1_lineOffset + 2_columnOffset)
+              == "ABCD\xE4\xB8\xAD"
+                 "E");
+
+        // The word under the cursor, which vi's * and # search for, is the same word: one line, as
+        // it was printed.
+        CHECK(std::get<0>(mock.terminal.extractWordUnderCursor(0_lineOffset + 1_columnOffset)) == U"ABCD中E");
+    }
+}
+
+TEST_CASE("Terminal.word_selection_follows_a_word_only_across_soft_wraps", "[terminal]")
+{
+    // A word runs on into the next row exactly where that row continues this one, and a row after a hard
+    // line break begins words of its own, as foot's word walk stops at a hard linebreak (selection.c:397).
+    using namespace vtbackend;
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(10) };
+    mock.terminal.setWordDelimiters(" ");
+
+    SECTION("a word that ends just past a wrap, on a row that continues one")
+    {
+        // "ab cd", "efghi", "j k": the second and third rows each continue the one above.
+        mock.writeToScreen("ab cdefghij k");
+        REQUIRE(mock.terminal.isLineWrapped(LineOffset(2)));
+        CHECK(doubleClickAt(mock, 0_lineOffset + 3_columnOffset) == "cdefghij");
+        CHECK(doubleClickAt(mock, 2_lineOffset + 0_columnOffset) == "cdefghij");
+        // The word under the cursor, which vi's * and # search for, walks the same way.
+        CHECK(std::get<0>(mock.terminal.extractWordUnderCursor(0_lineOffset + 3_columnOffset))
+              == U"cdefghij");
+    }
+
+    SECTION("not across a hard line break after a wrapped row")
+    {
+        // "ab cd", "efghi" continuing it, then "XY" after a line break.
+        mock.writeToScreen("ab cdefghi\r\nXY");
+        REQUIRE_FALSE(mock.terminal.isLineWrapped(LineOffset(2)));
+        CHECK(doubleClickAt(mock, 0_lineOffset + 3_columnOffset) == "cdefghi");
+        CHECK(doubleClickAt(mock, 2_lineOffset + 0_columnOffset) == "XY");
+        CHECK(std::get<0>(mock.terminal.extractWordUnderCursor(2_lineOffset + 0_columnOffset)) == U"XY");
+    }
+
+    SECTION("not back across a hard line break")
+    {
+        mock.writeToScreen("XYZWV\r\nabc");
+        CHECK(doubleClickAt(mock, 1_lineOffset + 1_columnOffset) == "abc");
+    }
+
+    SECTION("back into the history")
+    {
+        // "ab cd" scrolls into the history; "efghi", "jkl" and "mn" continue it on the page.
+        mock.writeToScreen("ab cdefghijklmnopqrs");
+        REQUIRE(mock.terminal.primaryScreen().historyLineCount() == LineCount(1));
+        REQUIRE(mock.terminal.isLineWrapped(LineOffset(0)));
+        CHECK(doubleClickAt(mock, 0_lineOffset + 0_columnOffset) == "cdefghijklmnopqrs");
+    }
+}
+
+TEST_CASE("Terminal.both_word_walks_end_a_word_on_the_same_cell", "[terminal]")
+{
+    // The double-click selection and the word under the cursor (vi's * and #) walk a word the same way:
+    // a word ending on a wide character ends on its second half, so the whole character is in it.
+    using namespace vtbackend;
+    auto mock = MockTerm { ColumnCount(8), LineCount(2) };
+    mock.terminal.setWordDelimiters(" ");
+    mock.writeToScreen("ab\xE4\xB8\xAD x"); // U+4E2D on columns 2 and 3
+
+    auto const [word, range] = mock.terminal.extractWordUnderCursor(0_lineOffset + 0_columnOffset);
+    CHECK(word == U"ab中");
+    CHECK(range.first == CellLocation { LineOffset(0), ColumnOffset(0) });
+    CHECK(range.second == CellLocation { LineOffset(0), ColumnOffset(3) });
+
+    CHECK(doubleClickAt(mock, 0_lineOffset + 0_columnOffset) == "ab\xE4\xB8\xAD");
+    REQUIRE(mock.terminal.selector() != nullptr);
+    CHECK(mock.terminal.selector()->to() == range.second);
+
+    // A word that is nothing but the wide character, taken from its first column.
+    mock.writeToScreen("\r\n\xE4\xB8\xAD x");
+    auto const [alone, aloneRange] = mock.terminal.extractWordUnderCursor(1_lineOffset + 0_columnOffset);
+    CHECK(alone == U"中");
+    CHECK(aloneRange.second == CellLocation { LineOffset(1), ColumnOffset(1) });
+    CHECK(doubleClickAt(mock, 1_lineOffset + 0_columnOffset) == "\xE4\xB8\xAD");
+    CHECK(mock.terminal.selector()->to() == aloneRange.second);
+}
+
 TEST_CASE("Terminal.a_press_at_a_new_cell_starts_a_fresh_click_sequence", "[terminal]")
 {
     // Regression: sendMousePressEvent() anchors a bare press at the cell it landed on (a fast click can
-    // arrive with no preceding MouseMove), but it did so WITHOUT resetting the speed-click counter that
+    // arrive with no preceding MouseMove), but it did so WITHOUT resetting the multi-click counter that
     // sendMouseMoveEvent resets for exactly the same cell change. A second fast click at a DIFFERENT
     // cell, still inside the one-second window, therefore inherited the first one's count and opened as
     // a double-click word selection instead of a fresh drag.
@@ -352,6 +491,24 @@ TEST_CASE("Terminal.TextSelection_wrapped_line", "[terminal]")
         Modifier::None, MouseButton::Left, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
     mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
     CHECK(mock.terminal.extractSelectionText().empty());
+}
+
+TEST_CASE("Terminal.selection_does_not_join_rows_whose_wrap_was_erased", "[terminal]")
+{
+    // EL 0 erased the end of the first row, so it no longer wraps into the second: a copy across both is
+    // two lines, not one.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(2), ColumnCount(10) } };
+    mock.writeToScreen("ABCDEFGHIJKLMNO\033[1;6H\033[K");
+
+    mock.terminal.setSelector(std::make_unique<vtbackend::LinearSelection>(
+        mock.terminal.selectionHelper(),
+        CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+        []() {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(1), .column = ColumnOffset(4) });
+    mock.terminal.selector()->complete();
+
+    CHECK(mock.terminal.extractSelectionText() == "ABCDE\nKLMNO");
 }
 
 TEST_CASE("Terminal.ShiftClickExtendSelection", "[terminal]")
@@ -725,6 +882,150 @@ TEST_CASE("Terminal.selection_of_a_trivial_line_survives_a_scrolled_viewport", "
             return cell.position.line == LineOffset(0);
         });
     CHECK(cellsAtScreenLine0 > 0);
+}
+
+TEST_CASE("Terminal.a_binding_is_offered_the_click_count_before_the_selection", "[terminal][semanticblocks]")
+{
+    auto mock = MockTerm { ColumnCount(11), LineCount(2) };
+    mock.terminal.setWordDelimiters(" ");
+    mock.writeToScreen("hello world");
+
+    using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+    auto const at = 0_lineOffset + 1_columnOffset;
+
+    auto offered = std::vector<int> {};
+    auto const claimThird = [&](uint8_t clickCount) {
+        offered.push_back(clickCount);
+        return clickCount == 3 ? MousePressClaim::Claimed : MousePressClaim::Unclaimed;
+    };
+
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 2))
+    {
+        mock.terminal.sendMousePressEvent(
+            Modifier::None, MouseButton::Left, at, PixelCoordinate, UiHandledHint, claimThird);
+        mock.terminal.sendMouseReleaseEvent(
+            Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    }
+    REQUIRE(mock.terminal.extractSelectionText() == "hello");
+
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, at, PixelCoordinate, UiHandledHint, claimThird);
+
+    CHECK(offered == std::vector<int> { 1, 2, 3 });
+    // The claimed press neither extended the word selection nor started a drag.
+    CHECK(mock.terminal.extractSelectionText() == "hello");
+    CHECK_FALSE(mock.terminal.leftMouseButtonPressed());
+}
+
+TEST_CASE("Terminal.a_press_an_application_asked_for_is_never_offered_to_a_binding",
+          "[terminal][semanticblocks]")
+{
+    auto mock = MockTerm { ColumnCount(11), LineCount(2) };
+    mock.writeToScreen("\033[?1000h"); // what vim and tmux turn on
+
+    using namespace vtbackend;
+    auto offered = 0;
+    mock.terminal.sendMousePressEvent(Modifier::None,
+                                      MouseButton::Left,
+                                      0_lineOffset + 1_columnOffset,
+                                      vtbackend::PixelCoordinate {},
+                                      false,
+                                      [&](uint8_t) {
+                                          ++offered;
+                                          return MousePressClaim::Claimed;
+                                      });
+    CHECK(offered == 0);
+}
+
+TEST_CASE("Terminal.a_pointer_move_between_presses_starts_a_new_count", "[terminal][semanticblocks]")
+{
+    auto mock = MockTerm { ColumnCount(11), LineCount(2) };
+    mock.writeToScreen("hello world");
+
+    using namespace vtbackend;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+    auto offered = std::vector<int> {};
+    auto const record = [&](uint8_t clickCount) {
+        offered.push_back(clickCount);
+        return MousePressClaim::Unclaimed;
+    };
+
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, false, record);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, false);
+    mock.terminal.sendMouseMoveEvent(Modifier::None, 0_lineOffset + 2_columnOffset, PixelCoordinate, false);
+    mock.terminal.sendMouseMoveEvent(Modifier::None, 0_lineOffset + 1_columnOffset, PixelCoordinate, false);
+    mock.terminal.sendMousePressEvent(
+        Modifier::None, MouseButton::Left, 0_lineOffset + 1_columnOffset, PixelCoordinate, false, record);
+
+    CHECK(offered == std::vector<int> { 1, 1 });
+}
+
+TEST_CASE("Terminal.a_claimed_press_reports_the_selection_its_action_made_on_release",
+          "[terminal][semanticblocks]")
+{
+    // A binding that claims a press and selects (Ctrl+triple-click on a block) completes the selection
+    // itself. Its release must still report it, or it never reaches PRIMARY as a plain triple-click does.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(20) } };
+    runCommand(mock, "ls", { "a-file" });
+    mock.writeToScreen(PromptStart);
+
+    using namespace vtbackend;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+    auto const claimAll = [](uint8_t) {
+        return MousePressClaim::Claimed;
+    };
+    auto const claimedClick = [&](auto const& action) {
+        mock.terminal.sendMousePressEvent(Modifier::None,
+                                          MouseButton::Left,
+                                          0_lineOffset + 1_columnOffset,
+                                          PixelCoordinate,
+                                          false,
+                                          claimAll);
+        action();
+        mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, false);
+    };
+
+    SECTION("an action that selects")
+    {
+        claimedClick([&] {
+            REQUIRE(
+                mock.terminal.selectCommandBlock(CommandBlockTarget::Last, CommandBlockPart::PromptAndOutput)
+                    .has_value());
+        });
+        CHECK(mock.selectionCompletions == 1);
+        CHECK_FALSE(mock.terminal.leftMouseButtonPressed());
+    }
+
+    SECTION("an action that selects nothing")
+    {
+        // A selection made before the press is not the action's to report.
+        mock.terminal.selectAll();
+        claimedClick([] {});
+        CHECK(mock.selectionCompletions == 0);
+    }
+}
+
+TEST_CASE("Terminal.a_word_walk_works_before_anyone_sets_the_delimiters", "[terminal]")
+{
+    // A terminal nobody configured walks words by the delimiters its settings carry -- none, so blanks
+    // alone -- rather than calling a walk it was never given.
+    auto mock = MockTerm { ColumnCount(11), LineCount(2) };
+    mock.writeToScreen("hello world");
+
+    using namespace vtbackend;
+    auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
+    auto const at = 0_lineOffset + 1_columnOffset;
+
+    for (auto const clicks: std::views::iota(1, 4))
+    {
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, at, PixelCoordinate, false);
+        mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, false);
+        if (clicks > 1) // the word, then the extended word
+            CHECK(mock.terminal.extractSelectionText() == "hello");
+    }
 }
 
 // NOLINTEND(misc-const-correctness)

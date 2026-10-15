@@ -2,8 +2,10 @@
 #pragma once
 
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/core/RowMove.hpp>
 #include <vtbackend/core/Search.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/graphics/KittyGraphics.hpp>
@@ -11,12 +13,13 @@
 #include <vtbackend/grid/CellUtil.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/screen/Cursor.hpp>
-#include <vtbackend/shell/CommandBlocks.hpp>
 #include <vtbackend/shell/Folding.hpp>
+#include <vtbackend/shell/LivePromptMarks.hpp>
 #include <vtbackend/shell/PromptRegion.hpp>
 #include <vtbackend/vt/Capabilities.hpp>
 #include <vtbackend/vt/Charset.hpp>
 #include <vtbackend/vt/KittyClipboard.hpp>
+#include <vtbackend/vt/SemanticPrompt.hpp>
 #include <vtbackend/vt/Sequence.hpp>
 #include <vtbackend/vt/TextSizing.hpp>
 #include <vtbackend/vt/VTType.hpp>
@@ -37,7 +40,6 @@
 #include <algorithm>
 #include <atomic>
 #include <concepts>
-#include <deque>
 #include <expected>
 #include <format>
 #include <functional>
@@ -46,14 +48,15 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace vtbackend
 {
 
-class SemanticBlockTracker;
 class SixelImageBuilder;
 class Terminal;
-struct CommandBlockInfo;
+struct CommandBlockRecord;
 struct Settings;
 
 namespace regis
@@ -346,7 +349,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     [[nodiscard]] ApplyResult processHierarchicalContext(std::string_view payload);
 
     /// Stamps the OSC-133-equivalent marks an OSC 3008 transition stands in for, when the arbiter says
-    /// this session's marks are OSC 3008's to stamp. @see MarkArbiter.
+    /// this session's marks are OSC 3008's to stamp, and feeds the command block store once OSC 3008 owns
+    /// the session. While OSC 133 owns it, a command context's end only enriches the matching block.
+    /// @see MarkArbiter
     void synthesizeSemanticMarks(ContextTransition const& transition, ContextCommand const& command);
 
     /// Erases the whole multi-cell block that @p position belongs to, however many rows and columns
@@ -418,6 +423,18 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///
     /// @note Only the screenshot of the current buffer is taken, not both (main and alternate).
     ///
+    /// It moves the cursor to no absolute position and clears nothing, so it draws wherever the replaying
+    /// cursor stands. That is what the state dump needs: inspect() prints it between lines of its own, to
+    /// standard error on a failure and to standard output and `screen-state-dump.vt` from
+    /// TerminalDisplay::inspect(), and a cursor-home there would jump to the top of the console it is
+    /// printed on, so the state dump writes it as it is, `screen-state-dump.vt` included. `screenshot.vt`
+    /// has no such surroundings: the ScreenshotVT action writes it there behind a prefix that resets the
+    /// rendition, the character set, origin mode and the scroll region, homes the cursor and clears the
+    /// display, so that file replays on its own.
+    ///
+    /// A text-sizing block is written as the OSC 66 that makes it, from its head down. One whose head has
+    /// scrolled above the page cannot be made again: its lower part on the page replays as blank cells.
+    ///
     /// @returns The page's rows as text and renditions, separated by CRLF and with none after the last, so
     ///          that replaying it from the top-left cell of a page of the same size draws the page again
     ///          without scrolling it.
@@ -436,6 +453,15 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void clearToBeginOfScreen();
     void clearToEndOfScreen();
     void clearScreen();
+
+    /// Drops every row above @p head (@see Grid::dropRowsAbove) and moves the cursor, the cursor DECSC
+    /// saved and the cell last written up with the rows they stood on (never above the page top).
+    /// @param head The row to keep at the top.
+    /// @return How far the page scrolled up.
+    [[nodiscard]] LineCount dropRowsAbove(LineOffset head);
+
+    /// Marks a prompt start (OSC 133;A, or its OSC 3008 stand-in) on the cursor's logical line, voiding an
+    /// earlier prompt's input border (PromptEnd) still on it and every right prompt an earlier prompt marked.
     void setMark();
 
     // Erase, sparing cells that carry @p protectedFlag. The default (CharacterProtected) is DEC/DECSCA
@@ -515,6 +541,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void setScrollSpeed(int speed); // DECSSCLS
     void deviceStatusReport();      // DSR
     void reportCursorPosition();    // CPR
+
+    /// DECMSR, the reply to `CSI ? 62 n` -- the room left for macro definitions, in units of 16 bytes.
+    void reportMacroSpace();
 
     /// DECCKSR (`CSI ? 63 ; Pid n`) -- the checksum of the macro memory.
     /// @param requestId The id the request was tagged with, carried back in the reply.
@@ -858,44 +887,80 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         return useCellAt(_lastCursorPosition.line, _lastCursorPosition.column);
     }
 
-    /// Re-points _currentLine at the row the cursor is on, and stamps that row with the context in
-    /// effect.
+    /// Re-points _currentLine at the row the cursor is on, and hands that row what is in effect -- the
+    /// context and command block being written, and the time the cursor first reached it -- wherever it
+    /// carries none yet.
     ///
     /// The stamp lives HERE because this is the tree's single "the cursor is now on this line" funnel
     /// -- fifteen call sites, and provably exhaustive, because _currentLine would already be stale if
     /// any path skipped it. Stamping per CODEPOINT instead would be the obvious design and the wrong
     /// one: this runs once per cursor line change, so the per-character write path is untouched.
+    ///
+    /// Fill-once: reaching a row is not writing it. A row the cursor merely revisits -- `clear` homing onto
+    /// the page's top row, a program stepping back up over earlier output -- keeps the context, block and
+    /// time it was born with; only an explicit transition relabels a row.
+    /// @see setActiveContextId, setActiveBlockId, setLineBirthStamp
     void updateCursorIterator() noexcept
     {
         _currentLine = &_grid.lineAt(_cursor.position.line);
-        _currentLine->adoptContext(_activeContextId);
+        _currentLine->adoptProvenance(_stamp);
     }
 
-    /// The OSC 3008 context freshly written lines are stamped with.
+    /// The OSC 3008 context the lines the cursor reaches are stamped with, where they carry none yet.
     ///
     /// A mirror of Terminal's ancestry rather than a read through it: Terminal fans the active id out
     /// to all 18 screens whenever it moves (@see Terminal::applyContextCommand), which costs two stores
     /// per command and keeps this funnel free of the two pointer chases a lookup would add. It also
     /// keeps Screen drivable in a test without a populated stack behind it.
-    void setActiveContextId(ContextId id) noexcept
+    ///
+    /// Also re-stamps (and dirties) the line the cursor is ALREADY on, not just the ones it moves to next:
+    /// a context is announced before the output it describes is written, and typically at column 0 of a
+    /// line the cursor is already sitting on -- so waiting for the next cursor-line change would attribute
+    /// that whole first line to the previous context. All of its LOGICAL line: output that did not end in a
+    /// newline leaves the cursor on the last row of a wrapped line, and reflow hands every chunk the head's
+    /// context, so restamping the cursor's row alone would hand what the new context writes there back to
+    /// the old one on the next resize. Re-stamping a line that already holds output is last-writer-wins,
+    /// which is the only defensible answer when one line spans two contexts. Zero is ignored for the stamp,
+    /// as Line::adoptContext() ignores it.
+    /// @param id The context now in effect.
+    void setActiveContextId(ContextId id) noexcept;
+
+    /// The birth stamp rows the cursor reaches from now on are given.
+    ///
+    /// Set by Terminal for the length of one PTY batch, and back to zero when the batch ends, on the
+    /// primary screen only: the alternate screen and the status lines never show a time, so their rows stay
+    /// unstamped and are never dirtied for one. Zero between batches is what keeps a row the cursor reaches
+    /// THEN -- a reset or resize the GUI asked for -- from taking the previous batch's time. Such a row is
+    /// stamped here instead, by the next batch: the line the cursor is ALREADY on is stamped when it has no
+    /// stamp yet, because this is the first batch it is seen in.
+    ///
+    /// That line is looked up by the cursor's row rather than through the cached _currentLine: this runs on
+    /// the primary page while another page may be current, and nothing that happened to the primary grid
+    /// meanwhile may leave the stamp written into a row that has moved.
+    /// @see Line::bornAt
+    /// @param secondsPlusOne Seconds since the session began, plus one; zero stamps nothing.
+    void setLineBirthStamp(uint32_t secondsPlusOne) noexcept
     {
-        _activeContextId = id;
-        // The line the cursor is ALREADY on, not just the ones it moves to next. A context is
-        // announced before the output it describes is written, and typically at column 0 of a line the
-        // cursor is already sitting on -- so waiting for the next cursor-line change would attribute
-        // that whole first line to the previous context. Re-stamping a line that already holds output
-        // is last-writer-wins, which is the only defensible answer when one line spans two contexts.
-        if (_currentLine && !!id && _currentLine->contextId() != id)
-        {
-            _currentLine->adoptContext(id);
-            // Dirtied HERE, unlike the updateCursorIterator() funnel, which deliberately is not.
-            // There the stamp always precedes the write that dirties the row anyway; here the row may
-            // already be clean and already replicated, and a daemon mirror's delta scan only revisits
-            // dirty rows -- so without this the mirror keeps a row's old context id forever, which
-            // GridParity reports as a real difference. At most one row per context transition.
-            _currentLine->markDirty();
-        }
+        _stamp.bornAt = secondsPlusOne;
+        _grid.lineAt(_cursor.position.line).stampBornAt(secondsPlusOne);
     }
+
+    /// The command block the rows the cursor reaches are stamped with, where they belong to none yet.
+    ///
+    /// A mirror of the store's current id rather than a read through it, for the reason
+    /// setActiveContextId() gives. Like it, re-stamps (and dirties) the line the cursor is ALREADY on --
+    /// all of its LOGICAL line: a prompt that starts on the last row of a wrapped output line marks that
+    /// logical line's head, and reflow hands every chunk the head's id, so stamping the cursor's row alone
+    /// would hand the prompt back to the previous block on the next resize. Last writer wins. Zero is
+    /// ignored for the stamp, as Line::adoptBlock() ignores it.
+    /// @param id The block now being written.
+    void setActiveBlockId(CommandBlockId id) noexcept;
+
+    /// Takes every row's command block id away: the store's ids started over, so an id a row was stamped
+    /// with would name a block minted after it. A walk over the whole grid, scrollback included --
+    /// affordable, as it happens once every 2^32 - 1 blocks.
+    /// @see CommandBlockStore::idEpoch
+    void forgetBlockIds() noexcept;
 
     /// The context that wrote the line at @p line, walking UP through blank lines.
     ///
@@ -963,22 +1028,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     ///         in the screen area, and in the savedLines area otherwise.
     [[nodiscard]] std::optional<LineOffset> findMarkerUpwards(LineOffset startLine) const;
 
-    /// The most recently FINISHED shell command, reconstructed from the OSC 133 marks its shell left in
-    /// the scrollback.
-    ///
-    /// Reads the marks alone, so it works for any shell that speaks plain OSC 133 — the semantic-block
-    /// reader protocol (DEC mode 2034) is a separate, opt-in channel and is not required here.
-    ///
-    /// @return The block, or nullopt when the scrollback holds no finished command.
-    [[nodiscard]] std::optional<CommandBlockText> lastCommandBlock() const;
-
     /// Where the shell's LIVE prompt sits in the grid — the one the user is typing at right now.
     ///
-    /// The complement of lastCommandBlock(): that one reconstructs a FINISHED command, which is opened by
-    /// an OSC 133;D and therefore can never be the prompt currently being typed into. Reads the OSC 133
-    /// marks alone, so no shell needs to opt into DEC mode 2034 for this to work.
+    /// Reads the OSC 133 marks alone, so no shell needs to opt into DEC mode 2034 for this to work.
     ///
-    /// Does NOT take the terminal lock — the caller holds it, the same contract lastCommandBlock() has.
+    /// Does NOT take the terminal lock — the caller holds it.
     ///
     /// @return The span, or why there is no live prompt (a command is running, no shell integration, or
     ///         the prompt scrolled out of reach).
@@ -986,10 +1040,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// The foldable output regions of the finished commands in the scrollback, most recent first.
     ///
-    /// Reads the OSC 133 marks alone, like its two siblings above, so folding works for any shell that
+    /// Reads the OSC 133 marks alone, like livePromptSpan() above, so folding works for any shell that
     /// speaks plain OSC 133 -- DEC mode 2034 is a separate, opt-in reader channel and is not required.
     ///
-    /// Does NOT take the terminal lock; the caller holds it, the same contract lastCommandBlock() has.
+    /// Does NOT take the terminal lock; the caller holds it, the same contract livePromptSpan() has.
     ///
     /// @param maxScanLines How far up the scrollback to walk (@see MaxFoldScanLines).
     /// @return The ranges, most recent first; empty when nothing in reach is foldable.
@@ -1005,6 +1059,67 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     [[nodiscard]] Grid const& grid() const noexcept { return _grid; }
     [[nodiscard]] Grid& grid() noexcept { return _grid; }
+
+    /// How many times a row of a command block was changed in what it tells its head, in place: an erase took
+    /// the row out of the block or a mark a head is found by (BlockHeadLineFlags) off it, or a new prompt
+    /// relabelled it to its own block.
+    ///
+    /// What makes Terminal::syncCommandBlockHeads() look at the heads again while the stable-id generation
+    /// stands still: a head row an erase blanked, or a new prompt took, is no row of its block any more.
+    [[nodiscard]] uint64_t blockRowChanges() const noexcept { return _blockRowChanges; }
+
+    /// How many rows the explicit transitions (setActiveContextId(), setActiveBlockId()) have looked at on
+    /// this screen since it was built.
+    ///
+    /// A test seam -- nothing in production reads it: what pins the cost of a transition on a long logical
+    /// line.
+    /// @return The count, which only ever grows.
+    [[nodiscard]] uint64_t restampWork() const noexcept { return _restampWork; }
+
+    /// Counts in blockRowChanges() a change made in place to a row of command block @p block, when it took
+    /// the row out of the block or changed which of the marks a head is found by (BlockHeadLineFlags) it
+    /// carries: the row may have headed the block.
+    ///
+    /// An erase counts its own. A daemon mirror writes the host's rows straight into the grid, past the
+    /// erase and the relabelling that would have counted them, so it counts each row it writes: its blocks
+    /// are then re-headed after the host's erase or new prompt as the host's own were.
+    /// @param block The block the row belonged to before the change; a row of none counts nothing.
+    /// @param flags The flags the row carried before the change.
+    /// @param row The row after the change.
+    void noteBlockRowChange(CommandBlockId block, LineFlags flags, Line const& row) noexcept;
+
+    /// Tells the user-mark index (Terminal::userMarkChanged()) that row @p line gained or lost
+    /// LineFlag::UserMark, if it did, on the primary screen.
+    ///
+    /// setLogicalLineFlags(), the funnel a mark is written through, reports its own. A row rewritten whole
+    /// passes no funnel -- an erase resets it, a daemon mirror writes the host's row over it -- so each such
+    /// rewrite reports through noteRowRewritten().
+    /// @param line The row; a mark sits on its logical line's head.
+    /// @param before The flags the row carried before the change.
+    void noteUserMarkChange(LineOffset line, LineFlags before) noexcept;
+
+    /// Tells everything that follows a row in place what rewriting row @p line whole did to it: the command
+    /// blocks (noteBlockRowChange()) and the user-mark index (noteUserMarkChange()).
+    ///
+    /// The one call each whole-row rewrite makes once it is done: an erase that resets the row, and a daemon
+    /// mirror writing a host row over it.
+    /// @param line The row, as rewritten.
+    /// @param block The block the row belonged to before the rewrite.
+    /// @param before The flags the row carried before the rewrite.
+    void noteRowRewritten(LineOffset line, CommandBlockId block, LineFlags before) noexcept;
+
+    /// Changes how much scrollback the grid keeps.
+    ///
+    /// Through the screen, not the grid, because the change turns the ring back to its zero and regrows it,
+    /// which moves every row: the cached cursor line is re-pointed at once, as after a resize. It is read
+    /// whether or not this screen is current -- the batch clock stamps the primary page's cursor row while
+    /// the alternate screen is up.
+    /// @param historyLimits The new limits.
+    void setHistoryLimits(HistoryLimits historyLimits)
+    {
+        _grid.setHistoryLimits(historyLimits);
+        updateCursorIterator();
+    }
 
     /// @returns true iff given absolute line number is wrapped, false otherwise.
     [[nodiscard]] bool isLineWrapped(LineOffset lineNumber) const noexcept
@@ -1063,11 +1178,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// line the user put a Vi mark on — and never the physical piece a wrap happened to chop it into.
     /// Stamping a continuation is exactly where they cannot survive: see HeadOnlyLineFlags, and the
     /// widening resize that rebuilds a joined logical line from its head alone.
-    /// Stamps @p flags onto the head of the LOGICAL line @p line belongs to.
     ///
-    /// Out of line because it reaches into Terminal, which is incomplete here: every semantic mark in
-    /// the tree passes through this one funnel -- OSC 133's four, and vi's `mm` -- and the fold ranges
-    /// derived from them have to be invalidated when one lands.
+    /// Out of line because it reaches into Terminal, which is incomplete here: every mark in the tree
+    /// passes through this one funnel -- OSC 133's four, and vi's `mm` -- and the fold ranges derived from
+    /// the shell's (ShellMarkLineFlags) have to be invalidated when one lands. A user mark derives none.
     void setLogicalLineFlags(LineOffset line, LineFlags flags, bool enable) noexcept;
 
     /// Which of the two column-carrying semantic marks a @ref markLogicalLineAtCursorWithColumn call
@@ -1087,10 +1201,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// LOGICAL column.
     ///
     /// Goes through the same funnel setLogicalLineFlags() does, and for the same reason: both marks
-    /// are in HeadOnlyLineFlags, so both have to invalidate the fold ranges derived from them.
+    /// are in ShellMarkLineFlags, so both have to invalidate the fold ranges derived from them.
     void markLogicalLineAtCursorWithColumn(ColumnMark mark) noexcept;
 
-    /// Whether the LOGICAL line that @p line belongs to carries all of @p flags.
+    /// Whether the LOGICAL line that @p line belongs to carries any of @p flags.
     [[nodiscard]] bool isLogicalLineFlagEnabled(LineOffset line, LineFlags flags) const noexcept
     {
         return isLineFlagEnabledAt(_grid.logicalLineHead(line), flags);
@@ -1102,6 +1216,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         setLogicalLineFlags(cursor().position.line, flags, true);
     }
 
+    /// Whether the physical line @p line carries any of @p flags.
     [[nodiscard]] bool isLineFlagEnabledAt(LineOffset line, LineFlags flags) const noexcept
     {
         return _grid.lineAt(line).isFlagEnabled(flags);
@@ -1284,6 +1399,64 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @param run  The run's segmentation state, carried on to whatever the run writes next.
     void writeTextPerCodepoint(std::string_view text, GraphemeRun& run);
 
+    /// Erases the row at @p line in place and starts it afresh: blank in @p attributes, carrying @p flags --
+    /// with the offset of each of them it already carried -- and no context, block or birth time.
+    ///
+    /// The one way Screen resets a row it keeps; a row the grid recycles as it scrolls in is a new row, and
+    /// the grid resets that itself. If the cursor is on the row, it is re-stamped at once with the context,
+    /// block and time in effect: a `\r\e[K` that finalises a progress line or redraws a prompt leaves the
+    /// cursor where it was, and updateCursorIterator(), which stamps a row on arrival, runs only on a change
+    /// of row -- so the row would otherwise carry no context, no block and no time. A progress line therefore
+    /// reads the time of its last redraw. Outside a batch the birth stamp is zero and stamps nothing, which
+    /// leaves the time to the next batch; a row erased with the cursor elsewhere is stamped when the cursor
+    /// reaches it. An erase that takes a row out of its command block, or a head mark off it, counts in
+    /// blockRowChanges(); one that takes a vi mark off it is reported to the user-mark index; one that
+    /// changes the shell marks a row carries drops the cached fold ranges.
+    /// @param line The row to erase.
+    /// @param flags The flags it is left with.
+    /// @param attributes The rendition its blank cells take.
+    /// @return The erased row, for a caller that goes on to write it.
+    Line& eraseRowInPlace(LineOffset line, LineFlags flags, GraphicsAttributes attributes) noexcept;
+
+    /// Has what holds this grid's stable ids follow a scroll the grid is about to do that moves or drops
+    /// rows' contents under their ids: the marks the shell put on the prompt in progress here, and, on the
+    /// primary screen, the command block heads on those rows, looked at again, a collapsed fold, which
+    /// follows its prompt line, and a user mark, which follows its line.
+    /// @param move What the scroll will do (@see Grid::rowMoveOfScrollUp), asked before it does it; nullopt
+    ///        for a scroll that moves no row's content away from its id.
+    void followRowMove(std::optional<RowMove> const& move);
+
+    /// followRowMove() for scrollUp(@p n, ..., @p margin), which is about to happen. A function of its own so
+    /// that the move it asks the grid for is not a temporary of scrollUp(), the line feed's path.
+    /// @param n      The scroll's line count.
+    /// @param margin The region it scrolls.
+    void followScrollUp(LineCount n, Margin margin);
+
+    /// Ends the wrap from row @p line into the row below it, which then starts a line of its own: what an
+    /// erase does that empties the end of @p line (EL 0, ED 0), or all of it above the row below (ED 1).
+    /// xterm's ClearRight and ClearBufRows clear LINEWRAPPED the same way. Nothing happens on the page's
+    /// last row, whose next row is not on the page.
+    /// @param line The row whose wrap ends.
+    void endWrapBelow(LineOffset line) noexcept;
+
+    /// Takes from the cursor's row what an ED that reaches across it from edge to edge takes from every row
+    /// it erases whole, beyond the cells EL has already blanked: its line rendition, which DEC STD 070's ED
+    /// sets to single width (p. 5-156), and its vi mark. EL alone leaves both: it changes what a line says,
+    /// not which line it is.
+    void forgetCursorRowErasedWhole() noexcept;
+
+    /// Relabels every row of the cursor's logical line with the ids @p transition carries: what an explicit
+    /// transition (setActiveContextId(), setActiveBlockId()) does to the line it happens on. A row it takes
+    /// from another command block counts in blockRowChanges(): that block's head may have been on it.
+    ///
+    /// From the cursor's row up, and no further than the first row that carries the ids already: a
+    /// transition relabels its line whole, and a row reached since takes the ids in force, so the rows above
+    /// such a row carry them too. A transition that hands out what the line carries -- the ;C after the ;A
+    /// that began its block, a context fanned out to every screen -- so looks at one row, however long the
+    /// line.
+    /// @param transition The ids the transition hands out; a zero id leaves the rows' own.
+    void restampCursorLogicalLine(LineProvenance const& transition) noexcept;
+
     void configureCurrentLineSize(LineFlags enabled);
 
     void advanceCursorAfterWrite(ColumnCount n) noexcept;
@@ -1296,6 +1469,21 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void linefeed(ColumnOffset column);
 
     void writeCharToCurrentAndAdvance(char32_t codepoint) noexcept;
+
+    /// What becomes of a character about to be written at the cursor.
+    enum class CharacterPlacement : uint8_t
+    {
+        Dropped, ///< It is not written at all.
+        Written, ///< It is written at the cursor, which may have moved to make room for it.
+    };
+
+    /// Makes room for a character @p width columns wide that does not fit between the cursor and the
+    /// margin. With autowrap it moves on to the next row and leaves the cells it passed over as
+    /// CellFlag::WrapPadding, as foot does; without, it is dropped, as xterm drops it (measured). At the
+    /// start of its row it fits nowhere better and is written there.
+    /// @param width The character's width in columns.
+    /// @return What becomes of the character.
+    [[nodiscard]] CharacterPlacement placeWideCharacter(int width) noexcept;
     void clearAndAdvance(int oldWidth, int newWidth) noexcept;
 
     /// Claims or releases columns after a grapheme cluster's width was revised by a codepoint that
@@ -1350,12 +1538,63 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     [[nodiscard]] std::optional<Image::Data> decodePng(std::span<uint8_t const> data, ImageSize& size) const;
 
     void processShellIntegration(Sequence const& seq);
+
+    /// Marks the cursor's logical line as where a command's output starts (LineFlag::OutputStart), as OSC
+    /// 133;C or an OSC 3008 command start says, and notes that the shell marks output starts.
+    void markOutputStart();
+
+    /// The command line the user typed at the live prompt, read off the grid at OSC 133;C.
+    ///
+    /// Only possible when the shell marked where its prompt ended (;B): the text from that column up to
+    /// the cursor is what was typed, less each continuation prompt the shell marked with a ;B of its own
+    /// and each right prompt beside it.
+    /// Must run BEFORE the ;C's OutputStart is stamped -- the live-prompt scan reads a line carrying
+    /// OutputStart as "a command is running" and finds no prompt.
+    /// @return The typed text, trailing blanks dropped, or nullopt without ;B or when nothing was typed.
+    [[nodiscard]] std::optional<std::string> recoverCommandLine() const;
+
+    /// The live prompt a column change leaves as the shell drew it, and the names its lines go by until then.
+    struct UnreflowedPrompt
+    {
+        /// Its first row; it reaches to the bottom of the page.
+        LineOffset firstLine;
+
+        /// The row each of its logical lines begins on, and the name LivePromptMarks knows the line by.
+        std::vector<std::pair<LineOffset, StableLine>> lines {};
+    };
+
+    /// The live prompt, if a column change is to leave it as the shell drew it rather than reflow it.
+    ///
+    /// The shell redraws its prompt at the new width, moving up as many rows as it drew before; reflowed
+    /// under it as well, the prompt spans other rows than the shell counts, and the redraw leaves doubled or
+    /// misplaced fragments of it, or erases the output above it. So it is not reflowed, as kitty does it
+    /// (prevent_current_prompt_from_rewrapping) -- unless the shell said it does not redraw it
+    /// (OSC 133;A;redraw=0), the prompt began above the page, where kitty does not look for it, or it shares
+    /// its first logical line with output that did not end that line. Nor before the shell has marked an
+    /// output start (@see OutputStartMarking): kitty's own integration always does, but a shell that sends
+    /// only ;A would have a running command's output taken for its prompt, and cut rather than reflowed.
+    /// @return The prompt, or nullopt when the column change reflows everything.
+    [[nodiscard]] std::optional<UnreflowedPrompt> unreflowedPrompt() const;
+
+    /// Hands what LivePromptMarks holds for the lines of @p prompt over to the names the resize just gave
+    /// them, each column it marked moving with its cell.
+    /// @param prompt The prompt, as unreflowedPrompt() found it before the resize.
+    /// @param moved How far the resize moved the prompt's rows on the page.
+    /// @param width The resize's change of width.
+    void renameUnreflowedPromptLines(UnreflowedPrompt const& prompt, LineOffset moved, WidthChange width);
+
+    /// Whether this screen is the main display -- the primary or the alternate screen -- where the shell's
+    /// command cycle runs, and so whose OSC 133 and OSC 3008 command transitions feed the command block
+    /// store. Not a DEC page other than the first, nor a status line. Rows are stamped with blocks on the
+    /// primary screen alone, whichever screen fed the store.
+    [[nodiscard]] bool isMainDisplay() const noexcept;
+
     void handleSemanticBlockQuery(Sequence const& seq);
-    void handleInProgressQuery(SemanticBlockTracker const& tracker);
-    void handleCompletedBlocksQuery(SemanticBlockTracker const& tracker,
-                                    std::deque<CommandBlockInfo> const& completedBlocks,
-                                    unsigned queryType,
-                                    int count);
+
+    /// Answers an SBQUERY with the blocks it found: each one's record, and the text of its own rows.
+    /// @param newestFirst The blocks, newest first; the reply lists them oldest first, and reports no data
+    ///        when there are none.
+    void replyWithBlocks(std::span<CommandBlockRecord const* const> newestFirst);
 
     gsl::not_null<Terminal*> _terminal;
     gsl::not_null<Settings*> _settings;
@@ -1365,12 +1604,33 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     Cursor _cursor {};
     Cursor _savedCursor {};
 
-    /// The OSC 3008 context freshly written lines are stamped with. @see setActiveContextId.
-    ContextId _activeContextId {};
+    /// What a row the cursor reaches is handed where it carries nothing yet: the OSC 3008 context and the
+    /// command block being written, and the batch's birth stamp.
+    /// @see updateCursorIterator, setActiveContextId, setActiveBlockId, setLineBirthStamp
+    LineProvenance _stamp {};
+
+    /// @see blockRowChanges
+    uint64_t _blockRowChanges = 0;
+
+    /// @see restampWork
+    uint64_t _restampWork = 0;
 
     /// Scratch for the OSC 3008 decoder, owned here so the per-prompt hot path allocates once per
     /// session rather than once per sequence. @see parseContextSequence.
     std::string _contextScratch {};
+
+    /// What the shell said about the lines of the prompt in progress that no row records, for
+    /// recoverCommandLine(): where a right prompt begins (OSC 133;P;k=r), and whether the input ends with
+    /// its line (OSC 133;I). setMark() forgets it.
+    LivePromptMarks _livePromptMarks {};
+
+    /// Whether the shell redraws the prompt in progress when the window is resized, as its OSC 133;A said.
+    /// @see unreflowedPrompt
+    PromptRedraw _promptRedraw = PromptRedraw::OnResize;
+
+    /// Whether the shell has marked a command's output start here since the last hard reset.
+    /// @see unreflowedPrompt, markOutputStart
+    OutputStartMarking _outputStartMarking = OutputStartMarking::Unseen;
 
     /// Payload accumulated across a chunked kitty graphics transmission (`m=1`), plus the command
     /// that opened it -- the continuation chunks carry no control data of their own.

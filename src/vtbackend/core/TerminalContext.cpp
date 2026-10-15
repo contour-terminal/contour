@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/TerminalContext.hpp>
 
+#include <vtbackend/core/FileUrl.hpp>
+
 #include <core/Assert.hpp>
+#include <core/Utils.hpp>
+#include <core/platform/FileSystem.hpp>
 
 #include <algorithm>
+#include <string>
 #include <utility>
 
 using std::optional;
@@ -81,14 +86,20 @@ namespace
     }
 } // namespace
 
-ContextStack::ContextStack(ContextStackLimits limits) noexcept: _limits { limits }
+ContextStack::ContextStack(ContextStackLimits limits) noexcept: _limits {}
+{
+    setLimits(limits);
+}
+
+void ContextStack::setLimits(ContextStackLimits limits) noexcept
 {
     // A programmer error, not a recoverable one: an ancestor evicted from the store would leave the
     // chain holding a record nothing else can resolve.
-    Require(_limits.maxRetained >= _limits.maxDepth);
-    Require(_limits.maxDepth >= 1);
+    Require(limits.maxRetained >= limits.maxDepth);
+    Require(limits.maxDepth >= 1);
     // The depth is what popFrom() counts, and ContextTransition reports that count in a uint16_t.
-    Require(_limits.maxDepth <= 0xFFFF);
+    Require(limits.maxDepth <= 0xFFFF);
+    _limits = limits;
 }
 
 optional<size_t> ContextStack::indexOf(string_view identifier) const noexcept
@@ -122,12 +133,13 @@ void ContextStack::store(shared_ptr<TerminalContext> record)
     _creationOrder.push_back(id);
 
     // Evict oldest-first, but never a context that is still an ancestor: the chain must be resolvable
-    // through find(), and the constructor's maxRetained >= maxDepth requirement guarantees there is
-    // always something else to drop. A chain-held id rotates to the back rather than being discarded
-    // from the queue, so it is reconsidered once it leaves the ancestry.
+    // through find(), and the maxRetained >= maxDepth requirement guarantees there is always something
+    // else to drop. A chain-held id rotates to the back rather than being discarded from the queue, so it
+    // is reconsidered once it leaves the ancestry.
     //
     // The bound is on ATTEMPTS, not on the queue: without it, a queue made entirely of ancestors would
-    // rotate forever.
+    // rotate forever -- which it can be once setLimits() has lowered both limits below an ancestry
+    // already deeper than them. The store then holds more than the bound until the ancestry shrinks.
     auto attempts = _creationOrder.size();
     while (_byId.size() > _limits.maxRetained && attempts-- > 0)
     {
@@ -340,15 +352,13 @@ ContextLocality ContextStack::localityOf(ContextId id, LocalIdentity const& self
         if (contextTypeCrossesHost(record.type) == HostBoundary::Crossed)
             return ContextLocality::Foreign;
 
-        if (!record.machineId.empty() && !self.machineId.empty())
+        // A context that names a machine is held to the rule every locality is decided by; one that
+        // names none says nothing either way.
+        if (!record.machineId.empty() || !record.hostname.empty())
         {
-            if (record.machineId != self.machineId)
-                return ContextLocality::Foreign;
-            sawIdentity = true;
-        }
-        else if (!record.hostname.empty() && !self.hostname.empty())
-        {
-            if (record.hostname != self.hostname)
+            if (!sameMachine(LocalIdentity { .machineId = record.machineId, .hostname = record.hostname },
+                             MissingMachineId::Omitted,
+                             self))
                 return ContextLocality::Foreign;
             sawIdentity = true;
         }
@@ -386,6 +396,45 @@ optional<EffectiveWorkingDirectory> ContextStack::effectiveWorkingDirectory(
                                            .locality = localityOf(record.id, self) };
     }
     return std::nullopt;
+}
+
+HostIdentity readHostIdentity(core::platform::FileSystem const& files, std::string hostname)
+{
+    // The first line, trimmed: trailing whitespace would make every comparison against an OSC 3008
+    // machineid= fail.
+    auto machineId =
+        files.readFile(MachineIdPath)
+            .transform([](std::string const& text) {
+                return std::string { core::trimRight(string_view { text }.substr(0, text.find('\n'))) };
+            })
+            .value_or(std::string {});
+    return HostIdentity { .machineId = std::move(machineId), .hostname = std::move(hostname) };
+}
+
+bool isMachineId(string_view id) noexcept
+{
+    return id.size() == 32
+           && std::ranges::all_of(id, [](char ch) { return core::digitValue<16>(ch).has_value(); });
+}
+
+bool sameMachine(LocalIdentity const& other, MissingMachineId missing, LocalIdentity const& self) noexcept
+{
+    auto const otherKnown = isMachineId(other.machineId);
+    auto const selfKnown = isMachineId(self.machineId);
+    if (otherKnown && selfKnown)
+        // Compared as numbers, so the case of a hex digit does not tell two ids apart.
+        return std::ranges::equal(other.machineId, self.machineId, [](char x, char y) {
+            return core::digitValue<16>(x) == core::digitValue<16>(y);
+        });
+    // One id known: two installs -- unless the identity without one merely left it out.
+    if (otherKnown || (selfKnown && missing == MissingMachineId::Absent))
+        return false;
+
+    auto const namesMachine = [](string_view hostname) {
+        return !hostname.empty() && !isLoopbackHost(hostname);
+    };
+    return namesMachine(other.hostname) && namesMachine(self.hostname)
+           && sameHostName(other.hostname, self.hostname);
 }
 
 } // namespace vtbackend

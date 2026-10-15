@@ -101,8 +101,9 @@ class SystemdScopePlacement final: public ProcessPlacement
         Stopping,
     };
 
-    // A std::thread and a state rather than a std::jthread: libc++ before 20 offers std::jthread
-    // only behind -fexperimental-library, which Xcode's toolchains do not enable.
+    // A std::thread and a state rather than a std::jthread: this file is built on Linux only, and a
+    // Linux build against libc++ before 20 has std::jthread only behind -fexperimental-library, which
+    // the build passes on Apple platforms alone.
     std::mutex _mutex;
     std::condition_variable _wakeup;
     std::deque<ParkedChild> _queue;

@@ -3,6 +3,7 @@
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/shell/Folding.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <core/Utils.hpp>
 
@@ -19,6 +20,7 @@
 #include <vector>
 
 using namespace vtbackend;
+using namespace vtbackend::test;
 using namespace std::chrono_literals;
 
 namespace chrono = std::chrono;
@@ -334,6 +336,31 @@ TEST_CASE("Folding.state.pruneDropsEvictedHeads", "[folding]")
     CHECK(state.isCollapsed(30));
 }
 
+TEST_CASE("Folding.state.followKeepsACollapsedFoldWithItsPromptLine", "[folding]")
+{
+    // A scroll inside margins moved what ids 11..15 named up by one, and dropped what 10 named.
+    auto state = FoldState {};
+    state.collapse(5);  // outside the move
+    state.collapse(10); // dropped
+    state.collapse(13); // moved to 12
+    auto const before = state.revision();
+
+    state.follow(
+        RowMove { .changed = { .first = 10, .last = 15 }, .moved = { .first = 11, .last = 15 }, .by = -1 });
+
+    CHECK(state.isCollapsed(5));
+    CHECK_FALSE(state.isCollapsed(10));
+    CHECK(state.isCollapsed(12));
+    CHECK_FALSE(state.isCollapsed(13));
+    CHECK(state.revision() != before);
+
+    // A move no collapsed fold lies in changes nothing, and says so by leaving the revision alone.
+    auto const after = state.revision();
+    state.follow(
+        RowMove { .changed = { .first = 20, .last = 25 }, .moved = { .first = 21, .last = 25 }, .by = -1 });
+    CHECK(state.revision() == after);
+}
+
 // }}}
 // {{{ hiddenIntervals
 
@@ -505,6 +532,33 @@ TEST_CASE("Folding.visible.distanceCountsOnlyVisibleIds", "[folding]")
     CHECK(visibleDistance(hidden, 26, 9) == -9);
 }
 
+TEST_CASE("Folding.visible.distancesFromOneOriginCountTheVisibleIds", "[folding]")
+{
+    // Every origin and every id around the two runs -- before, inside, on the edges of and after each, on
+    // both sides of the origin -- against the visible ids counted one at a time.
+    auto const hidden = twoRuns();
+    auto const isVisible = [&](int64_t id) {
+        return !hidingInterval(hidden, id).has_value();
+    };
+    auto const countVisible = [&](int64_t first, int64_t last) {
+        return static_cast<int64_t>(std::ranges::count_if(std::views::iota(first, last), isVisible));
+    };
+    for (auto const origin: std::views::iota(int64_t { 5 }, int64_t { 28 }))
+    {
+        auto const fromOrigin = VisibleDistanceFrom { hidden, origin };
+        for (auto const id: std::views::iota(int64_t { 5 }, int64_t { 28 }))
+        {
+            INFO(std::format("from {} to {}", origin, id));
+            CHECK(fromOrigin.to(id) == (origin <= id ? countVisible(origin, id) : -countVisible(id, origin)));
+        }
+    }
+
+    SECTION("nothing hidden is plain arithmetic")
+    {
+        CHECK(VisibleDistanceFrom({}, 5).to(17) == 12);
+    }
+}
+
 TEST_CASE("Folding.project.unfoldedIsTheLinearWalk", "[folding]")
 {
     // Nothing collapsed: the projection must be exactly what an unfolded viewport already draws.
@@ -614,21 +668,6 @@ TEST_CASE("Folding.project.zeroRowsAndInvertedRange", "[folding]")
 namespace
 {
 
-/// Runs one shell command through a terminal exactly as a shell with OSC 133 integration would: prompt
-/// start, prompt end, the echoed command line, output start, the output itself, and the command end
-/// that a precmd hook emits at the top of the NEXT prompt.
-void runCommand(MockTerm<>& mc, std::string const& command, std::vector<std::string> const& output)
-{
-    mc.writeToScreen("\033]133;A\033\\");
-    mc.writeToScreen("$ ");
-    mc.writeToScreen("\033]133;B\033\\");
-    mc.writeToScreen(command + "\r\n");
-    mc.writeToScreen("\033]133;C\033\\");
-    for (auto const& line: output)
-        mc.writeToScreen(line + "\r\n");
-    mc.writeToScreen("\033]133;D;0\033\\");
-}
-
 /// The text of each row the viewport currently shows, top first, trailing blanks dropped -- what
 /// folding is ultimately about.
 std::vector<std::string> visibleRows(Terminal& terminal)
@@ -662,6 +701,21 @@ TEST_CASE("Folding.terminal.rangesComeFromTheMarks", "[folding]")
     CHECK(ranges[0].headStableId == grid.stableLineIdOf(LineOffset(0)));
     CHECK(ranges[0].firstStableId == grid.stableLineIdOf(LineOffset(1)));
     CHECK(ranges[0].lastStableId == grid.stableLineIdOf(LineOffset(2)));
+}
+
+TEST_CASE("Folding.terminal.aUserMarkNeitherStartsNorSplitsAFold", "[folding][semanticblocks]")
+{
+    // `mm` on an output line: before UserMark existed this stamped LineFlag::Marked, and the fold scan read
+    // it as a second prompt that split the block in two.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    runCommand(mc, "ls", { "file1", "file2", "file3" });
+    mc.terminal.primaryScreen().setLogicalLineFlags(LineOffset(2), LineFlag::UserMark, true);
+
+    auto const ranges = mc.terminal.foldRanges();
+    REQUIRE(ranges.size() == 1);
+    auto const& grid = mc.terminal.primaryScreen().grid();
+    CHECK(ranges[0].headStableId == grid.stableLineIdOf(LineOffset(0)));
+    CHECK(ranges[0].lastStableId == grid.stableLineIdOf(LineOffset(3)));
 }
 
 TEST_CASE("Folding.terminal.nothingCollapsedProjectsNothing", "[folding]")
@@ -842,7 +896,7 @@ TEST_CASE("Folding.terminal.headCarriesTheMarker", "[folding]")
 TEST_CASE("Folding.terminal.gutterDrawsAFoldColumnOverTheWholeBlock", "[folding]")
 {
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    mc.terminal.settings().foldMarkers = true;
+    mc.terminal.settings().gutter.foldMarkers = true;
     runCommand(mc, "ls", { "file1", "file2" });
 
     auto buffer = RenderBuffer {};
@@ -883,7 +937,7 @@ TEST_CASE("Folding.terminal.gutterSitsBesideTheGridUnderATopStatusLine", "[foldi
     // markers must move with it -- and, more to the point, whatever maps a pixel back has to apply
     // the same shift, which is what Terminal::mainPageTopRow() states once for both directions.
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    mc.terminal.settings().foldMarkers = true;
+    mc.terminal.settings().gutter.foldMarkers = true;
     mc.terminal.settings().statusDisplayPosition = StatusDisplayPosition::Top;
     mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
 
@@ -908,7 +962,7 @@ TEST_CASE("Folding.terminal.gutterSitsBesideTheGridUnderATopStatusLine", "[foldi
 TEST_CASE("Folding.terminal.hoveringTheGutterLightsTheWholeRun", "[folding]")
 {
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    mc.terminal.settings().foldMarkers = true;
+    mc.terminal.settings().gutter.foldMarkers = true;
     runCommand(mc, "ls", { "file1", "file2" });
 
     auto const unhovered = [&] {
@@ -976,7 +1030,10 @@ TEST_CASE("Folding.terminal.noGutterWithoutMarkersOrWithoutFolds", "[folding]")
     SECTION("markers off")
     {
         auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-        mc.terminal.settings().foldMarkers = false;
+        // Every job of the block column off, explicitly: with exit status on, a finished head would show
+        // its dot, as Gutter.terminal.withFoldMarkersOffAFinishedHeadShowsTheDot pins.
+        mc.terminal.settings().gutter =
+            GutterSettings { .foldMarkers = false, .exitStatus = false, .userMarks = false };
         runCommand(mc, "ls", { "file1", "file2" });
 
         auto buffer = RenderBuffer {};
@@ -987,7 +1044,7 @@ TEST_CASE("Folding.terminal.noGutterWithoutMarkersOrWithoutFolds", "[folding]")
     SECTION("no shell integration")
     {
         auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-        mc.terminal.settings().foldMarkers = true;
+        mc.terminal.settings().gutter.foldMarkers = true;
         mc.writeToScreen("just some output\r\nand more\r\n");
 
         auto buffer = RenderBuffer {};
@@ -1013,6 +1070,60 @@ TEST_CASE("Folding.terminal.reflowClearsTheFoldState", "[folding]")
 
     CHECK(mc.terminal.foldState().empty());
     CHECK(mc.terminal.foldProjection().empty());
+}
+
+TEST_CASE("Folding.terminal.aCollapsedFoldMovesWithItsPromptUnderAScrollInsideMargins", "[folding]")
+{
+    // DL and IL below the page's top move the rows' contents while each stable id keeps naming its place.
+    // The ranges cached before the move name the old places, and a collapsed fold is known by its prompt's
+    // id: unless both follow the move, the marker lands on another row -- an output line, or one of no
+    // block at all -- and the wrong rows hide.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) }, LineCount(20) };
+    mc.writeToScreen("status\r\nstatus2\r\n");
+    runCommand(mc, "ls", { "a", "b" });
+    mc.writeToScreen("\033]133;A\033\\$ ");
+    auto const ranges = mc.terminal.foldRanges();
+    REQUIRE(ranges.size() == 1);
+    mc.terminal.foldState().collapse(ranges.front().headStableId);
+    auto const& grid = mc.terminal.primaryScreen().grid();
+
+    auto promptRow = LineOffset {};
+    SECTION("a line above it deleted (DL)")
+    {
+        mc.writeToScreen("\033[2;1H\033[M");
+        promptRow = LineOffset(1);
+    }
+    SECTION("a line above it inserted (IL)")
+    {
+        mc.writeToScreen("\033[2;1H\033[L");
+        promptRow = LineOffset(3);
+    }
+    REQUIRE(grid.lineTextTrimmed(promptRow) == "$ ls");
+
+    CHECK(mc.terminal.foldMarkerAt(promptRow) == FoldMarker::Collapsed);
+    CHECK(mc.terminal.isLineHiddenByFold(promptRow + 1));
+    CHECK(mc.terminal.isLineHiddenByFold(promptRow + 2));
+    CHECK_FALSE(mc.terminal.isLineHiddenByFold(promptRow + 3));
+    CHECK(mc.terminal.foldMarkerAt(promptRow - 1) == FoldMarker::None);
+}
+
+TEST_CASE("Folding.terminal.anEraseOfAFoldsPromptDropsTheCachedFold", "[folding]")
+{
+    // ED 1 on a page that has not scrolled erases the prompt a fold hangs off: the row is blank and its marks
+    // are gone, while neither the grid's generation nor its stable base -- what the cached ranges are keyed
+    // on -- moved. The fold must not stay on the blank row.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) }, LineCount(20) };
+    runCommand(mc, "ls", { "a", "b" });
+    mc.writeToScreen("\033]133;A\033\\$ ");
+    REQUIRE(mc.terminal.foldRanges().size() == 1);
+    REQUIRE(mc.terminal.foldMarkerAt(LineOffset(0)) == FoldMarker::Expanded);
+
+    mc.writeToScreen("\033[2;1H\033[1J");
+    auto const& grid = mc.terminal.primaryScreen().grid();
+    REQUIRE(grid.historyLineCount() == LineCount(0));
+    REQUIRE(grid.lineTextTrimmed(LineOffset(0)).empty());
+
+    CHECK(mc.terminal.foldMarkerAt(LineOffset(0)) == FoldMarker::None);
 }
 
 TEST_CASE("Folding.terminal.alternateScreenIsNeverFolded", "[folding]")
@@ -1192,8 +1303,8 @@ namespace
 /// through and roughly ninety grid lines hidden among them. That gap between the two counts is the
 /// whole point of the fixture; a viewport where they agree cannot show the bug.
 ///
-/// `scrolloff` is dialled down to 2, because the default 8 on a ten-line page leaves a safe area with
-/// no interior and every motion would scroll.
+/// `scrolloff` is dialled down to 2, because the default 8 on a ten-line page leaves a safe area of the
+/// middle row alone, and every motion would scroll.
 [[nodiscard]] auto setupViScrollMock()
 {
     return MockTerm<> {
@@ -1265,6 +1376,25 @@ TEST_CASE("Folding.vi.jWalksDownThroughFoldedHistoryWithoutFallingBack", "[foldi
         REQUIRE(terminal.viewport().isLineVisible(current));
         previous = current;
     }
+}
+
+TEST_CASE("Folding.vi.aUserMarkLeavesTheCachedRangesStanding", "[folding][vi][semanticblocks]")
+{
+    // No fold hangs off a user mark, so `mm` must not throw the cached ranges away: that would cost a rescan
+    // of the scrollback for nothing, and for good on a shell that never stamps a prompt mark. A prompt mark
+    // planted behind the cache's back -- enableLineFlags() is the raw write, which invalidates nothing -- is
+    // what a rescan would see, so the cached answer surviving the `mm` shows there was none.
+    auto mc = setupViMock(/*collapse*/ false);
+    auto const ranges = mc.terminal.foldRanges();
+    auto const cached = std::vector<FoldRange>(ranges.begin(), ranges.end());
+    REQUIRE(cached.size() == 1);
+
+    mc.terminal.primaryScreen().enableLineFlags(LineOffset(2), LineFlag::Marked, true);
+    placeViCursor(mc, LineOffset(1));
+    mc.sendCharSequence("mm");
+    REQUIRE(mc.terminal.primaryScreen().isLogicalLineFlagEnabled(LineOffset(1), LineFlag::UserMark));
+
+    CHECK(std::ranges::equal(mc.terminal.foldRanges(), cached));
 }
 
 TEST_CASE("Folding.vi.aPlainMotionNeverOpensAFold", "[folding][vi]")
@@ -1401,6 +1531,176 @@ TEST_CASE("Folding.viewport.clampIsThePlainIntervalWithNothingCollapsed", "[fold
     CHECK(clampLine(LineOffset(-20)) == LineOffset(-3));
     CHECK(clampLine(LineOffset(20)) == LineOffset(1)); // 5 - 1 - 3
     CHECK(clampLine(LineOffset(-1)) == LineOffset(-1));
+}
+
+// }}}
+// {{{ vim's z fold keys
+
+TEST_CASE("Folding.vi.zaTogglesTheBlockUnderTheCursor", "[folding][vi]")
+{
+    auto mc = setupViMock(/*collapse*/ false);
+    auto const head = mc.terminal.foldRanges()[0].headStableId;
+    placeViCursor(mc, LineOffset(2)); // inside the output, not on the prompt
+
+    mc.sendCharSequence("za");
+    CHECK(mc.terminal.foldState().isCollapsed(head));
+    // The row it stood on is hidden now, so the cursor was moved onto the closed fold -- its head row,
+    // where vim puts it too. Below the block, the second `za` would find nothing to open.
+    CHECK_FALSE(mc.terminal.isLineHiddenByFold(mc.terminal.normalModeCursorPosition().line));
+    CHECK(mc.terminal.normalModeCursorPosition().line == LineOffset(0));
+
+    mc.sendCharSequence("za");
+    CHECK_FALSE(mc.terminal.foldState().isCollapsed(head));
+}
+
+TEST_CASE("Folding.vi.zoOpensAndZcCloses", "[folding][vi]")
+{
+    auto mc = setupViMock(/*collapse*/ false);
+    auto const head = mc.terminal.foldRanges()[0].headStableId;
+    placeViCursor(mc, LineOffset(0));
+
+    mc.sendCharSequence("zo"); // already open
+    CHECK_FALSE(mc.terminal.foldState().isCollapsed(head));
+    mc.sendCharSequence("zc");
+    CHECK(mc.terminal.foldState().isCollapsed(head));
+    mc.sendCharSequence("zc"); // already closed: stays closed, where a toggle would have opened it
+    CHECK(mc.terminal.foldState().isCollapsed(head));
+    mc.sendCharSequence("zo");
+    CHECK_FALSE(mc.terminal.foldState().isCollapsed(head));
+}
+
+TEST_CASE("Folding.vi.zMClosesEveryBlockAndZROpensThemAll", "[folding][vi]")
+{
+    auto mc = setupViMock(/*collapse*/ false);
+    runCommand(mc, "pwd", { "/tmp" });
+    auto const reach = mc.terminal.foldRanges();
+    auto const ranges = std::vector<FoldRange>(reach.begin(), reach.end());
+    REQUIRE(ranges.size() == 2);
+
+    mc.sendCharSequence("zM");
+    for (auto const& range: ranges)
+        CHECK(mc.terminal.foldState().isCollapsed(range.headStableId));
+
+    mc.sendCharSequence("zR");
+    CHECK(mc.terminal.foldState().empty());
+}
+
+TEST_CASE("Folding.vi.zKeysHonourFoldingAvailability", "[folding][vi]")
+{
+    auto mc = setupViMock(/*collapse*/ false);
+    auto const head = mc.terminal.foldRanges()[0].headStableId;
+    mc.terminal.settings().foldingAvailability = FoldingAvailability::Disabled;
+    placeViCursor(mc, LineOffset(1));
+
+    // Nothing that hides output runs while folding is switched off...
+    for (auto const keys: { "za", "zc", "zM" })
+    {
+        mc.sendCharSequence(keys);
+        CHECK_FALSE(mc.terminal.foldState().isCollapsed(head));
+    }
+
+    // ...but what was folded while it was on can still be opened, as ExpandAllFolds can.
+    mc.terminal.foldState().collapse(head);
+    placeViCursor(mc, LineOffset(0));
+    mc.sendCharSequence("zo");
+    CHECK_FALSE(mc.terminal.foldState().isCollapsed(head));
+
+    mc.terminal.foldState().collapse(head);
+    mc.sendCharSequence("zR");
+    CHECK(mc.terminal.foldState().empty());
+}
+
+TEST_CASE("Folding.terminal.unavailableFoldingRefusesEveryVerbThatHides", "[folding]")
+{
+    // The one place folding.enabled is enforced: the fold actions and the gutter's click reach these verbs
+    // as the vi `z` keys do.
+    auto mc = setupViMock(/*collapse*/ false);
+    auto& terminal = mc.terminal;
+    auto const head = terminal.foldRanges()[0].headStableId;
+    terminal.settings().foldingAvailability = FoldingAvailability::Disabled;
+
+    CHECK_FALSE(terminal.toggleFoldContaining(LineOffset(1)));
+    terminal.collapseFoldContaining(LineOffset(1));
+    CHECK_FALSE(terminal.toggleLastFold());
+    CHECK_FALSE(terminal.collapseLastFold());
+    CHECK_FALSE(terminal.collapseAllFolds());
+    CHECK(terminal.foldState().empty());
+
+    // A toggle is refused even where it would open: on a fold collapsed while folding was on...
+    terminal.foldState().collapse(head);
+    CHECK_FALSE(terminal.toggleFoldContaining(LineOffset(0)));
+    CHECK_FALSE(terminal.toggleLastFold());
+    CHECK(terminal.foldState().isCollapsed(head));
+
+    // ...which only the expands open.
+    CHECK(terminal.expandFoldContaining(LineOffset(0)));
+    terminal.foldState().collapse(head);
+    CHECK(terminal.expandAllFolds());
+    CHECK(terminal.foldState().empty());
+}
+
+TEST_CASE("Folding.terminal.unavailableFoldingRefusesTheAutomaticCollapse", "[folding]")
+{
+    // auto_collapse_on_new_command travels as itself; the switch beside it is what refuses it.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) }, LineCount(20) };
+    mc.terminal.settings().autoCollapseFoldOnNewCommand = true;
+
+    SECTION("folding on: the next prompt collapses the command before it")
+    {
+        runCommand(mc, "ls", { "file1", "file2" });
+        runCommand(mc, "pwd", { "/" });
+        CHECK(mc.terminal.hiddenLineCount() > LineCount(0));
+    }
+
+    SECTION("folding off: nothing collapses")
+    {
+        mc.terminal.settings().foldingAvailability = FoldingAvailability::Disabled;
+        runCommand(mc, "ls", { "file1", "file2" });
+        runCommand(mc, "pwd", { "/" });
+        CHECK(mc.terminal.hiddenLineCount() == LineCount(0));
+    }
+}
+
+TEST_CASE("Folding.vi.zMAndZROnTheAlternateScreenLeaveThePrimaryFoldsAlone", "[folding][vi]")
+{
+    // In vim, the primary screen and its folds are out of sight: a fold key there must not fold away the
+    // output the user returns to.
+    auto mc = setupViMock(/*collapse*/ false);
+    auto const head = mc.terminal.foldRanges()[0].headStableId;
+    mc.writeToScreen("\033[?1049h");
+    mc.terminal.inputHandler().setMode(ViMode::Normal);
+
+    mc.sendCharSequence("zM");
+    CHECK(mc.terminal.foldState().empty());
+
+    mc.terminal.foldState().collapse(head);
+    mc.sendCharSequence("zR");
+    CHECK(mc.terminal.foldState().isCollapsed(head));
+}
+
+TEST_CASE("Folding.terminal.theFoldAllAndFoldLastVerbsActOnlyOnThePrimaryPage", "[folding]")
+{
+    // The verbs behind CollapseAllFolds, ExpandAllFolds, CollapseLastFold and ToggleLastFold, asked while
+    // another page is on display, as foldContaining() is.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    runCommand(mc, "ls", { "file1", "file2" });
+    auto const head = mc.terminal.foldRanges()[0].headStableId;
+    mc.writeToScreen("\033[?1049h");
+
+    CHECK_FALSE(mc.terminal.collapseAllFolds());
+    CHECK_FALSE(mc.terminal.collapseLastFold());
+    CHECK_FALSE(mc.terminal.toggleLastFold());
+    CHECK(mc.terminal.foldState().empty());
+
+    mc.terminal.foldState().collapse(head);
+    CHECK_FALSE(mc.terminal.expandAllFolds());
+    CHECK_FALSE(mc.terminal.toggleLastFold());
+    CHECK(mc.terminal.foldState().isCollapsed(head));
+
+    // Back on the primary screen they act again.
+    mc.writeToScreen("\033[?1049l");
+    CHECK(mc.terminal.toggleLastFold());
+    CHECK(mc.terminal.foldState().empty());
 }
 
 // }}}
@@ -1985,45 +2285,6 @@ TEST_CASE("Folding.terminal.aLineCountResizeKeepsTheFoldState", "[folding]")
     mc.terminal.refreshFoldState();
     CHECK(!mc.terminal.foldState().empty());
     CHECK(mc.terminal.hiddenLineCount() > LineCount(0));
-}
-
-TEST_CASE("Folding.terminal.theGutterStopsWhereTheProjectionDoes", "[folding]")
-{
-    // Collapse enough that the projection is shorter than the page: with no scrollback to backfill
-    // from, the rows below the content are blank and Grid::render draws nothing on them. The gutter
-    // walked the whole page regardless, and translateScreenToGridLine() answers for a row past the
-    // projection with the LAST visible line -- so each blank row was handed that line's marker, a
-    // column of duplicates hanging below the content while the grid beside it stayed empty.
-    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
-    mc.terminal.settings().foldMarkers = true;
-    runCommand(mc, "a", { "1", "2", "3", "4", "5" });
-    runCommand(mc, "b", { "6" });
-
-    auto const ranges = mc.terminal.foldRanges();
-    REQUIRE(ranges.size() == 2);
-
-    // The OLDER block, so the newer one stays expanded and its body reaches the bottom of the content:
-    // that is the range a blank row extrapolated onto, and so the marker that used to be repeated.
-    mc.terminal.foldState().collapse(ranges.back().headStableId);
-
-    auto const projectedRows = mc.terminal.foldProjection().size();
-    REQUIRE(projectedRows > 0);
-    REQUIRE(projectedRows < unbox<size_t>(mc.terminal.pageSize().lines));
-
-    auto buffer = RenderBuffer {};
-    mc.terminal.fillRenderBuffer(buffer, true);
-
-    // Nothing is drawn beside a row the grid leaves blank.
-    for (auto const& cell: buffer.gutter)
-    {
-        CAPTURE(cell.lineOffset);
-        CHECK(cell.lineOffset < LineOffset::cast_from(projectedRows));
-    }
-
-    // And no row carries two markers.
-    auto rows = std::set<int> {};
-    for (auto const& cell: buffer.gutter)
-        CHECK(rows.insert(unbox<int>(cell.lineOffset)).second);
 }
 
 // }}}

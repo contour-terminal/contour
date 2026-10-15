@@ -155,12 +155,76 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
     // Once per pass, not once per line: three facts that cannot change while a buffer is being built.
     _contextTintingPossible { terminal.settings().contextTintScope != ContextTintScope::Off
                               && terminal.colorPalette().hasContextTints()
-                              && &screen == &terminal.primaryScreen() }
+                              && &screen == &terminal.primaryScreen() },
+    _blinkOpacity { terminal.blinkState() },
+    _rapidBlinkOpacity { terminal.rapidBlinkState() }
 {
     output.frameID = terminal.lastFrameID();
 
     if (_cursorPosition)
         output.cursor = renderCursor();
+}
+
+void RenderBufferBuilder::renderDetachedLine(std::vector<RenderCell>& output,
+                                             Terminal const& terminal,
+                                             Line const& line,
+                                             LineOffset screenRow,
+                                             ColumnCount columns)
+{
+    // A blank row has no materialised cells to read -- the reason Grid::render keeps one off the
+    // per-cell path -- and nothing on it to show anyway.
+    if (line.isBlank())
+        return;
+
+    auto const& palette = terminal.colorPalette();
+    auto const reverseVideo = terminal.isModeEnabled(DECMode::ReverseVideo);
+    auto const blink = terminal.blinkState();
+    auto const rapidBlink = terminal.rapidBlinkState();
+    auto const limit = std::min(unbox<size_t>(line.size()), unbox<size_t>(std::max(columns, ColumnCount(0))));
+    // Only what shows: trailing default cells would draw nothing over the band. The wide-glyph check below
+    // still measures against the limit, so a glyph that starts before the trimmed end is copied whole.
+    auto const shown = std::min(limit, unbox<size_t>(line.trimmedColumns()));
+    auto const& storage = line.storage();
+    auto const first = output.size();
+    output.reserve(first + shown);
+
+    for (auto const column: std::views::iota(size_t { 0 }, shown))
+    {
+        auto const cell = ConstCellProxy(storage, column);
+
+        // Half a glyph is not a glyph: one that would straddle the limit is dropped whole.
+        if (column + std::max<size_t>(1, cell.width()) > limit)
+            break;
+
+        // No selection, cursor, cursor line or highlight: those describe the row where it really is,
+        // which is still on the page underneath. No tint either: a cell on the page background stays on
+        // it, and the header's opaque band shows through.
+        auto const [fg, bg] = makeColors(palette,
+                                         palette.colorLookupTable,
+                                         cell.flags(),
+                                         reverseVideo,
+                                         cell.foregroundColor(),
+                                         cell.backgroundColor(),
+                                         /*selected=*/false,
+                                         /*isCursor=*/false,
+                                         /*isCursorLine=*/false,
+                                         /*isHighlighted=*/false,
+                                         blink,
+                                         rapidBlink,
+                                         std::nullopt);
+
+        // The row's own line flags stay behind: the copy is drawn single width and single height.
+        output.emplace_back(makeRenderCell(palette,
+                                           terminal.hyperlinks(),
+                                           cell,
+                                           LineFlags {},
+                                           fg,
+                                           bg,
+                                           screenRow,
+                                           ColumnOffset::cast_from(column)));
+    }
+
+    markShapingGroup(std::span { output }.subspan(first));
 }
 
 std::optional<RGBColor> RenderBufferBuilder::tintFor(ContextId id) const noexcept
@@ -216,8 +280,8 @@ optional<RenderCursor> RenderBufferBuilder::renderCursor() const
                                                     _reverseVideo,
                                                     cellFg,
                                                     cellBg,
-                                                    _terminal->blinkState(),
-                                                    _terminal->rapidBlinkState());
+                                                    _blinkOpacity,
+                                                    _rapidBlinkOpacity);
         if (holds_alternative<CellForegroundColor>(colorPalette.cursor.color))
             return sgrColors.foreground;
         if (holds_alternative<CellBackgroundColor>(colorPalette.cursor.color))
@@ -316,7 +380,12 @@ RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
 
     renderCell.image = screenCell.imageFragment();
 
-    if (auto href = hyperlinks.hyperlinkById(screenCell.hyperlink()))
+    // Most cells link nowhere: those are done here, without a lookup in the storage.
+    auto const hyperlinkId = screenCell.hyperlink();
+    if (!hyperlinkId)
+        return renderCell;
+
+    if (auto href = hyperlinks.hyperlinkById(hyperlinkId))
     {
         auto const& color = href->state == HyperlinkState::Hover ? colorPalette.hyperlinkDecoration.hover
                                                                  : colorPalette.hyperlinkDecoration.normal;
@@ -353,8 +422,6 @@ RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
                                  CellLocation { .line = gridPosition.line, .column = gridPosition.column });
     auto const highlighted =
         _terminal->isHighlighted(CellLocation { .line = gridPosition.line, .column = gridPosition.column });
-    auto const blink = _terminal->blinkState();
-    auto const rapidBlink = _terminal->rapidBlinkState();
 
     return makeColors(_terminal->colorPalette(),
                       _colorLookupTable,
@@ -366,8 +433,8 @@ RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
                       paintCursor,
                       _useCursorlineColoring,
                       highlighted,
-                      blink,
-                      rapidBlink,
+                      _blinkOpacity,
+                      _rapidBlinkOpacity,
                       _currentContextTint);
 }
 
@@ -555,14 +622,27 @@ void RenderBufferBuilder::prepareSearchHighlights(LineOffset gridLine)
     auto const pattern = u32string_view(search.pattern);
     auto const columns = unbox(grid.pageSize().columns);
 
-    // A match that reaches this row may begin on a row above it in the same logical line. Each row it
-    // crosses gives it at least one codepoint of the needle, so it begins no further up than the needle
-    // is long.
-    auto const top = -boxed_cast<LineOffset>(grid.historyLineCount());
-    auto const reach = LineOffset::cast_from(pattern.size());
+    // A match that reaches this row may begin on a row above it in the same logical line. Each row above
+    // that holds text gives it at least one codepoint of the needle, so it begins no further up than the
+    // needle has codepoints in rows that hold text. A row holding none -- all of it a tall block's lower
+    // part -- gives the match nothing, and costs nothing to cross.
+    auto const holdsText = [&grid](LineOffset row) {
+        auto const& line = grid.lineAt(row);
+        auto const& storage = line.storage();
+        return !line.isBlank()
+               && std::ranges::any_of(
+                   std::views::iota(size_t { 0 }, unbox<size_t>(line.size())), [&storage](size_t column) {
+                       return storage.clusterSize[column] != 0 && !holdsNoText(storage, column);
+                   });
+    };
     auto firstRow = gridLine;
-    while (firstRow > top && firstRow > gridLine - reach && grid.isLineWrapped(firstRow))
+    auto rowsWithText = size_t { 0 };
+    while (rowsWithText < pattern.size() && grid.continuesRowAbove(firstRow))
+    {
         --firstRow;
+        if (holdsText(firstRow))
+            ++rowsWithText;
+    }
     if (_searchScannedThrough)
         firstRow = max(firstRow, *_searchScannedThrough + 1);
 

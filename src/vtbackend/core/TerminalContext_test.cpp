@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/TerminalContext.hpp>
 
+#include <core/platform/testing/InMemoryFileSystem.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <optional>
+#include <ranges>
+#include <vector>
+
+using core::platform::testing::InMemoryFileSystem;
 using namespace vtbackend;
 using namespace std::string_view_literals;
 
@@ -148,6 +157,25 @@ TEST_CASE("ContextSignal.a peer-supplied number is validated, not cast", "[conte
     CHECK(!isKnownContextSignal(16));
 }
 
+TEST_CASE("ContextSignal.exactly the signals numbered alike everywhere are portable", "[context]")
+{
+    // The twelve whose numbers Linux, macOS, the BSDs, Solaris and AIX agree on, spelled out rather than
+    // re-derived from the table.
+    constexpr auto Portable = std::array<uint8_t, 12> { 1, 2, 3, 4, 5, 6, 8, 9, 11, 13, 14, 15 };
+
+    auto portable = std::vector<uint8_t> {};
+    for (auto const number: std::views::iota(1, 64))
+    {
+        auto const value = static_cast<uint8_t>(number);
+        if (isKnownContextSignal(value)
+            && signalNumberingOf(static_cast<ContextSignal>(value)) == SignalNumbering::Portable)
+            portable.push_back(value);
+    }
+    CHECK(std::ranges::equal(portable, Portable));
+    CHECK(signalNumberingOf(ContextSignal::Bus) == SignalNumbering::LinuxOnly);
+    CHECK(signalNumberingOf(ContextSignal::None) == SignalNumbering::LinuxOnly);
+}
+
 TEST_CASE("ContextField.the mask names exactly the assigned bits", "[context]")
 {
     auto expected = uint16_t {};
@@ -166,6 +194,64 @@ TEST_CASE("ContextOutcome.exit codes map the way a shell would report them", "[c
     CHECK(makeOutcome(ContextExit::Failure, ContextSignal::Segv).asShellExitCode() == 139);
     CHECK(makeOutcome(ContextExit::Interrupt).asShellExitCode() == 130);
     CHECK(ContextOutcome {}.asShellExitCode() == 0);
+}
+
+TEST_CASE("ContextSignal.signalThatEnded.readsAShellsSignalExitCode", "[context]")
+{
+    struct Row
+    {
+        std::optional<int> exitCode;
+        ContextSignal expected = ContextSignal::None;
+    };
+    auto const rows = std::array {
+        Row { 129, ContextSignal::Hup },  Row { 130, ContextSignal::Int },
+        Row { 131, ContextSignal::Quit }, Row { 134, ContextSignal::Abrt },
+        Row { 137, ContextSignal::Kill }, Row { 139, ContextSignal::Segv },
+        Row { 141, ContextSignal::Pipe }, Row { 143, ContextSignal::Term },
+        Row { 135, ContextSignal::None }, Row { 138, ContextSignal::None },
+        Row { 140, ContextSignal::None }, Row { 152, ContextSignal::None },
+        Row { 153, ContextSignal::None }, Row { 159, ContextSignal::None },
+        Row { 128, ContextSignal::None }, Row { 200, ContextSignal::None },
+        Row { 255, ContextSignal::None }, Row { 393, ContextSignal::None },
+        Row { 2, ContextSignal::None },   Row { 0, ContextSignal::None },
+        Row { -9, ContextSignal::None },  Row { std::nullopt, ContextSignal::None },
+    };
+    // 135, 138, 140, 152, 153 and 159 are 128 + SIGBUS, SIGUSR1, SIGUSR2, SIGXCPU, SIGXFSZ and SIGSYS on
+    // Linux, but other systems number those signals differently, and the shell may run on any of them;
+    // 128 is 128 + 0, which is no signal; 200 is 128 + 72, which this terminal does not know; 393 would be
+    // 128 + 9 again were it taken modulo 256, but no shell reports a code above 255.
+    for (auto const& row: rows)
+    {
+        INFO(row.exitCode.value_or(-1));
+        CHECK(signalOfExitCode(row.exitCode) == row.expected);
+        CHECK(signalThatEnded(row.exitCode, ContextOutcome {}) == row.expected);
+    }
+}
+
+TEST_CASE("ContextSignal.signalThatEnded.prefersTheSignalOsc3008Named", "[context]")
+{
+    auto const segv = ContextOutcome { .exit = ContextExit::Crash, .signal = ContextSignal::Segv };
+    CHECK(signalThatEnded(137, segv) == ContextSignal::Segv);
+    CHECK(signalThatEnded(std::nullopt, segv) == ContextSignal::Segv);
+    CHECK(signalThatEnded(2, segv) == ContextSignal::Segv);
+
+    // A crash that named no signal is no signal, whatever code stands beside it.
+    auto const crash = ContextOutcome { .exit = ContextExit::Crash };
+    CHECK(signalThatEnded(std::nullopt, crash) == ContextSignal::None);
+    CHECK(signalThatEnded(137, crash) == ContextSignal::None);
+}
+
+TEST_CASE("ContextSignal.signalThatEnded.yieldsToAnExplicitVerdict", "[context]")
+{
+    // OSC 3008 said how the command ended and named no signal: a 128 + n code is then the program's own
+    // exit code, not a shell's spelling of a signal death.
+    CHECK(signalThatEnded(130, makeOutcome(ContextExit::Failure, ContextSignal::None, 130))
+          == ContextSignal::None);
+    CHECK(signalThatEnded(137, makeOutcome(ContextExit::Success)) == ContextSignal::None);
+    CHECK(signalThatEnded(130, makeOutcome(ContextExit::Interrupt)) == ContextSignal::None);
+
+    // Only a verdict nobody gave leaves the code to speak for itself.
+    CHECK(signalThatEnded(130, ContextOutcome {}) == ContextSignal::Int);
 }
 
 // }}}
@@ -411,6 +497,36 @@ TEST_CASE("ContextStack.a push at the depth limit keeps the earlier and discards
     CHECK(stack.droppedPushes() == 1);
     CHECK(stack.chain().front().record->identifier == "a"); // the earliest survived
     CHECK(stack.activeId() == stack.chain().back().record->id);
+}
+
+TEST_CASE("ContextStack.new limits hold from the next push and truncate nothing", "[context]")
+{
+    // A configuration reload lowers the limits under a running session: what is there stays, as it does
+    // when the limit is reached, and the next push meets the new one.
+    auto stack = ContextStack { { .maxDepth = 8, .maxRetained = 64 } };
+    stack.apply(startOf("a", ContextType::Shell));
+    stack.apply(startOf("b", ContextType::Command));
+    stack.apply(startOf("c", ContextType::Command));
+    stack.apply(endOf("c"));
+    REQUIRE(stack.retainedCount() == 3);
+
+    stack.setLimits({ .maxDepth = 1, .maxRetained = 2 });
+
+    CHECK(stack.limits() == ContextStackLimits { .maxDepth = 1, .maxRetained = 2 });
+    CHECK(stack.depth() == 2);
+    CHECK(stack.retainedCount() == 3);
+    CHECK(stack.apply(startOf("d", ContextType::Command)).kind == ContextTransitionKind::DepthExceeded);
+    CHECK(stack.droppedPushes() == 1);
+
+    // Room again once the ancestry is back within the depth; storing the new record evicts the retired
+    // one, the only record that is not an ancestor, down to the new retention.
+    stack.apply(endOf("b"));
+    REQUIRE(stack.depth() == 1);
+    CHECK(stack.apply(startOf("e", ContextType::Command)).kind == ContextTransitionKind::DepthExceeded);
+    stack.setLimits({ .maxDepth = 2, .maxRetained = 2 });
+    CHECK(stack.apply(startOf("e", ContextType::Command)).kind != ContextTransitionKind::DepthExceeded);
+    CHECK(stack.depth() == 2);
+    CHECK(stack.retainedCount() == 2);
 }
 
 TEST_CASE("ContextStack.a refused push does not let its end pop the parent", "[context]")
@@ -905,6 +1021,186 @@ TEST_CASE("ContextStack.a nested run0 inside a container reads as foreign and el
     REQUIRE(cwd.has_value());
     CHECK(cwd->locality == ContextLocality::Foreign);
     CHECK(stack.chain().front().record->type == ContextType::Container);
+}
+
+// }}}
+// {{{ this machine's identity
+
+TEST_CASE("readHostIdentity takes the machine id's first line, trimmed", "[context][identity]")
+{
+    // Trailing whitespace would make every comparison against an OSC 3008 machineid= fail.
+    auto files = InMemoryFileSystem {};
+    files.addFile(MachineIdPath, "3deb5353d3ba43d08201c136a47ead7b \r\nrest\n");
+
+    CHECK(readHostIdentity(files, "zeta")
+          == HostIdentity { .machineId = "3deb5353d3ba43d08201c136a47ead7b", .hostname = "zeta" });
+}
+
+TEST_CASE("readHostIdentity on a machine without a machine id knows its host name alone",
+          "[context][identity]")
+{
+    auto const files = InMemoryFileSystem {};
+
+    CHECK(readHostIdentity(files, "zeta") == HostIdentity { .machineId = {}, .hostname = "zeta" });
+}
+
+TEST_CASE("a host identity views its own strings", "[context][identity]")
+{
+    auto const identity =
+        HostIdentity { .machineId = "3deb5353d3ba43d08201c136a47ead7b", .hostname = "zeta" };
+    auto const view = identity.view();
+
+    CHECK(view.machineId == identity.machineId);
+    CHECK(view.hostname == identity.hostname);
+}
+
+TEST_CASE("isMachineId takes exactly 32 hexadecimal digits", "[context][identity]")
+{
+    CHECK(isMachineId("3deb5353d3ba43d08201c136a47ead7b"));
+    CHECK(isMachineId("3DEB5353D3BA43D08201C136A47EAD7B"));
+
+    CHECK_FALSE(isMachineId(""));
+    CHECK_FALSE(isMachineId("uninitialized")); // systemd's placeholder until a container's first boot
+    CHECK_FALSE(isMachineId("3deb5353d3ba43d08201c136a47ead7"));
+    CHECK_FALSE(isMachineId("3deb5353d3ba43d08201c136a47ead7b0"));
+    CHECK_FALSE(isMachineId("3deb5353-d3ba-43d0-8201-c136a47ead7b"));
+    CHECK_FALSE(isMachineId("3deb5353d3ba43d08201c136a47eadxy"));
+}
+
+namespace
+{
+/// Whether two complete identities, as machines state them of themselves, name one machine.
+[[nodiscard]] bool sameMachineStated(LocalIdentity const& other, LocalIdentity const& self) noexcept
+{
+    return sameMachine(other, MissingMachineId::Absent, self);
+}
+
+/// Whether what a context claims names the machine @p self describes.
+[[nodiscard]] bool sameMachineClaimed(LocalIdentity const& claim, LocalIdentity const& self) noexcept
+{
+    return sameMachine(claim, MissingMachineId::Omitted, self);
+}
+} // namespace
+
+TEST_CASE("sameMachine lets the machine ids decide when both are known", "[context][identity]")
+{
+    for (auto const missing: { MissingMachineId::Absent, MissingMachineId::Omitted })
+    {
+        // Equal ids are one machine whatever each calls itself, and the case of a hex digit is no difference.
+        CHECK(sameMachine(
+            { .machineId = "3DEB5353D3BA43D08201C136A47EAD7B", .hostname = "eta" }, missing, ThisMachine));
+        // Different ids are two, even under one name: a container or a cloned VM.
+        CHECK_FALSE(sameMachine(
+            { .machineId = "77aa5353d3ba43d08201c136a47ead7b", .hostname = "zeta" }, missing, ThisMachine));
+    }
+}
+
+TEST_CASE("sameMachine holds a machine with an id and one without for two", "[context][identity]")
+{
+    // A WSL distribution has a machine id and the Windows desktop it runs on has none, under one host name:
+    // two installs, whose paths name different filesystems.
+    auto const wsl =
+        LocalIdentity { .machineId = "3deb5353d3ba43d08201c136a47ead7b", .hostname = "DESKTOP-ABC" };
+    auto const windows = LocalIdentity { .machineId = {}, .hostname = "DESKTOP-ABC" };
+
+    CHECK_FALSE(sameMachineStated(wsl, windows));
+    CHECK_FALSE(sameMachineStated(windows, wsl));
+    // A claim naming an id, judged on a machine without one, comes from another install as well.
+    CHECK_FALSE(sameMachineClaimed(wsl, windows));
+}
+
+TEST_CASE("sameMachine judges a claim that names no machine id by its host name", "[context][identity]")
+{
+    // `machineid=` is optional to an OSC 3008 emitter, so a context without one says nothing about it: on a
+    // machine that has an id, the host names decide -- where a daemon's identity, which names every id it
+    // has, would be another machine's.
+    auto const named = [](std::string_view hostname) {
+        return LocalIdentity { .machineId = {}, .hostname = hostname };
+    };
+
+    CHECK(sameMachineClaimed(named("zeta"), ThisMachine));
+    CHECK(sameMachineClaimed(named("ZETA"), ThisMachine));
+    CHECK_FALSE(sameMachineClaimed(named("eta"), ThisMachine));
+    CHECK_FALSE(sameMachineClaimed(named("localhost"), ThisMachine));
+    CHECK_FALSE(sameMachineStated(named("zeta"), ThisMachine));
+}
+
+TEST_CASE("sameMachine takes a machine id that is not one for unknown", "[context][identity]")
+{
+    // Two containers that both still read `uninitialized` are not thereby one machine: their names decide.
+    CHECK_FALSE(sameMachineStated({ .machineId = "uninitialized", .hostname = "alpha" },
+                                  { .machineId = "uninitialized", .hostname = "beta" }));
+    CHECK(sameMachineStated({ .machineId = "uninitialized", .hostname = "alpha" },
+                            { .machineId = "uninitialized", .hostname = "alpha" }));
+    // And against a real id, it is the one-id-known case: two machines for a stated identity, the host
+    // names for a claim.
+    CHECK_FALSE(sameMachineStated({ .machineId = "uninitialized", .hostname = "zeta" }, ThisMachine));
+    CHECK(sameMachineClaimed({ .machineId = "uninitialized", .hostname = "zeta" }, ThisMachine));
+}
+
+TEST_CASE("sameMachine lets the whole host names decide when neither id is known", "[context][identity]")
+{
+    auto const named = [](std::string_view hostname) {
+        return LocalIdentity { .machineId = {}, .hostname = hostname };
+    };
+
+    for (auto const missing: { MissingMachineId::Absent, MissingMachineId::Omitted })
+    {
+        CHECK(sameMachine(named("zeta"), missing, named("ZETA")));
+        CHECK_FALSE(sameMachine(named("zeta"), missing, named("eta")));
+        // Whole names: a qualified name and its first label are not proof of one machine.
+        CHECK_FALSE(sameMachine(named("zeta"), missing, named("zeta.lan")));
+        // An empty name says nothing.
+        CHECK_FALSE(sameMachine(named(""), missing, named("")));
+        CHECK_FALSE(sameMachine(named("zeta"), missing, named("")));
+    }
+}
+
+TEST_CASE("sameMachine takes the loopback name for no machine at all", "[context][identity]")
+{
+    auto const named = [](std::string_view hostname) {
+        return LocalIdentity { .machineId = {}, .hostname = hostname };
+    };
+
+    // Every machine answers to it, so two machines that both report it have said nothing about where
+    // either runs.
+    CHECK_FALSE(sameMachineStated(named("localhost"), named("localhost")));
+    CHECK_FALSE(sameMachineStated(named("LOCALHOST.localdomain"), named("localhost.localdomain")));
+    CHECK_FALSE(sameMachineStated(named("localhost"), named("zeta")));
+    // The machine ids still decide where both are known.
+    CHECK(sameMachineStated({ .machineId = ThisMachine.machineId, .hostname = "localhost" }, ThisMachine));
+}
+
+TEST_CASE("ContextStack.localityOf holds a context to sameMachine", "[context][identity]")
+{
+    auto const localityFor = [](std::string_view machineId, std::string_view hostname, LocalIdentity self) {
+        auto stack = ContextStack {};
+        auto shell = startOf("shell", ContextType::Shell);
+        withCwd(shell, "/home/user");
+        if (!machineId.empty())
+            withMachineId(shell, machineId);
+        if (!hostname.empty())
+            withHostname(shell, hostname);
+        stack.apply(shell);
+        return stack.localityOf(stack.activeId(), self);
+    };
+    auto const windows = LocalIdentity { .machineId = {}, .hostname = "zeta" };
+
+    // systemd in a WSL distribution names its machine id; the Windows terminal around it has none.
+    CHECK(localityFor(ThisMachine.machineId, "zeta", windows) == ContextLocality::Foreign);
+    // A name and its qualified form are two names, as for a daemon.
+    CHECK(localityFor({}, "zeta.lan", windows) == ContextLocality::Foreign);
+    CHECK(localityFor({}, "ZETA", windows) == ContextLocality::Local);
+    // A loopback name proves nothing, even to a terminal that calls itself that.
+    CHECK(localityFor({}, "localhost", { .machineId = {}, .hostname = "localhost" })
+          == ContextLocality::Foreign);
+
+    // A context that names no machine id is judged by its host name, also on a machine that has an id:
+    // a matching `machineid=`, failing that a matching `hostname=`.
+    CHECK(localityFor({}, "zeta", ThisMachine) == ContextLocality::Local);
+    CHECK(localityFor({}, "eta", ThisMachine) == ContextLocality::Foreign);
+    CHECK(localityFor("uninitialized", "zeta", ThisMachine) == ContextLocality::Local);
+    CHECK(localityFor(ThisMachine.machineId, "elsewhere", ThisMachine) == ContextLocality::Local);
 }
 
 // }}}

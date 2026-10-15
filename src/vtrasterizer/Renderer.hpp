@@ -26,6 +26,7 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace vtrasterizer
@@ -387,14 +388,47 @@ class Renderer
     /// @param lines  Contiguous sub-range of RenderLine entries to render.
     void renderLines(std::span<vtbackend::RenderLine const> lines);
 
-    /// Draws the fold markers into the gutter -- the strip the page margin reserves to the LEFT of
-    /// column 0 (@see contour::geometry::fitPageToPixels, which folds the gutter into pageMargin.left).
+    /// Draws the gutter -- the strip the page margin reserves to the LEFT of column 0, which
+    /// contour::geometry::fitPageToPixels folds into pageMargin.left.
     ///
-    /// This is the ONE place in the tree that addresses a negative column, and the reason it can: a
-    /// gutter cell is mapped through the same GridMetrics as any other, and column -1 lands exactly in
-    /// the strip, so no second coordinate system is introduced for it. Keeping that here means nothing
-    /// that walks RenderBuffer::cells -- selection, hit-testing, accessibility -- ever meets one.
+    /// The ONE place in the tree that addresses negative columns, and the reason it can: each gutter cell
+    /// carries its column (-N .. -1) and is mapped through the same GridMetrics as any other, so the strip
+    /// needs no second coordinate system. Keeping that here means nothing that walks
+    /// RenderBuffer::cells -- selection, hit-testing, accessibility -- ever meets one.
+    ///
+    /// @param gutter  The gutter cells of the frame.
+    /// @see contour::geometry::fitPageToPixels
     void renderGutter(std::span<vtbackend::RenderGutterCell const> gutter);
+
+    /// Draws the annotations -- render-only text such as a collapsed fold's `⋯ N lines` -- over the cells
+    /// already drawn, as the terminal laid them out. Never through RenderBuffer::cells, which selection,
+    /// copying and the accessibility bridge walk.
+    ///
+    /// @param annotations  The annotation cells of the frame (RenderBuffer::annotations).
+    void renderAnnotations(std::span<vtbackend::RenderCell const> annotations);
+
+    /// Draws one cell that lives outside RenderBuffer::cells -- a gutter cell, or one of an annotation's --
+    /// background then text. A cell that fails to draw is logged and skipped, so the frame goes on.
+    ///
+    /// @param cell  The cell to draw.
+    /// @param what  The caller, named in the log line.
+    void renderOverlayCell(vtbackend::RenderCell const& cell, std::string_view what);
+
+    /// Draws the sticky command header over screen row @p row: an opaque band across the page's
+    /// @p columns, the header's cells and its chip where the terminal laid them out, and a one-pixel
+    /// separator along the band's bottom edge.
+    ///
+    /// The page columns only, not the gutter strip: the fold column beside row 0 keeps describing the row
+    /// it stands beside, which belongs to the very block the header names. Called in a render step of its
+    /// own, after the page's, because one step draws all its rectangles before any of its glyphs.
+    ///
+    /// @see renderImpl
+    /// @param header The header the render buffer carries.
+    /// @param row The screen row it covers -- the main page's first (Terminal::mainPageTopRow()).
+    /// @param columns The main page's width.
+    void renderStickyHeader(vtbackend::RenderStickyHeader const& header,
+                            vtbackend::LineOffset row,
+                            vtbackend::ColumnCount columns);
 
     void executeImageDiscards();
 

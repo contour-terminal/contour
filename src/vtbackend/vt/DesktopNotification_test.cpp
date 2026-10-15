@@ -1,11 +1,80 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
 
 #include <core/Base64.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cstddef>
+#include <format>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <vector>
+
 using namespace vtbackend;
+
+namespace
+{
+
+/// A terminal that records the OSC 99 notifications it raises.
+class NotificationTerm final: public MockTerm<>
+{
+  public:
+    NotificationTerm(): MockTerm<> { PageSize { .lines = LineCount(5), .columns = ColumnCount(40) } } {}
+
+    void showDesktopNotification(DesktopNotification const& notification) override
+    {
+        _shown.push_back(notification);
+    }
+
+    /// @return The notifications raised so far, oldest first.
+    [[nodiscard]] std::vector<DesktopNotification> const& shown() const noexcept { return _shown; }
+
+    /// @return The terminal's OSC 99 bookkeeping.
+    [[nodiscard]] DesktopNotificationManager& manager() noexcept
+    {
+        return terminal.desktopNotificationManager();
+    }
+
+    /// Writes @p body as the application would: wrapped in `OSC 99 ; ... ST`.
+    void osc99(std::string_view body) { writeToScreen(std::format("\033]99;{}\033\\", body)); }
+
+    /// @return The identifiers a `p=alive` query is answered with.
+    [[nodiscard]] std::vector<std::string> aliveIdentifiers()
+    {
+        discardPendingReplies();
+        osc99("i=query:p=alive;");
+        terminal.flushInput();
+        auto const& reply = replyData();
+        auto const prefix = std::string_view { "p=alive;" };
+        auto const begin = reply.find(prefix);
+        REQUIRE(begin != std::string::npos);
+        auto const listBegin = begin + prefix.size();
+        auto const list =
+            std::string_view { reply }.substr(listBegin, reply.find('\033', listBegin) - listBegin);
+        auto identifiers = std::vector<std::string> {};
+        for (auto const part: std::views::split(list, ','))
+            identifiers.emplace_back(std::string_view { part });
+        return identifiers;
+    }
+
+  private:
+    std::vector<DesktopNotification> _shown;
+};
+
+/// @return Whether @p identifiers holds @p identifier.
+bool holds(std::vector<std::string> const& identifiers, std::string const& identifier)
+{
+    return std::ranges::contains(identifiers, identifier);
+}
+
+/// How far past a bound a test's burst of new identifiers goes.
+constexpr auto Overshoot = size_t { 72 };
+
+} // namespace
 
 TEST_CASE("DesktopNotification.ParseSimpleTitle", "[DesktopNotification]")
 {
@@ -206,4 +275,113 @@ TEST_CASE("DesktopNotification.CloseResponseUntracked", "[DesktopNotification]")
     // whose desktop cannot report closure -- which is every sandboxed Contour, because
     // org.freedesktop.portal.Notification has no close signal at all.
     CHECK(buildOSC99CloseResponse("test-id", CloseReport::Untracked) == "99;i=test-id:p=close;untracked");
+}
+
+TEST_CASE("DesktopNotification.PendingChunksAreBounded", "[DesktopNotification]")
+{
+    // An application starting chunked notifications under ever new identifiers, and finishing none.
+    auto term = NotificationTerm {};
+    auto const limit = NotificationLimits.pending;
+    auto const sent = limit + Overshoot;
+    for (auto const n: std::views::iota(size_t { 0 }, sent))
+        term.osc99(std::format("i=p{}:d=0;part{}", n, n));
+
+    auto const pending = term.manager().pendingNotifications();
+    CHECK(pending.size() == limit);
+    CHECK(holds(pending, std::format("p{}", sent - 1)));
+    CHECK(holds(pending, std::format("p{}", sent - limit)));
+    CHECK_FALSE(holds(pending, std::format("p{}", sent - limit - 1)));
+
+    SECTION("the newest still completes")
+    {
+        term.osc99(std::format("i=p{}; end", sent - 1));
+        REQUIRE(term.shown().size() == 1);
+        CHECK(term.shown().back().title == std::format("part{} end", sent - 1));
+        CHECK(term.manager().pendingNotifications().size() == limit - 1);
+    }
+
+    SECTION("a chunk added to the oldest keeps it")
+    {
+        auto const oldest = std::format("p{}", sent - limit);
+        term.osc99(std::format("i={}:d=0; more", oldest));
+        term.osc99(std::format("i=p{}:d=0;part", sent));
+
+        auto const after = term.manager().pendingNotifications();
+        CHECK(after.size() == limit);
+        CHECK(holds(after, oldest));
+        CHECK_FALSE(holds(after, std::format("p{}", sent - limit + 1)));
+
+        term.osc99(std::format("i={};", oldest));
+        REQUIRE(term.shown().size() == 1);
+        CHECK(term.shown().back().title == std::format("part{} more", sent - limit));
+    }
+}
+
+TEST_CASE("DesktopNotification.LiveIdentifiersAreBounded", "[DesktopNotification]")
+{
+    // An application raising notifications under ever new identifiers, none of whose closes is observed.
+    auto term = NotificationTerm {};
+    auto const limit = NotificationLimits.live;
+
+    SECTION("p=alive reports the newest ones")
+    {
+        auto const sent = limit + Overshoot;
+        for (auto const n: std::views::iota(size_t { 0 }, sent))
+            term.osc99(std::format("i=a{};hello", n));
+
+        CHECK(term.manager().activeNotifications().size() == limit);
+        auto const alive = term.aliveIdentifiers();
+        CHECK(alive.size() == limit);
+        CHECK(holds(alive, std::format("a{}", sent - 1)));
+        CHECK(holds(alive, std::format("a{}", sent - limit)));
+        CHECK_FALSE(holds(alive, std::format("a{}", sent - limit - 1)));
+    }
+
+    SECTION("raising an identifier again keeps it")
+    {
+        for (auto const n: std::views::iota(size_t { 0 }, limit))
+            term.osc99(std::format("i=a{};hello", n));
+        term.osc99("i=a0;again");
+        term.osc99(std::format("i=a{};hello", limit));
+
+        auto const alive = term.aliveIdentifiers();
+        CHECK(alive.size() == limit);
+        CHECK(holds(alive, "a0"));
+        CHECK_FALSE(holds(alive, "a1"));
+        CHECK(holds(alive, std::format("a{}", limit)));
+    }
+}
+
+TEST_CASE("DesktopNotification.ChunkedTextIsBounded", "[DesktopNotification]")
+{
+    // An application sending a title and a body in more chunks than the bound holds. Neither bound is a
+    // whole number of the code points sent, so the cut has to back off to keep the last one whole: a
+    // title of three-byte euro signs, and a body of two-byte e-acutes behind one ASCII byte.
+    auto term = NotificationTerm {};
+    auto const cap = NotificationLimits.textBytes;
+    auto const repeated = [](std::string_view codePoint, int count) {
+        auto text = std::string {};
+        for ([[maybe_unused]] auto const n: std::views::iota(0, count))
+            text += codePoint;
+        return text;
+    };
+    auto const euros = repeated("\xE2\x82\xAC", 100);
+    auto const acutes = repeated("\xC3\xA9", 150);
+
+    term.osc99("i=long:d=0:p=body;a");
+    for ([[maybe_unused]] auto const chunk: std::views::iota(size_t { 0 }, (cap / euros.size()) + 3))
+    {
+        term.osc99(std::format("i=long:d=0:p=title;{}", euros));
+        term.osc99(std::format("i=long:d=0:p=body;{}", acutes));
+    }
+    term.osc99("i=long:p=body;");
+
+    REQUIRE(term.shown().size() == 1);
+    auto const& shown = term.shown().back();
+    CHECK(shown.title.size() == cap - (cap % 3));
+    CHECK(shown.title.ends_with("\xE2\x82\xAC"));
+    CHECK(shown.body.size() == cap - 1);
+    CHECK(shown.body.starts_with("a\xC3\xA9"));
+    CHECK(shown.body.ends_with("\xC3\xA9"));
+    CHECK(term.manager().pendingNotifications().empty());
 }

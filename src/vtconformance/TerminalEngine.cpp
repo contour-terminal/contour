@@ -4,6 +4,8 @@
 #include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/screen/Settings.hpp>
 
+#include <core/platform/NativeFileSystem.hpp>
+
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -48,10 +50,12 @@ TerminalEngine::TerminalEngine(std::unique_ptr<vtpty::Pty> device, Options optio
 
     _terminal = std::make_unique<vtbackend::Terminal>(*this,
                                                       core::defaultEnvironment(),
+                                                      core::platform::NativeFileSystem::instance(),
                                                       std::move(device),
                                                       settings,
                                                       std::nullopt,
-                                                      std::chrono::steady_clock::now());
+                                                      vtbackend::TerminalClocks::system(),
+                                                      vtbackend::randomSemanticBlockTokens());
 
     // The frontend's half of the window: a headless engine has no font and no screen, so nothing else
     // would fill these in -- and a terminal that reports a cell of zero pixels, or a screen exactly as

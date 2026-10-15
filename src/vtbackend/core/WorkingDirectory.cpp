@@ -3,24 +3,16 @@
 
 #include <vtbackend/core/FileUrl.hpp>
 
+#include <string_view>
+
 using std::optional;
 using std::string;
 
 namespace vtbackend
 {
 
-namespace
-{
-    /// Whether @p purpose will actually open or chdir into the path, and therefore needs it to be on
-    /// this machine.
-    [[nodiscard]] constexpr bool needsLocalPath(CwdPurpose purpose) noexcept
-    {
-        return purpose != CwdPurpose::Display;
-    }
-} // namespace
-
 optional<ResolvedWorkingDirectory> resolveWorkingDirectory(ContextStack const& contexts,
-                                                           string const& osc7Url,
+                                                           FileUrl const& osc7,
                                                            LocalIdentity const& self,
                                                            CwdPurpose purpose)
 {
@@ -28,8 +20,7 @@ optional<ResolvedWorkingDirectory> resolveWorkingDirectory(ContextStack const& c
     //    the path it names is on this machine.
     if (auto const context = contexts.effectiveWorkingDirectory(self))
     {
-        auto const usable = !needsLocalPath(purpose) || context->locality == ContextLocality::Local;
-        if (usable)
+        if (usableFor(purpose, context->locality))
             return ResolvedWorkingDirectory { .path = string { context->path },
                                               .source = CwdSource::ContextSignal,
                                               .locality = context->locality };
@@ -40,26 +31,32 @@ optional<ResolvedWorkingDirectory> resolveWorkingDirectory(ContextStack const& c
     // 2. OSC 7. Its authority is the only locality evidence it carries, which is exactly why an OSC
     //    3008 `cwd=` -- a bare path with no authority at all -- must not be run through the same test:
     //    isLocalHost() accepts an empty authority, so every container path would pass it.
-    if (osc7Url.empty())
+    if (osc7.url.empty() || osc7.path.empty())
         return std::nullopt;
 
-    // Asked ONCE, and the answer carries both halves: localWorkingDirectory() already extracts the path
-    // on its way to the verdict, so testing locality and then extracting again would parse the same URL
-    // twice and throw one of the two strings away.
-    if (auto local = localWorkingDirectory(osc7Url, self.hostname))
-        return ResolvedWorkingDirectory { .path = std::move(*local),
-                                          .source = CwdSource::Osc7,
-                                          .locality = ContextLocality::Local };
-
-    if (needsLocalPath(purpose))
+    auto const locality =
+        isLocalHost(osc7.host, self.hostname) ? ContextLocality::Local : ContextLocality::Foreign;
+    if (!usableFor(purpose, locality))
         return std::nullopt;
 
-    auto path = extractPathFromFileUrl(osc7Url);
-    if (path.empty())
-        return std::nullopt;
-    return ResolvedWorkingDirectory { .path = std::move(path),
-                                      .source = CwdSource::Osc7,
-                                      .locality = ContextLocality::Foreign };
+    return ResolvedWorkingDirectory { .path = osc7.path, .source = CwdSource::Osc7, .locality = locality };
+}
+
+string abbreviateHomePath(std::string_view path, std::string_view home)
+{
+    if (home.empty() || !path.starts_with(home))
+        return string { path };
+
+    // The home directory itself.
+    if (path.size() == home.size())
+        return "~";
+
+    // Only a whole component matches: without this, a home of "/home/bob" would turn "/home/bobby" into
+    // "~by" -- a path that reads as real and points somewhere else entirely.
+    if (path[home.size()] != '/')
+        return string { path };
+
+    return "~" + string { path.substr(home.size()) };
 }
 
 } // namespace vtbackend

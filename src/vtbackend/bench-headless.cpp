@@ -16,6 +16,7 @@
 #include <core/Utils.hpp>
 #include <core/cli/App.hpp>
 #include <core/cli/CLI.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 
 #include <algorithm>
 #include <array>
@@ -859,6 +860,7 @@ class ChildSession
                  core::Environment const& env):
         _terminal { _events,
                     env,
+                    core::platform::NativeFileSystem::instance(),
                     std::make_unique<ByteCountingProcess>(
                         launch,
                         vtpty::createPty(settings.pageSize, std::nullopt),
@@ -867,7 +869,8 @@ class ChildSession
                         std::make_shared<vtpty::NoPlacement>()),
                     settings,
                     std::nullopt,
-                    std::chrono::steady_clock::now() }
+                    vtbackend::TerminalClocks::system(),
+                    vtbackend::randomSemanticBlockTokens() }
     {
     }
 
@@ -2111,7 +2114,7 @@ class ContourHeadlessBench: public core::cli::App
 
         // Setup benchmark
         std::string const text = createText(PtyWriteSize);
-        unique_ptr<Pty> ptyObject =
+        unique_ptr<Pty> const ptyObject =
             createPty(PageSize { .lines = LineCount(25), .columns = ColumnCount(80) }, std::nullopt);
         auto& pty = *ptyObject;
         // createPty() only describes the PTY: start() opens it, and only then is there a slave to configure.

@@ -22,6 +22,7 @@ struct SelectionHelper
     virtual ~SelectionHelper() = default;
     std::function<bool(CellLocation)> wordDelimited;
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;
+    /// Whether row @p line continues the row above it after a soft wrap, that row still being in the grid.
     [[nodiscard]] virtual bool wrappedLine(LineOffset line) const noexcept = 0;
     [[nodiscard]] virtual bool cellEmpty(CellLocation pos) const noexcept = 0;
     [[nodiscard]] virtual int cellWidth(CellLocation pos) const noexcept = 0;

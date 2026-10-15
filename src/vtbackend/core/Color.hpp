@@ -198,6 +198,8 @@ struct RGBColorPair
     RGBColor foreground;
     RGBColor background;
 
+    constexpr bool operator==(RGBColorPair const&) const noexcept = default;
+
     [[nodiscard]] bool isTooSimilar(double threshold = 0.1) const noexcept
     {
         return distance(foreground, background) <= threshold;
@@ -444,9 +446,11 @@ constexpr Color defaultColor() noexcept
 
 struct CellForegroundColor
 {
+    constexpr bool operator==(CellForegroundColor const&) const noexcept = default;
 };
 struct CellBackgroundColor
 {
+    constexpr bool operator==(CellBackgroundColor const&) const noexcept = default;
 };
 using CellRGBColor = std::variant<RGBColor, CellForegroundColor, CellBackgroundColor>;
 
@@ -462,12 +466,16 @@ struct CellRGBColorAndAlphaPair
     float foregroundAlpha = 1.0f;
     CellRGBColor background = CellBackgroundColor {};
     float backgroundAlpha = 1.0f;
+
+    bool operator==(CellRGBColorAndAlphaPair const&) const = default;
 };
 
 struct CursorColor
 {
     CellRGBColor color = CellForegroundColor {};
     CellRGBColor textOverrideColor = CellBackgroundColor {};
+
+    bool operator==(CursorColor const&) const = default;
 };
 
 // {{{ Opacity

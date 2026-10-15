@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/input/vi/Selector.hpp>
 
+#include <vtbackend/grid/WordWalk.hpp>
 #include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
@@ -33,6 +34,26 @@ namespace // {{{ helper
 
         return { std::move(result), from, to };
     }
+
+    /// A selection's cells as a word walk sees them, through the helper that answers for the grid.
+    class SelectionWordCells
+    {
+      public:
+        explicit SelectionWordCells(SelectionHelper const& helper): _helper { &helper } {}
+
+        [[nodiscard]] PageSize pageSize() const noexcept { return _helper->pageSize(); }
+        [[nodiscard]] bool continuesRowAbove(LineOffset line) const noexcept
+        {
+            return _helper->wrappedLine(line);
+        }
+        [[nodiscard]] bool isWordDelimiter(CellLocation position) const
+        {
+            return _helper->wordDelimited(position);
+        }
+
+      private:
+        SelectionHelper const* _helper;
+    };
 } // namespace
 // }}}
 
@@ -137,62 +158,12 @@ WordWiseSelection::WordWiseSelection(SelectionHelper const& helper,
 
 CellLocation WordWiseSelection::extendSelectionBackward(CellLocation pos) const noexcept
 {
-    auto last = pos;
-    auto current = last;
-    for (;;)
-    {
-        auto const wrapIntoPreviousLine =
-            *current.column == 0 && *current.line > 0 && _helper.wrappedLine(current.line);
-        if (*current.column > 0)
-            current.column--;
-        else if (*current.line > 0 || wrapIntoPreviousLine)
-        {
-            current.line--;
-            current.column = boxed_cast<ColumnOffset>(_helper.pageSize().columns) - 1;
-        }
-        else
-            break;
-
-        if (_helper.wordDelimited(current))
-            break;
-        last = current;
-    }
-
-    return last;
+    return wordBegin(SelectionWordCells(_helper), pos);
 }
 
 CellLocation WordWiseSelection::extendSelectionForward(CellLocation pos) const noexcept
 {
-    auto last = pos;
-    auto current = last;
-    for (;;)
-    {
-        if (*current.column == *_helper.pageSize().columns - 1
-            && *current.line + 1 < *_helper.pageSize().lines && _helper.wrappedLine(current.line))
-        {
-            current.line++;
-            current.column = ColumnOffset(0);
-            current = stretchedColumn(_helper, { .line = current.line, .column = current.column + 1 });
-        }
-
-        if (*current.column + 1 < *_helper.pageSize().columns)
-        {
-            current = stretchedColumn(_helper, { .line = current.line, .column = current.column + 1 });
-        }
-        else if (*current.line + 1 < *_helper.pageSize().lines)
-        {
-            current.line++;
-            current.column = ColumnOffset(0);
-        }
-        else
-            break;
-
-        if (_helper.wordDelimited(current))
-            break;
-        last = current;
-    }
-
-    return stretchedColumn(_helper, last);
+    return wordEnd(SelectionWordCells(_helper), pos);
 }
 
 bool WordWiseSelection::extend(CellLocation to)

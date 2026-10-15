@@ -19,9 +19,9 @@ class DirectWriteLocator: public FontLocator
   public:
     DirectWriteLocator();
 
-    FontSourceList locate(FontDescription const& description) override;
-    FontSourceList all() override;
-    FontSourceList resolve(gsl::span<char32_t const> codepoints) override;
+    [[nodiscard]] FontSourceList locate(FontDescription const& description) override;
+    [[nodiscard]] FontSourceList all() override;
+    [[nodiscard]] FontSourceList resolve(gsl::span<char32_t const> codepoints) override;
 
   private:
     struct Private;

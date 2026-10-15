@@ -20,13 +20,19 @@ std::expected<PromptRegion, PromptRegionError> findLivePromptRegion(PromptRegion
 
         auto const marks = lines.marksAt(index);
 
-        if ((marks.flags & HeadOnlyLineFlags).any())
+        if ((marks.flags & ShellMarkLineFlags).any())
             sawAnyMark = true;
 
         // Checked before Marked, so that a line which is BOTH a prompt start and an output start reads as
         // "a command is running" rather than "here is a fresh prompt". Reaching an output start at all
         // means the cursor sits at or below it, which is the command's territory, not the prompt's.
-        if (marks.flags.contains(LineFlag::OutputStart))
+        //
+        // Unless the line also carries a CommandEnd and the prompt start: then the output start is the
+        // finished command's, one that printed nothing (`cd`), whose ;C, ;D and the next prompt's ;A all
+        // landed on this line. The block rows (commandBlockRows()) read such a line the same way.
+        auto const outputHasEnded =
+            marks.flags.contains(LineFlag::CommandEnd) && marks.flags.contains(LineFlag::Marked);
+        if (marks.flags.contains(LineFlag::OutputStart) && !outputHasEnded)
             return std::unexpected(PromptRegionError::InCommandOutput);
 
         // The FIRST one found is the one closest to the cursor, and therefore this prompt's — an older

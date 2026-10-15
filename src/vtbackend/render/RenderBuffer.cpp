@@ -1,11 +1,60 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/render/RenderBuffer.hpp>
 
+#include <libunicode/width.h>
+
+#include <algorithm>
 #include <format>
 #include <mutex>
 
 namespace vtbackend
 {
+
+ColumnOffset layoutRenderText(std::vector<RenderCell>& output,
+                              std::u32string_view text,
+                              RenderAttributes const& attributes,
+                              CellLocation origin,
+                              ColumnOffset end)
+{
+    auto const first = output.size();
+    auto column = origin.column;
+    for (auto const codepoint: text)
+    {
+        auto const width = static_cast<int>(unicode::width(codepoint));
+
+        // A combining mark or a variation selector belongs to the glyph before it -- one of this text's.
+        if (width == 0 && output.size() > first)
+        {
+            output.back().codepoints.push_back(codepoint);
+            continue;
+        }
+
+        auto const columns = std::max(1, width);
+        if (column + ColumnOffset(columns) > end)
+            break;
+
+        output.push_back(RenderCell { .codepoints = std::u32string(1, codepoint),
+                                      .image = {},
+                                      .position = CellLocation { .line = origin.line, .column = column },
+                                      .attributes = attributes,
+                                      .width = static_cast<uint8_t>(columns),
+                                      .sizing = {},
+                                      .groupStart = false,
+                                      .groupEnd = false });
+        column += ColumnOffset(columns);
+    }
+
+    markShapingGroup(std::span { output }.subspan(first));
+    return column;
+}
+
+void markShapingGroup(std::span<RenderCell> cells) noexcept
+{
+    if (cells.empty())
+        return;
+    cells.front().groupStart = true;
+    cells.back().groupEnd = true;
+}
 
 bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point now) noexcept
 {
@@ -27,7 +76,11 @@ bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point now) 
             break;
     }
 
-    lastUpdate = now;
+    // Only the writer thread swaps, so the buffer just put in front stays there while this reads it.
+    auto const& front = buffers[(currentBackBufferIndex.load() + 1) % 2];
+    frontStickyHeaderBlock = front.stickyHeader ? front.stickyHeader->block : CommandBlockId {};
+
+    lastUpdate.store(now, std::memory_order_relaxed);
     state = RenderBufferState::WaitingForRefresh;
     return true;
 }

@@ -10,6 +10,7 @@
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/SdBusScopeBus.hpp>
 #include <vtpty/SystemdScopePlacement.hpp>
+#include <vtpty/test/ProcessTesting.hpp>
 #include <vtpty/test/PtyReading.hpp>
 
 #include <chrono>
@@ -90,11 +91,7 @@ int drive(std::string_view placementName)
         return ExitUsage;
 
     auto process = vtpty::Process {
-        vtpty::Process::ExecInfo { .program = std::filesystem::read_symlink("/proc/self/exe").string(),
-                                   .arguments = { "--hog" },
-                                   .workingDirectory = {},
-                                   .env = {},
-                                   .removedEnvironment = {} },
+        vtpty::testing::execInfo(std::filesystem::read_symlink("/proc/self/exe").string(), { "--hog" }),
         vtpty::createPty(vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) }, std::nullopt),
         /*escapeSandbox=*/false,
         placement

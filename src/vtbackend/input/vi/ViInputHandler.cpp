@@ -153,6 +153,17 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "gh", [this]() { _executor->enterHintMode(HintAction::Copy); });
     registerCommand(ModeSelect::Normal, "gH", [this]() { _executor->enterHintMode(HintAction::Open); });
 
+    // Vim's fold keys. One row each, so a sixth is a row here and an enumerator in ViFoldCommand.
+    auto constexpr FoldMappings = std::array<std::pair<std::string_view, ViFoldCommand>, 5> { {
+        { "za", ViFoldCommand::Toggle },
+        { "zo", ViFoldCommand::Open },
+        { "zc", ViFoldCommand::Close },
+        { "zM", ViFoldCommand::CloseAll },
+        { "zR", ViFoldCommand::OpenAll },
+    } };
+    for (auto const& [keys, command]: FoldMappings)
+        registerCommand(ModeSelect::Normal, keys, [this, command = command]() { _executor->fold(command); });
+
     for (auto&& [theKey, viOperator]: { pair { 'y', ViOperator::Yank }, pair { 'o', ViOperator::Open } })
     {
         // This is solely a workaround for Apple Clang and FreeBSDs Clang.
@@ -312,7 +323,7 @@ void ViInputHandler::setMode(ViMode theMode)
 Handled ViInputHandler::sendKeyPressEvent(Key key, Modifiers modifiers, KeyboardEventType eventType)
 {
     // clang-format off
-    switch (_viMode)
+    switch (mode())
     {
         case ViMode::Insert:
             // In insert mode we do not handle any key events here.

@@ -39,6 +39,30 @@ class RenderBufferBuilder
                         std::optional<CellLocation> theCursorPosition,
                         bool includeSelection);
 
+    /// Renders grid row @p line as host chrome copying it: its own colours, SGR and hyperlinks, but no
+    /// cursor, selection, search match or yank highlight -- those describe the row where it really is.
+    ///
+    /// For the sticky command header, which draws it over a band of its own: only the columns that show
+    /// are copied (Line::trimmedColumns()), and a cell on the page's default background keeps it, so the
+    /// band shows through. The row's rendition (DECDWL/DECDHL) is not copied, and an OSC 66 block shows
+    /// only the part on this row.
+    ///
+    /// Appended to @p output, one cell per copied column, left to right, as one shaping group; nothing for
+    /// a blank row. Appended rather than returned, so the header copies into storage its frame keeps.
+    ///
+    /// @param output Where the cells go, after whatever it already holds.
+    /// @param terminal The terminal whose palette, colour mode, blink phase and hyperlinks apply.
+    /// @param line The grid row to copy.
+    /// @param screenRow The screen row the copy is drawn on.
+    /// @param columns How many columns to copy at most; a wide glyph that would straddle the limit is
+    ///                dropped whole.
+    /// @see Terminal::fillStickyHeader
+    static void renderDetachedLine(std::vector<RenderCell>& output,
+                                   Terminal const& terminal,
+                                   Line const& line,
+                                   LineOffset screenRow,
+                                   ColumnCount columns);
+
     /// Renders a single grid cell.
     /// This call is guaranteed to be invoked sequentially, from top line
     /// to the bottom line and from left page margin to the right page margin,
@@ -229,6 +253,14 @@ class RenderBufferBuilder
     /// constant for the whole buffer anyway, so there is nothing per-line to convey; and the status
     /// line is the better channel for it, being already immune to an application's own colours.
     bool _contextTintingPossible = false;
+
+    /// How opaque a blinking (SGR 5) cell is drawn this pass: the slow blinker's phase at the terminal's
+    /// clock, which is the frame's. Read once per pass, so every cell blinks in the same phase and the
+    /// cell loop computes no cosine.
+    float _blinkOpacity;
+
+    /// How opaque a rapidly blinking (SGR 6) cell is drawn this pass, read as @ref _blinkOpacity is.
+    float _rapidBlinkOpacity;
 
     /// The search matches found so far this pass that may still reach the row being rendered.
     std::vector<SearchMatch> _searchMatches;

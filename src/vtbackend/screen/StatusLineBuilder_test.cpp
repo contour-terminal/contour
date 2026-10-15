@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/screen/StatusLineBuilder.hpp>
+#include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/testing/MockTerm.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <string>
@@ -409,4 +412,17 @@ TEST_CASE("parseStatusLineSegment.commandShorthandWhitespaceOnlyIsNotAnItem", "[
     REQUIRE(segment.size() == 1);
     REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(segment[0]));
     CHECK(std::get<StatusLineDefinitions::Text>(segment[0]).text == "{Command: }");
+}
+
+TEST_CASE("serializeToVT.clockReadsTheTerminalsWallClockInItsTimeZone", "[statusline]")
+{
+    // UTC+05:30, a zone no machine's own clock is likely to share with UTC.
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) }, &fixedOffsetLocalTime<330> };
+    mc.wallClock.advance(std::chrono::hours { 4 } + std::chrono::minutes { 5 }); // 04:05 UTC
+    auto const clock = StatusLineSegment { StatusLineDefinitions::Clock {} };
+
+    CHECK(serializeToVT(mc.terminal, clock, StatusLineStyling::Disabled) == "09:35");
+
+    mc.wallClock.advance(std::chrono::hours { 1 } + std::chrono::minutes { 2 });
+    CHECK(serializeToVT(mc.terminal, clock, StatusLineStyling::Disabled) == "10:37");
 }

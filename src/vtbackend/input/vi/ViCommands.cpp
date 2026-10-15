@@ -9,8 +9,12 @@
 
 #include <libunicode/ucd.h>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <format>
 #include <memory>
+#include <utility>
 
 namespace vtbackend
 {
@@ -297,9 +301,18 @@ void ViCommands::toggleLineMark()
     // next widening resize erases, and one the command-block scan (which reads the head) cannot see. It
     // would not even toggle: reading a continuation's flags never finds the mark that sits on the head, so
     // `m` would keep adding a second one that could never be cleared from there.
-    auto& screen = _terminal->currentScreen();
-    auto const marked = screen.isLogicalLineFlagEnabled(cursorPosition.line, LineFlag::Marked);
-    screen.setLogicalLineFlags(cursorPosition.line, LineFlag::Marked, !marked);
+    //
+    // A USER mark, not a prompt mark: `mm` says "I want to come back here", not "a command starts here".
+    // Stamping LineFlag::Marked made a bookmark count as a block start for block-atomic eviction and for
+    // folding. Navigation visits both kinds; see NavigationMarkFlags.
+    //
+    // Through the terminal, which knows whose the mark is: a daemon mirror's are its host's.
+    _terminal->toggleUserMark(cursorPosition.line);
+
+    // A mark moves no cell and no cursor, so nothing else says the screen changed -- and the frontend
+    // reschedules the scrollbar's ticks on screen updates. Without this a mark would reach them only with
+    // the next byte of output.
+    _terminal->screenUpdated();
 }
 
 void ViCommands::searchCurrentWord()
@@ -321,6 +334,51 @@ void ViCommands::enterHintMode(HintAction action)
         .scope = HintScope::Visible,
         .scrollbackLimit = LineCount(0),
     });
+}
+
+namespace
+{
+    /// What one of vim's `z` fold keys does at the Vi cursor's line. Whether it may run while folding is
+    /// switched off is the terminal's to decide, as it is for every other way a fold is reached.
+    using FoldCommand = void (*)(Terminal& terminal, LineOffset cursorLine);
+
+    /// THE fold keys' behaviour, indexed by ViFoldCommand: one row per command, in its declared order.
+    constexpr auto FoldCommands =
+        std::array<FoldCommand, static_cast<std::size_t>(ViFoldCommand::OpenAll) + 1> {
+            // Toggle
+            [](Terminal& terminal, LineOffset line) { terminal.toggleFoldContaining(line); },
+            // Open
+            [](Terminal& terminal, LineOffset line) { terminal.expandFoldContaining(line); },
+            // Close
+            [](Terminal& terminal, LineOffset line) { terminal.collapseFoldContaining(line); },
+            // CloseAll
+            [](Terminal& terminal, LineOffset) { terminal.collapseAllFolds(); },
+            // OpenAll
+            [](Terminal& terminal, LineOffset) { terminal.expandAllFolds(); },
+        };
+    // A command the enum gained without a row here would be an empty slot.
+    static_assert(std::ranges::none_of(FoldCommands, [](FoldCommand command) { return command == nullptr; }));
+} // namespace
+
+void ViCommands::fold(ViFoldCommand command)
+{
+    auto const line = cursorPosition.line;
+    FoldCommands[std::to_underlying(command)](*_terminal, line);
+
+    // A block closed over the cursor leaves it where vim leaves it: on the closed fold, which here is
+    // the head row that now stands for the block -- so the next `za` opens what this one closed. The
+    // terminal's own snap, there for a fold closed by the mouse or an action, takes it DOWN past the
+    // block instead, where a `z` key would find no block to act on.
+    if (_terminal->isLineHiddenByFold(line))
+    {
+        moveCursorTo(CellLocation { .line = _terminal->snapToVisibleLine(line, VerticalDirection::Up),
+                                    .column = cursorPosition.column });
+        return;
+    }
+
+    // Folding moves the scrollable range. The frontend republishes it on a screen update, as after every
+    // other Vi command here.
+    _terminal->screenUpdated();
 }
 
 void ViCommands::executeYank(ViMotion motion, unsigned count)
@@ -648,13 +706,13 @@ CellLocationRange ViCommands::translateToCellRange(TextObjectScope scope,
         case TextObject::LineMark:
             // Walk the line upwards until we find a marked line.
             while (a.line > gridTop
-                   && !(_terminal->currentScreen().lineFlagsAt(a.line).contains(LineFlag::Marked)))
+                   && !_terminal->currentScreen().isLineFlagEnabledAt(a.line, NavigationMarkFlags))
                 --a.line;
             if (scope == TextObjectScope::Inner && a != cursorPosition)
                 ++a.line;
             // Walk the line downwards until we find a marked line.
             while (b.line < gridBottom
-                   && !(_terminal->currentScreen().lineFlagsAt(b.line).contains(LineFlag::Marked)))
+                   && !_terminal->currentScreen().isLineFlagEnabledAt(b.line, NavigationMarkFlags))
                 ++b.line;
             if (scope == TextObjectScope::Inner && b != cursorPosition)
                 --b.line;
@@ -901,15 +959,15 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
         case ViMotion::PageTop: // <S-H>
             // H, M and L name SCREEN rows, so they are computed there and translated -- which is both
             // shorter than the scroll-offset arithmetic this replaced and the only formulation that
-            // stays right when collapsed folds make screen rows and grid lines disagree.
+            // stays right when collapsed folds make screen rows and grid lines disagree. H and L keep the
+            // scrolloff, as the safe area caps it on a short page.
             return snapToCell({ .line = _terminal->viewport().translateScreenToGridLine(
-                                    LineOffset::cast_from(*_terminal->viewport().scrollOff())),
+                                    _terminal->viewport().safeArea().top),
                                 .column = ColumnOffset(0) });
         case ViMotion::PageBottom: // <S-L>
-            return snapToCell(
-                { .line = _terminal->viewport().translateScreenToGridLine(boxed_cast<LineOffset>(
-                      _terminal->pageSize().lines - *_terminal->viewport().scrollOff() - 1)),
-                  .column = ColumnOffset(0) });
+            return snapToCell({ .line = _terminal->viewport().translateScreenToGridLine(
+                                    _terminal->viewport().safeArea().bottom),
+                                .column = ColumnOffset(0) });
         case ViMotion::LineBegin: // 0
             return { .line = cursorPosition.line, .column = ColumnOffset(0) };
         case ViMotion::LineTextBegin: // ^
@@ -933,9 +991,9 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
                          cursorPosition.line, static_cast<int>(count), VerticalDirection::Up),
                      .column = cursorPosition.column };
         case ViMotion::LinesCenter: // M
-            return addJumpHistory({ .line = _terminal->viewport().translateScreenToGridLine(
-                                        LineOffset::cast_from((*_terminal->pageSize().lines / 2) - 1)),
-                                    .column = cursorPosition.column });
+            return addJumpHistory(
+                { .line = _terminal->viewport().translateScreenToGridLine(_terminal->viewport().middleRow()),
+                  .column = cursorPosition.column });
         case ViMotion::PageDown:
             return { .line = _terminal->advanceVisibleLines(
                          cursorPosition.line, *_terminal->pageSize().lines / 2, VerticalDirection::Down),
@@ -976,10 +1034,10 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
             while (count > 0)
             {
                 if (result.line > gridTop
-                    && _terminal->currentScreen().isLineFlagEnabledAt(result.line, LineFlag::Marked))
+                    && _terminal->currentScreen().isLineFlagEnabledAt(result.line, NavigationMarkFlags))
                     result.line = stepVisible(result.line, VerticalDirection::Up);
                 while (result.line > gridTop
-                       && !_terminal->currentScreen().isLineFlagEnabledAt(result.line, LineFlag::Marked))
+                       && !_terminal->currentScreen().isLineFlagEnabledAt(result.line, NavigationMarkFlags))
                 {
                     if (!tryStepVisible(result.line, VerticalDirection::Up))
                         break;
@@ -998,7 +1056,7 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
                     result.line = stepVisible(result.line, VerticalDirection::Down);
                 while (result.line < pageBottom)
                 {
-                    if (_terminal->currentScreen().lineFlagsAt(result.line).contains(LineFlag::Marked))
+                    if (_terminal->currentScreen().isLineFlagEnabledAt(result.line, NavigationMarkFlags))
                         break;
                     if (!tryStepVisible(result.line, VerticalDirection::Down))
                         break;

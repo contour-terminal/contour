@@ -773,3 +773,89 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
         CHECK(litColumnOfBottomRow(*head) == litColumnOfBottomRow(*body));
     }
 }
+
+TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
+{
+    // The block column's status marks, drawn here for the reason the fold heads are: one size and weight
+    // in every font, centred on the row the fold column's stem runs down. A realistic 9x20 cell.
+    auto constexpr Cell = ImageSize { Width(9), Height(20) };
+    auto const build = [&](char32_t codepoint) {
+        auto buffer = BoxDrawingRendererTest::buildElements(codepoint, Cell, 1);
+        REQUIRE(buffer.has_value());
+        return *std::move(buffer);
+    };
+
+    SECTION("renderable() claims them, so the font is never consulted")
+    {
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F002 }));
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F003 }));
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F004 }));
+    }
+
+    SECTION("the Unicode shapes they look like stay the font's")
+    {
+        // Program output writes these -- systemctl's ●, a prompt's ▸ or ◆, DEC Special Graphics' ` -- and
+        // draws them in its font's own size and weight, as it did before the gutter had marks.
+        CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x25B8 }));
+        CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x25C6 }));
+        CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x25CF }));
+    }
+
+    SECTION("each fills its cell's buffer, draws something, and sits on the row's middle")
+    {
+        for (auto const codepoint: { char32_t { 0x10F002 }, char32_t { 0x10F003 }, char32_t { 0x10F004 } })
+        {
+            CAPTURE(static_cast<uint32_t>(codepoint));
+            auto const buffer = build(codepoint);
+            CHECK(buffer.size() == 9zu * 20zu);
+            CHECK(countLitPixels(buffer) > 0);
+            CHECK(buffer == verticalMirror(buffer, Cell));
+        }
+    }
+
+    SECTION("the diamond and the disc are symmetric left to right; the triangle points right")
+    {
+        auto const diamond = build(0x10F003);
+        auto const disc = build(0x10F004);
+        auto const triangle = build(0x10F002);
+        CHECK(diamond == horizontalMirror(diamond, Cell));
+        CHECK(disc == horizontalMirror(disc, Cell));
+
+        auto const litInColumns = [](atlas::Buffer const& buffer, size_t from, size_t to) {
+            auto lit = size_t { 0 };
+            for (auto const y: std::views::iota(size_t { 0 }, size_t { 20 }))
+                for (auto const x: std::views::iota(from, to))
+                    lit += buffer[(y * 9) + x] > 0 ? 1 : 0;
+            return lit;
+        };
+        // Base on the left, apex on the right: more of it lies left of the middle column.
+        CHECK(litInColumns(triangle, 0, 4) > litInColumns(triangle, 5, 9));
+    }
+
+    SECTION("the disc covers more of the cell than the diamond inscribed in it")
+    {
+        CHECK(countLitPixels(build(0x10F004)) > countLitPixels(build(0x10F003)));
+    }
+}
+
+TEST_CASE("BoxDrawingRenderer.gutterStatusMarksInTinyCells", "[boxdrawing]")
+{
+    // A small font at a low DPI hands the builder a cell a few device pixels wide; the marks must still
+    // come out as a buffer of exactly that size rather than as undefined behaviour.
+    for (auto const width: std::views::iota(1, 12))
+    {
+        for (auto const height: std::views::iota(1, 12))
+        {
+            CAPTURE(width, height);
+            auto const cell =
+                ImageSize { Width(static_cast<unsigned>(width)), Height(static_cast<unsigned>(height)) };
+            for (auto const codepoint:
+                 { char32_t { 0x10F002 }, char32_t { 0x10F003 }, char32_t { 0x10F004 } })
+            {
+                auto const buffer = BoxDrawingRendererTest::buildElements(codepoint, cell, 1);
+                REQUIRE(buffer.has_value());
+                CHECK(buffer->size() == static_cast<size_t>(width * height));
+            }
+        }
+    }
+}

@@ -16,6 +16,12 @@ namespace
 constexpr auto ThisMachine =
     LocalIdentity { .machineId = "3deb5353d3ba43d08201c136a47ead7b", .hostname = "zeta" };
 
+/// @return @p url as the terminal holds an OSC 7 report: parsed.
+[[nodiscard]] FileUrl osc7(std::string url)
+{
+    return parseFileUrl(std::move(url)).value();
+}
+
 /// Pushes one context carrying the given fields onto @p stack.
 void push(ContextStack& stack,
           std::string_view id,
@@ -56,7 +62,7 @@ TEST_CASE("WorkingDirectory.nothing anywhere resolves to nothing", "[cwd]")
 {
     auto const stack = ContextStack {};
     for (auto const purpose: { CwdPurpose::Spawn, CwdPurpose::Display, CwdPurpose::OpenLocally })
-        CHECK(!resolveWorkingDirectory(stack, "", ThisMachine, purpose).has_value());
+        CHECK(!resolveWorkingDirectory(stack, osc7(""), ThisMachine, purpose).has_value());
 }
 
 TEST_CASE("WorkingDirectory.a local context cwd wins over OSC 7 for every purpose", "[cwd]")
@@ -66,7 +72,8 @@ TEST_CASE("WorkingDirectory.a local context cwd wins over OSC 7 for every purpos
 
     for (auto const purpose: { CwdPurpose::Spawn, CwdPurpose::Display, CwdPurpose::OpenLocally })
     {
-        auto const resolved = resolveWorkingDirectory(stack, "file://zeta/home/user", ThisMachine, purpose);
+        auto const resolved =
+            resolveWorkingDirectory(stack, osc7("file://zeta/home/user"), ThisMachine, purpose);
         REQUIRE(resolved.has_value());
         CHECK(resolved->path == "/home/user/project");
         CHECK(resolved->source == CwdSource::ContextSignal);
@@ -79,7 +86,7 @@ TEST_CASE("WorkingDirectory.OSC 7 answers when no context carries a cwd", "[cwd]
     push(stack, "shell", ContextType::Shell); // no cwd= at all
 
     auto const resolved =
-        resolveWorkingDirectory(stack, "file://zeta/home/user", ThisMachine, CwdPurpose::Spawn);
+        resolveWorkingDirectory(stack, osc7("file://zeta/home/user"), ThisMachine, CwdPurpose::Spawn);
     REQUIRE(resolved.has_value());
     CHECK(resolved->path == "/home/user");
     CHECK(resolved->source == CwdSource::Osc7);
@@ -92,8 +99,8 @@ TEST_CASE("WorkingDirectory.an anonymous context cwd is refused for spawning", "
     auto stack = ContextStack {};
     push(stack, "shell", ContextType::Shell, "/home/bob"); // no machineid, no hostname
 
-    CHECK(!resolveWorkingDirectory(stack, "", ThisMachine, CwdPurpose::Spawn).has_value());
-    CHECK(!resolveWorkingDirectory(stack, "", ThisMachine, CwdPurpose::OpenLocally).has_value());
+    CHECK(!resolveWorkingDirectory(stack, osc7(""), ThisMachine, CwdPurpose::Spawn).has_value());
+    CHECK(!resolveWorkingDirectory(stack, osc7(""), ThisMachine, CwdPurpose::OpenLocally).has_value());
 }
 
 TEST_CASE("WorkingDirectory.an anonymous context cwd is still shown to the user", "[cwd]")
@@ -101,7 +108,7 @@ TEST_CASE("WorkingDirectory.an anonymous context cwd is still shown to the user"
     auto stack = ContextStack {};
     push(stack, "shell", ContextType::Shell, "/home/bob");
 
-    auto const resolved = resolveWorkingDirectory(stack, "", ThisMachine, CwdPurpose::Display);
+    auto const resolved = resolveWorkingDirectory(stack, osc7(""), ThisMachine, CwdPurpose::Display);
     REQUIRE(resolved.has_value());
     CHECK(resolved->path == "/home/bob");
     CHECK(resolved->locality == ContextLocality::Unknown);
@@ -116,13 +123,13 @@ TEST_CASE("WorkingDirectory.a container cwd is displayed but never spawned into"
     push(stack, "box", ContextType::Container, {}, ThisMachine.machineId, ThisMachine.hostname);
     push(stack, "shell", ContextType::Shell, "/app");
 
-    auto const shown = resolveWorkingDirectory(stack, "", ThisMachine, CwdPurpose::Display);
+    auto const shown = resolveWorkingDirectory(stack, osc7(""), ThisMachine, CwdPurpose::Display);
     REQUIRE(shown.has_value());
     CHECK(shown->path == "/app");
     CHECK(shown->locality == ContextLocality::Foreign);
 
-    CHECK(!resolveWorkingDirectory(stack, "", ThisMachine, CwdPurpose::Spawn).has_value());
-    CHECK(!resolveWorkingDirectory(stack, "", ThisMachine, CwdPurpose::OpenLocally).has_value());
+    CHECK(!resolveWorkingDirectory(stack, osc7(""), ThisMachine, CwdPurpose::Spawn).has_value());
+    CHECK(!resolveWorkingDirectory(stack, osc7(""), ThisMachine, CwdPurpose::OpenLocally).has_value());
 }
 
 TEST_CASE("WorkingDirectory.a foreign machine id is refused for spawning", "[cwd]")
@@ -130,9 +137,9 @@ TEST_CASE("WorkingDirectory.a foreign machine id is refused for spawning", "[cwd
     auto stack = ContextStack {};
     push(stack, "shell", ContextType::Shell, "/home/bob", "ffffffffffffffffffffffffffffffff", "zeta");
 
-    CHECK(!resolveWorkingDirectory(stack, "", ThisMachine, CwdPurpose::Spawn).has_value());
+    CHECK(!resolveWorkingDirectory(stack, osc7(""), ThisMachine, CwdPurpose::Spawn).has_value());
 
-    auto const shown = resolveWorkingDirectory(stack, "", ThisMachine, CwdPurpose::Display);
+    auto const shown = resolveWorkingDirectory(stack, osc7(""), ThisMachine, CwdPurpose::Display);
     REQUIRE(shown.has_value());
     CHECK(shown->locality == ContextLocality::Foreign);
 }
@@ -145,7 +152,7 @@ TEST_CASE("WorkingDirectory.a foreign context falls through to OSC 7 for spawnin
     push(stack, "box", ContextType::Container, "/app");
 
     auto const resolved =
-        resolveWorkingDirectory(stack, "file://zeta/home/user", ThisMachine, CwdPurpose::Spawn);
+        resolveWorkingDirectory(stack, osc7("file://zeta/home/user"), ThisMachine, CwdPurpose::Spawn);
     REQUIRE(resolved.has_value());
     CHECK(resolved->path == "/home/user");
     CHECK(resolved->source == CwdSource::Osc7);
@@ -155,11 +162,11 @@ TEST_CASE("WorkingDirectory.a remote OSC 7 url is refused for spawning but shown
 {
     auto const stack = ContextStack {};
 
-    CHECK(!resolveWorkingDirectory(stack, "file://elsewhere/home/bob", ThisMachine, CwdPurpose::Spawn)
+    CHECK(!resolveWorkingDirectory(stack, osc7("file://elsewhere/home/bob"), ThisMachine, CwdPurpose::Spawn)
                .has_value());
 
     auto const shown =
-        resolveWorkingDirectory(stack, "file://elsewhere/home/bob", ThisMachine, CwdPurpose::Display);
+        resolveWorkingDirectory(stack, osc7("file://elsewhere/home/bob"), ThisMachine, CwdPurpose::Display);
     REQUIRE(shown.has_value());
     CHECK(shown->path == "/home/bob");
     CHECK(shown->locality == ContextLocality::Foreign);
@@ -173,7 +180,7 @@ TEST_CASE("WorkingDirectory.the walk skips a context that never mentioned a cwd"
     push(stack, "shell", ContextType::Shell, "/home/user", ThisMachine.machineId);
     push(stack, "cmd", ContextType::Command);
 
-    auto const resolved = resolveWorkingDirectory(stack, "", ThisMachine, CwdPurpose::Spawn);
+    auto const resolved = resolveWorkingDirectory(stack, osc7(""), ThisMachine, CwdPurpose::Spawn);
     REQUIRE(resolved.has_value());
     CHECK(resolved->path == "/home/user");
 }
@@ -193,10 +200,61 @@ TEST_CASE("WorkingDirectory.spawn and openLocally always agree", "[cwd]")
     {
         auto stack = ContextStack {};
         push(stack, "shell", ContextType::Shell, cwd, machineId);
-        auto const spawn = resolveWorkingDirectory(stack, "", ThisMachine, CwdPurpose::Spawn);
-        auto const open = resolveWorkingDirectory(stack, "", ThisMachine, CwdPurpose::OpenLocally);
+        auto const spawn = resolveWorkingDirectory(stack, osc7(""), ThisMachine, CwdPurpose::Spawn);
+        auto const open = resolveWorkingDirectory(stack, osc7(""), ThisMachine, CwdPurpose::OpenLocally);
         CHECK(spawn.has_value() == open.has_value());
         if (spawn && open)
             CHECK(spawn->path == open->path);
     }
 }
+
+TEST_CASE("WorkingDirectory.only a directory on this machine serves what opens or enters it", "[cwd]")
+{
+    STATIC_CHECK(usableFor(CwdPurpose::Display, ContextLocality::Foreign));
+    STATIC_CHECK(usableFor(CwdPurpose::Display, ContextLocality::Unknown));
+    STATIC_CHECK(usableFor(CwdPurpose::OpenLocally, ContextLocality::Local));
+    STATIC_CHECK(usableFor(CwdPurpose::Spawn, ContextLocality::Local));
+    STATIC_CHECK(!usableFor(CwdPurpose::OpenLocally, ContextLocality::Unknown));
+    STATIC_CHECK(!usableFor(CwdPurpose::OpenLocally, ContextLocality::Foreign));
+    STATIC_CHECK(!usableFor(CwdPurpose::Spawn, ContextLocality::Unknown));
+}
+
+// {{{ abbreviateHomePath -- how a working directory is shown (tab tooltip, finish notification)
+
+TEST_CASE("abbreviateHomePath.a path under home is abbreviated", "[cwd]")
+{
+    CHECK(abbreviateHomePath("/home/bob/projects/contour", "/home/bob") == "~/projects/contour");
+}
+
+TEST_CASE("abbreviateHomePath.the home directory itself is a bare tilde", "[cwd]")
+{
+    CHECK(abbreviateHomePath("/home/bob", "/home/bob") == "~");
+}
+
+TEST_CASE("abbreviateHomePath.a sibling that merely shares the prefix is untouched", "[cwd]")
+{
+    // Without a component-boundary check this becomes "~by": a path that reads as real and points
+    // somewhere else entirely.
+    CHECK(abbreviateHomePath("/home/bobby", "/home/bob") == "/home/bobby");
+    CHECK(abbreviateHomePath("/home/bobby/src", "/home/bob") == "/home/bobby/src");
+}
+
+TEST_CASE("abbreviateHomePath.a path outside home is untouched", "[cwd]")
+{
+    CHECK(abbreviateHomePath("/etc/contour", "/home/bob") == "/etc/contour");
+    CHECK(abbreviateHomePath("/", "/home/bob") == "/");
+}
+
+TEST_CASE("abbreviateHomePath.an unknown home abbreviates nothing", "[cwd]")
+{
+    // QDir::homePath() can come back empty; abbreviating against "" would turn every path into "~".
+    CHECK(abbreviateHomePath("/home/bob/src", "") == "/home/bob/src");
+}
+
+TEST_CASE("abbreviateHomePath.an empty path stays empty", "[cwd]")
+{
+    // Empty means "no working directory known", and every caller drops the line entirely.
+    CHECK(abbreviateHomePath("", "/home/bob").empty());
+}
+
+// }}}

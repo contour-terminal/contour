@@ -45,11 +45,14 @@ namespace
     return (std::ostringstream {} << std::ifstream { path }.rdbuf()).str();
 }
 
-/// @return The permission bits of the file or directory at @p path.
+#ifndef _WIN32
+/// @return The permission bits of the file or directory at @p path. Only checked off Windows, which keeps
+///         no POSIX permission bits.
 [[nodiscard]] std::filesystem::perms permissionsOf(std::filesystem::path const& path)
 {
     return std::filesystem::status(path).permissions() & std::filesystem::perms::all;
 }
+#endif
 
 /// @return @p hostname, as a host whose known_hosts file is @p knownHostsFile.
 [[nodiscard]] vtpty::SshHostConfig hostNamed(std::string hostname, std::filesystem::path knownHostsFile)

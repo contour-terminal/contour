@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace vtbackend
 {
@@ -33,6 +35,25 @@ enum class CwdPurpose : uint8_t
     /// caller greys the affordance out rather than opening the host's directory of the same name.
     OpenLocally,
 };
+
+/// Whether @p purpose will actually open or chdir into the path, and therefore needs it to be on this
+/// machine.
+/// @param purpose What a working directory is wanted for.
+/// @return Whether only a provably local path will do.
+[[nodiscard]] constexpr bool needsLocalPath(CwdPurpose purpose) noexcept
+{
+    return purpose != CwdPurpose::Display;
+}
+
+/// Whether a directory of @p locality may serve @p purpose: anywhere for showing it, only on this machine
+/// for whatever needsLocalPath().
+/// @param purpose What a working directory is wanted for.
+/// @param locality Whether the directory is on this machine.
+/// @return Whether a directory there answers @p purpose.
+[[nodiscard]] constexpr bool usableFor(CwdPurpose purpose, ContextLocality locality) noexcept
+{
+    return !needsLocalPath(purpose) || locality == ContextLocality::Local;
+}
 
 /// Where a resolved working directory came from.
 enum class CwdSource : uint8_t
@@ -65,13 +86,26 @@ struct ResolvedWorkingDirectory
 /// POSIX, the pty child's /proc cwd) is a better answer than a guess.
 ///
 /// @param contexts  The OSC 3008 ancestry.
-/// @param osc7Url   The OSC 7 working-directory URL, or empty when none was reported.
+/// @param osc7      The OSC 7 working-directory URL, parsed; its url is empty when none was reported.
 /// @param self      This machine's identity, injected. @see LocalIdentity.
 /// @param purpose   What the answer is wanted for.
 /// @return The resolved directory, or nullopt when no source could answer for this purpose.
 [[nodiscard]] std::optional<ResolvedWorkingDirectory> resolveWorkingDirectory(ContextStack const& contexts,
-                                                                              std::string const& osc7Url,
+                                                                              FileUrl const& osc7,
                                                                               LocalIdentity const& self,
                                                                               CwdPurpose purpose);
+
+/// Replaces a leading home directory with `~`, the way a shell prompt writes a path.
+///
+/// Purely presentational -- the tab tooltip, a finish notification: a caller
+/// that wants a path to ACT on wants the real one, which is why this is never done at the source.
+///
+/// Only a whole path component matches, so a sibling directory whose name merely starts with the home
+/// path (`/home/bobby` against a home of `/home/bob`) is left alone rather than mangled into `~by`.
+///
+/// @param path The absolute path to abbreviate.
+/// @param home The user's home directory. An empty value abbreviates nothing.
+/// @return @p path with the home prefix replaced by `~`, or @p path unchanged.
+[[nodiscard]] std::string abbreviateHomePath(std::string_view path, std::string_view home);
 
 } // namespace vtbackend

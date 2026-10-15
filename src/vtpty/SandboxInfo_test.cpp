@@ -11,6 +11,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <optional>
 #include <string_view>
 
 using vtpty::describeSshConnectFailure;
@@ -107,6 +109,22 @@ TEST_CASE("parseFlatpakInfo tolerates comments, blank lines and stray whitespace
         parseFlatpakInfo("# written by flatpak\n\n  [Context]  \n  shared = ipc ; network ; \n");
 
     CHECK(info.network == NetworkAccess::Permitted);
+}
+
+TEST_CASE("sharedRuntimeDirectory is the runtime directory, or its app directory in a sandbox",
+          "[vtpty][sandbox]")
+{
+    using vtpty::sharedRuntimeDirectory;
+    namespace fs = std::filesystem;
+
+    CHECK(sharedRuntimeDirectory("/run/user/1000", "") == fs::path("/run/user/1000"));
+    CHECK(sharedRuntimeDirectory("/run/user/1000", "org.contourterminal.Contour")
+          == fs::path("/run/user/1000") / "app" / "org.contourterminal.Contour");
+
+    // Unset, empty, or relative -- which the XDG base directory specification has ignored.
+    CHECK_FALSE(sharedRuntimeDirectory(std::nullopt, "").has_value());
+    CHECK_FALSE(sharedRuntimeDirectory("", "org.contourterminal.Contour").has_value());
+    CHECK_FALSE(sharedRuntimeDirectory("run/user/1000", "").has_value());
 }
 
 TEST_CASE("describeSshConnectFailure names the sandbox rather than the symptom", "[vtpty][sandbox]")

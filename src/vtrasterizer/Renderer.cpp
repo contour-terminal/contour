@@ -2,6 +2,7 @@
 #include <vtrasterizer/Renderer.hpp>
 
 #include <vtrasterizer/AtlasBudget.hpp>
+#include <vtrasterizer/GutterCells.hpp>
 #include <vtrasterizer/TextRenderer.hpp>
 #include <vtrasterizer/Utils.hpp>
 
@@ -727,10 +728,13 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
     auto const smoothPixelOffset = static_cast<int>(terminal.smoothScrollPixelOffset());
     auto const statusDisplayAtTop =
         terminal.settings().statusDisplayPosition == vtbackend::StatusDisplayPosition::Top;
+    // The main page as the fill laid it out, read race-free once: the PTY's page size is rewritten by a
+    // resize on another thread.
+    auto const mainPageSize = terminal.mainPageSize();
     // The partition boundary separates the two regions in the render buffer.
     // Bottom: [main 0..pageSize) [status pageSize..)   → boundary = pageSize
     // Top:    [status 0..statusHeight) [main statusHeight..)  → boundary = statusHeight
-    auto const statusLineBoundary = statusDisplayAtTop ? statusLineHeight : terminal.pageSize().lines;
+    auto const statusLineBoundary = statusDisplayAtTop ? statusLineHeight : mainPageSize.lines;
     auto const now = terminal.currentTime();
 
     auto cursorOpt = optional<vtbackend::RenderCursor> { std::nullopt };
@@ -751,17 +755,39 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 
     auto const primaryPressure = pressure && terminal.isPrimaryScreen();
 
+    // The sticky command header covers the main page's first row, so it has to composite OVER that row's
+    // glyphs -- and one execute() draws every rectangle it was handed before any glyph. So it is drawn once
+    // the page has been flushed, in a step of its own, and unshifted: it is pinned to the row, not carried
+    // by the content scrolling beneath it. Before the cursor: a bar or underline cursor on the covered row is
+    // drawn over the header, while a block cursor at rest -- painted into the page's cells by inverting them
+    // -- is hidden under it with the rest of that row.
+    auto const renderStickyHeaderStep = [&](vtbackend::RenderStickyHeader const& header) {
+        setSmoothScrollOffset(0);
+        renderPass(false,
+                   [&] { renderStickyHeader(header, terminal.mainPageTopRow(), mainPageSize.columns); });
+    };
+
     if (smoothPixelOffset == 0)
     {
         // --- Single-pass rendering: no smooth scroll offset, no scissor needed ---
         setSmoothScrollOffset(0);
+        // Held across both steps, so the header comes from the very buffer the cells did. Holding the front
+        // buffer's lock across the page step's execute() blocks no one: the terminal thread only try_locks it
+        // to swap, and a failed swap leaves the frame in the back buffer to be swapped in later -- the cost
+        // is a few more failed swaps, never a wait or an inversion.
+        vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
+        cursorOpt = renderBuffer.get().cursor;
         renderPass(primaryPressure, [&] {
-            vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
-            cursorOpt = renderBuffer.get().cursor;
             renderCells(std::span(renderBuffer.get().cells));
             renderLines(std::span(renderBuffer.get().lines));
             renderGutter(std::span(renderBuffer.get().gutter));
+            renderAnnotations(std::span(renderBuffer.get().annotations));
         });
+        if (auto const& header = renderBuffer.get().stickyHeader)
+        {
+            _renderTarget->execute(now);
+            renderStickyHeaderStep(*header);
+        }
     }
     else
     {
@@ -790,8 +816,9 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         renderPass(primaryPressure, [&] {
             renderCells(mainCells, smoothPixelOffset);
             renderLines(mainLines);
-            // The gutter belongs to the main display, and scrolls with it.
+            // The gutter and the annotations belong to the main display, and scroll with it.
             renderGutter(std::span(renderBuffer.get().gutter));
+            renderAnnotations(std::span(renderBuffer.get().annotations));
         });
 
         // Scissor clips the main display area so the offset content doesn't bleed into the status line.
@@ -799,7 +826,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
             auto const mainAreaTop =
                 _gridMetrics.pageMargin.top + (statusDisplayAtTop ? *statusLineHeight * cellHeight : 0);
-            auto const mainAreaHeight = *terminal.pageSize().lines * cellHeight;
+            auto const mainAreaHeight = *mainPageSize.lines * cellHeight;
             auto const renderSize = _renderTarget->renderSize();
             auto const renderWidth = renderSize.width.as<int>();
             auto const renderHeight = renderSize.height.as<int>();
@@ -808,6 +835,10 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             auto const scissorGuard = core::Finally([this] { _renderTarget->clearScissorRect(); });
             _renderTarget->execute(now);
         }
+
+        // The scissored step has flushed the page, and the header is not clipped with the content under it.
+        if (auto const& header = renderBuffer.get().stickyHeader)
+            renderStickyHeaderStep(*header);
 
         // Pass 2: Status line (no scroll offset, no scissor).
         setSmoothScrollOffset(0);
@@ -858,7 +889,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
             auto const mainAreaTop =
                 _gridMetrics.pageMargin.top + (statusDisplayAtTop ? *statusLineHeight * cellHeight : 0);
-            auto const mainAreaHeight = *terminal.pageSize().lines * cellHeight;
+            auto const mainAreaHeight = *mainPageSize.lines * cellHeight;
             auto const renderSize = _renderTarget->renderSize();
             auto const renderWidth = renderSize.width.as<int>();
             auto const renderHeight = renderSize.height.as<int>();
@@ -927,32 +958,50 @@ void Renderer::renderGutter(std::span<vtbackend::RenderGutterCell const> gutter)
 {
     ZoneScoped;
     for (auto const& marker: gutter)
-    {
-        // groupStart and groupEnd together make each marker its own shaping group, so it is placed at
-        // its own pen position rather than run together with whatever the text renderer saw last.
-        auto const cell = vtbackend::RenderCell {
-            .codepoints = std::u32string(1, marker.codepoint),
-            .image = {},
-            .position =
-                vtbackend::CellLocation { .line = marker.lineOffset, .column = vtbackend::ColumnOffset(-1) },
-            .attributes = marker.attributes,
-            .width = 1,
-            .sizing = {},
-            .groupStart = true,
-            .groupEnd = true,
-        };
+        renderOverlayCell(gutterRenderCell(marker), "renderGutter");
+}
 
-        try
-        {
-            _backgroundRenderer.renderCell(cell);
-            _textRenderer.renderCell(cell);
-        }
-        catch (std::exception const& e)
-        {
-            errorLog()(
-                "renderGutter: skipping marker on line {} due to exception: {}", marker.lineOffset, e.what());
-        }
+void Renderer::renderAnnotations(std::span<vtbackend::RenderCell const> annotations)
+{
+    ZoneScoped;
+    for (auto const& cell: annotations)
+        renderOverlayCell(cell, "renderAnnotations");
+}
+
+void Renderer::renderOverlayCell(vtbackend::RenderCell const& cell, std::string_view what)
+{
+    try
+    {
+        _backgroundRenderer.renderCell(cell);
+        _textRenderer.renderCell(cell);
     }
+    catch (std::exception const& e)
+    {
+        errorLog()("{}: skipping a cell on line {} due to exception: {}", what, cell.position.line, e.what());
+    }
+}
+
+void Renderer::renderStickyHeader(vtbackend::RenderStickyHeader const& header,
+                                  vtbackend::LineOffset row,
+                                  vtbackend::ColumnCount columns)
+{
+    ZoneScoped;
+    auto const top = _gridMetrics.mapTopLeft(row, vtbackend::ColumnOffset(0));
+    auto const bottom = _gridMetrics.mapBottomLeft(row, vtbackend::ColumnOffset(0));
+    auto const width = _gridMetrics.cellSize.width * vtbackend::Width::cast_from(columns);
+
+    // Opaque, whatever the window's background opacity: the band exists to hide the row beneath it, and a
+    // translucent one would let that row's glyphs show through its own.
+    auto constexpr Opaque = uint8_t { 0xFF };
+
+    _renderTarget->renderRectangle(
+        top.x, top.y, width, _gridMetrics.cellSize.height, vtbackend::RGBAColor(header.background, Opaque));
+    // Laid out by the terminal, the chip included: nothing here decides where a glyph goes.
+    renderCells(header.cells);
+    renderCells(header.chip);
+
+    _renderTarget->renderRectangle(
+        top.x, bottom.y - 1, width, vtbackend::Height(1), vtbackend::RGBAColor(header.separator, Opaque));
 }
 
 size_t Renderer::findCellPartitionPoint(std::vector<vtbackend::RenderCell> const& cells,

@@ -1,23 +1,50 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/shell/CommandBlock.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
+#include <functional>
 #include <optional>
-#include <string>
+#include <random>
+#include <vector>
 
 namespace vtbackend
 {
 
-/// Stores metadata for a single command block tracked via OSC 133 shell integration.
-struct CommandBlockInfo
+/// A mode 2034 session token: 64 bits, carried as the four 16-bit parameters T1..T4 of the DECSET 2034 reply
+/// and of every SBQUERY.
+using SemanticBlockToken = std::array<uint16_t, 4>;
+
+/// The largest value a part of a SemanticBlockToken takes: one short of 0xFFFF.
+///
+/// A CSI parameter saturates: the parser reads every number past 0xFFFF as 0xFFFF, so a query's 0xFFFF
+/// stands for all of them. A token part of 0xFFFF would be matched by any number out of range, and SBQUERY
+/// refuses that value instead.
+inline constexpr uint16_t MaxSemanticBlockTokenPart = 0xFFFE;
+
+/// Mints the token of each mode 2034 reader session. Injected, so that a test can pin the token a session is
+/// handed. Every part it mints is at most MaxSemanticBlockTokenPart: a part above that never authenticates.
+using SemanticBlockTokenSource = std::function<SemanticBlockToken()>;
+
+/// Draws a session token from @p bits, every part uniform in [0, MaxSemanticBlockTokenPart].
+/// @param bits A source of random bits.
+/// @return The token.
+template <std::uniform_random_bit_generator Bits>
+[[nodiscard]] SemanticBlockToken drawSemanticBlockToken(Bits& bits)
 {
-    std::optional<std::string> commandLine; ///< From OSC 133;C cmdline_url parameter.
-    int exitCode = -1;                      ///< From OSC 133;D parameter (-1 if unknown).
-    bool finished = false;                  ///< True after OSC 133;D received.
-};
+    auto parts = std::uniform_int_distribution<unsigned> { 0, MaxSemanticBlockTokenPart };
+    auto token = SemanticBlockToken {};
+    for (auto& part: token)
+        part = static_cast<uint16_t>(parts(bits));
+    return token;
+}
+
+/// What production passes for a SemanticBlockTokenSource.
+/// @return A source drawing every token from std::random_device.
+[[nodiscard]] SemanticBlockTokenSource randomSemanticBlockTokens();
 
 /// SBQUERY (CSI > Ps ; Pn b) query type parameter values.
 struct SBQueryType
@@ -27,67 +54,63 @@ struct SBQueryType
     static constexpr unsigned InProgress = 3;           ///< Current in-progress command.
 };
 
-/// Tracks semantic command blocks when DEC mode 2034 (Semantic Block Reader Protocol) is enabled.
+/// The reader side of DEC mode 2034 (Semantic Block Reader Protocol): the session token, and which of the
+/// terminal's command blocks a reader may see.
 ///
-/// This is a standalone tracker owned by Terminal, called from Screen::processShellIntegration()
-/// in addition to the existing ShellIntegration callback. It is only active when mode 2034 is enabled.
+/// It keeps NO blocks of its own. The blocks are the terminal's CommandBlockStore, recorded whether or not
+/// mode 2034 is on; this decides only what the protocol may report. A reader sees the blocks whose command
+/// had not started when it enabled the mode -- the prompt on screen then, and every block after it -- so
+/// enabling 2034 is never a way to read back commands that ran before.
 class SemanticBlockTracker
 {
   public:
-    /// 64-bit session token represented as 4 × uint16_t for CSI parameter encoding.
-    using Token = std::array<uint16_t, 4>;
+    /// 64-bit session token represented as 4 x uint16_t for CSI parameter encoding.
+    using Token = SemanticBlockToken;
 
-    /// Constructs a tracker with a maximum number of completed blocks to retain.
-    ///
-    /// @param maxBlocks Maximum number of completed command blocks to keep in history.
-    explicit SemanticBlockTracker(size_t maxBlocks = 100);
+    /// @param tokens Where each session's token comes from; drawn once per enable().
+    explicit SemanticBlockTracker(SemanticBlockTokenSource tokens);
 
-    /// Enables or disables tracking.
-    ///
-    /// On enable: generates a fresh session token.
-    /// On disable: clears all stored data and invalidates the token.
-    void setEnabled(bool enabled);
+    /// Starts a reader session: mints a fresh token and hides every block whose command has started already.
+    /// A block still at its prompt stays visible: its command is yet to come.
+    /// @param store The terminal's blocks, as they stand when the session starts.
+    void enable(CommandBlockStore const& store);
 
-    /// Returns whether tracking is currently enabled.
+    /// Ends the reader session: the token is invalidated and nothing is reported any more.
+    void disable() noexcept;
+
+    /// @return Whether a reader session is active.
     [[nodiscard]] bool isEnabled() const noexcept;
 
-    /// Returns the current session token, if mode is enabled.
+    /// @return The current session token, while a session is active.
     [[nodiscard]] std::optional<Token> const& token() const noexcept;
 
-    /// Validates a candidate token against the current session token.
-    ///
-    /// @param candidate The token to validate.
-    /// @return true if the token matches the current session token.
+    /// @param candidate The token a query carried.
+    /// @return Whether it matches the current session's.
     [[nodiscard]] bool validateToken(Token const& candidate) const noexcept;
 
-    /// Generates a new random 64-bit token using std::random_device.
-    [[nodiscard]] static Token generateToken();
+    /// The @p count most recent blocks this reader may see that FINISHED with a reported end, newest first.
+    /// A block a newer prompt closed implicitly (a nested shell) is left out: it has no exit code to report.
+    /// @param store The terminal's blocks.
+    /// @param count How many at most.
+    /// @return Pointers into @p store, valid until it next changes.
+    [[nodiscard]] std::vector<CommandBlockRecord const*> finishedBlocks(CommandBlockStore const& store,
+                                                                        size_t count) const;
 
-    /// Called when OSC 133;A (prompt start) is received.
-    void promptStart();
-
-    /// Called when OSC 133;C (command output start) is received.
-    ///
-    /// @param commandLine The command line from the cmdline_url parameter, if available.
-    void commandOutputStart(std::optional<std::string> const& commandLine);
-
-    /// Called when OSC 133;D (command finished) is received.
-    ///
-    /// @param exitCode The exit code of the finished command.
-    void commandFinished(int exitCode);
-
-    /// Returns the list of completed command blocks, oldest first.
-    [[nodiscard]] std::deque<CommandBlockInfo> const& completedBlocks() const noexcept;
-
-    /// Returns the currently in-progress command block, if any.
-    [[nodiscard]] std::optional<CommandBlockInfo> const& currentBlock() const noexcept;
+    /// @param store The terminal's blocks.
+    /// @return The block in progress (prompting or running), if this reader may see it, else nullptr.
+    [[nodiscard]] CommandBlockRecord const* inProgressBlock(CommandBlockStore const& store) const noexcept;
 
   private:
-    bool _enabled = false;
+    /// Whether @p record's command had not started when this reader session did.
+    /// @param store The store @p record is in, whose id epoch says whether the floor still counts its ids.
+    /// @param record The block.
+    [[nodiscard]] bool isVisible(CommandBlockStore const& store,
+                                 CommandBlockRecord const& record) const noexcept;
+
+    SemanticBlockTokenSource _tokens; ///< Fixed at construction.
     std::optional<Token> _token;
-    std::deque<CommandBlockInfo> _completedBlocks;
-    std::optional<CommandBlockInfo> _currentBlock;
-    size_t _maxBlocks;
+    CommandBlockId _hiddenThrough {}; ///< Blocks up to this id had started their commands before the session.
+    uint64_t _hiddenEpoch = 0;        ///< The CommandBlockStore::idEpoch() @ref _hiddenThrough counts in.
 };
 
 } // namespace vtbackend

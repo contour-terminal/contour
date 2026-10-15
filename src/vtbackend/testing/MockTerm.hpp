@@ -8,14 +8,30 @@
 
 #include <core/Environment.hpp>
 #include <core/cli/App.hpp>
+#include <core/platform/Clock.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 
 #include <libunicode/convert.h>
 
+#include <chrono>
 #include <concepts>
 #include <optional>
 
 namespace vtbackend
 {
+
+/// Reads an instant's UTC fields shifted by @p OffsetMinutes as local civil time, so a test spells the same
+/// text in every time zone it runs in.
+/// @tparam OffsetMinutes The zone's fixed offset from UTC, in minutes.
+/// @param when The instant to convert.
+/// @return @p when in that zone's civil time, to the second.
+template <int OffsetMinutes = 0>
+[[nodiscard]] std::chrono::local_seconds fixedOffsetLocalTime(
+    std::chrono::system_clock::time_point when) noexcept
+{
+    return std::chrono::local_seconds { std::chrono::floor<std::chrono::seconds>(when).time_since_epoch()
+                                        + std::chrono::minutes { OffsetMinutes } };
+}
 
 template <typename PtyDevice = vtpty::MockPty>
 class MockTerm: public Terminal::NullEvents
@@ -23,18 +39,32 @@ class MockTerm: public Terminal::NullEvents
   public:
     MockTerm(ColumnCount columns, LineCount lines): MockTerm { PageSize { lines, columns } } {}
 
+    /// @param size The page size.
+    /// @param historyLimits The scrollback's limits.
+    /// @param ptyReadBufferSize The PTY read buffer's size.
     /// @param commandServices Who runs `{Command}` status-line items; nullopt renders them empty.
+    /// @param localTime The time zone the terminal reads its clocks in: UTC unless a test names another,
+    ///                  so that no test depends on the zone of the machine it runs on.
     explicit MockTerm(PageSize size,
                       HistoryLimits historyLimits = {},
                       size_t ptyReadBufferSize = 1024,
-                      std::optional<StatusLineCommandServices> commandServices = std::nullopt);
+                      std::optional<StatusLineCommandServices> commandServices = std::nullopt,
+                      LocalTimeConverter localTime = &fixedOffsetLocalTime<>);
+
+    /// A terminal reading its clocks in the time zone @p localTime.
+    MockTerm(PageSize size, LocalTimeConverter localTime):
+        MockTerm { size, HistoryLimits {}, 1024, std::nullopt, localTime }
+    {
+    }
 
     /// Builds the terminal from @p settings exactly as given, for a test that needs a setting the
     /// other constructors do not expose, such as the parser's BulkScan.
     /// @see createSettings for what the other constructors set.
     /// @param commandServices Who runs `{Command}` status-line items; nullopt renders them empty.
+    /// @param localTime The time zone the terminal reads its clocks in, UTC unless a test names another.
     explicit MockTerm(vtbackend::Settings settings,
-                      std::optional<StatusLineCommandServices> commandServices = std::nullopt);
+                      std::optional<StatusLineCommandServices> commandServices = std::nullopt,
+                      LocalTimeConverter localTime = &fixedOffsetLocalTime<>);
 
     /// A scrollback with no headroom, which is what a bare line count has always meant here.
     MockTerm(PageSize size,
@@ -155,6 +185,11 @@ class MockTerm: public Terminal::NullEvents
     /// The size most recently requested by the application.
     std::optional<PageSize> requestedPageSize;
 
+    void onSelectionCompleted() override { ++selectionCompletions; }
+
+    /// How often the terminal reported a selection completed: what a frontend copies to PRIMARY on.
+    int selectionCompletions = 0;
+
     /// When set, the request is recorded but NOT applied — modelling a frontend that cannot honour it
     /// (window maximized/fullscreen, a tiling WM, or the resize still in-flight on the GUI thread). Lets
     /// a test prove a sequence resizes the grid on its own authority rather than via the frontend.
@@ -212,6 +247,17 @@ class MockTerm: public Terminal::NullEvents
 
     /// The icon (or tab) title most recently set by the application, via OSC 0 or OSC 1.
     std::string iconTitle;
+
+    /// The clocks the terminal reads, driven by the test: steadyClock for the terminal's own time and command
+    /// durations, wallClock for row birth and block times. Both start at their epoch, which is also the
+    /// session epoch row stamps count from. Declared BEFORE `terminal`, which borrows them for its life.
+    /// Their times are read in the zone the constructor was handed, UTC by default.
+    core::platform::ManualClock steadyClock;
+    core::platform::ManualWallClock wallClock;
+
+    /// The token the next DEC mode 2034 reader session is handed. Each session moves it on by one, so no two
+    /// sessions share a token; a test that asserts on the exact reply sets it first.
+    SemanticBlockToken nextSemanticBlockToken { 1, 2, 3, 4 };
 
     Terminal terminal;
 
@@ -280,6 +326,42 @@ class MockTerm: public Terminal::NullEvents
 
     void searchPromptRequested() override { ++searchPromptRequests; }
 
+    /// This machine's identity as the terminal is told it, for the locality of a working directory. Empty
+    /// by default, so only an OSC 7 URL with no host is provably local.
+    HostIdentity identity;
+
+    [[nodiscard]] LocalIdentity localIdentity() const noexcept override { return identity.view(); }
+
+    /// What new output does to a view scrolled back into the history: it stays by default, as a headless
+    /// terminal's view does. @see Terminal::Events::outputFollowing
+    OutputFollowing following = OutputFollowing::Stay;
+
+    [[nodiscard]] OutputFollowing outputFollowing() const noexcept override { return following; }
+
+    /// Every command block the terminal announced as finished, in order.
+    /// @see Terminal::Events::commandBlockFinished
+    std::vector<CommandBlockSummary> finishedCommandBlocks;
+
+    void commandBlockFinished(CommandBlockSummary const& summary) override
+    {
+        finishedCommandBlocks.push_back(summary);
+    }
+
+    /// Every change to a command block's record the terminal told of, in order.
+    /// @see Terminal::Events::commandBlockChanged
+    std::vector<CommandBlockChange> changedCommandBlocks;
+
+    void commandBlockChanged(CommandBlockChange const& change) override
+    {
+        changedCommandBlocks.push_back(change);
+    }
+
+    /// Every active OSC 3008 context the terminal announced, in order; a zero id is an emptied ancestry.
+    /// @see Terminal::Events::contextChanged
+    std::vector<ContextId> contextChanges;
+
+    void contextChanged(ContextId activeContext) override { contextChanges.push_back(activeContext); }
+
     static vtbackend::Settings createSettings(PageSize pageSize,
                                               HistoryLimits historyLimits,
                                               size_t ptyReadBufferSize)
@@ -317,20 +399,30 @@ template <typename PtyDevice>
 inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
                                      HistoryLimits historyLimits,
                                      size_t ptyReadBufferSize,
-                                     std::optional<StatusLineCommandServices> commandServices):
-    MockTerm { createSettings(pageSize, historyLimits, ptyReadBufferSize), std::move(commandServices) }
+                                     std::optional<StatusLineCommandServices> commandServices,
+                                     LocalTimeConverter localTime):
+    MockTerm { createSettings(pageSize, historyLimits, ptyReadBufferSize),
+               std::move(commandServices),
+               localTime }
 {
 }
 
 template <typename PtyDevice>
 inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
-                                     std::optional<StatusLineCommandServices> commandServices):
+                                     std::optional<StatusLineCommandServices> commandServices,
+                                     LocalTimeConverter localTime):
     terminal { *this,
                core::defaultEnvironment(),
+               core::platform::NativeFileSystem::instance(),
                std::make_unique<PtyDevice>(settings.pageSize),
                std::move(settings),
                std::move(commandServices),
-               std::chrono::steady_clock::time_point() } // explicitly start with empty timepoint
+               TerminalClocks { .steady = steadyClock, .wall = wallClock, .localTime = localTime },
+               [this] {
+                   auto const token = nextSemanticBlockToken;
+                   ++nextSemanticBlockToken.back();
+                   return token;
+               } }
 {
     if (auto const logFilterString = core::defaultEnvironment().get("LOG"))
     {

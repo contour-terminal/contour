@@ -192,14 +192,37 @@ TEST_CASE("BulkScan.TextOnTheOpenedSurfaceGivesTheSameScreen", "[BulkScan]")
 TEST_CASE("BulkScan.AWrapRestoredAfterAWideningResizeGivesTheSameScreen", "[BulkScan]")
 {
     // DECSC with a wrap pending on the last column, then DECCOLM widens the page in-band (DECNCSM keeps
-    // its contents) and DECRC restores the wrap, now pending left of the right margin. The next line
-    // holds a wide character for the wrapped text to land on.
+    // its contents) and DECRC restores the cursor. The next line holds a wide character. The widening
+    // takes the saved cursor's wrap as it takes the live one's (Screen::applyPageSizeToMainDisplay): the
+    // row has room now for what would have wrapped, so DECRC comes back right after its text. A wrap
+    // still pending left of the right margin is the next test's.
     auto const setup = std::format("\033[?40h\033[?95h\033[2;1Hab\xE4\xB8\xAD\033[1;1H{}\0337\033[?3h\0338",
                                    std::string(80, '.'));
     for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
     {
         INFO((screenSelect.empty() ? "primary" : "alternate"));
         auto const fullSetup = std::string(screenSelect) + setup;
+
+        auto probe = makeTerminal(PageSize { LineCount(3), ColumnCount(80) }, vtparser::BulkScan::Disabled);
+        probe.writeToScreen(fullSetup);
+        auto const& cursor = probe.terminal.currentScreen().cursor();
+        REQUIRE_FALSE(cursor.wrapPending);
+        REQUIRE(cursor.position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(80) });
+
+        checkSameScreenAtEverySplit(PageSize { LineCount(3), ColumnCount(80) }, fullSetup, "xyz"sv);
+    }
+}
+
+TEST_CASE("BulkScan.AWrapPendingLeftOfTheMarginGivesTheSameScreen", "[BulkScan]")
+{
+    // DECSLRM narrows the margins, a full row leaves a wrap pending on the right one, and DECLRMM reset
+    // widens them again under it: the wrap is now pending left of the right margin. The next line holds a
+    // wide character for the wrapped text to land on.
+    auto const setup = "\033[2;1Hab\xE4\xB8\xAD\033[?69h\033[1;5sabcde\033[?69l"sv;
+    for (auto const screenSelect: { ""sv, "\033[?1049h"sv })
+    {
+        INFO((screenSelect.empty() ? "primary" : "alternate"));
+        auto const fullSetup = std::string(screenSelect) + std::string(setup);
 
         auto probe = makeTerminal(PageSize { LineCount(3), ColumnCount(80) }, vtparser::BulkScan::Disabled);
         probe.writeToScreen(fullSetup);

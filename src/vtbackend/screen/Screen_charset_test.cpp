@@ -753,16 +753,21 @@ TEST_CASE("DECDLD: multiple glyphs separated by semicolons", "[screen]")
     CHECK(charset->glyphs.contains(0x22)); // Second glyph
 }
 
-TEST_CASE("DECDLD: soft reset clears DRCS", "[screen]")
+TEST_CASE("DECDLD: a soft reset keeps the soft character set, and a hard reset clears it", "[screen]")
 {
+    // DEC STD 070 lists DRCS among what is "NOT affected by the soft reset"; RIS "Clears the soft character
+    // set" (the VT520 manual), as Windows Terminal's HardReset does and its SoftReset does not.
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
     mock.writeToScreen("\033P0;0;0;10;10;0;20;0{A@\033\\");
-    mock.terminal.flushInput();
+    REQUIRE(mock.terminal.drcsCharset(0) != nullptr);
+
+    mock.writeToScreen("\033[!p"); // DECSTR
     CHECK(mock.terminal.drcsCharset(0) != nullptr);
-    // Soft reset
-    mock.writeToScreen("\033[!p");
-    mock.terminal.flushInput();
+    CHECK(mock.terminal.drcsDesignatorToFont("A").has_value());
+
+    mock.writeToScreen("\033c"); // RIS
     CHECK(mock.terminal.drcsCharset(0) == nullptr);
+    CHECK_FALSE(mock.terminal.drcsDesignatorToFont("A").has_value());
 }
 
 TEST_CASE("DECDLD: DA1 includes ext 7 (SoftCharacterSet)", "[screen]")

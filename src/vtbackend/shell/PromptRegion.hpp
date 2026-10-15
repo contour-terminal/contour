@@ -22,7 +22,7 @@ struct LogicalLineMarks
 
 /// Supplies the LOGICAL lines a live-prompt scan walks, indexed backwards from the cursor's line.
 ///
-/// The dependency-injection seam, mirroring CommandBlockLineSource: the scan below is a pure function of
+/// The dependency-injection seam, mirroring FoldLineSource: the scan below is a pure function of
 /// the marks it is handed, so it can be exercised against a plain vector — with no Grid, no Screen and no
 /// terminal behind it.
 ///
@@ -40,8 +40,8 @@ class PromptRegionLineSource
 
     /// Whether there is a logical line at @p index — 0 being the cursor's, counting upwards.
     ///
-    /// A predicate rather than a count, for the reason CommandBlockLineSource gives: counting would walk
-    /// the whole scrollback before the scan has looked at a single flag.
+    /// A predicate rather than a count: counting would walk the whole scrollback before the scan has looked
+    /// at a single flag, when it wants the handful of lines above the cursor.
     [[nodiscard]] virtual bool hasLineAt(size_t index) const = 0;
 
     /// The marks of the logical line @p index lines ABOVE the cursor's (0 being the cursor's).
@@ -83,14 +83,15 @@ enum class PromptRegionError : uint8_t
 
 /// The live (unfinished) prompt the cursor is standing in.
 ///
-/// The exact complement of scanCommandBlocksBackward(): that one reconstructs FINISHED blocks, which a
+/// The complement of the fold scan (computeFoldRanges()): that one finds FINISHED blocks, which a
 /// CommandEnd opens — so it can never see the prompt the user is typing at right now, which by definition
 /// has no CommandEnd yet. This one is anchored at the cursor, requires the block to still be OPEN, and
-/// returns POSITIONS rather than text.
+/// returns positions.
 ///
 /// The walk starts at the cursor's own logical line and climbs: an OutputStart reached before any prompt
-/// start means a command is running; a PromptEnd records the prompt/input border; a Marked ends the walk
-/// successfully.
+/// start means a command is running -- unless its line carries a CommandEnd and a prompt start too, which
+/// makes it the output start of a finished command that printed nothing; a PromptEnd records the
+/// prompt/input border; a Marked ends the walk successfully.
 ///
 /// @param lines The logical lines, the cursor's first.
 /// @param maxScanLines How far up to look before giving up. A prompt is a handful of lines, and the walk
@@ -98,6 +99,17 @@ enum class PromptRegionError : uint8_t
 /// @return The region, or why there is none.
 [[nodiscard]] std::expected<PromptRegion, PromptRegionError> findLivePromptRegion(
     PromptRegionLineSource const& lines, size_t maxScanLines);
+
+/// Whether the shell has marked where a command's output starts -- OSC 133;C, or an OSC 3008 command start.
+///
+/// Until it has, a live-prompt scan cannot tell the prompt from what follows it: a shell that sends only ;A
+/// leaves a running command's output as unmarked as the prompt's own lines, so everything from the prompt
+/// start down to the cursor would read as the prompt.
+enum class OutputStartMarking : uint8_t
+{
+    Unseen = 0, ///< None marked since the last hard reset: the rows below a prompt may be output.
+    Seen, ///< One was: the rows from a prompt start down to the cursor, with none between, are the prompt.
+};
 
 /// How far a live-prompt scan climbs before giving up.
 ///

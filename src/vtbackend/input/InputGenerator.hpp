@@ -703,6 +703,10 @@ class InputGenerator
                         eventType);
     }
     bool generate(Key key, KeyboardModifiers modifiers, KeyboardEventType eventType);
+
+    /// Queues @p text as a paste: as it is, or under bracketed paste mode between ESC [ 200 ~ and
+    /// ESC [ 201 ~ with every ESC taken out, so nothing inside can end the paste early.
+    /// @param text The pasted text; untrusted.
     void generatePaste(std::string_view const& text);
     bool generateMousePress(Modifiers modifier,
                             MouseButton button,

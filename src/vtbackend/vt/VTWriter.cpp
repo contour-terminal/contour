@@ -271,6 +271,11 @@ void VTWriter::write(Line const& line)
 
         // A tall text-sizing block's lower part belongs to the block the row above made, and writing
         // anything there would destroy that block: the cursor steps over it instead.
+        //
+        // Where the block's head is not in what is written -- its head row has scrolled above the page --
+        // the block cannot be made again, as OSC 66 makes a block from its head down. Its lower part then
+        // replays as blank cells, kept so that what stands beside it stays in its column. kitty's dump
+        // writes nothing for such cells either (text_in_cell_ansi, line.c).
         if (cell.isFlagEnabled(CellFlag::MulticellContinuation))
         {
             write("\033[C");

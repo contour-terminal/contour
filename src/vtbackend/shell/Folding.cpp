@@ -2,8 +2,11 @@
 #include <vtbackend/shell/Folding.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <iterator>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <vector>
@@ -15,9 +18,9 @@ namespace
 {
     /// Where a backward fold walk stands between two command blocks.
     ///
-    /// The same three states scanCommandBlocksBackward() walks, and deliberately so: the two read the
-    /// very same marks, and a fold that disagreed with the block the "copy last command" actions hand to
-    /// the clipboard would be a fold around something other than what it claims.
+    /// The three states a block's marks put a backward walk in: a fold reads the very same marks the block
+    /// actions read, and a fold that disagreed with the block they hand to the clipboard would be a fold
+    /// around something other than what it claims.
     enum class ScanState : uint8_t
     {
         Searching, ///< Looking for the CommandEnd that closes the next block.
@@ -278,6 +281,48 @@ int64_t visibleDistance(std::span<HiddenInterval const> hidden, int64_t first, i
         distance -= std::min(it->last + 1, last) - std::max(it->first, first);
 
     return distance;
+}
+
+namespace
+{
+    /// At i, the ids the first i of @p hidden hide, all told: one more entry than there are runs.
+    [[nodiscard]] std::vector<int64_t> hiddenPrefixSums(std::span<HiddenInterval const> hidden)
+    {
+        auto sums = std::vector<int64_t>(hidden.size() + 1);
+        std::transform_inclusive_scan(
+            hidden.begin(),
+            hidden.end(),
+            std::next(sums.begin()),
+            std::plus<> {},
+            [](HiddenInterval const& run) { return run.last - run.first + 1; },
+            int64_t { 0 });
+        return sums;
+    }
+} // namespace
+
+VisibleDistanceFrom::VisibleDistanceFrom(std::span<HiddenInterval const> hidden, int64_t origin):
+    _hidden { hidden },
+    _hiddenBefore { hiddenPrefixSums(hidden) },
+    _origin { origin },
+    _hiddenBelowOrigin { hiddenBelow(origin) }
+{
+}
+
+int64_t VisibleDistanceFrom::to(int64_t id) const noexcept
+{
+    // The span less what the runs hide inside it, which is what they hide below its far end less what they
+    // hide below its near one -- in either order, so this is symmetric as visibleDistance() is.
+    return (id - _origin) - (hiddenBelow(id) - _hiddenBelowOrigin);
+}
+
+int64_t VisibleDistanceFrom::hiddenBelow(int64_t id) const noexcept
+{
+    // Every run ending before @p id is hidden whole; the next one, if it starts before @p id, up to it.
+    auto const next = std::ranges::lower_bound(_hidden, id, {}, &HiddenInterval::last);
+    auto const whole = _hiddenBefore[static_cast<size_t>(std::distance(_hidden.begin(), next))];
+    if (next != _hidden.end() && next->first < id)
+        return whole + (id - next->first);
+    return whole;
 }
 
 std::vector<LineOffset> projectRows(std::span<HiddenInterval const> hidden,

@@ -605,6 +605,14 @@ enum class CursorDisplay : uint8_t
     Blink
 };
 
+/// Whether a cursor's wrap is pending: it stands on the last column of a row it has just filled, and
+/// the next character goes to the start of the next row (DEC STD 070's Last Column Flag).
+enum class WrapPending : uint8_t
+{
+    No,
+    Yes,
+};
+
 enum class CursorShape : uint8_t
 {
     Block,

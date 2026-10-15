@@ -25,21 +25,25 @@ set(vtpty_SOURCES
     CommandCapture.cpp
     CommandCapture${PLATFORM_SUFFIX}.cpp
     CommandCaptureStop.hpp # private: shared by the platform implementations only
+    CommandLine.cpp
     EnvironmentBlock.cpp
     MockPty.cpp
     MockViewPty.cpp
     OwnedFd.cpp
     Process${PLATFORM_SUFFIX}.cpp
     ProcessPlacement.cpp
+    ProgramLookup.cpp
     Pty.cpp
     SandboxInfo.cpp
     SpawnLadder.cpp
     SshFailureMessage.cpp
+    WindowsCommandLine.cpp
 )
 
 set(vtpty_HEADERS
     ChannelPty.hpp
     CommandCapture.hpp
+    CommandLine.hpp
     EnvironmentBlock.hpp
     ImageSize.hpp
     MockPty.hpp
@@ -49,11 +53,13 @@ set(vtpty_HEADERS
     PlacementBreaker.hpp
     Process.hpp
     ProcessPlacement.hpp
+    ProgramLookup.hpp
     Pty.hpp
     SandboxInfo.hpp
     ScopeBus.hpp
     SpawnLadder.hpp
     SshFailureMessage.hpp
+    WindowsCommandLine.hpp
 )
 
 set(_include_SshSession_module FALSE)
@@ -146,21 +152,25 @@ if(VTPTY_TESTING)
         test_main.cpp
         ChannelPty_test.cpp
         CommandCapture_test.cpp
+        CommandLine_test.cpp
         EnvironmentBlock_test.cpp
         ImageSize_test.cpp
         PlacementBreaker_test.cpp
         Process_test.cpp
         SandboxInfo_test.cpp
         SpawnLadder_test.cpp
+        WindowsCommandLine_test.cpp
+        test/PtyReading_test.cpp
     )
     if(WIN32)
         # ConPty is the Windows-only PTY backend.
         target_sources(vtpty_test PRIVATE ConPty_test.cpp)
 
-        # The child half of the ConPty tests that run a program: a console program writing OSC 133 marks
-        # the way a shell integration does, then a sentinel, so a test can see what survives the
-        # pseudoconsole.
+        # The child half of the ConPty tests that run a program: a console program printing the arguments
+        # it received, then writing OSC 133 marks the way a shell integration does, then a sentinel, so a
+        # test can see what arrives and what survives the pseudoconsole.
         add_executable(conpty_osc133_probe test/conpty_osc133_probe.cpp)
+        target_link_libraries(conpty_osc133_probe PRIVATE core::base)
         add_dependencies(vtpty_test conpty_osc133_probe)
         target_compile_definitions(vtpty_test PRIVATE
             VTPTY_CONPTY_OSC133_PROBE="$<TARGET_FILE:conpty_osc133_probe>")

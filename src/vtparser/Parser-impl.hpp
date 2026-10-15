@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <iterator>
 #include <ranges>
 #include <string_view>
 
@@ -382,22 +383,26 @@ constexpr ParserTable ParserTable::get() // {{{
 } // }}}
 
 template <ParserEventsConcept EventListener, bool TraceStateChanges>
-void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char const> data)
+size_t Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char const> data)
 {
     ZoneScoped;
-
-    // The reference every bulk scanner is checked against: each byte through the state machine.
-    if (_bulkScan == BulkScan::Disabled)
-    {
-        for (auto const ch: data)
-            processOnceViaStateMachine(static_cast<uint8_t>(ch));
-        return;
-    }
 
     auto const* input = data.data();
     auto const* const end = data.data() + data.size();
 
-    while (input != end)
+    // Both loops run while the input is short of _fragmentEnd, which returnAfterCurrentByte() can move.
+    _fragmentBegin = input;
+    _fragmentEnd = end;
+
+    // The reference every bulk scanner is checked against: each byte through the state machine.
+    if (_bulkScan == BulkScan::Disabled)
+    {
+        while (input < _fragmentEnd)
+            processOnceViaStateMachine(static_cast<uint8_t>(*input++));
+        return static_cast<size_t>(std::distance(data.data(), input));
+    }
+
+    while (input < _fragmentEnd)
     {
         // Which bulk scanner applies is a property of the state. Ground, where text is, comes first
         // and on its own; the rest reads as a switch rather than as a chain of conditionals -- and a
@@ -419,6 +424,7 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
         else
             processOnceViaStateMachine(static_cast<uint8_t>(*input++));
     }
+    return static_cast<size_t>(std::distance(data.data(), input));
 }
 
 /// True for the states that collect a string body (OSC/APC/PM/SOS/DCS), where an 8-bit ST must be

@@ -10,6 +10,7 @@
 #include <libunicode/case_mapping.h>
 #include <libunicode/convert.h>
 
+#include <algorithm>
 #include <array>
 #include <format>
 #include <iterator>
@@ -1108,13 +1109,34 @@ void InputGenerator::generatePaste(std::string_view const& text)
     if (text.empty())
         return;
 
-    if (_bracketedPaste)
-        append("\033[200~"sv);
+    if (!_bracketedPaste)
+    {
+        append(text);
+        return;
+    }
 
-    append(text);
-
-    if (_bracketedPaste)
-        append("\033[201~"sv);
+    // Pasted text is untrusted -- copied command output can hold anything -- and an ESC [ 201 ~ inside
+    // it would end the paste early, so the application would read the rest as typed keys. Every ESC is
+    // dropped, which leaves the end marker, and any other sequence, inert text: as foot, Windows Terminal
+    // and Alacritty do (xterm turns ESC into a space; kitty and WezTerm remove only the end marker).
+    // The C1 controls go too, each being the 8-bit form of one that starts with ESC (U+009B is CSI): in
+    // UTF-8 the two bytes C2 80..C2 9F, dropped whole. C2 only ever leads, so no other character loses a
+    // byte.
+    append("\033[200~"sv);
+    auto dropsNext = false; // the byte after a dropped C1 lead byte
+    for (auto const [offset, ch]: core::views::enumerate(text))
+    {
+        if (std::exchange(dropsNext, false) || ch == '\033')
+            continue;
+        if (ch == '\xC2' && offset + 1 < text.size() && static_cast<uint8_t>(text[offset + 1]) >= 0x80
+            && static_cast<uint8_t>(text[offset + 1]) <= 0x9F)
+        {
+            dropsNext = true;
+            continue;
+        }
+        _pendingSequence.push_back(ch);
+    }
+    append("\033[201~"sv);
 }
 
 inline bool InputGenerator::append(std::string_view sequence)

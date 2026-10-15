@@ -24,9 +24,9 @@ class DirectWriteShaper: public Shaper
 
     void setFontFallbackLimit(int limit) override;
 
-    std::optional<FontKey> loadFont(FontDescription const& description, FontSize size) override;
+    [[nodiscard]] std::optional<FontKey> loadFont(FontDescription const& description, FontSize size) override;
 
-    FontMetrics metrics(FontKey key) const override;
+    [[nodiscard]] FontMetrics metrics(FontKey key) const override;
 
     void shape(FontKey font,
                std::u32string_view text,
@@ -35,11 +35,11 @@ class DirectWriteShaper: public Shaper
                unicode::PresentationStyle presentation,
                ShapeResult& result) override;
 
-    std::optional<GlyphPosition> shape(FontKey font, char32_t codepoint) override;
+    [[nodiscard]] std::optional<GlyphPosition> shape(FontKey font, char32_t codepoint) override;
 
-    std::optional<RasterizedGlyph> rasterize(GlyphKey glyph,
-                                             RenderMode mode,
-                                             float outlineThickness = 0.0f) override;
+    [[nodiscard]] std::optional<RasterizedGlyph> rasterize(GlyphKey glyph,
+                                                           RenderMode mode,
+                                                           float outlineThickness = 0.0f) override;
 
   private:
     struct Private;

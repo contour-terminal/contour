@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
+#include <optional>
 #include <ranges>
 #include <set>
 
@@ -70,6 +72,17 @@ auto ipv6OnlyPatterns() -> std::vector<HintPattern>
         if (p.name == "ipv6")
             result.push_back(std::move(p));
     return result;
+}
+
+/// @return A resolve hook that keeps a match as written where @p keeps holds, and drops it elsewhere.
+[[nodiscard]] auto keepingWhere(std::function<bool(std::string const&)> keeps)
+{
+    return [keeps = std::move(keeps)](std::string const& matchStr,
+                                      LineOffset /*row*/) -> std::optional<std::string> {
+        if (!keeps(matchStr))
+            return std::nullopt;
+        return matchStr;
+    };
 }
 
 /// Returns only the filepath pattern for precise test assertions.
@@ -426,13 +439,11 @@ TEST_CASE("HintModeHandler.ValidatorFiltersMatches", "[hintmode]")
 
     auto lines = std::vector<std::string> { "open /accept/path and /reject/path" };
 
-    // Create a filepath pattern with a validator that only accepts "/accept/path".
+    // Create a filepath pattern whose resolve hook keeps only "/accept/path".
     auto patterns = filepathOnlyPatterns();
     for (auto& p: patterns)
     {
-        p.validator = [](std::string const& matchStr) -> bool {
-            return matchStr.contains("accept");
-        };
+        p.resolve = keepingWhere([](std::string const& matchStr) { return matchStr.contains("accept"); });
     }
 
     handler.activate(scanArea(lines), patterns, HintAction::Open);
@@ -449,7 +460,7 @@ TEST_CASE("HintModeHandler.NoValidatorPassesAll", "[hintmode]")
 
     auto lines = std::vector<std::string> { "see /foo/bar and /baz/qux" };
 
-    // No validator set — both paths should pass through.
+    // No resolve hook set — both paths should pass through.
     handler.activate(scanArea(lines), filepathOnlyPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
@@ -476,18 +487,17 @@ TEST_CASE("HintModeHandler.BareFilenameWithValidatedPattern", "[hintmode]")
     auto lines = std::vector<std::string> { "error in main.cpp and README.md also Makefile and src" };
 
     // Create a filepath pattern with the broader regex (includes bare name branch)
-    // and a validator that accepts specific names.
+    // and a resolve hook that keeps specific names.
     auto patterns = std::vector<HintPattern> {
         HintPattern {
             .name = "filepath",
             .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
                                 std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .validator = [](std::string const& matchStr) -> bool {
+            .resolve = keepingWhere([](std::string const& matchStr) -> bool {
                 // Simulate: these entries exist on disk, anything else doesn't.
                 return matchStr == "main.cpp" || matchStr == "README.md" || matchStr == "Makefile"
                        || matchStr == "src";
-            },
-            .transformer = {},
+            }),
         },
     };
 
@@ -507,7 +517,7 @@ TEST_CASE("HintModeHandler.BareFilenameFilteredByValidator", "[hintmode]")
     auto handler = HintModeHandler { executor };
 
     // Version numbers, domain names, and non-existent bare words should be filtered
-    // when the validator confirms they don't exist on disk.
+    // when the resolve hook finds they do not exist on disk.
     auto lines = std::vector<std::string> { "version v0.6.3 and example.com and real.txt also build" };
 
     auto patterns = std::vector<HintPattern> {
@@ -515,11 +525,10 @@ TEST_CASE("HintModeHandler.BareFilenameFilteredByValidator", "[hintmode]")
             .name = "filepath",
             .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
                                 std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .validator = [](std::string const& matchStr) -> bool {
+            .resolve = keepingWhere([](std::string const& matchStr) -> bool {
                 // Only real.txt "exists".
                 return matchStr == "real.txt";
-            },
-            .transformer = {},
+            }),
         },
     };
 
@@ -543,8 +552,7 @@ TEST_CASE("HintModeHandler.SingleCharTokensNotMatched", "[hintmode]")
             .name = "filepath",
             .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
                                 std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .validator = [](std::string const&) -> bool { return true; }, // Accept everything.
-            .transformer = {},
+            .resolve = keepingWhere([](std::string const&) -> bool { return true; }), // Accept everything.
         },
     };
 
@@ -559,7 +567,7 @@ TEST_CASE("HintModeHandler.BuiltinRegexDoesNotMatchBareFilenames", "[hintmode]")
     auto executor = MockExecutor {};
     auto handler = HintModeHandler { executor };
 
-    // With the default builtin patterns (no validator, no broad regex),
+    // With the default builtin patterns (no resolve hook, no broad regex),
     // bare filenames must NOT be matched — they need a path separator.
     auto lines = std::vector<std::string> { "edit main.cpp and README.md" };
 
@@ -592,22 +600,21 @@ TEST_CASE("HintModeHandler.CwdRelativeFilesystemValidation", "[hintmode]")
         "edit main.cpp and README.md also Makefile and src and .hidden but not bogus or phantom.xyz",
     };
 
-    // Mirror the production validator from Terminal::activateHintMode:
+    // Mirror the production resolve hook from Terminal::activateHintMode:
     // resolve bare names relative to CWD, then check filesystem existence.
     auto patterns = std::vector<HintPattern> {
         HintPattern {
             .name = "filepath",
             .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
                                 std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .validator = [cwd](std::string const& matchStr) -> bool {
+            .resolve = keepingWhere([cwd](std::string const& matchStr) -> bool {
                 auto resolved = std::string {};
                 if (matchStr.starts_with("/"))
                     resolved = matchStr;
                 else
                     resolved = cwd + "/" + matchStr;
                 return fs::exists(resolved);
-            },
-            .transformer = {},
+            }),
         },
     };
 
@@ -627,7 +634,7 @@ TEST_CASE("HintModeHandler.CwdRelativeFilesystemValidation", "[hintmode]")
     CHECK(std::ranges::find(matchedTexts, "src") != matchedTexts.end());
     CHECK(std::ranges::find(matchedTexts, ".hidden") != matchedTexts.end());
 
-    // Non-existent names must be filtered out by the validator.
+    // Non-existent names must be dropped by the resolve hook.
     CHECK(std::ranges::find(matchedTexts, "bogus") == matchedTexts.end());
     CHECK(std::ranges::find(matchedTexts, "phantom.xyz") == matchedTexts.end());
 
@@ -650,12 +657,11 @@ TEST_CASE("HintModeHandler.HiddenFilesWithValidatedPattern", "[hintmode]")
             .name = "filepath",
             .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
                                 std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .validator = [](std::string const& matchStr) -> bool {
+            .resolve = keepingWhere([](std::string const& matchStr) -> bool {
                 // Simulate: all dotfiles and README.md exist on disk.
                 return matchStr == ".gitignore" || matchStr == ".bashrc" || matchStr == ".config"
                        || matchStr == "README.md";
-            },
-            .transformer = {},
+            }),
         },
     };
 
@@ -689,8 +695,7 @@ TEST_CASE("HintModeHandler.DotPrefixedRelativePath", "[hintmode]")
             .name = "filepath",
             .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
                                 std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .validator = [](std::string const&) -> bool { return true; }, // Accept everything.
-            .transformer = {},
+            .resolve = keepingWhere([](std::string const&) -> bool { return true; }), // Accept everything.
         },
     };
 
@@ -717,8 +722,11 @@ TEST_CASE("HintModeHandler.TransformerRewritesMatchedText", "[hintmode]")
         HintPattern {
             .name = "filepath",
             .regex = std::regex(R"([\w./]+)", std::regex_constants::ECMAScript),
-            .validator = [](std::string const& matchStr) -> bool { return matchStr.contains('/'); },
-            .transformer = [](std::string const& matchStr) -> std::string { return "/project/" + matchStr; },
+            .resolve = [](std::string const& matchStr, LineOffset /*row*/) -> std::optional<std::string> {
+                if (!matchStr.contains('/'))
+                    return std::nullopt;
+                return "/project/" + matchStr;
+            },
         },
     };
 
@@ -1387,10 +1395,8 @@ TEST_CASE("HintModeHandler.LongestMatchWinsAtTheSameStart", "[hintmode]")
     // tie-break puts the longer one first, and the overlap pass then drops the shorter -- the rule
     // the wrapped-line overlap comparison relies on.
     auto patterns = std::vector<HintPattern> {
-        HintPattern {
-            .name = "short", .regex = std::regex(R"([0-9a-f]{7})"), .validator = {}, .transformer = {} },
-        HintPattern {
-            .name = "long", .regex = std::regex(R"([0-9a-f]{10})"), .validator = {}, .transformer = {} },
+        HintPattern { .name = "short", .regex = std::regex(R"([0-9a-f]{7})"), .resolve = {} },
+        HintPattern { .name = "long", .regex = std::regex(R"([0-9a-f]{10})"), .resolve = {} },
     };
 
     handler.activate(scanArea(std::vector<std::string> { "abcdef0123" }), patterns, HintAction::Copy);

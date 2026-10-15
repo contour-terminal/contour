@@ -3,13 +3,14 @@
 
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/RowMove.hpp>
+#include <vtbackend/shell/StableIdSet.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <format>
 #include <optional>
-#include <set>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -37,7 +38,7 @@ struct FoldRange
 
 /// Supplies the LOGICAL lines a fold scan walks, indexed backwards from the line it starts at.
 ///
-/// The dependency-injection seam, mirroring CommandBlockLineSource and PromptRegionLineSource: the scan
+/// The dependency-injection seam, mirroring PromptRegionLineSource: the scan
 /// below is a pure function of the flags and ids it is handed, so it can be exercised against a plain
 /// vector — with no Grid, no Screen and no terminal behind it.
 ///
@@ -82,9 +83,9 @@ constexpr inline size_t MaxFoldScanLines = 4096;
 
 /// The foldable regions in @p lines, most recent first.
 ///
-/// A backward walk over the line flags a shell's OSC 133 marks leave behind, the exact companion of
-/// scanCommandBlocksBackward(): CommandEnd (;D) closes a block, OutputStart (;C) says where its output
-/// began, and Marked (;A) begins the prompt the fold hangs off.
+/// A backward walk over the line flags a shell's OSC 133 marks leave behind: CommandEnd (;D) closes a
+/// block, OutputStart (;C) says where its output began, and Marked (;A) begins the prompt the fold hangs
+/// off.
 ///
 /// Only FINISHED blocks fold — the walk opens a block on a CommandEnd and on nothing else. That is what
 /// keeps the cursor from ever standing inside a collapsed range, and it makes the prompt the user is
@@ -131,34 +132,25 @@ class FoldState
     }
 
     /// Whether nothing at all is collapsed — the fast path every caller checks before projecting.
-    [[nodiscard]] bool empty() const noexcept { return _collapsed.empty(); }
+    [[nodiscard]] bool empty() const noexcept { return _collapsed.ids().empty(); }
 
-    /// Bumped by every mutation below.
+    /// Bumped by every mutation below that changed what is collapsed.
     ///
     /// What a cache of anything derived from this state keys on: the projection is rebuilt when the user
     /// collapses something, and a counter says so in one comparison rather than by re-deriving it.
-    [[nodiscard]] uint64_t revision() const noexcept { return _revision; }
+    [[nodiscard]] uint64_t revision() const noexcept { return _collapsed.revision(); }
 
-    void collapse(int64_t headStableId)
-    {
-        if (_collapsed.insert(headStableId).second)
-            ++_revision;
-    }
+    void collapse(int64_t headStableId) { _collapsed.insert(headStableId); }
 
-    void expand(int64_t headStableId)
-    {
-        if (_collapsed.erase(headStableId) != 0)
-            ++_revision;
-    }
+    void expand(int64_t headStableId) { _collapsed.erase(headStableId); }
 
     /// Collapses @p headStableId if it is expanded, expands it otherwise.
     /// @return What it is afterwards.
     FoldVisibility toggle(int64_t headStableId)
     {
-        ++_revision;
-        if (auto const it = _collapsed.find(headStableId); it != _collapsed.end())
+        if (_collapsed.contains(headStableId))
         {
-            _collapsed.erase(it);
+            _collapsed.erase(headStableId);
             return FoldVisibility::Expanded;
         }
         _collapsed.insert(headStableId);
@@ -168,25 +160,23 @@ class FoldState
     /// Collapses every fold in @p ranges, leaving those already collapsed alone.
     void collapseAll(std::span<FoldRange const> ranges);
 
-    void expandAll() noexcept
-    {
-        if (!_collapsed.empty())
-            ++_revision;
-        _collapsed.clear();
-    }
+    void expandAll() noexcept { _collapsed.clear(); }
 
     /// Forgets every fold whose head has been evicted from the scrollback.
     ///
     /// Without it the set grows without bound over a long session, and — worse — an id reused by a later
-    /// generation would come back collapsed. Cheap because the set is ordered: one erase of a prefix.
+    /// generation would come back collapsed.
     /// @param floorStableId The oldest still-addressable id (Grid::stableRangeFloor()).
-    void prune(int64_t floorStableId)
-    {
-        auto const end = _collapsed.lower_bound(floorStableId);
-        if (end != _collapsed.begin())
-            ++_revision;
-        _collapsed.erase(_collapsed.begin(), end);
-    }
+    void prune(int64_t floorStableId) { _collapsed.prune(floorStableId); }
+
+    /// Keeps each collapsed fold with its prompt line across a scroll that moved rows' contents under their
+    /// stable ids: a fold whose prompt line moved is collapsed under its new id, one whose line was dropped
+    /// is forgotten.
+    ///
+    /// Without it the collapse stays with the place, not the prompt: it shows on whatever line moved there,
+    /// and a prompt that moves onto the place later comes up collapsed.
+    /// @param move What the scroll did.
+    void follow(RowMove const& move) { _collapsed.follow(move); }
 
     /// Forgets everything, for a generation bump: reflow destroyed row identity wholesale, so every id
     /// held here now names a different row (or none).
@@ -197,9 +187,7 @@ class FoldState
     void clear() noexcept { expandAll(); }
 
   private:
-    // Ordered rather than hashed, so prune() is a single prefix erase rather than a full scan.
-    std::set<int64_t> _collapsed;
-    uint64_t _revision = 0;
+    StableIdSet _collapsed;
 };
 
 /// What a row's gutter shows.
@@ -255,6 +243,21 @@ enum class FoldJumpBehavior : uint8_t
 {
     Expand = 0, ///< Open the fold so the cursor lands on the real target, as vim's `foldopen` does.
     Skip,       ///< Leave folds alone and snap the cursor to the nearest visible line.
+};
+
+/// Whether output folding is available at all -- `folding.enabled`, converted at the configuration
+/// boundary.
+///
+/// Enforced once, by the engine's fold verbs, for every way a fold is reached: the vi `z` keys, the fold
+/// actions, the gutter's click and the automatic collapse at a new prompt.
+enum class FoldingAvailability : uint8_t
+{
+    /// Nothing that can hide output runs: the toggles (`za`, ToggleFold, ToggleFoldAt, ToggleLastFold, a
+    /// click on the gutter's fold column) are refused even on a collapsed fold, and so are the collapses
+    /// (`zc`, `zM`, CollapseLastFold, CollapseAllFolds, auto-collapse). Only the expands (`zo`, `zR`,
+    /// ExpandAllFolds, a jump into a fold) still open what was folded while folding was on.
+    Disabled = 0,
+    Enabled, ///< Folding is available.
 };
 
 /// Which way a fold-aware step or snap searches.
@@ -355,6 +358,35 @@ struct HiddenInterval
 [[nodiscard]] int64_t visibleDistance(std::span<HiddenInterval const> hidden,
                                       int64_t first,
                                       int64_t last) noexcept;
+
+/// visibleDistance() from one fixed id to many, at one binary search each.
+///
+/// visibleDistance() steps over every run between its two ends, so measuring N ids from one origin costs N
+/// times the runs above them -- quadratic once there is a collapsed fold per command and a mark per fold.
+/// The runs' lengths are summed once here instead, and a distance is the span less the difference of two
+/// sums, each found by one binary search.
+class VisibleDistanceFrom
+{
+  public:
+    /// @param hidden The hidden intervals, ascending and disjoint (@see hiddenIntervals); they must outlive
+    ///        this.
+    /// @param origin The id every distance is measured from.
+    VisibleDistanceFrom(std::span<HiddenInterval const> hidden, int64_t origin);
+
+    /// visibleDistance(hidden, origin, @p id): how many visible ids lie in [origin, @p id).
+    /// @param id The id to measure to.
+    /// @return The distance; negative, and symmetric, when @p id precedes the origin.
+    [[nodiscard]] int64_t to(int64_t id) const noexcept;
+
+  private:
+    /// How many ids the runs hide below @p id.
+    [[nodiscard]] int64_t hiddenBelow(int64_t id) const noexcept;
+
+    std::span<HiddenInterval const> _hidden;
+    std::vector<int64_t> _hiddenBefore; ///< At i: the ids the first i runs hide, all told.
+    int64_t _origin;
+    int64_t _hiddenBelowOrigin;
+};
 
 /// The grid lines a folded viewport shows, top row first.
 ///

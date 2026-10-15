@@ -703,11 +703,18 @@ class Parser
      * Parses the input string in UTF-8 encoding and emits VT events while processing.
      *
      * @param data UTF-8 encoded string to be parsed.
+     * @return How many bytes of @p data were parsed: all of them, unless returnAfterCurrentByte() was
+     *         called while one was being handled, which is then the last.
      *
      * With respect to text, only up to @c EventListener::maxBulkTextSequenceWidth()
      * Unicode grapheme clusters will be processed.
      */
-    void parseFragment(gsl::span<char const> data);
+    size_t parseFragment(gsl::span<char const> data);
+
+    /// Makes the parseFragment() call in progress return once the byte it is handling has been handled in
+    /// full -- its sequence dispatched, and the parser in the state that byte leads to -- so that the caller
+    /// can act at that point of the input before parsing the rest. Called while an event is being handled.
+    void returnAfterCurrentByte() noexcept { _fragmentEnd = _fragmentBegin; }
 
     [[nodiscard]] State state() const noexcept { return _state; }
 
@@ -848,6 +855,14 @@ class Parser
     /// content may be UTF-8, so an 8-bit ST (0x9C) terminates a string only when this is zero -- at a
     /// character boundary; otherwise 0x9C is a legitimate continuation byte (e.g. inside U+2705).
     unsigned _stringUtf8Pending = 0;
+
+    /// The start of the fragment parseFragment() is parsing, or was parsing last.
+    char const* _fragmentBegin = nullptr;
+
+    /// Where parseFragment() stops: the end of its fragment, until returnAfterCurrentByte() moves it back to
+    /// the start, which ends the loop once the byte being handled is. The loop compares against it on every
+    /// step anyway, which a flag of its own would add a test to. @see returnAfterCurrentByte
+    char const* _fragmentEnd = nullptr;
 };
 
 /// @returns parsed tuple with OSC code and offset to first data parameter byte.
