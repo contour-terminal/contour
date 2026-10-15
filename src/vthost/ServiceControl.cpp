@@ -50,6 +50,7 @@ namespace
             case ServiceErrorCode::NotRunning: return "not running";
             case ServiceErrorCode::Unsupported: return "unsupported on this platform";
             case ServiceErrorCode::Backend: return "the operating system refused";
+            case ServiceErrorCode::NotUtf8: return "not UTF-8";
         }
         return "unknown error";
     }

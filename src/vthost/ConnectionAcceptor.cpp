@@ -2,6 +2,7 @@
 #include <vthost/ConnectionAcceptor.hpp>
 
 #include <core/async/Cancellation.hpp>
+#include <core/net/AcceptPolicy.hpp>
 
 #include <chrono>
 #include <exception>
@@ -110,10 +111,24 @@ core::async::Task<void> ConnectionAcceptor::serve()
         auto accepted = co_await _listener->accept();
         if (!accepted.has_value())
         {
-            if (accepted.error().code == core::net::NetErrorCode::Cancelled)
+            // Only a closed or a dead listener ends the loop; any other failure may pass, and is backed
+            // off on (core::net::AcceptErrorTable).
+            switch (core::net::acceptDispositionOf(accepted.error().code))
             {
-                daemonLog()("{}: listener closed", name);
-                co_return; // listener closed / shutdown requested
+                case core::net::AcceptDisposition::Closed:
+                    daemonLog()("{}: listener closed", name);
+                    co_return; // listener closed / shutdown requested
+                case core::net::AcceptDisposition::Dead:
+                    // Its handle is gone, so every accept would fail the same way, for good: retried, the
+                    // daemon would back off forever and look like it served. Closed instead, so a client
+                    // is refused rather than queued for an accept that never comes — and said.
+                    _listener->close();
+                    errorLog()("{}", core::net::describeAcceptLoopEnded(name, accepted.error()));
+                    co_return;
+                case core::net::AcceptDisposition::Unclassified:
+                case core::net::AcceptDisposition::PollTick:
+                case core::net::AcceptDisposition::PeerFailed:
+                case core::net::AcceptDisposition::Exhausted: break;
             }
             // Persistent failures (EMFILE/ENFILE fd exhaustion) fail synchronously
             // with no suspension point — a bare `continue` would spin this loop and

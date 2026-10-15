@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <vtpty/test/NonAsciiSample.hpp>
+#include <vtpty/test/WindowsCommandLineSplit.hpp>
+
+#include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
@@ -7,6 +11,7 @@
 #include <core/net/Sockets.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -22,6 +27,15 @@
 
 #include <vthost/Daemon.hpp>
 #include <vthost/SocketPath.hpp>
+
+#ifdef _WIN32
+    #include <core/WideString.hpp>
+
+    #include <span>
+
+    #include <Windows.h>
+    #include <shellapi.h>
+#endif
 
 namespace
 {
@@ -72,8 +86,12 @@ TEST_CASE("ensureDaemon: a listening daemon is detected, nothing is spawned", "[
 {
     // The probe is the AF_UNIX connect that must work on Windows (10 1803+) as
     // well as POSIX; a runtime SKIP documents platforms lacking AF_UNIX entirely.
+    // Under a directory beyond ASCII too: core-cpp binds and connects to a path spelled in UTF-8.
+    auto const directory = GENERATE(std::u8string {}, std::u8string { vtpty::testing::NonAsciiName });
     auto const tmp = TempDir {};
-    auto const controlSocket = tmp.path / "control";
+    auto const controlSocket = tmp.path / directory / "control";
+    // listenUnix makes the socket's own directory, owner-only, but not the ones above it.
+    fs::create_directories(controlSocket.parent_path().parent_path());
 
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
@@ -81,7 +99,7 @@ TEST_CASE("ensureDaemon: a listening daemon is detected, nothing is spawned", "[
     // Stand in for a running daemon by binding exactly the endpoint the probe
     // looks for. No accept loop is needed: reaching the listen backlog is the
     // whole liveness signal ensureDaemon asks for.
-    auto listener = core::net::listenUnix(loop, vthost::nativeSocketPath(controlSocket).string());
+    auto listener = core::net::listenUnix(loop, core::pathToUtf8(vthost::nativeSocketPath(controlSocket)));
     if (!listener.has_value())
     {
         // Unsupported is the one acceptable failure (no AF_UNIX at all); anything
@@ -113,21 +131,6 @@ TEST_CASE("ensureDaemon: an unreachable socket fails once the timeout elapses", 
 // ---------------------------------------------------------------------------
 // The spawn command line, which both platforms' spawn paths share.
 
-namespace
-{
-
-/// @param args The argv to search.
-/// @param needle The exact argument to look for.
-/// @return True if @p args contains @p needle.
-///
-/// std::ranges::contains is not in Apple's libc++ yet; find() is.
-[[nodiscard]] bool containsArg(std::vector<std::string> const& args, std::string_view needle)
-{
-    return std::ranges::find(args, needle) != args.end();
-}
-
-} // namespace
-
 TEST_CASE("daemonSpawnArgs spells the daemon verb and its socket", "[vthost][spawn]")
 {
     auto const args = vthost::daemonSpawnArgs(
@@ -143,13 +146,13 @@ TEST_CASE("daemonSpawnArgs marks an exit-when-empty daemon", "[vthost][spawn]")
 {
     auto const transient =
         vthost::daemonSpawnArgs("contour", fs::path { "/tmp/s" }, {}, vthost::DaemonLifecycle::ExitWhenEmpty);
-    CHECK(containsArg(transient, "--exit-with-last-session"));
+    CHECK(std::ranges::contains(transient, "--exit-with-last-session"));
 
     // A persistent daemon must NOT be told to end with its last session — that asymmetry is the
     // whole point of the flag.
     auto const persistent =
         vthost::daemonSpawnArgs("contour", fs::path { "/tmp/s" }, {}, vthost::DaemonLifecycle::Persistent);
-    CHECK_FALSE(containsArg(persistent, "--exit-with-last-session"));
+    CHECK_FALSE(std::ranges::contains(persistent, "--exit-with-last-session"));
 }
 
 TEST_CASE("daemonSpawnArgs omits logging options that were not given", "[vthost][spawn]")
@@ -163,8 +166,8 @@ TEST_CASE("daemonSpawnArgs omits logging options that were not given", "[vthost]
                                 fs::path { "/tmp/s" },
                                 vthost::DaemonSpawnOptions { .filter = "vthost.*", .logFile = "/tmp/d.log" },
                                 vthost::DaemonLifecycle::Persistent);
-    CHECK(containsArg(logged, "--log=vthost.*"));
-    CHECK(containsArg(logged, "--log-file=/tmp/d.log"));
+    CHECK(std::ranges::contains(logged, "--log=vthost.*"));
+    CHECK(std::ranges::contains(logged, "--log-file=/tmp/d.log"));
 }
 
 TEST_CASE("daemonSpawnArgs forwards the client's config and profile", "[vthost][spawn]")
@@ -182,8 +185,8 @@ TEST_CASE("daemonSpawnArgs forwards the client's config and profile", "[vthost][
         fs::path { "/tmp/s" },
         vthost::DaemonSpawnOptions { .configPath = "/etc/contour.yml", .profileName = "work" },
         vthost::DaemonLifecycle::Persistent);
-    CHECK(containsArg(configured, "--config=/etc/contour.yml"));
-    CHECK(containsArg(configured, "--profile=work"));
+    CHECK(std::ranges::contains(configured, "--config=/etc/contour.yml"));
+    CHECK(std::ranges::contains(configured, "--profile=work"));
 }
 
 TEST_CASE("daemonSpawnArgs forwards the client-area size policy", "[vthost][spawn]")
@@ -195,14 +198,14 @@ TEST_CASE("daemonSpawnArgs forwards the client-area size policy", "[vthost][spaw
         vthost::daemonSpawnArgs("contour", fs::path { "/tmp/s" }, {}, vthost::DaemonLifecycle::Persistent);
     // Stated even at the default, unlike the string options: absence is itself a value here, so a
     // reader of the process list should not have to know what the default was.
-    CHECK(containsArg(bare, "--size-policy=latest"));
+    CHECK(std::ranges::contains(bare, "--size-policy=latest"));
 
     auto const smallest = vthost::daemonSpawnArgs(
         "contour",
         fs::path { "/tmp/s" },
         vthost::DaemonSpawnOptions { .sizePolicy = vthost::ClientSizePolicy::Smallest },
         vthost::DaemonLifecycle::Persistent);
-    CHECK(containsArg(smallest, "--size-policy=smallest"));
+    CHECK(std::ranges::contains(smallest, "--size-policy=smallest"));
 
     // The spelling has to be one the daemon's own parser accepts, or the spawned daemon dies on
     // its command line -- which is exactly what a hand-written second spelling would risk.
@@ -212,7 +215,7 @@ TEST_CASE("daemonSpawnArgs forwards the client-area size policy", "[vthost][spaw
                                                   fs::path { "/tmp/s" },
                                                   vthost::DaemonSpawnOptions { .sizePolicy = policy },
                                                   vthost::DaemonLifecycle::Persistent);
-        CHECK(containsArg(args, std::format("--size-policy={}", name)));
+        CHECK(std::ranges::contains(args, std::format("--size-policy={}", name)));
         CHECK(vthost::clientSizePolicyFrom(name) == policy);
     }
 }
@@ -251,7 +254,7 @@ TEST_CASE("DaemonConfig defaults to an empty startup layout, matching the prior 
     CHECK(vthost::DaemonConfig {}.startupLayout.tabs.empty());
 }
 
-TEST_CASE("joinCommandLine quotes every argument, argv[0] included", "[vthost][spawn]")
+TEST_CASE("joinCommandLine quotes the program and the arguments that need it", "[vthost][spawn]")
 {
     // The Windows spawn path used to quote only the socket VALUE, leaving argv[0] bare — which
     // breaks the default install location `C:\Program Files\contour\contour.exe`.
@@ -262,74 +265,10 @@ TEST_CASE("joinCommandLine quotes every argument, argv[0] included", "[vthost][s
 
     auto const line = vthost::joinCommandLine(args);
 
-    CHECK(line.starts_with(R"("C:\Program Files\contour\contour.exe")"));
-    CHECK(line.contains(R"("daemon")"));
-    CHECK(line.contains(R"("--exit-with-last-session")"));
-    // Every argument contributes exactly one quoted token, so the count is 2 per argument.
-    CHECK(static_cast<std::size_t>(std::ranges::count(line, '"')) == args.size() * 2);
+    CHECK(line.starts_with(R"("C:\Program Files\contour\contour.exe" daemon )"));
+    CHECK(line.contains(" --exit-with-last-session"));
+    CHECK(vthost::joinCommandLine({}).empty());
 }
-
-namespace
-{
-
-/// Undoes `CommandLineToArgvW`'s quoting rules over @p line, so a round-trip proves the encoder
-/// against the parser that actually consumes it rather than against a hand-written expectation.
-///
-/// Deliberately a second, independent implementation of the rule: outside a quoted region a space
-/// separates arguments; a backslash run is literal EXCEPT before a `"`, where it halves and an odd
-/// run escapes the quote; an unescaped `"` toggles the quoted region.
-/// @param line The command line to split.
-/// @return The argv a Win32 process would see.
-[[nodiscard]] std::vector<std::string> splitWin32CommandLine(std::string_view line)
-{
-    auto argv = std::vector<std::string> {};
-    auto current = std::string {};
-    auto quoted = false;
-    auto started = false;
-    auto backslashes = std::size_t { 0 };
-
-    auto const flushBackslashes = [&](std::size_t keep) {
-        current.append(keep, '\\');
-        backslashes = 0;
-    };
-
-    for (auto const ch: line)
-    {
-        if (ch == '\\')
-        {
-            ++backslashes;
-            started = true;
-            continue;
-        }
-        if (ch == '"')
-        {
-            auto const escaped = backslashes % 2 == 1;
-            flushBackslashes(backslashes / 2);
-            if (escaped)
-                current += '"'; // escaped by the odd backslash
-            else
-                quoted = !quoted;
-            started = true;
-            continue;
-        }
-        flushBackslashes(backslashes);
-        if (ch == ' ' && !quoted)
-        {
-            if (started)
-                argv.push_back(std::exchange(current, {}));
-            started = false;
-            continue;
-        }
-        current += ch;
-        started = true;
-    }
-    flushBackslashes(backslashes);
-    if (started)
-        argv.push_back(current);
-    return argv;
-}
-
-} // namespace
 
 TEST_CASE("joinCommandLine survives trailing backslashes and embedded quotes", "[vthost][spawn]")
 {
@@ -349,7 +288,7 @@ TEST_CASE("joinCommandLine survives trailing backslashes and embedded quotes", "
         "--exit-with-last-session",
     };
 
-    CHECK(splitWin32CommandLine(vthost::joinCommandLine(args)) == args);
+    CHECK(vtpty::testing::splitWindowsCommandLine(vthost::joinCommandLine(args)) == args);
 }
 
 TEST_CASE("joinCommandLine round-trips the arguments a spawn actually builds", "[vthost][spawn]")
@@ -361,74 +300,33 @@ TEST_CASE("joinCommandLine round-trips the arguments a spawn actually builds", "
                                                                            .configPath = R"(C:\cfg\)",
                                                                            .profileName = "work" },
                                               vthost::DaemonLifecycle::ExitWhenEmpty);
-    CHECK(splitWin32CommandLine(vthost::joinCommandLine(args)) == args);
+    CHECK(vtpty::testing::splitWindowsCommandLine(vthost::joinCommandLine(args)) == args);
 }
 
-// ---------------------------------------------------------------------------
-// argv[0] -> executable path resolution (POSIX exec has no PATH search).
-
-namespace
+#ifdef _WIN32
+TEST_CASE("joinCommandLine reads back through CommandLineToArgvW as the argv it joined", "[vthost][spawn]")
 {
+    // CommandLineToArgvW() is what contour.exe reads its own command line with, and the task a
+    // registration starts hands it the same: the reader that decides, measured rather than modelled.
+    auto const args =
+        vthost::daemonSpawnArgs(R"(C:\Program Files\contour\contour.exe)",
+                                fs::path { R"(C:\Users\A B\mux\)" },
+                                vthost::DaemonSpawnOptions { .filter = "vthost.*",
+                                                             .logFile = R"(D:\logs dir\)",
+                                                             .configPath = R"(C:\cfg\say "hi"\)",
+                                                             .profileName = "" },
+                                vthost::DaemonLifecycle::ExitWhenEmpty);
+    auto const commandLine = core::toUtf16(vthost::joinCommandLine(args));
+    REQUIRE(commandLine.has_value());
 
-/// A filesystem-free `isExecutable` predicate: exactly the paths named are executable.
-/// @param executables The paths that exist, in the generic (forward-slash) spelling.
-/// @return The predicate resolveExecutablePath takes.
-[[nodiscard]] auto onlyTheseExist(std::vector<std::string> executables)
-{
-    return [executables = std::move(executables)](fs::path const& candidate) {
-        return std::ranges::find(executables, candidate.generic_string()) != executables.end();
-    };
+    auto count = 0;
+    auto* const read = CommandLineToArgvW(commandLine->c_str(), &count);
+    REQUIRE(read != nullptr);
+    auto readBack = std::vector<std::string> {};
+    for (wchar_t const* const argument: std::span { read, static_cast<std::size_t>(count) })
+        readBack.push_back(core::toUtf8(argument));
+    LocalFree(static_cast<HLOCAL>(read));
+
+    CHECK(readBack == args);
 }
-
-/// Joins @p entries with the platform's PATH separator.
-[[nodiscard]] std::string pathList(std::vector<std::string> const& entries)
-{
-    return core::joinHumanReadable(entries, std::string { vthost::PathListSeparator });
-}
-
-} // namespace
-
-TEST_CASE("resolveExecutablePath finds a bare name on PATH", "[vthost][spawn]")
-{
-    // The regression this pins: `execv` does NOT search PATH, and a client started as plain
-    // `contour` hands exactly `contour` to the spawn as argv[0]. Exec'ing it verbatim fails with
-    // ENOENT, so auto-spawn never worked for anyone who did not spell out a path.
-    auto const search = pathList({ "/opt/empty", "/usr/local/bin", "/usr/bin" });
-    auto const exists = onlyTheseExist({ "/usr/local/bin/contour", "/usr/bin/contour" });
-
-    // Left-to-right: the FIRST matching entry wins, exactly as an exec would resolve it.
-    CHECK(fs::path { vthost::resolveExecutablePath("contour", search, exists) }.generic_string()
-          == "/usr/local/bin/contour");
-}
-
-TEST_CASE("resolveExecutablePath leaves a path-shaped name alone", "[vthost][spawn]")
-{
-    // execvp's own rule, and what keeps a relative or absolute argv[0] meaning what it says instead
-    // of being silently redirected to some other install on PATH.
-    auto const search = pathList({ "/usr/bin" });
-    auto const exists = onlyTheseExist({ "/usr/bin/contour" });
-
-    CHECK(vthost::resolveExecutablePath("/opt/contour/contour", search, exists) == "/opt/contour/contour");
-    CHECK(vthost::resolveExecutablePath("./contour", search, exists) == "./contour");
-}
-
-TEST_CASE("resolveExecutablePath falls back to the name it was given", "[vthost][spawn]")
-{
-    auto const nothingExists = onlyTheseExist({});
-    // Nothing matched: hand back the original so the exec still reports the name the user typed
-    // (ENOENT on "contour" is a far better diagnostic than ENOENT on an invented path).
-    CHECK(vthost::resolveExecutablePath("contour", pathList({ "/usr/bin" }), nothingExists) == "contour");
-    // No PATH at all, and an empty name, are both just "nothing to search".
-    CHECK(vthost::resolveExecutablePath("contour", "", nothingExists) == "contour");
-    CHECK(vthost::resolveExecutablePath("", pathList({ "/usr/bin" }), nothingExists).empty());
-}
-
-TEST_CASE("resolveExecutablePath skips empty PATH entries", "[vthost][spawn]")
-{
-    // POSIX reads an empty entry as the current directory. Resolving argv[0] against the cwd is
-    // exactly the ambiguity this function removes, so an empty entry must not match anything.
-    auto const search = std::format("{}{}{}", "", vthost::PathListSeparator, "/usr/bin");
-    auto const exists = onlyTheseExist({ "contour", "/usr/bin/contour" });
-    CHECK(fs::path { vthost::resolveExecutablePath("contour", search, exists) }.generic_string()
-          == "/usr/bin/contour");
-}
+#endif

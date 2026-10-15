@@ -93,7 +93,8 @@ class ConnectionAcceptor
     ConnectionAcceptor& operator=(ConnectionAcceptor&&) = delete;
     ~ConnectionAcceptor() = default;
 
-    /// The accept loop: runs until the listener is closed or the loop stops.
+    /// The accept loop: runs until the listener is closed, or found dead — then it is closed and the
+    /// end logged — or the loop stops. Any other failed accept is backed off on, and accepting goes on.
     /// blockOn this (or spawn it) to serve.
     [[nodiscard]] core::async::Task<void> serve();
 

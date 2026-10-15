@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/test/NonAsciiSample.hpp>
+
 #include <core/testing/Environment.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <format>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <vthost/HostedShell.hpp>
 #include <vthost/SocketPath.hpp>
@@ -30,6 +35,21 @@ TEST_CASE("an explicit --socket path wins over everything", "[vthost][socketpath
                                               .xdgRuntimeDir = "/run/user/1000",
                                               .user = TestUser })
           == "/tmp/explicit.sock");
+}
+
+TEST_CASE("the socket path is read as UTF-8, as the command line and the environment are",
+          "[vthost][socketpath]")
+{
+    constexpr auto Awkward = vtpty::testing::NonAsciiName;
+    auto const awkward = std::string { vtpty::testing::NonAsciiNameUtf8 };
+
+    auto const explicitPath = "/tmp/" + awkward;
+    CHECK(muxSocketPath(MuxSocketPathInputs { .explicitPath = explicitPath, .user = TestUser })
+          == std::filesystem::path { u8"/tmp/" } / Awkward);
+
+    CHECK(muxSocketPath(MuxSocketPathInputs { .label = awkward, .user = awkward })
+          == std::filesystem::temp_directory_path()
+                 / (std::u8string { u8"contour-" } + std::u8string { Awkward }) / Awkward);
 }
 
 TEST_CASE("$CONTOUR_MUX overrides the derived path", "[vthost][socketpath]")
@@ -92,6 +112,18 @@ TEST_CASE("without a runtime dir the sandbox rung has nothing to qualify", "[vth
     CHECK(path.filename() == "fallback");
 }
 
+TEST_CASE("a relative runtime dir counts as unset", "[vthost][socketpath]")
+{
+    // The XDG base directory specification has a relative value ignored: it would put the socket
+    // beneath whatever directory the daemon or the client happened to start in, so the two would not
+    // meet.
+    auto const path = muxSocketPath(
+        MuxSocketPathInputs { .label = "fallback", .xdgRuntimeDir = "run/user", .user = TestUser });
+
+    CHECK(path.parent_path().filename() == std::string { "contour-" } + TestUser);
+    CHECK(path.filename() == "fallback");
+}
+
 TEST_CASE("an empty env value counts as unset", "[vthost][socketpath]")
 {
     CHECK(muxSocketPath(MuxSocketPathInputs {
@@ -148,8 +180,8 @@ TEST_CASE("a daemon-hosted shell is told where its own daemon is", "[vthost][soc
     REQUIRE(environment.contains("CONTOUR_MUX"));
     CHECK(environment.at("CONTOUR_MUX") == "/run/user/1000/contour/default");
 
-    // In UTF-8, as the spawn reads an environment value -- narrowed, a path is spelled in the ANSI code
-    // page on Windows, or throws on one beyond it.
-    auto const awkward = vthost::hostedShellEnvironment(std::filesystem::path { u8"/tmp/ü€李\U0001F600" });
-    CHECK(awkward.at("CONTOUR_MUX") == "/tmp/\xc3\xbc\xe2\x82\xac\xe6\x9d\x8e\xf0\x9f\x98\x80");
+    // In UTF-8, as the spawn reads an environment value.
+    auto const awkward =
+        vthost::hostedShellEnvironment(std::filesystem::path { u8"/tmp/" } / vtpty::testing::NonAsciiName);
+    CHECK(awkward.at("CONTOUR_MUX") == std::format("/tmp/{}", vtpty::testing::NonAsciiNameUtf8));
 }

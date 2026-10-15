@@ -7,7 +7,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <iterator>
+#include <optional>
+#include <ranges>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -33,6 +36,84 @@ void appendCluster(std::string& out, proto::WireCell const& cell)
 
 // ---------------------------------------------------------------------------
 // RemoteScreen
+
+namespace
+{
+    /// Whether @p wire's strings fit what a record keeps, which every record a sane host sends does.
+    [[nodiscard]] bool fitsRecordBounds(proto::WireCommandBlock const& wire) noexcept
+    {
+        return wire.commandLine.size() <= vtbackend::MaxRecordedCommandLineBytes
+               && wire.workingDirectory.size() <= vtbackend::MaxRecordedWorkingDirectoryBytes
+               && wire.endWorkingDirectory.size() <= vtbackend::MaxRecordedWorkingDirectoryBytes;
+    }
+
+    /// Drops @p directory whole when it is too long for a record -- a cut path names a different directory --
+    /// and with it @p locality.
+    void boundDirectory(std::string& directory, uint8_t& locality)
+    {
+        if (directory.size() <= vtbackend::MaxRecordedWorkingDirectoryBytes)
+            return;
+        directory.clear();
+        directory.shrink_to_fit(); // what bounds the cost is the bytes kept, not the length
+        locality = std::to_underlying(vtbackend::ContextLocality::Unknown);
+    }
+
+    /// @p wire held to what a record keeps, exactly as vtbackend::CommandBlockStore::adopt() holds one: its
+    /// command line cut at a code point and ended in an ellipsis, a working directory too long dropped
+    /// whole -- a cut path names a different directory -- and with it its locality.
+    [[nodiscard]] proto::WireCommandBlock boundedToRecord(proto::WireCommandBlock wire)
+    {
+        if (wire.commandLine.size() > vtbackend::MaxRecordedCommandLineBytes)
+            wire.commandLine = vtbackend::truncatedCommandLine(wire.commandLine);
+        boundDirectory(wire.workingDirectory, wire.locality);
+        boundDirectory(wire.endWorkingDirectory, wire.endLocality);
+        return wire;
+    }
+
+    /// Forgets the record @p id names in @p screen's command-block table.
+    /// @param screen The mirror whose table to update.
+    /// @param id The host's id of the record.
+    /// @return How many records it forgot: one, or none when the table held no such id.
+    std::size_t dropCommandBlock(RemoteScreen& screen, uint32_t id)
+    {
+        auto const held = screen.commandBlocks.find(id);
+        if (held == screen.commandBlocks.end())
+            return 0;
+        screen.commandBlocksByRevision.erase(held->second.revision);
+        screen.commandBlocks.erase(held);
+        return 1;
+    }
+
+    /// Holds @p sent in @p screen's command-block table as the record its id names, within the table's
+    /// bounds (RemoteScreen::commandBlocks). One identical to the record held keeps its revision -- a
+    /// resend, or a resync stating what is held, is not news -- and any other is stamped with the next.
+    /// @param screen The mirror whose table to update.
+    /// @param sent The record as the host sent it.
+    /// @return How many records the cap dropped to make room for it: the oldest, or none.
+    std::size_t holdCommandBlock(RemoteScreen& screen, proto::WireCommandBlock const& sent)
+    {
+        // Held to the bounds before it is compared, so resending an over-long record is still a resend;
+        // copied only to cut it, which no sane host's record needs.
+        auto const bounded = fitsRecordBounds(sent) ? std::nullopt : std::optional { boundedToRecord(sent) };
+        auto const& wire = bounded ? *bounded : sent;
+
+        auto& table = screen.commandBlocks;
+        auto const maxRecords = screen.commandBlockLimits.maxRecords;
+        auto const at = table.lower_bound(wire.id);
+        auto const held = at != table.end() && at->first == wire.id;
+        if (!held && at == table.begin() && table.size() >= maxRecords)
+            return 0; // older than all a full table keeps: the cap would drop it on arrival
+        if (held && at->second.wire == wire)
+            return 0;
+
+        auto const entry = held ? at : table.emplace_hint(at, wire.id, MirroredCommandBlock {});
+        if (held)
+            screen.commandBlocksByRevision.erase(entry->second.revision);
+        entry->second = MirroredCommandBlock { .wire = wire, .revision = ++screen.commandBlocksRevision };
+        screen.commandBlocksByRevision.emplace(entry->second.revision, wire.id);
+        return table.size() > maxRecords ? dropCommandBlock(screen, table.begin()->first) : 0;
+    }
+} // namespace
 
 void RemoteScreen::apply(proto::SessionState const& state)
 {
@@ -60,6 +141,35 @@ void RemoteScreen::apply(proto::SessionState const& state)
     for (auto const& context: state.contexts)
         contexts.insert_or_assign(context.id, context);
     contextChain = state.contextChain;
+    sessionEpoch = state.sessionEpoch;
+    hostTime = state.hostTime;
+    commandBlockIdEpoch = state.commandBlockIdEpoch;
+
+    // REPLACED from the floor on, not merged: a snapshot states every record the host holds at or above
+    // its floor, and leaves the ones below — a capped snapshot's floor is the oldest record it states —
+    // until a delta retires them; whatever this client lacks there follows as increments. Updated in
+    // place: an unchanged record keeps its entry and its stamp, so a resync costs no copy and is not
+    // mistaken for news; anything from the floor on that the snapshot no longer names is gone on the host
+    // too.
+    auto stated = std::vector<uint32_t> {};
+    stated.reserve(state.commandBlocks.size());
+    auto dropped = std::size_t { 0 };
+    for (auto const& wire: state.commandBlocks)
+    {
+        stated.push_back(wire.id);
+        dropped += holdCommandBlock(*this, wire);
+    }
+    std::ranges::sort(stated);
+    auto gone = std::vector<uint32_t> {};
+    for (auto const id:
+         std::ranges::subrange(commandBlocks.lower_bound(state.commandBlocksFloor), commandBlocks.end())
+             | std::views::keys)
+        if (!std::ranges::binary_search(stated, id))
+            gone.push_back(id);
+    for (auto const id: gone)
+        dropped += dropCommandBlock(*this, id);
+    if (dropped != 0)
+        commandBlocksRetiredAt = ++commandBlocksRevision;
 }
 
 void RemoteScreen::apply(proto::Delta const& delta)
@@ -81,9 +191,12 @@ void RemoteScreen::apply(proto::Delta const& delta)
     }
 
     generation = delta.generation;
+    stableIdGeneration = delta.stableIdGeneration;
     seqno = delta.seqno;
     viewportBase = delta.stableViewportBase;
     stableFloor = delta.stableFloor;
+    evictedRowCount = delta.evictedRowCount;
+    commandBlockIdEpoch = delta.commandBlockIdEpoch;
     cursorLine = delta.cursorLine;
     cursorColumn = delta.cursorColumn;
     setModes = delta.setModes;
@@ -157,6 +270,14 @@ void RemoteScreen::apply(proto::Delta const& delta)
         std::ranges::reverse(contextChain); // outermost first, as SessionState spells it
     }
 
+    auto dropped = std::size_t { 0 };
+    for (auto const& wire: delta.commandBlocks)
+        dropped += holdCommandBlock(*this, wire);
+    for (auto const id: delta.retiredCommandBlocks)
+        dropped += dropCommandBlock(*this, id);
+    if (dropped != 0)
+        commandBlocksRetiredAt = ++commandBlocksRevision;
+
     // Trim client-side scrollback. The server's floor is authoritative — a
     // `clear`/CSI 3 J jumps it up with no line changes, so honoring it is what
     // drops history the real terminal already discarded (otherwise the mirror
@@ -227,6 +348,7 @@ std::string RemoteScreen::viewportText() const
 NativeClient::NativeClient(core::net::EventLoop& loop,
                            std::unique_ptr<core::net::ISocket> connection,
                            HandshakeOptions handshake,
+                           vtbackend::CommandBlockStoreLimits commandBlockLimits,
                            UpdateHandler onUpdate,
                            ImageHandler onImage,
                            SessionEventHandler onSessionEvent,
@@ -236,6 +358,7 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
     _historyKeep(resolveHistoryKeep(handshake)), // the parameter, before the move below
     _handshake(std::move(handshake)),
+    _blockLimits(commandBlockLimits),
     _onUpdate(std::move(onUpdate)),
     _onImage(std::move(onImage)),
     _onSessionEvent(std::move(onSessionEvent)),
@@ -263,7 +386,7 @@ std::optional<int64_t> NativeClient::resolveHistoryKeep(HandshakeOptions const& 
 
 RemoteScreen& NativeClient::screenFor(uint64_t session)
 {
-    return _screens.try_emplace(session, _historyKeep).first->second;
+    return _screens.try_emplace(session, _historyKeep, _blockLimits).first->second;
 }
 
 uint64_t NativeClient::send(proto::DecodedPdu const& pdu)
@@ -320,6 +443,15 @@ void NativeClient::createTab(uint64_t beside)
     send(proto::DecodedPdu { proto::CreateTab { .session = beside } });
 }
 
+void NativeClient::restateSessionSettings(std::optional<proto::WireSessionSettings> settings)
+{
+    if (settings == _handshake.sessionSettings)
+        return;
+    _handshake.sessionSettings = std::move(settings);
+    send(proto::DecodedPdu {
+        proto::SessionSettingsChanged { .sessionSettings = _handshake.sessionSettings } });
+}
+
 void NativeClient::createWindow()
 {
     send(proto::DecodedPdu { proto::NewWindow {} });
@@ -342,6 +474,11 @@ void NativeClient::closePane(uint64_t session)
     send(proto::DecodedPdu { proto::ClosePane { .session = session } });
 }
 
+void NativeClient::performOperation(proto::PerformOperation request)
+{
+    send(proto::DecodedPdu { std::move(request) });
+}
+
 void NativeClient::detach()
 {
     _detached = true;
@@ -362,6 +499,11 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
     {
         if (hello->codecVersion == proto::CodecVersion)
         {
+            // From the first hello only: the identity is the connection's, and a mirror already judged
+            // by it must not see it change under its feet.
+            if (!_connected)
+                _daemonIdentity =
+                    vtbackend::HostIdentity { .machineId = hello->machineId, .hostname = hello->hostname };
             _connected = true;
             clientLog()("attach: connected (codec v{})", proto::CodecVersion);
         }

@@ -22,6 +22,8 @@
 #include <optional>
 #include <utility>
 
+#include <vthost/WireEnum.hpp>
+
 namespace vthost
 {
 
@@ -59,9 +61,7 @@ constexpr auto MouseProtocols = std::to_array({
 ///         rather than casting one into the enum.
 [[nodiscard]] constexpr vtbackend::MouseTransport mouseTransportOf(uint8_t value) noexcept
 {
-    return value <= std::to_underlying(vtbackend::MouseTransport::URXVT)
-               ? static_cast<vtbackend::MouseTransport>(value)
-               : vtbackend::MouseTransport::Default;
+    return enumUpTo(value, vtbackend::MouseTransport::URXVT).value_or(vtbackend::MouseTransport::Default);
 }
 
 /// @param value A MouseWheelMode as the wire spells it.
@@ -69,8 +69,7 @@ constexpr auto MouseProtocols = std::to_array({
 [[nodiscard]] constexpr vtbackend::InputGenerator::MouseWheelMode mouseWheelModeOf(uint8_t value) noexcept
 {
     using WheelMode = vtbackend::InputGenerator::MouseWheelMode;
-    return value <= std::to_underlying(WheelMode::ApplicationCursorKeys) ? static_cast<WheelMode>(value)
-                                                                         : WheelMode::Default;
+    return enumUpTo(value, WheelMode::ApplicationCursorKeys).value_or(WheelMode::Default);
 }
 
 } // namespace vthost

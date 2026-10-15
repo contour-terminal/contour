@@ -3,18 +3,22 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <set>
+#include <span>
 #include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #ifndef _WIN32
     #include <csignal>
@@ -37,6 +41,7 @@
 
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/Daemon.hpp>
+#include <vthost/HostIdentity.hpp>
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/PduPump.hpp>
@@ -44,6 +49,8 @@
 #include <vthost/SessionSettings.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/client/NativeClient.hpp>
+#include <vthost/testing/ShippedCodec.hpp>
+#include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
 
@@ -52,6 +59,10 @@ using vthost::NativeSession;
 using vthost::SessionHost;
 using vthost::client::NativeClient;
 using vthost::client::RemoteScreen;
+using vthost::testing::finishedWire;
+using vthost::testing::newSession;
+using vthost::testing::promptingWire;
+using vthost::testing::runningWire;
 namespace proto = vthost::proto;
 using namespace std::chrono_literals;
 
@@ -79,7 +90,7 @@ struct EndToEndHarness
                        },
                        vtbackend::Settings {},
                        core::defaultEnvironment(),
-                       /*startPumps=*/false };
+                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
     core::net::ISocket* serverConn =
         pair.first.get(); ///< Captured before the move, to simulate a daemon exit.
@@ -89,6 +100,7 @@ struct EndToEndHarness
         std::make_unique<NativeClient>(loop,
                                        std::move(pair.second),
                                        NativeClient::HandshakeOptions {},
+                                       vtbackend::CommandBlockStoreLimits {},
                                        NativeClient::UpdateHandler {},
                                        NativeClient::ImageHandler {},
                                        NativeClient::SessionEventHandler {},
@@ -155,8 +167,7 @@ Task<void> driveEndToEnd(EndToEndHarness* h, vtworkspace::SessionId sessionId)
 TEST_CASE("attach mirrors, updates, inputs and resizes end to end", "[vthost][attach]")
 {
     auto h = EndToEndHarness {};
-    h.host.createTab();
-    auto const sessionId = h.host.model().window(h.host.windowId())->activeTab()->rootPane()->session();
+    auto const sessionId = newSession(h.host);
     h.host.terminal(sessionId)->writeToScreen("hello e2e");
 
     h.loop.blockOn(driveEndToEnd(&h, sessionId));
@@ -294,6 +305,21 @@ TEST_CASE("RemoteScreen drops history the server discarded via the floor", "[vth
     CHECK_FALSE(screen.rows.contains(7));
     CHECK_FALSE(screen.rows.contains(9));
     CHECK(screen.rows.contains(10)); // the viewport row survives
+}
+
+TEST_CASE("RemoteScreen keeps the server's eviction count", "[vthost][attach]")
+{
+    auto screen = RemoteScreen {};
+    auto delta = proto::Delta {};
+    delta.stableFloor = 7;
+    delta.evictedRowCount = 42;
+    screen.apply(delta);
+    CHECK(screen.evictedRowCount == 42);
+
+    // A reset on the server starts its count over, and the screen follows it down.
+    delta.evictedRowCount = 0;
+    screen.apply(delta);
+    CHECK(screen.evictedRowCount == 0);
 }
 
 TEST_CASE("the mirror's retention bound follows the client's profile", "[vthost][attach]")
@@ -535,6 +561,7 @@ TEST_CASE("attach fetches image pixels on demand and caches them", "[vthost][att
     auto client = NativeClient { loop,
                                  std::move(pair.second),
                                  NativeClient::HandshakeOptions {},
+                                 vtbackend::CommandBlockStoreLimits {},
                                  NativeClient::UpdateHandler {},
                                  NativeClient::ImageHandler { [&](RemoteScreen const&, uint32_t id) {
                                      if (id == 7)
@@ -571,7 +598,7 @@ void tokenAttach(std::string serverToken, std::string clientToken, bool* gotSnap
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     host.createTab();
     auto pair = *core::net::testing::makeSocketPair(loop);
     auto server = NativeSession { loop,
@@ -583,6 +610,7 @@ void tokenAttach(std::string serverToken, std::string clientToken, bool* gotSnap
     auto client = NativeClient { loop,
                                  std::move(pair.second),
                                  NativeClient::HandshakeOptions { .token = std::move(clientToken) },
+                                 vtbackend::CommandBlockStoreLimits {},
                                  NativeClient::UpdateHandler {},
                                  NativeClient::ImageHandler {},
                                  NativeClient::SessionEventHandler {},
@@ -616,6 +644,70 @@ TEST_CASE("attach enforces a preshared auth token", "[vthost][attach]")
     auto open = false;
     tokenAttach("", "whatever", &open);
     CHECK(open);
+}
+
+namespace
+{
+
+/// A daemon of contour 0.7.0, as far as a client of a later revision gets with one: it reads the client's
+/// first frame as that release reads a ClientHello, answers with its version alone, and hangs up.
+/// @param helloVersion Set to the version the client's hello states, if that release can read it.
+Task<void> shippedDaemon(core::net::ISocket* socket, std::optional<uint32_t>* helloVersion)
+{
+    auto buffer = std::vector<std::byte> {};
+    auto scratch = std::vector<std::byte>(4096);
+    auto frame = proto::readFrame(buffer);
+    while (!frame && frame.error() == proto::DecodeError::NeedMoreData)
+    {
+        auto const n = co_await socket->read(scratch);
+        if (!n.has_value() || *n == 0)
+            co_return;
+        buffer.insert(buffer.end(), scratch.begin(), scratch.begin() + static_cast<long>(*n));
+        frame = proto::readFrame(buffer);
+    }
+    if (!frame || frame->ident != vthost::testing::ShippedClientHelloTag)
+        co_return;
+    *helloVersion = vthost::testing::shippedClientHelloVersion(frame->body);
+    // A hello that release cannot read is dropped without an answer, as the release drops it.
+    if (helloVersion->has_value())
+    {
+        auto const reply = vthost::testing::shippedServerHello(frame->serial);
+        std::ignore = co_await socket->write(std::span<std::byte const> { reply });
+    }
+    socket->close();
+}
+
+} // namespace
+
+TEST_CASE("a client meets a daemon of contour 0.7.0 with the version message", "[vthost][attach][handshake]")
+{
+    // A daemon keeps running across an upgrade. It must read the new client's hello and answer with its
+    // version, and the client must read that answer: then the user is told the two revisions differ, rather
+    // than meeting a connection dropped on a decode error.
+    auto capture = core::log::ScopedCapture {};
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = NativeClient {
+        loop,
+        std::move(pair.second),
+        // Settings too: they are the part of a hello whose layout has changed since that release.
+        NativeClient::HandshakeOptions {
+            .token = "s3cr3t", .sessionSettings = proto::WireSessionSettings { .sixelScrolling = 0 } },
+        vtbackend::CommandBlockStoreLimits {},
+        NativeClient::UpdateHandler {},
+        NativeClient::ImageHandler {},
+        NativeClient::SessionEventHandler {},
+        NativeClient::LayoutHandler {}
+    };
+
+    auto helloVersion = std::optional<uint32_t> {};
+    loop.blockOn(core::net::testing::allOf(client.run(), shippedDaemon(daemonSocket, &helloVersion)));
+
+    CHECK(helloVersion == proto::CodecVersion);
+    CHECK(client.versionMismatch());
+    CHECK(capture.contains(std::format("daemon speaks codec v{}", vthost::testing::ShippedCodecVersion)));
 }
 
 TEST_CASE("parseHostPort accepts HOST:PORT and rejects malformed input", "[vthost][attach]")
@@ -662,6 +754,7 @@ Task<void> tcpAttachDriver(core::net::EventLoop* loop,
         auto client = NativeClient { *loop,
                                      std::move(*connected),
                                      NativeClient::HandshakeOptions { .token = "tok" },
+                                     vtbackend::CommandBlockStoreLimits {},
                                      NativeClient::UpdateHandler {},
                                      NativeClient::ImageHandler {},
                                      NativeClient::SessionEventHandler {},
@@ -689,7 +782,7 @@ TEST_CASE("attach mirrors over a real TCP transport with token auth", "[vthost][
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     host.createTab();
     // Declared after the host, so the connection flows the server spawns end while it exists.
     auto const drain = vthost::LoopDrain { loop };
@@ -724,6 +817,7 @@ Task<void> tlsTcpAttachDriver(core::net::EventLoop* loop,
         auto client = NativeClient { *loop,
                                      clientTls->wrap(std::move(*connected), *loop),
                                      NativeClient::HandshakeOptions { .token = "tok" },
+                                     vtbackend::CommandBlockStoreLimits {},
                                      NativeClient::UpdateHandler {},
                                      NativeClient::ImageHandler {},
                                      NativeClient::SessionEventHandler {},
@@ -751,7 +845,7 @@ TEST_CASE("attach mirrors over TLS-encrypted TCP with token auth", "[vthost][att
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     host.createTab();
     // Declared after the host, so the connection flows the server spawns end while it exists.
     auto const drain = vthost::LoopDrain { loop };
@@ -796,7 +890,7 @@ TEST_CASE("a clean TLS detach ends the connection as a disconnect rather than an
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     host.createTab();
     // Declared after the host, so the connection flows the server spawns end while it exists.
     auto const drain = vthost::LoopDrain { loop };
@@ -845,7 +939,7 @@ TEST_CASE("attach mirrors over TLS with a generated self-signed dev certificate"
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     host.createTab();
     // Declared after the host, so the connection flows the server spawns end while it exists.
     auto const drain = vthost::LoopDrain { loop };
@@ -927,7 +1021,7 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[vthost][attach]"
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     auto* tab = host.createTab();
     // Split the tab into two panes (a vertical divider at 60/40).
     host.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.6);
@@ -940,6 +1034,7 @@ TEST_CASE("attach receives the daemon's tab and pane layout", "[vthost][attach]"
     auto client = NativeClient { loop,
                                  std::move(pair.second),
                                  NativeClient::HandshakeOptions {},
+                                 vtbackend::CommandBlockStoreLimits {},
                                  NativeClient::UpdateHandler {},
                                  NativeClient::ImageHandler {},
                                  NativeClient::SessionEventHandler {},
@@ -972,7 +1067,7 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[v
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     host.createTab(); // the daemon starts with one tab
 
     auto pair = *core::net::testing::makeSocketPair(loop);
@@ -989,6 +1084,7 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[v
         NativeClient { loop,
                        std::move(pair.second),
                        NativeClient::HandshakeOptions {},
+                       vtbackend::CommandBlockStoreLimits {},
                        NativeClient::UpdateHandler {},
                        NativeClient::ImageHandler {},
                        NativeClient::SessionEventHandler {},
@@ -1013,7 +1109,7 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     host.createTab(); // the daemon starts with one window (with one tab)
 
     auto pair = *core::net::testing::makeSocketPair(loop);
@@ -1028,6 +1124,7 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
         NativeClient { loop,
                        std::move(pair.second),
                        NativeClient::HandshakeOptions {},
+                       vtbackend::CommandBlockStoreLimits {},
                        NativeClient::UpdateHandler {},
                        NativeClient::ImageHandler {},
                        NativeClient::SessionEventHandler {},
@@ -1040,4 +1137,296 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
 
     CHECK(windows.size() == 2);             // the client saw two distinct windows' layouts
     CHECK(host.model().windowCount() == 2); // the daemon really created a second window
+}
+
+TEST_CASE("RemoteScreen replaces its block table on a snapshot and stamps only what changed",
+          "[vthost][attach][blocks]")
+{
+    auto screen = RemoteScreen {};
+    auto first = proto::SessionState {};
+    first.commandBlocks = { finishedWire(1), runningWire(2) };
+    screen.apply(first);
+    REQUIRE(screen.commandBlocks.size() == 2);
+    CHECK(screen.commandBlocks.at(1).wire == finishedWire(1));
+    CHECK(screen.commandBlocksRetiredAt == 0); // nothing was there to remove
+    auto const revisionOfTwo = screen.commandBlocks.at(2).revision;
+
+    auto second = proto::SessionState {};
+    second.commandBlocks = { runningWire(2), promptingWire(3) };
+    screen.apply(second);
+
+    CHECK_FALSE(screen.commandBlocks.contains(1));               // the host no longer holds it ...
+    CHECK(screen.commandBlocksRetiredAt > revisionOfTwo);        // ... and the mirror is told to look
+    CHECK(screen.commandBlocks.at(2).revision == revisionOfTwo); // unchanged: not news
+    CHECK(screen.commandBlocks.at(3).revision > revisionOfTwo);  // new: news
+    CHECK(screen.commandBlocksRevision >= screen.commandBlocks.at(3).revision);
+
+    auto const settled = screen.commandBlocksRevision;
+    screen.apply(second); // a resync stating exactly what is held: no revision spent
+    CHECK(screen.commandBlocksRevision == settled);
+}
+
+namespace
+{
+/// Whether @p screen's revision index names every record of its block table once, under the revision the
+/// record last changed at, and nothing else.
+bool revisionIndexMatches(RemoteScreen const& screen)
+{
+    return screen.commandBlocksByRevision.size() == screen.commandBlocks.size()
+           && std::ranges::all_of(screen.commandBlocks, [&](auto const& entry) {
+                  auto const indexed = screen.commandBlocksByRevision.find(entry.second.revision);
+                  return indexed != screen.commandBlocksByRevision.end() && indexed->second == entry.first;
+              });
+}
+} // namespace
+
+TEST_CASE("RemoteScreen indexes every block under the revision it last changed at",
+          "[vthost][attach][blocks]")
+{
+    auto screen = RemoteScreen {};
+    auto attach = proto::SessionState {};
+    attach.commandBlocks = { finishedWire(1), finishedWire(2), runningWire(3) };
+    screen.apply(attach);
+    CHECK(revisionIndexMatches(screen));
+
+    auto finished = proto::Delta {};
+    finished.commandBlocks = { finishedWire(3), promptingWire(4) };
+    finished.retiredCommandBlocks = { 1 };
+    screen.apply(finished);
+    CHECK(revisionIndexMatches(screen));
+    // What changed since the attach, newest change last.
+    auto const changed = std::ranges::to<std::vector>(
+        std::ranges::subrange(screen.commandBlocksByRevision.upper_bound(screen.commandBlocks.at(2).revision),
+                              screen.commandBlocksByRevision.end())
+        | std::views::values);
+    CHECK(changed == std::vector<uint32_t> { 3, 4 });
+
+    auto resync = proto::SessionState {};
+    resync.commandBlocksFloor = 3;
+    resync.commandBlocks = { runningWire(4) }; // 3 is gone on the host, 4 started
+    screen.apply(resync);
+    CHECK(revisionIndexMatches(screen));
+    CHECK(screen.commandBlocks.size() == 2);
+}
+
+TEST_CASE("RemoteScreen holds a peer's records to what a record keeps", "[vthost][attach][blocks]")
+{
+    // A peer chooses what it sends: a 10 MB command line or working directory must cost this client what a
+    // record costs the store the mirror feeds, not ten megabytes per record.
+    constexpr auto Flood = std::size_t { 10 } * 1024 * 1024;
+    auto screen = RemoteScreen {};
+    auto hostile = proto::Delta {};
+    hostile.commandBlocks = { runningWire(1), runningWire(2) };
+    hostile.commandBlocks[0].commandLine = std::string(Flood, 'x');
+    hostile.commandBlocks[1].workingDirectory = std::string(Flood, 'y');
+    hostile.commandBlocks[1].locality = std::to_underlying(vtbackend::ContextLocality::Local);
+    hostile.commandBlocks[1].endWorkingDirectory = std::string(Flood, 'z');
+    hostile.commandBlocks[1].endLocality = std::to_underlying(vtbackend::ContextLocality::Local);
+    screen.apply(hostile);
+
+    auto const& commandLine = screen.commandBlocks.at(1).wire.commandLine;
+    CHECK(commandLine == vtbackend::truncatedCommandLine(std::string(Flood, 'x')));
+    CHECK(commandLine.capacity() < vtbackend::MaxRecordedCommandLineBytes * 2);
+    auto const& wire = screen.commandBlocks.at(2).wire;
+    CHECK(wire.workingDirectory.empty()); // dropped whole, as the store drops one: a cut path is another
+    CHECK(wire.workingDirectory.capacity() < vtbackend::MaxRecordedWorkingDirectoryBytes);
+    CHECK(wire.locality == std::to_underlying(vtbackend::ContextLocality::Unknown));
+    CHECK(wire.endWorkingDirectory.empty()); // where the command left the shell, likewise
+    CHECK(wire.endWorkingDirectory.capacity() < vtbackend::MaxRecordedWorkingDirectoryBytes);
+    CHECK(wire.endLocality == std::to_underlying(vtbackend::ContextLocality::Unknown));
+
+    auto const settled = screen.commandBlocksRevision;
+    screen.apply(hostile); // the same flood again is a resend
+    CHECK(screen.commandBlocksRevision == settled);
+}
+
+TEST_CASE("RemoteScreen keeps no more records than its cap, the oldest dropped first",
+          "[vthost][attach][blocks]")
+{
+    auto screen = RemoteScreen { RemoteScreen::DefaultHistoryKeep,
+                                 vtbackend::CommandBlockStoreLimits { .maxRecords = 3 } };
+
+    SECTION("a delta naming ids beyond the cap")
+    {
+        auto flood = proto::Delta {};
+        for (auto const id: std::views::iota(uint32_t { 1 }, uint32_t { 1001 }))
+            flood.commandBlocks.push_back(finishedWire(id));
+        screen.apply(flood);
+
+        CHECK(std::ranges::to<std::vector>(screen.commandBlocks | std::views::keys)
+              == std::vector<uint32_t> { 998, 999, 1000 });
+        CHECK(screen.commandBlocksByRevision.size() == 3);
+        CHECK(screen.commandBlocksRetiredAt == screen.commandBlocksRevision); // a mirror drops them too
+
+        // Older than all a full table keeps: not taken, and no revision spent on it.
+        auto const settled = screen.commandBlocksRevision;
+        auto stale = proto::Delta {};
+        stale.commandBlocks = { runningWire(7) };
+        screen.apply(stale);
+        CHECK_FALSE(screen.commandBlocks.contains(7));
+        CHECK(screen.commandBlocksRevision == settled);
+    }
+
+    SECTION("a snapshot stating more than the cap")
+    {
+        auto attach = proto::SessionState {};
+        for (auto const id: std::views::iota(uint32_t { 1 }, uint32_t { 11 }))
+            attach.commandBlocks.push_back(finishedWire(id));
+        screen.apply(attach);
+
+        CHECK(std::ranges::to<std::vector>(screen.commandBlocks | std::views::keys)
+              == std::vector<uint32_t> { 8, 9, 10 });
+        CHECK(screen.commandBlocksByRevision.size() == 3);
+    }
+
+    SECTION("a cap of zero still keeps the newest")
+    {
+        auto bare = RemoteScreen { RemoteScreen::DefaultHistoryKeep,
+                                   vtbackend::CommandBlockStoreLimits { .maxRecords = 0 } };
+        auto two = proto::Delta {};
+        two.commandBlocks = { finishedWire(1), runningWire(2) };
+        bare.apply(two);
+        CHECK(std::ranges::to<std::vector>(bare.commandBlocks | std::views::keys)
+              == std::vector<uint32_t> { 2 });
+    }
+}
+
+TEST_CASE("RemoteScreen keeps an unchanged block's entry through a snapshot", "[vthost][attach][blocks]")
+{
+    // A resize resyncs every pane with a snapshot naming every record, nearly all of them unchanged: each
+    // keeps the entry it has, rather than a copy of the wire taking its place.
+    auto screen = RemoteScreen {};
+    auto attach = proto::SessionState {};
+    attach.commandBlocks = { finishedWire(1), runningWire(2) };
+    attach.commandBlocks.front().commandLine = std::string(100, 'x'); // held on the heap, not inline
+    screen.apply(attach);
+    auto const* const entry = &screen.commandBlocks.at(1);
+    auto const* const commandLine = entry->wire.commandLine.data();
+
+    auto resync = attach;
+    resync.commandBlocks.back().state = 2; // the other one finished meanwhile
+    screen.apply(resync);
+
+    CHECK(&screen.commandBlocks.at(1) == entry);
+    CHECK(screen.commandBlocks.at(1).wire.commandLine.data() == commandLine);
+    CHECK(screen.commandBlocks.at(2).wire.state == 2);
+}
+
+TEST_CASE("RemoteScreen keeps the blocks below a snapshot's floor", "[vthost][attach][blocks]")
+{
+    // A capped snapshot speaks only from the oldest record it states on: what is held below that stays
+    // until a delta retires it, and only what is held from there on is replaced.
+    auto screen = RemoteScreen {};
+    auto attach = proto::SessionState {};
+    attach.commandBlocks = { finishedWire(1), finishedWire(2), finishedWire(3), runningWire(4) };
+    screen.apply(attach);
+    auto const retiredAt = screen.commandBlocksRetiredAt;
+    auto const revisionOfOne = screen.commandBlocks.at(1).revision;
+
+    auto capped = proto::SessionState {};
+    capped.commandBlocksFloor = 3;
+    capped.commandBlocks = { finishedWire(3), promptingWire(5) }; // 4 is gone on the host
+    screen.apply(capped);
+
+    CHECK(screen.commandBlocks.contains(1)); // below the floor: kept, unchanged
+    CHECK(screen.commandBlocks.contains(2));
+    CHECK(screen.commandBlocks.at(1).revision == revisionOfOne);
+    CHECK_FALSE(screen.commandBlocks.contains(4)); // from the floor on, what it no longer names is gone
+    CHECK(screen.commandBlocks.contains(5));
+    CHECK(screen.commandBlocksRetiredAt > retiredAt);
+
+    auto const settled = screen.commandBlocksRetiredAt;
+    screen.apply(capped); // the same floor again retires nothing below it
+    CHECK(screen.commandBlocksRetiredAt == settled);
+    CHECK(screen.commandBlocks.size() == 4);
+}
+
+TEST_CASE("RemoteScreen merges incremental blocks and erases retired ones", "[vthost][attach][blocks]")
+{
+    auto screen = RemoteScreen {};
+    auto running = proto::Delta {};
+    running.commandBlocks = { runningWire(5) };
+    screen.apply(running);
+    auto const first = screen.commandBlocks.at(5).revision;
+    CHECK(first > 0);
+
+    screen.apply(running); // the same record again: not news
+    CHECK(screen.commandBlocks.at(5).revision == first);
+    CHECK(screen.commandBlocksRevision == first);
+
+    auto finished = proto::Delta {};
+    finished.commandBlocks = { finishedWire(5) };
+    screen.apply(finished);
+    CHECK(screen.commandBlocks.at(5).wire.state == 2);
+    CHECK(screen.commandBlocks.at(5).revision > first);
+
+    auto retire = proto::Delta {};
+    retire.retiredCommandBlocks = { 5, 99 }; // 99 was never held: retiring it is a no-op
+    screen.apply(retire);
+    CHECK(screen.commandBlocks.empty());
+    CHECK(screen.commandBlocksRetiredAt == screen.commandBlocksRevision);
+
+    auto const quiet = screen.commandBlocksRevision;
+    screen.apply(retire); // nothing left to retire: no revision spent
+    CHECK(screen.commandBlocksRevision == quiet);
+}
+
+namespace
+{
+/// Waits until @p seen holds what the first update saw, then detaches @p client.
+Task<void> awaitFirstUpdate(core::net::EventLoop* loop,
+                            NativeClient* client,
+                            std::optional<vtbackend::HostIdentity> const* seen)
+{
+    co_await core::net::testing::waitUntil(loop, [seen] { return seen->has_value(); });
+    client->detach();
+}
+} // namespace
+
+TEST_CASE("an attached client knows the daemon's machine before it mirrors a session", "[vthost][attach]")
+{
+    // A record's locality says "local to the daemon's machine"; a client attached from elsewhere can
+    // only judge it if the daemon says which machine that is -- and must know before the first mirror of
+    // a session is built, since that mirror is judged by it for life.
+    auto const daemon =
+        vtbackend::HostIdentity { .machineId = "3deb5353d3ba43d08201c136a47ead7b", .hostname = "zeta" };
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .sizePolicy = vthost::ClientSizePolicy::Latest,
+                                                          .startupLayout = vtworkspace::Layout {},
+                                                          .identity = daemon } };
+    host.createTab();
+
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto server = NativeSession {
+        loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first)
+    };
+    auto seenAtFirstUpdate = std::optional<vtbackend::HostIdentity> {};
+    NativeClient const* attached = nullptr;
+    auto client = NativeClient { loop,
+                                 std::move(pair.second),
+                                 NativeClient::HandshakeOptions {},
+                                 vtbackend::CommandBlockStoreLimits {},
+                                 NativeClient::UpdateHandler { [&](RemoteScreen const&, proto::Delta const&) {
+                                     if (!seenAtFirstUpdate)
+                                         seenAtFirstUpdate = attached->daemonIdentity();
+                                 } },
+                                 NativeClient::ImageHandler {},
+                                 NativeClient::SessionEventHandler {},
+                                 NativeClient::LayoutHandler {} };
+    attached = &client;
+
+    loop.blockOn(core::net::testing::allOf(
+        server.run(), client.run(), awaitFirstUpdate(&loop, &client, &seenAtFirstUpdate)));
+
+    REQUIRE(seenAtFirstUpdate.has_value());
+    CHECK(*seenAtFirstUpdate == vthost::appSpecificIdentity(daemon.view()));
+    CHECK(client.daemonIdentity() == *seenAtFirstUpdate);
 }

@@ -199,7 +199,7 @@ struct ImsgHarness
                                },
                                vtbackend::Settings {},
                                core::defaultEnvironment(),
-                               /*startPumps=*/false };
+                               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     FakeTmuxClient client;
     std::unique_ptr<core::net::ISocket> serverEnd;
     int serverFd = -1; ///< serverEnd's descriptor (not owned), for a test that fills it first.
@@ -672,15 +672,14 @@ TEST_CASE("a real tmux binary attaches over imsg", "[vthost][imsgserver][oracle]
 
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
-    auto host = vthost::SessionHost {
-        loop,
-        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
-            return std::make_unique<vtpty::MockPty>(size);
-        },
-        vtbackend::Settings {},
-        core::defaultEnvironment(),
-        /*startPumps=*/false,
-    };
+    auto host =
+        vthost::SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     host.createTab();
     // Declared after the host, so the connection flows the server spawns end while it exists.
     auto const drain = vthost::LoopDrain { loop };

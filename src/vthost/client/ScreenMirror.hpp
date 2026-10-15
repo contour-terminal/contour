@@ -25,6 +25,8 @@
 ///    grapheme-cluster pool, image-fragment replacement),
 ///  - scrolling through `Screen::scrollUp` (cursor iterator, plus `onBufferScrolled` for the
 ///    viewport, the Vi cursor and any live selection),
+///  - command-block heads through `Screen::noteBlockRowChange` and `Terminal::placeCommandBlockHeads`
+///    (the parser's erases and prompts keep them on the host, by a rule the mirror applies to its own rows),
 ///  - the cursor through `Screen::moveCursorTo`, and the frame through `Terminal::screenUpdated`.
 ///
 /// The mirror OWNS its terminal's screen, and its scrollback is real scrollback built by scrolling
@@ -37,9 +39,12 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <unordered_map>
+#include <vector>
 
 #include <vthost/GridWire.hpp>
+#include <vthost/HostIdentity.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/proto/Pdu.hpp>
 
@@ -87,10 +92,12 @@ class ScreenMirror
   public:
     /// @param terminal The local terminal to keep in sync. Borrowed — it outlives this mirror,
     ///        which is bound to it for life (the session/pane owns both).
-    explicit ScreenMirror(vtbackend::Terminal& terminal) noexcept:
-        _terminal { &terminal }, _ownStatusDisplayType { terminal.statusDisplayType() }
-    {
-    }
+    /// @param daemon Whether the daemon runs on this terminal's machine, as the connection's ServerHello
+    ///        decided it (vthost::daemonMachineOf). Bound into @p terminal as its replica role
+    ///        (vtbackend::Terminal::bindReplica), which every locality it judges follows from then on, with
+    ///        this machine's identity as the daemon names machines (vthost::appSpecificIdentity).
+    ///        Fixed for the mirror's life, as for the connection's: every attach builds a new mirror.
+    ScreenMirror(vtbackend::Terminal& terminal, DaemonMachine daemon);
 
     /// Brings the mirror terminal up to date with @p screen after @p delta was applied to it.
     /// Falls back to a full replay on the first call, on snapshot deltas, and on generation,
@@ -115,6 +122,20 @@ class ScreenMirror
     /// Places image @p imageId now that its pixels arrived, or releases it if the server dropped
     /// it — what the client's image handler calls so the image appears where the delta put it.
     void applyImage(RemoteScreen const& screen, uint32_t imageId);
+
+    /// The row of the host's primary grid that a row of this mirror's primary page holds: what the host is
+    /// asked to act on when the user acts on the mirror's row -- a vi mark, which is the host's.
+    ///
+    /// Only rows the mirror holds where the host's numbering puts them can be named: the page and history
+    /// down to where a resize left the two numberings apart. Not while the alternate page is shown, whose
+    /// numbers are the only ones the mirror follows then.
+    ///
+    /// Takes the terminal lock; call it where the mirror is applied, on the thread its updates arrive on.
+    /// @param stableId The row, by this mirror's own stable id.
+    /// @param generation The stable-id generation of this mirror's grid that @p stableId was taken in
+    ///        (vtbackend::Grid::stableIdGeneration); a row named in another one is not named at all.
+    /// @return The host's row, or std::nullopt when this mirror cannot name it.
+    [[nodiscard]] std::optional<proto::RowAddress> hostRowOf(int64_t stableId, uint64_t generation) const;
 
     /// Reproduces a transient session event (bell / desktop notification / OSC 52 clipboard write)
     /// on the mirror terminal, so the frontend's own bell, notify and clipboard handling — and its
@@ -160,6 +181,35 @@ class ScreenMirror
     /// (the local scrollback is the mirror's own and usually deeper than the server's).
     void writeRow(vtbackend::Screen& page, RemoteScreen const& screen, int64_t stableId, int64_t target);
 
+    /// Writes @p row over the line at @p offset, or clears that line when the mirror holds no data for it,
+    /// then has the command blocks' heads and the user-mark index follow what the write did.
+    ///
+    /// The host's cached head never crosses the wire (proto::WireCommandBlock leaves it out), so the mirror
+    /// heads each block by the host's own rule, among its own rows. A write that took the row out of its
+    /// block, or changed the marks a head is found by, is the host's erase or new prompt arriving: it is
+    /// counted as the host counted it, so the next read re-heads that block as the host did. A row carrying
+    /// such a mark may head a block that has no head here yet: its block is noted for placeHeads().
+    ///
+    /// A vi mark is the host's, as the row's flags say (hostRowOf() names the row it is asked on): the write
+    /// takes the row's, and a mark it placed or took away is reported as a block's change is, since it never
+    /// passes the funnel a local one is written through. Both go through vtbackend::Screen::noteRowRewritten,
+    /// as an erase's do.
+    /// @see vtbackend::Terminal::placeCommandBlockHeads
+    /// @param page The page the line belongs to.
+    /// @param offset Where the line is in @p page; negative for a scrollback row.
+    /// @param row The wire row to write, or nullptr to clear the line.
+    void writeLine(vtbackend::Screen& page, vtbackend::LineOffset offset, proto::WireLine const* row);
+
+    /// Heads every block noted since the last call that has no head in the mirror's grid yet, by the rule
+    /// the host heads by — once all of an update's rows are written, since a lowest mark can only be told
+    /// with every row in place. A block whose host head row is gone is recorded as evicted instead, as the
+    /// host holds it.
+    void placeHeads();
+
+    /// Records where the primary page stands, when it is the page an update just wrote.
+    /// @see hostRowOf
+    void anchorPrimaryPage(RemoteScreen const& screen) noexcept;
+
     /// Scrolls one row into local history and writes @p stableId into the freed bottom line —
     /// how a row that scrolled by on the server gets into the mirror's own scrollback.
     void scrollInRow(vtbackend::Screen& page, RemoteScreen const& screen, int64_t stableId);
@@ -192,6 +242,50 @@ class ScreenMirror
     /// resolving it needs the record, and the record may arrive in the SAME delta as the first row
     /// referencing it.
     void syncContexts(RemoteScreen const& screen);
+
+    /// Which rule a command-block sync adopts records under.
+    enum class CommandBlockSync : uint8_t
+    {
+        Follow = 0, ///< The mirror has been following the session: a change it sees is news.
+        Prime = 1,  ///< The mirror's first replay — the attach: everything it sees is history.
+    };
+
+    /// Brings the mirror terminal's command-block store in line with @p screen's table, ahead of the
+    /// rows for the reason syncContexts() is.
+    ///
+    /// Adopts, oldest first, each record that changed since the last sync -- RemoteScreen's revision index
+    /// names them, so a sync costs what changed, not the table -- and one identical to the store's copy is
+    /// a resend the store passes over. On @p sync Prime every record is AdoptMode::Snapshot:
+    /// reattaching must never replay a finish that happened while detached. Otherwise a record is
+    /// AdoptMode::Live — so a finish raises Events::commandBlockFinished once — unless the store never held
+    /// it and it is older than the newest it holds, which is history this mirror was never shown.
+    ///
+    /// Retired records leave the store BEFORE anything is adopted. That is also what follows the host
+    /// when its ids start over: it forgets every record, so the walk that sends the new epoch's first
+    /// id retires all the old ones in the same delta, and the new id 1 lands in an empty store — not
+    /// below the old ids, where it would read as history or a full store would refuse it. And before
+    /// that, when the epoch @p screen states moved, every row of the mirror forgets its block id
+    /// (vtbackend::Screen::forgetBlockIds), as the host's rows did: the rows the host still holds come
+    /// again without theirs, but a row only the mirror holds would go on naming the new epoch's block
+    /// of the same number.
+    ///
+    /// A record's locality stands only when the daemon runs on this machine; otherwise the terminal holds
+    /// it as Foreign (vtbackend::Terminal::adoptCommandBlock, by the replica role the constructor bound).
+    /// @param screen The mirrored screen whose table to follow.
+    /// @param sync Whether this is the attach (Prime) or a later update (Follow).
+    void syncCommandBlocks(RemoteScreen const& screen, CommandBlockSync sync);
+
+    /// Drops from the store every record @p screen's table no longer holds (the host retired it), in
+    /// place (vtbackend::CommandBlockStore::retire): the records that stay are not touched.
+    ///
+    /// One merge walk over the store and the table, run only when a sync finds a removal it has not seen.
+    /// @param screen The mirrored screen whose table names the records the host still holds.
+    void retireAbsentCommandBlocks(RemoteScreen const& screen);
+
+    /// Has the terminal measure its clock against the host's newest reading in @p screen
+    /// (vtbackend::Terminal::adoptHostClock), once per reading, before any record is adopted.
+    /// @param screen The mirrored screen carrying the reading of the last SessionState.
+    void syncHostClock(RemoteScreen const& screen);
 
     /// A pointer, not a reference: a reference member would delete copy- and move-assignment, and
     /// the binding registry holds mirrors in a map. Never null.
@@ -228,6 +322,34 @@ class ScreenMirror
     /// so a reused wire id is recognised as new rather than silently re-pointing every line already
     /// stamped with it. @see vthost::MirroredContext.
     vthost::ContextIdMap _contextIds;
+    /// The RemoteScreen::commandBlocksRevision this mirror last synced at.
+    uint64_t _syncedCommandBlocks = 0;
+    /// The epoch the block ids on this mirror's rows count in (proto::SessionState::commandBlockIdEpoch).
+    uint64_t _commandBlockIdEpoch = 0;
+
+    /// Where the primary page stood, in this mirror's own row ids, when an update last wrote it: its first
+    /// line held the host row at `_viewportBase`. Kept in ids rather than offsets because this terminal's
+    /// page may change its line count meanwhile -- a status line the user turns on -- which keeps every row's
+    /// id but not its offset.
+    struct PageAnchor
+    {
+        int64_t mirrorBase = 0;          ///< The stable id of the page's first line, in this mirror's grid.
+        uint64_t mirrorIdGeneration = 0; ///< This grid's stable-id generation then.
+        uint64_t hostIdGeneration = 0;   ///< The host grid's stable-id generation then.
+    };
+    /// Unset until the primary page was first written.
+    /// @see hostRowOf
+    std::optional<PageAnchor> _primaryAnchor;
+    /// The RemoteScreen::hostTime this mirror last measured its clock against; 0 for none.
+    int64_t _measuredHostTime = 0;
+    /// The blocks the update being applied may give a head: each record it adopted anew, each whose head a
+    /// replay forgot, and each a row it wrote carries a head mark of. Gathered as the rows are written and
+    /// looked up only afterwards, in placeHeads(): a read of the store between two row writes would re-head
+    /// blocks among half-written rows.
+    std::vector<vtbackend::CommandBlockId> _headCandidates;
+    /// The blocks the update being applied may give a head whose host says its head row is gone
+    /// (vthost::HostHead::Evicted): recorded as evicted in placeHeads(), before any is looked for.
+    std::vector<vtbackend::CommandBlockId> _evictedHeads;
     /// Server image id → the local `vtbackend::Image` built from its pixels, so a placement decodes
     /// them once. Holding the reference is also what keeps the pool entry alive: `ImagePool`'s id
     /// index is weak, so an image nothing holds is collected.

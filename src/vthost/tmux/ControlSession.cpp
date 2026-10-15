@@ -716,8 +716,8 @@ ControlSession::HandlerResult ControlSession::commandCapturePane(std::vector<std
     // line storage) under the terminal's _stateMutex. Hold that lock across every
     // read below — historyLineCount/pageSize and the renderRange walk — so we never
     // read the line SoA vectors while they are being reallocated. Mirrors the locked
-    // grid reads NativeSession::pushDelta performs on the same state.
-    auto const guard = std::lock_guard { *terminal };
+    // grid reads NativeSession::pushDelta performs on the same state, as a reader's hold.
+    auto const guard = std::lock_guard { std::as_const(*terminal) };
     // The DISPLAYED page, not the primary one — capture-pane answers "what is in this pane", and a
     // pane running vim/less/htop is showing the alternate screen. Reading the primary grid there
     // returns the shell prompt the editor replaced, and `-S -` compounds it by counting history the

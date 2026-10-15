@@ -109,11 +109,15 @@ struct PumpResult
 /// @param stopReading Asked before every read; true ends the pump as a handler stop. What lets a
 ///        detach end the pump even when the read it retired had already delivered bytes, which
 ///        would otherwise send the pump straight back to read. Empty means never.
+/// @param awaitReadRoom Awaited before every read, and before @p stopReading is asked: what lets a server
+///        stop reading one connection while what it took from it backs up, and read on once that drains.
+///        Empty means never.
 /// @return Why the loop ended.
 [[nodiscard]] inline core::async::Task<PumpResult> pumpPdus(
     core::net::ISocket* socket,
     std::function<bool(proto::DecodedFrame const&)> handler,
-    std::function<bool()> stopReading = {})
+    std::function<bool()> stopReading = {},
+    std::function<core::async::Task<void>()> awaitReadRoom = {})
 {
     auto buffer = std::vector<std::byte> {};
     auto consumed = std::size_t { 0 };
@@ -130,6 +134,8 @@ struct PumpResult
             if (decoded.error() != proto::DecodeError::NeedMoreData)
                 co_return PumpResult::protocolError(decoded.error());
 
+            if (awaitReadRoom)
+                co_await awaitReadRoom();
             if (stopReading && stopReading())
                 co_return PumpResult::stopped(PumpStop::HandlerStopped);
             auto const appended = co_await core::net::appendReadChunk(socket, &buffer);

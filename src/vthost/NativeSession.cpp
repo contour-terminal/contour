@@ -3,6 +3,7 @@
 
 #include <vtbackend/core/Image.hpp>
 #include <vtbackend/grid/Line.hpp>
+#include <vtbackend/shell/CommandBlock.hpp>
 
 #include <core/Utils.hpp>
 #include <core/net/Sockets.hpp>
@@ -13,23 +14,30 @@
 #include <chrono>
 #include <cstddef>
 #include <expected>
+#include <functional>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include <vthost/CommandBlockWire.hpp>
 #include <vthost/ContextWire.hpp>
 #include <vthost/CursorStyle.hpp>
 #include <vthost/GracefulClose.hpp>
 #include <vthost/GridWire.hpp>
+#include <vthost/HostIdentity.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/MirroredModes.hpp>
 #include <vthost/MouseWire.hpp>
+#include <vthost/NotifyWire.hpp>
 #include <vthost/PduPump.hpp>
+#include <vthost/TimeWire.hpp>
 #include <vthost/proto/PduTrace.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -106,6 +114,85 @@ namespace
         return layout;
     }
 
+    /// Whether a record went into a frame or would have overspent its budget.
+    enum class RecordFit : uint8_t
+    {
+        OverBudget = 0, ///< It did not fit; nothing was appended.
+        Taken = 1,      ///< Its wire form was appended.
+    };
+
+    /// The command-block record bytes one frame may spend, by proto::estimatedEncodedSize, which never
+    /// under-counts. The first record always fits, however large, so a lone oversized one still travels
+    /// rather than holding everything behind it forever.
+    class RecordBudget
+    {
+      public:
+        /// @param bytes The most the frame's records may cost.
+        /// @param grid The grid the records' rows are stamped on, which says whether a head row is gone.
+        RecordBudget(std::size_t bytes, vtbackend::Grid const& grid) noexcept:
+            _bytes { bytes }, _grid { grid }
+        {
+        }
+
+        /// Converts @p record and appends it to @p out, unless that would overspend the budget.
+        /// @return Taken, or OverBudget when it did not fit.
+        [[nodiscard]] RecordFit take(vtbackend::CommandBlockRecord const& record,
+                                     std::vector<proto::WireCommandBlock>& out)
+        {
+            auto wire = toWireCommandBlock(record, hostHeadOf(_grid, record));
+            auto const cost = proto::estimatedEncodedSize(wire);
+            if (_spent != 0 && _spent + cost > _bytes)
+                return RecordFit::OverBudget;
+            _spent += cost;
+            out.push_back(std::move(wire));
+            return RecordFit::Taken;
+        }
+
+      private:
+        std::size_t _bytes;
+        vtbackend::Grid const& _grid;
+        std::size_t _spent = 0;
+    };
+
+    /// Adds the ids of @p sent -- ascending, as a walk takes them -- to @p known, ascending, keeping it a
+    /// set.
+    void addSentIds(std::vector<uint32_t>& known, std::span<proto::WireCommandBlock const> sent)
+    {
+        auto const seam = static_cast<std::ptrdiff_t>(known.size());
+        for (auto const& block: sent)
+            known.push_back(block.id);
+        // A walk that met only records newer than every one the peer holds -- the usual case, a new
+        // prompt -- appended them in order already.
+        auto const middle = std::next(known.begin(), seam);
+        if (middle == known.begin() || middle == known.end() || *std::prev(middle) < *middle)
+            return;
+        std::ranges::inplace_merge(known, middle);
+        known.erase(std::ranges::unique(known).begin(), known.end());
+    }
+
+    /// Moves every id of @p known that @p store no longer holds to @p retired, by a merge-join: both are
+    /// ascending, so one pass over each.
+    void retireReleasedIds(vtbackend::CommandBlockStore const& store,
+                           std::vector<uint32_t>& known,
+                           std::vector<uint32_t>& retired)
+    {
+        auto const records = store.records();
+        auto held = records.begin();
+        auto kept = known.begin();
+        for (auto const id: known)
+        {
+            held =
+                std::ranges::find_if(held, records.end(), [id](vtbackend::CommandBlockRecord const& record) {
+                    return record.id.value >= id;
+                });
+            if (held != records.end() && held->id.value == id)
+                *kept++ = id;
+            else
+                retired.push_back(id);
+        }
+        known.erase(kept, known.end());
+    }
+
     /// Collects the image-cell side-table entries of one row.
     void appendImageCells(std::vector<proto::ImageCellEntry>& out,
                           int64_t stableId,
@@ -144,21 +231,6 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
     _host(host),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), maxWriteQueueBytes),
-    // A LOW-water mark — one piece's worth — not "the bound minus a piece".
-    //
-    // Both make the enqueue that follows succeed, but the high one does it by riding the backlog
-    // just under the bound for the whole run, leaving a single piece of headroom for every OTHER
-    // producer on this queue: a LayoutState, another session's page delta, a FetchImage answer.
-    // None of those can pace itself, and any of them arriving then is refused — the connection
-    // dropped by the very mechanism added to stop dropping it. Pacing to one piece instead keeps
-    // the backlog under two pieces and leaves the rest of the bound to traffic that has no choice.
-    // It also stops the size ESTIMATE being load-bearing: a piece overshooting its budget twice over
-    // still lands under the bound.
-    //
-    // The piece itself is sized to the bound (snapshotPieceBytes), which is what lets one low-water
-    // mark serve every bound. A piece of a fixed size under a bound smaller than itself had to wait
-    // for a fully drained backlog instead, and then sat in it over the bound on its own, refusing
-    // every increment, bell or LayoutState enqueued behind it.
     _snapshotPieceBytes(snapshotPieceBytes(maxWriteQueueBytes)),
     _id(std::move(id)),
     _expectedToken(std::move(expectedToken))
@@ -208,6 +280,11 @@ void NativeSession::sessionScreenUpdated(SessionId session)
 {
     if (!_handshaken || _closed)
         return;
+    queueIncrement(session);
+}
+
+void NativeSession::queueIncrement(SessionId session)
+{
     _pendingSessions.insert(session.value);
     scheduleFlush();
 }
@@ -228,6 +305,7 @@ void NativeSession::sessionClosed(SessionId session)
     // answers NoSuchSession and it moves on), but every per-session set this connection keeps must
     // be dropped in ONE place, or the next one added is dropped in none.
     std::erase(_snapshotQueue, session.value);
+    _recordsAwaitingRoom.erase(session.value);
 }
 
 void NativeSession::sessionResized(SessionId session)
@@ -247,9 +325,13 @@ void NativeSession::sessionBell(SessionId session)
     emitSessionEvent(proto::SessionBell { .session = session.value });
 }
 
-void NativeSession::sessionNotify(SessionId session, std::string const& title, std::string const& body)
+void NativeSession::sessionNotify(SessionId session,
+                                  std::string const& title,
+                                  std::string const& body,
+                                  std::optional<vtbackend::DisplayOccasion> occasion)
 {
-    emitSessionEvent(proto::SessionNotify { .session = session.value, .title = title, .body = body });
+    emitSessionEvent(proto::SessionNotify {
+        .session = session.value, .title = title, .body = body, .occasion = wireOccasionOf(occasion) });
 }
 
 void NativeSession::sessionCopyToClipboard(SessionId session, std::string const& data)
@@ -306,7 +388,7 @@ core::async::Task<void> NativeSession::flushSoon()
 void NativeSession::collectContextState(vtbackend::Terminal& terminal,
                                         FollowState& follow,
                                         proto::Delta& delta,
-                                        bool snapshot)
+                                        SnapshotMode mode)
 {
     // The ACTIVE id is pull+diff like the cwd is, and the records it and its ancestors need travel as
     // a side table in the same "sent once per connection on first reference" shape the hyperlink pool
@@ -315,7 +397,7 @@ void NativeSession::collectContextState(vtbackend::Terminal& terminal,
     auto const active = static_cast<int>(contexts.activeId().value);
     if (active != follow.lastActiveContext)
     {
-        if (!snapshot)
+        if (mode == SnapshotMode::Delta)
         {
             delta.contextChanged = 1;
             delta.activeContext = contexts.activeId().value;
@@ -346,11 +428,131 @@ void NativeSession::collectContextState(vtbackend::Terminal& terminal,
         auto const id = record.id.value;
         auto const known = follow.sentContexts.find(id);
         auto const unchanged = known != follow.sentContexts.end() && known->second == wire;
-        if (!unchanged && !snapshot)
+        if (!unchanged && mode == SnapshotMode::Delta)
             delta.contexts.push_back(wire);
         refreshed.insert_or_assign(id, std::move(wire));
     });
     follow.sentContexts = std::move(refreshed);
+}
+
+NativeSession::CommandBlockBacklog NativeSession::collectCommandBlockSnapshot(
+    vtbackend::Terminal& terminal,
+    FollowState& follow,
+    proto::SessionState& state,
+    SupersededFrames superseded) const
+{
+    auto const& store = terminal.commandBlocks();
+    auto const revision = store.contentRevision();
+
+    // Stated outright, like the context pool — but capped, because SessionState is one unchunked frame
+    // and a store of hostile 4 KB command lines would otherwise make it megabytes. Capped at this
+    // connection's piece rather than at SnapshotChunkBytes, for the reason a snapshot's rows are cut to
+    // it (snapshotPieceBytes). The NEWEST records are the ones a client wants first (the current prompt,
+    // the last finish), so they are taken newest first until the cap is spent; the older remainder is
+    // left to a walk, which the increments carry.
+    auto& stated = state.commandBlocks;
+    auto budget = RecordBudget { _snapshotPieceBytes, terminal.primaryScreen().grid() };
+    for (auto const& record: store.records() | std::views::reverse)
+        if (budget.take(record, stated) == RecordFit::OverBudget)
+            break;
+    std::ranges::reverse(stated);
+
+    // Uncapped, the snapshot speaks for every id, and the client's table becomes the store as of
+    // `revision`. Capped, it speaks only from the oldest record it states on: the client keeps what it
+    // holds below that, so a resize does not have it drop the history it has and receive it all again.
+    // Unless the supersede dropped frames this peer counted as sent: what they carried or retired never
+    // arrives, so nothing the client holds below the cap can be trusted, and it speaks for every id.
+    auto const capped = stated.size() < store.size();
+    auto const floor = capped && superseded == SupersededFrames::None ? stated.front().id : uint32_t { 0 };
+    state.commandBlocksFloor = floor;
+    std::erase_if(follow.sentBlockIds, [floor](uint32_t id) { return id >= floor; });
+    for (auto const& wire: stated)
+        follow.sentBlockIds.push_back(wire.id);
+    if (floor == 0)
+    {
+        // It holds exactly the stated set: nothing to retire, and — capped — nothing older counts as sent.
+        follow.blockIdsJoinedAt = revision;
+        follow.sentBlockStamp = capped ? 0 : revision;
+    }
+    if (!capped)
+    {
+        follow.blockWalk.reset();
+        return CommandBlockBacklog::Drained;
+    }
+
+    // The older remainder goes as increments. A walk already open resumes where it stood, having brought
+    // what it passed up to its own target; the records from the floor on are current as of `revision`.
+    auto const until = vtbackend::CommandBlockId { stated.front().id };
+    follow.blockWalk = floor != 0 && follow.blockWalk
+                           ? CommandBlockWalk { .from = follow.blockWalk->from,
+                                                .until = until,
+                                                .target = follow.blockWalk->target }
+                           : CommandBlockWalk { .until = until, .target = revision };
+    return CommandBlockBacklog::Pending;
+}
+
+NativeSession::CommandBlockBacklog NativeSession::collectCommandBlockDelta(vtbackend::Terminal& terminal,
+                                                                           FollowState& follow,
+                                                                           proto::Delta& delta) const
+{
+    auto const& store = terminal.commandBlocks();
+    auto const revision = store.contentRevision();
+
+    // The gate, as for contexts: a debounce flush runs every 20 ms per session, and the walk below can
+    // have nothing to say while the store's content has not moved past what this peer was sent. Head
+    // placement leaves the content revision alone, so a reflow or an erase does not open it.
+    if (!follow.blockWalk && follow.sentBlockStamp == revision)
+        return CommandBlockBacklog::Drained;
+
+    // Rows must flow and records need not: they are state the next delta carries just as well. So
+    // under a slow reader the records lag, rather than riding every window onto a backlog until the
+    // queue refuses a frame and the connection goes. Nothing is lost by waiting — the walk stays where
+    // it stood, and the stamps still say what changed since.
+    if (!hasSendRoom())
+        return CommandBlockBacklog::Pending;
+
+    // Everything this peer was told about that the host let go of: a prompt the next one discarded,
+    // the oldest record the bound evicted, a reset. The mirror removes them; without this an attached
+    // pane keeps a phantom block per empty Enter. Only a store that moved can have let any go.
+    if (follow.blockIdsJoinedAt != revision)
+    {
+        retireReleasedIds(store, follow.sentBlockIds, delta.retiredCommandBlocks);
+        follow.blockIdsJoinedAt = revision;
+    }
+
+    auto& walk = follow.blockWalk ? *follow.blockWalk
+                                  : follow.blockWalk.emplace(CommandBlockWalk { .target = revision });
+    auto budget = RecordBudget { std::min(CommandBlockDeltaBytes, _snapshotPieceBytes),
+                                 terminal.primaryScreen().grid() };
+    auto const stamped = store.stampedRecords();
+    auto const resume = std::ranges::lower_bound(
+        stamped, walk.from, std::less {}, [](vtbackend::StampedCommandBlock const& entry) {
+            return entry.record.id;
+        });
+    for (auto const entry: std::ranges::subrange(resume, stamped.end()))
+    {
+        if (walk.until && entry.record.id >= *walk.until)
+            break;
+        if (entry.changeStamp <= follow.sentBlockStamp)
+            continue;
+        // Once over budget, everything newer waits too, so the peer still learns of records oldest
+        // first — which is what lets its mirror tell a finish it witnessed from history it was never
+        // shown. The next increment resumes right here.
+        if (budget.take(entry.record, delta.commandBlocks) == RecordFit::OverBudget)
+        {
+            walk.from = entry.record.id;
+            addSentIds(follow.sentBlockIds, delta.commandBlocks);
+            return CommandBlockBacklog::Pending;
+        }
+    }
+    addSentIds(follow.sentBlockIds, delta.commandBlocks);
+
+    // The walk reached its end: everything stamped up to its target travelled. A record that changed
+    // after the walk began, behind where it stood, is still owed — so a store that moved meanwhile asks
+    // for one more.
+    follow.sentBlockStamp = walk.target;
+    follow.blockWalk.reset();
+    return follow.sentBlockStamp == revision ? CommandBlockBacklog::Drained : CommandBlockBacklog::Pending;
 }
 
 void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
@@ -407,7 +609,7 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
         follow.cwdKnown = true;
     }
 
-    collectContextState(terminal, follow, delta, snapshot);
+    collectContextState(terminal, follow, delta, mode);
 
     // Live default fg/bg (OSC 10/11): pull+diff; the snapshot carries them in
     // SessionState below.
@@ -543,6 +745,8 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
         });
         for (auto const& entry: terminal.contexts().chain())
             snap.contextChain.push_back(entry.record->id.value);
+        snap.sessionEpoch = toWireTime(terminal.sessionEpoch());
+        snap.hostTime = toWireTime(terminal.wallTimeNow());
         snap.defaultForeground = colors.defaultForeground.value();
         snap.defaultBackground = colors.defaultBackground.value();
         snap.statusDisplayType = static_cast<uint8_t>(statusType);
@@ -569,12 +773,15 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
 
     auto hyperlinkIds = std::vector<uint16_t> {};
     auto referencedLinks = std::unordered_set<uint16_t> {}; ///< Deduplicates ids within THIS delta.
+    auto blockBacklog = CommandBlockBacklog::Drained;
+    auto superseded = SupersededFrames::None;
     {
         // The same lock discipline as refreshRenderBuffer: all grid queries
         // happen under the terminal's state lock — and so does every terminal
         // read below (pageSize/screenType/windowTitle mutate on the session's
-        // pump thread; windowTitle() in particular is an unlocked reference).
-        auto const guard = std::lock_guard { *terminal };
+        // pump thread; windowTitle() in particular is an unlocked reference). A
+        // reader's hold, which sends nothing as it is released.
+        auto const guard = std::lock_guard { std::as_const(*terminal) };
 
         // Mirror exactly what the fat GUI paints: the DISPLAYED page, which is what
         // the user sees. It coincides with the cursor page while DECPCCM couples
@@ -662,16 +869,24 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
                 // And the revision gate with it: the pool has not moved, so without this the re-send
                 // the clear exists to force would be skipped and the records never sent again.
                 follow.contextRevisionKnown = false;
+                // And the command-block records: what a dropped delta carried or retired never arrives,
+                // so the snapshot states its records as the client's whole table.
+                superseded = SupersededFrames::Dropped;
             }
         }
         delta.snapshot = snapshot ? 1 : 0;
         delta.generation = grid.generation();
+        delta.stableIdGeneration = grid.stableIdGeneration();
         delta.seqno = grid.seqno();
         delta.stableViewportBase = grid.stableLineIdOf(vtbackend::LineOffset(0));
         // The scrollback floor: a `clear`/CSI 3 J evicts history without a
         // generation bump or any line change, so this is the ONLY signal that
         // tells the mirror to drop the history the real terminal discarded.
         delta.stableFloor = grid.stableRangeFloor();
+        // Its row number: the client numbers absolute lines from the host's count, not from the floor
+        // moves its own grid happens to see. It moves only with the floor or a generation, so the
+        // floor gate below covers it.
+        delta.evictedRowCount = grid.evictedRowCount();
 
         auto const cursor = terminal->displayedPage().cursor().position;
         delta.cursorLine = unbox<int32_t>(cursor.line);
@@ -713,7 +928,26 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
         }
 
         collectLiveState(*terminal, follow, delta, state, session, std::to_underlying(screenType), mode);
+        // What the ids on the rows and records count in, stated on every push -- a snapshot's pieces
+        // included -- so a receiver learns that they started over in the update that starts them over.
+        auto const idEpoch = terminal->commandBlocks().idEpoch();
+        delta.commandBlockIdEpoch = idEpoch;
+        // After collectLiveState, which engages `state` exactly on a snapshot: a snapshot states its
+        // records there, an increment carries them in the delta.
+        if (state)
+        {
+            state->commandBlockIdEpoch = idEpoch;
+            blockBacklog = collectCommandBlockSnapshot(*terminal, follow, *state, superseded);
+        }
+        else
+            blockBacklog = collectCommandBlockDelta(*terminal, follow, delta);
     }
+
+    // Records left owed — a budget or a cap cut the walk short, or the send queue had no room — follow
+    // whether or not the session writes anything meanwhile: an idle shell after a flood raises no further
+    // screen update, and a snapshot's capped remainder is owed however quiet the session is.
+    if (blockBacklog == CommandBlockBacklog::Pending)
+        followUpRecords(session);
 
     // A pure mode flip (an app enabling mouse tracking, say) changes no cell,
     // yet clients must hear about it to encode input correctly. A pure cursor move
@@ -749,10 +983,16 @@ void NativeSession::pushDelta(SessionId session)
     auto built = buildPush(session, SnapshotMode::Delta);
     if (!built)
     {
-        // The increment could not describe the batch. The whole grid can, and the whole grid is
-        // exactly what must not go out inline.
-        if (built.error() == BuildFailure::ResyncRequired)
-            requestSnapshot(session);
+        switch (built.error())
+        {
+            case BuildFailure::ResyncRequired:
+                // The increment could not describe the batch. The whole grid can, and the whole grid
+                // is exactly what must not go out inline.
+                requestSnapshot(session);
+                break;
+            case BuildFailure::NoSuchSession:
+            case BuildFailure::NothingToSay: break;
+        }
         return;
     }
     // No SessionState arm: it accompanies a snapshot only, and an increment that wanted to become
@@ -793,6 +1033,62 @@ core::async::Task<bool> NativeSession::awaitSendRoom()
     co_return !_closed;
 }
 
+core::async::Task<void> NativeSession::awaitInputRoom()
+{
+    if (!_inputBackedUp)
+        co_return;
+    // Polled: the session drains on its pump thread, and only a connection that filled it waits here, for as
+    // long as the application leaves its input unread. An ended session holds none.
+    auto const session = *_inputBackedUp;
+    co_await core::net::pollUntil(
+        &_loop,
+        [this, session] { return _host.inputBacklog(session) <= _host.inputWatermarks().low; },
+        std::chrono::milliseconds { 5 });
+    _inputBackedUp.reset();
+}
+
+void NativeSession::pauseReadingIfBackedUp(SessionId session)
+{
+    if (_host.inputBacklog(session) >= _host.inputWatermarks().high)
+        _inputBackedUp = session;
+}
+
+bool NativeSession::hasSendRoom() const noexcept
+{
+    // The comparison waitUntilBacklogBelow makes against the same watermark, so "room" means one
+    // thing on this connection whether the asker can wait for it or not.
+    return _writer.backlogBytes() < _snapshotPieceBytes;
+}
+
+void NativeSession::followUpRecords(SessionId session)
+{
+    // With room, the next debounce window carries what is owed. Without it, every window would only
+    // rebuild the session — the lock, the row scan, the live state — to find no room again, for as long
+    // as the client reads nothing: so the records wait for room instead, on one waiter for the whole
+    // connection, as the snapshot streamer does.
+    if (hasSendRoom())
+    {
+        queueIncrement(session);
+        return;
+    }
+    _recordsAwaitingRoom.insert(session.value);
+    if (_roomWaiter == RoomWaiter::Parked || _closed)
+        return;
+    // Claimed before the spawn, for the reason requestSnapshot claims the streamer before its own.
+    _roomWaiter = RoomWaiter::Parked;
+    _loop.spawn(requeueOnSendRoom());
+}
+
+core::async::Task<void> NativeSession::requeueOnSendRoom()
+{
+    // A scope guard, for the reason streamSnapshots has one: run()'s teardown waits on it.
+    auto const idle = core::Finally { [this] { _roomWaiter = RoomWaiter::Idle; } };
+    if (!co_await awaitSendRoom())
+        co_return;
+    for (auto const session: std::exchange(_recordsAwaitingRoom, {}))
+        queueIncrement(SessionId { session });
+}
+
 core::async::Task<void> NativeSession::streamSnapshots()
 {
     // A scope guard, not an assignment at the end: run()'s teardown polls this for the streamer
@@ -818,6 +1114,8 @@ core::async::Task<void> NativeSession::streamSnapshots()
         // the optional it is, so the invariant lives in ONE place rather than in every consumer.
         if (built->state)
             send(0, proto::DecodedPdu { *std::move(built->state) }, session.value);
+        // A snapshot that stated only the newest records that fit had buildPush queue the older
+        // remainder as increments, which the debounce holds back until this run is off the wire.
         co_await sendSnapshotPieces(std::move(built->delta), session);
 
         // The session is let go once the backlog is back under a piece, not the moment its last
@@ -901,8 +1199,7 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
 {
     if (auto const* input = std::get_if<proto::Input>(&frame.pdu))
     {
-        auto* terminal = _host.terminal(SessionId { input->session });
-        if (terminal == nullptr)
+        if (_host.terminal(SessionId { input->session }) == nullptr)
         {
             errorLog()("{}: Input for unknown session {} ({} bytes dropped)",
                        _id,
@@ -910,8 +1207,12 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
                        input->data.size());
             return;
         }
-        std::ignore = terminal->device().write(
+        // Through the host, whose session pump writes it: this is the loop thread, which must not park on a
+        // PTY write while the application leaves its input unread.
+        _host.writeInput(
+            SessionId { input->session },
             std::string_view { reinterpret_cast<char const*>(input->data.data()), input->data.size() });
+        pauseReadingIfBackedUp(SessionId { input->session });
         return;
     }
     if (auto const* resize = std::get_if<proto::ResizeRequest>(&frame.pdu))
@@ -1034,6 +1335,20 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
             model.setPaneRatio(tab->id(), node->id(), proto::fromWireRatio(resize->ratio));
         return;
     }
+    if (auto const* changed = std::get_if<proto::SessionSettingsChanged>(&frame.pdu))
+    {
+        adoptClientSessionSettings(changed->sessionSettings);
+        return;
+    }
+    if (auto const* request = std::get_if<proto::PerformOperation>(&frame.pdu))
+    {
+        // The mirror follows through the screen update the operation raises; there is no reply to send.
+        if (auto const performed = _host.performOperation(*request); !performed)
+            errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(performed.error()));
+        // A write queues for the session's pump, as input does, and backs up with it.
+        pauseReadingIfBackedUp(SessionId { request->session });
+        return;
+    }
     if (auto const* close = std::get_if<proto::ClosePane>(&frame.pdu))
     {
         _host.handleSessionExit(vtworkspace::SessionId { close->session });
@@ -1043,6 +1358,19 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     // all the same — "the daemon ignored what I sent" is otherwise indistinguishable from "the
     // daemon never received it".
     errorLog()("{}: ignoring unexpected {} (serial {})", _id, proto::describe(frame.pdu), frame.serial);
+}
+
+void NativeSession::adoptClientSessionSettings(std::optional<proto::WireSessionSettings> const& stated)
+{
+    if (!stated)
+    {
+        _clientSessionSettings.reset();
+        connectionLog()("{}: sessions this client creates will emulate as the host's", _id);
+        return;
+    }
+    _clientSessionSettings = fromWireSessionSettings(*stated, _host.settings());
+    connectionLog()(
+        "{}: sessions this client creates will emulate as {}", _id, _clientSessionSettings->terminalId);
 }
 
 bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
@@ -1075,18 +1403,20 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
         send(frame.serial, proto::DecodedPdu { proto::ServerHello {} });
         return false;
     }
-    send(frame.serial, proto::DecodedPdu { proto::ServerHello {} });
+    // Only an accepted client learns which machine the daemon runs on: what every record's locality was
+    // judged against, so the client can tell whose "local" that is before it mirrors a single one. By an
+    // id derived for this application, never the machine's own, which machine-id(5) keeps confidential.
+    auto stated = appSpecificIdentity(_host.identity().view());
+    send(frame.serial,
+         proto::DecodedPdu { proto::ServerHello { .codecVersion = proto::CodecVersion,
+                                                  .machineId = std::move(stated.machineId),
+                                                  .hostname = std::move(stated.hostname) } });
     _handshaken = true;
     connectionLog()("{}: handshake complete (codec v{})", _id, proto::CodecVersion);
 
     // Adopted BEFORE the spawn below: that session exists because THIS client attached, so it
     // inherits this client's profile like any tab the client goes on to open.
-    if (hello->sessionSettings)
-    {
-        _clientSessionSettings = fromWireSessionSettings(*hello->sessionSettings, _host.settings());
-        connectionLog()(
-            "{}: sessions this client creates will emulate as {}", _id, _clientSessionSettings->terminalId);
-    }
+    adoptClientSessionSettings(hello->sessionSettings);
 
     // Attaching to an empty daemon spawns the first session.
     if (_host.model().window(_host.windowId())->tabCount() == 0)
@@ -1126,20 +1456,24 @@ core::async::Task<void> NativeSession::run()
 {
     // Nothing is valid before a version-matching ClientHello; afterwards the
     // pump serves request PDUs until the peer disconnects.
-    auto const outcome = co_await pumpPdus(_connection.get(), [this](proto::DecodedFrame const& frame) {
-        // Traced HERE rather than in handlePdu: the handshake frame never reaches handlePdu, and
-        // a trace that cannot show the ClientHello is useless for exactly the failures — version
-        // and token mismatches — one most wants a trace for.
-        if (protocolTraceLog)
-            protocolTraceLog()(
-                "{} {}",
-                _id,
-                proto::traceLine(proto::Direction::Recv, frame.serial, frame.pdu, frame.consumed));
-        if (!_handshaken)
-            return completeHandshake(frame);
-        handlePdu(frame);
-        return true;
-    });
+    auto const outcome = co_await pumpPdus(
+        _connection.get(),
+        [this](proto::DecodedFrame const& frame) {
+            // Traced HERE rather than in handlePdu: the handshake frame never reaches handlePdu, and
+            // a trace that cannot show the ClientHello is useless for exactly the failures — version
+            // and token mismatches — one most wants a trace for.
+            if (protocolTraceLog)
+                protocolTraceLog()(
+                    "{} {}",
+                    _id,
+                    proto::traceLine(proto::Direction::Recv, frame.serial, frame.pdu, frame.consumed));
+            if (!_handshaken)
+                return completeHandshake(frame);
+            handlePdu(frame);
+            return true;
+        },
+        {},
+        [this] { return awaitInputRoom(); });
     reportPumpOutcome(outcome);
 
     _closed = true;
@@ -1155,8 +1489,10 @@ core::async::Task<void> NativeSession::run()
     // The snapshot streamer joins the same barrier for the same reason, and needs it more: it
     // parks on the write queue's watermark, which is a far longer park than the flush debounce.
     // `_closed` was set just above, which is what unparks it — waitUntilBacklogBelow returns on
-    // a closed queue, and the streamer's loops all test _closed — so this poll is bounded.
-    co_await core::net::pollUntil(&_loop, [this] { return !_flushScheduled && !_streamingSession; });
+    // a closed queue, and the streamer's loops all test _closed — so this poll is bounded. The waiter
+    // for room for command-block records parks on the same watermark, and joins for the same reason.
+    co_await core::net::pollUntil(
+        &_loop, [this] { return !_flushScheduled && !_streamingSession && _roomWaiter == RoomWaiter::Idle; });
     co_await closeGracefully(&_loop, &_writer, _connection.get());
 }
 

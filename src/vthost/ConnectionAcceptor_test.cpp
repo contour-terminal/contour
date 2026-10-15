@@ -10,6 +10,7 @@
     #include <core/net/IoBackend.hpp>
     #include <core/net/Sockets.hpp>
     #include <core/net/testing/CoroTestSupport.hpp>
+    #include <core/net/testing/FailingListener.hpp>
     #include <core/testing/ScopedTempDir.hpp>
 
     #include <catch2/catch_test_macros.hpp>
@@ -23,6 +24,7 @@
     #include <memory>
     #include <span>
     #include <string>
+    #include <utility>
     #include <vector>
 
     #include <unistd.h>
@@ -77,24 +79,44 @@ Task<void> clientAwaitingClosure(EventLoop* loop, std::string socketPath, bool* 
     std::ignore = co_await reader.readLine(); // ends at EOF: the handler never replies
 }
 
-/// A listener whose accept fails synchronously every time — the shape of fd
-/// exhaustion (EMFILE/ENFILE), which never suspends the accepting coroutine.
-struct ExhaustedListener final: core::net::IListener
+/// A listener whose accept fails synchronously every time, with one error — the shape of fd
+/// exhaustion (EMFILE/ENFILE), which never suspends the accepting coroutine, and of a dead listener.
+struct FailingAcceptListener final: core::net::IListener
 {
     int* attempts;
+    core::net::NetError error;
+    bool* closed; ///< Set when the listener is closed; may be null.
 
-    explicit ExhaustedListener(int* attemptsArg) noexcept: attempts(attemptsArg) {}
+    // Not noexcept: IListener's constructor allocates its close token's state.
+    FailingAcceptListener(int* attemptsArg, core::net::NetError errorArg, bool* closedArg = nullptr):
+        attempts(attemptsArg), error(std::move(errorArg)), closed(closedArg)
+    {
+    }
 
     core::async::Task<core::net::AcceptResult> accept() override
     {
         ++*attempts;
-        co_return std::unexpected(core::net::NetError {
-            .code = core::net::NetErrorCode::SystemError, .systemCode = EMFILE, .context = "accept" });
+        co_return std::unexpected(error);
     }
 
     [[nodiscard]] std::uint16_t boundPort() const noexcept override { return 0; }
-    void close() noexcept override {}
+
+  protected:
+    void doClose() noexcept override
+    {
+        if (closed != nullptr)
+            *closed = true;
+    }
 };
+
+/// A listener that has run out of descriptors for good: every accept answers EMFILE, which passes.
+std::unique_ptr<core::net::IListener> exhaustedListener(int* attempts)
+{
+    return std::make_unique<FailingAcceptListener>(
+        attempts,
+        core::net::NetError {
+            .code = core::net::NetErrorCode::ResourceExhausted, .systemCode = EMFILE, .context = "accept" });
+}
 
 /// One client's round trip: connect, send a line, await the echo.
 Task<void> clientRoundTrip(EventLoop* loop, std::string socketPath, std::string line, bool* echoed)
@@ -181,7 +203,7 @@ TEST_CASE("persistent accept failures back off instead of starving the loop", "[
     auto server =
         ConnectionAcceptor { loop,
                              "test",
-                             std::make_unique<ExhaustedListener>(&attempts),
+                             exhaustedListener(&attempts),
                              [](vthost::ConnectionId const&, std::unique_ptr<core::net::ISocket> conn) {
                                  return drainConnection(std::move(conn));
                              } };
@@ -262,7 +284,7 @@ TEST_CASE("a persistently failing accept is reported, not silent", "[vthost][acc
     auto server =
         ConnectionAcceptor { loop,
                              "native",
-                             std::make_unique<ExhaustedListener>(&attempts),
+                             exhaustedListener(&attempts),
                              [](vthost::ConnectionId const&, std::unique_ptr<core::net::ISocket> conn) {
                                  return drainConnection(std::move(conn));
                              } };
@@ -274,6 +296,69 @@ TEST_CASE("a persistently failing accept is reported, not silent", "[vthost][acc
     CHECK(capture.contains("errno 24")); // EMFILE
     // Throttled: many retries, but not one line each.
     CHECK(capture.count("accept failed") < static_cast<std::size_t>(attempts));
+}
+
+TEST_CASE("a dead listener ends the accept loop, closed, and says so", "[vthost][acceptor]")
+{
+    // A listening handle that is gone fails every accept the same way, for good. Backed off on as a
+    // passing shortage is, it was retried every 100 ms forever, and the daemon looked like it served.
+    auto capture = core::log::ScopedCapture {};
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = EventLoop { *source };
+    auto attempts = 0;
+    auto closed = false;
+    auto deadHandle = core::net::NetError { .code = core::net::NetErrorCode::BadHandle,
+                                            .systemCode = EBADF,
+                                            .context = "accept" };
+    auto server = ConnectionAcceptor {
+        loop,
+        "native",
+        std::make_unique<FailingAcceptListener>(&attempts, std::move(deadHandle), &closed),
+        [](vthost::ConnectionId const&, std::unique_ptr<core::net::ISocket> conn) {
+            return drainConnection(std::move(conn));
+        }
+    };
+    loop.spawn(server.serve());
+    loop.blockOn(core::net::testing::sleepFor(&loop, std::chrono::milliseconds { 250 }));
+
+    CHECK(attempts == 1);
+    CHECK(closed); // refusing a client, rather than queueing it for an accept that never comes
+    CHECK(capture.contains("native: accept loop ended"));
+    CHECK(capture.contains("errno 9")); // EBADF
+}
+
+TEST_CASE("a passing accept failure is backed off on, and accepting goes on", "[vthost][acceptor]")
+{
+    // EMFILE says the process ran short of descriptors, which passes: the loop waits, accepts again, and
+    // serves the client that queued meanwhile.
+    auto const tmp = core::testing::ScopedTempDir { "contour-muxsrv" };
+    auto const socketPath = (tmp.path() / "sockets" / "exhausted").string();
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = EventLoop { *source };
+    auto listener = core::net::listenUnix(loop, socketPath);
+    REQUIRE(listener.has_value());
+
+    auto seen = std::vector<std::string> {};
+    auto server = ConnectionAcceptor {
+        loop,
+        "native",
+        std::make_unique<core::net::testing::FailingListener>(
+            std::move(*listener),
+            core::net::testing::repeatedFailures(core::net::NetErrorCode::ResourceExhausted, 2)),
+        [&seen](vthost::ConnectionId const&, std::unique_ptr<core::net::ISocket> conn) {
+            return echoLineHandler(std::move(conn), &seen);
+        }
+    };
+    loop.spawn(server.serve());
+
+    auto echoed = false;
+    loop.blockOn(clientRoundTrip(&loop, socketPath, "alpha", &echoed));
+
+    CHECK(echoed);
+    CHECK(server.acceptedCount() == 1);
+    server.close();
 }
 
 TEST_CASE("an exception escaping a connection handler is reported, not reaped", "[vthost][acceptor]")
@@ -310,7 +395,7 @@ TEST_CASE("an exception escaping a connection handler is reported, not reaped", 
 
 TEST_CASE("AcceptFailureThrottle reports the first failure and then every Nth", "[vthost][acceptor]")
 {
-    auto const emfile = core::net::NetError { .code = core::net::NetErrorCode::SystemError,
+    auto const emfile = core::net::NetError { .code = core::net::NetErrorCode::ResourceExhausted,
                                               .systemCode = EMFILE,
                                               .context = "accept" };
 

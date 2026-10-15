@@ -62,7 +62,7 @@ struct LoopbackHarness
                        },
                        vtbackend::Settings {},
                        core::defaultEnvironment(),
-                       /*startPumps=*/false };
+                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
     std::unique_ptr<ControlSession> server = std::make_unique<ControlSession>(
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first), [] {

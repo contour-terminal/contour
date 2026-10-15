@@ -21,6 +21,7 @@
 /// resync snapshot. Hyperlink URIs ship once per connection on first
 /// reference; image pixels only on FetchImage.
 
+#include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Primitives.hpp>
 
 #include <core/async/Task.hpp>
@@ -67,15 +68,33 @@ class NativeSession final: public SessionStreamEvents
     /// @see snapshotPieceBytes
     static constexpr std::size_t SnapshotChunkBytes = std::size_t { 256 } * 1024;
 
+    /// The most command-block record bytes one INCREMENTAL delta carries (by
+    /// proto::estimatedEncodedSize, which never under-counts).
+    ///
+    /// An increment is emitted inline, unpaced, so whatever it carries must fit beside a backlog. A
+    /// flood of OSC 133 cycles — a `cat` of a recorded session — can change a whole store's worth of
+    /// records within one debounce window, at up to MaxRecordedCommandLineBytes each, which unbounded
+    /// is megabytes in one frame. Budgeted, the remainder waits for the next window: records arrive
+    /// late, never lost, and never at the cost of the connection. A connection whose snapshot piece
+    /// is smaller spends that instead, for the reason the piece is smaller; and while its send queue
+    /// has no room, records wait altogether.
+    /// @see snapshotPieceBytes
+    /// @see hasSendRoom
+    static constexpr std::size_t CommandBlockDeltaBytes = std::size_t { 64 } * 1024;
+
     /// The snapshot piece size under a send-queue bound of @p maxWriteQueueBytes — which is also
     /// the backlog the streamer waits to get under before each piece.
     ///
-    /// A quarter of the bound, capped at @ref SnapshotChunkBytes. A run then keeps under two pieces —
-    /// about half the bound, the cut being by estimated size — in the backlog, so every frame sent
-    /// beside it that cannot pace itself (an increment, a bell, a LayoutState, a FetchImage answer)
-    /// has the other half. A piece of a fixed size does not: under a bound smaller than itself it
-    /// waits in the backlog already over the bound, and the queue refuses everything enqueued behind
-    /// it. The default bound is sixteen chunks, so it keeps the cap.
+    /// A quarter of the bound, capped at @ref SnapshotChunkBytes, and the watermark is one piece: a
+    /// LOW-water mark, not "the bound minus a piece". A run then keeps under two pieces — about half the
+    /// bound, the cut being by estimated size — in the backlog, so every frame sent beside it that cannot
+    /// pace itself (an increment, a bell, a LayoutState, a FetchImage answer) has the other half, and a
+    /// piece overshooting its estimate twice over still lands under the bound. Riding the backlog just
+    /// under the bound instead would leave those frames a single piece of headroom, and the queue would
+    /// refuse them — the connection dropped by the pacing meant to keep it. A piece of a fixed size
+    /// fails the same way: under a bound smaller than itself it waits in the backlog already over the
+    /// bound, refusing everything enqueued behind it. The default bound is sixteen chunks, so it keeps
+    /// the cap.
     /// @param maxWriteQueueBytes The connection's send-queue bound.
     /// @return The budget, in estimated encoded bytes; never zero, which a watermark cannot get under.
     [[nodiscard]] static constexpr std::size_t snapshotPieceBytes(std::size_t maxWriteQueueBytes) noexcept
@@ -118,7 +137,8 @@ class NativeSession final: public SessionStreamEvents
     void sessionBell(vtworkspace::SessionId session) override;
     void sessionNotify(vtworkspace::SessionId session,
                        std::string const& title,
-                       std::string const& body) override;
+                       std::string const& body,
+                       std::optional<vtbackend::DisplayOccasion> occasion) override;
     void sessionCopyToClipboard(vtworkspace::SessionId session, std::string const& data) override;
 
     /// Adapts the host's model-change fan-out into a single "layout changed"
@@ -161,6 +181,20 @@ class NativeSession final: public SessionStreamEvents
 
   private:
     friend struct NativeSessionFollowTester; ///< Test-only view of _followed.
+
+    /// A walk over a session's command-block records that a budget, a cap or a full send queue cut short;
+    /// the next increment resumes it where it stopped rather than from the oldest record.
+    ///
+    /// It sends, oldest first, every record stamped after FollowState::sentBlockStamp, and once it reaches
+    /// its end this peer holds every record stamped at or below @ref target in its current form.
+    struct CommandBlockWalk
+    {
+        vtbackend::CommandBlockId from {}; ///< The oldest record the walk has yet to look at.
+        /// Where it ends: the oldest record a capped snapshot stated, which this peer holds as of
+        /// @ref target already; nullopt walks on to the newest.
+        std::optional<vtbackend::CommandBlockId> until {};
+        uint64_t target = 0; ///< The CommandBlockStore::contentRevision() the walk brings this peer up to.
+    };
 
     /// Per followed grid: the delta cursor plus what this connection has seen.
     struct FollowState
@@ -218,6 +252,20 @@ class NativeSession final: public SessionStreamEvents
         /// The active context last sent (-1 until the first snapshot), so a change carries -- and
         /// forces -- a delta only when the ancestry actually moved.
         int lastActiveContext = -1;
+        /// While no walk is open: this peer holds every command-block record stamped at or below this
+        /// CommandBlockStore::contentRevision() in its current form. A record changes in place under one id
+        /// (C, then D, then an OSC 3008 enrichment), and the store restamps it each time, so a record is
+        /// re-sent exactly when something the wire carries moved — without a copy of it kept here to
+        /// compare against. Zero, which no record is stamped with, until a snapshot says otherwise.
+        uint64_t sentBlockStamp = 0;
+        /// The walk an increment left unfinished; nullopt between walks.
+        std::optional<CommandBlockWalk> blockWalk;
+        /// The ids of the records this peer holds, ascending: a merge-join against the store's names the
+        /// ones the host let go of, which the peer is told to retire.
+        std::vector<uint32_t> sentBlockIds;
+        /// The content revision `sentBlockIds` was last joined against the store at, so a walk resumed
+        /// over a store that has not moved since joins nothing.
+        uint64_t blockIdsJoinedAt = 0;
         /// The default fg/bg (0xRRGGBB) last sent (-1 until the first snapshot),
         /// so an OSC 10/11 change carries (and forces) a delta only on change.
         int lastDefaultForeground = -1;
@@ -285,12 +333,38 @@ class NativeSession final: public SessionStreamEvents
     /// @return False when the hello was missing or version-mismatched.
     [[nodiscard]] bool completeHandshake(proto::DecodedFrame const& frame);
 
+    /// Adopts the emulation settings the client states for the sessions it creates from now on, in
+    /// its ClientHello or later in a SessionSettingsChanged.
+    /// @param stated The client's preference; nullopt for the host's own.
+    void adoptClientSessionSettings(std::optional<proto::WireSessionSettings> const& stated);
+
     /// Whether a push re-describes the whole grid or reports only what changed since this
     /// connection's delta cursor.
     enum class SnapshotMode : uint8_t
     {
         Delta = 0,  ///< Report the rows changed since @c FollowState::cursor.
         Forced = 1, ///< Re-describe the whole grid: attach, resize, page flip or a lost cursor.
+    };
+
+    /// What became of the frames a snapshot supersedes that were still waiting in the send queue.
+    enum class SupersededFrames : uint8_t
+    {
+        None = 0,    ///< None waited: everything sent before the snapshot reaches the peer ahead of it.
+        Dropped = 1, ///< Some were dropped unsent, so what they carried never arrives.
+    };
+
+    /// Whether a push said everything this peer is owed about command-block records.
+    enum class CommandBlockBacklog : uint8_t
+    {
+        Drained = 0, ///< Every record this peer has not seen travelled.
+        Pending = 1, ///< A budget, a cap or a full send queue held records back for a later delta.
+    };
+
+    /// Whether @ref requeueOnSendRoom is parked on the send queue's watermark.
+    enum class RoomWaiter : uint8_t
+    {
+        Idle = 0,   ///< No waiter: the next session whose records find no room spawns one.
+        Parked = 1, ///< One waits, and re-queues every session in @ref _recordsAwaitingRoom when it wakes.
     };
 
     /// One session's push, built under the terminal's lock and emitted after it is released.
@@ -322,6 +396,11 @@ class NativeSession final: public SessionStreamEvents
 
     /// Collects @p session's push under the terminal's lock, advancing this connection's follow
     /// state to match what the returned push will say.
+    ///
+    /// Command-block records it leaves owed — a budget or a cap cut their walk short, or the send queue
+    /// had no room — it sees followed up itself, once the lock is released, whatever it returns: a quiet
+    /// session raises no further screen update to carry them.
+    /// @see followUpRecords
     /// @param session The session to describe.
     /// @param mode Whether to re-describe the whole grid or only what changed.
     /// @return The built push, or why none was built.
@@ -349,8 +428,42 @@ class NativeSession final: public SessionStreamEvents
     /// @return False when the connection is going away and the caller should stop.
     [[nodiscard]] core::async::Task<bool> awaitSendRoom();
 
+    /// Awaited before every read of the connection: while this connection's input backs up in a session
+    /// past the high-water mark, parks until the session holds no more than the low-water mark of it.
+    /// @see SessionHost::inputWatermarks
+    [[nodiscard]] core::async::Task<void> awaitInputRoom();
+
+    /// Marks this connection backed up on @p session once the session holds the high-water mark of what
+    /// clients handed it, so that it is read no further until awaitInputRoom() sees it drain.
+    /// @param session The session this connection just handed something.
+    void pauseReadingIfBackedUp(vtworkspace::SessionId session);
+
+    /// Whether the send queue has room right now: the backlog is under one snapshot piece — the
+    /// watermark @ref awaitSendRoom waits for, asked without waiting.
+    ///
+    /// What a producer that cannot wait but CAN defer consults: command-block records are state a
+    /// later delta carries just as well, so under a slow reader they lag instead of piling onto a
+    /// backlog until the queue refuses a frame and the connection goes.
+    /// @return true when the backlog is under @ref _snapshotPieceBytes.
+    [[nodiscard]] bool hasSendRoom() const noexcept;
+
+    /// Sees the command-block records a push left owed to @p session sent later: by the next debounce
+    /// window while the send queue has room, else once it has room again — parked on its watermark by
+    /// @ref requeueOnSendRoom, rather than rebuilding the session every window to find none.
+    /// @param session The session whose records are owed.
+    void followUpRecords(vtworkspace::SessionId session);
+
+    /// The one waiter for room for command-block records: parks until the send queue's backlog is under
+    /// a piece, then queues an increment for every session in @ref _recordsAwaitingRoom.
+    [[nodiscard]] core::async::Task<void> requeueOnSendRoom();
+
     /// Arms the debounced delta flush unless one is already armed or the connection is closing.
     void scheduleFlush();
+
+    /// Marks @p session as owed an increment and arms the debounced flush: what a screen update
+    /// does, and what a push that left command-block records unsent has done for it.
+    /// @param session The session to push in the next debounce window.
+    void queueIncrement(vtworkspace::SessionId session);
 
     /// The single snapshot streamer: drains @ref _snapshotQueue, one session at a time, waiting
     /// for room in the send queue before each piece. One streamer rather than one coroutine per
@@ -387,7 +500,41 @@ class NativeSession final: public SessionStreamEvents
     static void collectContextState(vtbackend::Terminal& terminal,
                                     FollowState& follow,
                                     proto::Delta& delta,
-                                    bool snapshot);
+                                    SnapshotMode mode);
+
+    /// States the command-block records into a snapshot's @p state: the newest whose estimated size
+    /// fits this connection's snapshot piece, oldest first, converting only those. The piece caps them
+    /// because SessionState is one unchunked frame, which has to fit beside a backlog the way a piece
+    /// does.
+    ///
+    /// Uncapped, the snapshot speaks for every id. Capped, it speaks only from its floor, the oldest
+    /// record it states, and a walk takes the older records this peer lacks — unless @p superseded
+    /// says frames were dropped, after which nothing this peer holds below the cap can be trusted and
+    /// it speaks for every id after all.
+    /// @see proto::SessionState::commandBlocksFloor
+    /// @return Pending when a cap left older records to the increments.
+    [[nodiscard]] CommandBlockBacklog collectCommandBlockSnapshot(vtbackend::Terminal& terminal,
+                                                                  FollowState& follow,
+                                                                  proto::SessionState& state,
+                                                                  SupersededFrames superseded) const;
+
+    /// Captures into an increment's @p delta the command-block records this peer has not seen in their
+    /// current form.
+    ///
+    /// The walk runs only while one is open or the store's content revision moved past
+    /// FollowState::sentBlockStamp, and only while the send queue has room (@ref hasSendRoom): without
+    /// it nothing is sent and the result is Pending. It sends, oldest first, each record stamped after
+    /// FollowState::sentBlockStamp until CommandBlockDeltaBytes or the snapshot piece, whichever is
+    /// less, is spent (always at least one), and lists as retired every id this peer holds that the
+    /// store no longer does.
+    ///
+    /// Cost: nothing while the content revision is unchanged; otherwise a pass over the stamps from
+    /// where the walk stands — integers only — converting just the records stamped after the last one
+    /// sent, plus a merge-join of the ids this peer holds against the store's when the store moved.
+    /// @return Pending when records were left unsent.
+    [[nodiscard]] CommandBlockBacklog collectCommandBlockDelta(vtbackend::Terminal& terminal,
+                                                               FollowState& follow,
+                                                               proto::Delta& delta) const;
 
     /// What every session THIS connection creates is spawned with.
     ///
@@ -406,9 +553,6 @@ class NativeSession final: public SessionStreamEvents
     core::net::WriteQueue _writer;
     /// What a snapshot is cut into, and the backlog each piece waits to get under before it is
     /// enqueued: @ref snapshotPieceBytes of this connection's bound.
-    ///
-    /// One number for both, because the watermark is one piece: a piece then lands on less than a
-    /// piece of backlog, and the run never holds more than two of them.
     std::size_t _snapshotPieceBytes;
     ConnectionId _id;           ///< Prefixes this connection's every log line.
     std::string _expectedToken; ///< Required ClientHello token; empty accepts any.
@@ -431,9 +575,18 @@ class NativeSession final: public SessionStreamEvents
     /// increment for it must stay held back for the whole run — until the send queue's backlog
     /// behind its last piece is back under one piece — not just while it waits its turn.
     std::optional<uint64_t> _streamingSession;
+    /// Sessions whose command-block records wait for room in the send queue.
+    /// @see followUpRecords
+    std::unordered_set<uint64_t> _recordsAwaitingRoom;
+    /// Whether @ref requeueOnSendRoom is live, which @ref run waits out before it lets `this` go — kept
+    /// apart from the set, which a closed session leaves while the waiter still holds `this`.
+    RoomWaiter _roomWaiter = RoomWaiter::Idle;
     bool _flushScheduled = false;
     bool _handshaken = false;
     bool _closed = false;
+    /// The session this connection's input backed up in, past the high-water mark: the connection is read
+    /// no further until it drains. @see awaitInputRoom
+    std::optional<vtworkspace::SessionId> _inputBackedUp;
 };
 
 /// The daemon's connection-handler factory for native-protocol clients.

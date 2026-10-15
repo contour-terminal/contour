@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/screen/LocalTime.hpp>
+#include <vtbackend/screen/TerminalClocks.hpp>
+#include <vtbackend/shell/CommandBlock.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
+
 #include <vtpty/MockPty.hpp>
+#ifndef _WIN32
+    #include <vtpty/UnixPty.hpp>
+    #include <vtpty/test/PtyReading.hpp>
+#endif
 
 #include <crispy/BufferObject.hpp>
 
@@ -8,6 +18,8 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
 #include <core/net/testing/ScriptedBackend.hpp>
+#include <core/platform/Clock.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,6 +32,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -29,6 +42,7 @@
 
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -186,8 +200,10 @@ struct StubClient final: vthost::SessionStreamEvents
 struct HostHarness
 {
     /// @param sizePolicy How the host resolves one client area from several reports.
-    explicit HostHarness(vthost::ClientSizePolicy sizePolicy = vthost::ClientSizePolicy::Latest):
-        policy { sizePolicy }
+    /// @param hostIdentity The machine the host says it runs on.
+    explicit HostHarness(vthost::ClientSizePolicy sizePolicy = vthost::ClientSizePolicy::Latest,
+                         vtbackend::HostIdentity hostIdentity = {}):
+        policy { sizePolicy }, identity { std::move(hostIdentity) }
     {
         host.subscribe(&recorder);
     }
@@ -196,16 +212,19 @@ struct HostHarness
     core::net::EventLoop loop { source };
     RecordingEvents recorder;
     StubClient client;
-    StubClient otherClient;          ///< For the multi-client policy cases.
-    vthost::ClientSizePolicy policy; // set by the constructor, before `host` reads it
+    StubClient otherClient;           ///< For the multi-client policy cases.
+    vthost::ClientSizePolicy policy;  // set by the constructor, before `host` reads it
+    vtbackend::HostIdentity identity; // set by the constructor, before `host` reads it
     SessionHost host { loop,
                        [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                            return std::make_unique<vtpty::MockPty>(size);
                        },
                        vtbackend::Settings {},
                        core::defaultEnvironment(),
-                       /*startPumps=*/false,
-                       policy };
+                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                   .sizePolicy = policy,
+                                                   .startupLayout = vtworkspace::Layout {},
+                                                   .identity = identity } };
 };
 
 } // namespace
@@ -514,7 +533,7 @@ TEST_CASE("stream events fan out to every subscriber independently", "[vthost][h
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     auto first = StreamRecorder {};
     auto second = StreamRecorder {};
     host.subscribeStream(&first);
@@ -577,7 +596,7 @@ TEST_CASE("a failing PTY factory is reported", "[vthost][host][diagnostics]")
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
 
     CHECK(host.createTab() == nullptr);
     CHECK(host.sessionCount() == 0);
@@ -639,7 +658,7 @@ TEST_CASE("a hosted session with a parked pump can still be torn down", "[vthost
         },
         vtbackend::Settings {},
         core::defaultEnvironment(),
-        /*startPumps=*/true);
+        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Threaded });
 
     REQUIRE(host->createTab() != nullptr);
     REQUIRE(blocking != nullptr);
@@ -661,6 +680,98 @@ TEST_CASE("a hosted session with a parked pump can still be torn down", "[vthost
     teardown.get();
 }
 
+TEST_CASE("the loop thread leaves a resize's report to the session's reader", "[vthost][host]")
+{
+    // The loop thread takes a session's terminal lock to resize it, and with in-band resize reports on
+    // (DECSET 2048) the resize queues a report for the application. Written where the lock is released, it
+    // blocked the loop -- and every client of the daemon with it -- for as long as the application did not
+    // read its input. The release wakes the session's reader instead, whose loop writes it.
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto* pty = static_cast<vthost::testing::StallingPty*>(nullptr);
+    auto host =
+        SessionHost { loop,
+                      [&pty](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                          auto made = std::make_unique<vthost::testing::StallingPty>(size);
+                          pty = made.get();
+                          return made;
+                      },
+                      vtbackend::Settings {},
+                      core::defaultEnvironment(),
+                      vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Threaded } };
+    auto* tab = host.createTab();
+    REQUIRE(tab != nullptr);
+    REQUIRE(pty != nullptr);
+    auto const session = tab->rootPane()->session();
+    auto* terminal = host.terminal(session);
+    REQUIRE(terminal != nullptr);
+    terminal->writeToScreen("\033[?2048h");
+    pty->stall();
+
+    auto resize = std::async(std::launch::async, [&] {
+        return host.applyPaneSize(
+            session, vtpty::PageSize { .lines = vtpty::LineCount(20), .columns = vtpty::ColumnCount(60) });
+    });
+    auto const returned = resize.wait_for(std::chrono::seconds { 5 });
+    pty->drain(); // whichever way it went, so that the resize can end
+    CHECK(resize.get() == vthost::SizeChange::Applied);
+    CHECK(returned == std::future_status::ready);
+    CHECK(pty->wakeups() > 0);
+
+    // The reader's loop sends it once woken, as a hosted session's pump flushes after every read.
+    for ([[maybe_unused]] auto const tick: std::views::iota(0, 500))
+    {
+        if (pty->written().contains("\033[48;20;60;"))
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
+    }
+    CHECK(pty->written().contains("\033[48;20;60;"));
+}
+
+#ifndef _WIN32
+TEST_CASE("a hosted session whose program reads no input terminates at once", "[vthost][host]")
+{
+    // A client's input parks the session's pump in its PTY write once the program leaves the PTY's buffers
+    // full. On a real PTY that write held the lock the PTY's close() and isClosed() take, so terminating the
+    // session -- what the loop thread does as its pane closes, to be rid of the program -- waited for the
+    // program forever, and every client of the daemon with it. The double the other cases stall never held
+    // a lock across its parked write, so this one runs on a real PTY with no program reading it.
+    auto ownedPty = std::make_unique<vtpty::UnixPty>(
+        vtpty::PageSize { .lines = vtpty::LineCount(24), .columns = vtpty::ColumnCount(80) }, std::nullopt);
+    auto* const pty = ownedPty.get();
+    auto session = vthost::HostedSession { vtworkspace::SessionId { 1 },
+                                           core::defaultEnvironment(),
+                                           std::move(ownedPty),
+                                           vtbackend::Settings {},
+                                           vtbackend::HostIdentity {},
+                                           vtbackend::TerminalClocks::system(),
+                                           core::platform::NativeFileSystem::instance(),
+                                           {},
+                                           {},
+                                           {},
+                                           {},
+                                           {} };
+    session.start();
+    // Lines, which the slave's line discipline keeps for a reader: a megabyte of them parks the pump.
+    auto input = std::string {};
+    for ([[maybe_unused]] auto const line: std::views::iota(0, 16 * 1024))
+        input += std::string(63, 'a') + "\n";
+    session.writeInput(input);
+    // The pump takes the input at once; the wait makes sure its write is parked before the close.
+    std::this_thread::sleep_for(std::chrono::milliseconds { 300 });
+
+    auto terminating = std::async(std::launch::async, [&session] { session.terminate(); });
+    auto const terminated = terminating.wait_for(std::chrono::seconds { 5 });
+    // Where it waits, a reader on the slave side lets the parked write through, and it after that.
+    if (terminated != std::future_status::ready)
+        vtpty::testing::drainSlave(pty->handle(), [&terminating] {
+            return terminating.wait_for(std::chrono::seconds { 0 }) == std::future_status::ready;
+        });
+    terminating.get();
+    CHECK(terminated == std::future_status::ready);
+}
+#endif
+
 TEST_CASE("resizing an unknown pane is reported", "[vthost][host][diagnostics]")
 {
     auto capture = core::log::ScopedCapture {};
@@ -670,6 +781,106 @@ TEST_CASE("resizing an unknown pane is reported", "[vthost][host][diagnostics]")
                          vtpty::PageSize { vtpty::LineCount(24), vtpty::ColumnCount(80) });
 
     CHECK(capture.contains("applyPaneSize: unknown session 9999"));
+}
+
+TEST_CASE("an engine operation a client asks for changes the host's grid", "[vthost][host][operations]")
+{
+    auto h = HostHarness {};
+    auto stream = StreamRecorder {};
+    h.host.subscribeStream(&stream);
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const session = tab->rootPane()->session();
+    auto& terminal = *h.host.terminal(session);
+    for (auto const row: std::views::iota(0, 40))
+        terminal.writeToScreen(std::format("row {}\r\n", row));
+    terminal.writeToScreen("\033]133;A\033\\$ prompt-here");
+    REQUIRE(terminal.primaryScreen().historyLineCount() > vtbackend::LineCount(0));
+    stream.screens.clear();
+
+    auto const perform = [&](vthost::proto::EngineOperation operation,
+                             std::string_view text = {},
+                             vthost::proto::RowAddress row = {}) {
+        return h.host.performOperation(vthost::proto::PerformOperation {
+            .session = session.value, .operation = operation, .text = std::string { text }, .row = row });
+    };
+
+    SECTION("ClearToPrompt drops every row above the prompt, and the mirrors are told")
+    {
+        CHECK(perform(vthost::proto::EngineOperation::ClearToPrompt).has_value());
+        CHECK(terminal.primaryScreen().historyLineCount() == vtbackend::LineCount(0));
+        CHECK(
+            terminal.primaryScreen().grid().lineText(vtbackend::LineOffset(0)).starts_with("$ prompt-here"));
+        CHECK(std::ranges::count(stream.screens, session.value) == 1);
+    }
+
+    SECTION("ClearHistoryAndReset drops the scrollback")
+    {
+        CHECK(perform(vthost::proto::EngineOperation::ClearHistoryAndReset).has_value());
+        CHECK(terminal.primaryScreen().historyLineCount() == vtbackend::LineCount(0));
+        CHECK_FALSE(stream.screens.empty());
+    }
+
+    SECTION("SoftReset resets the modes and keeps the scrollback")
+    {
+        terminal.writeToScreen("\033[4h"); // IRM, which DECSTR resets
+        REQUIRE(terminal.isModeEnabled(vtbackend::AnsiMode::Insert));
+        CHECK(perform(vthost::proto::EngineOperation::SoftReset).has_value());
+        CHECK_FALSE(terminal.isModeEnabled(vtbackend::AnsiMode::Insert));
+        CHECK(terminal.primaryScreen().historyLineCount() > vtbackend::LineCount(0));
+    }
+
+    SECTION("WriteScreen parses its text as the application's output")
+    {
+        CHECK(
+            perform(vthost::proto::EngineOperation::WriteScreen, "\r\033[2Kwritten-by-request").has_value());
+        CHECK(terminal.primaryScreen()
+                  .grid()
+                  .lineText(terminal.primaryScreen().cursor().position.line)
+                  .starts_with("written-by-request"));
+    }
+
+    SECTION("SetUserMark and ClearUserMark mark and unmark a row's logical line, in its generation")
+    {
+        auto const& grid = terminal.primaryScreen().grid();
+        auto const promptRow = terminal.primaryScreen().cursor().position.line;
+        auto const prompt = vthost::proto::RowAddress { .stableId = grid.stableLineIdOf(promptRow),
+                                                        .generation = grid.stableIdGeneration() };
+        auto const marked = [&] {
+            return grid.lineAt(promptRow).isFlagEnabled(vtbackend::LineFlag::UserMark);
+        };
+
+        CHECK(perform(vthost::proto::EngineOperation::SetUserMark, {}, prompt).has_value());
+        CHECK(marked());
+        CHECK(std::ranges::count(stream.screens, session.value) == 1); // every mirror follows
+
+        // An id taken in a generation gone since names no row the client meant.
+        CHECK(perform(vthost::proto::EngineOperation::ClearUserMark,
+                      {},
+                      vthost::proto::RowAddress { .stableId = prompt.stableId,
+                                                  .generation = prompt.generation + 1 })
+                  .has_value());
+        CHECK(marked());
+
+        CHECK(perform(vthost::proto::EngineOperation::ClearUserMark, {}, prompt).has_value());
+        CHECK_FALSE(marked());
+    }
+
+    SECTION("an unknown session or operation performs nothing, and says why")
+    {
+        auto const history = terminal.primaryScreen().historyLineCount();
+        CHECK(h.host
+                  .performOperation(vthost::proto::PerformOperation {
+                      .session = 987654, .operation = vthost::proto::EngineOperation::ClearToPrompt })
+                  .error()
+              == vthost::OperationError::UnknownSession);
+        CHECK(perform(static_cast<vthost::proto::EngineOperation>(200)).error()
+              == vthost::OperationError::UnknownOperation);
+        CHECK(terminal.primaryScreen().historyLineCount() == history);
+        CHECK(stream.screens.empty());
+    }
+
+    h.host.unsubscribeStream(&stream);
 }
 
 TEST_CASE("a host normalizes settings it cannot serve sessions with", "[vthost][host]")
@@ -798,9 +1009,9 @@ TEST_CASE("SessionHost realizes a single-tab startup layout into its one window"
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false,
-                              vthost::ClientSizePolicy::Latest,
-                              layout };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .sizePolicy = vthost::ClientSizePolicy::Latest,
+                                                          .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 1);
     auto* window = host.model().window(host.windowId());
@@ -837,9 +1048,9 @@ TEST_CASE("SessionHost realizes a multi-tab, multi-pane startup layout", "[vthos
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false,
-                              vthost::ClientSizePolicy::Latest,
-                              layout };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .sizePolicy = vthost::ClientSizePolicy::Latest,
+                                                          .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 3); // one leaf tab + two-pane split tab
     auto* window = host.model().window(host.windowId());
@@ -873,8 +1084,8 @@ TEST_CASE("SessionHost with an empty startup layout keeps today's single-default
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false,
-                              vthost::ClientSizePolicy::Latest };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .sizePolicy = vthost::ClientSizePolicy::Latest } };
 
     CHECK(host.sessionCount() == 0);
     auto* window = host.model().window(host.windowId());
@@ -907,9 +1118,9 @@ TEST_CASE("SessionHost honors a startup layout pane's command/arguments override
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false,
-                              vthost::ClientSizePolicy::Latest,
-                              layout };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .sizePolicy = vthost::ClientSizePolicy::Latest,
+                                                          .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 1);
     auto* window = host.model().window(host.windowId());
@@ -947,9 +1158,9 @@ TEST_CASE("SessionHost honors a startup layout pane's directory-only override, "
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false,
-                              vthost::ClientSizePolicy::Latest,
-                              layout };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .sizePolicy = vthost::ClientSizePolicy::Latest,
+                                                          .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 1);
     auto* window = host.model().window(host.windowId());
@@ -986,9 +1197,9 @@ TEST_CASE("SessionHost engages no override for a startup layout pane's arguments
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false,
-                              vthost::ClientSizePolicy::Latest,
-                              layout };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .sizePolicy = vthost::ClientSizePolicy::Latest,
+                                                          .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 1);
 
@@ -999,9 +1210,8 @@ TEST_CASE("SessionHost engages no override for a startup layout pane's arguments
 TEST_CASE("SessionHost still passes through an engaged-but-empty command with its arguments",
           "[vthost][host][layout]")
 {
-    // A pane whose `command:` resolves (after variable substitution and shell-splitting) to an
-    // empty string is engaged -- leaf.command holds a value, just an empty one -- unlike the
-    // unset-command case above. SessionHost still builds and forwards the override here: it is
+    // A pane whose command is an empty string is engaged -- leaf.command holds a value, just an empty one --
+    // unlike the unset-command case above. SessionHost still builds and forwards the override here: it is
     // vtpty::Process::applyCommandOverride (the shared overlay both the daemon and the local-GUI
     // path use) that declines to overlay an empty program, so the arguments end up dropped
     // downstream rather than here. This pane is just as malformed as the unset-command one and
@@ -1024,9 +1234,9 @@ TEST_CASE("SessionHost still passes through an engaged-but-empty command with it
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false,
-                              vthost::ClientSizePolicy::Latest,
-                              layout };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .sizePolicy = vthost::ClientSizePolicy::Latest,
+                                                          .startupLayout = layout } };
 
     REQUIRE(host.sessionCount() == 1);
     REQUIRE(seen.has_value());
@@ -1051,12 +1261,85 @@ TEST_CASE("SessionHost falls back to an empty window when every startup-layout s
                                   -> std::unique_ptr<vtpty::Pty> { return nullptr; },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false,
-                              vthost::ClientSizePolicy::Latest,
-                              layout };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .sizePolicy = vthost::ClientSizePolicy::Latest,
+                                                          .startupLayout = layout } };
 
     CHECK(host.sessionCount() == 0);
     auto* window = host.model().window(host.windowId());
     REQUIRE(window != nullptr);
     CHECK(window->tabCount() == 0);
+}
+
+TEST_CASE("a hosted session decides a command directory's locality against the host's identity",
+          "[vthost][host][blocks]")
+{
+    // A record's locality is decided where the command starts -- on the host -- and travels as
+    // decided, so a host that does not know its own name reads every OSC 7 naming it as another
+    // machine's.
+    auto const localityUnder = [](vtbackend::HostIdentity identity, std::string_view reportedDirectory) {
+        auto h = HostHarness { vthost::ClientSizePolicy::Latest, std::move(identity) };
+        auto* tab = h.host.createTab();
+        REQUIRE(tab != nullptr);
+        auto* terminal = h.host.terminal(tab->rootPane()->session());
+        REQUIRE(terminal != nullptr);
+
+        terminal->writeToScreen(reportedDirectory);
+        terminal->writeToScreen(vtbackend::test::typedAtPrompt("make") + "\033]133;C\033\\");
+        auto const* record = terminal->commandBlocks().current();
+        REQUIRE(record != nullptr);
+        return record->workingDirectory.locality;
+    };
+    auto const zeta =
+        vtbackend::HostIdentity { .machineId = "3deb5353d3ba43d08201c136a47ead7b", .hostname = "zeta" };
+
+    SECTION("by its host name, from an OSC 7 URL")
+    {
+        constexpr auto Osc7 = std::string_view { "\033]7;file://zeta/home/user\033\\" };
+        CHECK(localityUnder(zeta, Osc7) == vtbackend::ContextLocality::Local);
+        CHECK(localityUnder(vtbackend::HostIdentity {}, Osc7) == vtbackend::ContextLocality::Foreign);
+    }
+
+    SECTION("by its machine id, from an OSC 3008 context")
+    {
+        constexpr auto Context = std::string_view {
+            "\033]3008;start=shell-1;type=shell;machineid=3deb5353d3ba43d08201c136a47ead7b;cwd=/srv\033\\"
+        };
+        CHECK(localityUnder(zeta, Context) == vtbackend::ContextLocality::Local);
+        // A host with no machine id of its own is not the machine a context's id names
+        // (vtbackend::sameMachine): a daemon on Windows, say, under a shell in WSL.
+        CHECK(localityUnder(vtbackend::HostIdentity {}, Context) == vtbackend::ContextLocality::Foreign);
+    }
+}
+
+TEST_CASE("a hosted session's terminal reads the clocks the host was given", "[vthost][host][clocks]")
+{
+    // Record times and the session epoch travel to every client, so a test of the daemon must be able to
+    // drive them as it drives a local terminal's.
+    auto const start = std::chrono::sys_days { std::chrono::year { 2031 } / std::chrono::March / 4 }
+                       + std::chrono::hours { 5 } + std::chrono::milliseconds { 250 };
+    auto steadyClock = core::platform::ManualClock {};
+    auto wallClock = core::platform::ManualWallClock { start };
+    core::net::testing::ScriptedBackend source;
+    core::net::EventLoop loop { source };
+    SessionHost host { loop,
+                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                           return std::make_unique<vtpty::MockPty>(size);
+                       },
+                       vtbackend::Settings {},
+                       core::defaultEnvironment(),
+                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                   .clocks = vtbackend::TerminalClocks {
+                                                       .steady = steadyClock,
+                                                       .wall = wallClock,
+                                                       .localTime = &vtbackend::systemLocalTime } } };
+
+    auto const* tab = host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const* terminal = host.terminal(tab->rootPane()->session());
+    REQUIRE(terminal != nullptr);
+
+    CHECK(terminal->sessionEpoch() == std::chrono::floor<std::chrono::seconds>(start));
+    wallClock.advance(std::chrono::minutes { 3 });
+    CHECK(terminal->wallTimeNow() == start + std::chrono::minutes { 3 });
 }

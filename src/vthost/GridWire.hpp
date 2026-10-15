@@ -140,7 +140,9 @@ using ContextIdMap = std::unordered_map<uint16_t, MirroredContext>;
 /// Brings @p line to exactly what @p wire describes — the inverse of @ref toWireLine.
 ///
 /// Clears the row to its fill first, which is both how stale content goes and how the omitted
-/// trailing columns get their color; then writes the cells that travelled. @p line keeps its OWN
+/// trailing columns get their color; then writes the cells that travelled. The row's command-block
+/// id and birth stamp are the host's own and are copied, not translated as the hyperlink and context
+/// ids are; only the stamp is saturated, to the line's Line::MaxBornAt. @p line keeps its OWN
 /// width: a wire row wider than the receiver's grid is truncated rather than overrunning it, which
 /// is the transient state between a pane resizing and the daemon re-projecting.
 /// @param line The grid row to overwrite.

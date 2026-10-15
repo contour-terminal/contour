@@ -1,10 +1,16 @@
 add_library(vthost STATIC
     ClientSizePolicy.hpp
+    CommandBlockWire.hpp
     ImageWire.hpp
+    TimeWire.hpp
     MouseWire.hpp
+    NotifyWire.hpp
+    WireEnum.hpp
     Daemon.cpp
     Daemon.hpp
     GracefulClose.hpp
+    HostIdentity.cpp
+    HostIdentity.hpp
     LoopDrain.hpp
     ConnectionAcceptor.cpp
     ConnectionAcceptor.hpp
@@ -63,6 +69,7 @@ target_link_libraries(vthost PUBLIC
     core::base
     core::log
     core::net
+    core::platform
     vtworkspace
     vtbackend
     vtpty
@@ -86,12 +93,17 @@ if(VTHOST_TESTING)
     add_executable(vthost_test
         test_main.cpp
         GracefulClose_test.cpp
+        HostIdentity_test.cpp
         LoopDrain_test.cpp
         SessionHost_test.cpp
         SessionSettings_test.cpp
         ConnectionAcceptor_test.cpp
+        CommandBlockWire_test.cpp
         Daemon_test.cpp
         ImageWire_test.cpp
+        NotifyWire_test.cpp
+        TimeWire_test.cpp
+        WireEnum_test.cpp
         LastSessionWatcher_test.cpp
         NativeSession_test.cpp
         PduPump_test.cpp
@@ -100,6 +112,8 @@ if(VTHOST_TESTING)
         Token_test.cpp
         testing/GridParity.cpp
         testing/GridParity.hpp
+        testing/ShippedCodec.hpp
+        testing/TestHelpers.hpp
         client/NativeClient_test.cpp
         client/LayoutReconstruction_test.cpp
         client/ScreenMirror_test.cpp

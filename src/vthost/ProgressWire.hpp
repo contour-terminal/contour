@@ -13,9 +13,11 @@
 
 #include <vtbackend/vt/ProgressState.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
-#include <utility>
+
+#include <vthost/WireEnum.hpp>
 
 namespace vthost
 {
@@ -24,9 +26,7 @@ namespace vthost
 /// @return The state it names, or nullopt for a value no enumerator has.
 [[nodiscard]] constexpr std::optional<vtbackend::ProgressState> progressStateOf(uint8_t value) noexcept
 {
-    return value <= std::to_underlying(vtbackend::ProgressState::Paused)
-               ? std::optional { static_cast<vtbackend::ProgressState>(value) }
-               : std::nullopt;
+    return enumUpTo(value, vtbackend::ProgressState::Paused);
 }
 
 /// Rebuilds a whole progress indicator from the two bytes the wire carries.

@@ -15,7 +15,8 @@
 #include <vtbackend/core/Image.hpp>
 
 #include <cstdint>
-#include <utility>
+
+#include <vthost/WireEnum.hpp>
 
 namespace vthost
 {
@@ -25,9 +26,7 @@ namespace vthost
 ///         what `ImageResize`'s own default pairs with — for an out-of-range value.
 [[nodiscard]] constexpr vtbackend::ImageLayer imageLayerOf(uint8_t value) noexcept
 {
-    return value <= std::to_underlying(vtbackend::ImageLayer::Above)
-               ? static_cast<vtbackend::ImageLayer>(value)
-               : vtbackend::ImageLayer::Replace;
+    return enumUpTo(value, vtbackend::ImageLayer::Above).value_or(vtbackend::ImageLayer::Replace);
 }
 
 /// @param value An ImageResize as the wire spells it.
@@ -35,9 +34,8 @@ namespace vthost
 ///         out-of-range value.
 [[nodiscard]] constexpr vtbackend::ImageResize imageResizeOf(uint8_t value) noexcept
 {
-    return value <= std::to_underlying(vtbackend::ImageResize::StretchToFill)
-               ? static_cast<vtbackend::ImageResize>(value)
-               : vtbackend::ImageResize::ResizeToFit;
+    return enumUpTo(value, vtbackend::ImageResize::StretchToFill)
+        .value_or(vtbackend::ImageResize::ResizeToFit);
 }
 
 /// @param value An ImageAlignment as the wire spells it.
@@ -45,9 +43,8 @@ namespace vthost
 ///         out-of-range value.
 [[nodiscard]] constexpr vtbackend::ImageAlignment imageAlignmentOf(uint8_t value) noexcept
 {
-    return value <= std::to_underlying(vtbackend::ImageAlignment::BottomEnd)
-               ? static_cast<vtbackend::ImageAlignment>(value)
-               : vtbackend::ImageAlignment::MiddleCenter;
+    return enumUpTo(value, vtbackend::ImageAlignment::BottomEnd)
+        .value_or(vtbackend::ImageAlignment::MiddleCenter);
 }
 
 /// @param value An ImageFormat as the wire spells it.
@@ -55,9 +52,7 @@ namespace vthost
 ///         `isConsistentPixmap` rejects, so an unresolvable format cannot reach an upload.
 [[nodiscard]] constexpr vtbackend::ImageFormat imageFormatOf(uint8_t value) noexcept
 {
-    return value <= std::to_underlying(vtbackend::ImageFormat::PNG)
-               ? static_cast<vtbackend::ImageFormat>(value)
-               : vtbackend::ImageFormat::Auto;
+    return enumUpTo(value, vtbackend::ImageFormat::PNG).value_or(vtbackend::ImageFormat::Auto);
 }
 
 } // namespace vthost

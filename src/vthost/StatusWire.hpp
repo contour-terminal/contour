@@ -17,7 +17,8 @@
 
 #include <cstdint>
 #include <optional>
-#include <utility>
+
+#include <vthost/WireEnum.hpp>
 
 namespace vthost
 {
@@ -27,9 +28,7 @@ namespace vthost
 [[nodiscard]] constexpr std::optional<vtbackend::StatusDisplayType> statusDisplayTypeOf(
     uint8_t value) noexcept
 {
-    return value <= std::to_underlying(vtbackend::StatusDisplayType::HostWritable)
-               ? std::optional { static_cast<vtbackend::StatusDisplayType>(value) }
-               : std::nullopt;
+    return enumUpTo(value, vtbackend::StatusDisplayType::HostWritable);
 }
 
 /// @param value An ActiveStatusDisplay as the wire spells it.
@@ -37,9 +36,7 @@ namespace vthost
 [[nodiscard]] constexpr std::optional<vtbackend::ActiveStatusDisplay> activeStatusDisplayOf(
     uint8_t value) noexcept
 {
-    return value <= std::to_underlying(vtbackend::ActiveStatusDisplay::IndicatorStatusLine)
-               ? std::optional { static_cast<vtbackend::ActiveStatusDisplay>(value) }
-               : std::nullopt;
+    return enumUpTo(value, vtbackend::ActiveStatusDisplay::IndicatorStatusLine);
 }
 
 } // namespace vthost

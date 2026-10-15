@@ -9,11 +9,16 @@
 /// data model any frontend can render (the TTY attach client, later the GUI's
 /// remotely-populated display seam). Input flows the other way as Input PDUs.
 
+#include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/shell/CommandBlock.hpp>
+
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/WriteQueue.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -40,12 +45,25 @@ namespace vthost::client
 /// @param cell The wire cell whose cluster to emit.
 void appendCluster(std::string& out, proto::WireCell const& cell);
 
+/// One command-block record a mirror holds, and the RemoteScreen revision it last changed at — so a
+/// consumer that remembers the revision it last synced at adopts only what moved since.
+struct MirroredCommandBlock
+{
+    proto::WireCommandBlock wire; ///< The record as the host last sent it.
+    uint64_t revision = 0;        ///< The RemoteScreen::commandBlocksRevision it last changed at.
+};
+
 /// The client-side mirror of one remote session's screen.
 struct RemoteScreen
 {
     /// @param historyKeep How many rows above the viewport to retain; `nullopt` is unbounded.
     ///        Defaulted so a test can build a bare mirror, but `NativeClient` always states it.
-    explicit RemoteScreen(std::optional<int64_t> historyKeep = DefaultHistoryKeep): historyKeep(historyKeep)
+    /// @param commandBlockLimits How many command-block records to keep; defaulted likewise.
+    explicit RemoteScreen(std::optional<int64_t> historyKeep = DefaultHistoryKeep,
+                          vtbackend::CommandBlockStoreLimits commandBlockLimits = {}):
+        historyKeep(historyKeep),
+        // At least one, as the store raises it: a table that could hold nothing would refuse every record.
+        commandBlockLimits { .maxRecords = std::max(commandBlockLimits.maxRecords, std::size_t { 1 }) }
     {
     }
 
@@ -56,8 +74,10 @@ struct RemoteScreen
     int32_t cursorLine = 0;
     int32_t cursorColumn = 0;
     std::string title;
-    uint8_t cursorShape = 0;         ///< DECSCUSR Ps (0 = unknown/default); re-emitted as CSI Ps SP q.
-    std::string cwd;                 ///< OSC 7 working-directory URL, re-emitted as OSC 7.
+    uint8_t cursorShape = 0; ///< DECSCUSR Ps (0 = unknown/default); re-emitted as CSI Ps SP q.
+    /// The OSC 7 working-directory URL, as the host's terminal holds it; handed to the mirror's terminal
+    /// directly (vtbackend::Terminal::setCurrentWorkingDirectory), not re-emitted as OSC 7.
+    std::string cwd;
     uint32_t defaultForeground = 0;  ///< 0xRRGGBB default foreground, re-emitted as OSC 10.
     uint32_t defaultBackground = 0;  ///< 0xRRGGBB default background, re-emitted as OSC 11.
     uint8_t statusDisplayType = 0;   ///< StatusDisplayType, re-emitted as DECSSDT.
@@ -72,9 +92,15 @@ struct RemoteScreen
     std::vector<proto::WireLine> statusLines; ///< Host-writable status-line rows, painted on the status page.
 
     uint64_t generation = 0;
+    /// The stable-id generation the host's row ids count in.
+    /// @see proto::Delta::stableIdGeneration
+    uint64_t stableIdGeneration = 0;
     uint64_t seqno = 0;
     int64_t viewportBase = 0; ///< Stable id of viewport row 0.
     int64_t stableFloor = 0;  ///< Oldest stable id the server still holds; rows below are evicted.
+    /// Rows the server's grid has evicted for good, so the row at `stableFloor` is the session's row
+    /// number `evictedRowCount + 1`. @see proto::Delta::evictedRowCount.
+    uint64_t evictedRowCount = 0;
 
     /// Rows by stable id (ordered, so eviction trims the oldest first).
     std::map<int64_t, proto::WireLine> rows;
@@ -88,6 +114,40 @@ struct RemoteScreen
     /// The ancestry, outermost first, in the sender's id space. Empty when there is none -- and that
     /// emptiness is itself asserted, so a stack that emptied is not mistaken for one never sent.
     std::vector<uint16_t> contextChain;
+
+    /// The host's session epoch (nanoseconds since the Unix epoch) every row's bornAt counts from;
+    /// 0 until a SessionState stated it.
+    /// @see proto::SessionState::sessionEpoch.
+    int64_t sessionEpoch = 0;
+
+    /// The host's wall clock as the last SessionState stated it (nanoseconds since the Unix epoch); 0 until
+    /// one did. @see proto::SessionState::hostTime.
+    int64_t hostTime = 0;
+
+    /// The epoch the host's command-block ids count in, as the last SessionState or Delta stated it.
+    /// @see proto::SessionState::commandBlockIdEpoch.
+    uint64_t commandBlockIdEpoch = 0;
+
+    /// The command-block records the host holds, keyed by the HOST's id and ordered by it (oldest
+    /// first). A snapshot replaces the table from its floor on (proto::SessionState::commandBlocksFloor);
+    /// a delta merges into it and erases what it retires — so,
+    /// like `contexts`, it is always the latest state, and a mirror that missed a callback catches up
+    /// from it rather than from the deltas it never saw.
+    ///
+    /// Bounded as the store a mirror feeds is, for the peer chooses what it sends: each record's strings
+    /// are held to what a record keeps (vtbackend::MaxRecordedCommandLineBytes,
+    /// vtbackend::MaxRecordedWorkingDirectoryBytes), and the count to `commandBlockLimits`, the oldest
+    /// dropped first. One older than every record a full table holds is not taken at all.
+    std::map<uint32_t, MirroredCommandBlock> commandBlocks;
+    /// Each record of `commandBlocks` under the revision it last changed at, mapped to its id: one entry
+    /// per record. A consumer synced at a revision finds what changed since with an upper_bound, rather
+    /// than by walking the table.
+    std::map<uint64_t, uint32_t> commandBlocksByRevision;
+    /// Bumped once per record that changed (and stamped on it), and once per batch of removals.
+    uint64_t commandBlocksRevision = 0;
+    /// The revision of the last removal -- a retirement the host sent, or a record the cap dropped -- so a
+    /// mirror synced before it has records to drop.
+    uint64_t commandBlocksRetiredAt = 0;
 
     /// Whether a chunked snapshot is still arriving: set by a piece that opens or continues a
     /// run, cleared by the one that completes it.
@@ -132,6 +192,11 @@ struct RemoteScreen
     /// Unbounded is safe rather than reckless: `stableFloor` is authoritative in the eviction
     /// below, so the retained set is bounded by the daemon's own `maxHistoryLineCount` regardless.
     std::optional<int64_t> historyKeep;
+
+    /// How many command-block records `commandBlocks` keeps: what the terminal a mirror feeds keeps
+    /// (`command_blocks.max_records`), so a peer cannot make this client hold more than its store would.
+    /// Configuration, fixed at construction like `historyKeep`; maxRecords is at least one.
+    vtbackend::CommandBlockStoreLimits commandBlockLimits;
 
     /// Applies the session-state snapshot PDU.
     void apply(proto::SessionState const& state);
@@ -190,6 +255,8 @@ class NativeClient final
     /// @param loop The event loop everything runs on.
     /// @param connection The server transport (owned).
     /// @param handshake What to state in the ClientHello.
+    /// @param commandBlockLimits How many command-block records each mirrored screen keeps: the cap of the
+    ///        terminals the mirrors feed (RemoteScreen::commandBlockLimits).
     /// @param onUpdate Invoked after every applied Delta with the updated screen.
     /// @param onImage Invoked when an image's pixels arrive (ImageData) or the
     ///        image is dropped (ImageGone).
@@ -199,6 +266,7 @@ class NativeClient final
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
+                 vtbackend::CommandBlockStoreLimits commandBlockLimits,
                  UpdateHandler onUpdate,
                  ImageHandler onImage,
                  SessionEventHandler onSessionEvent,
@@ -256,6 +324,17 @@ class NativeClient final
     /// children. @see proto::ResizeSplit.
     void resizeSplit(uint64_t firstSession, uint64_t secondSession, uint16_t ratio);
 
+    /// Asks the daemon to perform an engine operation on a session's terminal, where the session lives; the
+    /// mirror follows through the deltas that change produces.
+    /// @param request The session, the operation, and what it acts with.
+    void performOperation(proto::PerformOperation request);
+
+    /// Restates the emulation settings to ask for the sessions this client creates from now on, when
+    /// the client's configuration changed; the sessions that exist keep theirs. Sends nothing when
+    /// @p settings is what the daemon already has. @see proto::SessionSettingsChanged.
+    /// @param settings The new preference; nullopt for whatever the daemon hosts with.
+    void restateSessionSettings(std::optional<proto::WireSessionSettings> settings);
+
     /// Closes the connection; run() finishes.
     void detach();
 
@@ -267,6 +346,14 @@ class NativeClient final
 
     /// @return True if the server answered with an incompatible codec version.
     [[nodiscard]] bool versionMismatch() const noexcept { return _versionMismatch; }
+
+    /// The machine the daemon runs on, as its ServerHello stated it: what every record's locality was
+    /// judged against, so "local" in a record means local to THAT machine, which need not be this one.
+    /// Fixed for the connection once connected() — before any session is mirrored — and empty until
+    /// then; a field stays empty where the daemon does not know it.
+    /// @see proto::ServerHello::machineId, vthost::daemonMachineOf
+    /// @return The daemon's identity.
+    [[nodiscard]] vtbackend::HostIdentity const& daemonIdentity() const noexcept { return _daemonIdentity; }
 
     /// How many rows above the viewport a mirror keeps; `nullopt` is unbounded.
     ///
@@ -303,7 +390,10 @@ class NativeClient final
     /// Declared before _handshake so the constructor can resolve it from its own parameter, rather
     /// than from a member whose initialization order it would otherwise have to reason about.
     std::optional<int64_t> _historyKeep;
-    HandshakeOptions _handshake; ///< Sent verbatim in the ClientHello.
+    /// Sent verbatim in the ClientHello; its settings are then kept as what the daemon was last told,
+    /// which restateSessionSettings() replaces.
+    HandshakeOptions _handshake;
+    vtbackend::CommandBlockStoreLimits _blockLimits; ///< Stamped on every screen this client creates.
     UpdateHandler _onUpdate;
     ImageHandler _onImage;
     SessionEventHandler _onSessionEvent;
@@ -313,6 +403,7 @@ class NativeClient final
     /// carries no session, so the serial is what routes it to the right screen.
     std::unordered_map<uint64_t, std::pair<uint64_t, uint32_t>> _pendingImages;
     uint64_t _nextSerial = 1;
+    vtbackend::HostIdentity _daemonIdentity; ///< @see daemonIdentity()
     bool _connected = false;
     bool _versionMismatch = false;
     bool _detached = false;

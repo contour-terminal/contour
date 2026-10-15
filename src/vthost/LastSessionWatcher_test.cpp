@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/MockPty.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/async/Cancellation.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
@@ -41,7 +42,7 @@ struct WatcherHarness
                        },
                        vtbackend::Settings {},
                        core::defaultEnvironment(),
-                       /*startPumps=*/false };
+                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     int shutdowns = 0;
     LastSessionWatcher watcher { host, loop, [this] { ++shutdowns; } };
 
@@ -155,7 +156,7 @@ TEST_CASE("the last session's exit unwinds the daemon's accept loop", "[vthost][
     // Proves the watcher's decision actually unwinds the serve loop and returns control — the step
     // between "we decided to exit" and "the process exits".
     auto const dir = core::testing::ScopedTempDir { "contour-lifecycle" };
-    auto const socketPath = (dir / "sock").string();
+    auto const socketPath = core::pathToUtf8(dir / "sock");
 
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
@@ -165,7 +166,7 @@ TEST_CASE("the last session's exit unwinds the daemon's accept loop", "[vthost][
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
 
     auto listener = core::net::listenUnix(loop, socketPath);
     REQUIRE(listener.has_value());
@@ -223,7 +224,7 @@ TEST_CASE("the watcher unsubscribes itself before the host outlives it", "[vthos
                               },
                               vtbackend::Settings {},
                               core::defaultEnvironment(),
-                              /*startPumps=*/false };
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
     auto shutdowns = 0;
     {
         auto const watcher = LastSessionWatcher { host, loop, [&] { ++shutdowns; } };

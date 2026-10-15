@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/tmux/TmuxClientModel.hpp>
 
+#include <core/platform/NativeFileSystem.hpp>
+
 #include <charconv>
 #include <chrono>
 #include <format>
@@ -39,10 +41,12 @@ PaneView::PaneView(int columns, int lines, vtbackend::LineCount history)
     // rendered, so nothing it reads from there describes anything but the client it runs in.
     _terminal = std::make_unique<vtbackend::Terminal>(_events,
                                                       core::defaultEnvironment(),
+                                                      core::platform::NativeFileSystem::instance(),
                                                       std::make_unique<vtpty::MockPty>(pageSize),
                                                       std::move(settings),
                                                       std::nullopt,
-                                                      std::chrono::steady_clock::now());
+                                                      vtbackend::TerminalClocks::system(),
+                                                      vtbackend::randomSemanticBlockTokens());
 }
 
 void PaneView::feed(std::string_view bytes)

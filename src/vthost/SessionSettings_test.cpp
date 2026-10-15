@@ -29,6 +29,7 @@ namespace
     settings.graphemeClustering = false;
     settings.primaryScreen.allowReflowOnResize = false;
     settings.maxImageRegisterCount = 1024;
+    settings.sixelScrolling = vtbackend::SixelScrolling::Disabled;
     settings.wordDelimiters = U" /\\()";
     settings.frozenModes[vtbackend::DECMode::Unicode] = true;
     settings.frozenModes[vtbackend::DECMode::BlinkingCursor] = false;
@@ -97,6 +98,16 @@ TEST_CASE("hostedSessionSettings always enables the good image protocol", "[vtho
     CHECK(hostedSessionSettings(asked).goodImageProtocol);
 }
 
+TEST_CASE("hostedSessionSettings leaves the input a lock queued to the session's reader",
+          "[vthost][settings]")
+{
+    // The daemon's loop thread takes a session's lock, and must not write to the PTY as it lets go: an
+    // application that does not read its input would park that write, and the loop with it.
+    auto settings = vtbackend::Settings {};
+    settings.inputWriter = vtbackend::InputWriter::QueueingThread;
+    CHECK(hostedSessionSettings(settings).inputWriter == vtbackend::InputWriter::ReaderThread);
+}
+
 TEST_CASE("hostedSessionSettings bounds the per-session allocations", "[vthost][settings]")
 {
     SECTION("image registers")
@@ -133,6 +144,7 @@ TEST_CASE("session settings round-trip through the wire", "[vthost][settings]")
     CHECK(restored.graphemeClustering == original.graphemeClustering);
     CHECK(restored.primaryScreen.allowReflowOnResize == original.primaryScreen.allowReflowOnResize);
     CHECK(restored.maxImageRegisterCount == original.maxImageRegisterCount);
+    CHECK(restored.sixelScrolling == original.sixelScrolling);
     CHECK(restored.wordDelimiters == original.wordDelimiters);
     CHECK(restored.frozenModes == original.frozenModes);
 }

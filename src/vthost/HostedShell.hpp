@@ -9,7 +9,8 @@
 /// spawns, and it is the one thing here that needs vtpty/Process.hpp.
 
 #include <vtpty/Process.hpp>
-#include <vtpty/Utf8Path.hpp>
+
+#include <core/Utf8Path.hpp>
 
 #include <filesystem>
 
@@ -38,7 +39,7 @@ namespace vthost
 [[nodiscard]] inline vtpty::Process::Environment hostedShellEnvironment(
     std::filesystem::path const& socketPath)
 {
-    return vtpty::Process::Environment { { "CONTOUR_MUX", vtpty::utf8Of(socketPath) } };
+    return vtpty::Process::Environment { { "CONTOUR_MUX", core::pathToUtf8(socketPath) } };
 }
 
 } // namespace vthost
