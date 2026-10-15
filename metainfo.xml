@@ -107,6 +107,7 @@
     <release version="0.7.1" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes Windows ignoring the configured font fallback list and switching surrounding text to another font when a glyph was missing. DirectWrite now tries the configured fonts first and only replaces missing clusters. Also fixes undersized emoji and incorrect text/emoji presentation (#2140)</li>
           <li>Fixes status-line <code>{Command}</code> items opening console windows on Windows and slowing down rendering: commands now run in the background at a configurable <code>Interval=</code> (default 10 seconds), with a 5-second timeout, and accept the <code>{Command:&lt;command&gt;}</code> shorthand (#2135)</li>
           <li>Fixes the Windows custom window frame growing the window and leaving a gap below the status line at startup: the client size is now preserved when the frame is applied (#2132)</li>
           <li>Fixes a combining character, such as an accent, that arrives in a separate read after a run of plain text attaching to the first character of that run instead of the last</li>
