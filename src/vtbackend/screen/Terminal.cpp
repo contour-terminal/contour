@@ -1184,7 +1184,8 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
             // The terminal's own furniture, so its bar may span the window's whole width (#2139).
             output.statusBar = RenderStatusBar { .lineOffset = base,
                                                  .lines = _indicatorStatusScreen.pageSize().lines,
-                                                 .background = indicatorStatusLineColors().background };
+                                                 .background = indicatorStatusLineColors().background,
+                                                 .position = _settings.statusDisplayPosition };
             return _indicatorStatusScreen.pageSize().lines;
         case StatusDisplayType::HostWritable:
             _hostWritableStatusLineScreen.render(RenderBufferBuilder { *this,

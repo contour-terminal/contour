@@ -570,6 +570,7 @@ TEST_CASE("Gutter.terminal.theIndicatorStatusLineSpansTheGutterToo", "[gutter][s
         REQUIRE(buffer.statusBar.has_value());
         CHECK(buffer.statusBar->lineOffset == LineOffset(4));
         CHECK(buffer.statusBar->lines == LineCount(1));
+        CHECK(buffer.statusBar->position == StatusDisplayPosition::Bottom);
         // The gutter itself stays beside the main page.
         CHECK(std::ranges::none_of(buffer.gutter,
                                    [](auto const& cell) { return cell.lineOffset >= LineOffset(4); }));
@@ -582,6 +583,7 @@ TEST_CASE("Gutter.terminal.theIndicatorStatusLineSpansTheGutterToo", "[gutter][s
         auto const buffer = renderOf(mc.terminal);
         REQUIRE(buffer.statusBar.has_value());
         CHECK(buffer.statusBar->lineOffset == LineOffset(0));
+        CHECK(buffer.statusBar->position == StatusDisplayPosition::Top);
     }
 
     SECTION("in the colors the indicator wears for the focus")
@@ -596,6 +598,9 @@ TEST_CASE("Gutter.terminal.theIndicatorStatusLineSpansTheGutterToo", "[gutter][s
     SECTION("the host-writable status line leaves the strip to the default background")
     {
         mc.terminal.setStatusDisplay(StatusDisplayType::HostWritable);
-        CHECK_FALSE(renderOf(mc.terminal).statusBar.has_value());
+        auto const buffer = renderOf(mc.terminal);
+        CHECK_FALSE(buffer.statusBar.has_value());
+        CHECK(std::ranges::none_of(buffer.gutter,
+                                   [](auto const& cell) { return cell.lineOffset >= LineOffset(4); }));
     }
 }

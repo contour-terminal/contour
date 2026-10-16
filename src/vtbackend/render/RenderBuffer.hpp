@@ -175,9 +175,10 @@ struct RenderCursor
 /// @ref RenderBuffer::cells expects them, so its text lines up with the page's.
 struct RenderStatusBar
 {
-    LineOffset lineOffset; ///< Its first row.
-    LineCount lines;       ///< How many rows it takes.
-    RGBColor background;   ///< What the bar is filled with.
+    LineOffset lineOffset;          ///< Its first row.
+    LineCount lines;                ///< How many rows it takes.
+    RGBColor background;            ///< What the bar is filled with.
+    StatusDisplayPosition position; ///< The edge it sits on, which it reaches past the margin there too.
 };
 
 struct RenderBuffer

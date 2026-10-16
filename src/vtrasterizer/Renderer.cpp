@@ -23,6 +23,7 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <utility>
 
 #include <tracy/Tracy.hpp>
 
@@ -988,14 +989,31 @@ void Renderer::renderOverlayCell(vtbackend::RenderCell const& cell, std::string_
 void Renderer::renderStatusBar(vtbackend::RenderStatusBar const& bar)
 {
     ZoneScoped;
-    auto const top = _gridMetrics.mapTopLeft(bar.lineOffset, vtbackend::ColumnOffset(0));
-    auto const height = _gridMetrics.cellSize.height * vtbackend::Height::cast_from(bar.lines);
+    auto const renderSize = _renderTarget->renderSize();
+    auto const rowsTop = _gridMetrics.mapTopLeft(bar.lineOffset, vtbackend::ColumnOffset(0)).y;
+    auto const rowsBottom =
+        rowsTop + (_gridMetrics.cellSize.height * vtbackend::Height::cast_from(bar.lines)).as<int>();
+
+    // Out to the edge it sits on as well: below a bottom bar lie the page margin and whatever part of a row
+    // the pane's height leaves over, above a top one the margin.
+    auto const [top, bottom] = [&]() -> std::pair<int, int> {
+        switch (bar.position)
+        {
+            case vtbackend::StatusDisplayPosition::Bottom:
+                return { rowsTop, std::max(rowsBottom, renderSize.height.as<int>()) };
+            case vtbackend::StatusDisplayPosition::Top: return { 0, rowsBottom };
+        }
+        core::unreachable();
+    }();
 
     // Opaque, as the BackgroundRenderer draws the status line's own cells: the bar reads as one piece.
     auto constexpr Opaque = uint8_t { 0xFF };
 
-    _renderTarget->renderRectangle(
-        0, top.y, _renderTarget->renderSize().width, height, vtbackend::RGBAColor(bar.background, Opaque));
+    _renderTarget->renderRectangle(0,
+                                   top,
+                                   renderSize.width,
+                                   vtbackend::Height::cast_from(bottom - top),
+                                   vtbackend::RGBAColor(bar.background, Opaque));
 }
 
 void Renderer::renderStickyHeader(vtbackend::RenderStickyHeader const& header,

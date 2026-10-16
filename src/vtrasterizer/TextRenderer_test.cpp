@@ -2320,15 +2320,16 @@ TEST_CASE("Renderer.statusBar.spansTheWindowUnderTheIndicatorStatusLine", "[rend
     REQUIRE(bar.has_value());
     REQUIRE(bar->lineOffset == LineOffset(5));
 
-    // Seeded metrics: 10x20 cells, no margin -- so the status line's row spans y 100..119.
+    // Seeded metrics: 10x20 cells, no margin -- so the status line's row spans y 100..119, and the 20 pixels
+    // the render target has left below it are the bar's too.
     auto const& rectangles = fixture.renderTarget.rectangles;
     auto const band = std::ranges::find_if(rectangles, [&](auto const& r) {
-        return r.x == 0 && r.y == 100 && r.height == Height(20)
-               && r.color == RGBAColor(bar->background, 0xFF);
+        return r.x == 0 && r.y == 100 && r.color == RGBAColor(bar->background, 0xFF);
     });
     REQUIRE(band != rectangles.end());
     CHECK(band->width == fixture.renderTarget.renderSize().width);
     CHECK(band->width == Width(260));
+    CHECK(band->height == Height(40));
 
     // The status line paints its own background on its cells, after the bar and in the same step.
     auto const ownBackground = std::ranges::find_if(std::next(band), rectangles.end(), [&](auto const& r) {
@@ -2336,6 +2337,41 @@ TEST_CASE("Renderer.statusBar.spansTheWindowUnderTheIndicatorStatusLine", "[rend
     });
     REQUIRE(ownBackground != rectangles.end());
     CHECK(ownBackground->step == band->step);
+}
+
+TEST_CASE("Renderer.statusBar.reachesPastTheMarginOfTheEdgeItSitsOn", "[renderer][statusline]")
+{
+    // A top bar is drawn from the render target's top edge, over the margin above its row, down to its row's
+    // bottom: nothing of the pane's own background shows above it.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto metrics = ReconfigFixture::seededMetrics();
+    metrics.pageMargin = vtrasterizer::PageMargin { .left = 30, .top = 6, .bottom = 4 };
+    RendererTest::seedMetrics(fixture.renderer, metrics);
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(260), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) } };
+    mc.terminal.settings().statusDisplayPosition = vtbackend::StatusDisplayPosition::Top;
+    mc.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const bar = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return buffer.get().statusBar;
+    }();
+    REQUIRE(bar.has_value());
+    REQUIRE(bar->lineOffset == LineOffset(0));
+
+    // Row 0 spans y 6..25 under the 6-pixel top margin.
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const band = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.x == 0 && r.color == RGBAColor(bar->background, 0xFF) && r.width == Width(260);
+    });
+    REQUIRE(band != rectangles.end());
+    CHECK(band->y == 0);
+    CHECK(band->height == Height(26));
 }
 
 int main(int argc, char* argv[])
