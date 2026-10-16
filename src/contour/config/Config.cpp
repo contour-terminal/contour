@@ -1503,6 +1503,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "notify_on_command_finish", where.notifyOnCommandFinish);
         loadFromEntry(child, "wm_class", where.wmClass);
         loadFromEntry(child, "tab_label", where.tabLabel);
+        loadFromEntry(child, "tab_color", where.tabColor);
         loadFromEntry(child, "pixel_reporting", where.pixelReporting);
         loadFromEntry(child, "option_as_alt", where.optionKeyAsAlt);
         loadFromEntry(child, "margins", where.margins);
@@ -1957,6 +1958,25 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     if (child)
         where = child.as<std::string>();
     logger()("Loading entry: {}, value {}", entry, where);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::optional<vtbackend::RGBColor>& where)
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+    if (child.IsNull())
+    {
+        where.reset();
+        return;
+    }
+    auto const value = child.as<std::string>();
+    if (auto const color = vtbackend::parseColor(value); color && value.size() == 7 && value.front() == '#')
+        where = color;
+    else
+        logger()("Invalid tab color '{}' (expected '#RRGGBB' or null); ignoring.", value);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,

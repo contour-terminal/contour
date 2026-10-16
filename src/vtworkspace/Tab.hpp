@@ -28,6 +28,7 @@ namespace vtworkspace
 /// not by editing precedence checks scattered across the model.
 enum class TabColorSource : uint8_t
 {
+    Profile,     //!< Default from the profile that created the tab.
     Application, //!< Assigned by the terminal application via DECAC item 2 (window frame).
     User,        //!< Chosen by the user via the tab's color flyout. Overrides Application.
 };

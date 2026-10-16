@@ -963,6 +963,7 @@ struct TerminalProfile
 
     ConfigEntry<std::string, documentation::WMClass> wmClass { CONTOUR_APP_ID };
     ConfigEntry<std::string, documentation::TabLabel> tabLabel { "{WindowTitle}" };
+    ConfigEntry<std::optional<vtbackend::RGBColor>, documentation::TabColor> tabColor {};
     ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
 };
 
@@ -1876,6 +1877,13 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CellRGBColor& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CursorColor& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::RGBColor& where);
+    /// Reads an optional tab color; null clears the profile's color.
+    /// @param node Mapping containing the entry.
+    /// @param entry Configuration key.
+    /// @param where Receives the color, or no value for null.
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       std::optional<vtbackend::RGBColor>& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::RGBColorPair& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::CellRGBColorAndAlphaPair& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtbackend::ColorPalette::Palette& colors);
@@ -2210,6 +2218,23 @@ struct Writer
     [[nodiscard]] std::string static format(vtbackend::RGBColor const& v)
     {
         return std::format("{}", SingleQuoted { std::format("{}", v) });
+    }
+
+    /// Formats an optional color as a YAML scalar.
+    /// @param v Color to quote, or no value for null.
+    /// @return A quoted '#RRGGBB' value or the unquoted null literal.
+    [[nodiscard]] std::string static format(std::optional<vtbackend::RGBColor> const& v)
+    {
+        return v ? std::format("{}", SingleQuoted { vtbackend::formatColor(*v) }) : "null";
+    }
+
+    /// Substitutes an optional color into a documentation template.
+    /// @param doc Format string containing the color placeholder.
+    /// @param v Optional color to serialize.
+    /// @return The template with the serialized color substituted.
+    [[nodiscard]] std::string format(std::string_view doc, std::optional<vtbackend::RGBColor> const& v)
+    {
+        return format(doc, format(v));
     }
 
     [[nodiscard]] std::string format(std::string_view doc, vtbackend::ImageSize v)

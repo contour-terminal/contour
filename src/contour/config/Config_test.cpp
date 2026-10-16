@@ -4568,6 +4568,29 @@ TEST_CASE("Config: a side file whose document is no map is skipped, not fatal", 
     }
 }
 
+TEST_CASE("Config: profile tab colors round trip and can be cleared", "[config][tab-color]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        tab_color: '#2E3440'
+    plain:
+        tab_color: null
+    invalid:
+        tab_color: '#GGGGGG'
+)"sv);
+    auto const nord = vtbackend::RGBColor { 0x2E, 0x34, 0x40 };
+    CHECK(config.profile("main")->tabColor.value() == nord);
+    CHECK_FALSE(config.profile("plain")->tabColor.value().has_value());
+    CHECK(config.profile("invalid")->tabColor.value() == nord);
+    CHECK_FALSE(contour::config::TerminalProfile {}.tabColor.value().has_value());
+    auto const emitted = contour::config::emitProfileYaml(*config.profile("main"));
+    CHECK(YAML::Load(emitted)["tab_color"].as<std::string>() == "#2E3440");
+    CHECK(YAML::Load(contour::config::emitProfileYaml(*config.profile("plain")))["tab_color"].IsNull());
+}
+
 // }}}
 
 // {{{ input_mapping modifier vocabulary and key case folding

@@ -190,6 +190,18 @@ constexpr StringLiteral TabLabelConfig {
     "{comment} Split tabs show \"Multiple panes\" instead.\n"
 };
 
+constexpr StringLiteral TabColorConfig {
+    "{comment} Default color for tabs opened with this profile ('#RRGGBB', or null for no profile color).\n"
+    "{comment} Layout, user and application colors override this default.\n"
+    "{comment} Split tabs keep the color of the profile that created the tab.\n"
+    "tab_color: {}\n"
+};
+
+constexpr StringLiteral TabColorWeb {
+    "Default tab color as `'#RRGGBB'`, or `null` for no profile color. Layout, user and application "
+    "colors override it. Split tabs keep the color of the profile that created the tab.\n"
+};
+
 constexpr StringLiteral PixelReportingConfig {
     "{comment} The unit pixel sizes are reported to applications in (ignore-case).\n"
     "{comment} Applications divide a reported extent by the grid to learn the cell size, and size\n"
@@ -2986,6 +2998,7 @@ using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYan
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
 using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
+using TabColor = DocumentationEntry<TabColorConfig, TabColorWeb>;
 using PixelReporting = DocumentationEntry<PixelReportingConfig, PixelReportingWeb>;
 using AccessibilityAnnouncements =
     DocumentationEntry<AccessibilityAnnouncementsConfig, AccessibilityAnnouncementsWeb>;
