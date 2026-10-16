@@ -2354,7 +2354,7 @@ TEST_CASE("TerminalSession: a configuration reload hands the presentation settin
     contour::test::ConfiguredTestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     auto const& settings = session->terminal().settings();
-    REQUIRE(settings.autoScrollOnUpdate);
+    REQUIRE_FALSE(settings.autoScrollOnUpdate);
     REQUIRE_FALSE(settings.isInsertAfterYank);
     REQUIRE(settings.blinkStyle == vtbackend::BlinkStyle::Smooth);
     REQUIRE(settings.screenTransitionStyle == vtbackend::ScreenTransitionStyle::Fade);
@@ -2365,7 +2365,7 @@ TEST_CASE("TerminalSession: a configuration reload hands the presentation settin
     reloadSessionWith(*session,
                       "",
                       "        history:\n"
-                      "            auto_scroll_on_update: false\n"
+                      "            auto_scroll_on_update: true\n"
                       "        insert_after_yank: true\n"
                       "        blink_style: linger\n"
                       "        screen_transition: classic\n"
@@ -2375,7 +2375,7 @@ TEST_CASE("TerminalSession: a configuration reload hands the presentation settin
                       "        smooth_scrolling: false\n"
                       "        momentum_scrolling: false\n");
 
-    CHECK_FALSE(settings.autoScrollOnUpdate);
+    CHECK(settings.autoScrollOnUpdate);
     CHECK(settings.isInsertAfterYank);
     CHECK(settings.blinkStyle == vtbackend::BlinkStyle::Linger);
     CHECK(settings.screenTransitionStyle == vtbackend::ScreenTransitionStyle::Classic);
@@ -5291,6 +5291,7 @@ TEST_CASE("TerminalSession: a find-bar search into the scrollback outlives the a
     // screenUpdated(), which would scroll the viewport straight back off it.
     TestApp testApp;
     auto held = makeSessionWithSurface(testApp.app());
+    held->terminal().settings().autoScrollOnUpdate = true; // the auto-scroll under test; off by default
 
     held->terminal().writeToScreen("needle in the haystack\r\n");
     for (auto const i: std::views::iota(0, 100))
@@ -5327,6 +5328,7 @@ TEST_CASE("TerminalSession: stepping PAST the last match keeps the one already r
     // to the auto-scroll, which threw that match away on the very next byte of output.
     TestApp testApp;
     auto held = makeSessionWithSurface(testApp.app());
+    held->terminal().settings().autoScrollOnUpdate = true; // the auto-scroll under test; off by default
 
     held->terminal().writeToScreen("needle one\r\n");
     for (auto const i: std::views::iota(0, 50))
@@ -8929,6 +8931,7 @@ TEST_CASE("TerminalSession: output brings a scrolled-back view down without raci
     TestApp testApp;
     auto pane = makeSessionWithSurface(testApp.app());
     auto& terminal = pane->terminal();
+    terminal.settings().autoScrollOnUpdate = true; // off by default
     for (auto const line: std::views::iota(0, 40))
         terminal.writeToScreen(std::format("line {}\r\n", line));
 

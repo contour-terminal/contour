@@ -404,62 +404,45 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
 
     auto const anyModifiers = vtbackend::Modifiers { vtbackend::Modifier::None };
 
-    SECTION("keypress always scrolls to bottom, even when autoScrollOnUpdate=false")
+    SECTION("keypress always scrolls to bottom, whatever autoScrollOnUpdate says")
     {
         // User input must reveal the cursor regardless of the output-scroll setting: sending a key
-        // snaps the viewport back to the bottom even though autoScrollOnUpdate (which governs
+        // snaps the viewport back to the bottom even where autoScrollOnUpdate (which governs
         // output-driven scrolling only) is disabled.
-        terminal.settings().autoScrollOnUpdate = false;
-        terminal.viewport().scrollUp(LineCount(2));
-        REQUIRE(terminal.viewport().scrolled());
+        for (auto const autoScrollOnUpdate: { false, true })
+        {
+            INFO("autoScrollOnUpdate " << autoScrollOnUpdate);
+            terminal.settings().autoScrollOnUpdate = autoScrollOnUpdate;
+            terminal.viewport().scrollUp(LineCount(2));
+            REQUIRE(terminal.viewport().scrolled());
 
-        terminal.sendKeyEvent(
-            vtbackend::Key::Enter, anyModifiers, vtbackend::KeyboardEventType::Press, mc.steadyClock.now());
+            terminal.sendKeyEvent(vtbackend::Key::Enter,
+                                  anyModifiers,
+                                  vtbackend::KeyboardEventType::Press,
+                                  mc.steadyClock.now());
 
-        CHECK(!terminal.viewport().scrolled());
+            CHECK(!terminal.viewport().scrolled());
+        }
     }
 
-    SECTION("keypress honors autoScrollOnUpdate=true (default)")
-    {
-        REQUIRE(terminal.settings().autoScrollOnUpdate);
-        terminal.viewport().scrollUp(LineCount(2));
-        REQUIRE(terminal.viewport().scrolled());
-
-        terminal.sendKeyEvent(
-            vtbackend::Key::Enter, anyModifiers, vtbackend::KeyboardEventType::Press, mc.steadyClock.now());
-
-        CHECK(!terminal.viewport().scrolled());
-    }
-
-    SECTION("char input always scrolls to bottom, even when autoScrollOnUpdate=false")
+    SECTION("char input always scrolls to bottom, whatever autoScrollOnUpdate says")
     {
         // Same input-independence as the keypress case above, exercised through the char path.
-        terminal.settings().autoScrollOnUpdate = false;
-        terminal.viewport().scrollUp(LineCount(2));
-        REQUIRE(terminal.viewport().scrolled());
+        for (auto const autoScrollOnUpdate: { false, true })
+        {
+            INFO("autoScrollOnUpdate " << autoScrollOnUpdate);
+            terminal.settings().autoScrollOnUpdate = autoScrollOnUpdate;
+            terminal.viewport().scrollUp(LineCount(2));
+            REQUIRE(terminal.viewport().scrolled());
 
-        terminal.sendCharEvent(U'a',
-                               vtbackend::KeyIdentity { .unshiftedKey = U'a' },
-                               anyModifiers,
-                               vtbackend::KeyboardEventType::Press,
-                               mc.steadyClock.now());
+            terminal.sendCharEvent(U'a',
+                                   vtbackend::KeyIdentity { .unshiftedKey = U'a' },
+                                   anyModifiers,
+                                   vtbackend::KeyboardEventType::Press,
+                                   mc.steadyClock.now());
 
-        CHECK(!terminal.viewport().scrolled());
-    }
-
-    SECTION("char input honors autoScrollOnUpdate=true")
-    {
-        REQUIRE(terminal.settings().autoScrollOnUpdate);
-        terminal.viewport().scrollUp(LineCount(2));
-        REQUIRE(terminal.viewport().scrolled());
-
-        terminal.sendCharEvent(U'a',
-                               vtbackend::KeyIdentity { .unshiftedKey = U'a' },
-                               anyModifiers,
-                               vtbackend::KeyboardEventType::Press,
-                               mc.steadyClock.now());
-
-        CHECK(!terminal.viewport().scrolled());
+            CHECK(!terminal.viewport().scrolled());
+        }
     }
 
     // A key/char *release* is never typed content. When the active keyboard protocol reports
@@ -544,7 +527,7 @@ TEST_CASE("Terminal.AutoScrollOnUpdate", "[terminal]")
 
     SECTION("bufferChanged honors autoScrollOnUpdate=true")
     {
-        REQUIRE(terminal.settings().autoScrollOnUpdate);
+        terminal.settings().autoScrollOnUpdate = true;
         terminal.viewport().scrollUp(LineCount(2));
         REQUIRE(terminal.viewport().scrolled());
 

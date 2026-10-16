@@ -366,7 +366,7 @@ struct HistoryConfig
     vtbackend::MaxHistoryLineCount hardLimit { vtbackend::LineCount(0) };
 
     vtbackend::LineCount historyScrollMultiplier { vtbackend::LineCount(3) };
-    bool autoScrollOnUpdate { true };
+    bool autoScrollOnUpdate { false };
 
     /// Both bounds, in the vocabulary vtbackend speaks, reconciled in this one place.
     ///
