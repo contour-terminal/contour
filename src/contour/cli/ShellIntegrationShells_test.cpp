@@ -566,15 +566,22 @@ void checkWorkingDirectoryReport(ShellLaunch const& launch)
         return record->workingDirectory;
     };
 
+    // A shell may name the directory the way it reached it, through a symbolic link: tcsh starts from HOME
+    // as spelled, which on macOS lies under /var, a link to /private/var. Resolved, the name must still be
+    // exactly the directory made here.
+    auto const resolved = [](std::string const& path) {
+        return core::platform::normalizePath(
+            std::filesystem::weakly_canonical(core::pathFromTrustedUtf8(path)));
+    };
     auto const here = nextRunsIn("echo here");
-    CHECK(here.path == expected);
+    CHECK(resolved(here.path) == expected);
     CHECK(here.locality == vtbackend::ContextLocality::Local);
     CHECK_FALSE(session->terminal().terminal.windowTitle().contains("pwned"));
 
     // The converse: to a terminal on another machine, the very same URL names a directory over there.
     session->terminal().identity.hostname = "elsewhere.invalid";
     auto const there = nextRunsIn("echo there");
-    CHECK(there.path == expected);
+    CHECK(resolved(there.path) == expected);
     CHECK(there.locality == vtbackend::ContextLocality::Foreign);
 
     // fish 4.0 and later report the directory themselves, ending OSC 7 in BEL where the scripts end it in
