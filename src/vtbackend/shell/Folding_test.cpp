@@ -978,12 +978,6 @@ TEST_CASE("Folding.terminal.hoveringTheGutterLightsTheWholeRun", "[folding]")
 
     auto buffer = RenderBuffer {};
     mc.terminal.fillRenderBuffer(buffer, true);
-
-    // A band runs down the whole run beside the glyphs (@see BlockBandGlyph), a line in the column rather
-    // than a background: set aside, the glyphs are compared with their resting selves.
-    auto const banded = std::ranges::count(buffer.gutter, BlockBandGlyph, &RenderGutterCell::codepoint);
-    CHECK(banded == 3);
-    std::erase_if(buffer.gutter, [](auto const& cell) { return cell.codepoint == BlockBandGlyph; });
     REQUIRE(buffer.gutter.size() == 3);
     for (size_t i = 0; i < buffer.gutter.size(); ++i)
     {

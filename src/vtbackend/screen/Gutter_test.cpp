@@ -746,42 +746,6 @@ TEST_CASE("Gutter.paint.aTwoCellBlockColumnDrawsOneGlyphAcrossBoth", "[gutter]")
     CHECK_FALSE(narrow.attributes.lineFlags.test(LineFlag::DoubleWidth));
 }
 
-TEST_CASE("Gutter.paint.aHoveredBlocksRowCarriesItsBandUnderTheGlyph", "[gutter]")
-{
-    // A thin line at the block column's far edge from the text, drawn across the column as its glyph is,
-    // and ahead of it so the glyph draws over it where the two meet. On the page's own background, so no
-    // rectangle is drawn behind it.
-    auto const layout = gutterLayoutFor(GutterSettings { .foldMarkers = true, .blockColumnWidth = 2 });
-    auto const background = RGBColor(4, 5, 6);
-    auto cells = std::vector<RenderGutterCell> {};
-    appendGutterCells(
-        layout,
-        GutterRow { .screenLine = LineOffset(3),
-                    .glyph = BlockColumnGlyph::FoldBody,
-                    .glyphColors = RGBColorPair { .foreground = RGBColor(7, 8, 9), .background = background },
-                    .band = RGBColor(200, 0, 0) },
-        RGBColorPair {},
-        cells);
-    REQUIRE(cells.size() == 2);
-    CHECK(cells[0].codepoint == BlockBandGlyph);
-    CHECK(cells[0].column == ColumnOffset(-2));
-    CHECK(cells[0].attributes.foregroundColor == RGBColor(200, 0, 0));
-    CHECK(cells[0].attributes.backgroundColor == background);
-    CHECK(cells[0].attributes.lineFlags.test(LineFlag::DoubleWidth));
-    CHECK(cells[1].codepoint == blockColumnCodepoint(BlockColumnGlyph::FoldBody));
-
-    // A row of the block with no glyph of its own still carries the band.
-    cells.clear();
-    appendGutterCells(layout,
-                      GutterRow { .screenLine = LineOffset(4),
-                                  .glyphColors = RGBColorPair { .foreground = {}, .background = background },
-                                  .band = RGBColor(200, 0, 0) },
-                      RGBColorPair {},
-                      cells);
-    REQUIRE(cells.size() == 1);
-    CHECK(cells[0].codepoint == BlockBandGlyph);
-}
-
 TEST_CASE("Gutter.paint.anEmptyRowPaintsNothing", "[gutter]")
 {
     auto const layout =

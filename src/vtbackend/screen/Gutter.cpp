@@ -546,7 +546,7 @@ RGBColorPair blockColumnColors(ColorPalette const& palette,
                           .background = fold.background };
 }
 
-RGBColor blockBandColor(ColorPalette const& palette, std::optional<CommandBlockOutcome> outcome) noexcept
+RGBColor blockHighlightColor(ColorPalette const& palette, std::optional<CommandBlockOutcome> outcome) noexcept
 {
     // A disc's hovered colour is its block's: the outcome's, lifted, or the text colour for an uncoloured
     // success.
@@ -586,15 +586,6 @@ void appendGutterCells(GutterLayout const& layout,
     auto const block = layout.segment(GutterSegmentKind::BlockColumn);
     if (!block)
         return;
-
-    // Ahead of the glyph, so the glyph draws over it where the two meet.
-    if (row.band)
-        output.push_back(RenderGutterCell {
-            .lineOffset = row.screenLine,
-            .codepoint = BlockBandGlyph,
-            .attributes = blockColumnCellAttributes(
-                *block, RGBColorPair { .foreground = *row.band, .background = row.glyphColors.background }),
-            .column = columnOf(block->firstColumn) });
 
     if (row.glyph == BlockColumnGlyph::None)
         return;

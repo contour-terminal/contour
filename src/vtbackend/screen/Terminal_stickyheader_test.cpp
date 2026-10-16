@@ -872,7 +872,7 @@ TEST_CASE("StickyHeader.jump.flashesTheRowItLandsOn", "[stickyheader][jump]")
         auto const start = at(0ms);
         REQUIRE(start.has_value());
         CHECK(start->lineOffset == LineOffset(0));
-        CHECK(start->color == blockBandColor(mc.terminal.colorPalette(), CommandBlockOutcome::Failure));
+        CHECK(start->color == blockHighlightColor(mc.terminal.colorPalette(), CommandBlockOutcome::Failure));
         auto const later = at(500ms);
         REQUIRE(later.has_value());
         CHECK(later->alpha < start->alpha);

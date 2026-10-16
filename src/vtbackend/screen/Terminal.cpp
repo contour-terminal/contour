@@ -3311,13 +3311,6 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     auto const hoveredHead =
         _gutterHoverLine ? foldCovering(foldRanges(), grid.stableLineIdOf(*_gutterHoverLine)) : std::nullopt;
 
-    // And a band marks the run a click acts on: the hovered fold's, or -- on a block with nothing to fold --
-    // its head, the row its status mark is on. Not every row the block reached: the one its end mark came on
-    // lies below its output, often where the next prompt begins.
-    auto const* const hoveredBlock = _gutterHoverLine ? commandBlockAt(*_gutterHoverLine) : nullptr;
-    auto const hoveredBlockHead =
-        hoveredBlock != nullptr && !hoveredHead ? headOffsetOf(grid, *hoveredBlock) : std::nullopt;
-
     // Shifted by baseLine for the same reason every cell is: a status line at the top moves the main page
     // down, and a gutter left where it was would point at the wrong row.
     for (auto const y: std::views::iota(0, unbox<int>(drawnRowLimit())))
@@ -3342,10 +3335,6 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
                                ? GutterHover::Hovered
                                : GutterHover::Rest;
 
-        auto const band = hover == GutterHover::Hovered || hoveredBlockHead == gridLine
-                              ? std::optional { blockBandColor(_colorPalette, outcome) }
-                              : std::nullopt;
-
         appendGutterCells(
             layout,
             GutterRow { .screenLine = baseLine + screenRow,
@@ -3354,10 +3343,8 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
                         .glyph = glyph,
                         // Mixed only for a glyph there is: most rows have none.
                         .glyphColors = glyph == BlockColumnGlyph::None
-                                           ? RGBColorPair { .foreground = {},
-                                                            .background = _colorPalette.defaultBackground }
-                                           : blockColumnColors(_colorPalette, glyph, outcome, hover),
-                        .band = band },
+                                           ? RGBColorPair {}
+                                           : blockColumnColors(_colorPalette, glyph, outcome, hover) },
             textColors,
             output.gutter);
     }
@@ -3655,7 +3642,7 @@ std::expected<void, CommandBlockJumpError> Terminal::scrollToCommandBlockHead(Co
             _lineFlash.duration = LineFlashDuration;
             _lineFlash.stableId = input ? grid.stableLineIdOf(*input) : record->headStableId;
             _lineFlash.stableIdGeneration = record->headIdGeneration;
-            _lineFlash.color = blockBandColor(
+            _lineFlash.color = blockHighlightColor(
                 _colorPalette,
                 _settings.gutter.exitStatus ? std::optional { outcomeOf(*record) } : std::nullopt);
             publishAnimationsEnd();
@@ -3763,23 +3750,19 @@ void Terminal::setGutterHoverLine(std::optional<LineOffset> gridLine)
     if (_gutterHoverLine == gridLine)
         return;
 
-    // What is DRAWN is the highlighted fold and the band down the hovered block, not the hovered row, so
-    // the repaint is gated on either changing rather than on the pointer crossing a row boundary. Dragging
-    // down a page of gutter would otherwise force one full render-buffer rebuild -- and one reader wakeup --
-    // per row.
-    auto const drawnFor =
-        [this](std::optional<LineOffset> line) -> std::pair<std::optional<int64_t>, CommandBlockId> {
+    // What is DRAWN is the highlighted fold, not the hovered row, so the repaint is gated on the fold
+    // changing rather than on the pointer crossing a row boundary. Dragging down a page of gutter
+    // would otherwise force one full render-buffer rebuild -- and one reader wakeup -- per row.
+    auto const headOf = [this](std::optional<LineOffset> line) -> std::optional<int64_t> {
         if (!line)
-            return {};
+            return std::nullopt;
         auto const range = foldContaining(*line);
-        auto const* const record = commandBlockAt(*line);
-        return { range ? std::optional { range->headStableId } : std::nullopt,
-                 record != nullptr ? record->id : CommandBlockId {} };
+        return range ? std::optional { range->headStableId } : std::nullopt;
     };
 
-    auto const before = drawnFor(_gutterHoverLine);
+    auto const before = headOf(_gutterHoverLine);
     _gutterHoverLine = gridLine;
-    if (before == drawnFor(gridLine))
+    if (before == headOf(gridLine))
         return;
 
     // The highlight lives only in the render buffer, so nothing else would notice it changed: without

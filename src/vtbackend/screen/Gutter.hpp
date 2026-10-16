@@ -238,20 +238,13 @@ enum class BlockColumnPress : uint8_t
 /// How far a scheme-set status colour is lifted toward the text colour while its fold is hovered.
 inline constexpr float BlockStatusHoverLift = 0.5F;
 
-/// The band down the hovered block's rows: U+258F LEFT ONE EIGHTH BLOCK, at the block column's left edge.
-///
-/// A line, not a tint: a tinted run reads as a selection of those rows (@see
-/// ColorPalette::foldMarkerHoverColors), where a thin bar at the column's far edge from the text reads as
-/// the extent of what a click acts on, as VS Code's command guide does. Drawn across the column like its
-/// glyphs, so two cells wide it is an eighth of both: about 2.5 pixels at the default font.
-inline constexpr char32_t BlockBandGlyph = U'\u258F';
-
-/// The colour of the band down a hovered block's rows: the block's own, as its hovered glyphs take it.
+/// The colour a block is highlighted in as a whole -- the line a jump to it lands on: the block's own, as
+/// its hovered glyphs take it.
 /// @param palette The colour scheme.
 /// @param outcome How the block ended; nullopt with exit status off.
-/// @return The band's colour.
-[[nodiscard]] RGBColor blockBandColor(ColorPalette const& palette,
-                                      std::optional<CommandBlockOutcome> outcome) noexcept;
+/// @return The highlight's colour.
+[[nodiscard]] RGBColor blockHighlightColor(ColorPalette const& palette,
+                                           std::optional<CommandBlockOutcome> outcome) noexcept;
 
 /// The colours a block-column glyph is drawn in.
 ///
@@ -298,9 +291,6 @@ struct GutterRow
     LineNumberText lineNumber {}; ///< The number, already aligned to its segment; empty for none.
     BlockColumnGlyph glyph = BlockColumnGlyph::None; ///< The block column's glyph.
     RGBColorPair glyphColors {}; ///< The glyph's colours, as blockColumnColors() picks them.
-
-    /// The colour of the band down the hovered block, on a row of that block; nullopt on any other row.
-    std::optional<RGBColor> band {};
 };
 
 /// Appends the cells @p row is drawn as -- one per non-blank character, each at its own negative column,
