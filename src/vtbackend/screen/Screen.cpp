@@ -17,6 +17,7 @@
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/shell/CommandBlockRows.hpp>
+#include <vtbackend/shell/CommandLineSanitizer.hpp>
 #include <vtbackend/vt/ControlCode.hpp>
 #include <vtbackend/vt/DesktopNotification.hpp>
 #include <vtbackend/vt/HierarchicalContext.hpp>
@@ -7292,7 +7293,10 @@ std::optional<std::string> Screen::recoverCommandLine() const
             break;
     }
 
-    text.resize(core::trimRight(text).size());
+    // The cursor at ;C may stand below rows the shell drew under its input: a spacer endo starts with U+00A0
+    // so that the row is never blank. Read up to the cursor, such a row is a line break and white space, and
+    // a trim that knew only ASCII's would keep both.
+    text.resize(trimTrailingWhiteSpace(text).size());
     if (text.empty())
         return std::nullopt;
     return text;

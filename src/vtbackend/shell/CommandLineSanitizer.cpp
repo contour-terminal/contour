@@ -62,6 +62,27 @@ namespace
         Rule { .first = 0x2066, .last = 0x2069, .treatment = { R, R, R, R } }, // LRI..PDI
     };
 
+    /// A run of code points, both ends inclusive.
+    struct CodePointRange
+    {
+        char32_t first;
+        char32_t last;
+    };
+
+    /// Every code point with Unicode's White_Space property (PropList.txt).
+    constexpr auto WhiteSpace = std::array {
+        CodePointRange { .first = 0x0009, .last = 0x000D }, // TAB, LF, VT, FF, CR
+        CodePointRange { .first = 0x0020, .last = 0x0020 }, // SPACE
+        CodePointRange { .first = 0x0085, .last = 0x0085 }, // NEXT LINE
+        CodePointRange { .first = 0x00A0, .last = 0x00A0 }, // NO-BREAK SPACE
+        CodePointRange { .first = 0x1680, .last = 0x1680 }, // OGHAM SPACE MARK
+        CodePointRange { .first = 0x2000, .last = 0x200A }, // EN QUAD..HAIR SPACE
+        CodePointRange { .first = 0x2028, .last = 0x2029 }, // LINE SEPARATOR, PARAGRAPH SEPARATOR
+        CodePointRange { .first = 0x202F, .last = 0x202F }, // NARROW NO-BREAK SPACE
+        CodePointRange { .first = 0x205F, .last = 0x205F }, // MEDIUM MATHEMATICAL SPACE
+        CodePointRange { .first = 0x3000, .last = 0x3000 }, // IDEOGRAPHIC SPACE
+    };
+
     /// What each purpose does with the spaces its text ends with, indexed by SanitizePurpose. A copy trims
     /// them: a line end it ended with would otherwise run the pasted command by itself.
     constexpr auto TrailingSpacesOf = std::array<TrailingSpaces, PurposeCount> {
@@ -115,6 +136,22 @@ namespace
                                                     })
                              == Rules.end(),
                   "treatmentOf() searches the rules by bisection: they must be sorted and disjoint");
+
+    static_assert(std::ranges::is_sorted(WhiteSpace, {}, &CodePointRange::first)
+                      && std::ranges::adjacent_find(WhiteSpace,
+                                                    [](CodePointRange const& a, CodePointRange const& b) {
+                                                        return a.last >= b.first;
+                                                    })
+                             == WhiteSpace.end(),
+                  "isWhiteSpace() searches the ranges by bisection: they must be sorted and disjoint");
+
+    /// @return Whether @p codePoint has Unicode's White_Space property.
+    [[nodiscard]] constexpr bool isWhiteSpace(char32_t codePoint) noexcept
+    {
+        // The first range not wholly below the code point is the only one that can hold it.
+        auto const range = std::ranges::lower_bound(WhiteSpace, codePoint, {}, &CodePointRange::last);
+        return range != WhiteSpace.end() && range->first <= codePoint;
+    }
 
     /// @return What @p purpose does with @p codePoint.
     [[nodiscard]] constexpr Treatment treatmentOf(char32_t codePoint, SanitizePurpose purpose) noexcept
@@ -260,6 +297,20 @@ bool isUnchangedBySanitizing(std::string_view text, SanitizePurpose purpose)
                                                                                 : WalkStep::Stop;
     };
     return walkCodePoints(text, isKept) == WalkStep::Continue;
+}
+
+std::string_view trimTrailingWhiteSpace(std::string_view text)
+{
+    // The walk hands over every byte of the text once and in order, so the bytes seen so far are a prefix.
+    auto seen = size_t { 0 };
+    auto end = size_t { 0 };
+    walkCodePoints(text, [&](std::optional<char32_t> codePoint, std::string_view bytes) {
+        seen += bytes.size();
+        if (!codePoint || !isWhiteSpace(*codePoint))
+            end = seen;
+        return WalkStep::Continue;
+    });
+    return text.substr(0, end);
 }
 
 } // namespace vtbackend
