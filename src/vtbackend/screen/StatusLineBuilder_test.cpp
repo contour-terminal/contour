@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <concepts>
 #include <cstddef>
+#include <format>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -412,6 +416,103 @@ TEST_CASE("parseStatusLineSegment.commandShorthandWhitespaceOnlyIsNotAnItem", "[
     REQUIRE(segment.size() == 1);
     REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(segment[0]));
     CHECK(std::get<StatusLineDefinitions::Text>(segment[0]).text == "{Command: }");
+}
+
+namespace
+{
+/// What the status line's pointer items say, in this order: CellSGR, CellTextUtf8, CellTextUtf32, Hyperlink.
+using PointerItemTexts = std::array<std::string, 4>;
+
+/// What the pointer items say about the cell under @p terminal's pointer.
+/// @param terminal The terminal whose status line it is.
+/// @return One text per item, in PointerItemTexts' order.
+[[nodiscard]] PointerItemTexts pointerItemTexts(Terminal const& terminal)
+{
+    auto const items = std::array<StatusLineDefinitions::Item, 4> { StatusLineDefinitions::CellSGR {},
+                                                                    StatusLineDefinitions::CellTextUtf8 {},
+                                                                    StatusLineDefinitions::CellTextUtf32 {},
+                                                                    StatusLineDefinitions::Hyperlink {} };
+    auto texts = PointerItemTexts {};
+    std::ranges::transform(items, texts.begin(), [&](StatusLineDefinitions::Item const& item) {
+        return serializeToVT(terminal, StatusLineSegment { item }, StatusLineStyling::Disabled);
+    });
+    return texts;
+}
+
+/// What the pointer items say about a cell.
+/// @param flags     The cell's graphics flags.
+/// @param text      Its text.
+/// @param codepoint Its text's codepoint, as CellTextUtf32 spells it.
+/// @param uri       The link it carries.
+/// @return One text per item, in PointerItemTexts' order.
+[[nodiscard]] PointerItemTexts describing(CellFlags flags,
+                                          std::string_view text,
+                                          std::string_view codepoint,
+                                          std::string_view uri)
+{
+    return { std::format("{}", flags), std::string(text), std::string(codepoint), std::string(uri) };
+}
+
+/// Four rows of distinct cells, each styled and linked: H scrolls into the history, and A, B and C are left
+/// on the three-row page, A in the top-left cell.
+constexpr auto LinkedRows =
+    std::string_view { "\033]8;;https://h.example/\033\\\033[3mH\033[m\033]8;;\033\\\r\n"
+                       "\033]8;;https://a.example/\033\\\033[1mA\033[m\033]8;;\033\\\r\n"
+                       "\033]8;;https://b.example/\033\\\033[4mB\033[m\033]8;;\033\\\r\n"
+                       "C" };
+
+constexpr auto PageWithHistory = PageSize { LineCount(3), ColumnCount(10) };
+
+/// The cell at @p line, column 0 of the page as it is shown.
+[[nodiscard]] constexpr CellLocation shownCell(int line)
+{
+    return CellLocation { .line = LineOffset(line), .column = ColumnOffset(0) };
+}
+} // namespace
+
+TEST_CASE("serializeToVT.pointerItemsSayNothingBeforeAnyPointerEvent", "[statusline]")
+{
+    // The pointer is on no cell until an event names one -- not on the top-left one, styled, lettered and
+    // linked here, which a fresh terminal's pointer position reads as.
+    auto mc = MockTerm { PageWithHistory, LineCount(10) };
+    mc.writeToScreen(LinkedRows);
+
+    CHECK(pointerItemTexts(mc.terminal) == PointerItemTexts {});
+}
+
+TEST_CASE("serializeToVT.pointerItemsDescribeTheCellAMoveNamed", "[statusline]")
+{
+    auto mc = MockTerm { PageWithHistory, LineCount(10) };
+    mc.writeToScreen(LinkedRows);
+
+    mc.terminal.sendMouseMoveEvent(Modifier::None, shownCell(1), PixelCoordinate {}, false);
+    CHECK(pointerItemTexts(mc.terminal)
+          == describing(CellFlags { CellFlag::Underline }, "B", "U+0042", "https://b.example/"));
+}
+
+TEST_CASE("serializeToVT.pointerItemsSayNothingOnceThePointerHasLeft", "[statusline]")
+{
+    // Off the grid the pointer is on no cell, and the last one it was on is not described any more.
+    auto mc = MockTerm { PageWithHistory, LineCount(10) };
+    mc.writeToScreen(LinkedRows);
+    mc.terminal.sendMouseMoveEvent(Modifier::None, shownCell(1), PixelCoordinate {}, false);
+    REQUIRE(pointerItemTexts(mc.terminal) != PointerItemTexts {});
+
+    mc.terminal.sendMouseLeaveEvent();
+    CHECK(pointerItemTexts(mc.terminal) == PointerItemTexts {});
+}
+
+TEST_CASE("serializeToVT.pointerItemsDescribeTheCellAScrolledViewShowsUnderThePointer", "[statusline]")
+{
+    // Scrolled back one row, the view shows H on its top row, where the live page has A: the cell under the
+    // pointer is H's.
+    auto mc = MockTerm { PageWithHistory, LineCount(10) };
+    mc.writeToScreen(LinkedRows);
+    REQUIRE(mc.terminal.viewport().scrollUp(LineCount(1)));
+
+    mc.terminal.sendMouseMoveEvent(Modifier::None, shownCell(0), PixelCoordinate {}, false);
+    CHECK(pointerItemTexts(mc.terminal)
+          == describing(CellFlags { CellFlag::Italic }, "H", "U+0048", "https://h.example/"));
 }
 
 TEST_CASE("serializeToVT.clockReadsTheTerminalsWallClockInItsTimeZone", "[statusline]")
