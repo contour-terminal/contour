@@ -4409,13 +4409,50 @@ void Terminal::openDocument(string_view data)
     runOutsideStateLock([this, document = string(data)] { _eventListener.openDocument(document); });
 }
 
+namespace
+{
+
+    /// A row's text as the grid lays it out, with every byte tied to the columns of the cell it came from.
+    struct RowTextWithColumns
+    {
+        std::string text;                ///< The row's text: a cell's own text, a space for an empty cell.
+        std::vector<size_t> firstColumn; ///< Per byte of @ref text: the first column of its cell.
+        std::vector<size_t> lastColumn;  ///< Per byte of @ref text: the last column of its cell.
+    };
+
+    /// Reads @p line cell by cell, so a byte offset into the text can be mapped back to a grid column.
+    ///
+    /// The cells decide their own width and text: a wide character's second cell and a cell with no text
+    /// of its own add nothing, a grapheme cluster is one cell however many codepoints it holds, and an
+    /// empty cell is one space, so a path is not glued to the text across a gap.
+    /// @param line The row to read.
+    /// @return The row's text and, per byte, the columns of the cell holding it.
+    [[nodiscard]] RowTextWithColumns rowTextWithColumns(Line const& line)
+    {
+        auto row = RowTextWithColumns {};
+        auto const columns = static_cast<size_t>(*line.size());
+        for (auto const column: std::views::iota(size_t { 0 }, columns))
+        {
+            auto const offset = ColumnOffset::cast_from(column);
+            auto const cellText = line.toUtf8(offset, offset + ColumnOffset(1));
+            auto const width = static_cast<size_t>(std::max<uint8_t>(line.cellWidthAt(offset), 1));
+            row.text += cellText;
+            row.firstColumn.insert(row.firstColumn.end(), cellText.size(), column);
+            row.lastColumn.insert(row.lastColumn.end(), cellText.size(), column + width - 1);
+        }
+        return row;
+    }
+
+} // namespace
+
 std::optional<std::string> Terminal::pathTextAtMousePosition() const
 {
     auto const mousePosition = currentMouseGridPosition();
     if (!mousePosition)
         return std::nullopt;
 
-    auto const lineText = currentScreen().lineTextAt(mousePosition->line, false, false);
+    auto const row = rowTextWithColumns(currentScreen().grid().lineAt(mousePosition->line));
+    auto const& lineText = row.text;
     auto const mouseColumn = static_cast<size_t>(*mousePosition->column);
 
     static auto const localPathRegex = [] {
@@ -4438,11 +4475,8 @@ std::optional<std::string> Terminal::pathTextAtMousePosition() const
         if (match.empty())
             continue;
 
-        auto const startColumn =
-            utf8ByteOffsetToCodepointIndex(lineText, static_cast<size_t>(match.position()));
-        auto const endColumn =
-            utf8ByteOffsetToCodepointIndex(lineText, static_cast<size_t>(match.position() + match.length()))
-            - 1;
+        auto const startColumn = row.firstColumn[static_cast<size_t>(match.position())];
+        auto const endColumn = row.lastColumn[static_cast<size_t>(match.position() + match.length()) - 1];
 
         // Matches do not overlap, so the first that spans the mouse is the only one.
         if (startColumn <= mouseColumn && mouseColumn <= endColumn)

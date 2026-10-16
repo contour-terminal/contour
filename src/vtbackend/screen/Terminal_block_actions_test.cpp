@@ -748,3 +748,57 @@ TEST_CASE("Terminal.hintMode.offersNoPathOnAReplicaOfAnotherMachine", "[semantic
     mock.terminal.bindReplica(ReplicaRole::OtherMachine, HostIdentity {});
     CHECK(hintsOf(mock).empty());
 }
+
+namespace
+{
+
+/// The path under a mouse pointer hovering over @p column of the first row of @p mock.
+[[nodiscard]] std::optional<std::string> pathTextAtColumn(MockTerm<>& mock, int column)
+{
+    mock.terminal.sendMouseMoveEvent(Modifier::None,
+                                     CellLocation { .line = LineOffset(0), .column = ColumnOffset(column) },
+                                     PixelCoordinate {},
+                                     false);
+    auto const _ = std::scoped_lock { mock.terminal };
+    return mock.terminal.pathTextAtMousePosition();
+}
+
+} // namespace
+
+TEST_CASE("Terminal.pathTextAtMousePosition.countsAWideCharacterAsTwoColumns", "[semanticblocks][blockpaths]")
+{
+    auto mock = MockTerm<> { PageSize { LineCount(3), ColumnCount(40) } };
+    mock.writeToScreen("\xe6\x9d\xb1\xe4\xba\xac src/a.txt"sv); // 東京 takes columns 0-3; the path 5-13
+    mock.terminal.flushInput();
+
+    CHECK(pathTextAtColumn(mock, 13) == "src/a.txt");
+    CHECK(pathTextAtColumn(mock, 5) == "src/a.txt");
+    CHECK(pathTextAtColumn(mock, 4) == std::nullopt);
+    CHECK(pathTextAtColumn(mock, 14) == std::nullopt);
+}
+
+TEST_CASE("Terminal.pathTextAtMousePosition.countsAClusterAsOneColumn", "[semanticblocks][blockpaths]")
+{
+    auto mock = MockTerm<> { PageSize { LineCount(3), ColumnCount(40) } };
+    // Two "e" + COMBINING ACUTE ACCENT clusters, one column each; the path takes columns 3-11.
+    mock.writeToScreen("e\xcc\x81"
+                       "e\xcc\x81 src/a.txt"sv);
+    mock.terminal.flushInput();
+
+    CHECK(pathTextAtColumn(mock, 11) == "src/a.txt");
+    CHECK(pathTextAtColumn(mock, 3) == "src/a.txt");
+    CHECK(pathTextAtColumn(mock, 2) == std::nullopt);
+}
+
+TEST_CASE("Terminal.pathTextAtMousePosition.findsASecondPathRightOfWideCharacters",
+          "[semanticblocks][blockpaths]")
+{
+    auto mock = MockTerm<> { PageSize { LineCount(3), ColumnCount(40) } };
+    mock.writeToScreen("src/a.txt \xe6\x9d\xb1\xe4\xba\xac b.txt"sv); // the path 0-8; 東京 10-13; b.txt 15-19
+    mock.terminal.flushInput();
+
+    CHECK(pathTextAtColumn(mock, 8) == "src/a.txt");
+    CHECK(pathTextAtColumn(mock, 15) == "b.txt");
+    CHECK(pathTextAtColumn(mock, 19) == "b.txt");
+    CHECK(pathTextAtColumn(mock, 12) == std::nullopt);
+}
