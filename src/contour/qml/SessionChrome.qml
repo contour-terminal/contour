@@ -111,6 +111,9 @@ Item {
                                           ? chrome.session.commandBlockTooltip()
                                           : ""
         readonly property bool showAbove: anchorRect.y > height + 8
+        // Half the hyperlink tip's: a pointer brought to the gutter is there on purpose, where one crossing
+        // a link is usually on its way to something else.
+        readonly property int showDelay: 300
 
         width: 1
         height: 1
@@ -122,7 +125,7 @@ Item {
         ToolTip.visible: blockTip.tipText !== ""
                          && chrome.Window.window !== null
                          && chrome.Window.window.active
-        ToolTip.delay: 600
+        ToolTip.delay: blockTip.showDelay
     }
 
     // Vertical scrollbar, bidirectionally bound to the VT viewport (drag -> viewport here; viewport ->
@@ -228,9 +231,10 @@ Item {
             width: vbar.availableWidth
             height: vbar.availableHeight
 
-            // How far past its two drawn pixels a tick takes a press, on either side: a two-pixel line is a
-            // hard target.
-            readonly property int hitMargin: 1
+            // A tick's drawn height, and how far past it the tick takes a press on either side: 3 + 2 * 3 makes a
+            // target nine pixels tall, where a two-pixel line taking one more on each side was a hard one.
+            readonly property int tickHeight: 3
+            readonly property int hitMargin: 3
 
             Repeater {
                 id: markRepeater
@@ -247,7 +251,7 @@ Item {
                     y: Math.min(markLayer.height - tick.height,
                                 Math.round(tick.modelData.position * markLayer.height))
                     width: markLayer.width
-                    height: 2
+                    height: markLayer.tickHeight
                     radius: 1
                     color: chrome.markColor(tick.modelData.kind)
 
@@ -323,6 +327,19 @@ Item {
         onNoToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, true);
         onNoClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, false);
         onRejected: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, false);
+    }
+
+    // Asked before RerunCommand types a command at the prompt and enters it: the command line is what the
+    // shell reported, or what the screen showed, and a program writing to the terminal can forge either. The
+    // text is set as the dialog opens, from the command the session holds for it.
+    RequestPermission {
+        id: requestRerunCommandDialog
+        title: qsTr("Run this command again?")
+        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(true, true);
+        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(true, false);
+        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(false, true);
+        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(false, false);
+        onRejected: if (chrome.session !== null) chrome.session.applyPendingRerun(false, false);
     }
 
     // The find bar (Ctrl+Shift+F, or `/` in Vi normal mode). Per pane, not per window: each session
@@ -454,5 +471,10 @@ Item {
         function onRequestPermissionForBufferCapture() { requestBufferCaptureDialog.open(); }
         function onRequestPermissionForShowHostWritableStatusLine() { requestShowHostWritableStatusLine.open(); }
         function onRequestPermissionForPasteLargeFile() { requestLargeFilePaste.open(); }
+        function onRequestPermissionForRerunCommand() {
+            requestRerunCommandDialog.text = qsTr("It is typed at the prompt and entered:") + "\n\n"
+                                             + chrome.session.pendingRerunCommandLine();
+            requestRerunCommandDialog.open();
+        }
     }
 }

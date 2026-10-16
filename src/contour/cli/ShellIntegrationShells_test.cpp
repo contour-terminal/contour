@@ -471,6 +471,25 @@ void awaitFirstPromptEnd(ShellSession& session)
     CHECK_FALSE(kindsOf(osc133Marks(session.transcript())).contains('C'));
 }
 
+/// Types @p command at the prompt the shell shows, and waits for the command's end (OSC 133;D) and the
+/// next prompt's end (OSC 133;B).
+/// @param session The shell, at a prompt.
+/// @param command What to type, without the Return that runs it.
+/// @return Where in the transcript the command was typed.
+size_t runCommand(ShellSession& session, std::string const& command)
+{
+    auto const typedAt = session.transcript().size();
+    session.type(command + "\r");
+    session.pumpUntil(
+        [typedAt](std::string_view text) {
+            auto const kinds = kindsOf(osc133Marks(text.substr(typedAt)));
+            auto const finished = kinds.find('D');
+            return finished != std::string::npos && kinds.find('B', finished) != std::string::npos;
+        },
+        "the command's end (OSC 133;D) and the next prompt's end (OSC 133;B)");
+    return typedAt;
+}
+
 /// Types @p launch's command at the prompt the shell shows, and checks what it told the terminal from
 /// then on: exactly one C carrying the command line, exactly one D with @p exitCode, and the next
 /// prompt's A and B, in that order -- repaints of the waiting prompt (A, B) aside -- and the command
@@ -480,15 +499,7 @@ void awaitFirstPromptEnd(ShellSession& session)
 /// @param exitCode The exit status the command ends with.
 void checkCommandCycle(ShellSession& session, ShellLaunch const& launch, int exitCode = 0)
 {
-    auto const typedAt = session.transcript().size();
-    session.type(launch.command + "\r");
-    session.pumpUntil(
-        [typedAt](std::string_view text) {
-            auto const kinds = kindsOf(osc133Marks(text.substr(typedAt)));
-            auto const finished = kinds.find('D');
-            return finished != std::string::npos && kinds.find('B', finished) != std::string::npos;
-        },
-        "the command's end (OSC 133;D) and the next prompt's end (OSC 133;B)");
+    auto const typedAt = runCommand(session, launch.command);
 
     auto const transcript = std::string_view { session.transcript() };
     INFO("what the shell wrote: " << core::escape(transcript));
@@ -526,6 +537,9 @@ void checkCommandCycle(ShellSession& session, ShellLaunch const& launch, int exi
               .contains(vtbackend::LineFlag::OutputStart));
 }
 
+/// A character of four UTF-8 bytes, U+1F600, which the awkward directory's name holds.
+constexpr auto FourByteCharacter = "\xf0\x9f\x98\x80"sv;
+
 #ifdef _WIN32
 /// A directory name no OSC 7 may carry raw, as far as Windows allows one: a space; "%41", which reads as
 /// "A" once decoded; ';', which separates OSC parameters, '#', which opens a URL's fragment, and the
@@ -539,6 +553,21 @@ constexpr auto AwkwardDirectory = "cwd a%41;#'[x]\xc3\xbc\xe2\x82\xac\xf0\x9f\x9
 constexpr auto AwkwardDirectory = "cwd a%41\xc3\xbc\xe2\x82\xac\xf0\x9f\x98\x80\x1b]2;pwned\x07z"sv;
 #endif
 
+/// Whether @p session's shell can hold a four-byte UTF-8 character in a string: whether it can change into a
+/// directory named with one.
+/// @param session The shell, at a prompt in its HOME; it is left there.
+/// @return Whether it can.
+[[nodiscard]] bool holdsFourByteCharacters(ShellSession& session)
+{
+    auto const probe = std::string { "probe" } + std::string { FourByteCharacter };
+    REQUIRE(std::filesystem::create_directory(session.home() / core::pathFromTrustedUtf8(probe)));
+    auto const typedAt = runCommand(session, "cd probe* && cd ..");
+    auto const marks = osc133Marks(std::string_view { session.transcript() }.substr(typedAt));
+    auto const finished = std::ranges::find(marks, 'D', &Mark::kind);
+    REQUIRE(finished != marks.end());
+    return finished->params == "0";
+}
+
 /// Changes @p launch's shell into AwkwardDirectory, and checks that the terminal learned from OSC 7
 /// exactly where the next command runs -- on this machine -- and nothing else from the name.
 void checkWorkingDirectoryReport(ShellLaunch const& launch)
@@ -546,12 +575,25 @@ void checkWorkingDirectoryReport(ShellLaunch const& launch)
     auto const session = start(launch);
     // The host every shell names in its file:// URL, as Contour asks for it too.
     session->terminal().identity.hostname = core::platform::hostName();
+    awaitPromptEnd(*session);
+
+    // A shell that cannot hold a four-byte UTF-8 character in a string cannot change into a directory named
+    // with one, whatever its integration would make of the name: tcsh 6.24.14 and 6.24.15 cut a string short
+    // at one in a UTF-8 locale (the tcsh mailing list, "UTF-8 character problems", February 2025). Asked
+    // first, so that such a shell is still tested on everything else the name holds -- and says so.
+    auto name = std::string { AwkwardDirectory };
+    if (!holdsFourByteCharacters(*session))
+    {
+        WARN(launch.shell
+             << " cannot hold a four-byte UTF-8 character in a string: its directory leaves it out");
+        name.erase(name.find(FourByteCharacter), FourByteCharacter.size());
+    }
+
     // Named as UTF-8 on every platform: Windows reads a narrow path in its ANSI code page. And expected in
     // the form a file:// URL's path takes there too: "C:/Users/...", with forward slashes.
-    auto const directory = session->home() / core::pathFromTrustedUtf8(AwkwardDirectory);
+    auto const directory = session->home() / core::pathFromTrustedUtf8(name);
     REQUIRE(std::filesystem::create_directory(directory));
     auto const expected = core::platform::normalizePath(std::filesystem::canonical(directory));
-    awaitPromptEnd(*session);
 
     auto changeDirectory = launch;
     changeDirectory.command = "cd cwd*";

@@ -177,6 +177,23 @@ TEST_CASE("Tab: color override can be set and reset", "[vtworkspace][tab][color]
     CHECK_FALSE(tab.color().has_value());
 }
 
+TEST_CASE("Tab: profile color is the default below application and user colors", "[vtworkspace][tab][color]")
+{
+    Ids ids;
+    Tab tab { TabId { 1 }, ids.pane(), ids.session() };
+    auto const profile = vtbackend::RGBColor { 0x2E, 0x34, 0x40 };
+    auto const application = vtbackend::RGBColor { 0x10, 0x20, 0x30 };
+    auto const user = vtbackend::RGBColor { 0x40, 0x50, 0x60 };
+    tab.setColor(TabColorSource::Profile, profile);
+    tab.setColor(TabColorSource::Application, application);
+    tab.setColor(TabColorSource::User, user);
+    CHECK(tab.color() == user);
+    tab.resetColor(TabColorSource::User);
+    CHECK(tab.color() == application);
+    tab.resetColor(TabColorSource::Application);
+    CHECK(tab.color() == profile);
+}
+
 TEST_CASE("Tab: the user's color outranks the application's, and each survives the other's reset",
           "[vtworkspace][tab][color]")
 {

@@ -52,4 +52,10 @@ enum class SanitizePurpose : uint8_t
 /// @return Whether @p text is already safe for @p purpose.
 [[nodiscard]] bool isUnchangedBySanitizing(std::string_view text, SanitizePurpose purpose);
 
+/// @p text without the white space it ends with: every code point of Unicode's White_Space property, not only
+/// ASCII's. Ill-formed UTF-8 is not white space, whatever its bytes.
+/// @param text The text to trim.
+/// @return The prefix of @p text that ends with its last code point that is not white space.
+[[nodiscard]] std::string_view trimTrailingWhiteSpace(std::string_view text);
+
 } // namespace vtbackend

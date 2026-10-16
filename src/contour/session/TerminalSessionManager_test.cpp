@@ -145,6 +145,8 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors",
     auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
     auto* factory = factoryOwned.get();
     contour::test::TestApp app { std::move(factoryOwned) };
+    auto const profileColor = vtbackend::RGBColor { "#2E3440" };
+    app.app().config().profile().tabColor.value() = profileColor;
     contour::test::ScopedController const win { app.manager() };
 
     // Build a 3-tab layout in C++ (no config needed). Panes set NO profile, so no config lookup
@@ -169,9 +171,12 @@ TEST_CASE("TerminalSessionManager: applyLayoutToWindow builds tabs with colors",
     auto* window = app.manager().model().window(win.id);
     REQUIRE(window != nullptr);
     CHECK(window->tabCount() == 3); // three tabs created from the layout
+    CHECK(window->tabAt(0)->color() == profileColor);
     auto* colored = window->tabAt(1);
     REQUIRE(colored != nullptr);
     CHECK(colored->color(vtworkspace::TabColorSource::User).has_value()); // second tab got its color
+    CHECK(colored->color() == t1.color);
+    CHECK(colored->color(vtworkspace::TabColorSource::Profile) == profileColor);
     auto* split = window->tabAt(2);
     REQUIRE(split != nullptr);
     CHECK(split->paneCount() == 2); // the split tab realized both leaves

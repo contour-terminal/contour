@@ -209,6 +209,18 @@ constexpr StringLiteral TabLabelConfig {
     "{comment} Split tabs show \"Multiple panes\" instead.\n"
 };
 
+constexpr StringLiteral TabColorConfig {
+    "{comment} Default color for tabs opened with this profile ('#RRGGBB', or null for no profile color).\n"
+    "{comment} Layout, user and application colors override this default.\n"
+    "{comment} Split tabs keep the color of the profile that created the tab.\n"
+    "tab_color: {}\n"
+};
+
+constexpr StringLiteral TabColorWeb {
+    "Default tab color as `'#RRGGBB'`, or `null` for no profile color. Layout, user and application "
+    "colors override it. Split tabs keep the color of the profile that created the tab.\n"
+};
+
 constexpr StringLiteral PixelReportingConfig {
     "{comment} The unit pixel sizes are reported to applications in (ignore-case).\n"
     "{comment} Applications divide a reported extent by the grid to learn the cell size, and size\n"
@@ -419,13 +431,22 @@ constexpr StringLiteral GutterConfig {
     "    {comment} The strip left of the grid. Its width follows this configuration and never the\n"
     "    {comment} content, so a growing line number cannot resize the page mid-command. The block\n"
     "    {comment} column beside the grid is reserved while fold markers (folding.show_markers), exit\n"
-    "    {comment} status or user marks are on -- one column, as the fold markers always took.\n"
+    "    {comment} status or user marks are on, block_column_width cells wide.\n"
     "    {comment} Colour each command's fold controls by how it ended, draw a triangle beside a running\n"
     "    {comment} command, and a dot beside a finished one that shows no fold control -- one with nothing\n"
-    "    {comment} to fold, or any one while fold markers are off.\n"
+    "    {comment} to fold, or any one while fold markers are off. A failed one shows a cross instead of\n"
+    "    {comment} the dot, and its fold's line is drawn heavy.\n"
     "    exit_status: {}\n"
     "    {comment} Draw a diamond beside every row marked with vi-mode mm.\n"
     "    user_marks: {}\n"
+    "    {comment} The block column's width in cells, 1 or 2. At 2 its fold controls and marks are drawn\n"
+    "    {comment} across both cells, twice the size, and a click anywhere in the column lands.\n"
+    "    block_column_width: {}\n"
+    "    {comment} Draw the fold under the pointer -- its line, its box and its end -- one stroke heavier, "
+    "as\n"
+    "    {comment} well as at full strength. Its colours are the color scheme's fold_marker.hover and\n"
+    "    {comment} block_status_hover.\n"
+    "    bold_on_hover: {}\n"
     "    {comment} Line numbers, as in vim:\n"
     "    {comment}   off      - none\n"
     "    {comment}   absolute - every row's number, counted from the session's first row (nu)\n"
@@ -1642,6 +1663,27 @@ constexpr StringLiteral BlockStatusHeaderConfig {
     "block_status:\n"
 };
 
+constexpr StringLiteral BlockStatusHoverConfig {
+    "\n"
+    "{comment} Colors of the gutter's block column by how each command ended, while the pointer is over\n"
+    "{comment} its fold. Unset by default: each is then its block_status color lifted halfway toward this\n"
+    "{comment} scheme's text color -- and a success block_status leaves to the fold column comes up as\n"
+    "{comment} the column does, to fold_marker.hover. Uncomment to override. The values shown are what\n"
+    "{comment} the default scheme derives, so uncommenting them as they are changes nothing.\n"
+    "{comment} block_status_hover:\n"
+    "{comment}     success: '#D0D0D0'\n"
+    "{comment}     failure: '#CB8484'\n"
+    "{comment}     running: '#B8B868'\n"
+};
+
+constexpr StringLiteral BlockStatusHoverHeaderConfig {
+    "\n"
+    "{comment} Colors of the gutter's block column by how each command ended, while the pointer is over\n"
+    "{comment} its fold. Written back because this scheme sets them; remove a key to derive it again from\n"
+    "{comment} block_status.\n"
+    "block_status_hover:\n"
+};
+
 constexpr StringLiteral GutterTextConfig {
     "\n"
     "{comment} Color of the gutter's line numbers and timestamps. Unset by default: this scheme's own\n"
@@ -2375,6 +2417,8 @@ constexpr StringLiteral GutterWeb {
     "gutter:\n"
     "  exit_status: true\n"
     "  user_marks: true\n"
+    "  block_column_width: 2\n"
+    "  bold_on_hover: true\n"
     "  line_numbers: off\n"
     "  line_number_width: 6\n"
     "  timestamps: false\n"
@@ -2382,8 +2426,8 @@ constexpr StringLiteral GutterWeb {
     "```\n"
     "The gutter's width follows this configuration and never its content, so a growing line number "
     "cannot resize the page in the middle of a command's output. The block column is reserved while "
-    "fold markers (`folding.show_markers`), exit status or user marks are on -- one column, exactly as "
-    "the fold markers always took.\n"
+    "fold markers (`folding.show_markers`), exit status or user marks are on, `block_column_width` cells "
+    "wide.\n"
     ":octicons-horizontal-rule-16: ==exit_status== Colour each command's fold controls by how it ended "
     "-- the colour scheme's `block_status` colours -- draw a triangle beside a running command, and a "
     "dot beside a finished one that shows no fold control: one with nothing to fold, or any one while "
@@ -2391,6 +2435,13 @@ constexpr StringLiteral GutterWeb {
     "directory and command line. <br/>\n"
     ":octicons-horizontal-rule-16: ==user_marks== Draw a diamond beside every row marked with vi-mode "
     "`mm`. <br/>\n"
+    ":octicons-horizontal-rule-16: ==block_column_width== The block column's width in cells, 1 or 2. At "
+    "2, the default, its fold controls and marks are drawn across both cells at twice the size, and a "
+    "click anywhere in the column -- the blank strip left of it included -- lands on it. <br/>\n"
+    ":octicons-horizontal-rule-16: ==bold_on_hover== Draw the fold under the pointer -- its line, its box "
+    "and its end -- one stroke heavier, as well as at full strength: a failed command's, already heavy, "
+    "heavier still. Its colours are the color scheme's `fold_marker.hover` and `block_status_hover`. "
+    "<br/>\n"
     ":octicons-horizontal-rule-16: ==line_numbers== `off`, `absolute` (every row's number, counted from "
     "the session's first row, so the numbers stay put while history scrolls away), `relative` (every "
     "row's distance from the cursor row, counting a collapsed block as one row -- exactly what `j` and "
@@ -3005,6 +3056,7 @@ using InsertAfterYank = DocumentationEntry<InsertAfterYankConfig, InsertAfterYan
 using CopyLastMarkRangeOffset = DocumentationEntry<CopyLastMarkRangeOffsetConfig, CopyLastMarkRangeOffsetWeb>;
 using WMClass = DocumentationEntry<WMClassConfig, WMClassWeb>;
 using TabLabel = DocumentationEntry<TabLabelConfig, TabLabelWeb>;
+using TabColor = DocumentationEntry<TabColorConfig, TabColorWeb>;
 using PixelReporting = DocumentationEntry<PixelReportingConfig, PixelReportingWeb>;
 using AccessibilityAnnouncements =
     DocumentationEntry<AccessibilityAnnouncementsConfig, AccessibilityAnnouncementsWeb>;
@@ -3209,6 +3261,8 @@ using ContextTint = DocumentationEntry<ContextTintConfig, Dummy>;
 using ContextTintHeader = DocumentationEntry<ContextTintHeaderConfig, Dummy>;
 using BlockStatus = DocumentationEntry<BlockStatusConfig, Dummy>;
 using BlockStatusHeader = DocumentationEntry<BlockStatusHeaderConfig, Dummy>;
+using BlockStatusHover = DocumentationEntry<BlockStatusHoverConfig, Dummy>;
+using BlockStatusHoverHeader = DocumentationEntry<BlockStatusHoverHeaderConfig, Dummy>;
 using GutterText = DocumentationEntry<GutterTextConfig, Dummy>;
 using GutterTextSet = DocumentationEntry<GutterTextSetConfig, Dummy>;
 using IndentedEntry = DocumentationEntry<IndentedEntryConfig, Dummy>;

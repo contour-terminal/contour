@@ -214,18 +214,19 @@ enum class FoldMarker : uint8_t
 /// control a reader has already met in editors and tree views -- and the body continues the column it
 /// hangs from down to a corner at the block's last row.
 ///
-/// The two heads are Contour's own private-use codepoints, because no Unicode character carries both
-/// the boxed sign and the stem that ties a head to its body (@see
-/// docs/vt-extensions/private-use-glyphs.md). All four are drawn by vtrasterizer's own box-drawing
-/// renderer rather than by the font, so they are crisp and cell-proportionate in any font.
+/// All four are Contour's own private-use codepoints (@see docs/vt-extensions/private-use-glyphs.md): no
+/// Unicode character carries both the boxed sign and the stem that ties a head to its body, and the body is
+/// drawn at the head's stroke in the head's column whatever the gutter's width, which a box-drawing
+/// character drawn two cells wide is not. vtrasterizer's own box-drawing renderer draws them rather than the
+/// font, so they are crisp and cell-proportionate in any font.
 [[nodiscard]] constexpr char32_t foldMarkerGlyph(FoldMarker marker) noexcept
 {
     constexpr auto Glyphs = std::array {
         U'\0',         // None
         U'\U0010F000', // Expanded:  boxed minus with a stem into the body below it
         U'\U0010F001', // Collapsed: boxed plus, with nothing below to connect to
-        U'│',          // Body:      BOX DRAWINGS LIGHT VERTICAL
-        U'┕',          // BodyEnd:   BOX DRAWINGS UP LIGHT AND RIGHT HEAVY
+        U'\U0010F006', // Body:      a vertical in the stem's column, as U+2502 │
+        U'\U0010F007', // BodyEnd:   down to the row's middle and right, as U+2514 └
     };
 
     // Otherwise a sixth marker without a sixth row is a silent out-of-bounds read rather than the

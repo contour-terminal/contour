@@ -97,6 +97,29 @@ TEST_CASE("ColorPalette.foldMarker.isLegibleInTheBuiltinSchemes", "[ColorPalette
     }
 }
 
+TEST_CASE("ColorPalette.foldMarker.keepsThreeToOneContrastAtRest", "[ColorPalette]")
+{
+    // WCAG 1.4.11's floor for a control a user must make out: the resting fade stops where it would go
+    // under it, which the solarized schemes reached at 2.4:1 (dark) and 2.0:1 (light). The default scheme,
+    // at 4.3:1, keeps its colour (@see defaultSchemeMatchesTheDocumentedColors).
+    for (auto const name: defaultColorPaletteNames())
+    {
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        INFO("scheme: " << name);
+
+        auto const rest = palette.foldMarkerColors();
+        if (contrastRatio(palette.defaultForeground, palette.defaultBackground)
+            >= ColorPalette::FoldMarkerRestMinimumContrast)
+            CHECK(contrastRatio(rest.foreground, rest.background)
+                  >= ColorPalette::FoldMarkerRestMinimumContrast);
+
+        // Still quieter than the text it sits beside.
+        CHECK(contrastRatio(rest.foreground, rest.background)
+              <= contrastRatio(palette.defaultForeground, palette.defaultBackground));
+    }
+}
+
 TEST_CASE("ColorPalette.foldMarker.defaultSchemeMatchesTheDocumentedColors", "[ColorPalette]")
 {
     // Three places outside this header transcribe what the default scheme derives, as literals: the

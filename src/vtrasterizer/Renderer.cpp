@@ -23,6 +23,7 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <utility>
 
 #include <tracy/Tracy.hpp>
 
@@ -767,6 +768,42 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
                    [&] { renderStickyHeader(header, terminal.mainPageTopRow(), mainPageSize.columns); });
     };
 
+    // The status line and the page, as the buffer holds them: the page first with the status line at the
+    // bottom, the status line first with it at the top.
+    struct StatusSplit
+    {
+        std::span<vtbackend::RenderCell const> mainCells {};
+        std::span<vtbackend::RenderLine const> mainLines {};
+        std::span<vtbackend::RenderCell const> statusCells {};
+        std::span<vtbackend::RenderLine const> statusLines {};
+    };
+    auto const splitStatus = [&](vtbackend::RenderBuffer const& buffer) {
+        auto const cellSplit = findCellPartitionPoint(buffer.cells, statusLineBoundary);
+        auto const lineSplit = findLinePartitionPoint(buffer.lines, statusLineBoundary);
+        auto const firstCells = std::span(buffer.cells).first(cellSplit);
+        auto const secondCells = std::span(buffer.cells).subspan(cellSplit);
+        auto const firstLines = std::span(buffer.lines).first(lineSplit);
+        auto const secondLines = std::span(buffer.lines).subspan(lineSplit);
+        return StatusSplit { .mainCells = statusDisplayAtTop ? secondCells : firstCells,
+                             .mainLines = statusDisplayAtTop ? secondLines : firstLines,
+                             .statusCells = statusDisplayAtTop ? firstCells : secondCells,
+                             .statusLines = statusDisplayAtTop ? firstLines : secondLines };
+    };
+
+    // The status line's own pass: drawn as far left of the page's column 0 as its bar says, the indicator
+    // status line's text spanning the gutter's columns as well (#2139). The grid's origin is moved for the
+    // pass and moved back once its text is flushed, which every renderer drawing it reads it through.
+    auto const renderStatusRows = [&](vtbackend::RenderBuffer const& buffer, StatusSplit const& split) {
+        auto const leading = buffer.statusBar ? unbox<int>(buffer.statusBar->leadingColumns) : 0;
+        auto const shift = leading * _gridMetrics.cellSize.width.as<int>();
+        _gridMetrics.pageMargin.left -= shift;
+        auto const restore = core::Finally { [&] { _gridMetrics.pageMargin.left += shift; } };
+        renderPass(false, [&] {
+            renderCells(split.statusCells);
+            renderLines(split.statusLines);
+        });
+    };
+
     if (smoothPixelOffset == 0)
     {
         // --- Single-pass rendering: no smooth scroll offset, no scissor needed ---
@@ -776,14 +813,27 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         // to swap, and a failed swap leaves the frame in the back buffer to be swapped in later -- the cost
         // is a few more failed swaps, never a wait or an inversion.
         vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
-        cursorOpt = renderBuffer.get().cursor;
+        auto const& buffer = renderBuffer.get();
+        cursorOpt = buffer.cursor;
+
+        // One pass, unless the status line is drawn left of the page's columns: then a pass of its own.
+        auto const statusShifted =
+            buffer.statusBar && buffer.statusBar->leadingColumns > vtbackend::ColumnCount(0);
+        auto const split = statusShifted ? splitStatus(buffer)
+                                         : StatusSplit { .mainCells = std::span(buffer.cells),
+                                                         .mainLines = std::span(buffer.lines) };
         renderPass(primaryPressure, [&] {
-            renderCells(std::span(renderBuffer.get().cells));
-            renderLines(std::span(renderBuffer.get().lines));
-            renderGutter(std::span(renderBuffer.get().gutter));
-            renderAnnotations(std::span(renderBuffer.get().annotations));
+            if (auto const& bar = buffer.statusBar)
+                renderStatusBar(*bar);
+            renderCells(split.mainCells);
+            renderLineFlash(buffer.lineFlash, mainPageSize.columns, 0);
+            renderLines(split.mainLines);
+            renderGutter(std::span(buffer.gutter));
+            renderAnnotations(std::span(buffer.annotations));
         });
-        if (auto const& header = renderBuffer.get().stickyHeader)
+        if (statusShifted)
+            renderStatusRows(buffer, split);
+        if (auto const& header = buffer.stickyHeader)
         {
             _renderTarget->execute(now);
             renderStickyHeaderStep(*header);
@@ -797,25 +847,12 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         setSmoothScrollOffset(smoothPixelOffset);
         vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;
-
-        auto const cellSplit = findCellPartitionPoint(renderBuffer.get().cells, statusLineBoundary);
-        auto const lineSplit = findLinePartitionPoint(renderBuffer.get().lines, statusLineBoundary);
-
-        // When status line is at bottom, the first partition is main display;
-        // when at top, the first partition is the status line.
-        auto const firstCells = std::span(renderBuffer.get().cells).first(cellSplit);
-        auto const secondCells = std::span(renderBuffer.get().cells).subspan(cellSplit);
-        auto const firstLines = std::span(renderBuffer.get().lines).first(lineSplit);
-        auto const secondLines = std::span(renderBuffer.get().lines).subspan(lineSplit);
-
-        auto const mainCells = statusDisplayAtTop ? secondCells : firstCells;
-        auto const statusCells = statusDisplayAtTop ? firstCells : secondCells;
-        auto const mainLines = statusDisplayAtTop ? secondLines : firstLines;
-        auto const statusLines = statusDisplayAtTop ? firstLines : secondLines;
+        auto const split = splitStatus(renderBuffer.get());
 
         renderPass(primaryPressure, [&] {
-            renderCells(mainCells, smoothPixelOffset);
-            renderLines(mainLines);
+            renderCells(split.mainCells, smoothPixelOffset);
+            renderLineFlash(renderBuffer.get().lineFlash, mainPageSize.columns, smoothPixelOffset);
+            renderLines(split.mainLines);
             // The gutter and the annotations belong to the main display, and scroll with it.
             renderGutter(std::span(renderBuffer.get().gutter));
             renderAnnotations(std::span(renderBuffer.get().annotations));
@@ -840,12 +877,11 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         if (auto const& header = renderBuffer.get().stickyHeader)
             renderStickyHeaderStep(*header);
 
-        // Pass 2: Status line (no scroll offset, no scissor).
+        // Pass 2: Status line (no scroll offset, no scissor), its bar ahead of its rows.
         setSmoothScrollOffset(0);
-        renderPass(false, [&] {
-            renderCells(statusCells);
-            renderLines(statusLines);
-        });
+        if (auto const& bar = renderBuffer.get().statusBar)
+            renderPass(false, [&] { renderStatusBar(*bar); });
+        renderStatusRows(renderBuffer.get(), split);
     }
 
     if (cursorOpt)
@@ -979,6 +1015,51 @@ void Renderer::renderOverlayCell(vtbackend::RenderCell const& cell, std::string_
     {
         errorLog()("{}: skipping a cell on line {} due to exception: {}", what, cell.position.line, e.what());
     }
+}
+
+void Renderer::renderLineFlash(std::optional<vtbackend::RenderLineFlash> const& lineFlash,
+                               vtbackend::ColumnCount columns,
+                               int smoothScrollOffset)
+{
+    if (!lineFlash)
+        return;
+    ZoneScoped;
+    auto const& flash = *lineFlash;
+    // Across the page's columns, after the cells' own backgrounds -- so it tints a coloured cell as much as
+    // a plain one -- and under their text, which a step draws after every rectangle.
+    auto const topLeft = _gridMetrics.map(flash.lineOffset, vtbackend::ColumnOffset(0), smoothScrollOffset);
+    auto const width = _gridMetrics.cellSize.width * vtbackend::Width::cast_from(columns);
+    auto const alpha = static_cast<uint8_t>(std::lround(std::clamp(flash.alpha, 0.0f, 1.0f) * 255.0f));
+    _renderTarget->renderRectangle(
+        topLeft.x, topLeft.y, width, _gridMetrics.cellSize.height, vtbackend::RGBAColor(flash.color, alpha));
+}
+
+void Renderer::renderStatusBar(vtbackend::RenderStatusBar const& bar)
+{
+    ZoneScoped;
+    auto const renderSize = _renderTarget->renderSize();
+    auto const rowsTop = _gridMetrics.mapTopLeft(bar.lineOffset, vtbackend::ColumnOffset(0)).y;
+    auto const rowsBottom =
+        rowsTop + (_gridMetrics.cellSize.height * vtbackend::Height::cast_from(bar.lines)).as<int>();
+
+    // Out to the edge it sits on as well: below a bottom bar lie the page margin and whatever part of a row
+    // the pane's height leaves over, above a top one the margin.
+    auto const [top, bottom] = [&]() -> std::pair<int, int> {
+        switch (bar.position)
+        {
+            case vtbackend::StatusDisplayPosition::Bottom:
+                return { rowsTop, std::max(rowsBottom, renderSize.height.as<int>()) };
+            case vtbackend::StatusDisplayPosition::Top: return { 0, rowsBottom };
+        }
+        core::unreachable();
+    }();
+
+    // Opaque, as the BackgroundRenderer draws the status line's own cells: the bar reads as one piece.
+    _renderTarget->renderRectangle(0,
+                                   top,
+                                   renderSize.width,
+                                   vtbackend::Height::cast_from(bottom - top),
+                                   vtbackend::RGBAColor(bar.background));
 }
 
 void Renderer::renderStickyHeader(vtbackend::RenderStickyHeader const& header,

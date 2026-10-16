@@ -9,6 +9,8 @@
 #include <chrono>
 #include <string>
 
+using contour::session::BlockTooltipHint;
+using contour::session::blockTooltipHintText;
 using contour::session::commandBlockTooltipText;
 using namespace std::chrono_literals;
 
@@ -32,6 +34,16 @@ constexpr auto Started = chrono::local_days { chrono::year { 2026 } / chrono::Oc
     return record;
 }
 } // namespace
+
+TEST_CASE("CommandBlockTooltip.hintSaysWhatAClickDoes", "[contour][gutter]")
+{
+    // What a mark cannot say by itself: a box folds, a disc or a cross opens the block's menu, and a
+    // right-click opens it anywhere on the block.
+    CHECK(blockTooltipHintText(BlockTooltipHint::Collapse) == "Click to collapse · Right-click for actions");
+    CHECK(blockTooltipHintText(BlockTooltipHint::Expand) == "Click to expand · Right-click for actions");
+    CHECK(blockTooltipHintText(BlockTooltipHint::Menu) == "Click for actions");
+    CHECK(blockTooltipHintText(BlockTooltipHint::RightClickOnly) == "Right-click for actions");
+}
 
 TEST_CASE("CommandBlockTooltip.saysHowWhenWhereAndWhat", "[contour][gutter]")
 {

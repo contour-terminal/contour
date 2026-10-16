@@ -169,11 +169,41 @@ struct RenderCursor
     std::optional<RGBColor> animateFromColor {}; ///< Cursor color at animation source position.
 };
 
+/// A status line whose bar spans the window's whole width: the gutter and the page margins beside it, too.
+///
+/// Its background reaches the window's edges. Its text starts at the gutter's left edge: the status line's
+/// cells are numbered from its own column 0 as every row's are, and drawn @ref leadingColumns columns left of
+/// the page's -- shifted as a whole by the renderer, rather than written at negative columns, which nothing
+/// that walks @ref RenderBuffer::cells expects.
+struct RenderStatusBar
+{
+    LineOffset lineOffset;          ///< Its first row.
+    LineCount lines;                ///< How many rows it takes.
+    RGBColor background;            ///< What the bar is filled with.
+    StatusDisplayPosition position; ///< The edge it sits on, which it reaches past the margin there too.
+    ColumnCount leadingColumns {};  ///< How far left of the page's column 0 its own column 0 is drawn.
+};
+
+/// A row flashed where a jump landed -- a press on the sticky header (@see
+/// Terminal::scrollToCommandBlockHead) -- so the eye finds the line the view moved to: a band across the
+/// page's columns, under the row's text, fading out.
+struct RenderLineFlash
+{
+    LineOffset lineOffset; ///< The screen row, as RenderCell::position.line counts them.
+    RGBColor color;        ///< The band's colour.
+    float alpha = 0.0f;    ///< Its opacity on this frame, from Terminal's peak down to nothing.
+};
+
 struct RenderBuffer
 {
     std::vector<RenderCell> cells {};
     std::vector<RenderLine> lines {};
     std::vector<RenderGutterCell> gutter {};
+
+    /// The indicator status line's bar, edge to edge. Absent for a host-writable status line: that one is
+    /// the application's, gets no wider than the main page, and leaves the strip beside it to the default
+    /// background.
+    std::optional<RenderStatusBar> statusBar {};
 
     /// Render-only text the terminal lays over the page -- a collapsed fold's `⋯ 1,234 lines` -- already
     /// laid out (@see layoutRenderText), one shaping group per annotation.
@@ -186,6 +216,9 @@ struct RenderBuffer
 
     /// The sticky command header covering the main page's first row on this frame, if any.
     std::optional<RenderStickyHeader> stickyHeader {};
+
+    /// The row a jump just landed on, while its flash fades; absent otherwise.
+    std::optional<RenderLineFlash> lineFlash {};
 
     uint64_t frameID {};
 
@@ -205,8 +238,10 @@ struct RenderBuffer
         cells.clear();
         lines.clear();
         gutter.clear();
+        statusBar.reset();
         annotations.clear();
         cursor.reset();
+        lineFlash.reset();
         if (stickyHeader)
         {
             _retiredStickyHeader = std::move(*stickyHeader);

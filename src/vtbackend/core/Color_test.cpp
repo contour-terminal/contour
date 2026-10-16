@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/Color.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 using namespace vtbackend;
@@ -211,3 +212,39 @@ TEST_CASE("Color.parseColor.rejects_malformed_specifications", "[Color]")
     checkRejected("0xff0000");       // not an X11 color specification
 }
 // }}}
+
+TEST_CASE("Color.contrastRatio.isWcags", "[color]")
+{
+    using vtbackend::contrastRatio;
+    using vtbackend::RGBColor;
+    CHECK(contrastRatio(RGBColor(0, 0, 0), RGBColor(255, 255, 255)) == Catch::Approx(21.0));
+    CHECK(contrastRatio(RGBColor(255, 255, 255), RGBColor(0, 0, 0)) == Catch::Approx(21.0));
+    CHECK(contrastRatio(RGBColor(0x77, 0x77, 0x77), RGBColor(0x77, 0x77, 0x77)) == Catch::Approx(1.0));
+    // WCAG's own worked example: #777 on white is 4.48:1.
+    CHECK(contrastRatio(RGBColor(0x77, 0x77, 0x77), RGBColor(255, 255, 255))
+          == Catch::Approx(4.48).margin(0.01));
+}
+
+TEST_CASE("Color.fadeKeepingContrast.stopsAtTheFloor", "[color]")
+{
+    using vtbackend::contrastRatio;
+    using vtbackend::fadeKeepingContrast;
+    using vtbackend::mixColor;
+    using vtbackend::RGBColor;
+
+    auto const white = RGBColor(255, 255, 255);
+    auto const black = RGBColor(0, 0, 0);
+
+    // Contrast to spare: the full fade.
+    CHECK(fadeKeepingContrast(white, black, 0.45F, 3.0) == mixColor(white, black, 0.45F));
+
+    // A fade that would go under the floor stops at it, and no earlier than a channel step allows.
+    auto const grey = RGBColor(0x90, 0x90, 0x90);
+    auto const faded = fadeKeepingContrast(grey, black, 0.9F, 3.0);
+    CHECK(contrastRatio(faded, black) >= 3.0);
+    CHECK(contrastRatio(faded, black) < 3.2);
+
+    // A colour already under the floor cannot keep it: the fade is what it always was.
+    auto const dim = RGBColor(0x30, 0x30, 0x30);
+    CHECK(fadeKeepingContrast(dim, black, 0.45F, 3.0) == mixColor(dim, black, 0.45F));
+}

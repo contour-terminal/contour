@@ -379,3 +379,48 @@ TEST_CASE("sanitizeCommandLine sanitises what follows a leading run of plain tex
     CHECK(sanitizeCommandLine("echo " + utf8(0x202E) + "x", SanitizePurpose::Display)
           == std::format("echo {}x", Fffd));
 }
+
+TEST_CASE("trimTrailingWhiteSpace drops every White_Space code point the text ends with", "[sanitize]")
+{
+    using vtbackend::trimTrailingWhiteSpace;
+
+    // Unicode's White_Space property (PropList.txt), not just ASCII's: a shell may pad what it draws below
+    // its input with U+00A0, and that is read back when the command line is recovered from the grid.
+    auto const whiteSpace = std::array<char32_t, 25> {
+        0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0020, 0x0085, 0x00A0, 0x1680,
+        0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008,
+        0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000,
+    };
+    for (auto const codePoint: whiteSpace)
+    {
+        INFO(std::format("U+{:04X}", static_cast<uint32_t>(codePoint)));
+        CHECK(trimTrailingWhiteSpace("ls" + utf8(codePoint)) == "ls");
+        CHECK(trimTrailingWhiteSpace(utf8(codePoint)).empty());
+        // Only what the text ends with: the same code point between two others stays.
+        auto const inner = "a" + utf8(codePoint) + "b";
+        CHECK(trimTrailingWhiteSpace(inner) == inner);
+    }
+
+    // A line break followed by a row of nothing but white space, as recovered from endo's spacer row.
+    CHECK(trimTrailingWhiteSpace("echo hi\n\xC2\xA0  ") == "echo hi");
+    CHECK(trimTrailingWhiteSpace("").empty());
+}
+
+TEST_CASE("trimTrailingWhiteSpace keeps what only looks blank", "[sanitize]")
+{
+    using vtbackend::trimTrailingWhiteSpace;
+
+    // Not White_Space: the zero-width space and joiner, the word joiner, the BOM, the braille blank.
+    for (auto const codePoint: std::array<char32_t, 5> { 0x200B, 0x200D, 0x2060, 0xFEFF, 0x2800 })
+    {
+        INFO(std::format("U+{:04X}", static_cast<uint32_t>(codePoint)));
+        auto const text = "ls" + utf8(codePoint);
+        CHECK(trimTrailingWhiteSpace(text) == text);
+    }
+
+    // Ill-formed UTF-8 is not white space, even where its bytes are a no-break space's: a lone continuation
+    // byte 0xA0, and a lead byte 0xC2 cut off by the end.
+    CHECK(trimTrailingWhiteSpace("ls\xA0") == "ls\xA0");
+    CHECK(trimTrailingWhiteSpace("ls\xC2") == "ls\xC2");
+    CHECK(trimTrailingWhiteSpace("ls\xC2 ") == "ls\xC2");
+}
