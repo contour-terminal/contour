@@ -2364,14 +2364,21 @@ TEST_CASE("SessionChrome over a live session: the scrollbar's strip is the bar's
         h.press(onTheBar);
         CHECK(h.isBarPressed());
         h.release(onTheBar);
-        CHECK(h.live.pty->stdinSnapshot() == before);
 
         h.press(besideTheBar);
         CHECK_FALSE(h.isBarPressed());
         h.release(besideTheBar);
-        CHECK(h.live.pty->stdinSnapshot().size() > before.size());
-        CHECK(h.live.pty->stdinSnapshot().substr(before.size()).starts_with("\033[<0;"));
         CHECK_FALSE(h.hasSelection());
+
+        // The reports are written by the PTY's reader thread, which the input only wakes, so they are waited
+        // for rather than looked for at once. The writes keep their order: whatever the bar's strip had let
+        // through would stand ahead of the click beside it, so that click must be all that follows `before`.
+        auto const cell = terminal.currentMousePosition();
+        auto const click =
+            std::format("\033[<0;{0};{1}M\033[<0;{0};{1}m", unbox(cell.column) + 1, unbox(cell.line) + 1);
+        REQUIRE(QTest::qWaitFor(
+            [&] { return h.live.pty->stdinSnapshot().size() >= before.size() + click.size(); }, 5000));
+        CHECK(h.live.pty->stdinSnapshot().substr(before.size()) == click);
     }
 
     INFO("QML messages:\n" << warnings.messages().join(QStringLiteral("\n")).toStdString());
