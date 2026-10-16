@@ -3627,11 +3627,13 @@ bool TerminalSession::operator()(actions::CopyCommandLine const& action)
             return record->commandLine;
         });
 
-    // Copyable, not displayable: the clipboard's next stop is a paste, usually into a shell, bracketed or
-    // not. A raw line may carry ESC [ 201 ~, which ends a bracketed paste early and runs the rest as typed
-    // input, or a line feed, which runs what precedes it as it arrives; the display form would keep both
-    // harmless on screen but put U+FFFD into what the user pastes.
-    return copyBlockText(commandLine.transform(&vtbackend::CommandLineText::copyable)).has_value();
+    // Keep control filtering in both modes. Multiline copies preserve shell syntax, but their internal
+    // newlines may submit input in a destination without bracketed paste, so the profile must opt in.
+    return copyBlockText(commandLine.transform([this](vtbackend::CommandLineText const& text) {
+               return profile().copyCommandPreserveMultiline.value() ? text.multilineCopyable()
+                                                                     : text.copyable();
+           }))
+        .has_value();
 }
 
 bool TerminalSession::operator()(actions::RerunCommand const& action)

@@ -1498,6 +1498,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
 
         loadFromEntry(child, "escape_sandbox", where.escapeSandbox);
         loadFromEntry(child, "copy_last_mark_range_offset", where.copyLastMarkRangeOffset);
+        loadFromEntry(child, "copy_command_preserve_multiline", where.copyCommandPreserveMultiline);
         loadFromEntry(child, "show_title_bar", where.showTitleBar);
         loadFromEntry(child, "window_shadow", where.windowShadow);
         loadFromEntry(child, "dim_unfocused", where.dimUnfocused);

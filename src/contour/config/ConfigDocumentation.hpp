@@ -177,6 +177,25 @@ constexpr StringLiteral CopyLastMarkRangeOffsetConfig {
     "\n"
 };
 
+constexpr StringLiteral CopyCommandPreserveMultilineConfig {
+    "{comment} Opt in to preserving internal line breaks and tabs when using Copy Command.\n"
+    "{comment} CR/CRLF become LF; trailing whitespace and unsafe controls are removed.\n"
+    "{comment} Pasting multiline text without bracketed paste may execute commands immediately.\n"
+    "{comment} The default, false, replaces line breaks and tabs with spaces.\n"
+    "copy_command_preserve_multiline: {}\n\n"
+};
+
+constexpr StringLiteral CopyCommandPreserveMultilineWeb {
+    "Set `copy_command_preserve_multiline: true` to preserve internal line breaks and tabs when using "
+    "Copy Command. The default is `false`, which keeps single-line copying. "
+    "CR/CRLF are normalized to LF; trailing whitespace is removed. Unsafe controls are filtered in "
+    "both modes. Pasting multiline text into a destination without bracketed paste may execute commands "
+    "immediately."
+};
+
+using CopyCommandPreserveMultiline =
+    DocumentationEntry<CopyCommandPreserveMultilineConfig, CopyCommandPreserveMultilineWeb>;
+
 constexpr StringLiteral WMClassConfig {
     "{comment} Defines the class part of the WM_CLASS property of the window.\n"
 };

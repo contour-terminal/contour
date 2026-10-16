@@ -109,6 +109,33 @@ void writeSideFile(QTemporaryDir& dir, std::filesystem::path const& relativePath
 
 } // namespace
 
+TEST_CASE("Config: multiline command copying is opt-in per profile", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+    single_line:
+        shell: /bin/sh
+        copy_command_preserve_multiline: false
+    multiline:
+        shell: /bin/sh
+        copy_command_preserve_multiline: true
+)"sv);
+    CHECK_FALSE(config.profile("main")->copyCommandPreserveMultiline.value());
+    CHECK_FALSE(config.profile("single_line")->copyCommandPreserveMultiline.value());
+    CHECK(config.profile("multiline")->copyCommandPreserveMultiline.value());
+
+    writeSideFile(
+        dir, "profiles/roundtrip.yml", contour::config::emitProfileYaml(*config.profile("multiline")));
+    auto const reloaded = loadFromYaml(dir, "default_profile: main\n");
+    auto const* roundTripped = reloaded.findProfile("roundtrip");
+    REQUIRE(roundTripped != nullptr);
+    CHECK(roundTripped->copyCommandPreserveMultiline.value());
+}
+
 TEST_CASE("Config: global scalars load from YAML", "[config]")
 {
     QTemporaryDir dir;
