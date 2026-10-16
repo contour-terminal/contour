@@ -20,6 +20,7 @@
 #include <vtbackend/input/vi/ViInputHandler.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Cursor.hpp>
+#include <vtbackend/screen/Gutter.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
@@ -1192,6 +1193,12 @@ class Terminal
     /// are made this tall, and statusLineHeight() answers from it rather than from their grids.
     static constexpr auto StatusLineHeight = LineCount(1);
 
+    /// The indicator status line's page: one row, as wide as the gutter and the page together, so its text
+    /// spans the whole bar and its middle is centred on it (#2139). The host-writable status line is the
+    /// application's, and keeps the page's width.
+    /// @return Its page size.
+    [[nodiscard]] PageSize indicatorStatusLinePageSize() const;
+
     /// How many lines the status line on display takes: none without one. From the status display type alone,
     /// which is race-free to read, as the renderer asks each frame without the state lock; the status
     /// screens' grids are rewritten by a resize.
@@ -1299,6 +1306,16 @@ class Terminal
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
     void sendPaste(std::string_view text); // Sends verbatim text in bracketed mode to application.
+
+    /// Whether @p text would reach the application exactly as it is if pasted now (sendPaste()).
+    ///
+    /// Inside a bracketed paste, where the application asked for one, the paste drops ESC
+    /// (InputGenerator::generatePaste); without one, a shell reads TAB and a line break as keys. A text that
+    /// loses a character either way -- a hint's path, a command line run again -- names another file or runs
+    /// another command, and is not to be pasted at all.
+    /// @param text The text to paste.
+    /// @return Whether sanitizing it for the way it would arrive leaves it unchanged.
+    [[nodiscard]] bool pastesUnchanged(std::string_view text) const;
 
     /// Asks the frontend to paste its clipboard. @see Events::pasteFromClipboard.
     ///
@@ -1516,6 +1533,27 @@ class Terminal
     /// @return Whether a fold was found and toggled; false while folding is unavailable.
     bool toggleFoldContaining(LineOffset gridLine);
 
+    /// What a left press on the gutter's block column beside @p gridLine does: toggle the fold that reaches
+    /// it -- with folding available and its controls drawn (GutterSettings::foldMarkers) -- or open the menu
+    /// of the block whose status mark it shows, or nothing.
+    ///
+    /// The one decision the hover that turns the pointer into a hand, the press and the block tooltip's hint
+    /// all read, so the gutter never offers a click it then ignores, nor acts where it drew nothing to click.
+    /// @param gridLine A grid line (0 = page top, negative = into the scrollback).
+    /// @return What the press does; Swallow beside any page but the primary screen's.
+    [[nodiscard]] BlockColumnPress blockColumnPressAt(LineOffset gridLine) const;
+
+    /// The head of the collapsed fold whose `⋯ N lines` label is drawn over @p position: what a click on the
+    /// label expands. The label is laid out where fillFoldLabels() draws it, by the same placement.
+    /// @param position A cell of the main page, as the pointer names it (main-page rows).
+    /// @return The fold head's grid line, or nullopt where no label is drawn.
+    [[nodiscard]] std::optional<LineOffset> collapsedFoldLabelAt(CellLocation position) const;
+
+    /// Whether the primary screen's shell shows a prompt that a command typed now would run at: the newest
+    /// command block is at its prompt, and the primary screen is the one on display.
+    /// @return Whether it does; false without shell integration, which reports no prompt.
+    [[nodiscard]] bool shellIsPrompting() const noexcept;
+
     /// Expands the fold covering @p gridLine, if a collapsed one does.
     ///
     /// What FoldJumpBehavior::Expand reaches for: a jump that names a hidden target opens the block
@@ -1630,7 +1668,9 @@ class Terminal
         return block;
     }
 
-    /// Scrolls the viewport so block @p id's head is its top row, expanding the fold that hangs off it.
+    /// Scrolls the viewport so block @p id's head is its top row, expanding the fold that hangs off it, and
+    /// flashes the row its command was typed on (RenderBuffer::lineFlash), so the eye finds where the view
+    /// moved to.
     ///
     /// What a press on the sticky header does. The head is located through the record's cached position,
     /// so the jump costs the same for a block a million rows up. It lands the way a click on a scrollbar
@@ -3445,6 +3485,10 @@ class Terminal
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
     LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
     void updateIndicatorStatusLine();
+
+    /// The indicator status line's colors for the focus and the input mode as they are now.
+    [[nodiscard]] RGBColorPair indicatorStatusLineColors() const;
+
     void updateCursorVisibilityState() const noexcept;
 
     /// Shows the cursor and starts its blink over, as a key does.
@@ -3896,8 +3940,32 @@ class Terminal
     /// thread). nextRender() reads _animationsEnd instead.
     CursorMotionState _cursorMotion;
 
-    /// When the later of the cursor motion and the screen transition ends, as the state lock last left them;
-    /// min() while neither runs. Atomic, for nextRender() to read on the render thread without that lock.
+    // {{{ Line flash state
+    /// A row flashed where a jump landed (@see scrollToCommandBlockHead), named by its stable id so that the
+    /// flash stays on that row as the view scrolls.
+    struct LineFlashState: crispy::AnimationState<crispy::LinearEasing>
+    {
+        int64_t stableId = 0;           ///< The row.
+        uint64_t stableIdGeneration {}; ///< The Grid::stableIdGeneration() @ref stableId was read in.
+        RGBColor color {};              ///< The band's colour: its block's, as the gutter's band has it.
+    };
+
+    /// How long a line flash takes to fade: iTerm2's, which is long enough to catch the eye and over before
+    /// the user reads on.
+    static constexpr auto LineFlashDuration = std::chrono::milliseconds { 750 };
+
+    /// A line flash's opacity as it starts. Under the row's text rather than over it, so a band in the text's
+    /// own colour -- an uncoloured success -- must stay faint enough to read through.
+    static constexpr auto LineFlashPeakAlpha = 0.4f;
+
+    /// Guarded by _stateMutex. Started by a jump (the GUI thread), advanced and ended by the render-buffer
+    /// fill. nextRender() reads _animationsEnd instead.
+    LineFlashState _lineFlash;
+    // }}}
+
+    /// When the last of the cursor motion, the screen transition and the line flash ends, as the state lock
+    /// last left them; min() while none runs. Atomic, for nextRender() to read on the render thread without
+    /// that lock.
     std::atomic<std::chrono::steady_clock::time_point> _animationsEnd =
         std::chrono::steady_clock::time_point::min();
 
@@ -4511,6 +4579,36 @@ class Terminal
         return _settings.foldingAvailability == FoldingAvailability::Enabled;
     }
 
+    /// Where one collapsed fold's label is drawn: on which grid line, after how many columns of text, saying
+    /// what. Shared by the painting (fillFoldLabels()) and the click (collapsedFoldLabelAt()).
+    struct FoldLabelPlacement
+    {
+        FoldRange range;         ///< The collapsed fold.
+        LineOffset gridLine;     ///< The row the label is drawn on: the head's logical line's last drawn row.
+        ColumnCount textColumns; ///< How many columns of that row hold text.
+        std::u32string label;    ///< The label, as collapsedFoldLabel() spells it.
+    };
+
+    /// The labels of the collapsed folds on display, each where it is drawn.
+    /// @return One per collapsed fold whose head's line has a drawn row; empty while nothing is collapsed.
+    [[nodiscard]] std::vector<FoldLabelPlacement> foldLabelPlacements() const;
+
+    /// The facts that decide the block-column glyph beside @p gridLine (blockColumnGlyph()), for the gutter's
+    /// painting and its press alike. Primary-screen rows only.
+    /// @param gridLine A grid line of the primary screen.
+    /// @return The row's fold marker, head state, user mark and its block's outcome (with exit status on).
+    [[nodiscard]] BlockColumnFacts blockColumnFactsAt(LineOffset gridLine) const;
+
+    /// blockColumnFactsAt() for a row whose stable id and covering fold the caller has already looked up:
+    /// the gutter's walk and the press, which need the fold for their own decisions too.
+    /// @param gridLine A grid line of the primary screen.
+    /// @param id Its stable id.
+    /// @param range The fold covering @p id (foldCovering()), if one does.
+    /// @return As blockColumnFactsAt().
+    [[nodiscard]] BlockColumnFacts blockColumnFactsAt(LineOffset gridLine,
+                                                      int64_t id,
+                                                      std::optional<FoldRange> const& range) const;
+
     /// Fills @p output's gutter: per drawn row its timestamp, line number and block-column glyph, each at
     /// its own negative column, as GutterLayout places them and appendGutterCells() paints them.
     /// @param output The buffer being built.
@@ -4558,6 +4656,12 @@ class Terminal
     /// @param output The buffer being built.
     /// @param baseLine The screen row the main page starts at, as for fillGutter().
     void fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const;
+
+    /// Fills @p output's line flash while one fades on a drawn row of the primary page, and ends the flash
+    /// once it has faded out.
+    /// @param output The buffer being built.
+    /// @param baseLine The screen row the main page starts at, as for fillGutter().
+    void fillLineFlash(RenderBuffer& output, LineOffset baseLine);
 
     /// What one frame's sticky header is decided from, and what the fill reads back from it rather than
     /// looking it up a second time.

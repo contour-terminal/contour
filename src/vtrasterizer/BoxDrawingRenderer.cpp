@@ -255,6 +255,44 @@ namespace detail
             Closed,   ///< A plus, and no stem: a collapsed block has nothing below it.
         };
 
+        /// The weight of the fold column's strokes, in steps of the cell's light line: one step heavier for a
+        /// block whose command failed -- failure read by shape as well as by colour, collapsed or not -- and
+        /// one more for the fold under the pointer (vtbackend's FoldWeight).
+        enum class FoldStrokeWeight : uint8_t
+        {
+            Light = 1,   ///< The cell's light line.
+            Heavy = 2,   ///< Twice it, as the box-drawing heavy lines are.
+            Heavier = 3, ///< Three times it.
+        };
+
+        /// How thick a fold-column stroke of @p weight is.
+        /// @param weight The stroke's weight.
+        /// @param lineThickness The cell's light line thickness.
+        /// @return The stroke's thickness in pixels; at least one.
+        [[nodiscard]] constexpr int foldStrokeThickness(FoldStrokeWeight weight, int lineThickness) noexcept
+        {
+            return std::max(1, lineThickness) * std::to_underlying(weight);
+        }
+
+        /// The left edge of the fold column's vertical: centred in a buffer @p width wide. Every glyph of the
+        /// column puts its vertical here -- a head's stem, the body, its end -- so that they meet exactly.
+        /// @param width The buffer's width.
+        /// @param stroke The vertical's thickness.
+        /// @return Its left edge.
+        [[nodiscard]] constexpr int foldStrokeLeft(int width, int stroke) noexcept
+        {
+            return (width - stroke) / 2;
+        }
+
+        /// Fills the pixel rectangle [@p x0, @p x1) x [@p y0, @p y1) of @p b, a buffer @p size large.
+        void fillPixels(auto& b, ImageSize size, int x0, int y0, int x1, int y1)
+        {
+            auto const w = unbox<double>(size.width);
+            auto const h = unbox<double>(size.height);
+            b.rect({ .x = double(x0) / w, .y = double(y0) / h },
+                   { .x = double(x1) / w, .y = double(y1) / h });
+        }
+
         /// The fold column's head marker: a box carrying a minus while the block is open and a plus
         /// once it is closed, with a stem descending from the open one into the column below it.
         ///
@@ -270,6 +308,7 @@ namespace detail
         {
             ImageSize size {};
             FoldHeadState state = FoldHeadState::Open;
+            int stroke = 1; ///< The outline's, the sign's and the stem's thickness (foldStrokeThickness()).
 
             /// The top of a @p stroke-thick horizontal bar centred between @p top and @p bottom.
             [[nodiscard]] static constexpr int centerY(int top, int bottom, int stroke) noexcept
@@ -296,8 +335,9 @@ namespace detail
                 auto const h = unbox<int>(size.height);
 
                 // Square whatever the cell's aspect ratio is: a box that stretched with the font would
-                // stop reading as a button the moment the user picked a narrow one. Odd, so the sign
-                // inside it has a centre pixel to sit on rather than straddling two.
+                // stop reading as a button the moment the user picked a narrow one. Of the stroke's parity --
+                // odd for a light one, even for a heavy one -- so the sign and the stem sit on the box's
+                // centre rather than straddling it a pixel off.
                 //
                 // The two bounds are ordered explicitly rather than handed to std::clamp as they come:
                 // a cell narrower than seven device pixels -- a small font at a low DPI -- puts the
@@ -305,13 +345,12 @@ namespace detail
                 auto const widest = std::max(3, w - 2);
                 auto side = std::clamp(
                     static_cast<int>(std::lround(std::min(w, h) * 0.78)), std::min(5, widest), widest);
-                if (side % 2 == 0)
-                    --side;
                 side = std::max(3, side);
-                auto const stroke = std::max(1, side / 7);
+                if ((side - stroke) % 2 != 0)
+                    --side;
 
-                // Where U+2502 puts its vertical, so the stem below meets the body column exactly.
-                auto const centerX = (w - stroke) / 2;
+                // Where the body puts its vertical, so the stem below meets the column exactly.
+                auto const centerX = foldStrokeLeft(w, stroke);
 
                 auto const left = centerX + (stroke / 2) - (side / 2);
                 auto const right = left + side;
@@ -322,8 +361,7 @@ namespace detail
                 auto const inner = stroke + std::max(1, side / 8);
 
                 auto const px = [&](int x0, int y0, int x1, int y1) {
-                    b.rect({ .x = double(x0) / w, .y = double(y0) / h },
-                           { .x = double(x1) / w, .y = double(y1) / h });
+                    fillPixels(b, size, x0, y0, x1, y1);
                 };
 
                 // The box outline.
@@ -346,6 +384,49 @@ namespace detail
             }
         };
 
+        /// Which part of a fold's body a row draws.
+        enum class FoldBodyPart : uint8_t
+        {
+            Through = 0, ///< A row inside the body: a vertical from the row's top to its bottom.
+            End,         ///< Its last row: down to the row's middle, and right to the edge.
+        };
+
+        /// The fold column below an open head, down to the block's last row.
+        ///
+        /// Contour's own glyph rather than U+2502 and U+2515, which describe the shape exactly: a two-cell
+        /// gutter draws its glyphs wide for their size, and a box-drawing character drawn that way takes
+        /// DECDWL's doubled stroke where the head beside it does not. Drawn here, the body has the head's
+        /// stroke and the head's column in either width.
+        struct FoldBody
+        {
+            ImageSize size {};
+            FoldBodyPart part = FoldBodyPart::Through;
+            int stroke = 1; ///< The line's thickness (foldStrokeThickness()).
+
+            operator atlas::Buffer() const
+            {
+                auto b = blockElement<1>(size);
+                auto const w = unbox<int>(size.width);
+                auto const h = unbox<int>(size.height);
+                auto const left = foldStrokeLeft(w, stroke);
+                auto const px = [&](int x0, int y0, int x1, int y1) {
+                    fillPixels(b, size, x0, y0, x1, y1);
+                };
+
+                if (part == FoldBodyPart::Through)
+                {
+                    px(left, 0, left + stroke, h);
+                    return b;
+                }
+
+                // A corner on the row's middle: the vertical stops where the horizontal begins.
+                auto const top = (h - stroke) / 2;
+                px(left, 0, left + stroke, top + stroke);
+                px(left, top, w, top + stroke);
+                return b;
+            }
+        };
+
         /// Supersampling factor used for anti-aliased shapes: the mathematical symbols and the gutter's
         /// status marks.
         constexpr auto MathSymbolSS = 4;
@@ -356,9 +437,10 @@ namespace detail
             SmallTriangle = 0, ///< U+10F002, a block whose command is still running.
             Diamond,           ///< U+10F003, a row the user marked.
             Disc,              ///< U+10F004, a finished block with no fold control on its head.
+            Cross,             ///< U+10F005, a FAILED block with no fold control on its head.
         };
 
-        /// The block column's status marks: a small right-pointing triangle, a diamond and a disc.
+        /// The block column's status marks: a small right-pointing triangle, a diamond, a disc and a cross.
         ///
         /// Drawn here rather than left to the font for the reason FoldHead is: they share a column with
         /// the fold controls, and a font's marks differ in size and weight between families. Each shape
@@ -371,6 +453,13 @@ namespace detail
 
             /// How much of the cell's shorter side the mark spans.
             static constexpr double Extent = 0.6;
+
+            /// How far the cross's arms reach from the centre, as a fraction of the radius: inside the disc's
+            /// square, so the two marks look the same size.
+            static constexpr double CrossReach = 0.8;
+
+            /// Half the width of the cross's bars, as a fraction of the radius.
+            static constexpr double CrossStroke = 0.22;
 
             /// Whether the point (@p dx, @p dy), relative to the cell centre, lies in @p shape of
             /// half-extent @p radius.
@@ -386,6 +475,15 @@ namespace detail
                         return dx >= -radius * 0.8 && std::abs(dy) <= ((radius * 0.8) - dx) / 2.0;
                     case StatusMarkShape::Diamond: return std::abs(dx) + std::abs(dy) <= radius;
                     case StatusMarkShape::Disc: return (dx * dx) + (dy * dy) <= radius * radius;
+                    case StatusMarkShape::Cross: {
+                        // Two diagonal bars a fifth of the mark wide, in the disc's square: as wide as the
+                        // disc, and heavy enough to read as a cross rather than as a hairline X.
+                        auto const reach = radius * CrossReach;
+                        auto const distance =
+                            std::min(std::abs(dx - dy), std::abs(dx + dy)) / std::numbers::sqrt2;
+                        return std::abs(dx) <= reach && std::abs(dy) <= reach
+                               && distance <= radius * CrossStroke;
+                    }
                 }
                 return false;
             }
@@ -2010,12 +2108,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint,
 
     auto const effectiveSize = ImageSize { logicalWidth, logicalHeight };
 
-    // Line thickness should be scaled if the logical size implies scaling?
-    // For DoubleWidth, vertical lines should be 2x thick if we want them to look "bold" or standard
-    // thickness? User complaint "not applied correctly" with 1x rendering suggests we need full resolution.
-    // Creating a 2xW buffer allows drawing 2x thick lines correctly distributed across Left/Right tiles.
-    auto const lineThickness =
-        isDoubleWidth ? _gridMetrics.underline.thickness * 2 : _gridMetrics.underline.thickness;
+    auto const lineThickness = tileLineThickness(codepoint, flags, _gridMetrics.underline.thickness);
 
     atlas::Buffer pixels;
 
@@ -2135,6 +2228,17 @@ Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTile
                                           });
 }
 
+int BoxDrawingRenderer::tileLineThickness(char32_t codepoint,
+                                          vtbackend::LineFlags flags,
+                                          int lineThickness) noexcept
+{
+    // A DECDWL row's text is stretched to twice its width, and its box drawing takes twice the stroke to
+    // match. Contour's own glyphs are drawn two cells wide by the gutter for their size, not stretched.
+    if (flags.test(vtbackend::LineFlag::DoubleWidth) && !isContourGlyph(codepoint))
+        return lineThickness * 2;
+    return lineThickness;
+}
+
 bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
 {
     auto const ascending = [codepoint](char32_t a, char32_t b) noexcept -> bool {
@@ -2145,7 +2249,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
            || ascending(0x2500, 0x259F)             // box drawing, block elements, shades
            || codepoint == 0x25B6                   // ▶ BLACK RIGHT-POINTING TRIANGLE
            || codepoint == 0x25BC                   // ▼ BLACK DOWN-POINTING TRIANGLE
-           || ascending(0x10F000, 0x10F004)         // Contour's own: fold heads, gutter status marks
+           || isContourGlyph(codepoint)             // Contour's own: the fold column, gutter status marks
            || ascending(0x1FB00, 0x1FBAF)           // more block sextants
            || ascending(0x1FBF0, 0x1FBF9)           // digits
            || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
@@ -2186,6 +2290,15 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         return blockElement<AntiAliasingSamplingFactor>(size)
             .getlineThickness(lineThickness)
             .baseline(_gridMetrics.baseline * AntiAliasingSamplingFactor);
+    };
+    auto const foldHead = [size, lineThickness](FoldHeadState state,
+                                                FoldStrokeWeight weight) -> atlas::Buffer {
+        return FoldHead { .size = size,
+                          .state = state,
+                          .stroke = foldStrokeThickness(weight, lineThickness) };
+    };
+    auto const foldBody = [size, lineThickness](FoldBodyPart part, FoldStrokeWeight weight) -> atlas::Buffer {
+        return FoldBody { .size = size, .part = part, .stroke = foldStrokeThickness(weight, lineThickness) };
     };
 
     if (detail::Braille::isBraille(codepoint))
@@ -2672,10 +2785,20 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         // Supplementary PUA-B rather than the BMP: E000..F8FF is comprehensively squatted by Nerd
         // Fonts and friends. Not at a plane's start either, where what leaves the BMP tends to land
         // first -- 10F000 sits near the far end of plane 16, which nothing well-known reaches.
-        case 0x10F000:
-            return /* fold head, open   */ FoldHead { .size = size, .state = FoldHeadState::Open };
-        case 0x10F001:
-            return /* fold head, closed */ FoldHead { .size = size, .state = FoldHeadState::Closed };
+        // The fold column: a head, its body and its end, light -- from U+10F008 the same four heavy, from
+        // U+10F00C heavier (vtbackend's blockColumnCodepoint()).
+        case 0x10F000: return /* fold head, open   */ foldHead(FoldHeadState::Open, FoldStrokeWeight::Light);
+        case 0x10F001: return /* fold head, closed */ foldHead(FoldHeadState::Closed, FoldStrokeWeight::Light);
+        case 0x10F006: return /* fold body         */ foldBody(FoldBodyPart::Through, FoldStrokeWeight::Light);
+        case 0x10F007: return /* fold body, end    */ foldBody(FoldBodyPart::End, FoldStrokeWeight::Light);
+        case 0x10F008: return /* heavy, open       */ foldHead(FoldHeadState::Open, FoldStrokeWeight::Heavy);
+        case 0x10F009: return /* heavy, closed     */ foldHead(FoldHeadState::Closed, FoldStrokeWeight::Heavy);
+        case 0x10F00A: return /* heavy, body       */ foldBody(FoldBodyPart::Through, FoldStrokeWeight::Heavy);
+        case 0x10F00B: return /* heavy, body end   */ foldBody(FoldBodyPart::End, FoldStrokeWeight::Heavy);
+        case 0x10F00C: return /* heavier, open     */ foldHead(FoldHeadState::Open, FoldStrokeWeight::Heavier);
+        case 0x10F00D: return /* heavier, closed   */ foldHead(FoldHeadState::Closed, FoldStrokeWeight::Heavier);
+        case 0x10F00E: return /* heavier, body     */ foldBody(FoldBodyPart::Through, FoldStrokeWeight::Heavier);
+        case 0x10F00F: return /* heavier, body end */ foldBody(FoldBodyPart::End, FoldStrokeWeight::Heavier);
         // The gutter's status marks, drawn by StatusMark: a running command, a user's mark, a finished command
         // with no fold control on its head. Shapes Unicode has (U+25B8, U+25C6, U+25CF), but claiming those
         // would draw every one a program writes -- a prompt's, systemctl's -- in place of its font's.
@@ -2683,6 +2806,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
             return /* running, ▸ */ StatusMark { .size = size, .shape = StatusMarkShape::SmallTriangle };
         case 0x10F003: return /* user mark, ◆ */ StatusMark { .size = size, .shape = StatusMarkShape::Diamond };
         case 0x10F004: return /* finished, ● */ StatusMark { .size = size, .shape = StatusMarkShape::Disc };
+        case 0x10F005: return /* failed, ✗ */ StatusMark { .size = size, .shape = StatusMarkShape::Cross };
 
         // PUA defines as introduced by FiraCode: https://github.com/tonsky/FiraCode/issues/1324
         case 0xEE00: return progressBar().left();

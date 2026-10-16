@@ -3010,6 +3010,28 @@ TEST_CASE("Terminal.hint_mode_dispatches_each_action", "[terminal][hintmode]")
     }
 }
 
+TEST_CASE("Terminal.pastesUnchanged_asks_about_the_way_the_paste_would_arrive", "[terminal]")
+{
+    // What a hint's path and a command line run again are both held to: a text that would lose a character
+    // is not pasted at all, and which characters it loses depends on whether the paste is bracketed.
+    auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    CHECK(mc.terminal.pastesUnchanged("ls -l ~/src"));
+
+    SECTION("typed, a shell reads TAB and a line break as keys")
+    {
+        CHECK_FALSE(mc.terminal.pastesUnchanged("a\tb"));
+        CHECK_FALSE(mc.terminal.pastesUnchanged("ls\nrm -rf ~"));
+    }
+
+    SECTION("bracketed, they are text; ESC is still taken out")
+    {
+        mc.writeToScreen("\033[?2004h");
+        CHECK(mc.terminal.pastesUnchanged("a\tb"));
+        CHECK(mc.terminal.pastesUnchanged("ls\nrm -rf ~"));
+        CHECK_FALSE(mc.terminal.pastesUnchanged("ls\033[201~rm -rf ~"));
+    }
+}
+
 TEST_CASE("Terminal.hint_mode_validates_and_resolves_paths_against_the_working_directory",
           "[terminal][hintmode]")
 {

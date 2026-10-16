@@ -28,6 +28,13 @@ enum class CommandLinePresence : std::uint8_t
     Present,    ///< Reported by the shell (OSC 133;C cmdline_url), or recovered from the grid.
 };
 
+/// Whether the shell shows a prompt that a command typed now would run at.
+enum class PromptPresence : std::uint8_t
+{
+    Absent = 0, ///< A command is running, or the shell marks no prompts at all.
+    Present,    ///< The shell waits at its prompt.
+};
+
 /// The command block a right-click landed on, with what its rows may act on.
 struct PointedBlock
 {
@@ -79,6 +86,8 @@ struct ContextMenuState
     /// one. Captured at click time and carried by the block rows, because the pointer leaves the block
     /// for the menu the moment the user reaches for a row.
     std::optional<PointedBlock> blockUnderCursor {};
+    /// Whether the shell waits at its prompt, where a command it is handed would run.
+    PromptPresence livePrompt = PromptPresence::Absent;
 
     std::string activeProfile;             ///< The profile this session runs under.
     std::vector<std::string> profileNames; ///< Every configured profile, in a stable order.

@@ -2286,6 +2286,195 @@ TEST_CASE("Renderer.stickyHeader.staysPutWhileThePageScrollsSmoothly", "[rendere
     CHECK(prompt->y == 0);
 }
 
+namespace
+{
+/// The status bar the frame last built for @p mc's terminal describes.
+/// @param mc The terminal, rendered.
+/// @return RenderBuffer::statusBar.
+[[nodiscard]] std::optional<vtbackend::RenderStatusBar> statusBarOf(vtbackend::MockTerm<>& mc)
+{
+    auto const buffer = mc.terminal.renderBuffer();
+    return buffer.get().statusBar;
+}
+
+/// Scrolls @p mc's page by a quarter cell, so the renderer draws it in two passes.
+/// @param mc The terminal, with 10x20 pixel cells.
+void scrollPartway(vtbackend::MockTerm<>& mc)
+{
+    mc.terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+    REQUIRE(mc.terminal.applySmoothScrollPixelDelta(5.0f) == SmoothScrollResult::Applied);
+    REQUIRE(mc.terminal.smoothScrollPixelOffset() != 0.0f);
+}
+} // namespace
+
+TEST_CASE("Renderer.statusBar.spansTheWindowUnderTheIndicatorStatusLine", "[renderer][statusline]")
+{
+    // #2139: the indicator status line's bar reaches both edges of the window -- over the gutter and the
+    // page margins beside it -- and the status line's own cells are drawn over it, in the same step.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    // Wider than the page's 20 columns of 10 pixels: the strips beside the page are what the bar adds.
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(260), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    mc.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    vtbackend::test::printLines(mc, "out", 20);
+
+    SECTION("in one pass")
+    {
+        REQUIRE(mc.terminal.smoothScrollPixelOffset() == 0.0f);
+    }
+    SECTION("in two, while the page scrolls smoothly")
+    {
+        scrollPartway(mc);
+    }
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const bar = statusBarOf(mc);
+    REQUIRE(bar.has_value());
+    REQUIRE(bar->lineOffset == LineOffset(5));
+
+    // Seeded metrics: 10x20 cells, no margin -- so the status line's row spans y 100..119, and the 20 pixels
+    // the render target has left below it are the bar's too.
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const band = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.x == 0 && r.y == 100 && r.color == RGBAColor(bar->background, 0xFF);
+    });
+    REQUIRE(band != rectangles.end());
+    CHECK(band->width == fixture.renderTarget.renderSize().width);
+    CHECK(band->width == Width(260));
+    CHECK(band->height == Height(40));
+
+    // The status line paints its own background on its cells, after the bar and in the same step.
+    auto const ownBackground = std::ranges::find_if(std::next(band), rectangles.end(), [&](auto const& r) {
+        return r.y == 100 && r.color.rgb() == bar->background;
+    });
+    REQUIRE(ownBackground != rectangles.end());
+    CHECK(ownBackground->step == band->step);
+}
+
+TEST_CASE("Renderer.statusBar.reachesPastTheMarginOfTheEdgeItSitsOn", "[renderer][statusline]")
+{
+    // A top bar is drawn from the render target's top edge, over the margin above its row, down to its row's
+    // bottom: nothing of the pane's own background shows above it.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto metrics = ReconfigFixture::seededMetrics();
+    metrics.pageMargin = vtrasterizer::PageMargin { .left = 30, .top = 6, .bottom = 4 };
+    RendererTest::seedMetrics(fixture.renderer, metrics);
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(260), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) } };
+    mc.terminal.settings().statusDisplayPosition = vtbackend::StatusDisplayPosition::Top;
+    mc.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const bar = statusBarOf(mc);
+    REQUIRE(bar.has_value());
+    REQUIRE(bar->lineOffset == LineOffset(0));
+
+    // Row 0 spans y 6..25 under the 6-pixel top margin.
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const band = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.x == 0 && r.color == RGBAColor(bar->background, 0xFF) && r.width == Width(260);
+    });
+    REQUIRE(band != rectangles.end());
+    CHECK(band->y == 0);
+    CHECK(band->height == Height(26));
+}
+
+TEST_CASE("Renderer.statusBar.drawsTheIndicatorFromTheGuttersLeftEdge", "[renderer][statusline]")
+{
+    // #2139: a status bar with leading columns is drawn that many columns left of the page's column 0 -- here
+    // the two of the gutter, from x 10 where the page starts at 30 -- and the grid's origin is back where it
+    // was for everything after it, in either path.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto metrics = ReconfigFixture::seededMetrics();
+    metrics.pageMargin = vtrasterizer::PageMargin { .left = 30, .top = 0, .bottom = 0 };
+    RendererTest::seedMetrics(fixture.renderer, metrics);
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(260), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    mc.terminal.settings().gutter = vtbackend::GutterSettings { .foldMarkers = true, .blockColumnWidth = 2 };
+    mc.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    vtbackend::test::printLines(mc, "out", 20);
+
+    SECTION("in one pass")
+    {
+        REQUIRE(mc.terminal.smoothScrollPixelOffset() == 0.0f);
+    }
+    SECTION("in two, while the page scrolls smoothly")
+    {
+        scrollPartway(mc);
+    }
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const bar = statusBarOf(mc);
+    REQUIRE(bar.has_value());
+    REQUIRE(bar->leadingColumns == vtbackend::ColumnCount(2));
+
+    // The status line's own background, on its column 0: two cells left of the page's.
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const firstColumn = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.x == 10 && r.y == 100 && r.color.rgb() == bar->background;
+    });
+    CHECK(firstColumn != rectangles.end());
+
+    CHECK(RendererTest::liveGridMetrics(fixture.renderer).pageMargin.left == 30);
+}
+
+TEST_CASE("Renderer.lineFlash.tintsTheRowAJumpLandedOn", "[renderer][stickyheader]")
+{
+    // A translucent band across the page's columns on the head's row -- under its text, at the frame's
+    // opacity -- in one pass and in two.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(260), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    vtbackend::test::printLines(mc, "before", 3);
+    mc.writeToScreen(vtbackend::test::commandStarted("make"));
+    vtbackend::test::printLines(mc, "out", 20);
+    auto const* const block = mc.terminal.commandBlocks().current();
+    REQUIRE(block != nullptr);
+    REQUIRE(mc.terminal.scrollToCommandBlockHead(block->id).has_value());
+
+    SECTION("in one pass")
+    {
+        REQUIRE(mc.terminal.smoothScrollPixelOffset() == 0.0f);
+    }
+    SECTION("in two, while the page scrolls smoothly")
+    {
+        scrollPartway(mc);
+    }
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const flash = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return buffer.get().lineFlash;
+    }();
+    REQUIRE(flash.has_value());
+
+    // Seeded metrics: 10x20 cells, no margin -- the band is the page's 200 pixels wide and one row tall.
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const band = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.color.rgb() == flash->color && r.color.alpha() < 0xFF && r.width == Width(200);
+    });
+    REQUIRE(band != rectangles.end());
+    CHECK(band->x == 0);
+    CHECK(band->height == Height(20));
+    CHECK(band->color.alpha() > 0);
+}
+
 int main(int argc, char* argv[])
 {
     core::testing::suppressWindowsDialogs();

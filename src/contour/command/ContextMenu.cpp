@@ -90,6 +90,13 @@ namespace
         return hasBlockUnderCursor(state)
                && state.blockUnderCursor->commandLine == CommandLinePresence::Present;
     }
+
+    /// A command line to run, and a prompt to run it at: typed while another command runs, it would be
+    /// that command's input.
+    bool canRerunUnderCursor(ContextMenuState const& state) noexcept
+    {
+        return hasCommandLineUnderCursor(state) && state.livePrompt == PromptPresence::Present;
+    }
     // }}}
 
     /// A row acting on the hyperlink that was RIGHT-CLICKED, carried with the row rather than looked up
@@ -208,6 +215,7 @@ namespace
             blockCommand<SelectCommandBlock>("Select Output", hasOutputUnderCursor),
             blockCommand<CopyCommandBlock>("Copy Output", hasOutputUnderCursor),
             blockCommand<CopyCommandLine>("Copy Command", hasCommandLineUnderCursor),
+            blockCommand<RerunCommand>("Rerun Command…", canRerunUnderCursor),
             blockCommand<OpenCommandOutput>("Open Output in Pager", hasOutputUnderCursor),
 
             Table::separator(),

@@ -142,10 +142,14 @@ TEST_CASE("Gutter.terminal.aRowErasedInsideABlockKeepsTheBlocksColour", "[gutter
     auto const failure = mc.terminal.colorPalette().blockStatusColor(CommandBlockOutcome::Failure);
     auto const buffer = renderOf(mc.terminal);
     auto const rows = gutterRows(buffer, 1);
-    CHECK(rows.at(0) == withGlyph(U"", foldMarkerGlyph(FoldMarker::Expanded)));
-    CHECK(rows.at(1) == withGlyph(U"", foldMarkerGlyph(FoldMarker::Body)));
-    CHECK(rows.at(3) == withGlyph(U"", foldMarkerGlyph(FoldMarker::Body)));
-    CHECK(rows.at(4) == withGlyph(U"", foldMarkerGlyph(FoldMarker::BodyEnd)));
+    // The command failed, so its fold is drawn heavy -- on the erased rows as much as on the others.
+    auto const heavy = [](BlockColumnGlyph glyph) {
+        return blockColumnCodepoint(glyph, FoldWeight::Heavy);
+    };
+    CHECK(rows.at(0) == withGlyph(U"", heavy(BlockColumnGlyph::FoldExpanded)));
+    CHECK(rows.at(1) == withGlyph(U"", heavy(BlockColumnGlyph::FoldBody)));
+    CHECK(rows.at(3) == withGlyph(U"", heavy(BlockColumnGlyph::FoldBody)));
+    CHECK(rows.at(4) == withGlyph(U"", heavy(BlockColumnGlyph::FoldBodyEnd)));
     REQUIRE(buffer.gutter.size() == 5);
     for (auto const& cell: buffer.gutter)
     {
@@ -511,4 +515,165 @@ TEST_CASE("Gutter.terminal.rowsBelowTheProjectionStayEmpty", "[gutter]")
     for (auto const& cell: buffer.gutter)
         if (cell.column == ColumnOffset(-1))
             CHECK(blockColumnRows.insert(unbox<int>(cell.lineOffset)).second);
+}
+
+TEST_CASE("Gutter.terminal.aPressDoesWhatTheRowShows", "[gutter]")
+{
+    // The hover's hand, the press and the tooltip's hint ask this one question, so it must say "toggle"
+    // only where a fold control is drawn and may toggle, and "menu" only beside a status mark.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mc.terminal.settings().gutter = GutterSettings { .foldMarkers = true, .exitStatus = true };
+    runCommand(mc, "true", {}, 0);      // row 0: a disc, nothing to fold
+    runCommand(mc, "make", { "a" }, 2); // rows 1-2: a fold
+    mc.writeToScreen(PromptStart);      // row 3: the next prompt
+
+    SECTION("on a fold, its head and its body alike, the fold")
+    {
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(1)) == BlockColumnPress::ToggleFold);
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(2)) == BlockColumnPress::ToggleFold);
+    }
+
+    SECTION("beside a status mark with nothing to fold, its block's menu")
+    {
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(0)) == BlockColumnPress::OpenBlockMenu);
+    }
+
+    SECTION("below every block, nothing")
+    {
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(8)) == BlockColumnPress::Swallow);
+    }
+
+    SECTION("with the fold controls hidden, a fold row is nothing; a status mark still opens its menu")
+    {
+        mc.terminal.settings().gutter.foldMarkers = false;
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(2)) == BlockColumnPress::Swallow);
+        // The failed head now shows its cross, not a fold control.
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(1)) == BlockColumnPress::OpenBlockMenu);
+    }
+
+    SECTION("with folding off, the drawn control does nothing")
+    {
+        mc.terminal.settings().foldingAvailability = FoldingAvailability::Disabled;
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(1)) == BlockColumnPress::Swallow);
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(2)) == BlockColumnPress::Swallow);
+    }
+}
+
+TEST_CASE("Gutter.terminal.aCollapsedFoldsLabelNamesItsFold", "[gutter]")
+{
+    // What a click on `⋯ N lines` expands: the label is found where it is drawn.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(30) } };
+    mc.terminal.settings().gutter = GutterSettings { .foldMarkers = true };
+    runCommand(mc, "make", { "a", "b" }); // "$ make" on row 0, its label from column 7
+    CHECK_FALSE(
+        mc.terminal.collapsedFoldLabelAt(CellLocation { .line = LineOffset(0), .column = ColumnOffset(8) }));
+
+    REQUIRE(mc.terminal.toggleFoldContaining(LineOffset(0)));
+    auto const at = [&](int column) {
+        return mc.terminal.collapsedFoldLabelAt(
+            CellLocation { .line = LineOffset(0), .column = ColumnOffset(column) });
+    };
+    CHECK(at(7) == LineOffset(0));
+    CHECK(at(12) == LineOffset(0));
+    CHECK_FALSE(at(3).has_value()); // the command's own text
+    CHECK_FALSE(at(6).has_value()); // the blank column before the label
+    CHECK_FALSE(
+        mc.terminal.collapsedFoldLabelAt(CellLocation { .line = LineOffset(1), .column = ColumnOffset(8) }));
+}
+
+TEST_CASE("Gutter.terminal.aRunningCommandIsNoPrompt", "[gutter]")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    CHECK_FALSE(mc.terminal.shellIsPrompting()); // no shell integration, no prompt reported
+    startCommand(mc, "sleep 9");
+    CHECK_FALSE(mc.terminal.shellIsPrompting());
+    mc.writeToScreen(commandEnd(0));
+    mc.writeToScreen(PromptStart);
+    CHECK(mc.terminal.shellIsPrompting());
+}
+
+TEST_CASE("Gutter.terminal.theIndicatorStatusLineSpansTheGutterToo", "[gutter][statusline]")
+{
+    // #2139: the indicator status line is the terminal's own bar, so the frame names the color it reaches
+    // the window's edges in -- over the gutter beside it and the page margins -- and its text is laid out
+    // across the gutter's columns and the page's, from the gutter's left edge. The host-writable one is the
+    // application's, gets no wider than the main page, and names none.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(40) } };
+    mc.terminal.settings().gutter = GutterSettings { .foldMarkers = true, .exitStatus = true };
+    auto& palette = mc.terminal.colorPalette();
+    palette.indicatorStatusLineInactive.background = 0x111111_rgb;
+    palette.indicatorStatusLineInsertMode.background = 0x222222_rgb;
+
+    SECTION("no status line, no bar")
+    {
+        CHECK_FALSE(renderOf(mc.terminal).statusBar.has_value());
+    }
+
+    SECTION("the indicator's bar, on its row below the main page")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        auto const buffer = renderOf(mc.terminal);
+        REQUIRE(buffer.statusBar.has_value());
+        CHECK(buffer.statusBar->lineOffset == LineOffset(4));
+        CHECK(buffer.statusBar->lines == LineCount(1));
+        CHECK(buffer.statusBar->position == StatusDisplayPosition::Bottom);
+        // The gutter itself stays beside the main page.
+        CHECK(std::ranges::none_of(buffer.gutter,
+                                   [](auto const& cell) { return cell.lineOffset >= LineOffset(4); }));
+    }
+
+    SECTION("the indicator's bar, on its row above the main page")
+    {
+        mc.terminal.settings().statusDisplayPosition = StatusDisplayPosition::Top;
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        auto const buffer = renderOf(mc.terminal);
+        REQUIRE(buffer.statusBar.has_value());
+        CHECK(buffer.statusBar->lineOffset == LineOffset(0));
+        CHECK(buffer.statusBar->position == StatusDisplayPosition::Top);
+    }
+
+    SECTION("its text laid out across the gutter's columns too")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        auto const lastTextColumn = [&](RenderBuffer const& buffer) {
+            auto last = -1;
+            for (auto const& cell: buffer.cells)
+                if (cell.position.line == LineOffset(4) && !cell.codepoints.empty()
+                    && cell.codepoints != U" ")
+                    last = std::max(last, unbox<int>(cell.position.column));
+            return last;
+        };
+
+        mc.terminal.settings().gutter = GutterSettings {};
+        auto const bare = renderOf(mc.terminal);
+        REQUIRE(bare.statusBar.has_value());
+        CHECK(bare.statusBar->leadingColumns == ColumnCount(0));
+        CHECK(mc.terminal.indicatorStatusLinePageSize().columns == ColumnCount(40));
+
+        mc.terminal.settings().gutter = GutterSettings { .foldMarkers = true, .blockColumnWidth = 2 };
+        auto const wide = renderOf(mc.terminal);
+        REQUIRE(wide.statusBar.has_value());
+        CHECK(wide.statusBar->leadingColumns == ColumnCount(2));
+        CHECK(mc.terminal.indicatorStatusLinePageSize().columns == ColumnCount(42));
+        // The right-hand segment ends at the bar's right edge, two columns further than the page's alone.
+        CHECK(lastTextColumn(wide) == lastTextColumn(bare) + 2);
+    }
+
+    SECTION("in the colors the indicator wears for the focus")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        (void) mc.terminal.sendFocusOutEvent();
+        CHECK(renderOf(mc.terminal).statusBar->background == 0x111111_rgb);
+        (void) mc.terminal.sendFocusInEvent();
+        CHECK(renderOf(mc.terminal).statusBar->background == 0x222222_rgb);
+    }
+
+    SECTION("the host-writable status line leaves the strip to the default background")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::HostWritable);
+        auto const buffer = renderOf(mc.terminal);
+        CHECK_FALSE(buffer.statusBar.has_value());
+        CHECK(std::ranges::none_of(buffer.gutter,
+                                   [](auto const& cell) { return cell.lineOffset >= LineOffset(4); }));
+    }
 }

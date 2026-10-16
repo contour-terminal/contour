@@ -490,41 +490,50 @@ template <typename ClampFn>
         detail::mainPageRowOf(yDevicePx, pageMarginTop, cellHeightPx, mainPageTopRow), 0, mainPageLines - 1);
 }
 
-/// Whether the device-pixel x coordinate @p xDevicePx falls inside the gutter.
+/// The gutter's two parts, in device pixels: the blank lead-in against the pane's left edge, then the columns
+/// ending where the grid begins. Their sum is the GutterWidth a page is fitted with.
+struct GutterExtent
+{
+    GutterWidth leadIn = 0;  ///< The lead-in (@see gutterLeadIn); 0 when there is no gutter.
+    GutterWidth columns = 0; ///< The columns themselves; 0 means there is no gutter.
+};
+
+/// Whether the device-pixel x coordinate @p xDevicePx falls inside the gutter, its lead-in included.
 ///
-/// The gutter is the strip [pageMarginLeft - gutter, pageMarginLeft): fitPageToPixels folds its width
-/// INTO pageMargin.left, so the strip is exactly what that inset gained, and column 0 begins where it
+/// The gutter is the strip [pageMarginLeft - lead-in - columns, pageMarginLeft): fitPageToPixels folds its
+/// width INTO pageMargin.left, so the strip is exactly what that inset gained, and column 0 begins where it
 /// ends. Pure, so the hit-test is testable without a window -- and so the one place that decides where
 /// the gutter IS is the same header that decided how wide to make it.
 ///
 /// @param xDevicePx       The x coordinate, in device pixels, relative to the item's left edge.
 /// @param pageMarginLeft  The renderer's grid origin (@c GridMetrics::pageMargin.left), in device pixels.
-/// @param gutterDevicePx  The reserved gutter width in device pixels; 0 means there is no gutter.
+/// @param extent          The reserved gutter; no columns means there is no gutter.
 /// @return Whether the coordinate is over the gutter rather than over a cell or the margin left of it.
-[[nodiscard]] constexpr bool isInGutter(int xDevicePx,
-                                        int pageMarginLeft,
-                                        GutterWidth gutterDevicePx) noexcept
+[[nodiscard]] constexpr bool isInGutter(int xDevicePx, int pageMarginLeft, GutterExtent extent) noexcept
 {
-    return gutterDevicePx > 0 && xDevicePx >= pageMarginLeft - gutterDevicePx && xDevicePx < pageMarginLeft;
+    return extent.columns > 0 && xDevicePx >= pageMarginLeft - extent.columns - extent.leadIn
+           && xDevicePx < pageMarginLeft;
 }
 
 /// The gutter column under @p xDevicePx, counted from the gutter's LEFT edge -- the column
 /// vtbackend::gutterSegmentAt() names a segment for.
 ///
-/// Built on isInGutter() so the two cannot disagree about where the strip is.
+/// The lead-in counts as the first column's: a target that reaches the pane's edge is the easier one to
+/// hit, and the strip holds nothing else a press there could have meant. Built on isInGutter() so the two
+/// cannot disagree about where the strip is.
 /// @param xDevicePx       The x coordinate, in device pixels, relative to the item's left edge.
 /// @param pageMarginLeft  The renderer's grid origin (@c GridMetrics::pageMargin.left), in device pixels.
-/// @param gutterDevicePx  The reserved gutter width in device pixels; 0 means there is no gutter.
+/// @param extent          The reserved gutter; no columns means there is no gutter.
 /// @param cellWidthPx     The cell width in device pixels.
 /// @return The column, or nullopt when the coordinate is not over the gutter.
 [[nodiscard]] constexpr std::optional<int> gutterColumnAt(int xDevicePx,
                                                           int pageMarginLeft,
-                                                          GutterWidth gutterDevicePx,
+                                                          GutterExtent extent,
                                                           int cellWidthPx) noexcept
 {
-    if (cellWidthPx <= 0 || !isInGutter(xDevicePx, pageMarginLeft, gutterDevicePx))
+    if (cellWidthPx <= 0 || !isInGutter(xDevicePx, pageMarginLeft, extent))
         return std::nullopt;
-    return (xDevicePx - (pageMarginLeft - gutterDevicePx)) / cellWidthPx;
+    return std::max(0, xDevicePx - (pageMarginLeft - extent.columns)) / cellWidthPx;
 }
 
 /// The page column under @p xDevicePx, or nullopt when it is beside the page: over the gutter, or the margins

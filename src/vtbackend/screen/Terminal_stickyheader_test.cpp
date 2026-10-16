@@ -845,6 +845,80 @@ TEST_CASE("StickyHeader.jump.bringsTheHeadToTheTop", "[stickyheader][jump]")
     CHECK_FALSE(renderOf(mc.terminal).stickyHeader.has_value());
 }
 
+TEST_CASE("StickyHeader.jump.flashesTheRowItLandsOn", "[stickyheader][jump]")
+{
+    // As iTerm2 does: a band across the head's row, fading out, so the eye finds where the view moved to.
+    using namespace std::chrono_literals;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(30) }, LineCount(100) };
+    mc.terminal.settings().gutter.exitStatus = true;
+    printLines(mc, "before", 3); // something above the head, for the view to scroll to
+    startCommand(mc, "make");
+    printLines(mc, "out", 20);
+    mc.writeToScreen(commandEnd(2));
+    printLines(mc, "after", 3);
+    auto const* const record = mc.terminal.commandBlocks().lastFinished();
+    REQUIRE(record != nullptr);
+    auto const id = record->id;
+    auto const at = [&](std::chrono::milliseconds elapsed) {
+        mc.terminal.tick(mc.steadyClock.now() + elapsed);
+        return renderOf(mc.terminal).lineFlash;
+    };
+
+    CHECK_FALSE(renderOf(mc.terminal).lineFlash.has_value());
+    REQUIRE(mc.terminal.scrollToCommandBlockHead(id).has_value());
+
+    SECTION("on the head's row, in its block's colour, fading out")
+    {
+        auto const start = at(0ms);
+        REQUIRE(start.has_value());
+        CHECK(start->lineOffset == LineOffset(0));
+        CHECK(start->color == blockHighlightColor(mc.terminal.colorPalette(), CommandBlockOutcome::Failure));
+        auto const later = at(500ms);
+        REQUIRE(later.has_value());
+        CHECK(later->alpha < start->alpha);
+        CHECK(later->alpha > 0.0f);
+    }
+
+    SECTION("asking for frames until it has faded, and none after")
+    {
+        (void) at(100ms);
+        auto const wakeup = mc.terminal.nextRender();
+        REQUIRE(wakeup.has_value());
+        CHECK(*wakeup <= 100ms);
+        CHECK_FALSE(at(800ms).has_value());
+        CHECK_FALSE(at(900ms).has_value());
+    }
+
+    SECTION("on the command's row, below a prompt's opening rows")
+    {
+        // A prompt that opens with a blank line, as endo's does: the head is that line, the command below it.
+        mc.writeToScreen("\033]133;A\033\\\r\n$ \033]133;B\033\\build\r\n\033]133;C\033\\");
+        printLines(mc, "built", 10);
+        auto const* const build = mc.terminal.commandBlocks().current();
+        REQUIRE(build != nullptr);
+        REQUIRE(mc.terminal.scrollToCommandBlockHead(build->id).has_value());
+        auto const flash = at(0ms);
+        REQUIRE(flash.has_value());
+        CHECK(flash->lineOffset == LineOffset(1));
+        CHECK(mc.terminal.primaryScreen()
+                  .grid()
+                  .lineText(mc.terminal.viewport().topLine() + LineOffset(1))
+                  .starts_with("$ build"));
+    }
+
+    SECTION("on the row, not on the screen row, as the view scrolls")
+    {
+        REQUIRE(mc.terminal.viewport().scrollUp(LineCount(1)));
+        auto const scrolled = at(100ms);
+        REQUIRE(scrolled.has_value());
+        CHECK(scrolled->lineOffset == LineOffset(1));
+
+        // Scrolled out of view, it fades unseen.
+        REQUIRE(mc.terminal.viewport().scrollDown(LineCount(3)));
+        CHECK_FALSE(at(200ms).has_value());
+    }
+}
+
 TEST_CASE("StickyHeader.jump.expandsTheBlocksCollapsedFold", "[stickyheader][jump][folding]")
 {
     auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(30) }, LineCount(100) };
