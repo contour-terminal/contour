@@ -28,6 +28,9 @@ class RenderBufferBuilder
     ///               status line and a non-displayed page are rendered through the same builder, so
     ///               anything that needs to look at neighbouring cells must go through this rather
     ///               than re-resolving via Terminal::currentScreen().
+    /// @param hoveredHyperlink The OSC 8 link the pointer is over in this frame, which the builder draws
+    ///                         in the hover role (Terminal::hyperlinkIdUnderPointer()); none for a screen
+    ///                         the pointer is not over.
     RenderBufferBuilder(Terminal const& terminal,
                         Screen const& screen,
                         RenderBuffer& output,
@@ -37,7 +40,8 @@ class RenderBufferBuilder
                         HighlightSearchMatches highlightSearchMatches,
                         InputMethodData inputMethodData,
                         std::optional<CellLocation> theCursorPosition,
-                        bool includeSelection);
+                        bool includeSelection,
+                        HyperlinkId hoveredHyperlink);
 
     /// Renders grid row @p line as host chrome copying it: its own colours, SGR and hyperlinks, but no
     /// cursor, selection, search match or yank highlight -- those describe the row where it really is.
@@ -51,7 +55,8 @@ class RenderBufferBuilder
     /// a blank row. Appended rather than returned, so the header copies into storage its frame keeps.
     ///
     /// @param output Where the cells go, after whatever it already holds.
-    /// @param terminal The terminal whose palette, colour mode, blink phase and hyperlinks apply.
+    /// @param terminal The terminal whose palette, colour mode and blink phase apply. A link on the row is
+    ///                 drawn at rest: the header is no hover target.
     /// @param line The grid row to copy.
     /// @param screenRow The screen row the copy is drawn on.
     /// @param columns How many columns to copy at most; a wide glyph that would straddle the limit is
@@ -127,13 +132,21 @@ class RenderBufferBuilder
 
     /// Constructs a RenderCell for the given screen Cell.
     [[nodiscard]] static RenderCell makeRenderCell(ColorPalette const& colorPalette,
-                                                   HyperlinkStorage const& hyperlinks,
                                                    ConstCellProxy cell,
                                                    LineFlags lineFlags,
                                                    RGBColor fg,
                                                    RGBColor bg,
                                                    LineOffset line,
                                                    ColumnOffset column);
+
+    /// The link role an OSC 8 hyperlink's cells take this frame.
+    ///
+    /// A link the terminal no longer holds (evicted from the hyperlink cache) is dead -- nothing opens it --
+    /// so it gets no decoration. Looking a link up also refreshes it in the cache, keeping the links on
+    /// screen from ageing out. The last answer is remembered, so a run of one link's cells costs one lookup.
+    /// @param hyperlink The cell's hyperlink; none gives LinkDecorationRole::None.
+    /// @return Hover for the link under the pointer, Normal for any other live one, None for a dead one.
+    [[nodiscard]] LinkDecorationRole osc8RoleOf(HyperlinkId hyperlink) const noexcept;
 
     /// Constructs the final foreground/background colors to be displayed on the screen.
     ///
@@ -233,6 +246,9 @@ class RenderBufferBuilder
     HighlightSearchMatches _highlightSearchMatches;
     InputMethodData _inputMethodData;
     bool _includeSelection;
+    HyperlinkId _hoveredHyperlink; ///< The OSC 8 link under the pointer, as the frame was asked to draw it.
+    mutable HyperlinkId _lastRoleLink {};                            ///< The link osc8RoleOf() answered last.
+    mutable LinkDecorationRole _lastRole = LinkDecorationRole::None; ///< The role it answered for it.
     ColumnCount _inputMethodSkipColumns = ColumnCount(0);
 
     int _prevWidth = 0;

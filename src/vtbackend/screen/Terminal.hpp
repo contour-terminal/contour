@@ -2700,6 +2700,20 @@ class Terminal
         return _hoveringHyperlinkId.load().value != 0;
     }
 
+    /// The OSC 8 hyperlink under the pointer as of the last pointer event (press, move, leave); none when
+    /// there was none. Safe from any thread, without the lock. A scroll, a screen switch or new output
+    /// moves the link under a still pointer without an event, so this can be stale then; a frame asks
+    /// hyperlinkIdUnderPointer() instead.
+    [[nodiscard]] HyperlinkId hoveringHyperlinkId() const noexcept { return _hoveringHyperlinkId.load(); }
+
+    /// The OSC 8 hyperlink in the cell the pointer is over right now, read from the screen; none when the
+    /// pointer is on no cell or the cell links nowhere. A pure query: nothing is stored or notified.
+    ///
+    /// The caller holds the lock: the cell is read from the grid, which the parser thread changes. Not
+    /// noexcept, for the reason currentMouseGridPosition() gives.
+    /// @see hoveringHyperlinkId
+    [[nodiscard]] HyperlinkId hyperlinkIdUnderPointer() const;
+
     /// Retrieves the HyperlinkInfo that is currently being hovered by the mouse, if so,
     /// or a nothing otherwise.
     [[nodiscard]] std::shared_ptr<HyperlinkInfo const> tryGetHoveringHyperlink() const noexcept
