@@ -84,9 +84,12 @@ vtbackend::GutterLayout configuredGutterLayout(config::Config const& config)
     return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config));
 }
 
-geometry::GutterWidth configuredGutterWidth(config::Config const& config, vtbackend::ImageSize cellSize)
+geometry::GutterWidth configuredGutterWidth(config::Config const& config,
+                                            vtbackend::ImageSize cellSize,
+                                            double scale)
 {
-    return gutterWidthFor(configuredGutterLayout(config), cellSize);
+    auto const columns = gutterWidthFor(configuredGutterLayout(config), cellSize);
+    return columns != 0 ? geometry::gutterLeadIn(scale) + columns : 0;
 }
 
 void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer::Renderer& renderer)
@@ -104,8 +107,9 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
     // by it fits the page against a width the surface does not have — while TerminalDisplay bakes the very
     // same margin into the renderer using the DPR, leaving the two disagreeing. @see TerminalDisplay.h,
     // which names the page fit and the margins explicitly.
-    auto const marginsDevicePx = geometry::scaled(toGeometryMargins(session.profile().margins.value()),
-                                                  session.display()->devicePixelRatio());
+    auto const devicePixelRatio = session.display()->devicePixelRatio();
+    auto const marginsDevicePx =
+        geometry::scaled(toGeometryMargins(session.profile().margins.value()), devicePixelRatio);
 
     // Fit the grid with the terminal's own total-page clamp injected, so the renderer geometry published
     // below and what resizeScreen() will actually apply can never disagree: resizeScreen() raises the
@@ -117,7 +121,7 @@ void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer:
         cellSize,
         marginsDevicePx,
         [&](auto page) { return terminal.clampedTotalPageSize(page); },
-        configuredGutterWidth(session.config(), cellSize));
+        configuredGutterWidth(session.config(), cellSize, devicePixelRatio));
 
     renderer.applyResize(newPixelSize, fit.pageSize, fit.pageMargin);
 

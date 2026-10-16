@@ -1413,15 +1413,34 @@ TEST_CASE("Terminal.Wheel.AltScreen.ScrollMultiplier.repeats_cursor_keys", "[ter
 TEST_CASE("Terminal.followOutput.brings_the_view_down_as_the_listener_and_the_settings_ask", "[terminal]")
 {
     // New output brings a view scrolled back into the history down to it, under the lock it is written under,
-    // where the listener follows output, auto_scroll_on_update is set and the view is in Insert mode.
+    // where the listener follows output, auto_scroll_on_update is set and the view is in Insert mode -- and
+    // only output that added lines: what is repainted in place on the page is not new output.
     using vtbackend::OutputFollowing;
     using vtbackend::ViMode;
+
+    // Appends a line: the cursor sits on the page's last row, so the line feed scrolls the page.
+    constexpr auto AppendedLine = std::string_view { "more\r\n" };
+
+    // A prompt repainting itself in place, as a shell's line editor does on a timer: up two rows, each
+    // rewritten across line feeds that never reach the bottom margin, and back to where it started. Shaped
+    // after the endo shell's idle frame, which also changes a digit of its own (a seconds counter).
+    constexpr auto RepaintedInPlace =
+        std::string_view { "\033[?2026h\033[2A\033[?25l\033[K\n\033[3C9\033[K\n\033[K\033[?25h\033[?2026l" };
+
+    // A line fed into the history by a scroll region anchored at the top, with a status row kept below it,
+    // as a progress bar pinned to the bottom of the page does (apt's): only the region scrolls.
+    constexpr auto TopAnchoredRegionLine = std::string_view { "\033[1;4r\033[4;1Hmore\n" };
+
+    // ED 2 scrolls the whole page into the history rather than erasing it.
+    constexpr auto ClearedPage = std::string_view { "\033[2J" };
+
     struct Row
     {
         std::string_view name;
         OutputFollowing following;
         bool autoScrollOnUpdate;
         ViMode mode;
+        std::string_view output;
         OutputFollowing outcome;
     };
     auto const rows = std::array {
@@ -1429,22 +1448,44 @@ TEST_CASE("Terminal.followOutput.brings_the_view_down_as_the_listener_and_the_se
               .following = OutputFollowing::Follow,
               .autoScrollOnUpdate = true,
               .mode = ViMode::Insert,
+              .output = AppendedLine,
               .outcome = OutputFollowing::Follow },
         Row { .name = "a listener that stays",
               .following = OutputFollowing::Stay,
               .autoScrollOnUpdate = true,
               .mode = ViMode::Insert,
+              .output = AppendedLine,
               .outcome = OutputFollowing::Stay },
         Row { .name = "auto_scroll_on_update off",
               .following = OutputFollowing::Follow,
               .autoScrollOnUpdate = false,
               .mode = ViMode::Insert,
+              .output = AppendedLine,
               .outcome = OutputFollowing::Stay },
         Row { .name = "Vi Normal mode",
               .following = OutputFollowing::Follow,
               .autoScrollOnUpdate = true,
               .mode = ViMode::Normal,
+              .output = AppendedLine,
               .outcome = OutputFollowing::Stay },
+        Row { .name = "a prompt repainting itself in place",
+              .following = OutputFollowing::Follow,
+              .autoScrollOnUpdate = true,
+              .mode = ViMode::Insert,
+              .output = RepaintedInPlace,
+              .outcome = OutputFollowing::Stay },
+        Row { .name = "a top-anchored scroll region feeding the history",
+              .following = OutputFollowing::Follow,
+              .autoScrollOnUpdate = true,
+              .mode = ViMode::Insert,
+              .output = TopAnchoredRegionLine,
+              .outcome = OutputFollowing::Follow },
+        Row { .name = "a clear, which scrolls the page into the history",
+              .following = OutputFollowing::Follow,
+              .autoScrollOnUpdate = true,
+              .mode = ViMode::Insert,
+              .output = ClearedPage,
+              .outcome = OutputFollowing::Follow },
     };
 
     for (auto const& row: rows)
@@ -1457,7 +1498,7 @@ TEST_CASE("Terminal.followOutput.brings_the_view_down_as_the_listener_and_the_se
         mc.terminal.inputHandler().setMode(row.mode);
         REQUIRE(mc.terminal.viewport().scrollUp(LineCount(3)));
 
-        mc.writeToScreen("more\r\n");
+        mc.writeToScreen(row.output);
 
         auto const outcome =
             mc.terminal.viewport().scrolled() ? OutputFollowing::Stay : OutputFollowing::Follow;
@@ -1468,8 +1509,8 @@ TEST_CASE("Terminal.followOutput.brings_the_view_down_as_the_listener_and_the_se
 TEST_CASE("Terminal.smoothLinefeed.shows_the_view_brought_down_to_the_output", "[terminal]")
 {
     // A linefeed under smooth scrolling (DECSCLM) shows the output so far before its batch ends, and so
-    // before the batch's end brings the view down: it brings the view down itself first, or the line would be
-    // shown to a view still scrolled back.
+    // before the batch's end brings the view down: it brings the view down itself first, or the lines it
+    // already added would be shown to a view still scrolled back.
     using vtbackend::OutputFollowing;
     struct ShowingTerm final: MockTerm<>
     {
@@ -1477,25 +1518,28 @@ TEST_CASE("Terminal.smoothLinefeed.shows_the_view_brought_down_to_the_output", "
 
         void screenUpdated() override
         {
-            if (!firstShown)
-                firstShown = terminal.viewport().scrolled() ? OutputFollowing::Stay : OutputFollowing::Follow;
+            shown.push_back(terminal.viewport().scrolled() ? OutputFollowing::Stay : OutputFollowing::Follow);
         }
 
-        std::optional<OutputFollowing> firstShown;
+        std::vector<OutputFollowing> shown;
     };
 
     auto mc = ShowingTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
     mc.following = OutputFollowing::Follow;
+    mc.terminal.settings().autoScrollOnUpdate = true;
     mc.terminal.settings().smoothLineScrolling = 1ms;
     printLines(mc, "line", 20);
     mc.writeToScreen("\033[?4h");
     REQUIRE(mc.terminal.viewport().scrollUp(LineCount(3)));
-    mc.firstShown.reset();
+    mc.shown.clear();
 
-    mc.writeToScreen("\n");
+    mc.writeToScreen("\n\n");
 
-    REQUIRE(mc.firstShown.has_value());
-    CHECK(*mc.firstShown == OutputFollowing::Follow);
+    // Each linefeed is shown before it scrolls. The first one, then, is shown before the batch has added
+    // anything to follow; the second one to a view brought down to the line the first one added.
+    REQUIRE(mc.shown.size() >= 2);
+    CHECK(mc.shown[0] == OutputFollowing::Stay);
+    CHECK(mc.shown[1] == OutputFollowing::Follow);
 }
 
 TEST_CASE("Terminal.smoothLinefeed.what_the_rest_of_its_batch_sends_on_the_spot_goes_out", "[terminal]")

@@ -222,11 +222,14 @@ struct Settings
     /// Mirrors the frontend history scroll multiplier; values below 1 are treated as 1.
     LineCount mouseWheelScrollMultiplier { LineCount(1) };
 
-    /// When true, PTY/app-caused updates (key input forwarded to the PTY, buffer
-    /// switches, scrollback clears, etc.) force the viewport to snap to the
-    /// bottom. When false, the viewport stays wherever the user parked it.
-    /// User-initiated transitions (e.g. leaving Vi mode) are not affected.
-    bool autoScrollOnUpdate = true;
+    /// When true, application-caused updates bring a viewport scrolled back into the history down to the
+    /// bottom: output that adds lines (@see Terminal::followOutput), buffer switches, scrollback clears.
+    /// When false, the viewport stays wherever the user parked it. Typing brings it down either way, and
+    /// user-initiated transitions (e.g. leaving Vi mode) are not affected.
+    ///
+    /// Off by default, as in VTE, ghostty, WezTerm and Windows Terminal: a view taken back to read the
+    /// history is the user's until they type. xterm's scrollTtyOutput is the one reference that defaults on.
+    bool autoScrollOnUpdate = false;
 
     /// What the strip left of the grid shows. The window geometry must agree: the gutter's width --
     /// gutterLayoutFor(gutter).totalColumns cells -- is taken out of the space available to cells, so a

@@ -2725,8 +2725,10 @@ class Terminal
 
     /// Brings a view scrolled back into the history down to the output just applied, as
     /// Settings::autoScrollOnUpdate asks in Insert mode, where the listener follows output
-    /// (@see Events::outputFollowing). Called with the state lock held, where output is applied and before it
-    /// is published: by the parse batch, and by a mirror applying a remote screen's update.
+    /// (@see Events::outputFollowing). Only output that scrolled lines off the page since the last call
+    /// counts (@see outputScrolledIntoHistory): a prompt, a progress bar or a clock repainted in place is not
+    /// new output. Called with the state lock held, where output is applied and before it is published: by
+    /// the parse batch, and by a mirror applying a remote screen's update.
     void followOutput();
 
     /// Runs @p pause with the parser thread's hold of the state lock released, and takes the lock back as
@@ -2988,6 +2990,13 @@ class Terminal
     ///
     /// A no-op unless DEC mode 2048 is set. Sent on every resize, and once when the mode is enabled.
     void reportInBandWindowResize();
+
+    /// Notes that output scrolled @p n lines off the top of the page, which is what followOutput() follows.
+    /// Called for every scroll Screen::scrollUp makes: a top-anchored scroll region's as well as the whole
+    /// page's, which onBufferScrolled() alone is told of.
+    /// @param n The lines scrolled, as the grid reports them.
+    void outputScrolledIntoHistory(LineCount n) noexcept;
+
     void onBufferScrolled(LineCount n) noexcept;
 
     /// Pulls the viewport and the Normal-mode cursor back inside the scrollback that still exists.
@@ -4014,6 +4023,9 @@ class Terminal
     Screen _indicatorStatusScreen;
     gsl::not_null<Screen*> _currentScreen;
     Viewport _viewport;
+    /// Lines output scrolled into the history since followOutput() last ran. Under the state lock.
+    /// @see outputScrolledIntoHistory
+    LineCount _linesScrolledSinceFollow {};
     StatusLineDefinition _indicatorStatusLineDefinition;
 
     // {{{ tabs info

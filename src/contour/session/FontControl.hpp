@@ -63,12 +63,16 @@ class TerminalSession;
 [[nodiscard]] vtbackend::GutterLayout configuredGutterLayout(config::Config const& config);
 
 /// The gutter width, in device pixels, @p config reserves: what every page fit, window size and size hint
-/// takes off the page.
+/// takes off the page. Its columns behind the blank lead-in that keeps them clear of the window's edge; the
+/// columns alone, which the hit-test maps a pointer onto, are gutterWidthFor().
 /// @param config The loaded configuration.
 /// @param cellSize The cell size in device pixels.
-/// @return gutterWidthFor(configuredGutterLayout(config), cellSize).
+/// @param scale The device-pixel ratio, which the lead-in is scaled by.
+/// @return geometry::gutterLeadIn(scale) + gutterWidthFor(configuredGutterLayout(config), cellSize); 0 when
+///         the layout has no columns.
 [[nodiscard]] geometry::GutterWidth configuredGutterWidth(config::Config const& config,
-                                                          vtbackend::ImageSize cellSize);
+                                                          vtbackend::ImageSize cellSize,
+                                                          double scale);
 
 /// Refits the grid to @p newPixelSize and resizes the child PTY accordingly.
 void applyResize(vtbackend::ImageSize newPixelSize,

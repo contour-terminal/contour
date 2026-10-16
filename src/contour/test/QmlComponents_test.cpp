@@ -14,6 +14,7 @@
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/display/TerminalDisplay.hpp>
+#include <contour/geometry/WindowGeometry.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/TerminalSession.hpp>
@@ -4273,6 +4274,16 @@ void skipUnlessOffscreen()
         SKIP("presses a resize zone, which a real windowing system hands to the user's own pointer");
 }
 
+/// The resize border's hit zones in @p host, which all eight share one objectName for.
+/// @param host The host window to search.
+/// @return Its four edge zones and four corner zones.
+[[nodiscard]] QList<QQuickItem*> resizeZonesOf(QObject& host)
+{
+    auto zones = host.findChildren<QQuickItem*>(QStringLiteral("resizeZone"));
+    REQUIRE(zones.size() == 8); // four edges, four corners
+    return zones;
+}
+
 /// Whether @p scenePoint lies inside one of the resize border's eight hit zones.
 ///
 /// This is the NON-VACUITY check every assertion below needs: "no drag started" is equally true of a
@@ -4286,8 +4297,7 @@ void skipUnlessOffscreen()
 /// @return Whether a zone covers it.
 [[nodiscard]] bool isOverResizeBorder(QObject& host, QPoint const& scenePoint)
 {
-    auto const zones = host.findChildren<QQuickItem*>(QStringLiteral("resizeZone"));
-    REQUIRE(zones.size() == 8); // four edges, four corners
+    auto const zones = resizeZonesOf(host);
     return std::ranges::any_of(
         zones, [&](QQuickItem const* zone) { return sceneRectOf(*zone).contains(scenePoint); });
 }
@@ -4526,6 +4536,25 @@ TEST_CASE("A resize-border press over the title bar does not start a window move
     postGesture(*window, Qt::LeftButton, press, QPoint(regionCentreX + 120, 120), GestureEnd::Released);
     CHECK(activations.isEmpty());
 
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The resize border is exactly as thick as the gutter's lead-in clears",
+          "[contour][gui][qml][resize][gutter]")
+{
+    // Both read geometry::ResizeBorderThickness -- the border through chromeStyle -- or a thicker border
+    // would quietly put the gutter's block column back under its left zone (@see geometry::gutterLeadIn).
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host = makeTabItemUnderResizeBorderHost(engine, controller);
+
+    auto const zones = resizeZonesOf(*host);
+    auto const leftEdge = std::ranges::find_if(
+        zones, [](QQuickItem const* zone) { return zone->property("edges").toInt() == Qt::LeftEdge; });
+    REQUIRE(leftEdge != zones.end());
+
+    CHECK((*leftEdge)->width() == contour::geometry::ResizeBorderThickness);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

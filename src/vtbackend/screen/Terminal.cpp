@@ -4155,6 +4155,14 @@ void Terminal::screenUpdated()
 
 void Terminal::followOutput()
 {
+    // Taken whatever is decided below, so that what scrolled while the view sat at the bottom is not
+    // followed later, by a batch that added nothing. A shell's line editor that repaints its prompt on a
+    // timer (endo, once a second) adds nothing, and used to bring a view taken back to read the history down
+    // with every repaint: xterm's scrollTtyOutput follows any byte read, ghostty only a bottom row that
+    // moved.
+    if (std::exchange(_linesScrolledSinceFollow, LineCount(0)) == LineCount(0))
+        return;
+
     if (!_settings.autoScrollOnUpdate || !_viewport.scrolled() || _inputHandler.mode() != ViMode::Insert)
         return;
 
@@ -6618,6 +6626,11 @@ void Terminal::synchronizedOutput(bool enabled)
         refreshRenderBuffer(true);
         _eventListener.screenUpdated();
     }
+}
+
+void Terminal::outputScrolledIntoHistory(LineCount n) noexcept
+{
+    _linesScrolledSinceFollow += n;
 }
 
 void Terminal::onBufferScrolled(LineCount n) noexcept

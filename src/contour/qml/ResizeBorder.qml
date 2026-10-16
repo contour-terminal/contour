@@ -11,7 +11,8 @@ Item {
     id: root
 
     required property var window
-    property int thickness: 6
+    // geometry::ResizeBorderThickness, which the gutter's lead-in clears (geometry::gutterLeadIn).
+    readonly property int thickness: chromeStyle.resizeBorderThickness
 
     anchors.fill: parent
     z: 1000

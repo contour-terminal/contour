@@ -44,11 +44,20 @@ struct Margins
 /// gutter's timestamps, line numbers and block column into, not padding, and it exists on one side only.
 /// It is subtracted from the width available to cells and added to the width a page requires, so a page
 /// fitted WITH a gutter reports fewer columns to the shell than the same window without one -- which is
-/// the honest answer, those columns genuinely not being there.
+/// the honest answer, those columns genuinely not being there. A reserved gutter begins with a blank
+/// lead-in (@see gutterLeadIn): the renderer sets the gutter's columns against the grid, so whatever the
+/// strip holds beyond them stays empty at its left edge.
 ///
 /// Every function below takes it last and defaults it to zero, so a caller that reserves no gutter gets
 /// exactly the arithmetic this header had before one existed.
 using GutterWidth = int;
+
+/// How far a frameless window's own resize border reaches in from each edge, in logical pixels.
+///
+/// The border is a set of invisible hit zones laid over the whole window, above everything else
+/// (ResizeBorder.qml, which reads this through UiStyleProvider), and a press inside one starts a window
+/// resize instead of reaching what is drawn beneath it.
+inline constexpr int ResizeBorderThickness = 6;
 
 /// Window chrome OUTSIDE the terminal content area (e.g. the QML title/tab bar), in logical pixels,
 /// DECLARED by the UI layer (Main.qml knows its layout). Never measured from live window-minus-item
@@ -158,6 +167,15 @@ namespace detail
         return static_cast<int>(scaled); // truncation == floor for non-negative values
     }
 
+    /// ceil(value * scale) for non-negative inputs, in constexpr-friendly form: the requirement-side
+    /// counterpart of floorScaled().
+    [[nodiscard]] constexpr int ceilScaled(double value, double scale) noexcept
+    {
+        auto const scaled = std::max(0.0, value * scale) - RoundingSlack;
+        auto const truncated = static_cast<int>(scaled);
+        return scaled > static_cast<double>(truncated) ? truncated + 1 : truncated;
+    }
+
     /// ceil(value / scale) for non-negative value and positive scale, in constexpr-friendly form.
     [[nodiscard]] constexpr int ceilUnscaled(double value, double scale) noexcept
     {
@@ -210,6 +228,23 @@ namespace detail
 {
     return { .horizontal = static_cast<int>(logical.horizontal * scale),
              .vertical = static_cast<int>(logical.vertical * scale) };
+}
+
+/// The blank lead-in a reserved gutter keeps at its left edge, in device pixels: room enough for a
+/// frameless window's resize border, so the block column starts where that border ends.
+///
+/// With no margin the gutter began at the window's edge, and its one-cell block column lay under the
+/// border's left zone: pointing at a fold control showed a resize cursor, pressing it resized the window,
+/// and the thin fold line itself was drawn hard against the edge. Kept whatever the window's frame -- a
+/// gutter flush against a border is hard to see under any frame, and a split pane's gutter is flush against
+/// its divider -- so that it costs no more than this one strip, and a title bar toggled on and off changes
+/// no page size.
+/// @param scale Content scale (device pixels per logical pixel).
+/// @return ceil(ResizeBorderThickness * scale): a whole pixel short of it would leave the column's first
+///         pixel inside the zone at a fractional scale.
+[[nodiscard]] constexpr int gutterLeadIn(double scale) noexcept
+{
+    return detail::ceilScaled(ResizeBorderThickness, scale);
 }
 
 /// Computes how many whole cells fit into the given device-pixel area: floor((available - 2*margins) / cell).
