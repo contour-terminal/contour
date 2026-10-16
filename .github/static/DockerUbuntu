@@ -32,12 +32,16 @@ COPY . /contour
 RUN LD_LIBRARY_PATH=/usr/local/lib sh /contour/scripts/install-static.sh
 
 WORKDIR /contour
+# CONTOUR_WITH_SYSTEMD=OFF -- systemd session scopes need libsystemd, which this image does not carry, and a
+# binary meant to run on any distribution cannot count on a systemd user manager to place sessions in. The
+# configure step fails outright without it. Off, as utempter is.
 RUN LD_LIBRARY_PATH=/usr/local/lib cmake -S . -B build -G Ninja \
     -D CMAKE_C_COMPILER=gcc-14 \
     -D CMAKE_CXX_COMPILER=g++-14 \
     -D CONTOUR_BUILD_STATIC=ON \
     -D CONTOUR_USE_CPM=ON \
     -D CONTOUR_WITH_UTEMPTER=OFF \
+    -D CONTOUR_WITH_SYSTEMD=OFF \
     -D CONTOUR_WAYLAND=OFF \
     -D CMAKE_CXX_FLAGS="-I/contour/build/_deps/yaml-cpp-src/include" \
     -D Qt6_DIR=/opt/qt/lib/cmake/Qt6

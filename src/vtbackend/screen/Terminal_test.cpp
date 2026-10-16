@@ -3902,6 +3902,9 @@ TEST_CASE("Terminal.processInputOnce.readAheadKeepsTheScreenExactWhileRendering"
     // The parser thread floods the terminal while another thread refreshes the render buffer as fast as
     // it can, so most reads find the state taken and read ahead. Run under the clang-tsan tree for the
     // races; anywhere, the screen must come out exactly as a single-threaded parse leaves it.
+    // The first frame holds the state until the parser has read ahead, so that the contended path runs
+    // whatever the scheduler does, and every frame after it yields: valgrind runs one thread at a time, and
+    // a thread that took the state straight back kept the parser waiting for minutes.
     auto constexpr TermSize = PageSize { LineCount(10), ColumnCount(40) };
     auto const flood = [] {
         auto text = std::string {};
@@ -3913,13 +3916,20 @@ TEST_CASE("Terminal.processInputOnce.readAheadKeepsTheScreenExactWhileRendering"
     auto threaded = MockTerm<PiecewisePty<64>> { TermSize, LineCount(100), 4096 };
     threaded.mockPty().appendStdOutBuffer(flood);
     auto parsed = std::atomic<bool> { false };
+    threaded.terminal.lock(); // the first frame's hold
     auto parser = std::thread { [&] {
         while (threaded.mockPty().isStdoutDataAvailable())
             threaded.terminal.processInputOnce();
         parsed.store(true, std::memory_order_release);
     } };
+    while (threaded.mockPty().readsAhead() == 0)
+        std::this_thread::yield();
+    threaded.terminal.unlock();
     while (!parsed.load(std::memory_order_acquire))
+    {
         threaded.terminal.refreshRenderBuffer();
+        std::this_thread::yield();
+    }
     parser.join();
 
     auto reference = MockTerm { TermSize, LineCount(100), 4096 };
