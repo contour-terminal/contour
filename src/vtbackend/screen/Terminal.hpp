@@ -1193,6 +1193,12 @@ class Terminal
     /// are made this tall, and statusLineHeight() answers from it rather than from their grids.
     static constexpr auto StatusLineHeight = LineCount(1);
 
+    /// The indicator status line's page: one row, as wide as the gutter and the page together, so its text
+    /// spans the whole bar and its middle is centred on it (#2139). The host-writable status line is the
+    /// application's, and keeps the page's width.
+    /// @return Its page size.
+    [[nodiscard]] PageSize indicatorStatusLinePageSize() const;
+
     /// How many lines the status line on display takes: none without one. From the status display type alone,
     /// which is race-free to read, as the renderer asks each frame without the state lock; the status
     /// screens' grids are rewritten by a resize.
@@ -3470,6 +3476,7 @@ class Terminal
 
     /// The indicator status line's colors for the focus and the input mode as they are now.
     [[nodiscard]] RGBColorPair indicatorStatusLineColors() const;
+
     void updateCursorVisibilityState() const noexcept;
 
     /// Shows the cursor and starts its blink over, as a key does.

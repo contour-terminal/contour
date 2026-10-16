@@ -171,14 +171,17 @@ struct RenderCursor
 
 /// A status line whose bar spans the window's whole width: the gutter and the page margins beside it, too.
 ///
-/// Only its background reaches that far. Its cells stay on the page's columns, where everything that walks
-/// @ref RenderBuffer::cells expects them, so its text lines up with the page's.
+/// Its background reaches the window's edges. Its text starts at the gutter's left edge: the status line's
+/// cells are numbered from its own column 0 as every row's are, and drawn @ref leadingColumns columns left of
+/// the page's -- shifted as a whole by the renderer, rather than written at negative columns, which nothing
+/// that walks @ref RenderBuffer::cells expects.
 struct RenderStatusBar
 {
     LineOffset lineOffset;          ///< Its first row.
     LineCount lines;                ///< How many rows it takes.
     RGBColor background;            ///< What the bar is filled with.
     StatusDisplayPosition position; ///< The edge it sits on, which it reaches past the margin there too.
+    ColumnCount leadingColumns {};  ///< How far left of the page's column 0 its own column 0 is drawn.
 };
 
 struct RenderBuffer

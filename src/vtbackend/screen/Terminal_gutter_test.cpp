@@ -623,6 +623,34 @@ TEST_CASE("Gutter.terminal.aCollapsedFoldsLabelNamesItsFold", "[gutter]")
         mc.terminal.collapsedFoldLabelAt(CellLocation { .line = LineOffset(1), .column = ColumnOffset(8) }));
 }
 
+TEST_CASE("Gutter.terminal.theIndicatorStatusLinesTextSpansTheGutterToo", "[gutter][statusline]")
+{
+    // #2139: the indicator status line is laid out across the gutter's columns and the page's, and drawn from
+    // the gutter's left edge. The host-writable one is the application's, and keeps the page's width.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(40) } };
+    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    auto const lastTextColumn = [&](RenderBuffer const& buffer) {
+        auto last = -1;
+        for (auto const& cell: buffer.cells)
+            if (cell.position.line == LineOffset(4) && !cell.codepoints.empty() && cell.codepoints != U" ")
+                last = std::max(last, unbox<int>(cell.position.column));
+        return last;
+    };
+
+    auto const bare = renderOf(mc.terminal);
+    REQUIRE(bare.statusBar.has_value());
+    CHECK(bare.statusBar->leadingColumns == ColumnCount(0));
+    CHECK(mc.terminal.indicatorStatusLinePageSize().columns == ColumnCount(40));
+
+    mc.terminal.settings().gutter = GutterSettings { .foldMarkers = true, .blockColumnWidth = 2 };
+    auto const wide = renderOf(mc.terminal);
+    REQUIRE(wide.statusBar.has_value());
+    CHECK(wide.statusBar->leadingColumns == ColumnCount(2));
+    CHECK(mc.terminal.indicatorStatusLinePageSize().columns == ColumnCount(42));
+    // The right-hand segment ends at the bar's right edge, two columns further than the page's alone.
+    CHECK(lastTextColumn(wide) == lastTextColumn(bare) + 2);
+}
+
 TEST_CASE("Gutter.terminal.aRunningCommandIsNoPrompt", "[gutter]")
 {
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };

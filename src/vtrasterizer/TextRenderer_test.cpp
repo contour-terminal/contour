@@ -2374,6 +2374,53 @@ TEST_CASE("Renderer.statusBar.reachesPastTheMarginOfTheEdgeItSitsOn", "[renderer
     CHECK(band->height == Height(26));
 }
 
+TEST_CASE("Renderer.statusBar.drawsTheIndicatorFromTheGuttersLeftEdge", "[renderer][statusline]")
+{
+    // #2139: a status bar with leading columns is drawn that many columns left of the page's column 0 -- here
+    // the two of the gutter, from x 10 where the page starts at 30 -- and the grid's origin is back where it
+    // was for everything after it, in either path.
+    configureMockFont();
+    ReconfigFixture fixture;
+    auto metrics = ReconfigFixture::seededMetrics();
+    metrics.pageMargin = vtrasterizer::PageMargin { .left = 30, .top = 0, .bottom = 0 };
+    RendererTest::seedMetrics(fixture.renderer, metrics);
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(260), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    mc.terminal.settings().gutter = vtbackend::GutterSettings { .foldMarkers = true, .blockColumnWidth = 2 };
+    mc.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    vtbackend::test::printLines(mc, "out", 20);
+
+    SECTION("in one pass")
+    {
+        REQUIRE(mc.terminal.smoothScrollPixelOffset() == 0.0f);
+    }
+    SECTION("in two, while the page scrolls smoothly")
+    {
+        mc.terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+        REQUIRE(mc.terminal.applySmoothScrollPixelDelta(5.0f) == SmoothScrollResult::Applied);
+    }
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const bar = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return buffer.get().statusBar;
+    }();
+    REQUIRE(bar.has_value());
+    REQUIRE(bar->leadingColumns == vtbackend::ColumnCount(2));
+
+    // The status line's own background, on its column 0: two cells left of the page's.
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const firstColumn = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.x == 10 && r.y == 100 && r.color.rgb() == bar->background;
+    });
+    CHECK(firstColumn != rectangles.end());
+
+    CHECK(RendererTest::liveGridMetrics(fixture.renderer).pageMargin.left == 30);
+}
+
 int main(int argc, char* argv[])
 {
     core::testing::suppressWindowsDialogs();

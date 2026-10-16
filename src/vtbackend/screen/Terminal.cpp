@@ -1181,11 +1181,15 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                 nullopt,
                                                                 includeSelection },
                                           ScrollOffset(0));
-            // The terminal's own furniture, so its bar may span the window's whole width (#2139).
-            output.statusBar = RenderStatusBar { .lineOffset = base,
-                                                 .lines = _indicatorStatusScreen.pageSize().lines,
-                                                 .background = indicatorStatusLineColors().background,
-                                                 .position = _settings.statusDisplayPosition };
+            // The terminal's own furniture, so its bar may span the window's whole width (#2139), and its
+            // text the gutter's columns as well as the page's.
+            output.statusBar = RenderStatusBar {
+                .lineOffset = base,
+                .lines = _indicatorStatusScreen.pageSize().lines,
+                .background = indicatorStatusLineColors().background,
+                .position = _settings.statusDisplayPosition,
+                .leadingColumns = _indicatorStatusScreen.pageSize().columns - _settings.pageSize.columns,
+            };
             return _indicatorStatusScreen.pageSize().lines;
         case StatusDisplayType::HostWritable:
             _hostWritableStatusLineScreen.render(RenderBufferBuilder { *this,
@@ -1204,6 +1208,12 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
     core::unreachable();
 }
 // }}}
+
+PageSize Terminal::indicatorStatusLinePageSize() const
+{
+    auto const gutterColumns = ColumnCount::cast_from(gutterLayoutFor(_settings.gutter).totalColumns);
+    return PageSize { StatusLineHeight, _settings.pageSize.columns + gutterColumns };
+}
 
 RGBColorPair Terminal::indicatorStatusLineColors() const
 {
@@ -1225,6 +1235,11 @@ RGBColorPair Terminal::indicatorStatusLineColors() const
 void Terminal::updateIndicatorStatusLine()
 {
     Require(_activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
+
+    // Refitted here as well as on a resize: the gutter's width follows its settings, which a configuration
+    // reload changes without the page necessarily changing size.
+    if (auto const wanted = indicatorStatusLinePageSize(); _indicatorStatusScreen.pageSize() != wanted)
+        _indicatorStatusScreen.applyPageSizeToMainDisplay(wanted);
 
     auto const colors = indicatorStatusLineColors();
 
@@ -1259,7 +1274,8 @@ void Terminal::updateIndicatorStatusLine()
     {
         // Don't show the middle segment if text is too long.
         auto const middleLength = serializeToVT(*this, definitions.middle, Styling::Disabled).size();
-        auto const center = pageSize().columns / ColumnCount(2) - ColumnCount(1);
+        // Centred on the bar, the gutter's columns and the page's together.
+        auto const center = _indicatorStatusScreen.pageSize().columns / ColumnCount(2) - ColumnCount(1);
         // size of middleVT segment is less that number of elements in the string due to formatting
         // and on average we can assume that the middle segment is half the size of the string
         _indicatorStatusScreen.moveCursorToColumn(
@@ -2761,14 +2777,16 @@ void Terminal::verifyState()
     Require(*_currentMousePosition.column < *thePageSize.columns);
     Require(*_currentMousePosition.line < *thePageSize.lines);
 
-    Require(_hostWritableStatusLineScreen.pageSize() == _indicatorStatusScreen.pageSize());
+    Require(_hostWritableStatusLineScreen.pageSize().lines == _indicatorStatusScreen.pageSize().lines);
     Require(_hostWritableStatusLineScreen.pageSize().lines == StatusLineHeight);
     Require(_hostWritableStatusLineScreen.pageSize().columns == _settings.pageSize.columns);
 
     // TODO: the current main display's page size PLUS visible status line count must match total page size.
 
     Require(_hostWritableStatusLineScreen.grid().pageSize().columns == _settings.pageSize.columns);
-    Require(_indicatorStatusScreen.grid().pageSize().columns == _settings.pageSize.columns);
+    // At least the page's: the gutter's columns too, as the gutter's settings stood when it was last laid
+    // out.
+    Require(_indicatorStatusScreen.grid().pageSize().columns >= _settings.pageSize.columns);
 
     Require(_tabs.empty() || _tabs.back() < unbox<ColumnOffset>(_settings.pageSize.columns));
 
@@ -6606,7 +6624,7 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     // cursor past a narrowed right margin and its cached cursor line un-re-pointed.
     auto const statusLinePageSize = PageSize { StatusLineHeight, _settings.pageSize.columns };
     _hostWritableStatusLineScreen.applyPageSizeToMainDisplay(statusLinePageSize);
-    _indicatorStatusScreen.applyPageSizeToMainDisplay(statusLinePageSize);
+    _indicatorStatusScreen.applyPageSizeToMainDisplay(indicatorStatusLinePageSize());
 
     // adjust margins for statuslines as well
     auto const statuslineMargin =
