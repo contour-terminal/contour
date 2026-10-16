@@ -502,38 +502,6 @@ TEST_CASE("display: a reload that widens the gutter widens the window's minimum 
     CHECK(h.window->minimumSize().height() == minimumBefore.height());
 }
 
-TEST_CASE("display: FollowHyperlink over a hovered OSC-8 link opens it via the launcher",
-          "[display][launcher]")
-{
-    // The hovered-hyperlink lookup only resolves after a real render (the hover state is updated on
-    // the display), so this path is exercised here rather than headlessly. Seed an OSC-8 remote link,
-    // move the mouse over its first cell, then dispatch FollowHyperlink and assert the injected
-    // launcher recorded the openUrl (no browser launched).
-    REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
-    namespace actions = contour::actions;
-
-    h.display->forceActiveFocus();
-    h.feedAndSettle("\033]8;;https://example.com/page\033\\LINK\033]8;;\033\\\r\n"sv);
-
-    // Hover the top-left cell (where the link text begins) via a real mouse move + render.
-    QTest::mouseMove(h.window.get(), QPoint(6, 6));
-    QCoreApplication::sendEvent(h.display.get(), [] {
-        static QHoverEvent ev(QEvent::HoverMove, QPointF(6, 6), QPointF(6, 6), QPointF(0, 0), Qt::NoModifier);
-        return &ev;
-    }());
-    h.pump();
-
-    if (h.session->terminal().isMouseHoveringHyperlink())
-    {
-        auto const before = h.testApp.launcher().openedUrls.size();
-        CHECK((*h.session)(actions::FollowHyperlink {}));
-        CHECK(h.testApp.launcher().openedUrls.size() == before + 1);
-    }
-    else
-        WARN("hyperlink hover not detected even under the live display; follow assertion skipped");
-}
-
 TEST_CASE("display: the deferred screenshot readback delivers a real image", "[display][screenshot]")
 {
     REQUIRE_DISPLAY_OR_SKIP();
@@ -1359,6 +1327,37 @@ void sendMouse(contour::display::TerminalDisplay* display,
                      double(cellSize.height.as<int>()) / dpr / 2.0);
 }
 } // namespace
+
+TEST_CASE("display: FollowHyperlink over a hovered OSC-8 link opens it via the launcher",
+          "[display][launcher]")
+{
+    // The hovered-hyperlink lookup only resolves after a real render (the hover state is updated on
+    // the display), so this path is exercised here rather than headlessly. Seed an OSC-8 remote link,
+    // hover its first cell, then dispatch FollowHyperlink and assert the injected launcher recorded the
+    // openUrl (no browser launched).
+    //
+    // The cell's position comes from the display's own geometry: the grid begins right of the gutter, so a
+    // pixel guessed at the top-left lands on the gutter, and the link is never hovered.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    namespace actions = contour::actions;
+
+    h.display->forceActiveFocus();
+    h.feedAndSettle("\033]8;;https://example.com/page\033\\LINK\033]8;;\033\\\r\n"sv);
+
+    // A pointer with no button down reaches the display as a hover, through hoverMoveEvent().
+    auto const onLink = logicalCellCenter(*h.display, vtbackend::LineOffset(0), vtbackend::ColumnOffset(0));
+    auto hover =
+        QHoverEvent(QEvent::HoverMove, onLink, h.display->mapToGlobal(onLink), onLink, Qt::NoModifier);
+    QCoreApplication::sendEvent(h.display.get(), &hover);
+    h.pump();
+    REQUIRE(h.session->terminal().isMouseHoveringHyperlink());
+
+    auto const before = h.testApp.launcher().openedUrls.size();
+    CHECK((*h.session)(actions::FollowHyperlink {}));
+    REQUIRE(h.testApp.launcher().openedUrls.size() == before + 1);
+    CHECK(h.testApp.launcher().openedUrls.back().toString().toStdString() == "https://example.com/page");
+}
 
 TEST_CASE("display: a mouse drag spanning multiple lines selects the exact cell range", "[display][mouse]")
 {
