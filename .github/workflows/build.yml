@@ -1423,12 +1423,14 @@ jobs:
           done
           export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
           CONTOUR_REQUIRE_SYSTEMD_TESTS=1 ctest --test-dir out/gcc-debug -L systemd --output-on-failure --no-tests=error
-      - name: "install weston (headless compositor for display-gated GUI tests)"
+      - name: "install weston and dbus-run-session (display-gated GUI tests)"
         # Non-gating until proven on a GitHub runner: the local run is green (headless weston,
         # 32 cases), but this step has not yet been validated on ubuntu-24.04 CI, so it must not
         # be able to fail the matrix. Drop continue-on-error once a real runner has passed it.
+        # dbus-daemon carries dbus-run-session, which the wrapper runs the tests under to give them
+        # a private session bus.
         continue-on-error: true
-        run: sudo apt-get install -qy weston qt6-wayland
+        run: sudo apt-get install -qy weston qt6-wayland dbus-daemon
       - name: "display-gated GUI tests (headless weston)"
         # Real-compositor run of the [display] suite (skipped by the offscreen ctest above): a
         # private headless weston instance provides a stable Wayland compositor without GPU or X.
