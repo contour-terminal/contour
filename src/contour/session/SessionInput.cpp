@@ -159,8 +159,10 @@ namespace
         auto const layout = configuredGutterLayout(session.config());
 
         auto const sx = static_cast<int>(positionPx.x() * dpr);
-        auto const column = geometry::gutterColumnAt(
-            sx, pageMargin.left, gutterWidthFor(layout, cellSize), unbox<int>(cellSize.width));
+        auto const column = geometry::gutterColumnAt(sx,
+                                                     pageMargin.left,
+                                                     configuredGutterExtent(session.config(), cellSize, dpr),
+                                                     unbox<int>(cellSize.width));
         auto const segment = column ? vtbackend::gutterSegmentAt(layout, *column) : std::nullopt;
         if (!segment)
             return std::nullopt;

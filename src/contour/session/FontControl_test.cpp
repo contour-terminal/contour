@@ -10,6 +10,7 @@
 #include <cmath>
 #include <functional>
 
+using contour::session::configuredGutterExtent;
 using contour::session::configuredGutterLayout;
 using contour::session::configuredGutterWidth;
 using contour::session::gutterWidthFor;
@@ -83,12 +84,38 @@ TEST_CASE("FontControl.configuredGutterWidth.keepsTheBlockColumnClearOfTheResize
         std::identity {},
         configuredGutterWidth(config, cell, Scale));
 
-    auto const columnAt = [&](int xDevicePx) {
-        return contour::geometry::gutterColumnAt(
-            xDevicePx, fit.pageMargin.left, columnsPx, unbox<int>(cell.width));
-    };
     auto const lastPixelUnderZone =
         static_cast<int>(std::ceil(contour::geometry::ResizeBorderThickness * Scale)) - 1;
-    CHECK_FALSE(columnAt(lastPixelUnderZone).has_value());
+    CHECK(fit.pageMargin.left - columnsPx == lastPixelUnderZone + 1);
+
+    // A press on the lead-in counts as one on the column. Where the zone lies over it, the zone takes the
+    // press first; a framed window, or a pane away from the window's edge, has no zone there.
+    auto const columnAt = [&](int xDevicePx) {
+        return contour::geometry::gutterColumnAt(xDevicePx,
+                                                 fit.pageMargin.left,
+                                                 configuredGutterExtent(config, cell, Scale),
+                                                 unbox<int>(cell.width));
+    };
+    CHECK(columnAt(0) == 0);
     CHECK(columnAt(lastPixelUnderZone + 1) == 0);
+}
+
+TEST_CASE("FontControl.configuredGutterExtent.splitsTheWidthIntoLeadInAndColumns",
+          "[contour][geometry][gutter]")
+{
+    auto const cell = vtbackend::ImageSize { .width = vtbackend::Width(9), .height = vtbackend::Height(18) };
+    auto constexpr Scale = 2.0;
+    auto config = contour::config::Config {};
+
+    auto const extent = configuredGutterExtent(config, cell, Scale);
+    CHECK(extent.leadIn == contour::geometry::gutterLeadIn(Scale));
+    CHECK(extent.columns == gutterWidthFor(configuredGutterLayout(config), cell));
+    CHECK(extent.leadIn + extent.columns == configuredGutterWidth(config, cell, Scale));
+
+    // No columns, no lead-in.
+    config.gutter.value() = contour::config::GutterConfig { .exitStatus = false, .userMarks = false };
+    config.folding.value().showMarkers = false;
+    auto const none = configuredGutterExtent(config, cell, Scale);
+    CHECK(none.leadIn == 0);
+    CHECK(none.columns == 0);
 }

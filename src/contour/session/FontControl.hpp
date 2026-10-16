@@ -62,14 +62,22 @@ class TerminalSession;
 /// @return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config)).
 [[nodiscard]] vtbackend::GutterLayout configuredGutterLayout(config::Config const& config);
 
-/// The gutter width, in device pixels, @p config reserves: what every page fit, window size and size hint
-/// takes off the page. Its columns behind the blank lead-in that keeps them clear of the window's edge; the
-/// columns alone, which the hit-test maps a pointer onto, are gutterWidthFor().
+/// The gutter @p config reserves, in device pixels, in its two parts: the blank lead-in against the pane's
+/// edge, and the columns behind it. What the hit-test maps a pointer onto, the lead-in included.
 /// @param config The loaded configuration.
 /// @param cellSize The cell size in device pixels.
 /// @param scale The device-pixel ratio, which the lead-in is scaled by.
-/// @return geometry::gutterLeadIn(scale) + gutterWidthFor(configuredGutterLayout(config), cellSize); 0 when
-///         the layout has no columns.
+/// @return Both parts; both 0 when the layout has no columns.
+[[nodiscard]] geometry::GutterExtent configuredGutterExtent(config::Config const& config,
+                                                            vtbackend::ImageSize cellSize,
+                                                            double scale);
+
+/// The gutter width, in device pixels, @p config reserves: what every page fit, window size and size hint
+/// takes off the page. Its columns behind the blank lead-in that keeps them clear of the window's edge.
+/// @param config The loaded configuration.
+/// @param cellSize The cell size in device pixels.
+/// @param scale The device-pixel ratio, which the lead-in is scaled by.
+/// @return configuredGutterExtent()'s two parts added up; 0 when the layout has no columns.
 [[nodiscard]] geometry::GutterWidth configuredGutterWidth(config::Config const& config,
                                                           vtbackend::ImageSize cellSize,
                                                           double scale);

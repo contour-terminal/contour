@@ -506,10 +506,11 @@ TEST_CASE("WindowGeometry.pageMarginFor.folds the gutter into the left inset", "
     auto const gutter = pageMarginFor(Margins, /*gutterDevicePx*/ 9);
     CHECK(gutter.left == 15);
     CHECK(gutter.top == 4);
-    CHECK(!isInGutter(5, gutter.left, 9));  // the configured margin, left of the gutter
-    CHECK(isInGutter(6, gutter.left, 9));   // the gutter's first pixel
-    CHECK(isInGutter(14, gutter.left, 9));  // its last
-    CHECK(!isInGutter(15, gutter.left, 9)); // column 0
+    CHECK(!isInGutter(
+        5, gutter.left, GutterExtent { .columns = 9 })); // the configured margin, left of the gutter
+    CHECK(isInGutter(6, gutter.left, GutterExtent { .columns = 9 }));   // the gutter's first pixel
+    CHECK(isInGutter(14, gutter.left, GutterExtent { .columns = 9 }));  // its last
+    CHECK(!isInGutter(15, gutter.left, GutterExtent { .columns = 9 })); // column 0
 
     // The fit supplies a measured bottom; everything else is the same placement.
     auto const fitted = pageMarginFor(Margins, 9, /*bottomDevicePx*/ 1);
@@ -567,16 +568,16 @@ TEST_CASE("WindowGeometry.isInGutter.covers the strip and nothing else", "[conto
     auto constexpr PageMarginLeft = MarginLeft + Gutter;
 
     // The margin to the left of the gutter is not the gutter.
-    CHECK(!isInGutter(0, PageMarginLeft, Gutter));
-    CHECK(!isInGutter(4, PageMarginLeft, Gutter));
+    CHECK(!isInGutter(0, PageMarginLeft, GutterExtent { .columns = Gutter }));
+    CHECK(!isInGutter(4, PageMarginLeft, GutterExtent { .columns = Gutter }));
 
     // The strip itself, both edges.
-    CHECK(isInGutter(5, PageMarginLeft, Gutter));
-    CHECK(isInGutter(14, PageMarginLeft, Gutter));
+    CHECK(isInGutter(5, PageMarginLeft, GutterExtent { .columns = Gutter }));
+    CHECK(isInGutter(14, PageMarginLeft, GutterExtent { .columns = Gutter }));
 
     // The first cell column is past it -- half-open, so 15 is already the grid.
-    CHECK(!isInGutter(15, PageMarginLeft, Gutter));
-    CHECK(!isInGutter(500, PageMarginLeft, Gutter));
+    CHECK(!isInGutter(15, PageMarginLeft, GutterExtent { .columns = Gutter }));
+    CHECK(!isInGutter(500, PageMarginLeft, GutterExtent { .columns = Gutter }));
 }
 
 TEST_CASE("WindowGeometry.isInGutter.no gutter means nothing is ever in it", "[contour][geometry]")
@@ -586,7 +587,7 @@ TEST_CASE("WindowGeometry.isInGutter.no gutter means nothing is ever in it", "[c
     for (auto const x: { 0, 1, 4, 5, 100 })
     {
         CAPTURE(x);
-        CHECK(!isInGutter(x, /*pageMarginLeft*/ 5, /*gutterDevicePx*/ 0));
+        CHECK(!isInGutter(x, /*pageMarginLeft*/ 5, GutterExtent { .columns = 0 }));
     }
 }
 
@@ -597,14 +598,36 @@ TEST_CASE("WindowGeometry.gutterColumnAt.namesTheColumnFromTheGuttersLeftEdge", 
     constexpr auto Gutter = 30;
     constexpr auto Cell = 10;
 
-    CHECK(gutterColumnAt(4, PageMarginLeft, Gutter, Cell) == std::nullopt); // the configured margin
-    CHECK(gutterColumnAt(5, PageMarginLeft, Gutter, Cell) == 0);
-    CHECK(gutterColumnAt(14, PageMarginLeft, Gutter, Cell) == 0);
-    CHECK(gutterColumnAt(15, PageMarginLeft, Gutter, Cell) == 1);
-    CHECK(gutterColumnAt(34, PageMarginLeft, Gutter, Cell) == 2);
-    CHECK(gutterColumnAt(35, PageMarginLeft, Gutter, Cell) == std::nullopt); // column 0 of the grid
-    CHECK(gutterColumnAt(20, PageMarginLeft, 0, Cell) == std::nullopt);      // no gutter at all
-    CHECK(gutterColumnAt(20, PageMarginLeft, Gutter, 0) == std::nullopt);    // no font yet
+    constexpr auto Columns = GutterExtent { .columns = Gutter };
+
+    CHECK(gutterColumnAt(4, PageMarginLeft, Columns, Cell) == std::nullopt); // the configured margin
+    CHECK(gutterColumnAt(5, PageMarginLeft, Columns, Cell) == 0);
+    CHECK(gutterColumnAt(14, PageMarginLeft, Columns, Cell) == 0);
+    CHECK(gutterColumnAt(15, PageMarginLeft, Columns, Cell) == 1);
+    CHECK(gutterColumnAt(34, PageMarginLeft, Columns, Cell) == 2);
+    CHECK(gutterColumnAt(35, PageMarginLeft, Columns, Cell) == std::nullopt);         // column 0 of the grid
+    CHECK(gutterColumnAt(20, PageMarginLeft, GutterExtent {}, Cell) == std::nullopt); // no gutter at all
+    CHECK(gutterColumnAt(20, PageMarginLeft, Columns, 0) == std::nullopt);            // no font yet
+}
+
+TEST_CASE("WindowGeometry.gutterColumnAt.countsTheLeadInAsTheFirstColumn", "[contour][geometry][gutter]")
+{
+    // A 6 px lead-in, then two 10 px columns ending where the grid starts at 26 px: a press anywhere from the
+    // pane's edge to the first column's right edge names the first column, a 16 px target rather than 10.
+    constexpr auto PageMarginLeft = 26;
+    constexpr auto Extent = GutterExtent { .leadIn = 6, .columns = 20 };
+    constexpr auto Cell = 10;
+
+    CHECK(gutterColumnAt(0, PageMarginLeft, Extent, Cell) == 0);
+    CHECK(gutterColumnAt(5, PageMarginLeft, Extent, Cell) == 0);
+    CHECK(gutterColumnAt(15, PageMarginLeft, Extent, Cell) == 0);
+    CHECK(gutterColumnAt(16, PageMarginLeft, Extent, Cell) == 1);
+    CHECK(gutterColumnAt(25, PageMarginLeft, Extent, Cell) == 1);
+    CHECK(gutterColumnAt(26, PageMarginLeft, Extent, Cell) == std::nullopt); // the grid
+
+    // A margin left of the lead-in is still nobody's.
+    CHECK(gutterColumnAt(3, PageMarginLeft + 4, Extent, Cell) == std::nullopt);
+    CHECK(gutterColumnAt(4, PageMarginLeft + 4, Extent, Cell) == 0);
 }
 
 TEST_CASE("WindowGeometry.pageColumnAt.namesOnlyThePagesOwnColumns", "[contour][geometry]")

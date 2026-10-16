@@ -84,12 +84,22 @@ vtbackend::GutterLayout configuredGutterLayout(config::Config const& config)
     return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config));
 }
 
+geometry::GutterExtent configuredGutterExtent(config::Config const& config,
+                                              vtbackend::ImageSize cellSize,
+                                              double scale)
+{
+    auto const columns = gutterWidthFor(configuredGutterLayout(config), cellSize);
+    if (columns == 0)
+        return {};
+    return geometry::GutterExtent { .leadIn = geometry::gutterLeadIn(scale), .columns = columns };
+}
+
 geometry::GutterWidth configuredGutterWidth(config::Config const& config,
                                             vtbackend::ImageSize cellSize,
                                             double scale)
 {
-    auto const columns = gutterWidthFor(configuredGutterLayout(config), cellSize);
-    return columns != 0 ? geometry::gutterLeadIn(scale) + columns : 0;
+    auto const extent = configuredGutterExtent(config, cellSize, scale);
+    return extent.leadIn + extent.columns;
 }
 
 void applyResize(ImageSize newPixelSize, TerminalSession& session, vtrasterizer::Renderer& renderer)
