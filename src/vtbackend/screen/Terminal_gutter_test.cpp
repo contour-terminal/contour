@@ -561,6 +561,46 @@ TEST_CASE("Gutter.terminal.aPressDoesWhatTheRowShows", "[gutter]")
     }
 }
 
+TEST_CASE("Gutter.terminal.theHoveredBlockCarriesABandDownItsRows", "[gutter]")
+{
+    // The run a click acts on: the hovered fold's, or the head of a block with nothing to fold.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mc.terminal.settings().gutter = GutterSettings { .foldMarkers = true, .exitStatus = true };
+    runCommand(mc, "true", {}, 0);           // row 0: a block with nothing to fold
+    runCommand(mc, "make", { "a", "b" }, 2); // rows 1-3: a failed block, folded output
+    auto const bandRows = [&] {
+        auto rows = std::set<int> {};
+        for (auto const& cell: renderOf(mc.terminal).gutter)
+            if (cell.codepoint == BlockBandGlyph)
+                rows.insert(unbox<int>(cell.lineOffset));
+        return rows;
+    };
+
+    SECTION("no band while nothing is hovered")
+    {
+        CHECK(bandRows().empty());
+    }
+
+    SECTION("the hovered fold's run, in its block's colour")
+    {
+        // Head and output, not the row the end mark came on below them.
+        mc.terminal.setGutterHoverLine(LineOffset(2));
+        CHECK(bandRows() == std::set<int> { 1, 2, 3 });
+
+        auto const buffer = renderOf(mc.terminal);
+        auto const band = std::ranges::find(buffer.gutter, BlockBandGlyph, &RenderGutterCell::codepoint);
+        REQUIRE(band != buffer.gutter.end());
+        CHECK(band->attributes.foregroundColor
+              == blockBandColor(mc.terminal.colorPalette(), CommandBlockOutcome::Failure));
+    }
+
+    SECTION("a block with nothing to fold has its band on its head")
+    {
+        mc.terminal.setGutterHoverLine(LineOffset(0));
+        CHECK(bandRows() == std::set<int> { 0 });
+    }
+}
+
 TEST_CASE("Gutter.terminal.aRunningCommandIsNoPrompt", "[gutter]")
 {
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
