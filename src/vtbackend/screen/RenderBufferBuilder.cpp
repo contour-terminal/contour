@@ -130,6 +130,25 @@ namespace
         return mixColor(selectionColors, cursorColor, 0.25f).distinct();
     }
 
+    /// Gives @p cell its link decoration: the role the renderer maps to the profile's decorator, and the
+    /// colour scheme's hyperlink_decoration colour for it.
+    void applyLinkRole(RenderCell& cell, LinkDecorationRole role, ColorPalette const& palette) noexcept
+    {
+        if (role == LinkDecorationRole::None)
+            return;
+        cell.linkRole = role;
+        cell.attributes.decorationColor = role == LinkDecorationRole::Hover
+                                              ? palette.hyperlinkDecoration.hover
+                                              : palette.hyperlinkDecoration.normal;
+    }
+
+    /// Tells whether the terminal still holds @p hyperlink: a link evicted from the cache is dead, nothing
+    /// opens it. The lookup refreshes the link in the cache, as drawing it always has.
+    bool isHyperlinkLive(HyperlinkStorage const& hyperlinks, HyperlinkId hyperlink) noexcept
+    {
+        return hyperlinks.cache.tryGet(hyperlink) != nullptr;
+    }
+
 } // namespace
 
 RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
@@ -141,7 +160,8 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
                                          HighlightSearchMatches highlightSearchMatches,
                                          InputMethodData inputMethodData,
                                          optional<CellLocation> theCursorPosition,
-                                         bool includeSelection):
+                                         bool includeSelection,
+                                         HyperlinkId hoveredHyperlink):
     _output { &output },
     _terminal { &terminal },
     _screen { &screen },
@@ -152,6 +172,7 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
     _highlightSearchMatches { highlightSearchMatches },
     _inputMethodData { std::move(inputMethodData) },
     _includeSelection { includeSelection },
+    _hoveredHyperlink { hoveredHyperlink },
     // Once per pass, not once per line: three facts that cannot change while a buffer is being built.
     _contextTintingPossible { terminal.settings().contextTintScope != ContextTintScope::Off
                               && terminal.colorPalette().hasContextTints()
@@ -214,14 +235,13 @@ void RenderBufferBuilder::renderDetachedLine(std::vector<RenderCell>& output,
                                          std::nullopt);
 
         // The row's own line flags stay behind: the copy is drawn single width and single height.
-        output.emplace_back(makeRenderCell(palette,
-                                           terminal.hyperlinks(),
-                                           cell,
-                                           LineFlags {},
-                                           fg,
-                                           bg,
-                                           screenRow,
-                                           ColumnOffset::cast_from(column)));
+        output.emplace_back(
+            makeRenderCell(palette, cell, LineFlags {}, fg, bg, screenRow, ColumnOffset::cast_from(column)));
+
+        // The header is no hover target -- it takes the pointer itself -- so its links are at rest.
+        if (auto const hyperlink = cell.hyperlink();
+            hyperlink != HyperlinkId {} && isHyperlinkLive(terminal.hyperlinks(), hyperlink))
+            applyLinkRole(output.back(), LinkDecorationRole::Normal, palette);
     }
 
     markShapingGroup(std::span { output }.subspan(first));
@@ -351,7 +371,6 @@ RenderCell RenderBufferBuilder::makeRenderCellExplicit(ColorPalette const& color
 }
 
 RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
-                                               HyperlinkStorage const& hyperlinks,
                                                ConstCellProxy screenCell,
                                                LineFlags lineFlags,
                                                RGBColor fg,
@@ -380,25 +399,22 @@ RenderCell RenderBufferBuilder::makeRenderCell(ColorPalette const& colorPalette,
 
     renderCell.image = screenCell.imageFragment();
 
-    // Most cells link nowhere: those are done here, without a lookup in the storage.
-    auto const hyperlinkId = screenCell.hyperlink();
-    if (!hyperlinkId)
-        return renderCell;
-
-    if (auto href = hyperlinks.hyperlinkById(hyperlinkId))
-    {
-        auto const& color = href->state == HyperlinkState::Hover ? colorPalette.hyperlinkDecoration.hover
-                                                                 : colorPalette.hyperlinkDecoration.normal;
-        // TODO(decoration): Move property into Terminal.
-        auto const decoration =
-            href->state == HyperlinkState::Hover
-                ? CellFlag::Underline              // TODO: decorationRenderer_.hyperlinkHover()
-                : CellFlag::DottedUnderline;       // TODO: decorationRenderer_.hyperlinkNormal();
-        renderCell.attributes.flags |= decoration; // toCellStyle(decoration);
-        renderCell.attributes.decorationColor = color;
-    }
-
     return renderCell;
+}
+
+LinkDecorationRole RenderBufferBuilder::osc8RoleOf(HyperlinkId hyperlink) const noexcept
+{
+    if (hyperlink == HyperlinkId {})
+        return LinkDecorationRole::None;
+    if (hyperlink == _lastRoleLink)
+        return _lastRole;
+
+    _lastRoleLink = hyperlink;
+    if (!isHyperlinkLive(_terminal->hyperlinks(), hyperlink))
+        _lastRole = LinkDecorationRole::None;
+    else
+        _lastRole = hyperlink == _hoveredHyperlink ? LinkDecorationRole::Hover : LinkDecorationRole::Normal;
+    return _lastRole;
 }
 
 RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
@@ -557,9 +573,12 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
         _terminal->viewport()
             .translateScreenToGridCoordinate(CellLocation { .line = lineOffset, .column = ColumnOffset(0) })
             .line;
-    bool const canRenderViaSimpleLine = (!_terminal->isSelected(gridLine) || !_includeSelection)
-                                        && !gridLineContainsCursor(lineOffset)
-                                        && !_terminal->isHighlighted(gridLine);
+
+    // A line one link covers takes the per-cell path as well: a RenderLine carries no per-cell decoration.
+    auto const linkRole = osc8RoleOf(lineBuffer.hyperlink);
+    bool const canRenderViaSimpleLine =
+        (!_terminal->isSelected(gridLine) || !_includeSelection) && !gridLineContainsCursor(lineOffset)
+        && !_terminal->isHighlighted(gridLine) && linkRole == LinkDecorationRole::None;
 
     if (canRenderViaSimpleLine)
     {
@@ -601,6 +620,13 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
                                                            displayColumn(columnOffset)));
     }
     // }}}
+
+    if (linkRole != LinkDecorationRole::None)
+    {
+        auto const& palette = _terminal->colorPalette();
+        for (auto& cell: std::span(_output->cells).subspan(frontIndex))
+            applyLinkRole(cell, linkRole, palette);
+    }
 
     auto const backIndex = _output->cells.size() - 1;
 
@@ -918,13 +944,16 @@ void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line,
     _prevHasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
     _output->cells.emplace_back(makeRenderCell(_terminal->colorPalette(),
-                                               _terminal->hyperlinks(),
                                                screenCell,
                                                _currentLineFlags,
                                                fg,
                                                bg,
                                                _baseLine + line,
                                                displayColumn(column)));
+
+    // Most cells link nowhere: those are done with this one test, and no link lookup.
+    if (auto const hyperlink = screenCell.hyperlink(); hyperlink != HyperlinkId {})
+        applyLinkRole(_output->cells.back(), osc8RoleOf(hyperlink), _terminal->colorPalette());
 
     // A row that a tall block reaches down into carries no text of its own, so nothing would be drawn
     // there and the block would exist only as long as its HEAD row was on screen -- scroll the head

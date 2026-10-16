@@ -5,6 +5,7 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/core/LinkDecoration.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/StickyHeaderKind.hpp>
 #include <vtbackend/core/TextScale.hpp>
@@ -75,6 +76,9 @@ struct RenderCell
     /// How this cell's glyph is sized and placed, and which row of its block it draws (kitty text
     /// sizing protocol, `OSC 66`). Ordinary text leaves it at its default.
     GlyphSizing sizing {};
+
+    /// Whether, and how, this cell is drawn as part of a link (OSC 8 or detected).
+    LinkDecorationRole linkRole = LinkDecorationRole::None;
 
     bool groupStart = false;
     bool groupEnd = false;

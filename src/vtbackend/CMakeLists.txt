@@ -55,6 +55,7 @@ set(vtbackend_HEADERS
     grid/Line.hpp
     core/LineFlags.hpp
     grid/LineSoA.hpp
+    core/LinkDecoration.hpp
     shell/LivePromptMarks.hpp
     screen/LocalTime.hpp
     Logging.hpp

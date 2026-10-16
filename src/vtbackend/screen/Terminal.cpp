@@ -831,31 +831,6 @@ int Terminal::TheSelectionHelper::cellWidth(CellLocation pos) const noexcept
     return terminal->currentScreen().cellWidthAt(pos);
 }
 
-namespace
-{
-    /**
-     * Sets the hyperlink into hovering state if mouse is currently hovering it
-     * and unsets the state when the object is being destroyed.
-     */
-    struct ScopedHyperlinkHover
-    {
-        std::shared_ptr<HyperlinkInfo const> href;
-
-        ScopedHyperlinkHover(Terminal const& terminal, Screen const& /*screen*/):
-            href { terminal.tryGetHoveringHyperlink() }
-        {
-            if (href)
-                href->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
-        }
-
-        ~ScopedHyperlinkHover()
-        {
-            if (href)
-                href->state = HyperlinkState::Inactive;
-        }
-    };
-} // namespace
-
 void Terminal::updateInputMethodPreeditString(std::string preeditString)
 {
     auto const composing = !preeditString.empty();
@@ -910,8 +885,12 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // grid drawn somewhere else would answer for a row the user did not point at.
     assert(baseLine == mainPageTopRow());
 
-    auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, *_currentScreen };
     auto const mainDisplayReverseVideo = isModeEnabled(vtbackend::DECMode::ReverseVideo);
+
+    // The link under the pointer is asked for once, here, as this frame's own: the pointer's cell holds
+    // another link after a scroll, a screen switch or new output even while the pointer stands still, and
+    // no pointer event says so. A pure query -- unlike updateHoveringHyperlinkState() it tells nobody.
+    auto const hoveredHyperlink = hyperlinkIdUnderPointer();
 
     // A non-empty search pattern forces every visible line onto the per-cell render path (the
     // uniform-line fast path emits one RenderLine and no per-cell data). Hint mode needs the same:
@@ -953,7 +932,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             HighlightSearchMatches::Yes,
                                                                             inputMethodData(),
                                                                             effectiveCursorPosition,
-                                                                            includeSelection },
+                                                                            includeSelection,
+                                                                            hoveredHyperlink },
                                                       _viewport.scrollOffset(),
                                                       renderLinesPerCell,
                                                       smoothScrollExtra,
@@ -968,7 +948,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             HighlightSearchMatches::Yes,
                                                                             inputMethodData(),
                                                                             effectiveCursorPosition,
-                                                                            includeSelection },
+                                                                            includeSelection,
+                                                                            hoveredHyperlink },
                                                       _viewport.scrollOffset(),
                                                       renderLinesPerCell);
 
@@ -1180,7 +1161,8 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                 HighlightSearchMatches::No,
                                                                 InputMethodData {},
                                                                 nullopt,
-                                                                includeSelection },
+                                                                includeSelection,
+                                                                HyperlinkId {} },
                                           ScrollOffset(0));
             // The terminal's own furniture, so its bar may span the window's whole width (#2139), and its
             // text the gutter's columns as well as the page's.
@@ -1202,7 +1184,8 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                        HighlightSearchMatches::No,
                                                                        InputMethodData {},
                                                                        nullopt,
-                                                                       includeSelection },
+                                                                       includeSelection,
+                                                                       HyperlinkId {} },
                                                  ScrollOffset(0));
             return _hostWritableStatusLineScreen.pageSize().lines;
     }
@@ -2311,11 +2294,16 @@ void Terminal::updateCursorVisibilityState() const noexcept
     }
 }
 
+HyperlinkId Terminal::hyperlinkIdUnderPointer() const
+{
+    auto const position = currentMouseGridPosition();
+    return position ? _currentScreen->hyperlinkIdAt(*position) : HyperlinkId {};
+}
+
 void Terminal::updateHoveringHyperlinkState()
 {
-    // The cell the frame's hover highlight reads too (@see tryGetHoveringHyperlink), so the two agree.
-    auto const position = currentMouseGridPosition();
-    auto const newState = position ? _currentScreen->hyperlinkIdAt(*position) : HyperlinkId {};
+    // The cell the hover tooltip reads too (@see tryGetHoveringHyperlink), so the two agree.
+    auto const newState = hyperlinkIdUnderPointer();
 
     auto const oldState = _hoveringHyperlinkId.exchange(newState);
 
