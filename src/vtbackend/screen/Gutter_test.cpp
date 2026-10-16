@@ -512,7 +512,7 @@ TEST_CASE("Gutter.blockColumn.withUserMarksOffNoDiamondIsDrawn", "[gutter]")
 TEST_CASE("Gutter.blockColumn.aFailureIsAShapeAsWellAsAColour", "[gutter]")
 {
     // A reader who cannot tell red from grey still tells a failed command from one that succeeded: a cross
-    // where a disc would be, and the body of its fold drawn heavy. Only with exit status on.
+    // where a disc would be, and its fold drawn heavy, head and body. Only with exit status on.
     auto const settings = GutterSettings { .foldMarkers = true, .exitStatus = true };
     auto const failed = std::optional { CommandBlockOutcome::Failure };
     auto const succeeded = std::optional { CommandBlockOutcome::Success };
@@ -532,12 +532,23 @@ TEST_CASE("Gutter.blockColumn.aFailureIsAShapeAsWellAsAColour", "[gutter]")
     CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Body, .outcome = succeeded }, settings)
           == BlockColumnGlyph::FoldBody);
 
-    // The fold control on the head stays the control, whatever the command did: its colour says how it ended.
+    // The fold control on the head stays the control, drawn heavy too: its stem runs on into the heavy body,
+    // and a collapsed fold, whose body is hidden, still says the command failed.
     CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Expanded,
                                               .head = BlockHeadState::Finished,
                                               .outcome = failed },
                            settings)
-          == BlockColumnGlyph::FoldExpanded);
+          == BlockColumnGlyph::FoldExpandedFailed);
+    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Collapsed,
+                                              .head = BlockHeadState::Finished,
+                                              .outcome = failed },
+                           settings)
+          == BlockColumnGlyph::FoldCollapsedFailed);
+    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Collapsed,
+                                              .head = BlockHeadState::Finished,
+                                              .outcome = succeeded },
+                           settings)
+          == BlockColumnGlyph::FoldCollapsed);
 
     // With exit status off nothing tells the outcome, by colour or by shape.
     auto const quiet = GutterSettings { .foldMarkers = true, .exitStatus = false };
@@ -555,8 +566,15 @@ TEST_CASE("Gutter.blockColumn.aPressTogglesAFoldWhereverItReachesAndOpensAStatus
     // With none to toggle, a status mark opens its block's menu, and anything else does nothing.
     for (auto const glyph: { Running, Finished, Failed })
         CHECK(blockColumnPressFor(glyph, FoldToggle::Unavailable) == BlockColumnPress::OpenBlockMenu);
-    for (auto const glyph:
-         { None, FoldExpanded, FoldCollapsed, FoldBody, FoldBodyEnd, UserMark, FoldBodyFailed })
+    for (auto const glyph: { None,
+                             FoldExpanded,
+                             FoldCollapsed,
+                             FoldBody,
+                             FoldBodyEnd,
+                             UserMark,
+                             FoldBodyFailed,
+                             FoldExpandedFailed,
+                             FoldCollapsedFailed })
         CHECK(blockColumnPressFor(glyph, FoldToggle::Unavailable) == BlockColumnPress::Swallow);
 }
 
@@ -573,9 +591,14 @@ TEST_CASE("Gutter.blockColumn.glyphsAreTheirCodepoints", "[gutter]")
     CHECK(blockColumnCodepoint(BlockColumnGlyph::Running) == U'􏀂');
     CHECK(blockColumnCodepoint(BlockColumnGlyph::Finished) == U'􏀄');
     CHECK(blockColumnCodepoint(BlockColumnGlyph::Failed) == U'\U0010F005');
-    // The heavy body needs no codepoint of its own: Unicode's heavy box drawing says it exactly.
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldBodyFailed) == U'\u2503');
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldBodyEndFailed) == U'\u2517');
+    // The fold column is Contour's own throughout, drawn at one stroke in either gutter width: light, and
+    // from U+10F008 the same four heavy.
+    CHECK(foldMarkerGlyph(FoldMarker::Body) == U'\U0010F006');
+    CHECK(foldMarkerGlyph(FoldMarker::BodyEnd) == U'\U0010F007');
+    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldExpandedFailed) == U'\U0010F008');
+    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldCollapsedFailed) == U'\U0010F009');
+    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldBodyFailed) == U'\U0010F00A');
+    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldBodyEndFailed) == U'\U0010F00B');
 }
 
 TEST_CASE("Gutter.blockColumn.onlyTheRecordedHeadIsAHead", "[gutter]")

@@ -124,18 +124,20 @@ class LineNumberText
 /// so all of them are one size and weight in every font.
 enum class BlockColumnGlyph : uint8_t
 {
-    None = 0,          ///< Nothing.
-    FoldExpanded,      ///< The head of an expanded fold.
-    FoldCollapsed,     ///< The head of a collapsed fold.
-    FoldBody,          ///< A row inside an expanded fold.
-    FoldBodyEnd,       ///< The last row of an expanded fold.
-    UserMark,          ///< A diamond, U+10F003 -- a row the user marked with vi `mm`.
-    Running,           ///< A small triangle, U+10F002 -- the head of a command that has not finished.
-    Finished,          ///< A disc, U+10F004 -- the head of a finished command with no fold drawn beside it.
-    Failed,            ///< A cross, U+10F005 -- the head of a FAILED command with no fold drawn beside it.
-    FoldBodyFailed,    ///< A row inside an expanded fold whose command failed: the body drawn heavy.
-    FoldBodyEndFailed, ///< The last row of such a fold.
-    Count,             ///< Not a glyph; pins the codepoint table.
+    None = 0,            ///< Nothing.
+    FoldExpanded,        ///< The head of an expanded fold.
+    FoldCollapsed,       ///< The head of a collapsed fold.
+    FoldBody,            ///< A row inside an expanded fold.
+    FoldBodyEnd,         ///< The last row of an expanded fold.
+    UserMark,            ///< A diamond, U+10F003 -- a row the user marked with vi `mm`.
+    Running,             ///< A small triangle, U+10F002 -- the head of a command that has not finished.
+    Finished,            ///< A disc, U+10F004 -- the head of a finished command with no fold drawn beside it.
+    Failed,              ///< A cross, U+10F005 -- the head of a FAILED command with no fold drawn beside it.
+    FoldBodyFailed,      ///< A row inside an expanded fold whose command failed: the body drawn heavy.
+    FoldBodyEndFailed,   ///< The last row of such a fold.
+    FoldExpandedFailed,  ///< The head of such a fold: its box heavy too, so its stem joins the heavy body.
+    FoldCollapsedFailed, ///< The head of a collapsed fold whose command failed.
+    Count,               ///< Not a glyph; pins the codepoint table.
 };
 
 /// Whether a row heads a command block, and in which state.

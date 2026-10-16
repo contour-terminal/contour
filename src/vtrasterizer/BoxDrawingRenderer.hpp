@@ -62,6 +62,25 @@ class BoxDrawingRenderer: public Renderable
 
     [[nodiscard]] static bool renderable(char32_t codepoint) noexcept;
 
+    /// Whether @p codepoint is one of Contour's own private-use glyphs: the gutter's fold column and status
+    /// marks (@see docs/vt-extensions/private-use-glyphs.md).
+    [[nodiscard]] static constexpr bool isContourGlyph(char32_t codepoint) noexcept
+    {
+        return 0x10F000 <= codepoint && codepoint <= 0x10F00B;
+    }
+
+    /// The line thickness @p codepoint's tile is drawn with on a row with @p flags: the cell's own, doubled
+    /// on a DECDWL row, whose text is stretched to twice its width -- except for Contour's own glyphs, which
+    /// a two-cell gutter draws wide for their size, so the fold column keeps one stroke weight in either
+    /// width.
+    /// @param codepoint The glyph.
+    /// @param flags The row's line flags.
+    /// @param lineThickness The cell's light line thickness.
+    /// @return The thickness to draw the glyph's lines with.
+    [[nodiscard]] static int tileLineThickness(char32_t codepoint,
+                                               vtbackend::LineFlags flags,
+                                               int lineThickness) noexcept;
+
     /// Renders boxdrawing character.
     ///
     /// @param codepoint     the boxdrawing character's codepoint.

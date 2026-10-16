@@ -339,13 +339,15 @@ namespace
     };
     static_assert(FoldGlyphs.size() == static_cast<std::size_t>(FoldMarker::Count));
 
-    /// The same for a fold whose command failed: its body heavy, its head the same control as any other's.
+    /// The same for a fold whose command failed: drawn heavy, its head as much as its body, so the head's
+    /// stem runs on into a body of its own weight -- and a collapsed fold, whose body is hidden, still says
+    /// so.
     constexpr auto FailedFoldGlyphs = std::array {
-        BlockColumnGlyph::None,              // FoldMarker::None
-        BlockColumnGlyph::FoldExpanded,      // FoldMarker::Expanded
-        BlockColumnGlyph::FoldCollapsed,     // FoldMarker::Collapsed
-        BlockColumnGlyph::FoldBodyFailed,    // FoldMarker::Body
-        BlockColumnGlyph::FoldBodyEndFailed, // FoldMarker::BodyEnd
+        BlockColumnGlyph::None,                // FoldMarker::None
+        BlockColumnGlyph::FoldExpandedFailed,  // FoldMarker::Expanded
+        BlockColumnGlyph::FoldCollapsedFailed, // FoldMarker::Collapsed
+        BlockColumnGlyph::FoldBodyFailed,      // FoldMarker::Body
+        BlockColumnGlyph::FoldBodyEndFailed,   // FoldMarker::BodyEnd
     };
     static_assert(FailedFoldGlyphs.size() == static_cast<std::size_t>(FoldMarker::Count));
 
@@ -361,6 +363,14 @@ namespace
         return marker == FoldMarker::Expanded || marker == FoldMarker::Collapsed;
     }
 
+    /// The glyph @p facts' fold marker is drawn as: heavy where its command failed.
+    [[nodiscard]] constexpr BlockColumnGlyph foldGlyphOf(BlockColumnFacts const& facts,
+                                                         GutterSettings const& settings) noexcept
+    {
+        auto const& glyphs = showsFailure(facts, settings) ? FailedFoldGlyphs : FoldGlyphs;
+        return glyphs[static_cast<std::size_t>(facts.fold)];
+    }
+
     /// One step of the block column's precedence: the glyph it claims the row for, or None to pass the row
     /// on to the next step.
     using BlockColumnRule = BlockColumnGlyph (*)(BlockColumnFacts const&, GutterSettings const&) noexcept;
@@ -370,7 +380,7 @@ namespace
     {
         if (!settings.foldMarkers || !isFoldHead(facts.fold))
             return BlockColumnGlyph::None;
-        return FoldGlyphs[static_cast<std::size_t>(facts.fold)];
+        return foldGlyphOf(facts, settings);
     }
 
     [[nodiscard]] BlockColumnGlyph userMarkRule(BlockColumnFacts const& facts,
@@ -389,8 +399,7 @@ namespace
     {
         if (!settings.foldMarkers || isFoldHead(facts.fold))
             return BlockColumnGlyph::None;
-        auto const& glyphs = showsFailure(facts, settings) ? FailedFoldGlyphs : FoldGlyphs;
-        return glyphs[static_cast<std::size_t>(facts.fold)];
+        return foldGlyphOf(facts, settings);
     }
 
     [[nodiscard]] BlockColumnGlyph runningHeadRule(BlockColumnFacts const& facts,
@@ -459,8 +468,10 @@ char32_t blockColumnCodepoint(BlockColumnGlyph glyph) noexcept
         U'\U0010F002',                          // Running:  a small right-pointing triangle, as U+25B8 ▸
         U'\U0010F004',                          // Finished: a disc, as U+25CF ●
         U'\U0010F005',                          // Failed:   a cross, as U+2717 ✗
-        U'┃',                                   // FoldBodyFailed:    BOX DRAWINGS HEAVY VERTICAL
-        U'┗',                                   // FoldBodyEndFailed: BOX DRAWINGS HEAVY UP AND RIGHT
+        U'\U0010F00A',                          // FoldBodyFailed:      the body, heavy
+        U'\U0010F00B',                          // FoldBodyEndFailed:   its end, heavy
+        U'\U0010F008',                          // FoldExpandedFailed:  the open head, heavy
+        U'\U0010F009',                          // FoldCollapsedFailed: the closed head, heavy
     };
     static_assert(Codepoints.size() == static_cast<std::size_t>(BlockColumnGlyph::Count));
     return Codepoints[static_cast<std::size_t>(glyph)];
@@ -484,6 +495,8 @@ BlockColumnPress blockColumnPressFor(BlockColumnGlyph glyph, FoldToggle fold) no
         BlockColumnPress::OpenBlockMenu, // Failed
         BlockColumnPress::Swallow,       // FoldBodyFailed
         BlockColumnPress::Swallow,       // FoldBodyEndFailed
+        BlockColumnPress::Swallow,       // FoldExpandedFailed: drawn, but folding is off
+        BlockColumnPress::Swallow,       // FoldCollapsedFailed: likewise
     };
     static_assert(Presses.size() == static_cast<std::size_t>(BlockColumnGlyph::Count));
     return Presses[static_cast<std::size_t>(glyph)];
