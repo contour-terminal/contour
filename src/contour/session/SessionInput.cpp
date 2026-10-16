@@ -738,7 +738,8 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
         return;
 
     if (session.sendGutterPressEvent(gutterHitAt(event->position(), session),
-                                     input::makeMouseButton(event->button()))
+                                     input::makeMouseButton(event->button()),
+                                     input::makeModifiers(event->modifiers()).chord)
         == ConsumedByGutter::Yes)
     {
         event->accept();

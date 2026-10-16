@@ -20,6 +20,7 @@
 #include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/shell/CommandLineText.hpp>
 #include <vtbackend/shell/ScrollbarMarks.hpp>
 
 #include <vtpty/Pty.hpp>
@@ -86,6 +87,7 @@ enum class GuardedRole : uint8_t
     CaptureBuffer,
     ShowHostWritableStatusLine,
     BigPaste,
+    RerunCommand,
 };
 
 /**
@@ -763,6 +765,17 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_INVOKABLE void applyPendingPaste(bool allow, bool remember);
     Q_INVOKABLE void executePendingBufferCapture(bool allow, bool remember);
     Q_INVOKABLE void executeShowHostWritableStatusLine(bool allow, bool remember);
+
+    /// Runs the command RerunCommand asked about, if @p allow: typed at the prompt and entered -- unless
+    /// the prompt went away while the dialog was up, or the line can no longer be typed as it is.
+    /// The two bools are the dialog's answer as every permission wall here gives it to QML.
+    /// @param allow Whether the user allowed it.
+    /// @param remember Whether the answer stands for the rest of the session.
+    Q_INVOKABLE void applyPendingRerun(bool allow, bool remember);
+
+    /// The command RerunCommand asks to run, made safe to show; empty while none is waiting.
+    /// @return The command line, for the dialog that asks.
+    [[nodiscard]] Q_INVOKABLE QString pendingRerunCommandLine() const;
     Q_INVOKABLE void resizeTerminalToDisplaySize();
 
     void updateColorPreference(vtbackend::ColorPreference preference);
@@ -874,19 +887,25 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return Whether the gutter consumed the event.
     ConsumedByGutter sendGutterHoverEvent(std::optional<GutterHit> hit);
 
-    /// Toggles the fold beside @p hit when the press landed on the block column where a fold control is
-    /// drawn (vtbackend::Terminal::gutterTogglesFoldAt).
+    /// Acts on the press that landed on the gutter: a left one does what the block column offers beside
+    /// that row (vtbackend::Terminal::blockColumnPressAt) -- toggles its fold, or opens the menu of the block
+    /// whose status mark it is -- and any other button over a block runs its binding for that block, a right
+    /// press opening that block's context menu.
     ///
     /// The press half of the gutter's click handshake, and the only place that arms it: a press the
     /// child never saw must be followed by a release it never sees either, and leaving that to the
     /// caller means a third event path re-deriving the rule (@see sendOwedRelease).
     ///
-    /// Every left press on the gutter is consumed; one with no fold to toggle does nothing.
+    /// Every left press on the gutter is consumed, one with nothing to act on included; another button is
+    /// the application's anywhere but over a block on the block column.
     ///
     /// @param hit Where over the gutter the pointer is, or nullopt when it is not over the gutter.
     /// @param button The button that went down.
+    /// @param modifiers The modifiers held, which pick another button's binding.
     /// @return Whether the gutter consumed the event.
-    ConsumedByGutter sendGutterPressEvent(std::optional<GutterHit> hit, vtbackend::MouseButton button);
+    ConsumedByGutter sendGutterPressEvent(std::optional<GutterHit> hit,
+                                          vtbackend::MouseButton button,
+                                          vtbackend::Modifiers modifiers);
 
     /// Acts on the press that landed on the sticky header, for the header's command block.
     ///
@@ -1062,6 +1081,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::SelectCommandBlock const& action);
     bool operator()(actions::CopyCommandBlock const& action);
     bool operator()(actions::CopyCommandLine const& action);
+    bool operator()(actions::RerunCommand const& action);
     bool operator()(actions::OpenCommandOutput const& action);
 
     /// The world as this pane's context menu needs to see it, snapshotted under a single terminal lock.
@@ -1157,6 +1177,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void requestPermissionForPasteLargeFile();
     void requestPermissionForBufferCapture();
     void requestPermissionForShowHostWritableStatusLine();
+    void requestPermissionForRerunCommand();
     void showNotification(QString const& title, QString const& content);
     void fontSizeChanged();
 
@@ -1568,9 +1589,22 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// followed by a release delivered to another would otherwise swallow the second pane's release.
     OwedRelease _owedRelease {};
 
-    /// The block a context menu opened over the sticky header describes, while the press that opens it
-    /// runs its binding; zero otherwise, when the menu describes the cell under the pointer.
+    /// The block a context menu opened over the sticky header or the gutter describes, while the press that
+    /// opens it runs; zero otherwise, when the menu describes the cell under the pointer.
     vtbackend::CommandBlockId _contextMenuBlock {};
+
+    /// Runs @p button's binding with @p modifiers for @p block, as over the block's own rows: a context menu
+    /// it opens describes @p block. The sticky header's and the gutter's buttons, other than the left one.
+    /// @param button The button pressed.
+    /// @param modifiers The modifiers held, which pick its binding.
+    /// @param block The block the press stands for.
+    void runBindingForBlock(vtbackend::MouseButton button,
+                            vtbackend::Modifiers modifiers,
+                            vtbackend::CommandBlockId block);
+
+    /// Opens the context menu of @p block: what a click on its status mark in the gutter does.
+    /// @param block The block.
+    void openBlockMenu(vtbackend::CommandBlockId block);
 
     /// Whether the mouse cursor shape must be re-decided on the next motion, even over the same cell.
     ///
@@ -1671,6 +1705,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         unsigned count;
     };
     std::optional<BigPasteRequest> _pendingBigPaste;
+
+    /// The command line RerunCommand asked to run, while its dialog is up. Kept, not read again when the
+    /// answer comes: the block's record may have gone by then, and what runs is what was shown.
+    std::optional<vtbackend::CommandLineText> _pendingRerun;
     PermissionCache _rememberedPermissions;
     std::unique_ptr<QThread> _exitWatcherThread;
 
@@ -1776,6 +1814,7 @@ struct std::formatter<contour::session::GuardedRole>: std::formatter<std::string
             case contour::session::GuardedRole::CaptureBuffer: output = "Capture Buffer"; break;
             case contour::session::GuardedRole::ShowHostWritableStatusLine:  output = "show Host Writable Statusline"; break;
             case contour::session::GuardedRole::BigPaste:  output = "paste large number of characters"; break;
+            case contour::session::GuardedRole::RerunCommand: output = "run a command again"; break;
         }
         // clang-format on
         return formatter<string_view>::format(output, ctx);

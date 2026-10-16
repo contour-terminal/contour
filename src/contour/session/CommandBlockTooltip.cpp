@@ -4,6 +4,8 @@
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
+#include <array>
+#include <cstddef>
 #include <format>
 #include <string_view>
 
@@ -26,6 +28,18 @@ namespace
         return std::format("Exit code {} ({})", *record.exitCode, signal);
     }
 } // namespace
+
+std::string_view blockTooltipHintText(BlockTooltipHint hint) noexcept
+{
+    constexpr auto Texts = std::array {
+        std::string_view { "Right-click for actions" },                     // RightClickOnly
+        std::string_view { "Click for actions" },                           // Menu
+        std::string_view { "Click to collapse · Right-click for actions" }, // Collapse
+        std::string_view { "Click to expand · Right-click for actions" },   // Expand
+    };
+    static_assert(Texts.size() == static_cast<std::size_t>(BlockTooltipHint::Expand) + 1);
+    return Texts[static_cast<std::size_t>(hint)];
+}
 
 std::string commandBlockTooltipText(vtbackend::CommandBlockRecord const& record,
                                     std::chrono::local_seconds startedAt)

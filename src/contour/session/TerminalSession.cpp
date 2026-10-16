@@ -827,6 +827,7 @@ void TerminalSession::executeRole(GuardedRole role, bool allow, bool remember)
             executeShowHostWritableStatusLine(allow, remember);
             break;
         case GuardedRole::BigPaste: applyPendingPaste(allow, remember); break;
+        case GuardedRole::RerunCommand: applyPendingRerun(allow, remember); break;
     }
 }
 
@@ -841,6 +842,9 @@ config::Permission TerminalSession::configuredPermissionFor(GuardedRole role) co
         // BigPaste is gated on payload size, not on configuration; what the gate adds for it is the
         // answer the user asked to be remembered for the session.
         case GuardedRole::BigPaste: return config::Permission::Ask;
+        // Asked every time unless the user said otherwise for the session: the line is the shell's report,
+        // which any program writing to the terminal can forge, so it runs only once it has been read.
+        case GuardedRole::RerunCommand: return config::Permission::Ask;
     }
     return config::Permission::Ask;
 }
@@ -889,6 +893,7 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
                     case GuardedRole::CaptureBuffer: emit requestPermissionForBufferCapture(); break;
                     case GuardedRole::ShowHostWritableStatusLine: emit requestPermissionForShowHostWritableStatusLine(); break;
                     case GuardedRole::BigPaste: emit requestPermissionForPasteLargeFile(); break;
+                    case GuardedRole::RerunCommand: emit requestPermissionForRerunCommand(); break;
                         // clang-format on
                 }
             }
@@ -1489,6 +1494,79 @@ void TerminalSession::applyPendingPaste(bool allow, bool remember)
     // The stored text is the one that was measured and approved -- deliberately not a fresh read of the
     // clipboard, whose contents may have changed while the dialog was up. @see BigPasteRequest.
     sendPasteRepeatedly(request.text, request.count);
+}
+
+namespace
+{
+    /// Why a command line cannot be run again now.
+    enum class RerunRefusal : uint8_t
+    {
+        NoPrompt,   ///< A command is running, or the page on display is no shell's: typed, it would be input.
+        Untypeable, ///< Typed, it would lose a character a shell reads as a key -- and be another command.
+    };
+
+    /// Whether @p commandLine can be typed at @p terminal's prompt as it is, now.
+    ///
+    /// Through a bracketed paste where the shell asked for one, which keeps a TAB or a line break text; typed
+    /// raw otherwise, where those are keys. Refused rather than sanitised where a character would be taken
+    /// out, as a hint's text is (Terminal's typeHint): a command missing a character is another command.
+    /// @param terminal The terminal, locked.
+    /// @param commandLine The command line as reported or recovered.
+    /// @return Nothing, or why not.
+    [[nodiscard]] std::expected<void, RerunRefusal> checkRerun(vtbackend::Terminal const& terminal,
+                                                               std::string_view commandLine)
+    {
+        if (!terminal.shellIsPrompting())
+            return std::unexpected(RerunRefusal::NoPrompt);
+        auto const purpose = terminal.isModeEnabled(vtbackend::DECMode::BracketedPaste)
+                                 ? vtbackend::SanitizePurpose::Insert
+                                 : vtbackend::SanitizePurpose::Type;
+        if (!vtbackend::isUnchangedBySanitizing(commandLine, purpose))
+            return std::unexpected(RerunRefusal::Untypeable);
+        return {};
+    }
+
+    [[nodiscard]] std::string_view rerunRefusalText(RerunRefusal refusal) noexcept
+    {
+        switch (refusal)
+        {
+            case RerunRefusal::NoPrompt: return "the shell is not at its prompt";
+            case RerunRefusal::Untypeable: return "it cannot be typed as it is";
+        }
+        return "";
+    }
+} // namespace
+
+void TerminalSession::applyPendingRerun(bool allow, bool remember)
+{
+    sessionLog()("applyPendingRerun: allow={}, remember={}", allow, remember);
+    if (remember)
+        _rememberedPermissions[GuardedRole::RerunCommand] = allow;
+
+    if (!_pendingRerun)
+        return;
+
+    // Taken out either way: a refused rerun is finished, not still pending.
+    auto const commandLine = std::exchange(_pendingRerun, std::nullopt).value();
+    if (!allow)
+        return;
+
+    // Locked: the prompt is asked about again -- it may have gone while the dialog was up -- and
+    // sendPaste() appends to the input generator the parser thread appends to as well. Flushed once the
+    // lock is released. See ViNormalMode.
+    auto const _ = std::scoped_lock { _terminal };
+    if (auto const checked = checkRerun(terminal(), commandLine.raw()); !checked)
+    {
+        sessionLog()("Not running the command again: {}.", rerunRefusalText(checked.error()));
+        return;
+    }
+    terminal().sendPaste(commandLine.raw());
+    terminal().sendRawInput("\r");
+}
+
+QString TerminalSession::pendingRerunCommandLine() const
+{
+    return _pendingRerun ? QString::fromStdString(_pendingRerun->display()) : QString {};
 }
 
 void TerminalSession::onSelectionCompleted()
@@ -2690,8 +2768,10 @@ ConsumedByGutter TerminalSession::sendGutterHoverEvent(std::optional<GutterHit> 
         auto const* record = onControl && _terminal.foldingAppliesToDisplayedPage()
                                  ? _terminal.commandBlockAt(hit->gridLine)
                                  : nullptr;
-        return std::pair { onControl && _terminal.gutterTogglesFoldAt(hit->gridLine),
-                           record != nullptr ? std::optional { record->id } : std::nullopt };
+        return std::pair {
+            onControl && _terminal.blockColumnPressAt(hit->gridLine) != vtbackend::BlockColumnPress::Swallow,
+            record != nullptr ? std::optional { record->id } : std::nullopt
+        };
     });
 
     // The tooltip describes a BLOCK, so it follows the block column only, and moves on only when the
@@ -2710,29 +2790,86 @@ ConsumedByGutter TerminalSession::sendGutterHoverEvent(std::optional<GutterHit> 
 }
 
 ConsumedByGutter TerminalSession::sendGutterPressEvent(std::optional<GutterHit> hit,
-                                                       vtbackend::MouseButton button)
+                                                       vtbackend::MouseButton button,
+                                                       vtbackend::Modifiers modifiers)
 {
-    // Only a left click acts on the gutter; every other button belongs to the application, gutter or not.
-    if (button != vtbackend::MouseButton::Left || !hit)
+    if (!hit)
+        return ConsumedByGutter::No;
+    auto const onBlockColumn = carriesFoldControls(hit->segment);
+
+    if (button == vtbackend::MouseButton::Left)
+    {
+        // What the hover offered, asked again under the same lock: the fold toggled through the one path
+        // every folding action takes, which republishes the scrollable count; or the block whose status
+        // mark this is, for its menu.
+        auto menuBlock = std::optional<vtbackend::CommandBlockId> {};
+        if (onBlockColumn)
+            withScrollableChange([&](vtbackend::Terminal& terminal) {
+                switch (terminal.blockColumnPressAt(hit->gridLine))
+                {
+                    case vtbackend::BlockColumnPress::ToggleFold:
+                        return terminal.toggleFoldContaining(hit->gridLine);
+                    case vtbackend::BlockColumnPress::OpenBlockMenu:
+                        if (auto const* const record = terminal.commandBlockAt(hit->gridLine))
+                            menuBlock = record->id;
+                        return false;
+                    case vtbackend::BlockColumnPress::Swallow: return false;
+                }
+                return false;
+            });
+
+        // The press is the gutter's wherever it lands, acted on or not: beside the timestamps, on a blank
+        // row, or with folding off, neither the child nor a selection may see it -- nor its release. Let
+        // through, it reached them as a press on column 0 of the row.
+        //
+        // Remembered here rather than by the caller, so the two halves of the handshake cannot drift: a
+        // release reported for a press the child never saw leaves it holding a button down that was never
+        // pressed. Owed before the menu opens, whose popup takes the release (@see dropOwedRelease).
+        _owedRelease = { .owner = PressOwner::Gutter, .button = button };
+        if (menuBlock)
+            openBlockMenu(*menuBlock);
+        return ConsumedByGutter::Yes;
+    }
+
+    // Any other button over a block on the block column does what its binding does over the block's own
+    // rows, for that block -- a right press opens its context menu -- as on the sticky header, and the
+    // application never hears of it. Anywhere else in the gutter it is the application's, as it always was.
+    auto const block =
+        onBlockColumn
+            ? core::locked(_terminal,
+                           [&]() -> std::optional<vtbackend::CommandBlockId> {
+                               if (!_terminal.foldingAppliesToDisplayedPage())
+                                   return std::nullopt;
+                               auto const* const record = _terminal.commandBlockAt(hit->gridLine);
+                               return record != nullptr ? std::optional { record->id } : std::nullopt;
+                           })
+            : std::nullopt;
+    if (!block)
         return ConsumedByGutter::No;
 
-    // Through the one path every folding action takes: it takes the lock and republishes the scrollable
-    // count. Only where the hover offered a hand -- the same question, asked under the same lock.
-    if (carriesFoldControls(hit->segment))
-        withScrollableChange([&](auto& terminal) {
-            return terminal.gutterTogglesFoldAt(hit->gridLine)
-                   && terminal.toggleFoldContaining(hit->gridLine);
-        });
-
-    // The press is the gutter's wherever it lands, a fold toggled or not: beside the timestamps, on a ● or a
-    // blank row, or with folding off, neither the child nor a selection may see it -- nor its release. Let
-    // through, it reached them as a press on column 0 of the row.
-    //
-    // Remembered here rather than by the caller, so the two halves of the handshake cannot drift: a
-    // release reported for a press the child never saw leaves it holding a button down that was never
-    // pressed.
     _owedRelease = { .owner = PressOwner::Gutter, .button = button };
+    runBindingForBlock(button, modifiers, *block);
     return ConsumedByGutter::Yes;
+}
+
+void TerminalSession::runBindingForBlock(vtbackend::MouseButton button,
+                                         vtbackend::Modifiers modifiers,
+                                         vtbackend::CommandBlockId block)
+{
+    // Outside the lock, as the grid's bindings run.
+    if (auto const* actions = mouseBinding(button, bindingModifiers(modifiers)))
+    {
+        _contextMenuBlock = block;
+        auto const forget = core::Finally { [this] { _contextMenuBlock = {}; } };
+        executeAllActions(*actions);
+    }
+}
+
+void TerminalSession::openBlockMenu(vtbackend::CommandBlockId block)
+{
+    _contextMenuBlock = block;
+    auto const forget = core::Finally { [this] { _contextMenuBlock = {}; } };
+    (*this)(actions::OpenContextMenu {});
 }
 
 PressOwner TerminalSession::sendOwedRelease(vtbackend::MouseButton button)
@@ -2778,17 +2915,10 @@ ConsumedByStickyHeader TerminalSession::sendStickyHeaderPressEvent(
     // (@see dropOwedRelease) while the binding runs.
     _owedRelease = { .owner = PressOwner::StickyHeader, .button = button };
 
-    // Any other button does what its binding does over the block's own rows, outside the lock as the grid's
-    // bindings run. The header stands for its block, so a context menu describes that block.
+    // Any other button does what its binding does over the block's own rows. The header stands for its
+    // block, so a context menu describes that block.
     if (button != vtbackend::MouseButton::Left)
-    {
-        if (auto const* actions = mouseBinding(button, bindingModifiers(modifiers)))
-        {
-            _contextMenuBlock = *block;
-            auto const forget = core::Finally { [this] { _contextMenuBlock = {}; } };
-            executeAllActions(*actions);
-        }
-    }
+        runBindingForBlock(button, modifiers, *block);
     return ConsumedByStickyHeader::Yes;
 }
 
@@ -2882,7 +3012,31 @@ QString TerminalSession::commandBlockTooltip() const
     auto const startedAt =
         _terminal.localTimeOf(record->commandStartedAt.or_else([&] { return record->promptStartedAt; })
                                   .value_or(std::chrono::system_clock::time_point {}));
-    return QString::fromStdString(commandBlockTooltipText(*record, startedAt));
+    auto text = commandBlockTooltipText(*record, startedAt);
+    if (text.empty())
+        return {};
+
+    // What a click beside its head does: the fold hangs there, and so does the status mark.
+    auto const hint = [&] {
+        auto const& grid = _terminal.primaryScreen().grid();
+        auto const head = record->headIdGeneration == grid.stableIdGeneration()
+                              ? grid.lineOffsetOf(record->headStableId)
+                              : std::nullopt;
+        if (!head)
+            return BlockTooltipHint::RightClickOnly;
+        switch (_terminal.blockColumnPressAt(*head))
+        {
+            case vtbackend::BlockColumnPress::ToggleFold:
+                return _terminal.foldState().isCollapsed(record->headStableId) ? BlockTooltipHint::Expand
+                                                                               : BlockTooltipHint::Collapse;
+            case vtbackend::BlockColumnPress::OpenBlockMenu: return BlockTooltipHint::Menu;
+            case vtbackend::BlockColumnPress::Swallow: return BlockTooltipHint::RightClickOnly;
+        }
+        return BlockTooltipHint::RightClickOnly;
+    }();
+    text += '\n';
+    text += blockTooltipHintText(hint);
+    return QString::fromStdString(text);
 }
 
 void TerminalSession::announceScrollableLineCount(vtbackend::LineCount scrollable)
@@ -3272,15 +3426,15 @@ command::ContextMenuState TerminalSession::contextMenuState()
         // without reading the rows, under the lock the parser waits on.
         auto const hasLastCommand = terminal().hasCommandBlockRows(vtbackend::CommandBlockTarget::Last);
 
-        // The block under the pointer, as an unpinned `target: pointer` action resolves it -- the gutter's
-        // block, and none over an alternate-screen application. Over the sticky header, the block the header
-        // stands for: the menu is the one its rows would open.
-        auto const overStickyHeader = _contextMenuBlock != vtbackend::CommandBlockId {};
+        // The block under the pointer, as an unpinned `target: pointer` action resolves it, and none over an
+        // alternate-screen application. Opened from the sticky header or the gutter, the block the press
+        // stood for: the menu is the one its rows would open.
+        auto const pinned = _contextMenuBlock != vtbackend::CommandBlockId {};
         auto const* const block =
             terminal().targetedCommandBlock(vtbackend::CommandBlockTarget::Pointer, _contextMenuBlock);
 
-        // The header is no cell, so no link is under it.
-        auto const hyperlink = overStickyHeader ? nullptr : terminal().tryGetHoveringHyperlink();
+        // Neither the header nor the gutter is a cell, so no link is under either.
+        auto const hyperlink = pinned ? nullptr : terminal().tryGetHoveringHyperlink();
 
         // The grid line under the pointer, where the right press just put the terminal's: the very position
         // `block` above was resolved from, so the fold row and the block rows name the same block. Not this
@@ -3288,11 +3442,17 @@ command::ContextMenuState TerminalSession::contextMenuState()
         // with none, and named whichever row the pointer last crossed on the grid. Over the header, a row
         // of its block.
         auto const pointerLine = [&]() -> std::optional<vtbackend::LineOffset> {
-            if (!overStickyHeader)
+            if (!pinned)
                 return terminal().currentMouseGridPosition().transform(
                     [](vtbackend::CellLocation position) { return position.line; });
             if (block == nullptr)
                 return std::nullopt;
+            // Its head, where its fold hangs; the lowest row the block reached -- the row its end mark came
+            // on, below the output -- is no row of the fold. The anchor stands in for a head the grid lost.
+            auto const& grid = terminal().primaryScreen().grid();
+            if (block->headIdGeneration == grid.stableIdGeneration())
+                if (auto const head = grid.lineOffsetOf(block->headStableId))
+                    return head;
             return terminal().commandBlockAnchor(*block);
         }();
 
@@ -3344,6 +3504,8 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // clicked, and the pointer will have left it by the time the row is picked.
             .foldLine = foldLine,
             .blockUnderCursor = blockUnderCursor,
+            .livePrompt = terminal().shellIsPrompting() ? command::PromptPresence::Present
+                                                        : command::PromptPresence::Absent,
             .activeProfile = profileName(),
             .profileNames = std::move(profileNames),
         };
@@ -3457,6 +3619,31 @@ bool TerminalSession::operator()(actions::CopyCommandLine const& action)
     // input, or a line feed, which runs what precedes it as it arrives; the display form would keep both
     // harmless on screen but put U+FFFD into what the user pastes.
     return copyBlockText(commandLine.transform(&vtbackend::CommandLineText::copyable)).has_value();
+}
+
+bool TerminalSession::operator()(actions::RerunCommand const& action)
+{
+    // The record belongs to the store, so it is read under the lock, and the prompt is asked about there.
+    auto const commandLine =
+        core::locked(_terminal, [&]() -> std::expected<vtbackend::CommandLineText, std::string_view> {
+            auto const* const record = terminal().targetedCommandBlock(action.target, action.block);
+            if (record == nullptr || record->commandLine.empty())
+                return std::unexpected(std::string_view { "no command line to run" });
+            if (auto const checked = checkRerun(terminal(), record->commandLine.raw()); !checked)
+                return std::unexpected(rerunRefusalText(checked.error()));
+            return record->commandLine;
+        });
+    if (!commandLine)
+    {
+        sessionLog()("Not running the command again: {}.", commandLine.error());
+        return false;
+    }
+
+    // Shown before it runs: the line is what the shell reported, or what the screen showed, and either can
+    // be written by any program that writes to the terminal.
+    _pendingRerun = *commandLine;
+    requestPermission(configuredPermissionFor(GuardedRole::RerunCommand), GuardedRole::RerunCommand);
+    return true;
 }
 
 namespace

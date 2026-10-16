@@ -329,6 +329,19 @@ Item {
         onRejected: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, false);
     }
 
+    // Asked before RerunCommand types a command at the prompt and enters it: the command line is what the
+    // shell reported, or what the screen showed, and a program writing to the terminal can forge either. The
+    // text is set as the dialog opens, from the command the session holds for it.
+    RequestPermission {
+        id: requestRerunCommandDialog
+        title: qsTr("Run this command again?")
+        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(true, true);
+        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(true, false);
+        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(false, true);
+        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(false, false);
+        onRejected: if (chrome.session !== null) chrome.session.applyPendingRerun(false, false);
+    }
+
     // The find bar (Ctrl+Shift+F, or `/` in Vi normal mode). Per pane, not per window: each session
     // keeps its own pattern, count and highlights, so a split shows the bar over the pane being
     // searched. Opened by the session's searchBarRequested signal, wired in Connections below.
@@ -458,5 +471,10 @@ Item {
         function onRequestPermissionForBufferCapture() { requestBufferCaptureDialog.open(); }
         function onRequestPermissionForShowHostWritableStatusLine() { requestShowHostWritableStatusLine.open(); }
         function onRequestPermissionForPasteLargeFile() { requestLargeFilePaste.open(); }
+        function onRequestPermissionForRerunCommand() {
+            requestRerunCommandDialog.text = qsTr("It is typed at the prompt and entered:") + "\n\n"
+                                             + chrome.session.pendingRerunCommandLine();
+            requestRerunCommandDialog.open();
+        }
     }
 }
