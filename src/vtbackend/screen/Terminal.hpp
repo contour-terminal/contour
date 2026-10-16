@@ -1527,6 +1527,12 @@ class Terminal
     /// @return What the press does; Swallow beside any page but the primary screen's.
     [[nodiscard]] BlockColumnPress blockColumnPressAt(LineOffset gridLine) const;
 
+    /// The head of the collapsed fold whose `⋯ N lines` label is drawn over @p position: what a click on the
+    /// label expands. The label is laid out where fillFoldLabels() draws it, by the same placement.
+    /// @param position A cell of the main page, as the pointer names it (main-page rows).
+    /// @return The fold head's grid line, or nullopt where no label is drawn.
+    [[nodiscard]] std::optional<LineOffset> collapsedFoldLabelAt(CellLocation position) const;
+
     /// Whether the primary screen's shell shows a prompt that a command typed now would run at: the newest
     /// command block is at its prompt, and the primary screen is the one on display.
     /// @return Whether it does; false without shell integration, which reports no prompt.
@@ -4529,6 +4535,20 @@ class Terminal
     {
         return _settings.foldingAvailability == FoldingAvailability::Enabled;
     }
+
+    /// Where one collapsed fold's label is drawn: on which grid line, after how many columns of text, saying
+    /// what. Shared by the painting (fillFoldLabels()) and the click (collapsedFoldLabelAt()).
+    struct FoldLabelPlacement
+    {
+        FoldRange range;         ///< The collapsed fold.
+        LineOffset gridLine;     ///< The row the label is drawn on: the head's logical line's last drawn row.
+        ColumnCount textColumns; ///< How many columns of that row hold text.
+        std::u32string label;    ///< The label, as collapsedFoldLabel() spells it.
+    };
+
+    /// The labels of the collapsed folds on display, each where it is drawn.
+    /// @return One per collapsed fold whose head's line has a drawn row; empty while nothing is collapsed.
+    [[nodiscard]] std::vector<FoldLabelPlacement> foldLabelPlacements() const;
 
     /// The facts that decide the block-column glyph beside @p gridLine (blockColumnGlyph()), for the gutter's
     /// painting and its press alike. Primary-screen rows only.

@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace vtbackend
@@ -319,6 +320,15 @@ void appendGutterCells(GutterLayout const& layout,
 /// @param hiddenLines How many rows the fold hides.
 /// @return The label, one column per codepoint.
 [[nodiscard]] std::u32string collapsedFoldLabel(uint64_t hiddenLines);
+
+/// The columns a collapsed fold's label covers on its row, [begin, end): one blank column after the row's
+/// text, clipped at the page's edge -- where layoutFoldLabel() draws it, and so where a click on it lands.
+/// @param textColumns How many columns of that row hold text (Line::trimmedColumns()).
+/// @param pageColumns The page's width.
+/// @param labelColumns How many columns the label takes (collapsedFoldLabel()'s, one per codepoint).
+/// @return The columns, or nullopt when not one of them fits on the page.
+[[nodiscard]] std::optional<std::pair<ColumnOffset, ColumnOffset>> foldLabelExtent(
+    ColumnCount textColumns, ColumnCount pageColumns, std::size_t labelColumns) noexcept;
 
 /// Lays @p label out one blank column after a row's text, clipped by width at the page edge, appending
 /// its cells to @p output -- nothing when not one glyph of it fits.

@@ -615,6 +615,17 @@ std::u32string collapsedFoldLabel(uint64_t hiddenLines)
     return label;
 }
 
+std::optional<std::pair<ColumnOffset, ColumnOffset>> foldLabelExtent(ColumnCount textColumns,
+                                                                     ColumnCount pageColumns,
+                                                                     std::size_t labelColumns) noexcept
+{
+    auto const begin = unbox<int>(textColumns) + FoldLabelGap;
+    auto const end = std::min(begin + static_cast<int>(labelColumns), unbox<int>(pageColumns));
+    if (begin >= end)
+        return std::nullopt;
+    return std::pair { ColumnOffset(begin), ColumnOffset(end) };
+}
+
 void layoutFoldLabel(std::vector<RenderCell>& output,
                      LineOffset screenLine,
                      ColumnCount textColumns,

@@ -5934,6 +5934,35 @@ TEST_CASE(
     CHECK(scene.session().pressOwner() == contour::session::PressOwner::None);
 }
 
+TEST_CASE("TerminalSession: a click on a collapsed fold's label expands it",
+          "[contour][session][input][gutter]")
+{
+    using contour::input::MouseCursorShape;
+
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    auto& terminal = scene.terminal();
+    terminal.writeToScreen("\033[?1000h\033[?1006h"); // a press the grid takes is written to the PTY
+    terminal.writeToScreen(vtbackend::test::commandRun("make", { "a", "b" })); // "$ make" on row 0
+    REQUIRE(terminal.toggleFoldContaining(vtbackend::LineOffset(0)));
+    scene.written().clear();
+
+    // Page column c starts at x 8 + 8c: the label starts at column 7, one after the six of "$ make".
+    auto const onLabel = QPointF(8 + (8 * 8) + 4, 4);
+
+    scene.hover(onLabel);
+    CHECK(scene.surface().cursorShapes.back() == MouseCursorShape::PointingHand);
+
+    scene.click(onLabel);
+    CHECK(terminal.foldState().empty());
+    CHECK(scene.written().empty()); // neither half reached the application
+    CHECK(scene.session().pressOwner() == contour::session::PressOwner::None);
+
+    // Expanded, the row has no label: the next press there is the grid's.
+    scene.click(onLabel);
+    CHECK_FALSE(scene.written().empty());
+}
+
 TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it is allowed",
           "[contour][session][semanticblocks]")
 {

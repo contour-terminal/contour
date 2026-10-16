@@ -3332,11 +3332,37 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
 
 void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
 {
+    auto const attributes = gutterCellAttributes(_colorPalette.gutterTextColors());
+    for (auto const& placement: foldLabelPlacements())
+        layoutFoldLabel(output.annotations,
+                        baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine),
+                        placement.textColumns,
+                        pageSize().columns,
+                        placement.label,
+                        attributes);
+}
+
+std::optional<LineOffset> Terminal::collapsedFoldLabelAt(CellLocation position) const
+{
+    for (auto const& placement: foldLabelPlacements())
+    {
+        if (_viewport.translateGridToScreenCoordinate(placement.gridLine) != position.line)
+            continue;
+        auto const extent =
+            foldLabelExtent(placement.textColumns, pageSize().columns, placement.label.size());
+        if (extent && position.column >= extent->first && position.column < extent->second)
+            return primaryScreen().grid().lineOffsetOf(placement.range.headStableId);
+    }
+    return std::nullopt;
+}
+
+std::vector<Terminal::FoldLabelPlacement> Terminal::foldLabelPlacements() const
+{
     // Only a COLLAPSED fold is labelled, and nothing is collapsed in the common case -- which then costs
     // one comparison. Independent of the gutter: with the fold column hidden, the label is the only sign
     // left that output was folded away.
     if (!foldingAppliesToDisplayedPage() || _foldState.empty())
-        return;
+        return {};
 
     // The few collapsed folds, rather than every drawn row: the rows are what is expensive to translate while
     // anything is collapsed. Copied out of foldRanges(), whose span points into a cache the translations
@@ -3349,8 +3375,8 @@ void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
     auto const& grid = primaryScreen().grid();
     auto const pageLines = unbox<int>(pageSize().lines);
     auto const drawnRows = drawnRowLimit();
-    auto const attributes = gutterCellAttributes(_colorPalette.gutterTextColors());
 
+    auto placements = std::vector<FoldLabelPlacement> {};
     for (auto const& range: collapsed)
     {
         auto const head = grid.lineOffsetOf(range.headStableId);
@@ -3377,13 +3403,12 @@ void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
 
         auto const gridLine = LineOffset(*lastDrawn);
         auto const hidden = static_cast<uint64_t>(range.lastStableId - range.firstStableId + 1);
-        layoutFoldLabel(output.annotations,
-                        baseLine + _viewport.translateGridToScreenCoordinate(gridLine),
-                        grid.lineAt(gridLine).trimmedColumns(),
-                        pageSize().columns,
-                        collapsedFoldLabel(hidden),
-                        attributes);
+        placements.push_back(FoldLabelPlacement { .range = range,
+                                                  .gridLine = gridLine,
+                                                  .textColumns = grid.lineAt(gridLine).trimmedColumns(),
+                                                  .label = collapsedFoldLabel(hidden) });
     }
+    return placements;
 }
 
 namespace

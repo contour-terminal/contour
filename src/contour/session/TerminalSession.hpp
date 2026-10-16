@@ -125,6 +125,7 @@ enum class PressOwner : uint8_t
     None = 0,     ///< Nobody: the grid's presses and releases go the normal way.
     Gutter,       ///< The gutter took the press.
     StickyHeader, ///< The sticky command header took the press.
+    FoldLabel,    ///< A collapsed fold's `⋯ N lines` label took the press, and expanded its fold.
 };
 
 /// What a session's program is to the user. Fixed at construction: it decides how the session's end is

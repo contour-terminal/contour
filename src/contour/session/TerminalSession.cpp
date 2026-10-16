@@ -2547,6 +2547,21 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
     auto const uiHandledHint = false;
     input::inputLog()("Mouse press received: {} {}\n", modifiers, button);
 
+    // A left press on a collapsed fold's label expands the fold, as a click on a folded placeholder does in
+    // iTerm2: the label is no text of the page, so neither a selection nor the application sees the press,
+    // nor its release. Looked up first, which costs one comparison while nothing is collapsed; expanded
+    // through the path that republishes the scrollable count.
+    if (button == MouseButton::Left && modifiers.none()
+        && core::locked(_terminal, [&]() { return _terminal.collapsedFoldLabelAt(pos).has_value(); }))
+    {
+        withScrollableChange([&](vtbackend::Terminal& terminal) {
+            auto const head = terminal.collapsedFoldLabelAt(pos);
+            return head && terminal.expandFoldContaining(*head);
+        });
+        _owedRelease = { .owner = PressOwner::FoldLabel, .button = button };
+        return;
+    }
+
     auto const sanitizedModifier = bindingModifiers(modifiers);
 
     // A binding that names a click count is offered the press BEFORE the terminal's own multi-click
@@ -2709,7 +2724,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
         auto const link = _terminal.tryGetHoveringHyperlink();
         auto const pointsAtTarget =
             decidesPointerShape
-            && (_terminal.isMouseHoveringHyperlink()
+            && (_terminal.isMouseHoveringHyperlink() || _terminal.collapsedFoldLabelAt(pos).has_value()
                 || (modifiers.contains(vtbackend::Modifier::Control)
                     && _terminal.localPathAtMousePosition().value_or(std::nullopt).has_value()));
         return Hover { .uri = link ? link->uri : std::string {},

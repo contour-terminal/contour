@@ -601,6 +601,28 @@ TEST_CASE("Gutter.terminal.theHoveredBlockCarriesABandDownItsRows", "[gutter]")
     }
 }
 
+TEST_CASE("Gutter.terminal.aCollapsedFoldsLabelNamesItsFold", "[gutter]")
+{
+    // What a click on `⋯ N lines` expands: the label is found where it is drawn.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(30) } };
+    mc.terminal.settings().gutter = GutterSettings { .foldMarkers = true };
+    runCommand(mc, "make", { "a", "b" }); // "$ make" on row 0, its label from column 7
+    CHECK_FALSE(
+        mc.terminal.collapsedFoldLabelAt(CellLocation { .line = LineOffset(0), .column = ColumnOffset(8) }));
+
+    REQUIRE(mc.terminal.toggleFoldContaining(LineOffset(0)));
+    auto const at = [&](int column) {
+        return mc.terminal.collapsedFoldLabelAt(
+            CellLocation { .line = LineOffset(0), .column = ColumnOffset(column) });
+    };
+    CHECK(at(7) == LineOffset(0));
+    CHECK(at(12) == LineOffset(0));
+    CHECK_FALSE(at(3).has_value()); // the command's own text
+    CHECK_FALSE(at(6).has_value()); // the blank column before the label
+    CHECK_FALSE(
+        mc.terminal.collapsedFoldLabelAt(CellLocation { .line = LineOffset(1), .column = ColumnOffset(8) }));
+}
+
 TEST_CASE("Gutter.terminal.aRunningCommandIsNoPrompt", "[gutter]")
 {
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
