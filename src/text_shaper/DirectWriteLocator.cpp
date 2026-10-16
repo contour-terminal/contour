@@ -8,6 +8,7 @@
 
 #include <libunicode/convert.h>
 
+#include <array>
 #include <string>
 #include <string_view>
 
@@ -31,60 +32,54 @@ namespace text
 {
 namespace // {{{ support
 {
-    FontWeight dwFontWeight(int weight)
+    [[nodiscard]] DWRITE_FONT_WEIGHT dwFontWeight(FontWeight weight)
     {
-        switch (weight)
-        {
-            case DWRITE_FONT_WEIGHT_THIN: return FontWeight::Thin;
-            case DWRITE_FONT_WEIGHT_EXTRA_LIGHT: return FontWeight::ExtraLight;
-            case DWRITE_FONT_WEIGHT_LIGHT: return FontWeight::Light;
-            case DWRITE_FONT_WEIGHT_SEMI_LIGHT: return FontWeight::DemiLight;
-            case DWRITE_FONT_WEIGHT_REGULAR:
-                return FontWeight::Normal;
-                // XXX What about FontWeight::Book (which does exist via fontconfig)?
-            case DWRITE_FONT_WEIGHT_MEDIUM: return FontWeight::Medium;
-            case DWRITE_FONT_WEIGHT_DEMI_BOLD: return FontWeight::DemiBold;
-            case DWRITE_FONT_WEIGHT_BOLD: return FontWeight::Bold;
-            case DWRITE_FONT_WEIGHT_EXTRA_BOLD: return FontWeight::ExtraBold;
-            case DWRITE_FONT_WEIGHT_BLACK: return FontWeight::Black;
-            case DWRITE_FONT_WEIGHT_EXTRA_BLACK: return FontWeight::ExtraBlack;
-            default: // TODO: the others
-                break;
-        }
-        return FontWeight::Normal; // TODO: rename normal to regular
+        static constexpr auto weights = std::array {
+            DWRITE_FONT_WEIGHT_THIN,       DWRITE_FONT_WEIGHT_EXTRA_LIGHT, DWRITE_FONT_WEIGHT_LIGHT,
+            DWRITE_FONT_WEIGHT_SEMI_LIGHT, DWRITE_FONT_WEIGHT_NORMAL,      DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_WEIGHT_MEDIUM,     DWRITE_FONT_WEIGHT_SEMI_BOLD,   DWRITE_FONT_WEIGHT_BOLD,
+            DWRITE_FONT_WEIGHT_EXTRA_BOLD, DWRITE_FONT_WEIGHT_BLACK,       DWRITE_FONT_WEIGHT_EXTRA_BLACK
+        };
+        return weights[static_cast<size_t>(weight)];
     }
 
-    FontSlant dwFontSlant(int style)
+    [[nodiscard]] DWRITE_FONT_STYLE dwFontSlant(FontSlant slant)
     {
-        switch (style)
+        switch (slant)
         {
-            case DWRITE_FONT_STYLE_NORMAL: return FontSlant::Normal;
-            case DWRITE_FONT_STYLE_ITALIC: return FontSlant::Italic;
-            case DWRITE_FONT_STYLE_OBLIQUE: return FontSlant::Oblique;
+            case FontSlant::Normal: return DWRITE_FONT_STYLE_NORMAL;
+            case FontSlant::Italic: return DWRITE_FONT_STYLE_ITALIC;
+            case FontSlant::Oblique: return DWRITE_FONT_STYLE_OBLIQUE;
         }
-        return FontSlant::Normal;
+        return DWRITE_FONT_STYLE_NORMAL;
     }
-
-    std::wstring getFontPath(IDWriteFontFace* fontFace)
+    [[nodiscard]] std::wstring getFontPath(IDWriteFontFace* fontFace)
     {
         ComPtr<IDWriteFontFile> fontFile;
         UINT32 numberOfFiles = 0;
-        fontFace->GetFiles(&numberOfFiles, nullptr);
-        fontFace->GetFiles(&numberOfFiles, &fontFile);
+        if (FAILED(fontFace->GetFiles(&numberOfFiles, nullptr)) || numberOfFiles != 1
+            || FAILED(fontFace->GetFiles(&numberOfFiles, &fontFile)))
+            return {};
 
         ComPtr<IDWriteFontFileLoader> loader;
-        fontFile->GetLoader(&loader);
-        void const* key;
-        UINT32 keySize;
-        fontFile->GetReferenceKey(&key, &keySize);
+        if (FAILED(fontFile->GetLoader(&loader)))
+            return {};
+        void const* key {};
+        UINT32 keySize {};
+        if (FAILED(fontFile->GetReferenceKey(&key, &keySize)))
+            return {};
         ComPtr<IDWriteLocalFontFileLoader> localLoader;
-        loader.As(&localLoader);
+        if (FAILED(loader.As(&localLoader)))
+            return {};
 
-        UINT32 pathLen;
-        localLoader->GetFilePathLengthFromKey(key, keySize, &pathLen);
+        UINT32 pathLen {};
+        if (FAILED(localLoader->GetFilePathLengthFromKey(key, keySize, &pathLen)))
+            return {};
         std::wstring path;
+        path.resize(pathLen + 1);
+        if (FAILED(localLoader->GetFilePathFromKey(key, keySize, path.data(), pathLen + 1)))
+            return {};
         path.resize(pathLen);
-        localLoader->GetFilePathFromKey(key, keySize, path.data(), pathLen + 1);
 
         return path;
     }
@@ -126,38 +121,48 @@ FontSourceList DirectWriteLocator::locate(FontDescription const& fd)
     // A name that is not UTF-8 names no family, and the fallback below is used.
     auto const familyName = core::toUtf16(fd.familyName).value_or(std::wstring {});
 
-    UINT32 familyIndex;
-    BOOL familyExists = FALSE;
-    _d->systemFontCollection->FindFamilyName(familyName.c_str(), &familyIndex, &familyExists);
-
-    if (!familyExists)
-    {
-        // Fallback to Consolas
-        wchar_t const* consolas = L"Consolas";
-        _d->systemFontCollection->FindFamilyName(consolas, &familyIndex, &familyExists);
-    }
-
-    ComPtr<IDWriteFontFamily> fontFamily;
-    _d->systemFontCollection->GetFontFamily(familyIndex, &fontFamily);
-
-    for (UINT32 k = 0, ke = fontFamily->GetFontCount(); k < ke; ++k)
-    {
+    // Resolve each requested family independently: a missing fallback must not silently turn into
+    // Consolas, and a family without an exact weight/slant still has a nearest matching face.
+    auto const addFamily = [&](std::wstring const& name) {
+        UINT32 familyIndex {};
+        BOOL familyExists = FALSE;
+        if (FAILED(_d->systemFontCollection->FindFamilyName(name.c_str(), &familyIndex, &familyExists))
+            || !familyExists)
+            return;
+        ComPtr<IDWriteFontFamily> family;
+        if (FAILED(_d->systemFontCollection->GetFontFamily(familyIndex, &family)))
+            return;
         ComPtr<IDWriteFont> font;
-        fontFamily->GetFont(k, font.GetAddressOf());
-
-        FontWeight weight = dwFontWeight(font->GetWeight());
-        if (weight != fd.weight)
-            continue;
-
-        FontSlant slant = dwFontSlant(font->GetStyle());
-        if (slant != fd.slant)
-            continue;
-
-        ComPtr<IDWriteFontFace> fontFace;
-        font->CreateFontFace(&fontFace);
-        output.emplace_back(FontPath { core::toUtf8(getFontPath(fontFace.Get())) });
+        if (FAILED(family->GetFirstMatchingFont(
+                dwFontWeight(fd.weight), DWRITE_FONT_STRETCH_NORMAL, dwFontSlant(fd.slant), &font)))
+            return;
+        ComPtr<IDWriteFont1> font1;
+        if (fd.strictSpacing && SUCCEEDED(font.As(&font1)) && fd.spacing == FontSpacing::Mono
+            && !font1->IsMonospacedFont())
+            return;
+        ComPtr<IDWriteFontFace> face;
+        if (FAILED(font->CreateFontFace(&face)))
+            return;
+        auto path = core::toUtf8(getFontPath(face.Get()));
+        if (path.empty())
+            return;
+        auto const faceIndex = static_cast<int>(face->GetIndex());
+        if (std::ranges::any_of(output, [&](FontSource const& source) {
+                auto const& existing = std::get<FontPath>(source);
+                return existing.value == path && existing.collectionIndex == faceIndex;
+            }))
+            return;
+        output.emplace_back(FontPath { .value = std::move(path), .collectionIndex = faceIndex });
         locatorLog()("Adding font file: {}", output.back());
-    }
+    };
+
+    addFamily(familyName);
+    if (output.empty())
+        addFamily(L"Consolas");
+    if (auto const* list = std::get_if<FontFallbackList>(&fd.fontFallback))
+        for (auto const& fallback: list->fallbackFonts)
+            if (auto const name = core::toUtf16(fallback)) // A name that is not UTF-8 names no family.
+                addFamily(*name);
 
     return output;
 }
@@ -197,9 +202,12 @@ FontSourceList DirectWriteLocator::resolve(gsl::span<char32_t const> codepoints)
     if (mappedFont)
     {
         ComPtr<IDWriteFontFace> fontFace;
-        mappedFont->CreateFontFace(&fontFace);
-
-        output.emplace_back(FontPath { core::toUtf8(getFontPath(fontFace.Get())) });
+        if (FAILED(mappedFont->CreateFontFace(&fontFace)))
+            return output;
+        auto path = core::toUtf8(getFontPath(fontFace.Get()));
+        if (!path.empty())
+            output.emplace_back(FontPath { .value = std::move(path),
+                                           .collectionIndex = static_cast<int>(fontFace->GetIndex()) });
     }
 
     return output;

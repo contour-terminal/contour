@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <text_shaper/ClusterSpans.hpp>
 #include <text_shaper/Font.hpp>
 #include <text_shaper/Shaper.hpp>
 
@@ -10,8 +11,7 @@ namespace text
 {
 
 /**
- * Text shaping and rendering engine using open source technologies,
- * fontconfig + harfbuzz + freetype.
+ * Windows text shaping and rendering engine using DirectWrite.
  */
 class DirectWriteShaper: public Shaper
 {
@@ -42,6 +42,14 @@ class DirectWriteShaper: public Shaper
                                                            float outlineThickness = 0.0f) override;
 
   private:
+    /// Shapes one face without fallback, retaining its input-cluster mapping.
+    void shapeWithFont(FontKey font,
+                       std::u32string_view text,
+                       std::span<unsigned const> clusters,
+                       unicode::PresentationStyle presentation,
+                       ShapeResult& result,
+                       std::vector<ShapedGlyphRef>& refs);
+
     struct Private;
     std::unique_ptr<Private, void (*)(Private*)> _d;
 };
