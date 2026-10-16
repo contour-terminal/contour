@@ -53,8 +53,18 @@ class RecordingTaskbar final: public contour::platform::TaskbarProgressSink
     };
 
     /// @param support Whether this adapter accepts scheduled updates.
-    explicit RecordingTaskbar(Support support = Support::Available): _support(support) {}
+    explicit RecordingTaskbar(
+        Support support = Support::Available,
+        contour::platform::TaskbarProgressScope scope = contour::platform::TaskbarProgressScope::Window):
+        _support(support), _scope(scope)
+    {
+    }
     [[nodiscard]] bool isSupported() const noexcept override { return _support == Support::Available; }
+    [[nodiscard]] contour::platform::TaskbarProgressScope scope() const noexcept override { return _scope; }
+    void setApplicationProgress(contour::platform::TaskbarProgress progress) override
+    {
+        application = progress;
+    }
     void bindWindow(uint64_t, QWindow&) override {}
     void setProgress(uint64_t window, contour::platform::TaskbarProgress progress) override
     {
@@ -63,9 +73,11 @@ class RecordingTaskbar final: public contour::platform::TaskbarProgressSink
     void removeWindow(uint64_t window) override { windows.erase(window); }
 
     std::unordered_map<uint64_t, contour::platform::TaskbarProgress> windows;
+    contour::platform::TaskbarProgress application;
 
   private:
     Support _support;
+    contour::platform::TaskbarProgressScope _scope;
 };
 
 /// Mints @p n model tabs in the controller's window (no backing sessions).
@@ -156,6 +168,50 @@ TEST_CASE("taskbar progress follows background panes across window moves and clo
         [&] { return recording->windows.at(windowB.id.value).state == vtbackend::ProgressState::Inactive; },
         1000));
     windowA->closeTabAtIndex(0);
+    windowB->closeTabAtIndex(0);
+}
+
+TEST_CASE("application taskbar progress combines windows without resetting report deadlines",
+          "[contour][multiwindow][taskbar]")
+{
+    auto sink = std::make_unique<RecordingTaskbar>(RecordingTaskbar::Support::Available,
+                                                   contour::platform::TaskbarProgressScope::Application);
+    auto* recording = sink.get();
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>(),
+                nullptr,
+                nullptr,
+                nullptr,
+                TestApp::testHostIdentity(),
+                std::move(sink));
+    auto& manager = app.manager();
+    ScopedController windowA { manager };
+    ScopedController windowB { manager };
+    windowA->createNewTab();
+    windowB->createNewTab();
+    auto* failed = windowA->activeSession();
+    auto* running = windowB->activeSession();
+    auto const now = app.steadyClock().now();
+    app.app().config().progressTimeout.value() = std::chrono::milliseconds { 10 };
+    manager.recordProgress(
+        failed->modelSessionId(), { .state = vtbackend::ProgressState::Error, .percentage = 60 }, now);
+    manager.recordProgress(
+        running->modelSessionId(), { .state = vtbackend::ProgressState::Normal, .percentage = 20 }, now);
+    QCoreApplication::processEvents();
+    CHECK(recording->windows.empty());
+    CHECK(
+        recording->application
+        == contour::platform::TaskbarProgress { .state = vtbackend::ProgressState::Error, .percentage = 60 });
+    manager.moveTabToWindow(windowA.id, 0, windowB.id, 0);
+    QCoreApplication::processEvents();
+    CHECK(recording->application.state == vtbackend::ProgressState::Error);
+    manager.removeSession(*failed);
+    QCoreApplication::processEvents();
+    CHECK(recording->application
+          == contour::platform::TaskbarProgress { .state = vtbackend::ProgressState::Normal,
+                                                  .percentage = 20 });
+    app.steadyClock().advance(std::chrono::milliseconds { 11 });
+    REQUIRE(QTest::qWaitFor(
+        [&] { return recording->application.state == vtbackend::ProgressState::Inactive; }, 1000));
     windowB->closeTabAtIndex(0);
 }
 

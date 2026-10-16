@@ -21,6 +21,7 @@
     #include <wrl/client.h>
 #endif
 
+#if !defined(__linux__) && !defined(__APPLE__)
 namespace contour::platform
 {
 namespace
@@ -29,12 +30,17 @@ namespace
     {
       public:
         [[nodiscard]] bool isSupported() const noexcept override { return false; }
+        [[nodiscard]] TaskbarProgressScope scope() const noexcept override
+        {
+            return TaskbarProgressScope::Window;
+        }
+        void setApplicationProgress(TaskbarProgress) override {}
         void bindWindow(uint64_t, QWindow&) override {}
         void setProgress(uint64_t, TaskbarProgress) override {}
         void removeWindow(uint64_t) override {}
     };
 
-#ifdef _WIN32
+    #ifdef _WIN32
     auto const taskbarLog = core::log::Category { "taskbar.progress", "Windows taskbar progress" };
 
     /// Application-owned native observer; HWNDs are read only while Qt owns a live native surface.
@@ -45,6 +51,11 @@ namespace
     {
       public:
         [[nodiscard]] bool isSupported() const noexcept override { return true; }
+        [[nodiscard]] TaskbarProgressScope scope() const noexcept override
+        {
+            return TaskbarProgressScope::Window;
+        }
+        void setApplicationProgress(TaskbarProgress) override {}
         ~Win32TaskbarProgressSink() override
         {
             if (auto* app = QCoreApplication::instance())
@@ -245,15 +256,16 @@ namespace
         Microsoft::WRL::ComPtr<ITaskbarList3> _taskbar;
         std::unordered_map<uint64_t, Window> _windows;
     };
-#endif
+    #endif
 } // namespace
 
 std::unique_ptr<TaskbarProgressSink> makeTaskbarProgressSink()
 {
-#ifdef _WIN32
+    #ifdef _WIN32
     return std::make_unique<Win32TaskbarProgressSink>();
-#else
+    #else
     return std::make_unique<NullTaskbarProgressSink>();
-#endif
+    #endif
 }
 } // namespace contour::platform
+#endif

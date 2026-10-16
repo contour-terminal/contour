@@ -16,9 +16,8 @@ namespace contour::platform
 
 /// What a taskbar backend should be told to show.
 ///
-/// Deliberately NOT vtbackend::Progress: this is what the WINDOW shows, aggregated across its
-/// sessions, whereas a Progress is what one session reports. The two coincide only when a window
-/// hosts a single session.
+/// Deliberately NOT vtbackend::Progress: this is what the desktop indicator shows, aggregated
+/// across a window's sessions on Windows or the application's sessions on other desktops.
 struct TaskbarProgress
 {
     vtbackend::ProgressState state = vtbackend::ProgressState::Inactive;
@@ -28,7 +27,7 @@ struct TaskbarProgress
 
 /// The dependency-free aggregation and staleness policy behind the OS taskbar progress indicator.
 ///
-/// It answers one question -- given what every session in a window has reported, and when -- what
+/// It answers one question -- given what the selected sessions have reported, and when -- what
 /// should the taskbar show right now? Keeping that here rather than in the platform backend is what
 /// makes it testable without a D-Bus session or a Windows shell: the decisions are
 /// resolve-across-sessions and expire-when-stale, and neither needs a taskbar to check.

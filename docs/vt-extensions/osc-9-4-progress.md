@@ -66,12 +66,18 @@ printf '\033]9;4;0\033\\'
           right: "{Progress:Bold} | {Clock}"
   ```
 
-- **The OS taskbar**, on supported platforms (currently Windows), including while Contour is minimized.
-  No extra setting is required. Progress from all tabs and split panes is combined per window:
+- **The OS taskbar or Dock**, on Windows, KDE Plasma and macOS, including while Contour is minimized.
+  No extra setting is required. Progress from all tabs and split panes is combined per window on
+  Windows and across the application's windows on KDE Plasma and macOS:
   a failure outranks a pause, which outranks
   a busy session, which outranks a running one — and among equals the *least* complete percentage
   wins, so the indicator reflects the work still outstanding.
-  Background tabs and panes also contribute. Moving or closing a tab updates the affected windows.
+  Background tabs and panes also contribute. Moving or closing a tab updates the indicator.
+  KDE Plasma uses the Unity LauncherEntry D-Bus protocol and requires a matching installed desktop
+  file. It shows percentages for running, paused and error states without distinct state colors;
+  busy is represented by a full bar because this protocol has no indeterminate state. Other desktops
+  implementing the same protocol may also display it. macOS overlays a bar on the application Dock
+  icon, with red for errors, orange for paused work and a moving segment while busy.
 
 ## Withdrawing a stale indicator
 
