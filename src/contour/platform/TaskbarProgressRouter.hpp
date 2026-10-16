@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <ranges>
 #include <unordered_map>
 #include <utility>
@@ -78,6 +79,19 @@ class TaskbarProgressRouter
     [[nodiscard]] TaskbarProgress resolve(std::chrono::steady_clock::time_point now,
                                           std::chrono::milliseconds timeout = {}) const
     {
+        return resolveFor([](SessionKey) { return true; }, now, timeout);
+    }
+
+    /// Resolves the same policy for sessions belonging to one window, without copying their reports.
+    /// @param includes Selects the sessions hosted by that window.
+    /// @param now Current monotonic time.
+    /// @param timeout Staleness limit; zero disables expiry.
+    /// @return The selected sessions' aggregate.
+    template <typename Predicate>
+    [[nodiscard]] TaskbarProgress resolveFor(Predicate includes,
+                                             std::chrono::steady_clock::time_point now,
+                                             std::chrono::milliseconds timeout = {}) const
+    {
         // Ranked lexicographically on (severity, -percentage): higher severity wins, and among equals
         // the LEAST complete does -- so the bar reflects the work still outstanding rather than the
         // most nearly finished part of it, and a failure is never hidden by a sibling merely busy.
@@ -86,9 +100,9 @@ class TaskbarProgressRouter
         };
         auto winner = TaskbarProgress {};
         auto best = std::pair { -1, 0 }; // below every real rank, so the first live report takes it
-        for (auto const& report: _reports | std::views::values)
+        for (auto const& [session, report]: _reports)
         {
-            if (isStale(report, now, timeout))
+            if (!includes(session) || isStale(report, now, timeout))
                 continue;
             if (auto const rank = rankOf(report.progress); rank > best)
             {
@@ -98,6 +112,22 @@ class TaskbarProgressRouter
             }
         }
         return winner;
+    }
+
+    /// Earliest future expiry, for scheduling a single wakeup even while windows are minimized.
+    /// @param now Current monotonic time.
+    /// @param timeout Staleness limit; zero disables the timer.
+    /// @return Next expiry, or nullopt if no live report can expire.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> nextExpiry(
+        std::chrono::steady_clock::time_point now, std::chrono::milliseconds timeout) const
+    {
+        auto next = std::optional<std::chrono::steady_clock::time_point> {};
+        if (timeout.count() == 0)
+            return next;
+        for (auto const& report: _reports | std::views::values)
+            if (auto const expiry = report.at + timeout; expiry > now && (!next || expiry < *next))
+                next = expiry;
+        return next;
     }
 
   private:

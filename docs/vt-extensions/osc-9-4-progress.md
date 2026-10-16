@@ -66,10 +66,12 @@ printf '\033]9;4;0\033\\'
           right: "{Progress:Bold} | {Clock}"
   ```
 
-- **The OS taskbar**, where the platform provides one. A window has a single taskbar button but may
-  host many sessions, so they are reduced to one answer: a failure outranks a pause, which outranks
+- **The OS taskbar**, on supported platforms (currently Windows), including while Contour is minimized.
+  No extra setting is required. Progress from all tabs and split panes is combined per window:
+  a failure outranks a pause, which outranks
   a busy session, which outranks a running one — and among equals the *least* complete percentage
   wins, so the indicator reflects the work still outstanding.
+  Background tabs and panes also contribute. Moving or closing a tab updates the affected windows.
 
 ## Withdrawing a stale indicator
 

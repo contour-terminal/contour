@@ -57,11 +57,13 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
                                                SessionFactory& factory,
                                                config::LayoutStore& layouts,
                                                command::CommandHistoryStore& commands,
-                                               std::string homeDirectory):
+                                               std::string homeDirectory,
+                                               platform::TaskbarProgressSink& taskbarProgressSink):
     _app { app },
     _sessionFactory { factory },
     _layoutStore { layouts },
     _commandHistoryStore { commands },
+    _taskbarProgressSink { taskbarProgressSink },
     _homeDirectory { std::move(homeDirectory) },
     // Not seeded here, and capacity deliberately left at 0: the config file has not been loaded yet at
     // this point (ContourGuiApp constructs the manager before it reads the file), so the configured
@@ -74,6 +76,8 @@ TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
     _configFileWatcher {},
     _configReloadTimer {}
 {
+    _taskbarProgressTimer.setSingleShot(true);
+    connect(&_taskbarProgressTimer, &QTimer::timeout, this, &TerminalSessionManager::refreshTaskbarProgress);
     // Long enough to take in every notification of one save, short enough to read as immediate.
     constexpr auto ConfigReloadCoalescing = std::chrono::milliseconds { 100 };
     _configReloadTimer.setSingleShot(true);
@@ -733,6 +737,7 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
                         controller->updateSizeHintsFor(
                             *display, window::WindowController::HintApplyMode::RespectWindowState);
         }
+    scheduleTaskbarProgress();
     return {};
 }
 
@@ -968,6 +973,7 @@ void TerminalSessionManager::removeWindowController(vtworkspace::WindowId window
     bool const wasLast = _controllersByWindow.size() == 1;
     auto* controller = it->second;
     _controllersByWindow.erase(it);
+    _taskbarProgressSink.removeWindow(windowId.value);
     if (controller != nullptr)
         controller->deleteLater();
 
@@ -1090,6 +1096,7 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
             _model->closePane(_model->windowOfTab(tab->id()), tab->id(), leaf->id());
     _sessionsById.erase(sessionId.value);
     _tabBySession.erase(sessionId.value);
+    scheduleTaskbarProgress();
 
     // Session->display ownership is the pane tree's; there is no per-display map to scrub. The pane's
     // model leaf was closed above (collapsing its split); the surviving panes keep their sessions via
@@ -1195,6 +1202,7 @@ void TerminalSessionManager::tabMovedToWindow(
         src->onTabClosed();
     if (auto* dst = controllerFor(to))
         dst->onTabAdded(toIndex);
+    scheduleTaskbarProgress();
 }
 
 void TerminalSessionManager::activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId, int)
@@ -1375,13 +1383,46 @@ void TerminalSessionManager::refreshTabProgressForSession(vtworkspace::SessionId
     // to its answer. Kept current even with no backend present, so adding one is a sink, not a
     // rewiring. @see platform::TaskbarProgressRouter.
     if (auto* s = sessionForId(session))
-        recordProgress(session, s->terminal().resolvedProgress());
+        recordProgress(session, s->terminal().resolvedProgress(), _app.terminalClocks().steady.now());
 }
 
 platform::TaskbarProgress TerminalSessionManager::taskbarProgress(
     std::chrono::steady_clock::time_point now) const
 {
     return _taskbarProgress.resolve(now, _app.config().progressTimeout.value());
+}
+
+platform::TaskbarProgress TerminalSessionManager::taskbarProgress(
+    vtworkspace::WindowId window, std::chrono::steady_clock::time_point now) const
+{
+    return _taskbarProgress.resolveFor(
+        [this, window](uint64_t session) {
+            auto const found = _tabBySession.find(session);
+            return found != _tabBySession.end() && _model->windowOfTab(found->second) == window;
+        },
+        now,
+        _app.config().progressTimeout.value());
+}
+
+void TerminalSessionManager::bindTaskbarWindow(vtworkspace::WindowId window, QWindow& nativeWindow)
+{
+    _taskbarProgressSink.bindWindow(window.value, nativeWindow);
+    scheduleTaskbarProgress();
+}
+
+void TerminalSessionManager::scheduleTaskbarProgress()
+{
+    if (_taskbarProgressSink.isSupported())
+        _taskbarProgressTimer.start(0);
+}
+
+void TerminalSessionManager::refreshTaskbarProgress()
+{
+    auto const now = _app.terminalClocks().steady.now();
+    for (auto const& [window, controller]: _controllersByWindow)
+        _taskbarProgressSink.setProgress(window, taskbarProgress(vtworkspace::WindowId { window }, now));
+    if (auto const expiry = _taskbarProgress.nextExpiry(now, _app.config().progressTimeout.value()))
+        _taskbarProgressTimer.start(std::chrono::ceil<std::chrono::milliseconds>(*expiry - now));
 }
 
 void TerminalSessionManager::setTabTitleForSession(vtworkspace::SessionId session, std::string title)

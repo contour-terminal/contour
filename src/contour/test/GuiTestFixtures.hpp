@@ -441,13 +441,15 @@ class TestApp
     /// @param fileSystem Where the app's sessions look up paths, link detection's probes too; null for the
     ///                fixture's own in-memory one, fileSystem(). Borrowed.
     /// @param environment The environment variables the app reads as the test sets them.
+    /// @param taskbarProgress Optional native taskbar sink override.
     explicit TestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
                      std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
                      std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
                      std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr,
                      vtbackend::HostIdentity identity = testHostIdentity(),
                      core::platform::FileSystem const* fileSystem = nullptr,
-                     TestEnvironment::Overrides environment = {}):
+                     TestEnvironment::Overrides environment = {},
+                     std::unique_ptr<contour::platform::TaskbarProgressSink> taskbarProgress = nullptr):
         _environment { std::move(environment) },
         _sessionFiles { fileSystem ? fileSystem : &_fileSystem },
         _app(_environment,
@@ -461,7 +463,8 @@ class TestApp
              std::move(identity),
              _sessionFiles,
              nullptr,
-             linkServices())
+             linkServices(),
+             std::move(taskbarProgress))
     {
         parseTerminalVerb();
     }

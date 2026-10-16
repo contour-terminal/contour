@@ -9,6 +9,7 @@
 #include <contour/display/Logging.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
+#include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
@@ -199,6 +200,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       which the constructor requires. Absent (the default), the app's own pool,
     ///                       probe thread and fileSystem(). Borrowed: it must outlive the app.
     /// @param env            The process environment every part of the application reads through.
+    /// @param taskbarProgress Native taskbar adapter; null wires the production one.
     explicit ContourGuiApp(core::Environment const& env,
                            std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
                            std::unique_ptr<platform::ExternalLauncher> externalLauncher = nullptr,
@@ -210,7 +212,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
                            std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt,
                            core::platform::FileSystem const* fileSystem = nullptr,
                            std::shared_ptr<vtpty::ProcessPlacement> processPlacement = nullptr,
-                           std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt);
+                           std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt,
+                           std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress = nullptr);
     ~ContourGuiApp() override;
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
@@ -506,6 +509,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     vtbackend::HostIdentity _hostIdentity;
     // Likewise; borrowed.
     core::platform::FileSystem const& _fileSystem;
+    std::unique_ptr<platform::TaskbarProgressSink> _taskbarProgressSink;
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI

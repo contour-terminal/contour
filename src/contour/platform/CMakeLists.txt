@@ -42,6 +42,8 @@ add_library(contour_platform STATIC
     QtPath.hpp
     SpeechSynthesizer.cpp SpeechSynthesizer.hpp
     TaskbarProgressRouter.hpp
+    TaskbarProgressSink.cpp TaskbarProgressSink.hpp
+    TaskbarProgressState.hpp
     # The per-OS window frame and the two compositor shadow adapters. Each of the platform-specific
     # ones is wholly inside a platform #ifdef, so it compiles to nothing where it does not apply --
     # listed unconditionally all the same, as the notification pair above is.
@@ -64,7 +66,7 @@ add_library(contour_platform STATIC
 set_target_properties(contour_platform PROPERTIES AUTOMOC ON)
 
 if(WIN32)
-    target_link_libraries(contour_platform PUBLIC comctl32)
+    target_link_libraries(contour_platform PUBLIC comctl32 ole32 user32 uuid)
 endif()
 
 # The Cocoa adapters use Objective-C++; the parent enables the language for these and the native tests
