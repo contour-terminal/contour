@@ -724,6 +724,8 @@ if(CONTOUR_FRONTEND_GUI)
             platform/PortalExternalLauncher_test.cpp
             platform/PortalNotificationTransport_test.cpp
             platform/TaskbarProgressRouter_test.cpp
+            platform/LauncherProgress_test.cpp
+            platform/LauncherProgressSink_test.cpp
             platform/NativeWindowFrame_test.cpp
             platform/PopupShadow_test.cpp
             platform/QtInvoke_test.cpp
@@ -749,11 +751,13 @@ if(CONTOUR_FRONTEND_GUI)
             geometry/WindowGeometry_test.cpp
             platform/WindowResizeGrid_test.cpp
         )
+        set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
         if(APPLE)
-            target_sources(contour_gui_test PRIVATE platform/CocoaWindowResizeGrid_test.mm)
+            target_sources(contour_gui_test PRIVATE platform/CocoaWindowResizeGrid_test.mm platform/CocoaTaskbarProgressSink_test.mm)
             set_target_properties(contour_gui_test PROPERTIES
                 OBJCXX_STANDARD ${CMAKE_CXX_STANDARD}
                 OBJCXX_STANDARD_REQUIRED ON)
+            set_source_files_properties(platform/CocoaTaskbarProgressSink_test.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
         endif()
         if(CONTOUR_WITH_GPU_SELECTION)
             target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)

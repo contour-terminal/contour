@@ -43,6 +43,7 @@ add_library(contour_platform STATIC
     SpeechSynthesizer.cpp SpeechSynthesizer.hpp
     TaskbarProgressRouter.hpp
     TaskbarProgressSink.cpp TaskbarProgressSink.hpp
+    LauncherProgress.hpp LauncherProgressSink.cpp
     TaskbarProgressState.hpp
     # The per-OS window frame and the two compositor shadow adapters. Each of the platform-specific
     # ones is wholly inside a platform #ifdef, so it compiles to nothing where it does not apply --
@@ -78,7 +79,8 @@ if(APPLE)
     set_target_properties(contour_platform PROPERTIES
         OBJCXX_STANDARD ${CMAKE_CXX_STANDARD}
         OBJCXX_STANDARD_REQUIRED ON)
-    target_sources(contour_platform PRIVATE CocoaWindowFrame.mm CocoaWindowResizeGrid.mm)
+    target_sources(contour_platform PRIVATE CocoaWindowFrame.mm CocoaWindowResizeGrid.mm CocoaTaskbarProgressSink.mm)
+    set_source_files_properties(CocoaTaskbarProgressSink.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(contour_platform PUBLIC "-framework AppKit")
 endif()
 

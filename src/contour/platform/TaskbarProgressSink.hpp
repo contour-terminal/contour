@@ -11,7 +11,14 @@ class QWindow;
 namespace contour::platform
 {
 
-/// Receives window-scoped progress on the GUI thread. Owns native-window readiness and replay.
+/// Whether the desktop exposes one indicator per window or per application.
+enum class TaskbarProgressScope : uint8_t
+{
+    Window,
+    Application,
+};
+
+/// Receives aggregated progress on the GUI thread. Owns native indicator resources and readiness.
 class TaskbarProgressSink
 {
   public:
@@ -19,6 +26,13 @@ class TaskbarProgressSink
 
     /// @return Whether this adapter can publish progress; unsupported platforms need no update timer.
     [[nodiscard]] virtual bool isSupported() const noexcept = 0;
+
+    /// @return The native indicator's aggregation scope.
+    [[nodiscard]] virtual TaskbarProgressScope scope() const noexcept = 0;
+
+    /// Publishes the shared router's application-wide aggregate on desktops with one launcher icon.
+    /// @param progress Aggregate across all sessions, using their original deadlines.
+    virtual void setApplicationProgress(TaskbarProgress progress) = 0;
 
     /// Observes a window before its first show. Rebinding replaces its previous native attachment.
     /// @param window Stable workspace window identity.
@@ -35,8 +49,8 @@ class TaskbarProgressSink
     virtual void removeWindow(uint64_t window) = 0;
 };
 
-/// Creates the native Windows adapter, or a no-op adapter on other platforms.
-/// @return Application-owned taskbar sink; native resources are acquired after a window is bound.
+/// Creates the native taskbar/Dock adapter, or a no-op adapter on unsupported platforms.
+/// @return Application-owned taskbar sink; native resources are acquired when needed.
 [[nodiscard]] std::unique_ptr<TaskbarProgressSink> makeTaskbarProgressSink();
 
 } // namespace contour::platform

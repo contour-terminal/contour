@@ -1419,8 +1419,11 @@ void TerminalSessionManager::scheduleTaskbarProgress()
 void TerminalSessionManager::refreshTaskbarProgress()
 {
     auto const now = _app.terminalClocks().steady.now();
-    for (auto const& [window, controller]: _controllersByWindow)
-        _taskbarProgressSink.setProgress(window, taskbarProgress(vtworkspace::WindowId { window }, now));
+    if (_taskbarProgressSink.scope() == platform::TaskbarProgressScope::Application)
+        _taskbarProgressSink.setApplicationProgress(taskbarProgress(now));
+    else
+        for (auto const& [window, controller]: _controllersByWindow)
+            _taskbarProgressSink.setProgress(window, taskbarProgress(vtworkspace::WindowId { window }, now));
     if (auto const expiry = _taskbarProgress.nextExpiry(now, _app.config().progressTimeout.value()))
         _taskbarProgressTimer.start(std::chrono::ceil<std::chrono::milliseconds>(*expiry - now));
 }
