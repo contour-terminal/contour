@@ -4007,8 +4007,8 @@ LineOffset Terminal::snapToVisibleLine(LineOffset line, VerticalDirection direct
 std::vector<ScrollbarMarkInput> Terminal::scrollbarMarkInputs() const
 {
     // The alternate screen keeps no history and no marks: the scrollbar over it has nothing to point into.
-    // Nor is a tick offered while the primary screen is shown but cannot scroll, or the other way round:
-    // the gate is the reveal's, so no tick is drawn that a click would refuse.
+    // Nor is a tick offered while another page is on display, wherever the cursor is: the gate is the
+    // reveal's, so no tick is drawn that a click would refuse.
     if (!canRevealScrollback())
         return {};
 
@@ -4070,7 +4070,6 @@ uint64_t Terminal::scrollbarMarksRevision() const
         .stableIdGeneration = grid.stableIdGeneration(),
         .stableFloor = grid.stableRangeFloor(),
         .displayedPage = _displayedPage,
-        .cursorScreen = _currentScreenType,
     };
     if (inputs != _scrollbarMarksInputs)
     {
@@ -4296,6 +4295,10 @@ void Terminal::followOutput()
         return;
 
     if (!_settings.autoScrollOnUpdate || !_viewport.scrolled() || _inputHandler.mode() != ViMode::Insert)
+        return;
+
+    // Output to a page that is not on display, as onBufferScrolled() says, is no output to follow.
+    if (_currentScreen != &displayedPage())
         return;
 
     if (_eventListener.outputFollowing() == OutputFollowing::Follow)
@@ -6153,7 +6156,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             break;
         case DECMode::PageCursorCoupling:
             if (enable && _displayedPage != _cursorPage)
-                _displayedPage = _cursorPage;
+                showPage(_cursorPage);
             break;
         case DECMode::DesignateCharsetUSASCII:
             // DEC private mode 2 is DECANM: reset (`CSI ? 2 l`) enters VT52. The set form (`CSI ? 2 h`,
@@ -6458,7 +6461,7 @@ void Terminal::hardReset()
     for (auto& page: _pages)
         page->hardReset();
     _cursorPage = PageIndex(0);
-    _displayedPage = PageIndex(0);
+    showPage(PageIndex(0));
     _hostWritableStatusLineScreen.hardReset();
     _indicatorStatusScreen.hardReset();
 
@@ -6628,7 +6631,7 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
 
     // When DECPCCM is set, the displayed page follows the cursor page.
     if (isModeEnabled(DECMode::PageCursorCoupling))
-        _displayedPage = clamped;
+        showPage(clamped);
 
     _currentScreenType = screenTypeFromPage(clamped);
     publishBindingModes();
@@ -6640,6 +6643,12 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
         _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0));
 
     bufferChanged(_currentScreenType);
+}
+
+void Terminal::showPage(PageIndex page)
+{
+    _displayedPage = page;
+    _viewport.clampScrollOffset();
 }
 
 void Terminal::saveCursorPage()
@@ -6807,7 +6816,12 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
     // refreshHints() there); remember that so the visible-scope branch below does not re-scan twice.
     auto viewportFollowedContent = false;
     if (viewport().scrolled() || _viewport.pixelOffset() > 0.0f || _inputHandler.mode() == ViMode::Normal)
-        viewportFollowedContent = viewport().scrollUp(n);
+    {
+        // Only for output to the page on display, which the viewport is the window onto: a page the cursor
+        // writes to with DECPCCM reset, or the status line DECSASD selected, scrolls under nobody's view.
+        if (_currentScreen == &displayedPage())
+            viewportFollowedContent = viewport().scrollUp(n);
+    }
 
     // Keep an open hint session consistent with content that just scrolled. Scrollback labels are
     // fixed for the session, so shift each match up to stay on its own text. The visible scope

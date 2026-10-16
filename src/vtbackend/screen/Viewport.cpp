@@ -357,7 +357,9 @@ LineOffset Viewport::translateGridToScreenCoordinate(LineOffset p) const
 
 LineCount Viewport::historyLineCount() const noexcept
 {
-    return _terminal->currentScreen().historyLineCount();
+    // The page on display, which the frame draws with this viewport's offset. Not currentScreen(): that is
+    // where output goes, another page with DECPCCM reset, or the status line DECSASD selected.
+    return _terminal->displayedPage().historyLineCount();
 }
 
 LineCount Viewport::scrollableLineCount() const
@@ -373,7 +375,7 @@ LineCount Viewport::screenLineCount() const noexcept
 bool Viewport::scrollingDisabled() const noexcept
 {
     // TODO: make configurable
-    return _terminal->isAlternateScreen();
+    return screenTypeFromPage(_terminal->displayedPageIndex()) == ScreenType::Alternate;
 }
 
 } // namespace vtbackend

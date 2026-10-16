@@ -1996,7 +1996,8 @@ TEST_CASE("TerminalSession: a scrollbar marks refresh notices every input the ti
 
     SECTION("the cursor leaving for another page")
     {
-        // DECPCCM reset: page 0 stays on display, but the viewport cannot scroll while the cursor is away.
+        // DECPCCM reset: page 0 stays on display, and the viewport, the window onto it, still scrolls to a
+        // tick wherever the cursor writes.
         terminal.writeToScreen(vtbackend::test::commandRun("make", numberedOutput(3), 0));
         pane->refreshScrollbarMarks();
         REQUIRE(pane->scrollbarMarks().size() == 1);
@@ -2004,7 +2005,7 @@ TEST_CASE("TerminalSession: a scrollbar marks refresh notices every input the ti
         terminal.writeToScreen("\033[?64l");
         terminal.setPage(vtbackend::PageIndex(3), /*moveCursorHome*/ true);
         pane->refreshScrollbarMarks();
-        CHECK(pane->scrollbarMarks().isEmpty());
+        CHECK(pane->scrollbarMarks().size() == 1);
     }
 
     SECTION("another page put on display")

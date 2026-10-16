@@ -1462,15 +1462,12 @@ class Terminal
     }
 
     /// Whether a line of the primary screen's scrollback can be brought into view: that screen is the page
-    /// on display, and the viewport may scroll, which it may not while the cursor stands on another page.
+    /// on display. The viewport, the window onto the page on display, scrolls exactly while page 1 is.
     ///
     /// The one question the scrollbar's ticks (scrollbarMarkInputs()) and the reveal a click on one performs
     /// (revealStableLineAtTop()) both ask, so a tick is offered exactly where a click on it lands. With
-    /// DECPCCM reset the page on display and the cursor's part ways, and either can leave the other.
-    [[nodiscard]] bool canRevealScrollback() const noexcept
-    {
-        return foldingAppliesToDisplayedPage() && !_viewport.scrollingDisabled();
-    }
+    /// DECPCCM reset the cursor may write to another page meanwhile, which changes neither.
+    [[nodiscard]] bool canRevealScrollback() const noexcept { return foldingAppliesToDisplayedPage(); }
 
     /// Drops fold state the grid can no longer account for: heads evicted from the scrollback, and
     /// everything at all when a reflow destroyed row identity wholesale.
@@ -3355,6 +3352,14 @@ class Terminal
     /// @param output Whether the displayed text changed.
     void onStatusLineCommandCompleted(StatusLineCommandOutput output);
 
+    /// Puts @p page on display, and brings the viewport, the window onto it, back inside its history.
+    ///
+    /// The one place the page on display changes. The page coming on display may have less history than the
+    /// one it replaces -- every page but the primary has none -- and the frame draws it with the viewport's
+    /// offset.
+    /// @param page The page to display.
+    void showPage(PageIndex page);
+
     /// One batch's birth stamp, in force on the primary screen for exactly as long as this lives.
     ///
     /// Rows the cursor first reaches meanwhile are born with it. When it ends the stamp is withdrawn, so a
@@ -4418,13 +4423,12 @@ class Terminal
     /// Everything scrollbarMarkInputs() is a function of, as scrollbarMarksRevision() last saw it.
     struct ScrollbarMarksInputs
     {
-        uint64_t blockRevision = 0;                    ///< CommandBlockStore::revision()
-        uint64_t userMarkRevision = 0;                 ///< UserMarkIndex::revision()
-        uint64_t foldRevision = 0;                     ///< FoldState::revision()
-        uint64_t stableIdGeneration = 0;               ///< What the heads' and marks' ids mean
-        int64_t stableFloor = 0;                       ///< Eviction moves every row up
-        PageIndex displayedPage {};                    ///< canRevealScrollback(): the page on display...
-        ScreenType cursorScreen = ScreenType::Primary; ///< ...and whether the viewport may scroll
+        uint64_t blockRevision = 0;      ///< CommandBlockStore::revision()
+        uint64_t userMarkRevision = 0;   ///< UserMarkIndex::revision()
+        uint64_t foldRevision = 0;       ///< FoldState::revision()
+        uint64_t stableIdGeneration = 0; ///< What the heads' and marks' ids mean
+        int64_t stableFloor = 0;         ///< Eviction moves every row up
+        PageIndex displayedPage {};      ///< canRevealScrollback(): the page on display
 
         bool operator==(ScrollbarMarksInputs const&) const = default;
     };
