@@ -1328,6 +1328,7 @@ constexpr StringLiteral ImagesConfig {
     "\n"
     "    {comment} Enable or disable Good Image Protocol (GIP) support (disabled by default).\n"
     "    good_image_protocol: {}\n"
+    "\n"
 };
 
 constexpr StringLiteral ExperimentalFeaturesConfig {
