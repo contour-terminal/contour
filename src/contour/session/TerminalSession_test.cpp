@@ -9225,6 +9225,57 @@ TEST_CASE("TerminalSession: a selection report the wheel raises reaches the PTY 
     CHECK(mockPtyOf(*pane).stdinBuffer().contains("\033[>"));
 }
 
+TEST_CASE("TerminalSession: a horizontal wheel notch is reported at the cell it turns over",
+          "[contour][session][input]")
+{
+    // A notch is not a press at a new spot, but it happens where the pointer is, and its event says where
+    // that is. Remembered positions are not the pointer's: before any pointer event the terminal's is only
+    // its default, the top-left cell, and once the pointer has left the grid it is the cell it left from.
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(testApp.app());
+    pane->terminal().writeToScreen("\033[?1000h\033[?1006h"); // button events, SGR encoding
+    auto const& cellSize = pane.surface->cellSizeValue;
+    auto const pixelCentreOf = [&](vtbackend::CellLocation cell) {
+        return QPointF((unbox<double>(cell.column) + 0.5) * unbox<double>(cellSize.width),
+                       (unbox<double>(cell.line) + 0.5) * unbox<double>(cellSize.height));
+    };
+    auto const underTheWheel =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(3) };
+
+    SECTION("before any pointer event")
+    {
+    }
+
+    SECTION("once the pointer has left the grid")
+    {
+        pane->terminal().sendMouseMoveEvent(Modifiers {},
+                                            vtbackend::CellLocation { .line = vtbackend::LineOffset(5),
+                                                                      .column = vtbackend::ColumnOffset(7) },
+                                            vtbackend::PixelCoordinate {},
+                                            false);
+        pane->terminal().sendMouseLeaveEvent();
+    }
+
+    SECTION("with the pointer moved onto that cell")
+    {
+        pane->terminal().sendMouseMoveEvent(
+            Modifiers {}, underTheWheel, vtbackend::PixelCoordinate {}, false);
+    }
+
+    discardWrittenInput(*pane);
+    auto const position = pixelCentreOf(underTheWheel);
+    auto wheel = QWheelEvent { position,     position,       QPoint(0, 0),      QPoint(120, 0),
+                               Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false };
+    contour::session::sendWheelEvent(&wheel, *pane);
+
+    auto const& reports = mockPtyOf(*pane).stdinBuffer();
+    INFO("reports: " << core::escape(reports));
+    CHECK(reports.contains(";4;3M"));
+    CHECK_FALSE(reports.contains(";1;1M"));
+    CHECK_FALSE(reports.contains(";8;6M"));
+    CHECK(pane->terminal().currentMouseGridPosition() == underTheWheel);
+}
+
 TEST_CASE("TerminalSession: a desktop notification's answer reaches the PTY at once",
           "[contour][session][notification]")
 {
