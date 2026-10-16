@@ -123,15 +123,18 @@ class LineNumberText
 /// so all of them are one size and weight in every font.
 enum class BlockColumnGlyph : uint8_t
 {
-    None = 0,      ///< Nothing.
-    FoldExpanded,  ///< The head of an expanded fold.
-    FoldCollapsed, ///< The head of a collapsed fold.
-    FoldBody,      ///< A row inside an expanded fold.
-    FoldBodyEnd,   ///< The last row of an expanded fold.
-    UserMark,      ///< A diamond, U+10F003 -- a row the user marked with vi `mm`.
-    Running,       ///< A small triangle, U+10F002 -- the head of a command that has not finished.
-    Finished,      ///< A disc, U+10F004 -- the head of a finished command with no fold drawn beside it.
-    Count,         ///< Not a glyph; pins the codepoint table.
+    None = 0,          ///< Nothing.
+    FoldExpanded,      ///< The head of an expanded fold.
+    FoldCollapsed,     ///< The head of a collapsed fold.
+    FoldBody,          ///< A row inside an expanded fold.
+    FoldBodyEnd,       ///< The last row of an expanded fold.
+    UserMark,          ///< A diamond, U+10F003 -- a row the user marked with vi `mm`.
+    Running,           ///< A small triangle, U+10F002 -- the head of a command that has not finished.
+    Finished,          ///< A disc, U+10F004 -- the head of a finished command with no fold drawn beside it.
+    Failed,            ///< A cross, U+10F005 -- the head of a FAILED command with no fold drawn beside it.
+    FoldBodyFailed,    ///< A row inside an expanded fold whose command failed: the body drawn heavy.
+    FoldBodyEndFailed, ///< The last row of such a fold.
+    Count,             ///< Not a glyph; pins the codepoint table.
 };
 
 /// Whether a row heads a command block, and in which state.
@@ -163,15 +166,22 @@ struct BlockColumnFacts
     BlockHeadState head = BlockHeadState::None;       ///< Whether it heads a running or a finished block.
     UserMarkPresence mark = UserMarkPresence::Absent; ///< Whether the user marked it.
 
+    /// How the row's block ended; nullopt for a row of no block, or with exit status off.
+    std::optional<CommandBlockOutcome> outcome {};
+
     bool operator==(BlockColumnFacts const&) const = default;
 };
 
 /// What the block column shows beside a row with @p facts, by precedence: a fold head, a user mark on any
 /// other row, a fold body, a running command's head, a finished command's head.
 ///
-/// The precedence alone gives a finished block with no foldable output its dot: a finished head that has
-/// a fold drawn shows the fold control, which outranks the dot. With fold markers off no fold is drawn,
-/// so every finished head shows the dot.
+/// The precedence alone gives a finished block with no foldable output its mark: a finished head that has
+/// a fold drawn shows the fold control, which outranks the mark. With fold markers off no fold is drawn,
+/// so every finished head shows its mark.
+///
+/// A failed command is told apart by shape as well as by colour, which a reader who cannot tell red from
+/// grey needs: a cross rather than a disc on its head, and its fold's body drawn heavy -- both only with
+/// exit status on, which is what colours them too.
 /// @param facts What is true of the row.
 /// @param settings Which of the column's jobs are switched on.
 /// @return The glyph, or BlockColumnGlyph::None.
@@ -224,6 +234,16 @@ inline constexpr float BlockStatusHoverLift = 0.5F;
 /// @param colors The foreground and background.
 /// @return @p colors, with any decoration in the foreground's colour.
 [[nodiscard]] RenderAttributes gutterCellAttributes(RGBColorPair colors) noexcept;
+
+/// The attributes the block column's glyph cell is drawn with: @p colors, and across the whole column.
+///
+/// One cell wide, the glyph fills its cell. Two wide, it is drawn as one glyph twice the width -- a fold
+/// control and a status mark about twice the size -- rather than as one cell-sized glyph beside a blank.
+/// @param block The block column's segment.
+/// @param colors The glyph's colours, as blockColumnColors() picks them.
+/// @return The attributes; flagged LineFlag::DoubleWidth for a column two cells wide.
+[[nodiscard]] RenderAttributes blockColumnCellAttributes(GutterSegment const& block,
+                                                         RGBColorPair colors) noexcept;
 
 /// Everything one gutter row shows, gathered by Terminal::fillGutter and painted by appendGutterCells().
 ///

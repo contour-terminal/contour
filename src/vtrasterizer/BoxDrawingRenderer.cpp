@@ -356,9 +356,10 @@ namespace detail
             SmallTriangle = 0, ///< U+10F002, a block whose command is still running.
             Diamond,           ///< U+10F003, a row the user marked.
             Disc,              ///< U+10F004, a finished block with no fold control on its head.
+            Cross,             ///< U+10F005, a FAILED block with no fold control on its head.
         };
 
-        /// The block column's status marks: a small right-pointing triangle, a diamond and a disc.
+        /// The block column's status marks: a small right-pointing triangle, a diamond, a disc and a cross.
         ///
         /// Drawn here rather than left to the font for the reason FoldHead is: they share a column with
         /// the fold controls, and a font's marks differ in size and weight between families. Each shape
@@ -371,6 +372,13 @@ namespace detail
 
             /// How much of the cell's shorter side the mark spans.
             static constexpr double Extent = 0.6;
+
+            /// How far the cross's arms reach from the centre, as a fraction of the radius: inside the disc's
+            /// square, so the two marks look the same size.
+            static constexpr double CrossReach = 0.8;
+
+            /// Half the width of the cross's bars, as a fraction of the radius.
+            static constexpr double CrossStroke = 0.22;
 
             /// Whether the point (@p dx, @p dy), relative to the cell centre, lies in @p shape of
             /// half-extent @p radius.
@@ -386,6 +394,15 @@ namespace detail
                         return dx >= -radius * 0.8 && std::abs(dy) <= ((radius * 0.8) - dx) / 2.0;
                     case StatusMarkShape::Diamond: return std::abs(dx) + std::abs(dy) <= radius;
                     case StatusMarkShape::Disc: return (dx * dx) + (dy * dy) <= radius * radius;
+                    case StatusMarkShape::Cross: {
+                        // Two diagonal bars a fifth of the mark wide, in the disc's square: as wide as the
+                        // disc, and heavy enough to read as a cross rather than as a hairline X.
+                        auto const reach = radius * CrossReach;
+                        auto const distance =
+                            std::min(std::abs(dx - dy), std::abs(dx + dy)) / std::numbers::sqrt2;
+                        return std::abs(dx) <= reach && std::abs(dy) <= reach
+                               && distance <= radius * CrossStroke;
+                    }
                 }
                 return false;
             }
@@ -2145,7 +2162,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
            || ascending(0x2500, 0x259F)             // box drawing, block elements, shades
            || codepoint == 0x25B6                   // ▶ BLACK RIGHT-POINTING TRIANGLE
            || codepoint == 0x25BC                   // ▼ BLACK DOWN-POINTING TRIANGLE
-           || ascending(0x10F000, 0x10F004)         // Contour's own: fold heads, gutter status marks
+           || ascending(0x10F000, 0x10F005)         // Contour's own: fold heads, gutter status marks
            || ascending(0x1FB00, 0x1FBAF)           // more block sextants
            || ascending(0x1FBF0, 0x1FBF9)           // digits
            || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
@@ -2683,6 +2700,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
             return /* running, ▸ */ StatusMark { .size = size, .shape = StatusMarkShape::SmallTriangle };
         case 0x10F003: return /* user mark, ◆ */ StatusMark { .size = size, .shape = StatusMarkShape::Diamond };
         case 0x10F004: return /* finished, ● */ StatusMark { .size = size, .shape = StatusMarkShape::Disc };
+        case 0x10F005: return /* failed, ✗ */ StatusMark { .size = size, .shape = StatusMarkShape::Cross };
 
         // PUA defines as introduced by FiraCode: https://github.com/tonsky/FiraCode/issues/1324
         case 0xEE00: return progressBar().left();

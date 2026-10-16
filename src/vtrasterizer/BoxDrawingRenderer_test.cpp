@@ -790,6 +790,7 @@ TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
         CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F002 }));
         CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F003 }));
         CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F004 }));
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F005 }));
     }
 
     SECTION("the Unicode shapes they look like stay the font's")
@@ -799,11 +800,13 @@ TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
         CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x25B8 }));
         CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x25C6 }));
         CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x25CF }));
+        CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x2717 }));
     }
 
     SECTION("each fills its cell's buffer, draws something, and sits on the row's middle")
     {
-        for (auto const codepoint: { char32_t { 0x10F002 }, char32_t { 0x10F003 }, char32_t { 0x10F004 } })
+        for (auto const codepoint:
+             { char32_t { 0x10F002 }, char32_t { 0x10F003 }, char32_t { 0x10F004 }, char32_t { 0x10F005 } })
         {
             CAPTURE(static_cast<uint32_t>(codepoint));
             auto const buffer = build(codepoint);
@@ -836,6 +839,41 @@ TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
     {
         CHECK(countLitPixels(build(0x10F004)) > countLitPixels(build(0x10F003)));
     }
+
+    SECTION("the cross is symmetric both ways, and is not the disc")
+    {
+        auto const cross = build(0x10F005);
+        CHECK(cross == horizontalMirror(cross, Cell));
+        CHECK(cross != build(0x10F004));
+        // Its centre is lit, and a corner of the disc's square is not: a cross, not a box.
+        CHECK(cross[(10 * 9) + 4] > 0);
+        CHECK(cross[(2 * 9) + 0] == 0);
+    }
+}
+
+TEST_CASE("BoxDrawingRenderer.gutterGlyphsDrawnTwoCellsWideAreTwiceTheSize", "[boxdrawing]")
+{
+    // A two-cell block column draws its glyph into a buffer two cells wide (LineFlag::DoubleWidth): the fold
+    // control and the marks then size themselves to the row's height rather than to one cell's width.
+    auto constexpr Cell = ImageSize { Width(10), Height(19) };
+    auto constexpr Wide = ImageSize { Width(20), Height(19) };
+    auto const lit = [](char32_t codepoint, ImageSize size) {
+        auto buffer = BoxDrawingRendererTest::buildElements(codepoint, size, 1);
+        REQUIRE(buffer.has_value());
+        CHECK(buffer->size() == unbox<size_t>(size.width) * unbox<size_t>(size.height));
+        return countLitPixels(*buffer);
+    };
+
+    for (auto const codepoint: { char32_t { 0x10F000 },
+                                 char32_t { 0x10F001 },
+                                 char32_t { 0x10F002 },
+                                 char32_t { 0x10F003 },
+                                 char32_t { 0x10F004 },
+                                 char32_t { 0x10F005 } })
+    {
+        CAPTURE(static_cast<uint32_t>(codepoint));
+        CHECK(lit(codepoint, Wide) > lit(codepoint, Cell) * 3 / 2);
+    }
 }
 
 TEST_CASE("BoxDrawingRenderer.gutterStatusMarksInTinyCells", "[boxdrawing]")
@@ -849,8 +887,10 @@ TEST_CASE("BoxDrawingRenderer.gutterStatusMarksInTinyCells", "[boxdrawing]")
             CAPTURE(width, height);
             auto const cell =
                 ImageSize { Width(static_cast<unsigned>(width)), Height(static_cast<unsigned>(height)) };
-            for (auto const codepoint:
-                 { char32_t { 0x10F002 }, char32_t { 0x10F003 }, char32_t { 0x10F004 } })
+            for (auto const codepoint: { char32_t { 0x10F002 },
+                                         char32_t { 0x10F003 },
+                                         char32_t { 0x10F004 },
+                                         char32_t { 0x10F005 } })
             {
                 auto const buffer = BoxDrawingRendererTest::buildElements(codepoint, cell, 1);
                 REQUIRE(buffer.has_value());

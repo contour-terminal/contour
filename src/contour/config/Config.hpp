@@ -436,6 +436,10 @@ struct GutterConfig
     /// Draw ◆ beside rows marked with vi `mm`.
     bool userMarks { true };
 
+    /// The block column's width in cells, MinBlockColumnWidth..MaxBlockColumnWidth. Two by default: its
+    /// fold controls and marks are drawn across both, twice the size, and a click anywhere in them lands.
+    int blockColumnWidth { 2 };
+
     /// Which line numbers, if any.
     vtbackend::LineNumberMode lineNumbers { vtbackend::LineNumberMode::Off };
 
@@ -2280,6 +2284,7 @@ struct Writer
         return format(doc,
                       v.exitStatus,
                       v.userMarks,
+                      v.blockColumnWidth,
                       v.lineNumbers,
                       v.lineNumberWidth,
                       v.timestamps,

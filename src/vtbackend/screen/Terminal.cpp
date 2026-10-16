@@ -3267,11 +3267,12 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
             .head = blockHeadStateOf(record, id, grid.stableIdGeneration()),
             .mark =
                 line.isFlagEnabled(LineFlag::UserMark) ? UserMarkPresence::Present : UserMarkPresence::Absent,
+            .outcome =
+                record != nullptr && gutter.exitStatus ? std::optional { outcomeOf(*record) } : std::nullopt,
         };
         auto const glyph = blockColumnGlyph(facts, gutter);
+        auto const& outcome = facts.outcome;
 
-        auto const outcome =
-            record != nullptr && gutter.exitStatus ? std::optional { outcomeOf(*record) } : std::nullopt;
         auto const hover = hoveredHead && range && hoveredHead->headStableId == range->headStableId
                                ? GutterHover::Hovered
                                : GutterHover::Rest;

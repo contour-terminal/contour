@@ -151,8 +151,10 @@ profiles:
     auto const current = row.value("value");
     if (type == "bool")
         return { !current.toBool() };
+    // Down rather than up where it can go: a row's range is not on it, and a default at its maximum -- the
+    // block column's two cells -- has room only below. A small one goes up, from the floor of a count.
     if (type == "int")
-        return { current.toInt() + 1 };
+        return { current.toInt() > 1 ? current.toInt() - 1 : current.toInt() + 1 };
     if (type == "double")
         return { current.toDouble() + 1.0 };
     if (type == "enum")

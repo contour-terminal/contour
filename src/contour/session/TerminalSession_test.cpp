@@ -5513,7 +5513,8 @@ TEST_CASE("TerminalSession: a profile switch re-applies sticky_header to the ter
 namespace
 {
 /// The scene every sticky header input test starts from: a session with a recording surface of 8x16 cells
-/// whose grid starts one cell right of the item's edge -- the width of the default gutter's one column -- and
+/// whose grid starts one cell right of the item's edge -- the pixels left of it lie in the default gutter's
+/// block column -- and
 /// the Qt event helpers that reach it, which a display-less session would drop. Main-page row 0 spans y 0..15
 /// below the status line, if any; page column c starts at x 8 + 8c.
 class StickyHeaderScene

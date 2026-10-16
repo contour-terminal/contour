@@ -684,6 +684,7 @@ vtbackend::GutterSettings gutterSettingsFor(Config const& config)
         .foldMarkers = config.folding.value().markersVisible(),
         .exitStatus = gutter.exitStatus,
         .userMarks = gutter.userMarks,
+        .blockColumnWidth = gutter.blockColumnWidth,
         .lineNumbers = gutter.lineNumbers,
         .lineNumberWidth = gutter.lineNumberWidth,
         .timestamps = gutter.timestamps,
@@ -2546,6 +2547,20 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
     // Validated rather than clamped or trusted: a width out of range and a format the gutter cannot draw
     // are typos, and either taken as written would resize the page or blank the column.
+    if (child["block_column_width"])
+    {
+        auto width = where.blockColumnWidth;
+        loadGuarded(child, "block_column_width", width);
+        if (width >= vtbackend::MinBlockColumnWidth && width <= vtbackend::MaxBlockColumnWidth)
+            where.blockColumnWidth = width;
+        else
+            errorLog()("gutter.block_column_width must be between {} and {}, not {}; keeping {}.",
+                       vtbackend::MinBlockColumnWidth,
+                       vtbackend::MaxBlockColumnWidth,
+                       width,
+                       where.blockColumnWidth);
+    }
+
     if (child["line_number_width"])
     {
         auto width = where.lineNumberWidth;

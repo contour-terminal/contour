@@ -181,10 +181,12 @@ namespace
 
     [[nodiscard]] int blockColumnColumns(SegmentInputs const& inputs)
     {
-        // One column whenever any of its three jobs is on. Fold markers alone already reserved it, so
-        // turning exit status or user marks on beside them costs no width.
+        // Its configured width whenever any of its three jobs is on. Fold markers alone already reserved
+        // it, so turning exit status or user marks on beside them costs no width.
         auto const& settings = inputs.settings;
-        return (settings.foldMarkers || settings.exitStatus || settings.userMarks) ? 1 : 0;
+        if (!settings.foldMarkers && !settings.exitStatus && !settings.userMarks)
+            return 0;
+        return std::clamp(settings.blockColumnWidth, MinBlockColumnWidth, MaxBlockColumnWidth);
     }
 
     /// One row of the gutter's table: a segment, and how wide the settings make it.
@@ -337,6 +339,23 @@ namespace
     };
     static_assert(FoldGlyphs.size() == static_cast<std::size_t>(FoldMarker::Count));
 
+    /// The same for a fold whose command failed: its body heavy, its head the same control as any other's.
+    constexpr auto FailedFoldGlyphs = std::array {
+        BlockColumnGlyph::None,              // FoldMarker::None
+        BlockColumnGlyph::FoldExpanded,      // FoldMarker::Expanded
+        BlockColumnGlyph::FoldCollapsed,     // FoldMarker::Collapsed
+        BlockColumnGlyph::FoldBodyFailed,    // FoldMarker::Body
+        BlockColumnGlyph::FoldBodyEndFailed, // FoldMarker::BodyEnd
+    };
+    static_assert(FailedFoldGlyphs.size() == static_cast<std::size_t>(FoldMarker::Count));
+
+    /// Whether the row's block failed, as far as the column may say: only with exit status on.
+    [[nodiscard]] constexpr bool showsFailure(BlockColumnFacts const& facts,
+                                              GutterSettings const& settings) noexcept
+    {
+        return settings.exitStatus && facts.outcome == CommandBlockOutcome::Failure;
+    }
+
     [[nodiscard]] constexpr bool isFoldHead(FoldMarker marker) noexcept
     {
         return marker == FoldMarker::Expanded || marker == FoldMarker::Collapsed;
@@ -370,7 +389,8 @@ namespace
     {
         if (!settings.foldMarkers || isFoldHead(facts.fold))
             return BlockColumnGlyph::None;
-        return FoldGlyphs[static_cast<std::size_t>(facts.fold)];
+        auto const& glyphs = showsFailure(facts, settings) ? FailedFoldGlyphs : FoldGlyphs;
+        return glyphs[static_cast<std::size_t>(facts.fold)];
     }
 
     [[nodiscard]] BlockColumnGlyph runningHeadRule(BlockColumnFacts const& facts,
@@ -383,8 +403,9 @@ namespace
     [[nodiscard]] BlockColumnGlyph finishedHeadRule(BlockColumnFacts const& facts,
                                                     GutterSettings const& settings) noexcept
     {
-        return settings.exitStatus && facts.head == BlockHeadState::Finished ? BlockColumnGlyph::Finished
-                                                                             : BlockColumnGlyph::None;
+        if (!settings.exitStatus || facts.head != BlockHeadState::Finished)
+            return BlockColumnGlyph::None;
+        return showsFailure(facts, settings) ? BlockColumnGlyph::Failed : BlockColumnGlyph::Finished;
     }
 
     /// The block column, highest precedence first. Another glyph is a rule here and a row in
@@ -430,6 +451,9 @@ char32_t blockColumnCodepoint(BlockColumnGlyph glyph) noexcept
         U'\U0010F003',                          // UserMark: a diamond, as U+25C6 ◆
         U'\U0010F002',                          // Running:  a small right-pointing triangle, as U+25B8 ▸
         U'\U0010F004',                          // Finished: a disc, as U+25CF ●
+        U'\U0010F005',                          // Failed:   a cross, as U+2717 ✗
+        U'┃',                                   // FoldBodyFailed:    BOX DRAWINGS HEAVY VERTICAL
+        U'┗',                                   // FoldBodyEndFailed: BOX DRAWINGS HEAVY UP AND RIGHT
     };
     static_assert(Codepoints.size() == static_cast<std::size_t>(BlockColumnGlyph::Count));
     return Codepoints[static_cast<std::size_t>(glyph)];
@@ -514,8 +538,18 @@ void appendGutterCells(GutterLayout const& layout,
         return;
     output.push_back(RenderGutterCell { .lineOffset = row.screenLine,
                                         .codepoint = blockColumnCodepoint(row.glyph),
-                                        .attributes = gutterCellAttributes(row.glyphColors),
+                                        .attributes = blockColumnCellAttributes(*block, row.glyphColors),
                                         .column = columnOf(block->firstColumn) });
+}
+
+RenderAttributes blockColumnCellAttributes(GutterSegment const& block, RGBColorPair colors) noexcept
+{
+    auto attributes = gutterCellAttributes(colors);
+    // Drawn across the whole column: the renderer rasterises a cell flagged DoubleWidth into a tile two
+    // cells wide, as it does a DECDWL line's, and draws its background two cells wide with it.
+    if (block.columns >= 2)
+        attributes.lineFlags = LineFlag::DoubleWidth;
+    return attributes;
 }
 
 std::u32string collapsedFoldLabel(uint64_t hiddenLines)

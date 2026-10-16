@@ -36,12 +36,13 @@ nothing to anyone who is already using it.
 | `U+10F002` | BLOCK RUNNING | A small filled triangle pointing right, as `U+25B8` ▸. |
 | `U+10F003` | USER MARK | A filled diamond, as `U+25C6` ◆. |
 | `U+10F004` | BLOCK FINISHED | A filled disc, as `U+25CF` ●. |
+| `U+10F005` | BLOCK FAILED | A diagonal cross, as `U+2717` ✗. |
 
 The fold heads are drawn as line art at the current foreground colour, scaled to the cell: the box is
 square whatever the cell's aspect ratio, and the stem shares its column with `U+2502` so that the two
 meet exactly.
 
-The three marks are filled shapes at the current foreground colour, anti-aliased, centred in the cell
+The four marks are filled shapes at the current foreground colour, anti-aliased, centred in the cell
 and spanning 60% of its shorter side, so they sit on the same line as the fold column's stem.
 
 ### What they are for
@@ -69,10 +70,14 @@ A box carrying a plus or a minus, rather than a triangle, because that is the fo
 has already met in editors, tree views and file managers.
 
 The marks share that column. A command that is still running heads its block with `U+10F002`, a
-finished one with no fold control beside it with `U+10F004`, and a row the user marked (vi `mm`) carries
-`U+10F003`.
+finished one with no fold control beside it with `U+10F004` -- or `U+10F005` when it failed -- and a row
+the user marked (vi `mm`) carries `U+10F003`. A failed command whose output folds draws that body heavy,
+with `U+2503` and `U+2517`, so failure reads by shape as well as by colour.
 
-Unicode has these three shapes at `U+25B8`, `U+25C6` and `U+25CF`, but the gutter does not use them:
+The gutter's block column may be two cells wide (`gutter.block_column_width`); its glyphs are then drawn
+across both cells, each twice the size.
+
+Unicode has these four shapes at `U+25B8`, `U+25C6`, `U+25CF` and `U+2717`, but the gutter does not use them:
 the renderer's claim on a codepoint is global, so claiming those would draw every one a program
 writes -- the ● of `systemctl status`, a prompt theme's ▸ or ◆, DEC Special Graphics' `` ` `` -- as a
 gutter mark instead of in its font's own size and weight.

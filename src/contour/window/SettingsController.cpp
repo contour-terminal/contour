@@ -1545,6 +1545,17 @@ namespace
                             "Gutter: user marks",
                             "Show the lines you marked with Vi mode's mm in the gutter.",
                             [](config::Config const& c) { return c.gutter.value().userMarks; }),
+            globalIntField(
+                "gutter.block_column_width",
+                "Gutter: block column width",
+                QString::fromStdString(
+                    std::format("Cells the fold controls and command marks are drawn across, "
+                                "{} to {}. Changing it resizes the page.",
+                                vtbackend::MinBlockColumnWidth,
+                                vtbackend::MaxBlockColumnWidth)),
+                [](config::Config const& c) { return c.gutter.value().blockColumnWidth; },
+                vtbackend::MinBlockColumnWidth,
+                vtbackend::MaxBlockColumnWidth),
             globalEnumFieldFromTable<vtbackend::LineNumberMode>(
                 "gutter.line_numbers",
                 "Gutter: line numbers",

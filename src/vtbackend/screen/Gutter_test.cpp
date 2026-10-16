@@ -284,6 +284,35 @@ TEST_CASE("Gutter.layout.anyOfTheBlockColumnsJobsReservesIt", "[gutter]")
         CHECK(gutterLayoutFor(settings).totalColumns == 1);
 }
 
+TEST_CASE("Gutter.layout.theBlockColumnTakesItsConfiguredWidth", "[gutter]")
+{
+    // gutter.block_column_width: two cells, the configuration's default, and held to 1..2 like the line
+    // numbers' width is held to theirs -- the one place the range is enforced on the way to the screen.
+    auto settings = GutterSettings { .foldMarkers = true, .exitStatus = true };
+    for (auto const [asked, taken]: std::array { std::pair { 1, 1 },
+                                                 std::pair { 2, 2 },
+                                                 std::pair { 0, MinBlockColumnWidth },
+                                                 std::pair { 7, MaxBlockColumnWidth } })
+    {
+        INFO("block_column_width " << asked);
+        settings.blockColumnWidth = asked;
+        auto const layout = gutterLayoutFor(settings);
+        REQUIRE(layout.segment(GutterSegmentKind::BlockColumn).has_value());
+        CHECK(layout.segment(GutterSegmentKind::BlockColumn)->columns == taken);
+        CHECK(layout.totalColumns == taken);
+    }
+
+    // Beside the grid, wherever the line numbers stand.
+    settings.blockColumnWidth = 2;
+    settings.lineNumbers = LineNumberMode::Absolute;
+    settings.lineNumberWidth = 4;
+    auto const layout = gutterLayoutFor(settings);
+    CHECK(layout.segment(GutterSegmentKind::BlockColumn)
+          == GutterSegment { .kind = GutterSegmentKind::BlockColumn, .firstColumn = 4, .columns = 2 });
+    CHECK(gutterSegmentAt(layout, 4) == GutterSegmentKind::BlockColumn);
+    CHECK(gutterSegmentAt(layout, 5) == GutterSegmentKind::BlockColumn);
+}
+
 TEST_CASE("Gutter.layout.aDefaultConstructedSettingsReservesNothing", "[gutter]")
 {
     // The engine's defaults are all off, so a terminal configured by hand has no gutter unless it asks.
@@ -480,6 +509,42 @@ TEST_CASE("Gutter.blockColumn.withUserMarksOffNoDiamondIsDrawn", "[gutter]")
     CHECK(blockColumnGlyph({ .mark = UserMarkPresence::Present }, noMarks) == BlockColumnGlyph::None);
 }
 
+TEST_CASE("Gutter.blockColumn.aFailureIsAShapeAsWellAsAColour", "[gutter]")
+{
+    // A reader who cannot tell red from grey still tells a failed command from one that succeeded: a cross
+    // where a disc would be, and the body of its fold drawn heavy. Only with exit status on.
+    auto const settings = GutterSettings { .foldMarkers = true, .exitStatus = true };
+    auto const failed = std::optional { CommandBlockOutcome::Failure };
+    auto const succeeded = std::optional { CommandBlockOutcome::Success };
+
+    auto const head = BlockColumnFacts { .head = BlockHeadState::Finished };
+    CHECK(blockColumnGlyph(BlockColumnFacts { .head = BlockHeadState::Finished, .outcome = failed }, settings)
+          == BlockColumnGlyph::Failed);
+    CHECK(blockColumnGlyph(BlockColumnFacts { .head = BlockHeadState::Finished, .outcome = succeeded },
+                           settings)
+          == BlockColumnGlyph::Finished);
+    CHECK(blockColumnGlyph(head, settings) == BlockColumnGlyph::Finished);
+
+    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Body, .outcome = failed }, settings)
+          == BlockColumnGlyph::FoldBodyFailed);
+    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::BodyEnd, .outcome = failed }, settings)
+          == BlockColumnGlyph::FoldBodyEndFailed);
+    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Body, .outcome = succeeded }, settings)
+          == BlockColumnGlyph::FoldBody);
+
+    // The fold control on the head stays the control, whatever the command did: its colour says how it ended.
+    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Expanded,
+                                              .head = BlockHeadState::Finished,
+                                              .outcome = failed },
+                           settings)
+          == BlockColumnGlyph::FoldExpanded);
+
+    // With exit status off nothing tells the outcome, by colour or by shape.
+    auto const quiet = GutterSettings { .foldMarkers = true, .exitStatus = false };
+    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Body, .outcome = failed }, quiet)
+          == BlockColumnGlyph::FoldBody);
+}
+
 TEST_CASE("Gutter.blockColumn.glyphsAreTheirCodepoints", "[gutter]")
 {
     CHECK(blockColumnCodepoint(BlockColumnGlyph::None) == U'\0');
@@ -492,6 +557,10 @@ TEST_CASE("Gutter.blockColumn.glyphsAreTheirCodepoints", "[gutter]")
     CHECK(blockColumnCodepoint(BlockColumnGlyph::UserMark) == U'􏀃');
     CHECK(blockColumnCodepoint(BlockColumnGlyph::Running) == U'􏀂');
     CHECK(blockColumnCodepoint(BlockColumnGlyph::Finished) == U'􏀄');
+    CHECK(blockColumnCodepoint(BlockColumnGlyph::Failed) == U'\U0010F005');
+    // The heavy body needs no codepoint of its own: Unicode's heavy box drawing says it exactly.
+    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldBodyFailed) == U'\u2503');
+    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldBodyEndFailed) == U'\u2517');
 }
 
 TEST_CASE("Gutter.blockColumn.onlyTheRecordedHeadIsAHead", "[gutter]")
@@ -607,6 +676,36 @@ TEST_CASE("Gutter.paint.eachSegmentLandsAtItsOwnNegativeColumns", "[gutter]")
         CHECK(cell.lineOffset == LineOffset(2));
     CHECK(cells[0].attributes.foregroundColor == RGBColor(1, 2, 3));
     CHECK(cells[7].attributes.foregroundColor == RGBColor(7, 8, 9));
+}
+
+TEST_CASE("Gutter.paint.aTwoCellBlockColumnDrawsOneGlyphAcrossBoth", "[gutter]")
+{
+    // Not a cell-sized glyph beside a blank: one glyph, at the column's first cell, rasterised two cells
+    // wide -- the renderer draws a DoubleWidth cell's glyph and background across two cells.
+    auto const glyph = RGBColorPair { .foreground = RGBColor(7, 8, 9), .background = RGBColor(4, 5, 6) };
+
+    auto const paint = [&](int width) {
+        auto const layout =
+            gutterLayoutFor(GutterSettings { .foldMarkers = true, .blockColumnWidth = width });
+        auto cells = std::vector<RenderGutterCell> {};
+        appendGutterCells(layout,
+                          GutterRow { .screenLine = LineOffset(0),
+                                      .glyph = BlockColumnGlyph::FoldExpanded,
+                                      .glyphColors = glyph },
+                          RGBColorPair {},
+                          cells);
+        REQUIRE(cells.size() == 1);
+        return cells.front();
+    };
+
+    auto const wide = paint(2);
+    CHECK(wide.column == ColumnOffset(-2));
+    CHECK(wide.attributes.lineFlags.test(LineFlag::DoubleWidth));
+    CHECK(wide.attributes.foregroundColor == RGBColor(7, 8, 9));
+
+    auto const narrow = paint(1);
+    CHECK(narrow.column == ColumnOffset(-1));
+    CHECK_FALSE(narrow.attributes.lineFlags.test(LineFlag::DoubleWidth));
 }
 
 TEST_CASE("Gutter.paint.anEmptyRowPaintsNothing", "[gutter]")

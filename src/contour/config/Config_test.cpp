@@ -1433,9 +1433,9 @@ TEST_CASE("Config: folding decides the block column's fold controls, not whether
         int gutterColumns;
     };
     auto const cases = std::array {
-        Case { .folding = "", .foldMarkers = true, .gutterColumns = 1 },
-        Case { .folding = "folding:\n    show_markers: false\n", .foldMarkers = false, .gutterColumns = 1 },
-        Case { .folding = "folding:\n    enabled: false\n", .foldMarkers = false, .gutterColumns = 1 },
+        Case { .folding = "", .foldMarkers = true, .gutterColumns = 2 },
+        Case { .folding = "folding:\n    show_markers: false\n", .foldMarkers = false, .gutterColumns = 2 },
+        Case { .folding = "folding:\n    enabled: false\n", .foldMarkers = false, .gutterColumns = 2 },
         Case { .folding = "folding:\n    show_markers: false\n"
                           "gutter:\n    exit_status: false\n    user_marks: false\n",
                .foldMarkers = false,
@@ -5634,19 +5634,50 @@ profiles:
     CHECK(gutter.timestampFormat == "%H:%M");
 }
 
-TEST_CASE("Config: gutter defaults keep the one column the fold markers always took", "[config]")
+TEST_CASE("Config: gutter defaults draw the block column two cells wide", "[config]")
 {
     auto const config = contour::config::Config {};
     auto const& gutter = config.gutter.value();
     CHECK(gutter.exitStatus);
     CHECK(gutter.userMarks);
+    CHECK(gutter.blockColumnWidth == 2);
     CHECK(gutter.lineNumbers == vtbackend::LineNumberMode::Off);
     CHECK(gutter.lineNumberWidth == 6);
     CHECK_FALSE(gutter.timestamps);
     CHECK(gutter.timestampFormat == "%H:%M:%S");
 
-    // Nobody's column count changes on upgrade: exit status and user marks share the fold column.
-    CHECK(vtbackend::gutterLayoutFor(contour::config::gutterSettingsFor(config)).totalColumns == 1);
+    // Exit status and user marks share the fold column, which takes two cells: its controls and marks are
+    // drawn across both, at twice the size, and a click anywhere in it lands.
+    CHECK(vtbackend::gutterLayoutFor(contour::config::gutterSettingsFor(config)).totalColumns == 2);
+}
+
+TEST_CASE("Config: gutter.block_column_width takes 1 or 2 cells", "[config]")
+{
+    struct Case
+    {
+        std::string_view width;
+        int expected;
+    };
+    auto const cases = std::array {
+        Case { .width = "1", .expected = 1 },  Case { .width = "2", .expected = 2 },
+        Case { .width = "0", .expected = 2 },  Case { .width = "3", .expected = 2 },
+        Case { .width = "-1", .expected = 2 },
+    };
+    for (auto const& testCase: cases)
+    {
+        CAPTURE(testCase.width);
+        QTemporaryDir dir;
+        auto capture = core::log::ScopedCapture { "error" };
+        auto const config =
+            loadFromYaml(dir,
+                         contour::test::profileConfigYaml(
+                             "main", std::format("gutter:\n    block_column_width: {}\n", testCase.width)));
+        CHECK(config.gutter.value().blockColumnWidth == testCase.expected);
+        CHECK(contour::config::gutterSettingsFor(config).blockColumnWidth == testCase.expected);
+        // Refused, and said so, rather than taken: a width out of range is a typo.
+        CHECK(capture.text().contains("block_column_width")
+              == (testCase.expected != std::stoi(std::string { testCase.width })));
+    }
 }
 
 TEST_CASE("Config: an unusable gutter width or timestamp format keeps the default and says why", "[config]")

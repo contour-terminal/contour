@@ -29,10 +29,13 @@ TEST_CASE("FontControl.gutterWidthFor.reservesEveryColumnOfTheLayout", "[contour
 TEST_CASE("FontControl.configuredGutterLayout.followsTheConfiguration", "[contour][geometry][gutter]")
 {
     auto config = contour::config::Config {};
-    // The default: one column, exactly as the fold markers always took.
-    CHECK(configuredGutterLayout(config).totalColumns == 1);
+    // The default: the block column alone, two cells wide.
+    CHECK(configuredGutterLayout(config).totalColumns == 2);
 
     config.gutter.value().lineNumbers = vtbackend::LineNumberMode::Relative;
+    CHECK(configuredGutterLayout(config).totalColumns == 8);
+
+    config.gutter.value().blockColumnWidth = 1;
     CHECK(configuredGutterLayout(config).totalColumns == 7);
 
     // No job left for the block column and no numbers: no strip, and no width taken from the page.
@@ -50,10 +53,10 @@ TEST_CASE("FontControl.configuredGutterWidth.isTheConfiguredLayoutsWidthBehindIt
     auto constexpr Scale = 2.0;
     auto const leadIn = contour::geometry::gutterLeadIn(Scale);
     auto config = contour::config::Config {};
-    CHECK(configuredGutterWidth(config, cell, Scale) == leadIn + (1 * 9));
+    CHECK(configuredGutterWidth(config, cell, Scale) == leadIn + (2 * 9));
 
     config.gutter.value().lineNumbers = vtbackend::LineNumberMode::Relative;
-    CHECK(configuredGutterWidth(config, cell, Scale) == leadIn + (7 * 9));
+    CHECK(configuredGutterWidth(config, cell, Scale) == leadIn + (8 * 9));
     CHECK(configuredGutterWidth(config, cell, Scale)
           == leadIn + gutterWidthFor(configuredGutterLayout(config), cell));
 
