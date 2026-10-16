@@ -66,7 +66,7 @@ class BoxDrawingRenderer: public Renderable
     /// marks (@see docs/vt-extensions/private-use-glyphs.md).
     [[nodiscard]] static constexpr bool isContourGlyph(char32_t codepoint) noexcept
     {
-        return 0x10F000 <= codepoint && codepoint <= 0x10F00B;
+        return 0x10F000 <= codepoint && codepoint <= 0x10F00F;
     }
 
     /// The line thickness @p codepoint's tile is drawn with on a row with @p flags: the cell's own, doubled

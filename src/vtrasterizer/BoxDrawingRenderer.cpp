@@ -255,23 +255,23 @@ namespace detail
             Closed,   ///< A plus, and no stem: a collapsed block has nothing below it.
         };
 
-        /// The weight of the fold column's strokes: light, or heavy for a block whose command failed -- so
-        /// failure reads by shape as well as by colour, collapsed or not.
+        /// The weight of the fold column's strokes, in steps of the cell's light line: one step heavier for a
+        /// block whose command failed -- failure read by shape as well as by colour, collapsed or not -- and
+        /// one more for the fold under the pointer (vtbackend's FoldWeight).
         enum class FoldStrokeWeight : uint8_t
         {
-            Light = 0,
-            Heavy,
+            Light = 1,   ///< The cell's light line.
+            Heavy = 2,   ///< Twice it, as the box-drawing heavy lines are.
+            Heavier = 3, ///< Three times it.
         };
 
-        /// How thick a fold-column stroke of @p weight is: the cell's light line, or twice it, as the
-        /// box-drawing heavy lines are.
+        /// How thick a fold-column stroke of @p weight is.
         /// @param weight The stroke's weight.
         /// @param lineThickness The cell's light line thickness.
         /// @return The stroke's thickness in pixels; at least one.
         [[nodiscard]] constexpr int foldStrokeThickness(FoldStrokeWeight weight, int lineThickness) noexcept
         {
-            auto const light = std::max(1, lineThickness);
-            return weight == FoldStrokeWeight::Heavy ? 2 * light : light;
+            return std::max(1, lineThickness) * std::to_underlying(weight);
         }
 
         /// The left edge of the fold column's vertical: centred in a buffer @p width wide. Every glyph of the
@@ -2785,16 +2785,20 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         // Supplementary PUA-B rather than the BMP: E000..F8FF is comprehensively squatted by Nerd
         // Fonts and friends. Not at a plane's start either, where what leaves the BMP tends to land
         // first -- 10F000 sits near the far end of plane 16, which nothing well-known reaches.
-        // The fold column: a head, its body and its end, light -- and from U+10F008 on, the same four heavy, for
-        // a block whose command failed.
+        // The fold column: a head, its body and its end, light -- from U+10F008 the same four heavy, from
+        // U+10F00C heavier (vtbackend's blockColumnCodepoint()).
         case 0x10F000: return /* fold head, open   */ foldHead(FoldHeadState::Open, FoldStrokeWeight::Light);
         case 0x10F001: return /* fold head, closed */ foldHead(FoldHeadState::Closed, FoldStrokeWeight::Light);
         case 0x10F006: return /* fold body         */ foldBody(FoldBodyPart::Through, FoldStrokeWeight::Light);
         case 0x10F007: return /* fold body, end    */ foldBody(FoldBodyPart::End, FoldStrokeWeight::Light);
-        case 0x10F008: return /* failed, open      */ foldHead(FoldHeadState::Open, FoldStrokeWeight::Heavy);
-        case 0x10F009: return /* failed, closed    */ foldHead(FoldHeadState::Closed, FoldStrokeWeight::Heavy);
-        case 0x10F00A: return /* failed, body      */ foldBody(FoldBodyPart::Through, FoldStrokeWeight::Heavy);
-        case 0x10F00B: return /* failed, body end  */ foldBody(FoldBodyPart::End, FoldStrokeWeight::Heavy);
+        case 0x10F008: return /* heavy, open       */ foldHead(FoldHeadState::Open, FoldStrokeWeight::Heavy);
+        case 0x10F009: return /* heavy, closed     */ foldHead(FoldHeadState::Closed, FoldStrokeWeight::Heavy);
+        case 0x10F00A: return /* heavy, body       */ foldBody(FoldBodyPart::Through, FoldStrokeWeight::Heavy);
+        case 0x10F00B: return /* heavy, body end   */ foldBody(FoldBodyPart::End, FoldStrokeWeight::Heavy);
+        case 0x10F00C: return /* heavier, open     */ foldHead(FoldHeadState::Open, FoldStrokeWeight::Heavier);
+        case 0x10F00D: return /* heavier, closed   */ foldHead(FoldHeadState::Closed, FoldStrokeWeight::Heavier);
+        case 0x10F00E: return /* heavier, body     */ foldBody(FoldBodyPart::Through, FoldStrokeWeight::Heavier);
+        case 0x10F00F: return /* heavier, body end */ foldBody(FoldBodyPart::End, FoldStrokeWeight::Heavier);
         // The gutter's status marks, drawn by StatusMark: a running command, a user's mark, a finished command
         // with no fold control on its head. Shapes Unicode has (U+25B8, U+25C6, U+25CF), but claiming those
         // would draw every one a program writes -- a prompt's, systemctl's -- in place of its font's.

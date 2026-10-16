@@ -122,6 +122,13 @@ inline constexpr int MinBlockColumnWidth = 1;
 /// centred; a fold control two cells wide is as tall as the row already allows.
 inline constexpr int MaxBlockColumnWidth = 2;
 
+/// What hovering a fold does to its column's strokes, beside bringing them to full strength.
+enum class FoldHoverStroke : uint8_t
+{
+    Unchanged = 0, ///< The strokes keep their weight: only the colour says the fold is under the pointer.
+    Bolder,        ///< The hovered fold's line, its head and its end are drawn one stroke heavier.
+};
+
 /// What the gutter shows: which segments it has and what each draws.
 ///
 /// The bools mirror the YAML keys they come from one to one -- `folding.show_markers`,
@@ -158,6 +165,9 @@ struct GutterSettings
 
     /// A std::format chrono specification, without the braces, spelled in local time.
     std::string timestampFormat = std::string { DefaultTimestampFormat };
+
+    /// What hovering a fold does to its strokes (`gutter.bold_on_hover`, converted at the boundary).
+    FoldHoverStroke hoverStroke = FoldHoverStroke::Unchanged;
 
     bool operator==(GutterSettings const&) const = default;
 };

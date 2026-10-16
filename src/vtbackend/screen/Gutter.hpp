@@ -124,20 +124,30 @@ class LineNumberText
 /// so all of them are one size and weight in every font.
 enum class BlockColumnGlyph : uint8_t
 {
-    None = 0,            ///< Nothing.
-    FoldExpanded,        ///< The head of an expanded fold.
-    FoldCollapsed,       ///< The head of a collapsed fold.
-    FoldBody,            ///< A row inside an expanded fold.
-    FoldBodyEnd,         ///< The last row of an expanded fold.
-    UserMark,            ///< A diamond, U+10F003 -- a row the user marked with vi `mm`.
-    Running,             ///< A small triangle, U+10F002 -- the head of a command that has not finished.
-    Finished,            ///< A disc, U+10F004 -- the head of a finished command with no fold drawn beside it.
-    Failed,              ///< A cross, U+10F005 -- the head of a FAILED command with no fold drawn beside it.
-    FoldBodyFailed,      ///< A row inside an expanded fold whose command failed: the body drawn heavy.
-    FoldBodyEndFailed,   ///< The last row of such a fold.
-    FoldExpandedFailed,  ///< The head of such a fold: its box heavy too, so its stem joins the heavy body.
-    FoldCollapsedFailed, ///< The head of a collapsed fold whose command failed.
-    Count,               ///< Not a glyph; pins the codepoint table.
+    None = 0,      ///< Nothing.
+    FoldExpanded,  ///< The head of an expanded fold.
+    FoldCollapsed, ///< The head of a collapsed fold.
+    FoldBody,      ///< A row inside an expanded fold.
+    FoldBodyEnd,   ///< The last row of an expanded fold.
+    UserMark,      ///< A diamond, U+10F003 -- a row the user marked with vi `mm`.
+    Running,       ///< A small triangle, U+10F002 -- the head of a command that has not finished.
+    Finished,      ///< A disc, U+10F004 -- the head of a finished command with no fold drawn beside it.
+    Failed,        ///< A cross, U+10F005 -- the head of a FAILED command with no fold drawn beside it.
+    Count,         ///< Not a glyph; pins the codepoint table.
+};
+
+/// How heavy a row's fold strokes are drawn: its head's outline and stem, its body, its end.
+///
+/// One step heavier for a command that failed -- failure told by shape as well as by colour, which a reader
+/// who cannot tell red from grey needs -- and one more for the fold under the pointer, where
+/// GutterSettings::hoverStroke asks for it. A weight rather than more glyphs: what a row shows and how heavy
+/// it is drawn are two facts, decided apart.
+enum class FoldWeight : uint8_t
+{
+    Light = 0, ///< The text's own stroke.
+    Heavy,     ///< Twice it.
+    Heavier,   ///< Three times it.
+    Count,     ///< Not a weight; pins the codepoint table.
 };
 
 /// Whether a row heads a command block, and in which state.
@@ -182,14 +192,23 @@ struct BlockColumnFacts
 /// a fold drawn shows the fold control, which outranks the mark. With fold markers off no fold is drawn,
 /// so every finished head shows its mark.
 ///
-/// A failed command is told apart by shape as well as by colour, which a reader who cannot tell red from
-/// grey needs: a cross rather than a disc on its head, and its fold's body drawn heavy -- both only with
-/// exit status on, which is what colours them too.
+/// A failed command is told apart by shape as well as by colour: a cross rather than a disc on its head, and
+/// its fold drawn heavier (foldWeightOf()) -- both only with exit status on, which is what colours them too.
 /// @param facts What is true of the row.
 /// @param settings Which of the column's jobs are switched on.
 /// @return The glyph, or BlockColumnGlyph::None.
 [[nodiscard]] BlockColumnGlyph blockColumnGlyph(BlockColumnFacts const& facts,
                                                 GutterSettings const& settings) noexcept;
+
+/// How heavy the fold strokes beside a row with @p facts are drawn.
+/// @param facts What is true of the row.
+/// @param settings The gutter's settings: exit status, and what hovering does.
+/// @param hover Whether the pointer is over the row's fold.
+/// @return Light, one step heavier where the command failed, and one more where the fold is hovered and
+///         GutterSettings::hoverStroke asks for it.
+[[nodiscard]] FoldWeight foldWeightOf(BlockColumnFacts const& facts,
+                                      GutterSettings const& settings,
+                                      GutterHover hover) noexcept;
 
 /// Whether a press on the block column beside a row can toggle a fold there.
 enum class FoldToggle : uint8_t
@@ -216,15 +235,16 @@ enum class BlockColumnPress : uint8_t
 /// @return What the press does.
 [[nodiscard]] BlockColumnPress blockColumnPressFor(BlockColumnGlyph glyph, FoldToggle fold) noexcept;
 
-/// The character @p glyph is drawn as.
+/// The character @p glyph is drawn as at @p weight.
 ///
-/// The status marks are Contour's private-use codepoints, as the fold heads are, rather than the Unicode
-/// shapes they resemble (U+25C6, U+25B8, U+25CF): vtrasterizer draws what it claims wherever it appears, and
-/// those three stay the font's in program output.
+/// All are Contour's private-use codepoints, the fold's four in each of FoldWeight's three weights, and the
+/// status marks in one, rather than the Unicode shapes they resemble (U+25C6, U+25B8, U+25CF): vtrasterizer
+/// draws what it claims wherever it appears, and those three stay the font's in program output.
 /// @param glyph The glyph.
+/// @param weight The weight of its strokes (foldWeightOf()); a status mark has one.
 /// @return Its codepoint; U+0000 for BlockColumnGlyph::None.
 /// @see docs/vt-extensions/private-use-glyphs.md
-[[nodiscard]] char32_t blockColumnCodepoint(BlockColumnGlyph glyph) noexcept;
+[[nodiscard]] char32_t blockColumnCodepoint(BlockColumnGlyph glyph, FoldWeight weight) noexcept;
 
 /// Whether the row with stable id @p stableId heads @p record's block, and in which state.
 /// @param record The block the row belongs to (Terminal::commandBlockAt), or nullptr for none.
@@ -234,9 +254,6 @@ enum class BlockColumnPress : uint8_t
 [[nodiscard]] BlockHeadState blockHeadStateOf(CommandBlockRecord const* record,
                                               int64_t stableId,
                                               uint64_t stableIdGeneration) noexcept;
-
-/// How far a scheme-set status colour is lifted toward the text colour while its fold is hovered.
-inline constexpr float BlockStatusHoverLift = 0.5F;
 
 /// The colour a block is highlighted in as a whole -- the line a jump to it lands on: the block's own, as
 /// its hovered glyphs take it.
@@ -290,7 +307,8 @@ struct GutterRow
     std::string timestamp {};     ///< The time to show, UTF-8; empty for none.
     LineNumberText lineNumber {}; ///< The number, already aligned to its segment; empty for none.
     BlockColumnGlyph glyph = BlockColumnGlyph::None; ///< The block column's glyph.
-    RGBColorPair glyphColors {}; ///< The glyph's colours, as blockColumnColors() picks them.
+    RGBColorPair glyphColors {};           ///< The glyph's colours, as blockColumnColors() picks them.
+    FoldWeight weight = FoldWeight::Light; ///< How heavy the glyph's strokes are (foldWeightOf()).
 };
 
 /// Appends the cells @p row is drawn as -- one per non-blank character, each at its own negative column,

@@ -370,6 +370,17 @@ struct ColorPalette
     /// @see blockStatusColor for what each derives from.
     std::array<std::optional<RGBColor>, CommandBlockOutcomeCount> blockStatus {};
 
+    /// The block column's colours under the pointer, indexed by CommandBlockOutcome, each unset unless the
+    /// scheme says otherwise.
+    ///
+    /// @see blockStatusHoverColor for what each derives from.
+    std::array<std::optional<RGBColor>, CommandBlockOutcomeCount> blockStatusHover {};
+
+    /// How far a status colour is lifted toward the text colour under the pointer, where the scheme sets
+    /// no hover colour of its own: hovering still says "this is what a click acts on" without washing the
+    /// status out.
+    static constexpr float BlockStatusHoverLift = 0.5F;
+
     /// The colour of the gutter's text -- its line numbers and timestamps -- unset unless the scheme says
     /// otherwise.
     std::optional<RGBColor> gutterText;
@@ -393,6 +404,25 @@ struct ColorPalette
             case CommandBlockOutcome::Running: return normalColor(3);
         }
         return foldMarkerColors().foreground;
+    }
+
+    /// The colour a block's gutter glyphs take for @p outcome under the pointer, with the unset case
+    /// resolved.
+    ///
+    /// The status colour lifted halfway toward the text colour -- except a success the scheme leaves to the
+    /// fold column, which comes up to full strength as the column does.
+    ///
+    /// @param outcome How the block's command ended, or that it is still running.
+    /// @return The scheme's hover colour for @p outcome, or the derived one when the scheme sets none.
+    [[nodiscard]] RGBColor blockStatusHoverColor(CommandBlockOutcome outcome) const noexcept
+    {
+        auto const index = static_cast<size_t>(outcome);
+        if (auto const& configured = blockStatusHover[index])
+            return *configured;
+        auto const fullStrength = foldMarkerHoverColors().foreground;
+        if (outcome == CommandBlockOutcome::Success && !blockStatus[index])
+            return fullStrength;
+        return mixColor(blockStatusColor(outcome), fullStrength, BlockStatusHoverLift);
     }
 
     /// The gutter's text colour with the unset case resolved: the scheme's foreground faded toward its

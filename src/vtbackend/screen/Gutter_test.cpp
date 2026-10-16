@@ -525,80 +525,96 @@ TEST_CASE("Gutter.blockColumn.aFailureIsAShapeAsWellAsAColour", "[gutter]")
           == BlockColumnGlyph::Finished);
     CHECK(blockColumnGlyph(head, settings) == BlockColumnGlyph::Finished);
 
-    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Body, .outcome = failed }, settings)
-          == BlockColumnGlyph::FoldBodyFailed);
-    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::BodyEnd, .outcome = failed }, settings)
-          == BlockColumnGlyph::FoldBodyEndFailed);
-    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Body, .outcome = succeeded }, settings)
-          == BlockColumnGlyph::FoldBody);
-
-    // The fold control on the head stays the control, drawn heavy too: its stem runs on into the heavy body,
-    // and a collapsed fold, whose body is hidden, still says the command failed.
-    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Expanded,
-                                              .head = BlockHeadState::Finished,
-                                              .outcome = failed },
-                           settings)
-          == BlockColumnGlyph::FoldExpandedFailed);
-    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Collapsed,
-                                              .head = BlockHeadState::Finished,
-                                              .outcome = failed },
-                           settings)
-          == BlockColumnGlyph::FoldCollapsedFailed);
-    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Collapsed,
-                                              .head = BlockHeadState::Finished,
-                                              .outcome = succeeded },
-                           settings)
-          == BlockColumnGlyph::FoldCollapsed);
+    // The fold keeps its glyphs -- the control on its head stays the control -- and is drawn heavy, head and
+    // body: the stem runs on into a body of its own weight, and a collapsed fold, whose body is hidden, still
+    // says the command failed.
+    for (auto const marker:
+         { FoldMarker::Expanded, FoldMarker::Collapsed, FoldMarker::Body, FoldMarker::BodyEnd })
+    {
+        CAPTURE(marker);
+        auto const failedRow = BlockColumnFacts { .fold = marker, .outcome = failed };
+        auto const succeededRow = BlockColumnFacts { .fold = marker, .outcome = succeeded };
+        CHECK(blockColumnGlyph(failedRow, settings) == blockColumnGlyph(succeededRow, settings));
+        CHECK(foldWeightOf(failedRow, settings, GutterHover::Rest) == FoldWeight::Heavy);
+        CHECK(foldWeightOf(succeededRow, settings, GutterHover::Rest) == FoldWeight::Light);
+    }
 
     // With exit status off nothing tells the outcome, by colour or by shape.
     auto const quiet = GutterSettings { .foldMarkers = true, .exitStatus = false };
-    CHECK(blockColumnGlyph(BlockColumnFacts { .fold = FoldMarker::Body, .outcome = failed }, quiet)
-          == BlockColumnGlyph::FoldBody);
+    CHECK(foldWeightOf(
+              BlockColumnFacts { .fold = FoldMarker::Body, .outcome = failed }, quiet, GutterHover::Rest)
+          == FoldWeight::Light);
+}
+
+TEST_CASE("Gutter.blockColumn.aHoveredFoldIsDrawnOneStepHeavierWhereAsked", "[gutter]")
+{
+    // Bold on hover, as the configuration asks by default: one step for the pointer, on top of the step a
+    // failure takes. Asked not to, hovering changes only the colour.
+    auto const failed = std::optional { CommandBlockOutcome::Failure };
+    auto const succeeded = std::optional { CommandBlockOutcome::Success };
+    auto const bolder =
+        GutterSettings { .foldMarkers = true, .exitStatus = true, .hoverStroke = FoldHoverStroke::Bolder };
+    auto const unchanged = GutterSettings { .foldMarkers = true, .exitStatus = true };
+    auto const row = [](std::optional<CommandBlockOutcome> outcome) {
+        return BlockColumnFacts { .fold = FoldMarker::Body, .outcome = outcome };
+    };
+
+    CHECK(foldWeightOf(row(succeeded), bolder, GutterHover::Rest) == FoldWeight::Light);
+    CHECK(foldWeightOf(row(succeeded), bolder, GutterHover::Hovered) == FoldWeight::Heavy);
+    CHECK(foldWeightOf(row(failed), bolder, GutterHover::Rest) == FoldWeight::Heavy);
+    CHECK(foldWeightOf(row(failed), bolder, GutterHover::Hovered) == FoldWeight::Heavier);
+
+    CHECK(foldWeightOf(row(succeeded), unchanged, GutterHover::Hovered) == FoldWeight::Light);
+    CHECK(foldWeightOf(row(failed), unchanged, GutterHover::Hovered) == FoldWeight::Heavy);
 }
 
 TEST_CASE("Gutter.blockColumn.aPressTogglesAFoldWhereverItReachesAndOpensAStatusMarksMenu", "[gutter]")
 {
     using enum BlockColumnGlyph;
     // A fold that may toggle wins on every row it reaches -- a user mark inside its run included.
-    for (auto const glyph: { FoldExpanded, FoldBody, FoldBodyEndFailed, UserMark, Finished, None })
+    for (auto const glyph: { FoldExpanded, FoldBody, FoldBodyEnd, UserMark, Finished, None })
         CHECK(blockColumnPressFor(glyph, FoldToggle::Available) == BlockColumnPress::ToggleFold);
 
     // With none to toggle, a status mark opens its block's menu, and anything else does nothing.
     for (auto const glyph: { Running, Finished, Failed })
         CHECK(blockColumnPressFor(glyph, FoldToggle::Unavailable) == BlockColumnPress::OpenBlockMenu);
-    for (auto const glyph: { None,
-                             FoldExpanded,
-                             FoldCollapsed,
-                             FoldBody,
-                             FoldBodyEnd,
-                             UserMark,
-                             FoldBodyFailed,
-                             FoldExpandedFailed,
-                             FoldCollapsedFailed })
+    for (auto const glyph: { None, FoldExpanded, FoldCollapsed, FoldBody, FoldBodyEnd, UserMark })
         CHECK(blockColumnPressFor(glyph, FoldToggle::Unavailable) == BlockColumnPress::Swallow);
 }
 
 TEST_CASE("Gutter.blockColumn.glyphsAreTheirCodepoints", "[gutter]")
 {
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::None) == U'\0');
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldExpanded) == foldMarkerGlyph(FoldMarker::Expanded));
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldCollapsed) == foldMarkerGlyph(FoldMarker::Collapsed));
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldBody) == foldMarkerGlyph(FoldMarker::Body));
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldBodyEnd) == foldMarkerGlyph(FoldMarker::BodyEnd));
+    using enum BlockColumnGlyph;
+    auto const light = [](BlockColumnGlyph glyph) {
+        return blockColumnCodepoint(glyph, FoldWeight::Light);
+    };
+    CHECK(light(None) == U'\0');
+    CHECK(light(FoldExpanded) == foldMarkerGlyph(FoldMarker::Expanded));
+    CHECK(light(FoldCollapsed) == foldMarkerGlyph(FoldMarker::Collapsed));
+    CHECK(light(FoldBody) == foldMarkerGlyph(FoldMarker::Body));
+    CHECK(light(FoldBodyEnd) == foldMarkerGlyph(FoldMarker::BodyEnd));
     // Contour's own private-use codepoints, as the fold heads are: vtrasterizer draws them, and the shapes
-    // they look like -- U+25C6, U+25B8, U+25CF -- stay the font's wherever a program writes them.
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::UserMark) == U'􏀃');
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::Running) == U'􏀂');
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::Finished) == U'􏀄');
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::Failed) == U'\U0010F005');
-    // The fold column is Contour's own throughout, drawn at one stroke in either gutter width: light, and
-    // from U+10F008 the same four heavy.
+    // they look like -- U+25C6, U+25B8, U+25CF -- stay the font's wherever a program writes them. One weight
+    // each.
+    for (auto const weight: { FoldWeight::Light, FoldWeight::Heavy, FoldWeight::Heavier })
+    {
+        CHECK(blockColumnCodepoint(UserMark, weight) == U'\U0010F003');
+        CHECK(blockColumnCodepoint(Running, weight) == U'\U0010F002');
+        CHECK(blockColumnCodepoint(Finished, weight) == U'\U0010F004');
+        CHECK(blockColumnCodepoint(Failed, weight) == U'\U0010F005');
+    }
+    // The fold column is Contour's own throughout, drawn at one stroke in either gutter width: light, from
+    // U+10F008 the same four heavy, from U+10F00C heavier.
     CHECK(foldMarkerGlyph(FoldMarker::Body) == U'\U0010F006');
     CHECK(foldMarkerGlyph(FoldMarker::BodyEnd) == U'\U0010F007');
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldExpandedFailed) == U'\U0010F008');
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldCollapsedFailed) == U'\U0010F009');
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldBodyFailed) == U'\U0010F00A');
-    CHECK(blockColumnCodepoint(BlockColumnGlyph::FoldBodyEndFailed) == U'\U0010F00B');
+    CHECK(blockColumnCodepoint(FoldExpanded, FoldWeight::Heavy) == U'\U0010F008');
+    CHECK(blockColumnCodepoint(FoldCollapsed, FoldWeight::Heavy) == U'\U0010F009');
+    CHECK(blockColumnCodepoint(FoldBody, FoldWeight::Heavy) == U'\U0010F00A');
+    CHECK(blockColumnCodepoint(FoldBodyEnd, FoldWeight::Heavy) == U'\U0010F00B');
+    CHECK(blockColumnCodepoint(FoldExpanded, FoldWeight::Heavier) == U'\U0010F00C');
+    CHECK(blockColumnCodepoint(FoldCollapsed, FoldWeight::Heavier) == U'\U0010F00D');
+    CHECK(blockColumnCodepoint(FoldBody, FoldWeight::Heavier) == U'\U0010F00E');
+    CHECK(blockColumnCodepoint(FoldBodyEnd, FoldWeight::Heavier) == U'\U0010F00F');
 }
 
 TEST_CASE("Gutter.blockColumn.onlyTheRecordedHeadIsAHead", "[gutter]")
@@ -653,8 +669,9 @@ TEST_CASE("Gutter.colors.anOutcomeTakesItsColourAndIsLiftedWhenHovered", "[gutte
 
     auto const hovered = blockColumnColors(
         palette, BlockColumnGlyph::FoldExpanded, CommandBlockOutcome::Failure, GutterHover::Hovered);
-    CHECK(hovered.foreground
-          == mixColor(failure, palette.foldMarkerHoverColors().foreground, BlockStatusHoverLift));
+    CHECK(
+        hovered.foreground
+        == mixColor(failure, palette.foldMarkerHoverColors().foreground, ColorPalette::BlockStatusHoverLift));
     CHECK(hovered.background == palette.defaultBackground);
 
     // A success the scheme DOES colour is an outcome like any other.
@@ -664,6 +681,30 @@ TEST_CASE("Gutter.colors.anOutcomeTakesItsColourAndIsLiftedWhenHovered", "[gutte
               coloured, BlockColumnGlyph::FoldBody, CommandBlockOutcome::Success, GutterHover::Rest)
               .foreground
           == RGBColor(0x10, 0x80, 0x10));
+}
+
+TEST_CASE("Gutter.colors.aSchemeSetsEachOutcomesHoverColourOfItsOwn", "[gutter]")
+{
+    // block_status_hover: each outcome's colour under the pointer, where the scheme sets one -- the resting
+    // colour untouched -- and derived as before where it does not.
+    auto palette = ColorPalette {};
+    palette.blockStatusHover[static_cast<size_t>(CommandBlockOutcome::Failure)] = RGBColor(0xFF, 0x40, 0x40);
+    palette.blockStatusHover[static_cast<size_t>(CommandBlockOutcome::Success)] = RGBColor(0x40, 0xFF, 0x40);
+    auto const colorOf = [&](CommandBlockOutcome outcome, GutterHover hover) {
+        return blockColumnColors(palette, BlockColumnGlyph::FoldBody, outcome, hover).foreground;
+    };
+
+    CHECK(colorOf(CommandBlockOutcome::Failure, GutterHover::Hovered) == RGBColor(0xFF, 0x40, 0x40));
+    CHECK(colorOf(CommandBlockOutcome::Failure, GutterHover::Rest)
+          == palette.blockStatusColor(CommandBlockOutcome::Failure));
+    // A success the scheme leaves to the fold column at rest still takes its own hover colour.
+    CHECK(colorOf(CommandBlockOutcome::Success, GutterHover::Hovered) == RGBColor(0x40, 0xFF, 0x40));
+    CHECK(colorOf(CommandBlockOutcome::Success, GutterHover::Rest) == palette.foldMarkerColors().foreground);
+    // Unset, running is derived: its resting colour lifted toward the text.
+    CHECK(colorOf(CommandBlockOutcome::Running, GutterHover::Hovered)
+          == mixColor(palette.blockStatusColor(CommandBlockOutcome::Running),
+                      palette.foldMarkerHoverColors().foreground,
+                      ColorPalette::BlockStatusHoverLift));
 }
 
 TEST_CASE("Gutter.colors.aUserMarkIsAlwaysAtFullStrength", "[gutter]")
@@ -709,7 +750,7 @@ TEST_CASE("Gutter.paint.eachSegmentLandsAtItsOwnNegativeColumns", "[gutter]")
     CHECK(at(4) == std::pair { U'3', -6 });
     CHECK(at(5) == std::pair { U'4', -3 });
     CHECK(at(6) == std::pair { U'2', -2 });
-    CHECK(at(7) == std::pair { blockColumnCodepoint(BlockColumnGlyph::Running), -1 });
+    CHECK(at(7) == std::pair { blockColumnCodepoint(BlockColumnGlyph::Running, FoldWeight::Light), -1 });
     for (auto const& cell: cells)
         CHECK(cell.lineOffset == LineOffset(2));
     CHECK(cells[0].attributes.foregroundColor == RGBColor(1, 2, 3));

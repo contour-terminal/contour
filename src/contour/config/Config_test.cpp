@@ -5479,8 +5479,18 @@ color_schemes:
             success: '#20A020'
             failure: '#E02020'
             running: '#E0E020'
+        block_status_hover:
+            success: '#40C040'
+            failure: '#FF4040'
+            running: '#FFFF40'
         gutter_text: '#606060'
 )"sv));
+        CHECK(scheme.blockStatusHover[static_cast<size_t>(vtbackend::CommandBlockOutcome::Success)]
+              == vtbackend::RGBColor(0x40, 0xC0, 0x40));
+        CHECK(scheme.blockStatusHover[static_cast<size_t>(vtbackend::CommandBlockOutcome::Failure)]
+              == vtbackend::RGBColor(0xFF, 0x40, 0x40));
+        CHECK(scheme.blockStatusHover[static_cast<size_t>(vtbackend::CommandBlockOutcome::Running)]
+              == vtbackend::RGBColor(0xFF, 0xFF, 0x40));
         CHECK(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Success)
               == vtbackend::RGBColor(0x20, 0xA0, 0x20));
         CHECK(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Failure)
@@ -5537,6 +5547,7 @@ color_schemes:
     {
         auto const generated = contour::config::defaultConfigString();
         CHECK(generated.contains("# block_status:"));
+        CHECK(generated.contains("# block_status_hover:"));
         CHECK(generated.contains("# gutter_text:"));
     }
 }
@@ -5548,6 +5559,13 @@ template <vtbackend::CommandBlockOutcome Outcome>
 std::optional<vtbackend::RGBColor>& blockStatusOf(vtbackend::ColorPalette& palette)
 {
     return palette.blockStatus[static_cast<size_t>(Outcome)];
+}
+
+/// The palette's hover colour for @p Outcome, as a slot a table of colour keys can name.
+template <vtbackend::CommandBlockOutcome Outcome>
+std::optional<vtbackend::RGBColor>& blockStatusHoverOf(vtbackend::ColorPalette& palette)
+{
+    return palette.blockStatusHover[static_cast<size_t>(Outcome)];
 }
 } // namespace
 
@@ -5562,6 +5580,12 @@ TEST_CASE("Config: each gutter color a scheme sets is written back on its own", 
                     Slot { &blockStatusOf<vtbackend::CommandBlockOutcome::Failure> } },
         std::pair { "block_status.running"sv,
                     Slot { &blockStatusOf<vtbackend::CommandBlockOutcome::Running> } },
+        std::pair { "block_status_hover.success"sv,
+                    Slot { &blockStatusHoverOf<vtbackend::CommandBlockOutcome::Success> } },
+        std::pair { "block_status_hover.failure"sv,
+                    Slot { &blockStatusHoverOf<vtbackend::CommandBlockOutcome::Failure> } },
+        std::pair { "block_status_hover.running"sv,
+                    Slot { &blockStatusHoverOf<vtbackend::CommandBlockOutcome::Running> } },
         std::pair { "gutter_text"sv,
                     Slot { [](vtbackend::ColorPalette& palette) -> std::optional<vtbackend::RGBColor>& {
                         return palette.gutterText;
@@ -5605,6 +5629,13 @@ TEST_CASE("Config: the gutter colors the generated config quotes are what the de
         std::format("#     failure: {}\n", palette.blockStatusColor(CommandBlockOutcome::Failure))));
     CHECK(generated.contains(
         std::format("#     running: {}\n", palette.blockStatusColor(CommandBlockOutcome::Running))));
+    for (auto const [key, outcome]: { std::pair { "success"sv, CommandBlockOutcome::Success },
+                                      std::pair { "failure"sv, CommandBlockOutcome::Failure },
+                                      std::pair { "running"sv, CommandBlockOutcome::Running } })
+    {
+        INFO("block_status_hover." << key);
+        CHECK(generated.contains(std::format("#     {}: {}\n", key, palette.blockStatusHoverColor(outcome))));
+    }
     CHECK(generated.contains(std::format("# gutter_text: {}\n", palette.gutterTextColor())));
 }
 
@@ -5616,6 +5647,7 @@ default_profile: main
 gutter:
     exit_status: false
     user_marks: false
+    bold_on_hover: false
     line_numbers: hybrid
     line_number_width: 8
     timestamps: true
@@ -5628,6 +5660,8 @@ profiles:
     auto const& gutter = config.gutter.value();
     CHECK(gutter.exitStatus == false);
     CHECK(gutter.userMarks == false);
+    CHECK(gutter.boldOnHover == false);
+    CHECK(contour::config::gutterSettingsFor(config).hoverStroke == vtbackend::FoldHoverStroke::Unchanged);
     CHECK(gutter.lineNumbers == vtbackend::LineNumberMode::Hybrid);
     CHECK(gutter.lineNumberWidth == 8);
     CHECK(gutter.timestamps == true);
@@ -5641,6 +5675,8 @@ TEST_CASE("Config: gutter defaults draw the block column two cells wide", "[conf
     CHECK(gutter.exitStatus);
     CHECK(gutter.userMarks);
     CHECK(gutter.blockColumnWidth == 2);
+    CHECK(gutter.boldOnHover);
+    CHECK(contour::config::gutterSettingsFor(config).hoverStroke == vtbackend::FoldHoverStroke::Bolder);
     CHECK(gutter.lineNumbers == vtbackend::LineNumberMode::Off);
     CHECK(gutter.lineNumberWidth == 6);
     CHECK_FALSE(gutter.timestamps);
@@ -7260,6 +7296,8 @@ TEST_CASE("Config: the generated config and the reference docs carry every comma
         { "gutter",
           { "exit_status",
             "user_marks",
+            "block_column_width",
+            "bold_on_hover",
             "line_numbers",
             "line_number_width",
             "timestamps",
@@ -7290,7 +7328,7 @@ TEST_CASE("Config: the generated config and the reference docs carry every comma
     // The colour-scheme slots are optional, so the generated scheme carries them as commented examples, as
     // it does fold_marker: present in the text, absent from the parsed tree.
     auto const schemes = text.substr(text.find("\ncolor_schemes:"));
-    for (auto const* key: { "block_status", "gutter_text", "sticky_header" })
+    for (auto const* key: { "block_status", "block_status_hover", "gutter_text", "sticky_header" })
     {
         INFO("generated colour scheme: " << key);
         CHECK(schemes.contains(key));

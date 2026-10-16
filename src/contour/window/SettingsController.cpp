@@ -963,29 +963,77 @@ namespace
         std::string_view key;   //!< QML key.
         std::string_view label; //!< Swatch label.
         /// The scheme's own colour for the slot; unset while the palette derives it.
-        std::optional<vtbackend::RGBColor> const& (*own)(vtbackend::ColorPalette const&);
+        std::optional<vtbackend::RGBColor> (*own)(vtbackend::ColorPalette const&);
         /// Sets the scheme's own colour, or unsets it so that the palette derives it again.
         void (*assign)(vtbackend::ColorPalette&, std::optional<vtbackend::RGBColor>);
         /// The colour in effect: the scheme's own, or the derived one while the slot is unset.
         vtbackend::RGBColor (*resolve)(vtbackend::ColorPalette const&);
     };
 
-    /// The slot of the block column's colour for @p Outcome.
+    /// The slot of the block column's colour for @p Outcome in one state: the palette's array @p Colors,
+    /// resolved by @p Resolve.
     /// @param key   QML key.
     /// @param label Swatch label.
-    /// @return The slot, resolved by ColorPalette::blockStatusColor.
-    template <vtbackend::CommandBlockOutcome Outcome>
-    constexpr DerivedColorSlot blockStatusSlot(std::string_view key, std::string_view label)
+    /// @return The slot.
+    template <auto Colors, auto Resolve, vtbackend::CommandBlockOutcome Outcome>
+    constexpr DerivedColorSlot outcomeSlot(std::string_view key, std::string_view label)
     {
         constexpr auto Index = static_cast<size_t>(Outcome);
         return { .key = key,
                  .label = label,
-                 .own = [](vtbackend::ColorPalette const& p) -> auto const& {
-                     return p.blockStatus.at(Index);
-                 },
+                 .own = [](vtbackend::ColorPalette const& p) { return (p.*Colors).at(Index); },
                  .assign = [](vtbackend::ColorPalette& p,
-                              std::optional<vtbackend::RGBColor> color) { p.blockStatus.at(Index) = color; },
-                 .resolve = [](vtbackend::ColorPalette const& p) { return p.blockStatusColor(Outcome); } };
+                              std::optional<vtbackend::RGBColor> color) { (p.*Colors).at(Index) = color; },
+                 .resolve = [](vtbackend::ColorPalette const& p) { return (p.*Resolve)(Outcome); } };
+    }
+
+    /// The slot of the fold column's glyph colour in one state: the foreground of the palette's pair @p Pair,
+    /// resolved by @p Resolve. Set, the pair keeps the background it had, or sits on the scheme's own -- the
+    /// gutter draws no band of its own (@see the background row, which carries such a pair along).
+    /// @param key   QML key.
+    /// @param label Swatch label.
+    /// @return The slot.
+    template <auto Pair, auto Resolve>
+    constexpr DerivedColorSlot foldMarkerSlot(std::string_view key, std::string_view label)
+    {
+        return { .key = key,
+                 .label = label,
+                 .own = [](vtbackend::ColorPalette const& p) -> std::optional<vtbackend::RGBColor> {
+                     if (auto const& pair = p.*Pair)
+                         return pair->foreground;
+                     return std::nullopt;
+                 },
+                 .assign =
+                     [](vtbackend::ColorPalette& p, std::optional<vtbackend::RGBColor> color) {
+                         auto& pair = p.*Pair;
+                         if (!color)
+                         {
+                             pair.reset();
+                             return;
+                         }
+                         auto const background = pair ? pair->background : p.defaultBackground;
+                         pair = vtbackend::RGBColorPair { .foreground = *color, .background = background };
+                     },
+                 .resolve = [](vtbackend::ColorPalette const& p) { return (p.*Resolve)().foreground; } };
+    }
+
+    /// The slot of the block column's resting colour for @p Outcome (ColorPalette::blockStatusColor).
+    template <vtbackend::CommandBlockOutcome Outcome>
+    constexpr DerivedColorSlot blockStatusSlot(std::string_view key, std::string_view label)
+    {
+        return outcomeSlot<&vtbackend::ColorPalette::blockStatus,
+                           &vtbackend::ColorPalette::blockStatusColor,
+                           Outcome>(key, label);
+    }
+
+    /// The slot of the block column's colour for @p Outcome under the pointer
+    /// (ColorPalette::blockStatusHoverColor).
+    template <vtbackend::CommandBlockOutcome Outcome>
+    constexpr DerivedColorSlot blockStatusHoverSlot(std::string_view key, std::string_view label)
+    {
+        return outcomeSlot<&vtbackend::ColorPalette::blockStatusHover,
+                           &vtbackend::ColorPalette::blockStatusHoverColor,
+                           Outcome>(key, label);
     }
 
     /// The slot of a colour the palette holds as a member of its own, @p Own, resolved by @p Resolve.
@@ -997,7 +1045,7 @@ namespace
     {
         return { .key = key,
                  .label = label,
-                 .own = [](vtbackend::ColorPalette const& p) -> auto const& { return p.*Own; },
+                 .own = [](vtbackend::ColorPalette const& p) { return p.*Own; },
                  .assign = [](vtbackend::ColorPalette& p,
                               std::optional<vtbackend::RGBColor> color) { p.*Own = color; },
                  .resolve = [](vtbackend::ColorPalette const& p) { return (p.*Resolve)(); } };
@@ -1006,12 +1054,23 @@ namespace
     /// The command-block colour slots, in the order the editor lists them after the ANSI banks. Adding
     /// a derived slot to the scheme editor is adding a row here.
     constexpr auto DerivedColorSlots = std::array {
+        foldMarkerSlot<&vtbackend::ColorPalette::foldMarker, &vtbackend::ColorPalette::foldMarkerColors>(
+            "fold_marker", "Fold column"),
+        foldMarkerSlot<&vtbackend::ColorPalette::foldMarkerHover,
+                       &vtbackend::ColorPalette::foldMarkerHoverColors>("fold_marker_hover",
+                                                                        "Fold column: hovered"),
         blockStatusSlot<vtbackend::CommandBlockOutcome::Success>("block_status_success",
                                                                  "Block status: success"),
         blockStatusSlot<vtbackend::CommandBlockOutcome::Failure>("block_status_failure",
                                                                  "Block status: failure"),
         blockStatusSlot<vtbackend::CommandBlockOutcome::Running>("block_status_running",
                                                                  "Block status: running"),
+        blockStatusHoverSlot<vtbackend::CommandBlockOutcome::Success>("block_status_hover_success",
+                                                                      "Block status hovered: success"),
+        blockStatusHoverSlot<vtbackend::CommandBlockOutcome::Failure>("block_status_hover_failure",
+                                                                      "Block status hovered: failure"),
+        blockStatusHoverSlot<vtbackend::CommandBlockOutcome::Running>("block_status_hover_running",
+                                                                      "Block status hovered: running"),
         memberSlot<&vtbackend::ColorPalette::gutterText, &vtbackend::ColorPalette::gutterTextColor>(
             "gutter_text", "Gutter text"),
         memberSlot<&vtbackend::ColorPalette::stickyHeaderBackground,
@@ -1063,7 +1122,15 @@ namespace
             list.push_back({ .key = "background",
                              .label = "Background",
                              .get = [](auto const& p) { return p.defaultBackground; },
-                             .set = [](auto& p, auto c) { p.defaultBackground = c; } });
+                             .set =
+                                 [](vtbackend::ColorPalette& p, vtbackend::RGBColor c) {
+                                     // A fold column the editor set sits on the page's background: it moves
+                                     // with it, rather than leaving a band of the old one down the gutter.
+                                     for (auto* const pair: { &p.foldMarker, &p.foldMarkerHover })
+                                         if (*pair && (*pair)->background == p.defaultBackground)
+                                             (*pair)->background = c;
+                                     p.defaultBackground = c;
+                                 } });
             list.push_back({ .key = "foreground",
                              .label = "Foreground",
                              .get = [](auto const& p) { return p.defaultForeground; },
@@ -1545,6 +1612,11 @@ namespace
                             "Gutter: user marks",
                             "Show the lines you marked with Vi mode's mm in the gutter.",
                             [](config::Config const& c) { return c.gutter.value().userMarks; }),
+            globalBoolField("gutter.bold_on_hover",
+                            "Gutter: bold on hover",
+                            "Draw the fold under the pointer -- its line, its box and its end -- one stroke "
+                            "heavier, as well as at full strength.",
+                            [](config::Config const& c) { return c.gutter.value().boldOnHover; }),
             globalIntField(
                 "gutter.block_column_width",
                 "Gutter: block column width",

@@ -3344,7 +3344,8 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
                         // Mixed only for a glyph there is: most rows have none.
                         .glyphColors = glyph == BlockColumnGlyph::None
                                            ? RGBColorPair {}
-                                           : blockColumnColors(_colorPalette, glyph, outcome, hover) },
+                                           : blockColumnColors(_colorPalette, glyph, outcome, hover),
+                        .weight = foldWeightOf(facts, gutter, hover) },
             textColors,
             output.gutter);
     }

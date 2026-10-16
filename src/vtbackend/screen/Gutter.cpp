@@ -339,18 +339,6 @@ namespace
     };
     static_assert(FoldGlyphs.size() == static_cast<std::size_t>(FoldMarker::Count));
 
-    /// The same for a fold whose command failed: drawn heavy, its head as much as its body, so the head's
-    /// stem runs on into a body of its own weight -- and a collapsed fold, whose body is hidden, still says
-    /// so.
-    constexpr auto FailedFoldGlyphs = std::array {
-        BlockColumnGlyph::None,                // FoldMarker::None
-        BlockColumnGlyph::FoldExpandedFailed,  // FoldMarker::Expanded
-        BlockColumnGlyph::FoldCollapsedFailed, // FoldMarker::Collapsed
-        BlockColumnGlyph::FoldBodyFailed,      // FoldMarker::Body
-        BlockColumnGlyph::FoldBodyEndFailed,   // FoldMarker::BodyEnd
-    };
-    static_assert(FailedFoldGlyphs.size() == static_cast<std::size_t>(FoldMarker::Count));
-
     /// Whether the row's block failed, as far as the column may say: only with exit status on.
     [[nodiscard]] constexpr bool showsFailure(BlockColumnFacts const& facts,
                                               GutterSettings const& settings) noexcept
@@ -363,14 +351,6 @@ namespace
         return marker == FoldMarker::Expanded || marker == FoldMarker::Collapsed;
     }
 
-    /// The glyph @p facts' fold marker is drawn as: heavy where its command failed.
-    [[nodiscard]] constexpr BlockColumnGlyph foldGlyphOf(BlockColumnFacts const& facts,
-                                                         GutterSettings const& settings) noexcept
-    {
-        auto const& glyphs = showsFailure(facts, settings) ? FailedFoldGlyphs : FoldGlyphs;
-        return glyphs[static_cast<std::size_t>(facts.fold)];
-    }
-
     /// One step of the block column's precedence: the glyph it claims the row for, or None to pass the row
     /// on to the next step.
     using BlockColumnRule = BlockColumnGlyph (*)(BlockColumnFacts const&, GutterSettings const&) noexcept;
@@ -380,7 +360,7 @@ namespace
     {
         if (!settings.foldMarkers || !isFoldHead(facts.fold))
             return BlockColumnGlyph::None;
-        return foldGlyphOf(facts, settings);
+        return FoldGlyphs[static_cast<std::size_t>(facts.fold)];
     }
 
     [[nodiscard]] BlockColumnGlyph userMarkRule(BlockColumnFacts const& facts,
@@ -399,7 +379,7 @@ namespace
     {
         if (!settings.foldMarkers || isFoldHead(facts.fold))
             return BlockColumnGlyph::None;
-        return foldGlyphOf(facts, settings);
+        return FoldGlyphs[static_cast<std::size_t>(facts.fold)];
     }
 
     [[nodiscard]] BlockColumnGlyph runningHeadRule(BlockColumnFacts const& facts,
@@ -456,25 +436,37 @@ BlockColumnGlyph blockColumnGlyph(BlockColumnFacts const& facts, GutterSettings 
     return BlockColumnGlyph::None;
 }
 
-char32_t blockColumnCodepoint(BlockColumnGlyph glyph) noexcept
+FoldWeight foldWeightOf(BlockColumnFacts const& facts,
+                        GutterSettings const& settings,
+                        GutterHover hover) noexcept
 {
+    auto const steps =
+        (showsFailure(facts, settings) ? 1 : 0)
+        + (hover == GutterHover::Hovered && settings.hoverStroke == FoldHoverStroke::Bolder ? 1 : 0);
+    return static_cast<FoldWeight>(steps);
+}
+
+char32_t blockColumnCodepoint(BlockColumnGlyph glyph, FoldWeight weight) noexcept
+{
+    // A row per glyph, a column per weight. The fold's light four are foldMarkerGlyph()'s; from U+10F008 the
+    // same four heavy, from U+10F00C heavier. A status mark has one weight, so its row repeats it.
+    using Weights = std::array<char32_t, static_cast<std::size_t>(FoldWeight::Count)>;
+    auto constexpr Single = [](char32_t codepoint) {
+        return Weights { codepoint, codepoint, codepoint };
+    };
     constexpr auto Codepoints = std::array {
-        U'\0',                                  // None
-        foldMarkerGlyph(FoldMarker::Expanded),  // FoldExpanded
-        foldMarkerGlyph(FoldMarker::Collapsed), // FoldCollapsed
-        foldMarkerGlyph(FoldMarker::Body),      // FoldBody
-        foldMarkerGlyph(FoldMarker::BodyEnd),   // FoldBodyEnd
-        U'\U0010F003',                          // UserMark: a diamond, as U+25C6 ◆
-        U'\U0010F002',                          // Running:  a small right-pointing triangle, as U+25B8 ▸
-        U'\U0010F004',                          // Finished: a disc, as U+25CF ●
-        U'\U0010F005',                          // Failed:   a cross, as U+2717 ✗
-        U'\U0010F00A',                          // FoldBodyFailed:      the body, heavy
-        U'\U0010F00B',                          // FoldBodyEndFailed:   its end, heavy
-        U'\U0010F008',                          // FoldExpandedFailed:  the open head, heavy
-        U'\U0010F009',                          // FoldCollapsedFailed: the closed head, heavy
+        Single(U'\0'),                                                                    // None
+        Weights { foldMarkerGlyph(FoldMarker::Expanded), U'\U0010F008', U'\U0010F00C' },  // FoldExpanded
+        Weights { foldMarkerGlyph(FoldMarker::Collapsed), U'\U0010F009', U'\U0010F00D' }, // FoldCollapsed
+        Weights { foldMarkerGlyph(FoldMarker::Body), U'\U0010F00A', U'\U0010F00E' },      // FoldBody
+        Weights { foldMarkerGlyph(FoldMarker::BodyEnd), U'\U0010F00B', U'\U0010F00F' },   // FoldBodyEnd
+        Single(U'\U0010F003'), // UserMark: a diamond, as U+25C6 ◆
+        Single(U'\U0010F002'), // Running:  a small right-pointing triangle, as U+25B8 ▸
+        Single(U'\U0010F004'), // Finished: a disc, as U+25CF ●
+        Single(U'\U0010F005'), // Failed:   a cross, as U+2717 ✗
     };
     static_assert(Codepoints.size() == static_cast<std::size_t>(BlockColumnGlyph::Count));
-    return Codepoints[static_cast<std::size_t>(glyph)];
+    return Codepoints[static_cast<std::size_t>(glyph)][static_cast<std::size_t>(weight)];
 }
 
 BlockColumnPress blockColumnPressFor(BlockColumnGlyph glyph, FoldToggle fold) noexcept
@@ -493,10 +485,6 @@ BlockColumnPress blockColumnPressFor(BlockColumnGlyph glyph, FoldToggle fold) no
         BlockColumnPress::OpenBlockMenu, // Running
         BlockColumnPress::OpenBlockMenu, // Finished
         BlockColumnPress::OpenBlockMenu, // Failed
-        BlockColumnPress::Swallow,       // FoldBodyFailed
-        BlockColumnPress::Swallow,       // FoldBodyEndFailed
-        BlockColumnPress::Swallow,       // FoldExpandedFailed: drawn, but folding is off
-        BlockColumnPress::Swallow,       // FoldCollapsedFailed: likewise
     };
     static_assert(Presses.size() == static_cast<std::size_t>(BlockColumnGlyph::Count));
     return Presses[static_cast<std::size_t>(glyph)];
@@ -533,16 +521,15 @@ RGBColorPair blockColumnColors(ColorPalette const& palette,
     if (glyph == BlockColumnGlyph::UserMark)
         return RGBColorPair { .foreground = fullStrength, .background = fold.background };
 
-    // No status to show, or a success the scheme leaves to the fold column: exactly today's column.
-    if (!outcome
-        || (*outcome == CommandBlockOutcome::Success
-            && !palette.blockStatus[std::to_underlying(CommandBlockOutcome::Success)]))
+    // No status to show: exactly the fold column.
+    if (!outcome)
         return fold;
 
-    auto const status = palette.blockStatusColor(*outcome);
+    // The scheme's colour for the outcome in either state, each derived where it sets none -- a success it
+    // leaves unset as the fold column's own, at rest and hovered.
     return RGBColorPair { .foreground = hover == GutterHover::Hovered
-                                            ? mixColor(status, fullStrength, BlockStatusHoverLift)
-                                            : status,
+                                            ? palette.blockStatusHoverColor(*outcome)
+                                            : palette.blockStatusColor(*outcome),
                           .background = fold.background };
 }
 
@@ -590,7 +577,7 @@ void appendGutterCells(GutterLayout const& layout,
     if (row.glyph == BlockColumnGlyph::None)
         return;
     output.push_back(RenderGutterCell { .lineOffset = row.screenLine,
-                                        .codepoint = blockColumnCodepoint(row.glyph),
+                                        .codepoint = blockColumnCodepoint(row.glyph, row.weight),
                                         .attributes = blockColumnCellAttributes(*block, row.glyphColors),
                                         .column = columnOf(block->firstColumn) });
 }

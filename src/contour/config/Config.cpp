@@ -689,6 +689,8 @@ vtbackend::GutterSettings gutterSettingsFor(Config const& config)
         .lineNumberWidth = gutter.lineNumberWidth,
         .timestamps = gutter.timestamps,
         .timestampFormat = gutter.timestampFormat,
+        .hoverStroke =
+            gutter.boldOnHover ? vtbackend::FoldHoverStroke::Bolder : vtbackend::FoldHoverStroke::Unchanged,
     };
 }
 
@@ -1857,6 +1859,10 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
         for (auto const& [key, outcome]: BlockStatusKeys)
             loadOptional(map, key, where.blockStatus[static_cast<size_t>(outcome)]);
     });
+    loadMap("block_status_hover", [&](YAML::Node const& map) {
+        for (auto const& [key, outcome]: BlockStatusKeys)
+            loadOptional(map, key, where.blockStatusHover[static_cast<size_t>(outcome)]);
+    });
     loadMap("gutter_text", [&](YAML::Node const&) { loadOptional(node, "gutter_text", where.gutterText); });
 
     // The sticky header's band and the line along its bottom edge, each left unset unless the scheme says
@@ -2542,6 +2548,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
     loadGuarded(child, "exit_status", where.exitStatus);
     loadGuarded(child, "user_marks", where.userMarks);
+    loadGuarded(child, "bold_on_hover", where.boldOnHover);
     loadGuarded(child, "line_numbers", where.lineNumbers);
     loadGuarded(child, "timestamps", where.timestamps);
 
@@ -4557,6 +4564,12 @@ static void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::Co
                          BlockStatusKeys | std::views::transform([&](auto const& row) {
                              return std::pair { row.first,
                                                 entry.blockStatus[static_cast<size_t>(row.second)] };
+                         }));
+    emitOptionalColorMap(documentation::BlockStatusHoverHeader {},
+                         documentation::BlockStatusHover {},
+                         BlockStatusKeys | std::views::transform([&](auto const& row) {
+                             return std::pair { row.first,
+                                                entry.blockStatusHover[static_cast<size_t>(row.second)] };
                          }));
 
     if (entry.gutterText)

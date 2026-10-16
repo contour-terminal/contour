@@ -143,10 +143,13 @@ TEST_CASE("Gutter.terminal.aRowErasedInsideABlockKeepsTheBlocksColour", "[gutter
     auto const buffer = renderOf(mc.terminal);
     auto const rows = gutterRows(buffer, 1);
     // The command failed, so its fold is drawn heavy -- on the erased rows as much as on the others.
-    CHECK(rows.at(0) == withGlyph(U"", blockColumnCodepoint(BlockColumnGlyph::FoldExpandedFailed)));
-    CHECK(rows.at(1) == withGlyph(U"", blockColumnCodepoint(BlockColumnGlyph::FoldBodyFailed)));
-    CHECK(rows.at(3) == withGlyph(U"", blockColumnCodepoint(BlockColumnGlyph::FoldBodyFailed)));
-    CHECK(rows.at(4) == withGlyph(U"", blockColumnCodepoint(BlockColumnGlyph::FoldBodyEndFailed)));
+    auto const heavy = [](BlockColumnGlyph glyph) {
+        return blockColumnCodepoint(glyph, FoldWeight::Heavy);
+    };
+    CHECK(rows.at(0) == withGlyph(U"", heavy(BlockColumnGlyph::FoldExpanded)));
+    CHECK(rows.at(1) == withGlyph(U"", heavy(BlockColumnGlyph::FoldBody)));
+    CHECK(rows.at(3) == withGlyph(U"", heavy(BlockColumnGlyph::FoldBody)));
+    CHECK(rows.at(4) == withGlyph(U"", heavy(BlockColumnGlyph::FoldBodyEnd)));
     REQUIRE(buffer.gutter.size() == 5);
     for (auto const& cell: buffer.gutter)
     {

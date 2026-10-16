@@ -43,11 +43,16 @@ nothing to anyone who is already using it.
 | `U+10F009` | FOLD HEAD CLOSED HEAVY | `U+10F001` drawn at twice the stroke. |
 | `U+10F00A` | FOLD BODY HEAVY | `U+10F006` drawn at twice the stroke. |
 | `U+10F00B` | FOLD BODY END HEAVY | `U+10F007` drawn at twice the stroke. |
+| `U+10F00C` | FOLD HEAD OPEN HEAVIER | `U+10F000` drawn at three times the stroke. |
+| `U+10F00D` | FOLD HEAD CLOSED HEAVIER | `U+10F001` drawn at three times the stroke. |
+| `U+10F00E` | FOLD BODY HEAVIER | `U+10F006` drawn at three times the stroke. |
+| `U+10F00F` | FOLD BODY END HEAVIER | `U+10F007` drawn at three times the stroke. |
 
 The fold column is drawn as line art at the current foreground colour, scaled to the cell: the box is
 square whatever the cell's aspect ratio, and every glyph of the column shares one stroke and one column,
 so that the head's stem, the body and its end meet exactly. The stroke is the cell's own line weight --
-twice it for the heavy four -- even where the gutter draws its glyphs two cells wide.
+twice it for the heavy four, three times for the heavier four -- even where the gutter draws its glyphs
+two cells wide.
 
 The four marks are filled shapes at the current foreground colour, anti-aliased, centred in the cell
 and spanning 60% of its shorter side, so they sit on the same line as the fold column's stem.
@@ -83,7 +88,8 @@ The marks share that column. A command that is still running heads its block wit
 finished one with no fold control beside it with `U+10F004` -- or `U+10F005` when it failed -- and a row
 the user marked (vi `mm`) carries `U+10F003`. A failed command whose output folds draws its whole fold
 heavy, head and body, with `U+10F008` to `U+10F00B`, so failure reads by shape as well as by colour --
-collapsed too, where only the head is drawn.
+collapsed too, where only the head is drawn. The fold under the pointer is drawn one step heavier again
+(`gutter.bold_on_hover`): heavy for a light fold, `U+10F00C` to `U+10F00F` for a failed one.
 
 The gutter's block column may be two cells wide (`gutter.block_column_width`); its glyphs are then drawn
 across both cells, each twice the size.

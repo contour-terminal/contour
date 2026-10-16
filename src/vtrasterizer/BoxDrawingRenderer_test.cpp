@@ -773,7 +773,8 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
             for (auto const thickness: { 1, 2 })
             {
                 for (auto const [open, body, end]: { std::tuple { 0x10F000, 0x10F006, 0x10F007 },
-                                                     std::tuple { 0x10F008, 0x10F00A, 0x10F00B } })
+                                                     std::tuple { 0x10F008, 0x10F00A, 0x10F00B },
+                                                     std::tuple { 0x10F00C, 0x10F00E, 0x10F00F } })
                 {
                     CAPTURE(unbox<int>(size.width), thickness, open);
                     auto const headBuffer =
@@ -798,13 +799,16 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
         }
     }
 
-    SECTION("a failed block's fold column is twice the weight")
+    SECTION("the heavy fold column is twice the weight, the heavier three times")
     {
         auto const light = BoxDrawingRendererTest::buildElements(char32_t { 0x10F006 }, Cell, 1);
         auto const heavy = BoxDrawingRendererTest::buildElements(char32_t { 0x10F00A }, Cell, 1);
+        auto const heavier = BoxDrawingRendererTest::buildElements(char32_t { 0x10F00E }, Cell, 1);
         REQUIRE(light.has_value());
         REQUIRE(heavy.has_value());
+        REQUIRE(heavier.has_value());
         CHECK(countLitPixels(*heavy) == 2 * countLitPixels(*light));
+        CHECK(countLitPixels(*heavier) == 3 * countLitPixels(*light));
     }
 
     SECTION("the stem leaves the box from its centre, light or heavy, one cell wide or two")
@@ -814,8 +818,9 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
         auto constexpr Wide = ImageSize { Width(18), Height(20) };
         for (auto const size: { Cell, Wide })
         {
-            for (auto const [closed, open]:
-                 { std::pair { 0x10F001, 0x10F000 }, std::pair { 0x10F009, 0x10F008 } })
+            for (auto const [closed, open]: { std::pair { 0x10F001, 0x10F000 },
+                                              std::pair { 0x10F009, 0x10F008 },
+                                              std::pair { 0x10F00D, 0x10F00C } })
             {
                 CAPTURE(unbox<int>(size.width), closed);
                 auto const w = unbox<int>(size.width);
@@ -863,13 +868,13 @@ TEST_CASE("BoxDrawingRenderer.contourGlyphsKeepTheCellsStrokeWhenDrawnTwoCellsWi
     auto const narrow = vtbackend::LineFlags {};
     CHECK(BoxDrawingRenderer::tileLineThickness(char32_t { 0x2502 }, wide, 1) == 2);
     CHECK(BoxDrawingRenderer::tileLineThickness(char32_t { 0x2502 }, narrow, 1) == 1);
-    for (auto const codepoint: std::views::iota(char32_t { 0x10F000 }, char32_t { 0x10F00C }))
+    for (auto const codepoint: std::views::iota(char32_t { 0x10F000 }, char32_t { 0x10F010 }))
     {
         CAPTURE(static_cast<uint32_t>(codepoint));
         CHECK(BoxDrawingRenderer::renderable(codepoint));
         CHECK(BoxDrawingRenderer::tileLineThickness(codepoint, wide, 1) == 1);
     }
-    CHECK_FALSE(BoxDrawingRenderer::isContourGlyph(char32_t { 0x10F00C }));
+    CHECK_FALSE(BoxDrawingRenderer::isContourGlyph(char32_t { 0x10F010 }));
 }
 
 TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
