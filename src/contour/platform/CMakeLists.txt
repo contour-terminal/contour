@@ -41,6 +41,8 @@ add_library(contour_platform STATIC
     QtPath.hpp
     SpeechSynthesizer.cpp SpeechSynthesizer.hpp
     TaskbarProgressRouter.hpp
+    TaskbarProgressSink.cpp TaskbarProgressSink.hpp
+    TaskbarProgressState.hpp
     # The per-OS window frame and the two compositor shadow adapters. Each of the platform-specific
     # ones is wholly inside a platform #ifdef, so it compiles to nothing where it does not apply --
     # listed unconditionally all the same, as the notification pair above is.
@@ -60,6 +62,10 @@ add_library(contour_platform STATIC
     XcbProperty.cpp XcbProperty.hpp
 )
 set_target_properties(contour_platform PROPERTIES AUTOMOC ON)
+
+if(WIN32)
+    target_link_libraries(contour_platform PUBLIC ole32 user32 uuid)
+endif()
 
 # The Cocoa frame adapter is the tree's only Objective-C++ translation unit, so the language is
 # enabled here and nowhere else -- and INSIDE the APPLE guard, because enabling OBJCXX on a host

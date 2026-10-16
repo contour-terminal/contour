@@ -408,11 +408,13 @@ class TestApp
     ///                observation pointer first) to drive the read-aloud path. @see defaultSpeech()
     ///                for what a test app gets without one.
     /// @param identity The machine the app's sessions run on. @see testHostIdentity() for the default.
+    /// @param taskbarProgress Optional native taskbar sink override.
     explicit TestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
                      std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
                      std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
                      std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr,
-                     vtbackend::HostIdentity identity = testHostIdentity()):
+                     vtbackend::HostIdentity identity = testHostIdentity(),
+                     std::unique_ptr<contour::platform::TaskbarProgressSink> taskbarProgress = nullptr):
         _app(_environment,
              withTestNotifier(std::move(factory)),
              makeRecordingLauncher(),
@@ -421,7 +423,8 @@ class TestApp
              speech ? std::move(speech) : defaultSpeech(),
              makeOutputFiles(),
              clocks(),
-             std::move(identity))
+             std::move(identity),
+             std::move(taskbarProgress))
     {
         char const* argv[] = { "contour", "terminal" };
         // Parse the "terminal" subcommand so parameters() carries every contour.terminal.* default

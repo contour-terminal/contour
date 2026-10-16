@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <unordered_map>
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
@@ -39,6 +40,33 @@ namespace
 
 using contour::test::ScopedController;
 using contour::test::TestApp;
+
+/// Records the manager's window-scoped native output without reaching the Windows shell.
+class RecordingTaskbar final: public contour::platform::TaskbarProgressSink
+{
+  public:
+    /// Whether this test adapter supports publishing progress.
+    enum class Support : uint8_t
+    {
+        Unavailable, ///< Models a platform without a native adapter.
+        Available,   ///< Records scheduled updates.
+    };
+
+    /// @param support Whether this adapter accepts scheduled updates.
+    explicit RecordingTaskbar(Support support = Support::Available): _support(support) {}
+    [[nodiscard]] bool isSupported() const noexcept override { return _support == Support::Available; }
+    void bindWindow(uint64_t, QWindow&) override {}
+    void setProgress(uint64_t window, contour::platform::TaskbarProgress progress) override
+    {
+        windows[window] = progress;
+    }
+    void removeWindow(uint64_t window) override { windows.erase(window); }
+
+    std::unordered_map<uint64_t, contour::platform::TaskbarProgress> windows;
+
+  private:
+    Support _support;
+};
 
 /// Mints @p n model tabs in the controller's window (no backing sessions).
 void createTabs(contour::session::TerminalSessionManager& manager,
@@ -57,6 +85,79 @@ void createTabs(contour::session::TerminalSessionManager& manager,
 }
 
 } // namespace
+
+TEST_CASE("unsupported taskbar adapters do not schedule updates", "[contour][multiwindow][taskbar]")
+{
+    auto sink = std::make_unique<RecordingTaskbar>(RecordingTaskbar::Support::Unavailable);
+    auto* recording = sink.get();
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>(),
+                nullptr,
+                nullptr,
+                nullptr,
+                TestApp::testHostIdentity(),
+                std::move(sink));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    auto const now = app.steadyClock().now();
+    manager.recordProgress(window->activeSession()->modelSessionId(),
+                           { .state = vtbackend::ProgressState::Normal, .percentage = 40 },
+                           now);
+    QCoreApplication::processEvents();
+    CHECK(recording->windows.empty());
+    CHECK(manager.taskbarProgress(window.id, now).state == vtbackend::ProgressState::Normal);
+}
+
+TEST_CASE("taskbar progress follows background panes across window moves and closure",
+          "[contour][multiwindow][taskbar]")
+{
+    auto sink = std::make_unique<RecordingTaskbar>();
+    auto* recording = sink.get();
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>(),
+                nullptr,
+                nullptr,
+                nullptr,
+                TestApp::testHostIdentity(),
+                std::move(sink));
+    auto& manager = app.manager();
+    ScopedController windowA { manager };
+    ScopedController windowB { manager };
+    windowA->createNewTab();
+    auto* background = windowA->activeSession();
+    manager.splitActivePane(true, background);
+    windowA->createNewTab(); // The reporting pane is now in an inactive tab and is not its active pane.
+    windowB->createNewTab();
+    auto* paused = windowB->activeSession();
+    auto const now = app.steadyClock().now();
+    manager.recordProgress(
+        background->modelSessionId(), { .state = vtbackend::ProgressState::Error, .percentage = 40 }, now);
+    manager.recordProgress(
+        paused->modelSessionId(), { .state = vtbackend::ProgressState::Paused, .percentage = 20 }, now);
+    QCoreApplication::processEvents();
+    CHECK(recording->windows.at(windowA.id.value).state == vtbackend::ProgressState::Error);
+    CHECK(recording->windows.at(windowB.id.value).state == vtbackend::ProgressState::Paused);
+
+    manager.moveTabToWindow(windowA.id, 0, windowB.id, 0);
+    QCoreApplication::processEvents();
+    CHECK(recording->windows.at(windowA.id.value).state == vtbackend::ProgressState::Inactive);
+    CHECK(recording->windows.at(windowB.id.value).state == vtbackend::ProgressState::Error);
+
+    // Mock PTYs are not started: drive the sessionClosed endpoint rather than waiting for an exit watcher.
+    manager.removeSession(*background);
+    QCoreApplication::processEvents();
+    CHECK(recording->windows.at(windowB.id.value).state == vtbackend::ProgressState::Paused);
+    app.app().config().progressTimeout.value() = std::chrono::milliseconds { 10 };
+    manager.recordProgress(
+        paused->modelSessionId(), { .state = vtbackend::ProgressState::Paused, .percentage = 20 }, now);
+    QCoreApplication::processEvents();
+    app.steadyClock().advance(std::chrono::milliseconds { 11 });
+    // Time is explicit; wait only for Qt to deliver the scheduled callback, with no subsequent report.
+    REQUIRE(QTest::qWaitFor(
+        [&] { return recording->windows.at(windowB.id.value).state == vtbackend::ProgressState::Inactive; },
+        1000));
+    windowA->closeTabAtIndex(0);
+    windowB->closeTabAtIndex(0);
+}
 
 TEST_CASE("newWindow stages the spawn screen; takePendingSpawnScreen consumes it exactly once",
           "[contour][multiwindow]")

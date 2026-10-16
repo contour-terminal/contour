@@ -935,6 +935,7 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
         return;
 
     _osWindow = osWindow;
+    _manager.bindTaskbarWindow(_windowId, *osWindow);
 
     // Still unexposed, so the scene graph has not chosen a graphics device yet.
     _manager.app().applyGraphicsDevice(*osWindow);
