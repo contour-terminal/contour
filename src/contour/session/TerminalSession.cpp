@@ -2704,7 +2704,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     // cell it came from. The flag is that invalidation: without it the gutter's pointing hand survived
     // over the grid until the pointer happened to cross into another cell.
     auto const decidesPointerShape =
-        (pos != _currentMousePosition || _isPointerShapeStale) && _display != nullptr;
+        (pos != _pointerShapeCell || _isPointerShapeStale) && _display != nullptr;
 
     // The hovered link is read inside the lock the move already takes, rather than asked for again
     // afterwards. tryGetHoveringHyperlink() re-queries the screen and needs the same non-recursive
@@ -2734,7 +2734,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     if (decidesPointerShape)
     {
         _isPointerShapeStale = false;
-        _currentMousePosition = pos;
+        _pointerShapeCell = pos;
         if (hover.targetShape)
             _display->setMouseCursorShape(*hover.targetShape);
         else

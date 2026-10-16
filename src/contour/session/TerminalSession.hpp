@@ -1570,7 +1570,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // state vars
     //
     vtbackend::ScreenType _currentScreenType = vtbackend::ScreenType::Primary;
-    vtbackend::CellLocation _currentMousePosition = vtbackend::CellLocation {};
+
+    /// The cell the mouse cursor's shape was last decided for, in main-page rows.
+    ///
+    /// Not the pointer's position, which is the terminal's (Terminal::currentMouseGridPosition()): a press or
+    /// a wheel notch moves that onto a new cell without deciding the shape, so the next move onto that cell
+    /// must still decide it. Read by sendMouseMoveEvent()'s shape decision alone; @ref _isPointerShapeStale
+    /// says when the shape no longer holds even for this cell.
+    vtbackend::CellLocation _pointerShapeCell {};
 
     /// Whether the pointer was last seen over the gutter rather than over the grid.
     ///
