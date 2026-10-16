@@ -28,9 +28,11 @@ namespace
 constexpr auto Fffd = std::string_view { "\xEF\xBF\xBD" };
 
 /// Every purpose, for the checks that hold for all of them.
-constexpr auto Purposes = std::array {
-    SanitizePurpose::Display, SanitizePurpose::Insert, SanitizePurpose::Type, SanitizePurpose::Clipboard
-};
+constexpr auto Purposes = std::array { SanitizePurpose::Display,
+                                       SanitizePurpose::Insert,
+                                       SanitizePurpose::Type,
+                                       SanitizePurpose::Clipboard,
+                                       SanitizePurpose::ClipboardMultiline };
 
 /// @return @p codePoint, UTF-8 encoded.
 [[nodiscard]] std::string utf8(char32_t codePoint)
@@ -106,6 +108,20 @@ TEST_CASE("sanitizeCommandLine for the clipboard trims trailing white space only
     // The other purposes keep it.
     CHECK(sanitizeCommandLine("ls ", SanitizePurpose::Insert) == "ls ");
     CHECK(sanitizeCommandLine("ls ", SanitizePurpose::Display) == "ls ");
+}
+
+TEST_CASE("sanitizeCommandLine preserves multiline clipboard syntax across line ending conventions",
+          "[sanitize]")
+{
+    auto const expected = "# comment\nWrite-Output @'\n\tfirst\n\nsecond\n'@";
+    CHECK(sanitizeCommandLine(expected, SanitizePurpose::ClipboardMultiline) == expected);
+    CHECK(sanitizeCommandLine("# comment\r\nWrite-Output @'\r\n\tfirst\r\n\r\nsecond\r\n'@\r\n",
+                              SanitizePurpose::ClipboardMultiline)
+          == expected);
+    CHECK(sanitizeCommandLine("a\rb\r\r\nc\n \t", SanitizePurpose::ClipboardMultiline) == "a\nb\n\nc");
+    CHECK(sanitizeCommandLine(" \t\r\n", SanitizePurpose::ClipboardMultiline).empty());
+    CHECK(sanitizeCommandLine("  a\x1b[201~\n\tb\x07\n", SanitizePurpose::ClipboardMultiline)
+          == "  a[201~\n\tb");
 }
 
 TEST_CASE("sanitizeCommandLine for the clipboard cannot end a bracketed paste", "[sanitize]")
@@ -320,7 +336,7 @@ TEST_CASE("isUnchangedBySanitizing answers what comparing with the sanitised cop
     // Plain text, a control at either end and in the middle, TAB and LF, C1, a separator, a bidi override,
     // well-formed and ill-formed multi-byte sequences, a sequence cut off by the end, and white space at
     // either end.
-    auto const samples = std::array<std::string, 17> {
+    auto const samples = std::array<std::string, 22> {
         "",
         "/home/u/notes.txt",
         "\x1b"
@@ -340,6 +356,11 @@ TEST_CASE("isUnchangedBySanitizing answers what comparing with the sanitised cop
         "ls ",
         " ls",
         "f\xc3\xbc ",
+        "a\r\nb",
+        "a\rb",
+        "a\n",
+        "a\t",
+        "a\n\tb",
     };
     for (auto const& sample: samples)
         for (auto const purpose: Purposes)
@@ -357,4 +378,49 @@ TEST_CASE("sanitizeCommandLine sanitises what follows a leading run of plain tex
     CHECK(sanitizeCommandLine("echo ok\xff!", SanitizePurpose::Insert) == std::format("echo ok{}!", Fffd));
     CHECK(sanitizeCommandLine("echo " + utf8(0x202E) + "x", SanitizePurpose::Display)
           == std::format("echo {}x", Fffd));
+}
+
+TEST_CASE("trimTrailingWhiteSpace drops every White_Space code point the text ends with", "[sanitize]")
+{
+    using vtbackend::trimTrailingWhiteSpace;
+
+    // Unicode's White_Space property (PropList.txt), not just ASCII's: a shell may pad what it draws below
+    // its input with U+00A0, and that is read back when the command line is recovered from the grid.
+    auto const whiteSpace = std::array<char32_t, 25> {
+        0x0009, 0x000A, 0x000B, 0x000C, 0x000D, 0x0020, 0x0085, 0x00A0, 0x1680,
+        0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008,
+        0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000,
+    };
+    for (auto const codePoint: whiteSpace)
+    {
+        INFO(std::format("U+{:04X}", static_cast<uint32_t>(codePoint)));
+        CHECK(trimTrailingWhiteSpace("ls" + utf8(codePoint)) == "ls");
+        CHECK(trimTrailingWhiteSpace(utf8(codePoint)).empty());
+        // Only what the text ends with: the same code point between two others stays.
+        auto const inner = "a" + utf8(codePoint) + "b";
+        CHECK(trimTrailingWhiteSpace(inner) == inner);
+    }
+
+    // A line break followed by a row of nothing but white space, as recovered from endo's spacer row.
+    CHECK(trimTrailingWhiteSpace("echo hi\n\xC2\xA0  ") == "echo hi");
+    CHECK(trimTrailingWhiteSpace("").empty());
+}
+
+TEST_CASE("trimTrailingWhiteSpace keeps what only looks blank", "[sanitize]")
+{
+    using vtbackend::trimTrailingWhiteSpace;
+
+    // Not White_Space: the zero-width space and joiner, the word joiner, the BOM, the braille blank.
+    for (auto const codePoint: std::array<char32_t, 5> { 0x200B, 0x200D, 0x2060, 0xFEFF, 0x2800 })
+    {
+        INFO(std::format("U+{:04X}", static_cast<uint32_t>(codePoint)));
+        auto const text = "ls" + utf8(codePoint);
+        CHECK(trimTrailingWhiteSpace(text) == text);
+    }
+
+    // Ill-formed UTF-8 is not white space, even where its bytes are a no-break space's: a lone continuation
+    // byte 0xA0, and a lead byte 0xC2 cut off by the end.
+    CHECK(trimTrailingWhiteSpace("ls\xA0") == "ls\xA0");
+    CHECK(trimTrailingWhiteSpace("ls\xC2") == "ls\xC2");
+    CHECK(trimTrailingWhiteSpace("ls\xC2 ") == "ls\xC2");
 }

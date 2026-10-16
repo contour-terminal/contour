@@ -5421,7 +5421,8 @@ TEST_CASE("TerminalSession: a press beside the line numbers is the gutter's, and
     auto const& folds = session->terminal().foldState();
 
     CHECK(session->sendGutterPressEvent(gutterHit(0, GutterSegmentKind::LineNumber),
-                                        vtbackend::MouseButton::Left)
+                                        vtbackend::MouseButton::Left,
+                                        vtbackend::Modifiers {})
           == ConsumedByGutter::Yes);
     CHECK(session->sendOwedRelease(vtbackend::MouseButton::Left) == contour::session::PressOwner::Gutter);
     CHECK(folds.empty());                             // nothing toggled
@@ -5429,12 +5430,14 @@ TEST_CASE("TerminalSession: a press beside the line numbers is the gutter's, and
 
     // Every other button still belongs to the application, wherever it lands.
     CHECK(session->sendGutterPressEvent(gutterHit(0, GutterSegmentKind::Timestamp),
-                                        vtbackend::MouseButton::Right)
+                                        vtbackend::MouseButton::Right,
+                                        vtbackend::Modifiers {})
           == ConsumedByGutter::No);
 
     // The block column keeps today's behaviour: a press on a fold toggles it.
     CHECK(session->sendGutterPressEvent(gutterHit(0, GutterSegmentKind::BlockColumn),
-                                        vtbackend::MouseButton::Left)
+                                        vtbackend::MouseButton::Left,
+                                        vtbackend::Modifiers {})
           == ConsumedByGutter::Yes);
     CHECK_FALSE(folds.empty());
     CHECK(session->sendOwedRelease(vtbackend::MouseButton::Left) == contour::session::PressOwner::Gutter);
@@ -5513,7 +5516,8 @@ TEST_CASE("TerminalSession: a profile switch re-applies sticky_header to the ter
 namespace
 {
 /// The scene every sticky header input test starts from: a session with a recording surface of 8x16 cells
-/// whose grid starts one cell right of the item's edge -- the width of the default gutter's one column -- and
+/// whose grid starts one cell right of the item's edge -- the pixels left of it lie in the default gutter's
+/// block column -- and
 /// the Qt event helpers that reach it, which a display-less session would drop. Main-page row 0 spans y 0..15
 /// below the status line, if any; page column c starts at x 8 + 8c.
 class StickyHeaderScene
@@ -5532,6 +5536,14 @@ class StickyHeaderScene
 
     /// @return What reached the PTY: the application's input.
     [[nodiscard]] std::string& written() const { return mockPtyOf(*_held).stdinBuffer(); }
+
+    /// Turns on normal (1000) and SGR (1006) mouse reporting: a press the grid takes is written to the PTY.
+    void reportMouse() const { terminal().writeToScreen("\033[?1000h\033[?1006h"); }
+
+    /// A point in the gutter's block column beside page row @p row: the 8 pixels left of the page, one 8x16
+    /// cell per row.
+    /// @param row The page row.
+    [[nodiscard]] static QPointF besideRow(int row) { return { 4.0, (row * 16.0) + 4.0 }; }
 
     /// Runs `make` through the shell integration, printing @p output.
     /// @param output The lines it prints.
@@ -5598,6 +5610,14 @@ class StickyHeaderScene
         contour::session::sendMouseMoveEvent(&event, session());
     }
 
+    /// Drags the pointer to @p position with the left button down, as the item that took the press hears it.
+    void drag(QPointF position) const
+    {
+        auto event =
+            QMouseEvent(QEvent::MouseMove, position, position, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        contour::session::sendMouseMoveEvent(&event, session());
+    }
+
   private:
     SessionWithSurface _held;
 };
@@ -5621,6 +5641,10 @@ TEST_CASE("TerminalSession: a press on the sticky header jumps to its command",
                   vtbackend::LineOffset(0), vtbackend::MouseButton::Left, vtbackend::Modifiers {})
               == ConsumedByStickyHeader::Yes);
         CHECK(terminal.primaryScreen().grid().lineText(terminal.viewport().topLine()).starts_with("$ make"));
+        // And the row it landed on flashes, so the eye finds it.
+        auto const flash = vtbackend::test::drawFrame(terminal).lineFlash;
+        REQUIRE(flash.has_value());
+        CHECK(flash->lineOffset == vtbackend::LineOffset(0));
 
         CHECK(session.sendOwedRelease(vtbackend::MouseButton::Left) == PressOwner::StickyHeader);
         CHECK(session.sendOwedRelease(vtbackend::MouseButton::Left) == PressOwner::None);
@@ -5711,8 +5735,7 @@ TEST_CASE("TerminalSession: a Qt press on row 0 reaches the sticky header where 
     auto& terminal = scene.terminal();
     REQUIRE(terminal.mainPageTopRow() == vtbackend::LineOffset(0));
 
-    // Normal (1000) and SGR (1006) mouse reporting: a press the grid takes is written to the PTY.
-    terminal.writeToScreen("\033[?1000h\033[?1006h");
+    scene.reportMouse();
     scene.scrollBackIntoCommand(numberedOutput(60));
     scene.written().clear();
 
@@ -5748,6 +5771,282 @@ TEST_CASE("TerminalSession: a Qt press on row 0 reaches the sticky header where 
         auto const topLine = terminal.viewport().topLine();
         scene.click(QPointF(8 + pageWidth + 2, 4));
         CHECK(terminal.viewport().topLine() == topLine);
+    }
+}
+
+TEST_CASE("TerminalSession: the gutter's block column swallows its presses, and toggles only what it draws",
+          "[contour][session][input][gutter]")
+{
+    // The scene's gutter is the 8 pixels left of the page: the block column, one 8x16 cell per row.
+    using contour::input::MouseCursorShape;
+
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    auto& terminal = scene.terminal();
+    scene.reportMouse();
+    terminal.writeToScreen(vtbackend::test::commandRun("true", {}));         // row 0: ●, nothing to fold
+    terminal.writeToScreen(vtbackend::test::commandRun("make", { "a" }, 2)); // rows 1-2: a fold
+    scene.written().clear();
+
+    auto const beside = &StickyHeaderScene::besideRow;
+
+    SECTION("on a fold control, the fold")
+    {
+        scene.hover(beside(1));
+        CHECK(scene.surface().cursorShapes.back() == MouseCursorShape::PointingHand);
+        scene.click(beside(1));
+        CHECK_FALSE(terminal.foldState().empty());
+    }
+
+    SECTION("beside a block with nothing to fold, nothing")
+    {
+        scene.click(beside(0));
+    }
+
+    SECTION("below the last block, nothing")
+    {
+        scene.click(beside(10));
+    }
+
+    SECTION("with folding off, no hand and nothing")
+    {
+        terminal.settings().foldingAvailability = vtbackend::FoldingAvailability::Disabled;
+        scene.hover(beside(1));
+        CHECK(scene.surface().cursorShapes.back() != MouseCursorShape::PointingHand);
+        scene.click(beside(1));
+        CHECK(terminal.foldState().empty());
+    }
+
+    SECTION("with the fold controls hidden, no hand and nothing beside the output")
+    {
+        // The head shows its status mark then, which offers the block's menu; the output rows show nothing.
+        terminal.settings().gutter.foldMarkers = false;
+        scene.hover(beside(2));
+        CHECK(scene.surface().cursorShapes.back() != MouseCursorShape::PointingHand);
+        scene.click(beside(2));
+        CHECK(terminal.foldState().empty());
+    }
+
+    // Let through, the press reached the application as one on column 0 of the row, and began a selection.
+    CHECK(scene.written().empty());
+    CHECK_FALSE(terminal.leftMouseButtonPressed());
+    CHECK(scene.session().pressOwner() == contour::session::PressOwner::None);
+}
+
+TEST_CASE("TerminalSession: a selection dragged from the grid into the gutter keeps extending",
+          "[contour][session][input][gutter]")
+{
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    auto& terminal = scene.terminal();
+    terminal.writeToScreen("line 0\r\nline 1\r\nline 2\r\n");
+
+    // From row 2's fourth column, out to the left over the gutter beside row 0: clamped onto column 0 of row
+    // 0, as a drag past the page's right edge is clamped onto its last column.
+    scene.press(QPointF(8 + (3 * 8) + 4, (2 * 16) + 4), Qt::LeftButton, Qt::LeftButton);
+    scene.drag(QPointF(4, 4));
+    scene.release(QPointF(4, 4), Qt::LeftButton, Qt::NoButton);
+
+    REQUIRE(terminal.selectionAvailable());
+    auto const text = terminal.extractSelectionText();
+    CHECK(text.starts_with("line 0"));
+    CHECK(text.contains("line 1"));
+}
+
+TEST_CASE(
+    "TerminalSession: a right press in the gutter opens the menu of the block beside it, its fold row too",
+    "[contour][session][input][gutter]")
+{
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    auto& terminal = scene.terminal();
+    terminal.writeToScreen(vtbackend::test::commandRun("make", { "a", "b" })); // rows 0-2
+    terminal.writeToScreen(vtbackend::test::commandRun("test", { "c", "d" })); // rows 3-5
+
+    // The menu as it opens: built from the session's state at that moment.
+    auto state = std::optional<contour::command::ContextMenuState> {};
+    QObject::connect(&testApp.app().sessionsManager(),
+                     &contour::session::TerminalSessionManager::contextMenuRequested,
+                     [&](contour::session::TerminalSession* acting) { state = acting->contextMenuState(); });
+
+    // The pointer crosses the grid over the first block, then the gutter to the second, and presses there.
+    scene.hover(QPointF(40, (1 * 16) + 4));
+    scene.hover(QPointF(4, (4 * 16) + 4));
+    scene.press(QPointF(4, (4 * 16) + 4), Qt::RightButton, Qt::RightButton);
+
+    REQUIRE(state.has_value());
+    REQUIRE(state->blockUnderCursor.has_value());
+    CHECK(state->blockUnderCursor->id == terminal.commandBlockAt(vtbackend::LineOffset(4))->id);
+    REQUIRE(state->foldLine.has_value());
+    CHECK(terminal.foldContaining(*state->foldLine) == terminal.foldContaining(vtbackend::LineOffset(4)));
+}
+
+TEST_CASE(
+    "TerminalSession: a click on a status mark, or a right-click on the block column, opens its block's menu",
+    "[contour][session][input][gutter]")
+{
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    auto& terminal = scene.terminal();
+    scene.reportMouse();
+    terminal.writeToScreen(vtbackend::test::commandRun("true", {}));              // row 0: a disc
+    terminal.writeToScreen(vtbackend::test::commandRun("make", { "a", "b" }, 2)); // rows 1-3: a fold
+    scene.written().clear();
+
+    auto menuBlock = std::optional<vtbackend::CommandBlockId> {};
+    auto menuRequests = 0;
+    QObject::connect(&testApp.app().sessionsManager(),
+                     &contour::session::TerminalSessionManager::contextMenuRequested,
+                     [&](contour::session::TerminalSession* acting) {
+                         ++menuRequests;
+                         if (auto const pointed = acting->contextMenuState().blockUnderCursor)
+                             menuBlock = pointed->id;
+                     });
+    auto const beside = &StickyHeaderScene::besideRow;
+    auto const blockAt = [&](int row) {
+        auto const* const record = terminal.commandBlockAt(vtbackend::LineOffset(row));
+        REQUIRE(record != nullptr);
+        return record->id;
+    };
+
+    SECTION("a left click on the disc: the block has nothing to fold, so its menu")
+    {
+        scene.hover(beside(0));
+        CHECK(scene.surface().cursorShapes.back() == contour::input::MouseCursorShape::PointingHand);
+        scene.click(beside(0));
+        CHECK(menuRequests == 1);
+        CHECK(menuBlock == blockAt(0));
+        CHECK(terminal.foldState().empty());
+    }
+
+    SECTION("a right click anywhere on a block's run: that block's menu, and the application hears nothing")
+    {
+        scene.press(beside(2), Qt::RightButton, Qt::RightButton);
+        scene.release(beside(2), Qt::RightButton, Qt::NoButton);
+        CHECK(menuRequests == 1);
+        CHECK(menuBlock == blockAt(1));
+        CHECK(scene.written().empty());
+    }
+
+    SECTION("a right click beside no block is the application's, as it always was")
+    {
+        scene.press(beside(10), Qt::RightButton, Qt::RightButton);
+        scene.release(beside(10), Qt::RightButton, Qt::NoButton);
+        CHECK(menuRequests == 0);
+        CHECK_FALSE(scene.written().empty());
+    }
+
+    CHECK(scene.session().pressOwner() == contour::session::PressOwner::None);
+}
+
+TEST_CASE("TerminalSession: a click on a collapsed fold's label expands it",
+          "[contour][session][input][gutter]")
+{
+    using contour::input::MouseCursorShape;
+
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    auto& terminal = scene.terminal();
+    scene.reportMouse();
+    terminal.writeToScreen(vtbackend::test::commandRun("make", { "a", "b" })); // "$ make" on row 0
+    REQUIRE(terminal.toggleFoldContaining(vtbackend::LineOffset(0)));
+    scene.written().clear();
+
+    // Page column c starts at x 8 + 8c: the label starts at column 7, one after the six of "$ make".
+    auto const onLabel = QPointF(8 + (8 * 8) + 4, 4);
+
+    scene.hover(onLabel);
+    CHECK(scene.surface().cursorShapes.back() == MouseCursorShape::PointingHand);
+
+    scene.click(onLabel);
+    CHECK(terminal.foldState().empty());
+    CHECK(scene.written().empty()); // neither half reached the application
+    CHECK(scene.session().pressOwner() == contour::session::PressOwner::None);
+
+    // Expanded, the row has no label: the next press there is the grid's.
+    scene.click(onLabel);
+    CHECK_FALSE(scene.written().empty());
+}
+
+TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it is allowed",
+          "[contour][session][semanticblocks]")
+{
+    using contour::actions::RerunCommand;
+
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    auto& terminal = session->terminal();
+    terminal.writeToScreen(vtbackend::test::commandRun("make", { "a" }));
+    terminal.writeToScreen(vtbackend::test::PromptStart); // the next prompt, at which the shell waits
+    auto& written = mockPtyOf(*session).stdinBuffer();
+    written.clear();
+    auto asked = QSignalSpy(session.session.get(),
+                            &contour::session::TerminalSession::requestPermissionForRerunCommand);
+
+    SECTION("asked first, shown what it runs, and run once allowed")
+    {
+        CHECK((*session)(RerunCommand {}));
+        CHECK(asked.count() == 1);
+        CHECK(session->pendingRerunCommandLine() == "make");
+        CHECK(written.empty());
+
+        session->applyPendingRerun(true, false);
+        CHECK(written == "make\r");
+        CHECK(session->pendingRerunCommandLine().isEmpty());
+    }
+
+    SECTION("refused, nothing is typed")
+    {
+        REQUIRE((*session)(RerunCommand {}));
+        session->applyPendingRerun(false, false);
+        CHECK(written.empty());
+    }
+
+    SECTION("allowed for the session, the next one runs without asking")
+    {
+        REQUIRE((*session)(RerunCommand {}));
+        session->applyPendingRerun(true, true);
+        written.clear();
+        CHECK((*session)(RerunCommand {}));
+        CHECK(asked.count() == 1);
+        CHECK(written == "make\r");
+    }
+
+    SECTION("through a bracketed paste where the shell asked for one")
+    {
+        terminal.writeToScreen("\033[?2004h");
+        REQUIRE((*session)(RerunCommand {}));
+        session->applyPendingRerun(true, false);
+        CHECK(written == "\033[200~make\033[201~\r");
+    }
+
+    SECTION("not while a command runs: typed, it would be that command's input")
+    {
+        CHECK(session->contextMenuState().livePrompt == contour::command::PromptPresence::Present);
+        terminal.writeToScreen(vtbackend::test::commandStarted("sleep 9"));
+        CHECK(session->contextMenuState().livePrompt == contour::command::PromptPresence::Absent);
+        CHECK_FALSE((*session)(RerunCommand {}));
+        CHECK(asked.count() == 0);
+    }
+
+    SECTION("the prompt gone by the time the answer comes, nothing is typed")
+    {
+        REQUIRE((*session)(RerunCommand {}));
+        terminal.writeToScreen("sleep 9\r\n\033]133;C\033\\");
+        session->applyPendingRerun(true, false);
+        CHECK(written.empty());
+    }
+
+    SECTION("a command line that cannot be typed as it is is not run at all")
+    {
+        // Reported with a line feed in it: typed raw, without a bracketed paste, the shell would run the part
+        // before it as a command of its own.
+        terminal.writeToScreen(std::string { vtbackend::test::PromptStart } + "\033]133;B\033\\\r\n"
+                               + vtbackend::test::reportedOutputStart("echo%20a%0Aecho%20b")
+                               + vtbackend::test::commandEnd(0)
+                               + std::string { vtbackend::test::PromptStart });
+        CHECK_FALSE((*session)(RerunCommand {}));
+        CHECK(asked.count() == 0);
     }
 }
 
@@ -5928,7 +6227,7 @@ TEST_CASE("TerminalSession: each button on the sticky header acts for the header
 
     auto const scene = StickyHeaderScene { testApp.app() };
     auto& terminal = scene.terminal();
-    terminal.writeToScreen("\033[?1000h\033[?1006h");
+    scene.reportMouse();
     scene.scrollBackIntoCommand(numberedOutput(60));
     auto const block = terminal.stickyHeaderBlock();
     REQUIRE(block.has_value());
@@ -6055,7 +6354,15 @@ TEST_CASE("TerminalSession: hovering a block's gutter row describes the block", 
     auto const text = session->commandBlockTooltip().toStdString();
     CHECK(text.starts_with("Exit code 2\n"));
     CHECK(text.contains("$ make"));
+    // And what a click does there: its output folds.
+    CHECK(text.ends_with("\nClick to collapse · Right-click for actions"));
     CHECK(session->commandBlockTooltipAnchor().width() > 0);
+
+    // Collapsed, the click expands it.
+    REQUIRE(session->terminal().toggleFoldContaining(vtbackend::LineOffset(0)));
+    CHECK(session->commandBlockTooltip().toStdString().ends_with(
+        "\nClick to expand · Right-click for actions"));
+    REQUIRE(session->terminal().toggleFoldContaining(vtbackend::LineOffset(0)));
 
     // Another row of the same block: the tooltip stays where the block was entered.
     session->sendGutterHoverEvent(gutterHit(1, GutterSegmentKind::BlockColumn));
@@ -6716,20 +7023,34 @@ TEST_CASE("TerminalSession: CopyCommandLine copies a line that is safe to paste"
     CHECK(clipboard.text() == "ls[201~;id");
 }
 
-TEST_CASE("TerminalSession: CopyCommandLine copies a command that runs nothing by itself when pasted",
+TEST_CASE("TerminalSession: CopyCommandLine preserves multiline commands only when enabled",
           "[contour][session][clipboard][semanticblocks]")
 {
-    // A block's rows may show `$ make test` while the command line the shell reported says more. Pasted into
-    // a shell without bracketed paste, every line but the last would run as it arrived, and a trailing line
-    // end would run the last one too: the copy is one line, with nothing after it, for the user to read.
     TestApp testApp;
+    auto expected = std::string { "# comment  Write-Output @'   text  '@" };
+    SECTION("the default keeps single-line copying")
+    {
+        CHECK_FALSE(testApp.app()
+                        .config()
+                        .profile(testApp.app().profileName())
+                        ->copyCommandPreserveMultiline.value());
+    }
+    SECTION("the profile can enable multiline copying")
+    {
+        testApp.app().config().profile(testApp.app().profileName())->copyCommandPreserveMultiline = true;
+        expected = "# comment\nWrite-Output @'\n\ttext\n'@";
+    }
     auto session = makeSessionWithSurface(testApp.app());
     auto const clipboard = ClipboardGuard {};
 
-    writeFinishedBlock(*session, "make test", "", ";cmdline_url=make%20test%0Acurl%20x%7Csh%0A");
+    writeFinishedBlock(
+        *session,
+        "# comment",
+        "",
+        ";cmdline_url=%23%20comment%0D%0AWrite-Output%20%40%27%0D%0A%09text%0D%0A%27%40%0D%0A");
 
     CHECK((*session)(contour::actions::CopyCommandLine {}));
-    CHECK(clipboard.text() == "make test curl x|sh");
+    CHECK(clipboard.text() == expected);
 }
 
 TEST_CASE("TerminalSession: the last command's output is copied up to where the command ended",

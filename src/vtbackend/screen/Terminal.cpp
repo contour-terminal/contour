@@ -980,6 +980,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // After the gutter, with the same baseLine: the header covers the main page's first row, wherever a top
     // status line put it.
     fillStickyHeader(output, baseLine);
+    fillLineFlash(output, baseLine);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
     auto const mainScreenLine = baseLine;
@@ -1181,6 +1182,15 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                 nullopt,
                                                                 includeSelection },
                                           ScrollOffset(0));
+            // The terminal's own furniture, so its bar may span the window's whole width (#2139), and its
+            // text the gutter's columns as well as the page's.
+            output.statusBar = RenderStatusBar {
+                .lineOffset = base,
+                .lines = _indicatorStatusScreen.pageSize().lines,
+                .background = indicatorStatusLineColors().background,
+                .position = _settings.statusDisplayPosition,
+                .leadingColumns = _indicatorStatusScreen.pageSize().columns - _settings.pageSize.columns,
+            };
             return _indicatorStatusScreen.pageSize().lines;
         case StatusDisplayType::HostWritable:
             _hostWritableStatusLineScreen.render(RenderBufferBuilder { *this,
@@ -1200,29 +1210,39 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
 }
 // }}}
 
+PageSize Terminal::indicatorStatusLinePageSize() const
+{
+    auto const gutterColumns = ColumnCount::cast_from(gutterLayoutFor(_settings.gutter).totalColumns);
+    return PageSize { StatusLineHeight, _settings.pageSize.columns + gutterColumns };
+}
+
+RGBColorPair Terminal::indicatorStatusLineColors() const
+{
+    if (!_focused)
+        return colorPalette().indicatorStatusLineInactive;
+
+    switch (_inputHandler.mode())
+    {
+        case ViMode::Insert: return colorPalette().indicatorStatusLineInsertMode;
+        case ViMode::Normal:
+        case ViMode::Hint: return colorPalette().indicatorStatusLineNormalMode;
+        case ViMode::Visual:
+        case ViMode::VisualLine:
+        case ViMode::VisualBlock: return colorPalette().indicatorStatusLineVisualMode;
+    }
+    core::unreachable();
+}
+
 void Terminal::updateIndicatorStatusLine()
 {
     Require(_activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
 
-    auto const colors = [&]() {
-        if (!_focused)
-        {
-            return colorPalette().indicatorStatusLineInactive;
-        }
-        else
-        {
-            switch (_inputHandler.mode())
-            {
-                case ViMode::Insert: return colorPalette().indicatorStatusLineInsertMode;
-                case ViMode::Normal:
-                case ViMode::Hint: return colorPalette().indicatorStatusLineNormalMode;
-                case ViMode::Visual:
-                case ViMode::VisualLine:
-                case ViMode::VisualBlock: return colorPalette().indicatorStatusLineVisualMode;
-            }
-        }
-        core::unreachable();
-    }();
+    // Refitted here as well as on a resize: the gutter's width follows its settings, which a configuration
+    // reload changes without the page necessarily changing size.
+    if (auto const wanted = indicatorStatusLinePageSize(); _indicatorStatusScreen.pageSize() != wanted)
+        _indicatorStatusScreen.applyPageSizeToMainDisplay(wanted);
+
+    auto const colors = indicatorStatusLineColors();
 
     auto const backupForeground = _colorPalette.defaultForeground;
     auto const backupBackground = _colorPalette.defaultBackground;
@@ -1255,7 +1275,8 @@ void Terminal::updateIndicatorStatusLine()
     {
         // Don't show the middle segment if text is too long.
         auto const middleLength = serializeToVT(*this, definitions.middle, Styling::Disabled).size();
-        auto const center = pageSize().columns / ColumnCount(2) - ColumnCount(1);
+        // Centred on the bar, the gutter's columns and the page's together.
+        auto const center = _indicatorStatusScreen.pageSize().columns / ColumnCount(2) - ColumnCount(1);
         // size of middleVT segment is less that number of elements in the string due to formatting
         // and on average we can assume that the middle segment is half the size of the string
         _indicatorStatusScreen.moveCursorToColumn(
@@ -1997,6 +2018,13 @@ void Terminal::sendPaste(string_view text)
     // past the edit buffer the prompt was actually rendering from.
     core::locked(_inputMutex, [&] { _inputGenerator.generatePaste(text); });
     flushInput();
+}
+
+bool Terminal::pastesUnchanged(string_view text) const
+{
+    auto const purpose =
+        isModeEnabled(DECMode::BracketedPaste) ? SanitizePurpose::Insert : SanitizePurpose::Type;
+    return isUnchangedBySanitizing(text, purpose);
 }
 
 void Terminal::sendPasteFromClipboard(unsigned count, bool strip)
@@ -2757,14 +2785,16 @@ void Terminal::verifyState()
     Require(*_currentMousePosition.column < *thePageSize.columns);
     Require(*_currentMousePosition.line < *thePageSize.lines);
 
-    Require(_hostWritableStatusLineScreen.pageSize() == _indicatorStatusScreen.pageSize());
+    Require(_hostWritableStatusLineScreen.pageSize().lines == _indicatorStatusScreen.pageSize().lines);
     Require(_hostWritableStatusLineScreen.pageSize().lines == StatusLineHeight);
     Require(_hostWritableStatusLineScreen.pageSize().columns == _settings.pageSize.columns);
 
     // TODO: the current main display's page size PLUS visible status line count must match total page size.
 
     Require(_hostWritableStatusLineScreen.grid().pageSize().columns == _settings.pageSize.columns);
-    Require(_indicatorStatusScreen.grid().pageSize().columns == _settings.pageSize.columns);
+    // At least the page's: the gutter's columns too, as the gutter's settings stood when it was last laid
+    // out.
+    Require(_indicatorStatusScreen.grid().pageSize().columns >= _settings.pageSize.columns);
 
     Require(_tabs.empty() || _tabs.back() < unbox<ColumnOffset>(_settings.pageSize.columns));
 
@@ -3069,6 +3099,50 @@ bool Terminal::toggleFoldContaining(LineOffset gridLine)
     return true;
 }
 
+BlockColumnPress Terminal::blockColumnPressAt(LineOffset gridLine) const
+{
+    if (!foldingAppliesToDisplayedPage())
+        return BlockColumnPress::Swallow;
+
+    // The fold looked up once, for the toggle and the glyph alike: foldContaining() without its page check,
+    // already made above.
+    auto const id = primaryScreen().grid().stableLineIdOf(gridLine);
+    auto const range = foldCovering(foldRanges(), id);
+    auto const& gutter = _settings.gutter;
+    auto const fold = isFoldingAvailable() && gutter.foldMarkers && range.has_value()
+                          ? FoldToggle::Available
+                          : FoldToggle::Unavailable;
+    return blockColumnPressFor(blockColumnGlyph(blockColumnFactsAt(gridLine, id, range), gutter), fold);
+}
+
+bool Terminal::shellIsPrompting() const noexcept
+{
+    auto const* const current = commandBlocks().current();
+    return isPrimaryScreen() && current != nullptr && current->state == CommandBlockState::Prompting;
+}
+
+BlockColumnFacts Terminal::blockColumnFactsAt(LineOffset gridLine) const
+{
+    auto const id = primaryScreen().grid().stableLineIdOf(gridLine);
+    return blockColumnFactsAt(gridLine, id, foldCovering(foldRanges(), id));
+}
+
+BlockColumnFacts Terminal::blockColumnFactsAt(LineOffset gridLine,
+                                              int64_t id,
+                                              std::optional<FoldRange> const& range) const
+{
+    auto const& grid = primaryScreen().grid();
+    auto const* const record = commandBlockAt(gridLine);
+    return BlockColumnFacts {
+        .fold = range ? markerIn(*range, id) : FoldMarker::None,
+        .head = blockHeadStateOf(record, id, grid.stableIdGeneration()),
+        .mark = grid.lineAt(gridLine).isFlagEnabled(LineFlag::UserMark) ? UserMarkPresence::Present
+                                                                        : UserMarkPresence::Absent,
+        .outcome = record != nullptr && _settings.gutter.exitStatus ? std::optional { outcomeOf(*record) }
+                                                                    : std::nullopt,
+    };
+}
+
 bool Terminal::expandFoldContaining(LineOffset gridLine)
 {
     auto const range = foldContaining(gridLine);
@@ -3243,26 +3317,20 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     {
         auto const screenRow = LineOffset(y);
         auto const gridLine = _viewport.translateScreenToGridLine(screenRow);
-        auto const id = grid.stableLineIdOf(gridLine);
         auto const& line = grid.lineAt(gridLine);
-        auto const* record = commandBlockAt(gridLine);
 
         // Asked for per row rather than held across the loop: foldRanges() hands back a span over a
         // CACHE, and the translation above re-enters that cache once per row. Holding it survives only as
         // long as no key input can move inside a frame -- one that could, and the remaining rows would be
-        // reading freed memory. A cache hit here is three integer comparisons.
+        // reading freed memory. A cache hit here is three integer comparisons. Asked once, for the hover
+        // and the glyph alike.
+        auto const id = grid.stableLineIdOf(gridLine);
         auto const range = foldCovering(foldRanges(), id);
 
-        auto const facts = BlockColumnFacts {
-            .fold = range ? markerIn(*range, id) : FoldMarker::None,
-            .head = blockHeadStateOf(record, id, grid.stableIdGeneration()),
-            .mark =
-                line.isFlagEnabled(LineFlag::UserMark) ? UserMarkPresence::Present : UserMarkPresence::Absent,
-        };
+        auto const facts = blockColumnFactsAt(gridLine, id, range);
         auto const glyph = blockColumnGlyph(facts, gutter);
+        auto const& outcome = facts.outcome;
 
-        auto const outcome =
-            record != nullptr && gutter.exitStatus ? std::optional { outcomeOf(*record) } : std::nullopt;
         auto const hover = hoveredHead && range && hoveredHead->headStableId == range->headStableId
                                ? GutterHover::Hovered
                                : GutterHover::Rest;
@@ -3276,7 +3344,8 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
                         // Mixed only for a glyph there is: most rows have none.
                         .glyphColors = glyph == BlockColumnGlyph::None
                                            ? RGBColorPair {}
-                                           : blockColumnColors(_colorPalette, glyph, outcome, hover) },
+                                           : blockColumnColors(_colorPalette, glyph, outcome, hover),
+                        .weight = foldWeightOf(facts, gutter, hover) },
             textColors,
             output.gutter);
     }
@@ -3284,11 +3353,37 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
 
 void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
 {
+    auto const attributes = gutterCellAttributes(_colorPalette.gutterTextColors());
+    for (auto const& placement: foldLabelPlacements())
+        layoutFoldLabel(output.annotations,
+                        baseLine + _viewport.translateGridToScreenCoordinate(placement.gridLine),
+                        placement.textColumns,
+                        pageSize().columns,
+                        placement.label,
+                        attributes);
+}
+
+std::optional<LineOffset> Terminal::collapsedFoldLabelAt(CellLocation position) const
+{
+    for (auto const& placement: foldLabelPlacements())
+    {
+        auto const extent = foldLabelExtent(_viewport.translateGridToScreenCoordinate(placement.gridLine),
+                                            placement.textColumns,
+                                            pageSize().columns,
+                                            placement.label.size());
+        if (extent && extent->contains(position))
+            return primaryScreen().grid().lineOffsetOf(placement.range.headStableId);
+    }
+    return std::nullopt;
+}
+
+std::vector<Terminal::FoldLabelPlacement> Terminal::foldLabelPlacements() const
+{
     // Only a COLLAPSED fold is labelled, and nothing is collapsed in the common case -- which then costs
     // one comparison. Independent of the gutter: with the fold column hidden, the label is the only sign
     // left that output was folded away.
     if (!foldingAppliesToDisplayedPage() || _foldState.empty())
-        return;
+        return {};
 
     // The few collapsed folds, rather than every drawn row: the rows are what is expensive to translate while
     // anything is collapsed. Copied out of foldRanges(), whose span points into a cache the translations
@@ -3301,8 +3396,8 @@ void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
     auto const& grid = primaryScreen().grid();
     auto const pageLines = unbox<int>(pageSize().lines);
     auto const drawnRows = drawnRowLimit();
-    auto const attributes = gutterCellAttributes(_colorPalette.gutterTextColors());
 
+    auto placements = std::vector<FoldLabelPlacement> {};
     for (auto const& range: collapsed)
     {
         auto const head = grid.lineOffsetOf(range.headStableId);
@@ -3329,13 +3424,12 @@ void Terminal::fillFoldLabels(RenderBuffer& output, LineOffset baseLine) const
 
         auto const gridLine = LineOffset(*lastDrawn);
         auto const hidden = static_cast<uint64_t>(range.lastStableId - range.firstStableId + 1);
-        layoutFoldLabel(output.annotations,
-                        baseLine + _viewport.translateGridToScreenCoordinate(gridLine),
-                        grid.lineAt(gridLine).trimmedColumns(),
-                        pageSize().columns,
-                        collapsedFoldLabel(hidden),
-                        attributes);
+        placements.push_back(FoldLabelPlacement { .range = range,
+                                                  .gridLine = gridLine,
+                                                  .textColumns = grid.lineAt(gridLine).trimmedColumns(),
+                                                  .label = collapsedFoldLabel(hidden) });
     }
+    return placements;
 }
 
 namespace
@@ -3533,7 +3627,57 @@ std::expected<void, CommandBlockJumpError> Terminal::scrollToCommandBlockHead(Co
 
     // The reveal a click on a scrollbar tick performs: it refuses a head placed in another generation, then
     // one the scrollback dropped, and opens the fold hanging off the head first.
-    return revealStableLineAtTop(record->headStableId, record->headIdGeneration).transform_error(jumpErrorOf);
+    return revealStableLineAtTop(record->headStableId, record->headIdGeneration)
+        .transform([&] {
+            // The row the header copied -- the command's input -- rather than the head, which a prompt
+            // opening with a blank line or a status row puts above it: the command is what the eye goes
+            // looking for.
+            auto const& grid = primaryScreen().grid();
+            auto const head = headOffsetOf(grid, *record);
+            auto const input = head ? inputRowOf(StampedBlockRows { grid }, *head, record->id) : std::nullopt;
+
+            // Timed by the injected clock rather than currentTime(), which stands still between paints: a
+            // flash stamped with the last paint's time could be over before the frame that shows it.
+            _lineFlash.active = true;
+            _lineFlash.startTime = _clocks.steady.now();
+            _lineFlash.duration = LineFlashDuration;
+            _lineFlash.stableId = input ? grid.stableLineIdOf(*input) : record->headStableId;
+            _lineFlash.stableIdGeneration = record->headIdGeneration;
+            _lineFlash.color = blockHighlightColor(
+                _colorPalette,
+                _settings.gutter.exitStatus ? std::optional { outcomeOf(*record) } : std::nullopt);
+            publishAnimationsEnd();
+            breakLoopAndRefreshRenderBuffer();
+        })
+        .transform_error(jumpErrorOf);
+}
+
+void Terminal::fillLineFlash(RenderBuffer& output, LineOffset baseLine)
+{
+    if (!_lineFlash.active)
+        return;
+    auto const progress = _lineFlash.progress(currentTime());
+    if (progress >= 1.0f)
+    {
+        _lineFlash.active = false;
+        return;
+    }
+
+    // On the primary page alone, where the row is, and only where it is drawn: scrolled out of view, folded
+    // away or on another page, the flash fades unseen.
+    auto const& grid = primaryScreen().grid();
+    if (!foldingAppliesToDisplayedPage() || _lineFlash.stableIdGeneration != grid.stableIdGeneration())
+        return;
+    auto const line = grid.lineOffsetOf(_lineFlash.stableId);
+    if (!line || !_viewport.isLineVisible(*line))
+        return;
+    auto const screenRow = _viewport.translateGridToScreenCoordinate(*line);
+    if (screenRow < LineOffset(0) || screenRow >= drawnRowLimit())
+        return;
+
+    output.lineFlash = RenderLineFlash { .lineOffset = baseLine + screenRow,
+                                         .color = _lineFlash.color,
+                                         .alpha = LineFlashPeakAlpha * (1.0f - progress) };
 }
 
 void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
@@ -4643,18 +4787,14 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
 
 namespace
 {
-    /// Pastes a hint's text into @p terminal, unless it cannot arrive as it is. A path resolved against the
-    /// working directory carries whatever the OSC 7 URL decoded into it -- an ESC, a line feed. Under
-    /// bracketed paste the paste drops ESC (InputGenerator::generatePaste), and without it a shell reads
-    /// TAB and LF as keys; either way a path with a character taken out names another file, so it is not
-    /// pasted at all.
+    /// Pastes a hint's text into @p terminal, unless it cannot arrive as it is (Terminal::pastesUnchanged()):
+    /// a path resolved against the working directory carries whatever the OSC 7 URL decoded into it -- an
+    /// ESC, a line feed.
     /// @param terminal The terminal to paste into.
     /// @param text The hint's text.
     void typeHint(Terminal& terminal, std::string const& text)
     {
-        auto const purpose =
-            terminal.isModeEnabled(DECMode::BracketedPaste) ? SanitizePurpose::Insert : SanitizePurpose::Type;
-        if (!isUnchangedBySanitizing(text, purpose))
+        if (!terminal.pastesUnchanged(text))
         {
             terminalLog()("Not typing the hint \"{}\": a shell would read part of it as keys.",
                           core::escape(text));
@@ -6409,7 +6549,8 @@ void Terminal::publishAnimationsEnd() noexcept
         return animation.active ? animation.startTime + animation.duration
                                 : chrono::steady_clock::time_point::min();
     };
-    _animationsEnd.store(std::max(endOf(_cursorMotion), endOf(_screenTransition)), std::memory_order_relaxed);
+    _animationsEnd.store(std::max({ endOf(_cursorMotion), endOf(_screenTransition), endOf(_lineFlash) }),
+                         std::memory_order_relaxed);
 }
 
 void Terminal::setPage(PageIndex target, bool moveCursorHome)
@@ -6529,7 +6670,7 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     // cursor past a narrowed right margin and its cached cursor line un-re-pointed.
     auto const statusLinePageSize = PageSize { StatusLineHeight, _settings.pageSize.columns };
     _hostWritableStatusLineScreen.applyPageSizeToMainDisplay(statusLinePageSize);
-    _indicatorStatusScreen.applyPageSizeToMainDisplay(statusLinePageSize);
+    _indicatorStatusScreen.applyPageSizeToMainDisplay(indicatorStatusLinePageSize());
 
     // adjust margins for statuslines as well
     auto const statuslineMargin =

@@ -170,6 +170,20 @@ std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings()
                                                                               vtbackend::Modifier::Shift } },
                                           .input = vtbackend::Key::Tab,
                                           .binding = { { actions::SwitchToTabLeft {} } } } },
+        // From one command's prompt to the next, as Ghostty's jump_to_prompt binds it. Bound nowhere in the
+        // defaults when it was added -- Shift alone scrolls a line, Alt+Shift focuses a pane, Ctrl+Alt swaps
+        // one, Ctrl+Shift+Alt resizes one. On the primary screen only, where the prompts are; an
+        // alternate-screen application keeps the chord.
+        FallbackKeyMapping { .mapping = { .modes { PrimaryScreenOnly },
+                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                              vtbackend::Modifier::Shift } },
+                                          .input = vtbackend::Key::UpArrow,
+                                          .binding = { { actions::ScrollMarkUp {} } } } },
+        FallbackKeyMapping { .mapping = { .modes { PrimaryScreenOnly },
+                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                              vtbackend::Modifier::Shift } },
+                                          .input = vtbackend::Key::DownArrow,
+                                          .binding = { { actions::ScrollMarkDown {} } } } },
     };
     return mappings;
 }
@@ -670,10 +684,13 @@ vtbackend::GutterSettings gutterSettingsFor(Config const& config)
         .foldMarkers = config.folding.value().markersVisible(),
         .exitStatus = gutter.exitStatus,
         .userMarks = gutter.userMarks,
+        .blockColumnWidth = gutter.blockColumnWidth,
         .lineNumbers = gutter.lineNumbers,
         .lineNumberWidth = gutter.lineNumberWidth,
         .timestamps = gutter.timestamps,
         .timestampFormat = gutter.timestampFormat,
+        .hoverStroke =
+            gutter.boldOnHover ? vtbackend::FoldHoverStroke::Bolder : vtbackend::FoldHoverStroke::Unchanged,
     };
 }
 
@@ -1481,6 +1498,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
 
         loadFromEntry(child, "escape_sandbox", where.escapeSandbox);
         loadFromEntry(child, "copy_last_mark_range_offset", where.copyLastMarkRangeOffset);
+        loadFromEntry(child, "copy_command_preserve_multiline", where.copyCommandPreserveMultiline);
         loadFromEntry(child, "show_title_bar", where.showTitleBar);
         loadFromEntry(child, "window_shadow", where.windowShadow);
         loadFromEntry(child, "dim_unfocused", where.dimUnfocused);
@@ -1503,6 +1521,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         loadFromEntry(child, "notify_on_command_finish", where.notifyOnCommandFinish);
         loadFromEntry(child, "wm_class", where.wmClass);
         loadFromEntry(child, "tab_label", where.tabLabel);
+        loadFromEntry(child, "tab_color", where.tabColor);
         loadFromEntry(child, "pixel_reporting", where.pixelReporting);
         loadFromEntry(child, "option_as_alt", where.optionKeyAsAlt);
         loadFromEntry(child, "margins", where.margins);
@@ -1842,6 +1861,10 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, vtbackend::ColorPal
         for (auto const& [key, outcome]: BlockStatusKeys)
             loadOptional(map, key, where.blockStatus[static_cast<size_t>(outcome)]);
     });
+    loadMap("block_status_hover", [&](YAML::Node const& map) {
+        for (auto const& [key, outcome]: BlockStatusKeys)
+            loadOptional(map, key, where.blockStatusHover[static_cast<size_t>(outcome)]);
+    });
     loadMap("gutter_text", [&](YAML::Node const&) { loadOptional(node, "gutter_text", where.gutterText); });
 
     // The sticky header's band and the line along its bottom edge, each left unset unless the scheme says
@@ -1957,6 +1980,25 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     if (child)
         where = child.as<std::string>();
     logger()("Loading entry: {}, value {}", entry, where);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::optional<vtbackend::RGBColor>& where)
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+    if (child.IsNull())
+    {
+        where.reset();
+        return;
+    }
+    auto const value = child.as<std::string>();
+    if (auto const color = vtbackend::parseColor(value); color && value.size() == 7 && value.front() == '#')
+        where = color;
+    else
+        logger()("Invalid tab color '{}' (expected '#RRGGBB' or null); ignoring.", value);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -2527,23 +2569,45 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
     loadGuarded(child, "exit_status", where.exitStatus);
     loadGuarded(child, "user_marks", where.userMarks);
+    loadGuarded(child, "bold_on_hover", where.boldOnHover);
     loadGuarded(child, "line_numbers", where.lineNumbers);
     loadGuarded(child, "timestamps", where.timestamps);
 
     // Validated rather than clamped or trusted: a width out of range and a format the gutter cannot draw
     // are typos, and either taken as written would resize the page or blank the column.
-    if (child["line_number_width"])
+    struct BoundedWidth
     {
-        auto width = where.lineNumberWidth;
-        loadGuarded(child, "line_number_width", width);
-        if (width >= vtbackend::MinLineNumberWidth && width <= vtbackend::MaxLineNumberWidth)
-            where.lineNumberWidth = width;
+        char const* key;
+        int GutterConfig::* member;
+        int min;
+        int max;
+    };
+    constexpr auto BoundedWidths = std::to_array<BoundedWidth>({
+        { .key = "block_column_width",
+          .member = &GutterConfig::blockColumnWidth,
+          .min = vtbackend::MinBlockColumnWidth,
+          .max = vtbackend::MaxBlockColumnWidth },
+        { .key = "line_number_width",
+          .member = &GutterConfig::lineNumberWidth,
+          .min = vtbackend::MinLineNumberWidth,
+          .max = vtbackend::MaxLineNumberWidth },
+    });
+    for (auto const& bounded: BoundedWidths)
+    {
+        if (!child[bounded.key])
+            continue;
+        auto& kept = where.*bounded.member;
+        auto width = kept;
+        loadGuarded(child, bounded.key, width);
+        if (width >= bounded.min && width <= bounded.max)
+            kept = width;
         else
-            errorLog()("gutter.line_number_width must be between {} and {}, not {}; keeping {}.",
-                       vtbackend::MinLineNumberWidth,
-                       vtbackend::MaxLineNumberWidth,
+            errorLog()("gutter.{} must be between {} and {}, not {}; keeping {}.",
+                       bounded.key,
+                       bounded.min,
+                       bounded.max,
                        width,
-                       where.lineNumberWidth);
+                       kept);
     }
 
     if (child["timestamp_format"])
@@ -4521,6 +4585,12 @@ static void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::Co
                          BlockStatusKeys | std::views::transform([&](auto const& row) {
                              return std::pair { row.first,
                                                 entry.blockStatus[static_cast<size_t>(row.second)] };
+                         }));
+    emitOptionalColorMap(documentation::BlockStatusHoverHeader {},
+                         documentation::BlockStatusHover {},
+                         BlockStatusKeys | std::views::transform([&](auto const& row) {
+                             return std::pair { row.first,
+                                                entry.blockStatusHover[static_cast<size_t>(row.second)] };
                          }));
 
     if (entry.gutterText)

@@ -215,6 +215,27 @@ TEST_CASE("application taskbar progress combines windows without resetting repor
     windowB->closeTabAtIndex(0);
 }
 
+TEST_CASE("new tabs use their profile's default color", "[contour][multiwindow][tab-color]")
+{
+    TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());
+    auto const color = vtbackend::RGBColor { 0x2E, 0x34, 0x40 };
+    app.app().config().profile().tabColor.value() = color;
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* modelWindow = manager.model().window(window.id);
+    REQUIRE(modelWindow->tabCount() == 2);
+    for (auto const index: { 0, 1 })
+    {
+        auto* tab = modelWindow->tabAt(index);
+        CHECK(tab->color(vtworkspace::TabColorSource::Profile) == color);
+        window->setTabColor(index, QColor(Qt::red));
+        window->resetTabColor(index);
+        CHECK(tab->color() == color);
+    }
+}
+
 TEST_CASE("newWindow stages the spawn screen; takePendingSpawnScreen consumes it exactly once",
           "[contour][multiwindow]")
 {

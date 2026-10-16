@@ -2116,6 +2116,23 @@ TEST_CASE("SessionChrome draws the scrollbar's marks, and a click on one jumps t
         CHECK(host.bar->property("position").toReal() == Catch::Approx(0.9));
     }
 
+    SECTION("a tick takes a press a few pixels off its line, a nine-pixel target")
+    {
+        bind(*session);
+        host.bar->setProperty("position", 0.9);
+        QCoreApplication::processEvents();
+
+        auto const ticks = markTicksOf(*layer);
+        REQUIRE(ticks.size() == 2);
+        CHECK(ticks[0]->height() == Catch::Approx(3));
+        // Two pixels above its top edge: outside the line, inside the margin around it.
+        auto const aboveTheLine = ticks[0]->mapToScene(QPointF(ticks[0]->width() / 2, -2)).toPoint();
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, aboveTheLine);
+        QCoreApplication::processEvents();
+
+        CHECK(session->jumpedTo == std::vector<qint64> { 42 });
+    }
+
     SECTION("a click on a tick under the enlarged handle still jumps, and leaves the bar where it was")
     {
         auto deep = ScrollingMockSession {};
@@ -4176,6 +4193,8 @@ TEST_CASE("SessionChrome shows the command block tooltip only while a block is h
     auto* tip = host.chrome->findChild<QQuickItem*>(QStringLiteral("commandBlockTooltip"));
     REQUIRE(tip != nullptr);
     CHECK(tip->property("tipText").toString().isEmpty());
+    // Sooner than the hyperlink tip: the gutter is where a pointer goes on purpose.
+    CHECK(tip->property("showDelay").toInt() == 300);
 
     SECTION("a hovered block publishes its text, beside its gutter cell")
     {

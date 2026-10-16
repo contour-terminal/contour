@@ -25,4 +25,5 @@ TEST_CASE("CommandLineText hands a reader the bytes made safe for its purpose", 
     CHECK(text.display() == "ls\xEF\xBF\xBD[201~rm -rf ~\xEF\xBF\xBD");
     CHECK(text.insertable() == "ls[201~rm -rf ~\n");
     CHECK(text.copyable() == "ls[201~rm -rf ~");
+    CHECK(CommandLineText { "a\r\n\tb\n" }.multilineCopyable() == "a\n\tb");
 }

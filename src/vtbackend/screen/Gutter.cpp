@@ -181,10 +181,12 @@ namespace
 
     [[nodiscard]] int blockColumnColumns(SegmentInputs const& inputs)
     {
-        // One column whenever any of its three jobs is on. Fold markers alone already reserved it, so
-        // turning exit status or user marks on beside them costs no width.
+        // Its configured width whenever any of its three jobs is on. Fold markers alone already reserved
+        // it, so turning exit status or user marks on beside them costs no width.
         auto const& settings = inputs.settings;
-        return (settings.foldMarkers || settings.exitStatus || settings.userMarks) ? 1 : 0;
+        if (!settings.foldMarkers && !settings.exitStatus && !settings.userMarks)
+            return 0;
+        return std::clamp(settings.blockColumnWidth, MinBlockColumnWidth, MaxBlockColumnWidth);
     }
 
     /// One row of the gutter's table: a segment, and how wide the settings make it.
@@ -337,6 +339,13 @@ namespace
     };
     static_assert(FoldGlyphs.size() == static_cast<std::size_t>(FoldMarker::Count));
 
+    /// Whether the row's block failed, as far as the column may say: only with exit status on.
+    [[nodiscard]] constexpr bool showsFailure(BlockColumnFacts const& facts,
+                                              GutterSettings const& settings) noexcept
+    {
+        return settings.exitStatus && facts.outcome == CommandBlockOutcome::Failure;
+    }
+
     [[nodiscard]] constexpr bool isFoldHead(FoldMarker marker) noexcept
     {
         return marker == FoldMarker::Expanded || marker == FoldMarker::Collapsed;
@@ -383,8 +392,9 @@ namespace
     [[nodiscard]] BlockColumnGlyph finishedHeadRule(BlockColumnFacts const& facts,
                                                     GutterSettings const& settings) noexcept
     {
-        return settings.exitStatus && facts.head == BlockHeadState::Finished ? BlockColumnGlyph::Finished
-                                                                             : BlockColumnGlyph::None;
+        if (!settings.exitStatus || facts.head != BlockHeadState::Finished)
+            return BlockColumnGlyph::None;
+        return showsFailure(facts, settings) ? BlockColumnGlyph::Failed : BlockColumnGlyph::Finished;
     }
 
     /// The block column, highest precedence first. Another glyph is a rule here and a row in
@@ -399,6 +409,13 @@ namespace
 
     /// The blank column between a row's text and its fold label.
     constexpr auto FoldLabelGap = 1;
+
+    /// The column a fold label starts at, for the drawing and the click alike.
+    /// @param textColumns How many columns of the row hold text.
+    [[nodiscard]] constexpr ColumnOffset foldLabelStart(ColumnCount textColumns) noexcept
+    {
+        return ColumnOffset(unbox<int>(textColumns) + FoldLabelGap);
+    }
 
     /// Digits per thousands group in a fold label's count.
     constexpr auto DigitsPerGroup = std::size_t { 3 };
@@ -419,20 +436,58 @@ BlockColumnGlyph blockColumnGlyph(BlockColumnFacts const& facts, GutterSettings 
     return BlockColumnGlyph::None;
 }
 
-char32_t blockColumnCodepoint(BlockColumnGlyph glyph) noexcept
+FoldWeight foldWeightOf(BlockColumnFacts const& facts,
+                        GutterSettings const& settings,
+                        GutterHover hover) noexcept
 {
+    auto const steps =
+        (showsFailure(facts, settings) ? 1 : 0)
+        + (hover == GutterHover::Hovered && settings.hoverStroke == FoldHoverStroke::Bolder ? 1 : 0);
+    return static_cast<FoldWeight>(steps);
+}
+
+char32_t blockColumnCodepoint(BlockColumnGlyph glyph, FoldWeight weight) noexcept
+{
+    // A row per glyph, a column per weight. The fold's light four are foldMarkerGlyph()'s; from U+10F008 the
+    // same four heavy, from U+10F00C heavier. A status mark has one weight, so its row repeats it.
+    using Weights = std::array<char32_t, static_cast<std::size_t>(FoldWeight::Count)>;
+    auto constexpr Single = [](char32_t codepoint) {
+        return Weights { codepoint, codepoint, codepoint };
+    };
     constexpr auto Codepoints = std::array {
-        U'\0',                                  // None
-        foldMarkerGlyph(FoldMarker::Expanded),  // FoldExpanded
-        foldMarkerGlyph(FoldMarker::Collapsed), // FoldCollapsed
-        foldMarkerGlyph(FoldMarker::Body),      // FoldBody
-        foldMarkerGlyph(FoldMarker::BodyEnd),   // FoldBodyEnd
-        U'\U0010F003',                          // UserMark: a diamond, as U+25C6 ◆
-        U'\U0010F002',                          // Running:  a small right-pointing triangle, as U+25B8 ▸
-        U'\U0010F004',                          // Finished: a disc, as U+25CF ●
+        Single(U'\0'),                                                                    // None
+        Weights { foldMarkerGlyph(FoldMarker::Expanded), U'\U0010F008', U'\U0010F00C' },  // FoldExpanded
+        Weights { foldMarkerGlyph(FoldMarker::Collapsed), U'\U0010F009', U'\U0010F00D' }, // FoldCollapsed
+        Weights { foldMarkerGlyph(FoldMarker::Body), U'\U0010F00A', U'\U0010F00E' },      // FoldBody
+        Weights { foldMarkerGlyph(FoldMarker::BodyEnd), U'\U0010F00B', U'\U0010F00F' },   // FoldBodyEnd
+        Single(U'\U0010F003'), // UserMark: a diamond, as U+25C6 ◆
+        Single(U'\U0010F002'), // Running:  a small right-pointing triangle, as U+25B8 ▸
+        Single(U'\U0010F004'), // Finished: a disc, as U+25CF ●
+        Single(U'\U0010F005'), // Failed:   a cross, as U+2717 ✗
     };
     static_assert(Codepoints.size() == static_cast<std::size_t>(BlockColumnGlyph::Count));
-    return Codepoints[static_cast<std::size_t>(glyph)];
+    return Codepoints[static_cast<std::size_t>(glyph)][static_cast<std::size_t>(weight)];
+}
+
+BlockColumnPress blockColumnPressFor(BlockColumnGlyph glyph, FoldToggle fold) noexcept
+{
+    if (fold == FoldToggle::Available)
+        return BlockColumnPress::ToggleFold;
+
+    // With no fold to toggle, only a status mark has something to offer: its block's menu.
+    constexpr auto Presses = std::array {
+        BlockColumnPress::Swallow,       // None
+        BlockColumnPress::Swallow,       // FoldExpanded: drawn, but folding is off
+        BlockColumnPress::Swallow,       // FoldCollapsed: likewise
+        BlockColumnPress::Swallow,       // FoldBody
+        BlockColumnPress::Swallow,       // FoldBodyEnd
+        BlockColumnPress::Swallow,       // UserMark
+        BlockColumnPress::OpenBlockMenu, // Running
+        BlockColumnPress::OpenBlockMenu, // Finished
+        BlockColumnPress::OpenBlockMenu, // Failed
+    };
+    static_assert(Presses.size() == static_cast<std::size_t>(BlockColumnGlyph::Count));
+    return Presses[static_cast<std::size_t>(glyph)];
 }
 
 BlockHeadState blockHeadStateOf(CommandBlockRecord const* record,
@@ -466,17 +521,23 @@ RGBColorPair blockColumnColors(ColorPalette const& palette,
     if (glyph == BlockColumnGlyph::UserMark)
         return RGBColorPair { .foreground = fullStrength, .background = fold.background };
 
-    // No status to show, or a success the scheme leaves to the fold column: exactly today's column.
-    if (!outcome
-        || (*outcome == CommandBlockOutcome::Success
-            && !palette.blockStatus[std::to_underlying(CommandBlockOutcome::Success)]))
+    // No status to show: exactly the fold column.
+    if (!outcome)
         return fold;
 
-    auto const status = palette.blockStatusColor(*outcome);
+    // The scheme's colour for the outcome in either state, each derived where it sets none -- a success it
+    // leaves unset as the fold column's own, at rest and hovered.
     return RGBColorPair { .foreground = hover == GutterHover::Hovered
-                                            ? mixColor(status, fullStrength, BlockStatusHoverLift)
-                                            : status,
+                                            ? palette.blockStatusHoverColor(*outcome)
+                                            : palette.blockStatusColor(*outcome),
                           .background = fold.background };
+}
+
+RGBColor blockHighlightColor(ColorPalette const& palette, std::optional<CommandBlockOutcome> outcome) noexcept
+{
+    // A disc's hovered colour is its block's: the outcome's, lifted, or the text colour for an uncoloured
+    // success.
+    return blockColumnColors(palette, BlockColumnGlyph::Finished, outcome, GutterHover::Hovered).foreground;
 }
 
 void appendGutterCells(GutterLayout const& layout,
@@ -510,12 +571,25 @@ void appendGutterCells(GutterLayout const& layout,
     appendText(GutterSegmentKind::LineNumber, row.lineNumber.view());
 
     auto const block = layout.segment(GutterSegmentKind::BlockColumn);
-    if (!block || row.glyph == BlockColumnGlyph::None)
+    if (!block)
+        return;
+
+    if (row.glyph == BlockColumnGlyph::None)
         return;
     output.push_back(RenderGutterCell { .lineOffset = row.screenLine,
-                                        .codepoint = blockColumnCodepoint(row.glyph),
-                                        .attributes = gutterCellAttributes(row.glyphColors),
+                                        .codepoint = blockColumnCodepoint(row.glyph, row.weight),
+                                        .attributes = blockColumnCellAttributes(*block, row.glyphColors),
                                         .column = columnOf(block->firstColumn) });
+}
+
+RenderAttributes blockColumnCellAttributes(GutterSegment const& block, RGBColorPair colors) noexcept
+{
+    auto attributes = gutterCellAttributes(colors);
+    // Drawn across the whole column: the renderer rasterises a cell flagged DoubleWidth into a tile two
+    // cells wide, as it does a DECDWL line's, and draws its background two cells wide with it.
+    if (block.columns >= 2)
+        attributes.lineFlags = LineFlag::DoubleWidth;
+    return attributes;
 }
 
 std::u32string collapsedFoldLabel(uint64_t hiddenLines)
@@ -539,6 +613,19 @@ std::u32string collapsedFoldLabel(uint64_t hiddenLines)
     return label;
 }
 
+std::optional<ColumnRange> foldLabelExtent(LineOffset screenLine,
+                                           ColumnCount textColumns,
+                                           ColumnCount pageColumns,
+                                           std::size_t labelColumns) noexcept
+{
+    auto const begin = foldLabelStart(textColumns);
+    auto const end =
+        std::min(begin + ColumnOffset::cast_from(labelColumns), boxed_cast<ColumnOffset>(pageColumns));
+    if (begin >= end)
+        return std::nullopt;
+    return ColumnRange { .line = screenLine, .fromColumn = begin, .toColumn = end - ColumnOffset(1) };
+}
+
 void layoutFoldLabel(std::vector<RenderCell>& output,
                      LineOffset screenLine,
                      ColumnCount textColumns,
@@ -547,12 +634,11 @@ void layoutFoldLabel(std::vector<RenderCell>& output,
                      RenderAttributes const& attributes)
 {
     // The layout stops at the page's edge, glyph by glyph: a wide one that would cross it is dropped whole.
-    layoutRenderText(
-        output,
-        label,
-        attributes,
-        CellLocation { .line = screenLine, .column = ColumnOffset(unbox<int>(textColumns) + FoldLabelGap) },
-        boxed_cast<ColumnOffset>(pageColumns));
+    layoutRenderText(output,
+                     label,
+                     attributes,
+                     CellLocation { .line = screenLine, .column = foldLabelStart(textColumns) },
+                     boxed_cast<ColumnOffset>(pageColumns));
 }
 
 } // namespace vtbackend

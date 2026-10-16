@@ -326,6 +326,11 @@ struct ColorPalette
     /// the marker quieter than the text beside it in every theme, which a constant grey manages in none.
     static constexpr float FoldMarkerRestFade = 0.45f;
 
+    /// The contrast the fade stops short of: WCAG 1.4.11's minimum for what a user must make out to operate
+    /// something. A scheme with less between its text and its background fades less, rather than leaving
+    /// the gutter's marks a shade off the background.
+    static constexpr double FoldMarkerRestMinimumContrast = 3.0;
+
     /// The fold column's colors at rest, with the unset case resolved.
     ///
     /// The background is the page's own, exactly -- as it is when hovered, so the gutter never draws a
@@ -333,8 +338,10 @@ struct ColorPalette
     /// behind the column in both states.
     [[nodiscard]] RGBColorPair foldMarkerColors() const noexcept
     {
-        return foldMarker.value_or(
-            RGBColorPair { .foreground = restingForeground(), .background = defaultBackground });
+        // Not value_or(): its argument is computed whether or not it is used.
+        return foldMarker
+                   ? *foldMarker
+                   : RGBColorPair { .foreground = restingForeground(), .background = defaultBackground };
     }
 
     /// The fold column's colors while the pointer is over it, with the unset case resolved.
@@ -363,6 +370,17 @@ struct ColorPalette
     /// @see blockStatusColor for what each derives from.
     std::array<std::optional<RGBColor>, CommandBlockOutcomeCount> blockStatus {};
 
+    /// The block column's colours under the pointer, indexed by CommandBlockOutcome, each unset unless the
+    /// scheme says otherwise.
+    ///
+    /// @see blockStatusHoverColor for what each derives from.
+    std::array<std::optional<RGBColor>, CommandBlockOutcomeCount> blockStatusHover {};
+
+    /// How far a status colour is lifted toward the text colour under the pointer, where the scheme sets
+    /// no hover colour of its own: hovering still says "this is what a click acts on" without washing the
+    /// status out.
+    static constexpr float BlockStatusHoverLift = 0.5F;
+
     /// The colour of the gutter's text -- its line numbers and timestamps -- unset unless the scheme says
     /// otherwise.
     std::optional<RGBColor> gutterText;
@@ -388,6 +406,25 @@ struct ColorPalette
         return foldMarkerColors().foreground;
     }
 
+    /// The colour a block's gutter glyphs take for @p outcome under the pointer, with the unset case
+    /// resolved.
+    ///
+    /// The status colour lifted halfway toward the text colour -- except a success the scheme leaves to the
+    /// fold column, which comes up to full strength as the column does.
+    ///
+    /// @param outcome How the block's command ended, or that it is still running.
+    /// @return The scheme's hover colour for @p outcome, or the derived one when the scheme sets none.
+    [[nodiscard]] RGBColor blockStatusHoverColor(CommandBlockOutcome outcome) const noexcept
+    {
+        auto const index = static_cast<size_t>(outcome);
+        if (auto const& configured = blockStatusHover[index])
+            return *configured;
+        auto const fullStrength = foldMarkerHoverColors().foreground;
+        if (outcome == CommandBlockOutcome::Success && !blockStatus[index])
+            return fullStrength;
+        return mixColor(blockStatusColor(outcome), fullStrength, BlockStatusHoverLift);
+    }
+
     /// The gutter's text colour with the unset case resolved: the scheme's foreground faded toward its
     /// background exactly as the resting fold column is, so numbers and times stay quieter than the
     /// output beside them in any theme.
@@ -395,7 +432,7 @@ struct ColorPalette
     /// @return The scheme's gutter text colour, or the faded foreground when the scheme sets none.
     [[nodiscard]] RGBColor gutterTextColor() const noexcept
     {
-        return gutterText.value_or(restingForeground());
+        return gutterText ? *gutterText : restingForeground();
     }
 
     /// The gutter's text colour on the page's own background: what its line numbers, its timestamps and a
@@ -488,11 +525,13 @@ struct ColorPalette
     bool operator==(ColorPalette const&) const = default;
 
   private:
-    /// The scheme's foreground faded toward its background by FoldMarkerRestFade: what the gutter derives
-    /// its quiet colours from when the scheme sets none.
+    /// The scheme's foreground faded toward its background by FoldMarkerRestFade, but never below
+    /// FoldMarkerRestMinimumContrast against it: what the gutter derives its quiet colours from when the
+    /// scheme sets none.
     [[nodiscard]] RGBColor restingForeground() const noexcept
     {
-        return mixColor(defaultForeground, defaultBackground, FoldMarkerRestFade);
+        return fadeKeepingContrast(
+            defaultForeground, defaultBackground, FoldMarkerRestFade, FoldMarkerRestMinimumContrast);
     }
 };
 

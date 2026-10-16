@@ -21,6 +21,9 @@ enum class SanitizePurpose : uint8_t
     /// as Insert, but LF, CR and TAB become a space and trailing spaces go, so the paste is one line that
     /// runs nothing until the user presses Enter.
     Clipboard,
+    /// Clipboard text with internal TAB and LF preserved, CR/CRLF normalized to LF, and trailing
+    /// whitespace removed. Internal newlines may submit commands when pasted without bracketed paste.
+    ClipboardMultiline,
 };
 
 /// Makes a command line reported by a shell safe to show, to type back into a shell, or to copy.
@@ -29,6 +32,8 @@ enum class SanitizePurpose : uint8_t
 /// Display: C0/C1 controls, bidi overrides and the line and paragraph separators → U+FFFD; Insert:
 /// additionally drops ESC and every C0 except TAB and LF, and every C1; Type: drops TAB and LF as well;
 /// Clipboard: as Insert, with TAB, LF and CR turned into spaces and the trailing spaces trimmed.
+/// ClipboardMultiline: preserves TAB and LF, normalizes CR/CRLF to LF, and trims trailing spaces,
+/// tabs and line endings. All other controls are treated as for Clipboard.
 ///
 /// In detail: DEL counts as a C0 control. The bidi controls are the embeddings, overrides and
 /// isolates (U+202A..U+202E, U+2066..U+2069); the separators are U+2028 and U+2029, at which a text
@@ -46,5 +51,11 @@ enum class SanitizePurpose : uint8_t
 /// @param purpose What the text is for.
 /// @return Whether @p text is already safe for @p purpose.
 [[nodiscard]] bool isUnchangedBySanitizing(std::string_view text, SanitizePurpose purpose);
+
+/// @p text without the white space it ends with: every code point of Unicode's White_Space property, not only
+/// ASCII's. Ill-formed UTF-8 is not white space, whatever its bytes.
+/// @param text The text to trim.
+/// @return The prefix of @p text that ends with its last code point that is not white space.
+[[nodiscard]] std::string_view trimTrailingWhiteSpace(std::string_view text);
 
 } // namespace vtbackend

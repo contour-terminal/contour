@@ -109,6 +109,33 @@ void writeSideFile(QTemporaryDir& dir, std::filesystem::path const& relativePath
 
 } // namespace
 
+TEST_CASE("Config: multiline command copying is opt-in per profile", "[config]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+    single_line:
+        shell: /bin/sh
+        copy_command_preserve_multiline: false
+    multiline:
+        shell: /bin/sh
+        copy_command_preserve_multiline: true
+)"sv);
+    CHECK_FALSE(config.profile("main")->copyCommandPreserveMultiline.value());
+    CHECK_FALSE(config.profile("single_line")->copyCommandPreserveMultiline.value());
+    CHECK(config.profile("multiline")->copyCommandPreserveMultiline.value());
+
+    writeSideFile(
+        dir, "profiles/roundtrip.yml", contour::config::emitProfileYaml(*config.profile("multiline")));
+    auto const reloaded = loadFromYaml(dir, "default_profile: main\n");
+    auto const* roundTripped = reloaded.findProfile("roundtrip");
+    REQUIRE(roundTripped != nullptr);
+    CHECK(roundTripped->copyCommandPreserveMultiline.value());
+}
+
 TEST_CASE("Config: global scalars load from YAML", "[config]")
 {
     QTemporaryDir dir;
@@ -1433,9 +1460,9 @@ TEST_CASE("Config: folding decides the block column's fold controls, not whether
         int gutterColumns;
     };
     auto const cases = std::array {
-        Case { .folding = "", .foldMarkers = true, .gutterColumns = 1 },
-        Case { .folding = "folding:\n    show_markers: false\n", .foldMarkers = false, .gutterColumns = 1 },
-        Case { .folding = "folding:\n    enabled: false\n", .foldMarkers = false, .gutterColumns = 1 },
+        Case { .folding = "", .foldMarkers = true, .gutterColumns = 2 },
+        Case { .folding = "folding:\n    show_markers: false\n", .foldMarkers = false, .gutterColumns = 2 },
+        Case { .folding = "folding:\n    enabled: false\n", .foldMarkers = false, .gutterColumns = 2 },
         Case { .folding = "folding:\n    show_markers: false\n"
                           "gutter:\n    exit_status: false\n    user_marks: false\n",
                .foldMarkers = false,
@@ -3851,6 +3878,33 @@ TEST_CASE("config.builtinFallbackKeyMappings", "[config]")
         CHECK(std::holds_alternative<contour::actions::SwitchToTabLeft>(backTab->front()));
     }
 
+    SECTION("Ctrl+Shift+Up and Down go from prompt to prompt, on the primary screen only")
+    {
+        auto const config = Config {};
+
+        auto const* up = contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, modeFlags);
+        REQUIRE(up != nullptr);
+        REQUIRE(up->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::ScrollMarkUp>(up->front()));
+
+        auto const* down =
+            contour::config::applyBuiltinFallback(config, Key::DownArrow, ctrlShift, modeFlags);
+        REQUIRE(down != nullptr);
+        REQUIRE(down->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::ScrollMarkDown>(down->front()));
+
+        // A full-screen application keeps the chord.
+        auto const alternateScreen = uint8_t { vtbackend::MatchModes::AlternateScreen };
+        CHECK(contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, alternateScreen)
+              == nullptr);
+
+        // And the plain defaults leave it free, so a user's own binding of it is found first.
+        CHECK(std::ranges::none_of(config.inputMappings.value().keyMappings, [&](auto const& mapping) {
+            return (mapping.input == Key::UpArrow || mapping.input == Key::DownArrow)
+                   && mapping.modifiers == ctrlShift;
+        }));
+    }
+
     SECTION("matching is on the exact chord")
     {
         auto const config = Config {};
@@ -4566,6 +4620,29 @@ TEST_CASE("Config: a side file whose document is no map is skipped, not fatal", 
         CHECK(capture.text().contains("word.yml"));
         CHECK_FALSE(capture.text().contains("profiles.main.colors"));
     }
+}
+
+TEST_CASE("Config: profile tab colors round trip and can be cleared", "[config][tab-color]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        tab_color: '#2E3440'
+    plain:
+        tab_color: null
+    invalid:
+        tab_color: '#GGGGGG'
+)"sv);
+    auto const nord = vtbackend::RGBColor { 0x2E, 0x34, 0x40 };
+    CHECK(config.profile("main")->tabColor.value() == nord);
+    CHECK_FALSE(config.profile("plain")->tabColor.value().has_value());
+    CHECK(config.profile("invalid")->tabColor.value() == nord);
+    CHECK_FALSE(contour::config::TerminalProfile {}.tabColor.value().has_value());
+    auto const emitted = contour::config::emitProfileYaml(*config.profile("main"));
+    CHECK(YAML::Load(emitted)["tab_color"].as<std::string>() == "#2E3440");
+    CHECK(YAML::Load(contour::config::emitProfileYaml(*config.profile("plain")))["tab_color"].IsNull());
 }
 
 // }}}
@@ -5452,8 +5529,18 @@ color_schemes:
             success: '#20A020'
             failure: '#E02020'
             running: '#E0E020'
+        block_status_hover:
+            success: '#40C040'
+            failure: '#FF4040'
+            running: '#FFFF40'
         gutter_text: '#606060'
 )"sv));
+        CHECK(scheme.blockStatusHover[static_cast<size_t>(vtbackend::CommandBlockOutcome::Success)]
+              == vtbackend::RGBColor(0x40, 0xC0, 0x40));
+        CHECK(scheme.blockStatusHover[static_cast<size_t>(vtbackend::CommandBlockOutcome::Failure)]
+              == vtbackend::RGBColor(0xFF, 0x40, 0x40));
+        CHECK(scheme.blockStatusHover[static_cast<size_t>(vtbackend::CommandBlockOutcome::Running)]
+              == vtbackend::RGBColor(0xFF, 0xFF, 0x40));
         CHECK(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Success)
               == vtbackend::RGBColor(0x20, 0xA0, 0x20));
         CHECK(blockStatusIn(scheme, vtbackend::CommandBlockOutcome::Failure)
@@ -5510,6 +5597,7 @@ color_schemes:
     {
         auto const generated = contour::config::defaultConfigString();
         CHECK(generated.contains("# block_status:"));
+        CHECK(generated.contains("# block_status_hover:"));
         CHECK(generated.contains("# gutter_text:"));
     }
 }
@@ -5521,6 +5609,13 @@ template <vtbackend::CommandBlockOutcome Outcome>
 std::optional<vtbackend::RGBColor>& blockStatusOf(vtbackend::ColorPalette& palette)
 {
     return palette.blockStatus[static_cast<size_t>(Outcome)];
+}
+
+/// The palette's hover colour for @p Outcome, as a slot a table of colour keys can name.
+template <vtbackend::CommandBlockOutcome Outcome>
+std::optional<vtbackend::RGBColor>& blockStatusHoverOf(vtbackend::ColorPalette& palette)
+{
+    return palette.blockStatusHover[static_cast<size_t>(Outcome)];
 }
 } // namespace
 
@@ -5535,6 +5630,12 @@ TEST_CASE("Config: each gutter color a scheme sets is written back on its own", 
                     Slot { &blockStatusOf<vtbackend::CommandBlockOutcome::Failure> } },
         std::pair { "block_status.running"sv,
                     Slot { &blockStatusOf<vtbackend::CommandBlockOutcome::Running> } },
+        std::pair { "block_status_hover.success"sv,
+                    Slot { &blockStatusHoverOf<vtbackend::CommandBlockOutcome::Success> } },
+        std::pair { "block_status_hover.failure"sv,
+                    Slot { &blockStatusHoverOf<vtbackend::CommandBlockOutcome::Failure> } },
+        std::pair { "block_status_hover.running"sv,
+                    Slot { &blockStatusHoverOf<vtbackend::CommandBlockOutcome::Running> } },
         std::pair { "gutter_text"sv,
                     Slot { [](vtbackend::ColorPalette& palette) -> std::optional<vtbackend::RGBColor>& {
                         return palette.gutterText;
@@ -5578,6 +5679,13 @@ TEST_CASE("Config: the gutter colors the generated config quotes are what the de
         std::format("#     failure: {}\n", palette.blockStatusColor(CommandBlockOutcome::Failure))));
     CHECK(generated.contains(
         std::format("#     running: {}\n", palette.blockStatusColor(CommandBlockOutcome::Running))));
+    for (auto const [key, outcome]: { std::pair { "success"sv, CommandBlockOutcome::Success },
+                                      std::pair { "failure"sv, CommandBlockOutcome::Failure },
+                                      std::pair { "running"sv, CommandBlockOutcome::Running } })
+    {
+        INFO("block_status_hover." << key);
+        CHECK(generated.contains(std::format("#     {}: {}\n", key, palette.blockStatusHoverColor(outcome))));
+    }
     CHECK(generated.contains(std::format("# gutter_text: {}\n", palette.gutterTextColor())));
 }
 
@@ -5589,6 +5697,7 @@ default_profile: main
 gutter:
     exit_status: false
     user_marks: false
+    bold_on_hover: false
     line_numbers: hybrid
     line_number_width: 8
     timestamps: true
@@ -5601,25 +5710,60 @@ profiles:
     auto const& gutter = config.gutter.value();
     CHECK(gutter.exitStatus == false);
     CHECK(gutter.userMarks == false);
+    CHECK(gutter.boldOnHover == false);
+    CHECK(contour::config::gutterSettingsFor(config).hoverStroke == vtbackend::FoldHoverStroke::Unchanged);
     CHECK(gutter.lineNumbers == vtbackend::LineNumberMode::Hybrid);
     CHECK(gutter.lineNumberWidth == 8);
     CHECK(gutter.timestamps == true);
     CHECK(gutter.timestampFormat == "%H:%M");
 }
 
-TEST_CASE("Config: gutter defaults keep the one column the fold markers always took", "[config]")
+TEST_CASE("Config: gutter defaults draw the block column two cells wide", "[config]")
 {
     auto const config = contour::config::Config {};
     auto const& gutter = config.gutter.value();
     CHECK(gutter.exitStatus);
     CHECK(gutter.userMarks);
+    CHECK(gutter.blockColumnWidth == 2);
+    CHECK(gutter.boldOnHover);
+    CHECK(contour::config::gutterSettingsFor(config).hoverStroke == vtbackend::FoldHoverStroke::Bolder);
     CHECK(gutter.lineNumbers == vtbackend::LineNumberMode::Off);
     CHECK(gutter.lineNumberWidth == 6);
     CHECK_FALSE(gutter.timestamps);
     CHECK(gutter.timestampFormat == "%H:%M:%S");
 
-    // Nobody's column count changes on upgrade: exit status and user marks share the fold column.
-    CHECK(vtbackend::gutterLayoutFor(contour::config::gutterSettingsFor(config)).totalColumns == 1);
+    // Exit status and user marks share the fold column, which takes two cells: its controls and marks are
+    // drawn across both, at twice the size, and a click anywhere in it lands.
+    CHECK(vtbackend::gutterLayoutFor(contour::config::gutterSettingsFor(config)).totalColumns == 2);
+}
+
+TEST_CASE("Config: gutter.block_column_width takes 1 or 2 cells", "[config]")
+{
+    struct Case
+    {
+        std::string_view width;
+        int expected;
+    };
+    auto const cases = std::array {
+        Case { .width = "1", .expected = 1 },  Case { .width = "2", .expected = 2 },
+        Case { .width = "0", .expected = 2 },  Case { .width = "3", .expected = 2 },
+        Case { .width = "-1", .expected = 2 },
+    };
+    for (auto const& testCase: cases)
+    {
+        CAPTURE(testCase.width);
+        QTemporaryDir dir;
+        auto capture = core::log::ScopedCapture { "error" };
+        auto const config =
+            loadFromYaml(dir,
+                         contour::test::profileConfigYaml(
+                             "main", std::format("gutter:\n    block_column_width: {}\n", testCase.width)));
+        CHECK(config.gutter.value().blockColumnWidth == testCase.expected);
+        CHECK(contour::config::gutterSettingsFor(config).blockColumnWidth == testCase.expected);
+        // Refused, and said so, rather than taken: a width out of range is a typo.
+        CHECK(capture.text().contains("block_column_width")
+              == (testCase.expected != std::stoi(std::string { testCase.width })));
+    }
 }
 
 TEST_CASE("Config: an unusable gutter width or timestamp format keeps the default and says why", "[config]")
@@ -7202,6 +7346,8 @@ TEST_CASE("Config: the generated config and the reference docs carry every comma
         { "gutter",
           { "exit_status",
             "user_marks",
+            "block_column_width",
+            "bold_on_hover",
             "line_numbers",
             "line_number_width",
             "timestamps",
@@ -7232,7 +7378,7 @@ TEST_CASE("Config: the generated config and the reference docs carry every comma
     // The colour-scheme slots are optional, so the generated scheme carries them as commented examples, as
     // it does fold_marker: present in the text, absent from the parsed tree.
     auto const schemes = text.substr(text.find("\ncolor_schemes:"));
-    for (auto const* key: { "block_status", "gutter_text", "sticky_header" })
+    for (auto const* key: { "block_status", "block_status_hover", "gutter_text", "sticky_header" })
     {
         INFO("generated colour scheme: " << key);
         CHECK(schemes.contains(key));

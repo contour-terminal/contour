@@ -1122,10 +1122,14 @@ void TerminalSessionManager::tabAboutToBeAdded(vtworkspace::WindowId window, int
         c->onTabAboutToBeAdded(index);
 }
 
-void TerminalSessionManager::tabAdded(vtworkspace::WindowId window, vtworkspace::TabId, int index)
+void TerminalSessionManager::tabAdded(vtworkspace::WindowId window, vtworkspace::TabId id, int index)
 {
     if (auto* c = controllerFor(window))
         c->onTabAdded(index);
+    if (auto* tab = _model->findTab(id))
+        if (auto* session = sessionForId(tab->rootPane()->firstLeaf()->session()))
+            if (auto const& color = session->profile().tabColor.value(); color)
+                _model->setTabColor(id, vtworkspace::TabColorSource::Profile, *color);
 }
 
 void TerminalSessionManager::tabAboutToBeRemoved(vtworkspace::WindowId window, int index)

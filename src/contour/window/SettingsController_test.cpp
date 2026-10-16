@@ -151,8 +151,10 @@ profiles:
     auto const current = row.value("value");
     if (type == "bool")
         return { !current.toBool() };
+    // Down rather than up where it can go: a row's range is not on it, and a default at its maximum -- the
+    // block column's two cells -- has room only below. A small one goes up, from the floor of a count.
     if (type == "int")
-        return { current.toInt() + 1 };
+        return { current.toInt() > 1 ? current.toInt() - 1 : current.toInt() + 1 };
     if (type == "double")
         return { current.toDouble() + 1.0 };
     if (type == "enum")
@@ -478,11 +480,23 @@ TEST_CASE("SettingsController: the command-block colour slots are editable and s
     CHECK(colorOf("block_status_success") == hexOf(palette.blockStatusColor(CommandBlockOutcome::Success)));
     CHECK(colorOf("block_status_failure") == hexOf(palette.blockStatusColor(CommandBlockOutcome::Failure)));
     CHECK(colorOf("block_status_running") == hexOf(palette.blockStatusColor(CommandBlockOutcome::Running)));
+    for (auto const& [key, outcome]:
+         { std::pair { "block_status_hover_success", CommandBlockOutcome::Success },
+           std::pair { "block_status_hover_failure", CommandBlockOutcome::Failure },
+           std::pair { "block_status_hover_running", CommandBlockOutcome::Running } })
+    {
+        INFO(key);
+        CHECK(colorOf(QString::fromLatin1(key)) == hexOf(palette.blockStatusHoverColor(outcome)));
+    }
+    CHECK(colorOf("fold_marker") == hexOf(palette.foldMarkerColors().foreground));
+    CHECK(colorOf("fold_marker_hover") == hexOf(palette.foldMarkerHoverColors().foreground));
     CHECK(colorOf("gutter_text") == hexOf(palette.gutterTextColor()));
     CHECK(colorOf("sticky_header_background") == hexOf(palette.stickyHeaderBackgroundColor()));
     CHECK(colorOf("sticky_header_separator") == hexOf(palette.stickyHeaderSeparatorColor()));
 
     fx.controller->setSchemeColor("block_status_failure", "#ff0000");
+    fx.controller->setSchemeColor("block_status_hover_failure", "#ff8080");
+    fx.controller->setSchemeColor("fold_marker_hover", "#e0e0e0");
     fx.controller->setSchemeColor("sticky_header_separator", "#123456");
     CHECK(colorOf("block_status_failure") == "#ff0000");
     REQUIRE(fx.controller->saveColorScheme("blocks"));
@@ -494,14 +508,40 @@ TEST_CASE("SettingsController: the command-block colour slots are editable and s
         return saved->blockStatus.at(static_cast<std::size_t>(outcome));
     };
     CHECK(statusOf(CommandBlockOutcome::Failure) == vtbackend::RGBColor { 0xff, 0x00, 0x00 });
+    CHECK(saved->blockStatusHover.at(static_cast<std::size_t>(CommandBlockOutcome::Failure))
+          == vtbackend::RGBColor { 0xff, 0x80, 0x80 });
+    REQUIRE(saved->foldMarkerHover.has_value());
+    CHECK(saved->foldMarkerHover->foreground == vtbackend::RGBColor { 0xe0, 0xe0, 0xe0 });
+    // On the page's own background: the gutter draws no band.
+    CHECK(saved->foldMarkerHover->background == saved->defaultBackground);
     CHECK(saved->stickyHeaderSeparator == vtbackend::RGBColor { 0x12, 0x34, 0x56 });
 
     // The slots nobody edited are still unset, so they keep following the colours they derive from.
     // Seeding the draft with resolved values would have pinned colours the scheme never chose.
     CHECK_FALSE(statusOf(CommandBlockOutcome::Success).has_value());
     CHECK_FALSE(statusOf(CommandBlockOutcome::Running).has_value());
+    CHECK_FALSE(
+        saved->blockStatusHover.at(static_cast<std::size_t>(CommandBlockOutcome::Success)).has_value());
+    CHECK_FALSE(saved->foldMarker.has_value());
     CHECK_FALSE(saved->gutterText.has_value());
     CHECK_FALSE(saved->stickyHeaderBackground.has_value());
+}
+
+TEST_CASE("SettingsController: a fold column set in the editor moves with the background it sits on",
+          "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newColorScheme("");
+    fx.controller->setSchemeColor("fold_marker", "#808080");
+    fx.controller->setSchemeColor("background", "#203040");
+    REQUIRE(fx.controller->saveColorScheme("folds"));
+
+    auto const saved = config::loadColorSchemeFile(std::filesystem::path(fx.dir.path().toStdU16String())
+                                                   / "colorschemes" / "folds.yml");
+    REQUIRE(saved.has_value());
+    REQUIRE(saved->foldMarker.has_value());
+    CHECK(saved->foldMarker->foreground == vtbackend::RGBColor { 0x80, 0x80, 0x80 });
+    CHECK(saved->foldMarker->background == vtbackend::RGBColor { 0x20, 0x30, 0x40 });
 }
 
 TEST_CASE("SettingsController: an unset colour slot follows its source, and says so", "[settings]")

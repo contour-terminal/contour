@@ -757,21 +757,124 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
 
     SECTION("the open head's stem meets the body column exactly")
     {
-        // The stem and U+2502 must share a column, or the fold column breaks at every head.
-        auto const head = BoxDrawingRendererTest::buildElements(char32_t { 0x10F000 }, Cell, 1);
-        auto const body = BoxDrawingRendererTest::buildBoxElements(char32_t { 0x2502 }, Cell, 1, 1);
-        REQUIRE(head.has_value());
-        REQUIRE(body.has_value());
-
-        auto const litColumnOfBottomRow = [&](atlas::Buffer const& b) {
-            for (auto x = 0; x < 9; ++x)
-                if (b[static_cast<size_t>(x)] > 0)
-                    return x;
-            return -1;
+        // The stem, the body and its end share one column at one width, or the fold column steps at every
+        // head -- light and heavy alike, one cell wide or two, at any stroke.
+        auto const litColumns = [](atlas::Buffer const& b, ImageSize size, size_t row) {
+            auto const w = unbox<size_t>(size.width);
+            auto columns = std::vector<size_t> {};
+            for (auto const x: std::views::iota(size_t { 0 }, w))
+                if (b[(row * w) + x] > 0)
+                    columns.push_back(x);
+            return columns;
         };
+        auto constexpr Wide = ImageSize { Width(18), Height(20) };
+        for (auto const size: { Cell, Wide })
+        {
+            for (auto const thickness: { 1, 2 })
+            {
+                for (auto const [open, body, end]: { std::tuple { 0x10F000, 0x10F006, 0x10F007 },
+                                                     std::tuple { 0x10F008, 0x10F00A, 0x10F00B },
+                                                     std::tuple { 0x10F00C, 0x10F00E, 0x10F00F } })
+                {
+                    CAPTURE(unbox<int>(size.width), thickness, open);
+                    auto const headBuffer =
+                        BoxDrawingRendererTest::buildElements(char32_t(open), size, thickness);
+                    auto const bodyBuffer =
+                        BoxDrawingRendererTest::buildElements(char32_t(body), size, thickness);
+                    auto const endBuffer =
+                        BoxDrawingRendererTest::buildElements(char32_t(end), size, thickness);
+                    REQUIRE(headBuffer.has_value());
+                    REQUIRE(bodyBuffer.has_value());
+                    REQUIRE(endBuffer.has_value());
 
-        CHECK(litColumnOfBottomRow(*head) == litColumnOfBottomRow(*body));
+                    // Buffers run bottom-up: row 0 is the cell's bottom, the last row its top.
+                    auto const top = unbox<size_t>(size.height) - 1;
+                    auto const stem = litColumns(*headBuffer, size, 0);
+                    CHECK_FALSE(stem.empty());
+                    CHECK(litColumns(*bodyBuffer, size, top) == stem);
+                    CHECK(litColumns(*bodyBuffer, size, 0) == stem);
+                    CHECK(litColumns(*endBuffer, size, top) == stem);
+                }
+            }
+        }
     }
+
+    SECTION("the heavy fold column is twice the weight, the heavier three times")
+    {
+        auto const light = BoxDrawingRendererTest::buildElements(char32_t { 0x10F006 }, Cell, 1);
+        auto const heavy = BoxDrawingRendererTest::buildElements(char32_t { 0x10F00A }, Cell, 1);
+        auto const heavier = BoxDrawingRendererTest::buildElements(char32_t { 0x10F00E }, Cell, 1);
+        REQUIRE(light.has_value());
+        REQUIRE(heavy.has_value());
+        REQUIRE(heavier.has_value());
+        CHECK(countLitPixels(*heavy) == 2 * countLitPixels(*light));
+        CHECK(countLitPixels(*heavier) == 3 * countLitPixels(*light));
+    }
+
+    SECTION("the stem leaves the box from its centre, light or heavy, one cell wide or two")
+    {
+        // As many columns of box left of the stem as right of it: a heavy stem a pixel off the centre of an
+        // odd box reads as a crooked control.
+        auto constexpr Wide = ImageSize { Width(18), Height(20) };
+        for (auto const size: { Cell, Wide })
+        {
+            for (auto const [closed, open]: { std::pair { 0x10F001, 0x10F000 },
+                                              std::pair { 0x10F009, 0x10F008 },
+                                              std::pair { 0x10F00D, 0x10F00C } })
+            {
+                CAPTURE(unbox<int>(size.width), closed);
+                auto const w = unbox<int>(size.width);
+                auto const box = BoxDrawingRendererTest::buildElements(char32_t(closed), size, 1);
+                auto const head = BoxDrawingRendererTest::buildElements(char32_t(open), size, 1);
+                REQUIRE(box.has_value());
+                REQUIRE(head.has_value());
+                auto boxColumns = std::vector<int> {};
+                for (auto const i: std::views::iota(0, w * 20))
+                    if ((*box)[static_cast<size_t>(i)] > 0)
+                        boxColumns.push_back(i % w);
+                auto stem = std::vector<int> {}; // the head's bottom row: its stem alone
+                for (auto const x: std::views::iota(0, w))
+                    if ((*head)[static_cast<size_t>(x)] > 0)
+                        stem.push_back(x);
+                REQUIRE_FALSE(boxColumns.empty());
+                REQUIRE_FALSE(stem.empty());
+                CHECK(stem.front() - std::ranges::min(boxColumns)
+                      == std::ranges::max(boxColumns) - stem.back());
+            }
+        }
+    }
+
+    SECTION("the body's end turns right at the row's middle, out to the cell's edge")
+    {
+        auto const end = BoxDrawingRendererTest::buildElements(char32_t { 0x10F007 }, Cell, 1);
+        REQUIRE(end.has_value());
+        vtrasterizer::verifyBitmap(
+            TestTileData {
+                .bitmapSize = Cell, .bitmapFormat = vtrasterizer::atlas::Format::Red, .bitmap = *end },
+            {
+                ".........", ".........", ".........", ".........", ".........", ".........", ".........",
+                ".........", ".........", ".........", "....#####", "....#....", "....#....", "....#....",
+                "....#....", "....#....", "....#....", "....#....", "....#....", "....#....",
+            });
+    }
+}
+
+TEST_CASE("BoxDrawingRenderer.contourGlyphsKeepTheCellsStrokeWhenDrawnTwoCellsWide", "[boxdrawing]")
+{
+    // A DECDWL row's text is stretched to twice its width, and its box drawing takes twice the stroke to
+    // match. The gutter's glyphs are drawn two cells wide for their size: they keep a cell's stroke, so the
+    // fold column reads the same in either width.
+    auto const wide = vtbackend::LineFlags { vtbackend::LineFlag::DoubleWidth };
+    auto const narrow = vtbackend::LineFlags {};
+    CHECK(BoxDrawingRenderer::tileLineThickness(char32_t { 0x2502 }, wide, 1) == 2);
+    CHECK(BoxDrawingRenderer::tileLineThickness(char32_t { 0x2502 }, narrow, 1) == 1);
+    for (auto const codepoint: std::views::iota(char32_t { 0x10F000 }, char32_t { 0x10F010 }))
+    {
+        CAPTURE(static_cast<uint32_t>(codepoint));
+        CHECK(BoxDrawingRenderer::renderable(codepoint));
+        CHECK(BoxDrawingRenderer::tileLineThickness(codepoint, wide, 1) == 1);
+    }
+    CHECK_FALSE(BoxDrawingRenderer::isContourGlyph(char32_t { 0x10F010 }));
 }
 
 TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
@@ -790,6 +893,7 @@ TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
         CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F002 }));
         CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F003 }));
         CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F004 }));
+        CHECK(BoxDrawingRenderer::renderable(char32_t { 0x10F005 }));
     }
 
     SECTION("the Unicode shapes they look like stay the font's")
@@ -799,11 +903,13 @@ TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
         CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x25B8 }));
         CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x25C6 }));
         CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x25CF }));
+        CHECK_FALSE(BoxDrawingRenderer::renderable(char32_t { 0x2717 }));
     }
 
     SECTION("each fills its cell's buffer, draws something, and sits on the row's middle")
     {
-        for (auto const codepoint: { char32_t { 0x10F002 }, char32_t { 0x10F003 }, char32_t { 0x10F004 } })
+        for (auto const codepoint:
+             { char32_t { 0x10F002 }, char32_t { 0x10F003 }, char32_t { 0x10F004 }, char32_t { 0x10F005 } })
         {
             CAPTURE(static_cast<uint32_t>(codepoint));
             auto const buffer = build(codepoint);
@@ -836,6 +942,41 @@ TEST_CASE("BoxDrawingRenderer.gutterStatusMarks", "[boxdrawing]")
     {
         CHECK(countLitPixels(build(0x10F004)) > countLitPixels(build(0x10F003)));
     }
+
+    SECTION("the cross is symmetric both ways, and is not the disc")
+    {
+        auto const cross = build(0x10F005);
+        CHECK(cross == horizontalMirror(cross, Cell));
+        CHECK(cross != build(0x10F004));
+        // Its centre is lit, and a corner of the disc's square is not: a cross, not a box.
+        CHECK(cross[(10 * 9) + 4] > 0);
+        CHECK(cross[(2 * 9) + 0] == 0);
+    }
+}
+
+TEST_CASE("BoxDrawingRenderer.gutterGlyphsDrawnTwoCellsWideAreTwiceTheSize", "[boxdrawing]")
+{
+    // A two-cell block column draws its glyph into a buffer two cells wide (LineFlag::DoubleWidth): the fold
+    // control and the marks then size themselves to the row's height rather than to one cell's width.
+    auto constexpr Cell = ImageSize { Width(10), Height(19) };
+    auto constexpr Wide = ImageSize { Width(20), Height(19) };
+    auto const lit = [](char32_t codepoint, ImageSize size) {
+        auto buffer = BoxDrawingRendererTest::buildElements(codepoint, size, 1);
+        REQUIRE(buffer.has_value());
+        CHECK(buffer->size() == unbox<size_t>(size.width) * unbox<size_t>(size.height));
+        return countLitPixels(*buffer);
+    };
+
+    for (auto const codepoint: { char32_t { 0x10F000 },
+                                 char32_t { 0x10F001 },
+                                 char32_t { 0x10F002 },
+                                 char32_t { 0x10F003 },
+                                 char32_t { 0x10F004 },
+                                 char32_t { 0x10F005 } })
+    {
+        CAPTURE(static_cast<uint32_t>(codepoint));
+        CHECK(lit(codepoint, Wide) > lit(codepoint, Cell) * 3 / 2);
+    }
 }
 
 TEST_CASE("BoxDrawingRenderer.gutterStatusMarksInTinyCells", "[boxdrawing]")
@@ -849,8 +990,10 @@ TEST_CASE("BoxDrawingRenderer.gutterStatusMarksInTinyCells", "[boxdrawing]")
             CAPTURE(width, height);
             auto const cell =
                 ImageSize { Width(static_cast<unsigned>(width)), Height(static_cast<unsigned>(height)) };
-            for (auto const codepoint:
-                 { char32_t { 0x10F002 }, char32_t { 0x10F003 }, char32_t { 0x10F004 } })
+            for (auto const codepoint: { char32_t { 0x10F002 },
+                                         char32_t { 0x10F003 },
+                                         char32_t { 0x10F004 },
+                                         char32_t { 0x10F005 } })
             {
                 auto const buffer = BoxDrawingRendererTest::buildElements(codepoint, cell, 1);
                 REQUIRE(buffer.has_value());

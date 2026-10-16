@@ -114,6 +114,21 @@ inline constexpr int MinLineNumberWidth = 3;
 /// The widest line-number segment `gutter.line_number_width` may ask for.
 inline constexpr int MaxLineNumberWidth = 10;
 
+/// The narrowest block column `gutter.block_column_width` may ask for: one cell, its glyphs cell-sized.
+inline constexpr int MinBlockColumnWidth = 1;
+
+/// The widest block column `gutter.block_column_width` may ask for: two cells, its glyphs drawn across both.
+/// No wider, because a glyph is drawn one or two cells wide, and in three a two-cell glyph could not be
+/// centred; a fold control two cells wide is as tall as the row already allows.
+inline constexpr int MaxBlockColumnWidth = 2;
+
+/// What hovering a fold does to its column's strokes, beside bringing them to full strength.
+enum class FoldHoverStroke : uint8_t
+{
+    Unchanged = 0, ///< The strokes keep their weight: only the colour says the fold is under the pointer.
+    Bolder,        ///< The hovered fold's line, its head and its end are drawn one stroke heavier.
+};
+
 /// What the gutter shows: which segments it has and what each draws.
 ///
 /// The bools mirror the YAML keys they come from one to one -- `folding.show_markers`,
@@ -133,6 +148,11 @@ struct GutterSettings
     /// The block column draws ◆ on rows marked with vi `mm`.
     bool userMarks = false;
 
+    /// The columns the block column takes while any of its three jobs is on; its glyphs are drawn across
+    /// all of them, so at two each is twice the size it is at one. Any value is safe: gutterLayoutFor()
+    /// holds it to MinBlockColumnWidth..MaxBlockColumnWidth.
+    int blockColumnWidth = MinBlockColumnWidth;
+
     /// Which line numbers, if any.
     LineNumberMode lineNumbers = LineNumberMode::Off;
 
@@ -145,6 +165,9 @@ struct GutterSettings
 
     /// A std::format chrono specification, without the braces, spelled in local time.
     std::string timestampFormat = std::string { DefaultTimestampFormat };
+
+    /// What hovering a fold does to its strokes (`gutter.bold_on_hover`, converted at the boundary).
+    FoldHoverStroke hoverStroke = FoldHoverStroke::Unchanged;
 
     bool operator==(GutterSettings const&) const = default;
 };

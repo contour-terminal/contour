@@ -20,7 +20,8 @@ namespace
         Keep = 0,
         Replace, ///< Becomes U+FFFD, so the reader sees that something was there.
         Drop,
-        Space, ///< Becomes U+0020: a line or field break, joined into one line.
+        Space,   ///< Becomes U+0020: a line or field break, joined into one line.
+        Newline, ///< Becomes LF; a following LF is consumed as part of CRLF.
     };
 
     /// What becomes of the spaces the sanitised text ends with.
@@ -31,7 +32,7 @@ namespace
     };
 
     /// How many purposes there are: the columns of Rules, the entries of TrailingSpacesOf.
-    constexpr auto PurposeCount = size_t { std::to_underlying(SanitizePurpose::Clipboard) + 1 };
+    constexpr auto PurposeCount = size_t { std::to_underlying(SanitizePurpose::ClipboardMultiline) + 1 };
 
     /// A run of code points not kept as they are, and what each purpose does with them.
     struct Rule
@@ -45,28 +46,50 @@ namespace
     constexpr auto D = Treatment::Drop;
     constexpr auto K = Treatment::Keep;
     constexpr auto S = Treatment::Space;
+    constexpr auto N = Treatment::Newline;
 
     // clang-format off
     /// Every code point not kept as it is; anything not listed is kept. A new purpose is a new column.
     constexpr auto Rules = std::array {
-        //                                                          Display, Insert, Type, Clipboard
-        Rule { .first = 0x00,   .last = 0x08,   .treatment = { R, D, D, D } }, // C0 < TAB
-        Rule { .first = 0x09,   .last = 0x0A,   .treatment = { R, K, D, S } }, // TAB, LF: keys when typed
-        Rule { .first = 0x0B,   .last = 0x0C,   .treatment = { R, D, D, D } }, // VT, FF
-        Rule { .first = 0x0D,   .last = 0x0D,   .treatment = { R, D, D, S } }, // CR: a line end too
-        Rule { .first = 0x0E,   .last = 0x1F,   .treatment = { R, D, D, D } }, // ESC & co.
-        Rule { .first = 0x7F,   .last = 0x7F,   .treatment = { R, D, D, D } }, // DEL
-        Rule { .first = 0x80,   .last = 0x9F,   .treatment = { R, D, D, D } }, // C1
-        Rule { .first = 0x2028, .last = 0x2029, .treatment = { R, R, R, R } }, // LS, PS
-        Rule { .first = 0x202A, .last = 0x202E, .treatment = { R, R, R, R } }, // LRE..RLO
-        Rule { .first = 0x2066, .last = 0x2069, .treatment = { R, R, R, R } }, // LRI..PDI
+        //                                                          Display, Insert, Type, Clipboard, Multiline
+        Rule { .first = 0x00,   .last = 0x08,   .treatment = { R, D, D, D, D } }, // C0 < TAB
+        Rule { .first = 0x09,   .last = 0x0A,   .treatment = { R, K, D, S, K } }, // TAB, LF: keys when typed
+        Rule { .first = 0x0B,   .last = 0x0C,   .treatment = { R, D, D, D, D } }, // VT, FF
+        Rule { .first = 0x0D,   .last = 0x0D,   .treatment = { R, D, D, S, N } }, // CR: a line end too
+        Rule { .first = 0x0E,   .last = 0x1F,   .treatment = { R, D, D, D, D } }, // ESC & co.
+        Rule { .first = 0x7F,   .last = 0x7F,   .treatment = { R, D, D, D, D } }, // DEL
+        Rule { .first = 0x80,   .last = 0x9F,   .treatment = { R, D, D, D, D } }, // C1
+        Rule { .first = 0x2028, .last = 0x2029, .treatment = { R, R, R, R, R } }, // LS, PS
+        Rule { .first = 0x202A, .last = 0x202E, .treatment = { R, R, R, R, R } }, // LRE..RLO
+        Rule { .first = 0x2066, .last = 0x2069, .treatment = { R, R, R, R, R } }, // LRI..PDI
+    };
+
+    /// A run of code points, both ends inclusive.
+    struct CodePointRange
+    {
+        char32_t first;
+        char32_t last;
+    };
+
+    /// Every code point with Unicode's White_Space property (PropList.txt).
+    constexpr auto WhiteSpace = std::array {
+        CodePointRange { .first = 0x0009, .last = 0x000D }, // TAB, LF, VT, FF, CR
+        CodePointRange { .first = 0x0020, .last = 0x0020 }, // SPACE
+        CodePointRange { .first = 0x0085, .last = 0x0085 }, // NEXT LINE
+        CodePointRange { .first = 0x00A0, .last = 0x00A0 }, // NO-BREAK SPACE
+        CodePointRange { .first = 0x1680, .last = 0x1680 }, // OGHAM SPACE MARK
+        CodePointRange { .first = 0x2000, .last = 0x200A }, // EN QUAD..HAIR SPACE
+        CodePointRange { .first = 0x2028, .last = 0x2029 }, // LINE SEPARATOR, PARAGRAPH SEPARATOR
+        CodePointRange { .first = 0x202F, .last = 0x202F }, // NARROW NO-BREAK SPACE
+        CodePointRange { .first = 0x205F, .last = 0x205F }, // MEDIUM MATHEMATICAL SPACE
+        CodePointRange { .first = 0x3000, .last = 0x3000 }, // IDEOGRAPHIC SPACE
     };
 
     /// What each purpose does with the spaces its text ends with, indexed by SanitizePurpose. A copy trims
     /// them: a line end it ended with would otherwise run the pasted command by itself.
     constexpr auto TrailingSpacesOf = std::array<TrailingSpaces, PurposeCount> {
-        //  Display,              Insert,               Type,                 Clipboard
-        TrailingSpaces::Keep, TrailingSpaces::Keep, TrailingSpaces::Keep, TrailingSpaces::Trim,
+        //  Display,              Insert,               Type,                 Clipboard,          Multiline
+        TrailingSpaces::Keep, TrailingSpaces::Keep, TrailingSpaces::Keep, TrailingSpaces::Trim, TrailingSpaces::Trim,
     };
     // clang-format on
 
@@ -108,22 +131,48 @@ namespace
     /// U+FFFD REPLACEMENT CHARACTER, UTF-8 encoded.
     constexpr auto ReplacementCharacter = std::string_view { "\xEF\xBF\xBD" };
 
-    static_assert(std::ranges::is_sorted(Rules, {}, &Rule::first)
-                      && std::ranges::adjacent_find(Rules,
-                                                    [](Rule const& a, Rule const& b) {
-                                                        return a.last >= b.first;
-                                                    })
-                             == Rules.end(),
-                  "treatmentOf() searches the rules by bisection: they must be sorted and disjoint");
+    /// Whether @p ranges -- runs of code points with inclusive `first` and `last` ends -- are sorted and
+    /// disjoint: what findRange() needs of them to bisect.
+    /// @param ranges The table.
+    /// @return Whether it is.
+    template <typename Range, std::size_t N>
+    [[nodiscard]] constexpr bool isSortedAndDisjoint(std::array<Range, N> const& ranges) noexcept
+    {
+        return std::ranges::is_sorted(ranges, {}, &Range::first)
+               && std::ranges::adjacent_find(ranges, [](Range const& a, Range const& b) {
+                      return a.last >= b.first;
+                  }) == ranges.end();
+    }
+
+    /// The run of @p ranges holding @p codePoint, by bisection.
+    /// @param ranges The table, sorted and disjoint (isSortedAndDisjoint()).
+    /// @param codePoint The code point to look up.
+    /// @return The run, or nullptr when none holds it.
+    template <typename Range, std::size_t N>
+    [[nodiscard]] constexpr Range const* findRange(std::array<Range, N> const& ranges,
+                                                   char32_t codePoint) noexcept
+    {
+        // The first run not wholly below the code point is the only one that can hold it.
+        auto const range = std::ranges::lower_bound(ranges, codePoint, {}, &Range::last);
+        return range != ranges.end() && range->first <= codePoint ? &*range : nullptr;
+    }
+
+    static_assert(isSortedAndDisjoint(Rules),
+                  "treatmentOf() bisects the rules: they must be sorted and disjoint");
+    static_assert(isSortedAndDisjoint(WhiteSpace),
+                  "isWhiteSpace() bisects the ranges: they must be sorted and disjoint");
+
+    /// @return Whether @p codePoint has Unicode's White_Space property.
+    [[nodiscard]] constexpr bool isWhiteSpace(char32_t codePoint) noexcept
+    {
+        return findRange(WhiteSpace, codePoint) != nullptr;
+    }
 
     /// @return What @p purpose does with @p codePoint.
     [[nodiscard]] constexpr Treatment treatmentOf(char32_t codePoint, SanitizePurpose purpose) noexcept
     {
-        // The first rule not wholly below the code point is the only one that can hold it.
-        auto const rule = std::ranges::lower_bound(Rules, codePoint, {}, &Rule::last);
-        if (rule == Rules.end() || codePoint < rule->first)
-            return Treatment::Keep;
-        return rule->treatment[std::to_underlying(purpose)];
+        auto const* const rule = findRange(Rules, codePoint);
+        return rule != nullptr ? rule->treatment[std::to_underlying(purpose)] : Treatment::Keep;
     }
 
     /// @return The rule for @p codeUnit as a lead byte, or nullopt when it can never lead.
@@ -224,18 +273,23 @@ namespace
             return out;
         out.reserve(text.size());
 
+        auto previousCodePoint = std::optional<char32_t> {};
         walkCodePoints(text.substr(plain), [&](std::optional<char32_t> codePoint, std::string_view bytes) {
+            auto const previous = std::exchange(previousCodePoint, codePoint);
             if (!codePoint)
             {
                 out += ReplacementCharacter;
                 return WalkStep::Continue;
             }
+            if (purpose == SanitizePurpose::ClipboardMultiline && previous == U'\r' && codePoint == U'\n')
+                return WalkStep::Continue;
             switch (treatmentOf(*codePoint, purpose))
             {
                 case Treatment::Keep: out += bytes; break;
                 case Treatment::Replace: out += ReplacementCharacter; break;
                 case Treatment::Drop: break;
                 case Treatment::Space: out += ' '; break;
+                case Treatment::Newline: out += '\n'; break;
             }
             return WalkStep::Continue;
         });
@@ -247,19 +301,37 @@ std::string sanitizeCommandLine(std::string_view text, SanitizePurpose purpose)
 {
     auto out = treatCodePoints(text, purpose);
     if (trailingSpacesOf(purpose) == TrailingSpaces::Trim)
-        out.erase(out.find_last_not_of(' ') + 1); // npos + 1 is 0: nothing but spaces leaves nothing
+        out.erase(out.find_last_not_of(purpose == SanitizePurpose::ClipboardMultiline ? " \t\n" : " ")
+                  + 1); // npos + 1 is 0: nothing but whitespace leaves nothing
     return out;
 }
 
 bool isUnchangedBySanitizing(std::string_view text, SanitizePurpose purpose)
 {
-    if (trailingSpacesOf(purpose) == TrailingSpaces::Trim && text.ends_with(' '))
+    if (trailingSpacesOf(purpose) == TrailingSpaces::Trim && !text.empty()
+        && (text.ends_with(' ')
+            || (purpose == SanitizePurpose::ClipboardMultiline
+                && (text.ends_with('\t') || text.ends_with('\n')))))
         return false;
     auto const isKept = [purpose](std::optional<char32_t> codePoint, std::string_view /*bytes*/) {
         return codePoint && treatmentOf(*codePoint, purpose) == Treatment::Keep ? WalkStep::Continue
                                                                                 : WalkStep::Stop;
     };
     return walkCodePoints(text, isKept) == WalkStep::Continue;
+}
+
+std::string_view trimTrailingWhiteSpace(std::string_view text)
+{
+    // The walk hands over every byte of the text once and in order, so the bytes seen so far are a prefix.
+    auto seen = size_t { 0 };
+    auto end = size_t { 0 };
+    walkCodePoints(text, [&](std::optional<char32_t> codePoint, std::string_view bytes) {
+        seen += bytes.size();
+        if (!codePoint || !isWhiteSpace(*codePoint))
+            end = seen;
+        return WalkStep::Continue;
+    });
+    return text.substr(0, end);
 }
 
 } // namespace vtbackend

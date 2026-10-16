@@ -49,6 +49,13 @@ class CommandLineText
         return sanitizeCommandLine(_raw, SanitizePurpose::Clipboard);
     }
 
+    /// @return Clipboard text preserving internal line breaks and tabs, without trailing whitespace.
+    /// @see SanitizePurpose::ClipboardMultiline
+    [[nodiscard]] std::string multilineCopyable() const
+    {
+        return sanitizeCommandLine(_raw, SanitizePurpose::ClipboardMultiline);
+    }
+
     /// @return Whether there is no command line.
     [[nodiscard]] bool empty() const noexcept { return _raw.empty(); }
 
