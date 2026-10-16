@@ -545,6 +545,21 @@ TEST_CASE("Gutter.blockColumn.aFailureIsAShapeAsWellAsAColour", "[gutter]")
           == BlockColumnGlyph::FoldBody);
 }
 
+TEST_CASE("Gutter.blockColumn.aPressTogglesAFoldWhereverItReachesAndOpensAStatusMarksMenu", "[gutter]")
+{
+    using enum BlockColumnGlyph;
+    // A fold that may toggle wins on every row it reaches -- a user mark inside its run included.
+    for (auto const glyph: { FoldExpanded, FoldBody, FoldBodyEndFailed, UserMark, Finished, None })
+        CHECK(blockColumnPressFor(glyph, FoldToggle::Available) == BlockColumnPress::ToggleFold);
+
+    // With none to toggle, a status mark opens its block's menu, and anything else does nothing.
+    for (auto const glyph: { Running, Finished, Failed })
+        CHECK(blockColumnPressFor(glyph, FoldToggle::Unavailable) == BlockColumnPress::OpenBlockMenu);
+    for (auto const glyph:
+         { None, FoldExpanded, FoldCollapsed, FoldBody, FoldBodyEnd, UserMark, FoldBodyFailed })
+        CHECK(blockColumnPressFor(glyph, FoldToggle::Unavailable) == BlockColumnPress::Swallow);
+}
+
 TEST_CASE("Gutter.blockColumn.glyphsAreTheirCodepoints", "[gutter]")
 {
     CHECK(blockColumnCodepoint(BlockColumnGlyph::None) == U'\0');

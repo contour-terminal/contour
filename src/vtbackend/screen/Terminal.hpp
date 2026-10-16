@@ -20,6 +20,7 @@
 #include <vtbackend/input/vi/ViInputHandler.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Cursor.hpp>
+#include <vtbackend/screen/Gutter.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
@@ -1516,14 +1517,20 @@ class Terminal
     /// @return Whether a fold was found and toggled; false while folding is unavailable.
     bool toggleFoldContaining(LineOffset gridLine);
 
-    /// Whether a click on the gutter's block column beside @p gridLine toggles a fold: folding is available,
-    /// the column draws fold controls (GutterSettings::foldMarkers), and a fold reaches that line.
+    /// What a left press on the gutter's block column beside @p gridLine does: toggle the fold that reaches
+    /// it -- with folding available and its controls drawn (GutterSettings::foldMarkers) -- or open the menu
+    /// of the block whose status mark it shows, or nothing.
     ///
-    /// The one question the hover that turns the pointer into a hand and the press that toggles both ask,
-    /// so the gutter never offers a click it then ignores, nor acts where it drew nothing to click.
+    /// The one decision the hover that turns the pointer into a hand, the press and the block tooltip's hint
+    /// all read, so the gutter never offers a click it then ignores, nor acts where it drew nothing to click.
     /// @param gridLine A grid line (0 = page top, negative = into the scrollback).
-    /// @return Whether that click toggles a fold.
-    [[nodiscard]] bool gutterTogglesFoldAt(LineOffset gridLine) const;
+    /// @return What the press does; Swallow beside any page but the primary screen's.
+    [[nodiscard]] BlockColumnPress blockColumnPressAt(LineOffset gridLine) const;
+
+    /// Whether the primary screen's shell shows a prompt that a command typed now would run at: the newest
+    /// command block is at its prompt, and the primary screen is the one on display.
+    /// @return Whether it does; false without shell integration, which reports no prompt.
+    [[nodiscard]] bool shellIsPrompting() const noexcept;
 
     /// Expands the fold covering @p gridLine, if a collapsed one does.
     ///
@@ -4522,6 +4529,12 @@ class Terminal
     {
         return _settings.foldingAvailability == FoldingAvailability::Enabled;
     }
+
+    /// The facts that decide the block-column glyph beside @p gridLine (blockColumnGlyph()), for the gutter's
+    /// painting and its press alike. Primary-screen rows only.
+    /// @param gridLine A grid line of the primary screen.
+    /// @return The row's fold marker, head state, user mark and its block's outcome (with exit status on).
+    [[nodiscard]] BlockColumnFacts blockColumnFactsAt(LineOffset gridLine) const;
 
     /// Fills @p output's gutter: per drawn row its timestamp, line number and block-column glyph, each at
     /// its own negative column, as GutterLayout places them and appendGutterCells() paints them.

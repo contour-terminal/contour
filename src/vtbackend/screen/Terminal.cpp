@@ -3073,9 +3073,41 @@ bool Terminal::toggleFoldContaining(LineOffset gridLine)
     return true;
 }
 
-bool Terminal::gutterTogglesFoldAt(LineOffset gridLine) const
+BlockColumnPress Terminal::blockColumnPressAt(LineOffset gridLine) const
 {
-    return isFoldingAvailable() && _settings.gutter.foldMarkers && foldContaining(gridLine).has_value();
+    if (!foldingAppliesToDisplayedPage())
+        return BlockColumnPress::Swallow;
+
+    auto const& gutter = _settings.gutter;
+    auto const fold = isFoldingAvailable() && gutter.foldMarkers && foldContaining(gridLine).has_value()
+                          ? FoldToggle::Available
+                          : FoldToggle::Unavailable;
+    return blockColumnPressFor(blockColumnGlyph(blockColumnFactsAt(gridLine), gutter), fold);
+}
+
+bool Terminal::shellIsPrompting() const noexcept
+{
+    auto const* const current = commandBlocks().current();
+    return isPrimaryScreen() && current != nullptr && current->state == CommandBlockState::Prompting;
+}
+
+BlockColumnFacts Terminal::blockColumnFactsAt(LineOffset gridLine) const
+{
+    auto const& grid = primaryScreen().grid();
+    auto const id = grid.stableLineIdOf(gridLine);
+    auto const* const record = commandBlockAt(gridLine);
+
+    // Asked for here rather than handed in: foldRanges() hands back a span over a CACHE, which a caller
+    // walking rows re-enters per row. A cache hit is three integer comparisons.
+    auto const range = foldCovering(foldRanges(), id);
+    return BlockColumnFacts {
+        .fold = range ? markerIn(*range, id) : FoldMarker::None,
+        .head = blockHeadStateOf(record, id, grid.stableIdGeneration()),
+        .mark = grid.lineAt(gridLine).isFlagEnabled(LineFlag::UserMark) ? UserMarkPresence::Present
+                                                                        : UserMarkPresence::Absent,
+        .outcome = record != nullptr && _settings.gutter.exitStatus ? std::optional { outcomeOf(*record) }
+                                                                    : std::nullopt,
+    };
 }
 
 bool Terminal::expandFoldContaining(LineOffset gridLine)
@@ -3252,24 +3284,15 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     {
         auto const screenRow = LineOffset(y);
         auto const gridLine = _viewport.translateScreenToGridLine(screenRow);
-        auto const id = grid.stableLineIdOf(gridLine);
         auto const& line = grid.lineAt(gridLine);
-        auto const* record = commandBlockAt(gridLine);
 
         // Asked for per row rather than held across the loop: foldRanges() hands back a span over a
         // CACHE, and the translation above re-enters that cache once per row. Holding it survives only as
         // long as no key input can move inside a frame -- one that could, and the remaining rows would be
         // reading freed memory. A cache hit here is three integer comparisons.
-        auto const range = foldCovering(foldRanges(), id);
+        auto const range = foldCovering(foldRanges(), grid.stableLineIdOf(gridLine));
 
-        auto const facts = BlockColumnFacts {
-            .fold = range ? markerIn(*range, id) : FoldMarker::None,
-            .head = blockHeadStateOf(record, id, grid.stableIdGeneration()),
-            .mark =
-                line.isFlagEnabled(LineFlag::UserMark) ? UserMarkPresence::Present : UserMarkPresence::Absent,
-            .outcome =
-                record != nullptr && gutter.exitStatus ? std::optional { outcomeOf(*record) } : std::nullopt,
-        };
+        auto const facts = blockColumnFactsAt(gridLine);
         auto const glyph = blockColumnGlyph(facts, gutter);
         auto const& outcome = facts.outcome;
 

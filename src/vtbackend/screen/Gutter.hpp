@@ -188,6 +188,31 @@ struct BlockColumnFacts
 [[nodiscard]] BlockColumnGlyph blockColumnGlyph(BlockColumnFacts const& facts,
                                                 GutterSettings const& settings) noexcept;
 
+/// Whether a press on the block column beside a row can toggle a fold there.
+enum class FoldToggle : uint8_t
+{
+    Unavailable = 0, ///< No fold reaches the row, or folding or its controls are off.
+    Available,       ///< A fold reaches the row, and a press may toggle it.
+};
+
+/// What a left press on the block column beside a row does.
+enum class BlockColumnPress : uint8_t
+{
+    Swallow = 0,   ///< Nothing to act on there: the press is the gutter's all the same, and does nothing.
+    ToggleFold,    ///< Collapse or expand the fold that reaches the row, wherever in its run.
+    OpenBlockMenu, ///< Open the menu of the block the row heads: its status mark, with nothing to fold.
+};
+
+/// What a left press beside a row showing @p glyph does.
+///
+/// A fold wins wherever it reaches -- a user mark inside a fold's run toggles the fold as the rest of the run
+/// does -- and a status mark with no fold to toggle opens its block's menu: the click a ● or a ✗ invites
+/// then has something to do.
+/// @param glyph The glyph the row shows (blockColumnGlyph()).
+/// @param fold Whether a fold reaches the row and may be toggled.
+/// @return What the press does.
+[[nodiscard]] BlockColumnPress blockColumnPressFor(BlockColumnGlyph glyph, FoldToggle fold) noexcept;
+
 /// The character @p glyph is drawn as.
 ///
 /// The status marks are Contour's private-use codepoints, as the fold heads are, rather than the Unicode

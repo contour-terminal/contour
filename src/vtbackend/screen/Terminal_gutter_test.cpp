@@ -514,38 +514,62 @@ TEST_CASE("Gutter.terminal.rowsBelowTheProjectionStayEmpty", "[gutter]")
             CHECK(blockColumnRows.insert(unbox<int>(cell.lineOffset)).second);
 }
 
-TEST_CASE("Gutter.terminal.aClickTogglesAFoldOnlyWhereItDrawsAControl", "[gutter]")
+TEST_CASE("Gutter.terminal.aPressDoesWhatTheRowShows", "[gutter]")
 {
-    // The hover's hand and the press's toggle ask this one question, so it must say no wherever the block
-    // column draws no fold control -- or would toggle nothing.
+    // The hover's hand, the press and the tooltip's hint ask this one question, so it must say "toggle"
+    // only where a fold control is drawn and may toggle, and "menu" only beside a status mark.
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
     mc.terminal.settings().gutter = GutterSettings { .foldMarkers = true, .exitStatus = true };
-    runCommand(mc, "true", {}, 0);      // row 0: nothing to fold
-    runCommand(mc, "make", { "a" }, 2); // rows 1-2: a fold
+    runCommand(mc, "true", {}, 0);          // row 0: a disc, nothing to fold
+    runCommand(mc, "make", { "a" }, 2);     // rows 1-2: a fold
+    mc.writeToScreen("\033]133;A\033\\$ "); // row 3: the next prompt, at which the shell waits
 
-    SECTION("on a fold, its head and its body alike")
+    SECTION("on a fold, its head and its body alike, the fold")
     {
-        CHECK(mc.terminal.gutterTogglesFoldAt(LineOffset(1)));
-        CHECK(mc.terminal.gutterTogglesFoldAt(LineOffset(2)));
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(1)) == BlockColumnPress::ToggleFold);
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(2)) == BlockColumnPress::ToggleFold);
     }
 
-    SECTION("beside a block with nothing to fold, and below every block")
+    SECTION("beside a status mark with nothing to fold, its block's menu")
     {
-        CHECK_FALSE(mc.terminal.gutterTogglesFoldAt(LineOffset(0)));
-        CHECK_FALSE(mc.terminal.gutterTogglesFoldAt(LineOffset(8)));
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(0)) == BlockColumnPress::OpenBlockMenu);
     }
 
-    SECTION("with the fold controls hidden")
+    SECTION("below every block, nothing")
+    {
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(8)) == BlockColumnPress::Swallow);
+    }
+
+    SECTION("with the fold controls hidden, a fold row is nothing; a status mark still opens its menu")
     {
         mc.terminal.settings().gutter.foldMarkers = false;
-        CHECK_FALSE(mc.terminal.gutterTogglesFoldAt(LineOffset(1)));
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(2)) == BlockColumnPress::Swallow);
+        // The failed head now shows its cross, not a fold control.
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(1)) == BlockColumnPress::OpenBlockMenu);
     }
 
-    SECTION("with folding off")
+    SECTION("with folding off, the drawn control does nothing")
     {
         mc.terminal.settings().foldingAvailability = FoldingAvailability::Disabled;
-        CHECK_FALSE(mc.terminal.gutterTogglesFoldAt(LineOffset(1)));
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(1)) == BlockColumnPress::Swallow);
+        CHECK(mc.terminal.blockColumnPressAt(LineOffset(2)) == BlockColumnPress::Swallow);
     }
+
+    SECTION("the shell waits at a prompt")
+    {
+        CHECK(mc.terminal.shellIsPrompting());
+    }
+}
+
+TEST_CASE("Gutter.terminal.aRunningCommandIsNoPrompt", "[gutter]")
+{
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    CHECK_FALSE(mc.terminal.shellIsPrompting()); // no shell integration, no prompt reported
+    startCommand(mc, "sleep 9");
+    CHECK_FALSE(mc.terminal.shellIsPrompting());
+    mc.writeToScreen(commandEnd(0));
+    mc.writeToScreen("\033]133;A\033\\$ ");
+    CHECK(mc.terminal.shellIsPrompting());
 }
 
 TEST_CASE("Gutter.terminal.theIndicatorStatusLineSpansTheGutterToo", "[gutter][statusline]")

@@ -459,6 +459,29 @@ char32_t blockColumnCodepoint(BlockColumnGlyph glyph) noexcept
     return Codepoints[static_cast<std::size_t>(glyph)];
 }
 
+BlockColumnPress blockColumnPressFor(BlockColumnGlyph glyph, FoldToggle fold) noexcept
+{
+    if (fold == FoldToggle::Available)
+        return BlockColumnPress::ToggleFold;
+
+    // With no fold to toggle, only a status mark has something to offer: its block's menu.
+    constexpr auto Presses = std::array {
+        BlockColumnPress::Swallow,       // None
+        BlockColumnPress::Swallow,       // FoldExpanded: drawn, but folding is off
+        BlockColumnPress::Swallow,       // FoldCollapsed: likewise
+        BlockColumnPress::Swallow,       // FoldBody
+        BlockColumnPress::Swallow,       // FoldBodyEnd
+        BlockColumnPress::Swallow,       // UserMark
+        BlockColumnPress::OpenBlockMenu, // Running
+        BlockColumnPress::OpenBlockMenu, // Finished
+        BlockColumnPress::OpenBlockMenu, // Failed
+        BlockColumnPress::Swallow,       // FoldBodyFailed
+        BlockColumnPress::Swallow,       // FoldBodyEndFailed
+    };
+    static_assert(Presses.size() == static_cast<std::size_t>(BlockColumnGlyph::Count));
+    return Presses[static_cast<std::size_t>(glyph)];
+}
+
 BlockHeadState blockHeadStateOf(CommandBlockRecord const* record,
                                 int64_t stableId,
                                 uint64_t stableIdGeneration) noexcept
