@@ -187,6 +187,10 @@ endif()
 # Both sit below display/ and session/, which is why they are added before them.
 if(CONTOUR_FRONTEND_GUI)
     add_subdirectory(input)
+    if(APPLE)
+        # Both the platform adapters and their GUI tests compile Objective-C++.
+        enable_language(OBJCXX)
+    endif()
     add_subdirectory(platform)
     add_subdirectory(display)
 endif()
@@ -721,6 +725,8 @@ if(CONTOUR_FRONTEND_GUI)
             platform/PortalExternalLauncher_test.cpp
             platform/PortalNotificationTransport_test.cpp
             platform/TaskbarProgressRouter_test.cpp
+            platform/LauncherProgress_test.cpp
+            platform/LauncherProgressSink_test.cpp
             platform/NativeWindowFrame_test.cpp
             platform/PopupShadow_test.cpp
             platform/QtInvoke_test.cpp
@@ -753,6 +759,11 @@ if(CONTOUR_FRONTEND_GUI)
             window/WindowSizing_test.cpp
         )
         set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
+        if(APPLE)
+            target_sources(contour_gui_test PRIVATE platform/CocoaTaskbarProgressSink_test.mm)
+            set_source_files_properties(platform/CocoaTaskbarProgressSink_test.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+            set_target_properties(contour_gui_test PROPERTIES OBJCXX_STANDARD 23 OBJCXX_STANDARD_REQUIRED ON)
+        endif()
         if(CONTOUR_WITH_GPU_SELECTION)
             target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)
         endif()

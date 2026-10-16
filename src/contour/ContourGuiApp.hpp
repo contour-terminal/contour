@@ -9,6 +9,7 @@
 #include <contour/display/Logging.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
+#include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
@@ -186,6 +187,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       the host name. Tests pass a fixed one, so what counts as this machine does
     ///                       not depend on the machine they run on.
     /// @param env            The process environment every part of the application reads through.
+    /// @param taskbarProgress Native taskbar adapter; null wires the production one.
     explicit ContourGuiApp(core::Environment const& env,
                            std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
                            std::unique_ptr<platform::ExternalLauncher> externalLauncher = nullptr,
@@ -194,7 +196,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
                            std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer = nullptr,
                            std::unique_ptr<session::CommandOutputFiles> commandOutputFiles = nullptr,
                            vtbackend::TerminalClocks terminalClocks = vtbackend::TerminalClocks::system(),
-                           std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt);
+                           std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt,
+                           std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress = nullptr);
     ~ContourGuiApp() override;
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
@@ -465,6 +468,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     vtbackend::TerminalClocks _terminalClocks;
     // Likewise.
     vtbackend::HostIdentity _hostIdentity;
+    std::unique_ptr<platform::TaskbarProgressSink> _taskbarProgressSink;
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI

@@ -275,7 +275,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer,
                              std::unique_ptr<session::CommandOutputFiles> commandOutputFiles,
                              vtbackend::TerminalClocks terminalClocks,
-                             std::optional<vtbackend::HostIdentity> hostIdentity):
+                             std::optional<vtbackend::HostIdentity> hostIdentity,
+                             std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress):
     ContourApp { env },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeStatusLineCommandExecutor()),
@@ -294,10 +295,15 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _terminalClocks(terminalClocks),
     // Read once, for every session, rather than by each one on the GUI thread as it is built.
     _hostIdentity(hostIdentity ? std::move(*hostIdentity) : thisMachineIdentity()),
+    _taskbarProgressSink(taskbarProgress ? std::move(taskbarProgress) : platform::makeTaskbarProgressSink()),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
-    _sessionManager(
-        *this, *_sessionFactory, *_layoutStore, *_commandHistoryStore, QDir::homePath().toStdString()),
+    _sessionManager(*this,
+                    *_sessionFactory,
+                    *_layoutStore,
+                    *_commandHistoryStore,
+                    QDir::homePath().toStdString(),
+                    *_taskbarProgressSink),
     _gpuInventory { display::makePlatformGpuInventory() }
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));

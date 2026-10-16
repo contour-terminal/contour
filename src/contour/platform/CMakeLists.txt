@@ -41,6 +41,9 @@ add_library(contour_platform STATIC
     QtPath.hpp
     SpeechSynthesizer.cpp SpeechSynthesizer.hpp
     TaskbarProgressRouter.hpp
+    TaskbarProgressSink.cpp TaskbarProgressSink.hpp
+    LauncherProgress.hpp LauncherProgressSink.cpp
+    TaskbarProgressState.hpp
     # The per-OS window frame and the two compositor shadow adapters. Each of the platform-specific
     # ones is wholly inside a platform #ifdef, so it compiles to nothing where it does not apply --
     # listed unconditionally all the same, as the notification pair above is.
@@ -61,14 +64,18 @@ add_library(contour_platform STATIC
 )
 set_target_properties(contour_platform PROPERTIES AUTOMOC ON)
 
-# The Cocoa frame adapter is the tree's only Objective-C++ translation unit, so the language is
-# enabled here and nowhere else -- and INSIDE the APPLE guard, because enabling OBJCXX on a host
-# with no Objective-C compiler fails the configure step outright. The .mm is added the same way,
+if(WIN32)
+    target_link_libraries(contour_platform PUBLIC ole32 user32 uuid)
+endif()
+
+# The Cocoa adapters use Objective-C++, enabled in the parent for these and their tests.
+# Keep the sources INSIDE the APPLE guard: the .mm is added this way,
 # rather than listed unconditionally like the platform .cpp files above: CMake would try to compile
 # it as C++ elsewhere rather than preprocess it away.
 if(APPLE)
-    enable_language(OBJCXX)
-    target_sources(contour_platform PRIVATE CocoaWindowFrame.mm)
+    set_target_properties(contour_platform PROPERTIES OBJCXX_STANDARD 23 OBJCXX_STANDARD_REQUIRED ON)
+    target_sources(contour_platform PRIVATE CocoaWindowFrame.mm CocoaTaskbarProgressSink.mm)
+    set_source_files_properties(CocoaTaskbarProgressSink.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(contour_platform PUBLIC "-framework AppKit")
 endif()
 

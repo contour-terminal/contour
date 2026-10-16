@@ -107,6 +107,7 @@
     <release version="0.7.1" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Extends OSC 9;4 progress indicators to the Windows taskbar, KDE Plasma launcher and macOS Dock, including while minimized, using combined progress from tabs and split panes.</li>
           <li>Adds the profile option <code>copy_command_preserve_multiline</code> to preserve line breaks and tabs when using Copy Command. Disabled by default.</li>
           <li>Adds <code>tab_color</code> to profiles, giving newly opened tabs a default color while preserving layout, application and user overrides (#2152)</li>
           <li>Changes the indicator status line to span the window's whole width: its bar reaches the window's edges past the gutter and the page margins, and its text is laid out across the gutter's columns as well as the page's, so its middle sits in the bar's centre. The host-writable status line keeps the page's width (#2139)</li>
