@@ -223,6 +223,30 @@ TEST_CASE("Terminal.sendMouseLeaveEvent.hoversNothingUntilThePointerIsBack", "[t
     }
 }
 
+TEST_CASE("Terminal.firstPointerEventOntoTheTopLeftCellHoversItsLink", "[terminal][hyperlink]")
+{
+    // The first pointer event names the pointer's cell, whichever cell that is: the top-left one too, which a
+    // fresh terminal's pointer position reads as before any event.
+    auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen("\033]8;;https://example.com/\033\\link\033]8;;\033\\");
+    auto const topLeft = CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) };
+
+    SECTION("a move")
+    {
+        terminal.sendMouseMoveEvent(Modifier::None, topLeft, vtbackend::PixelCoordinate {}, false);
+    }
+
+    SECTION("a press")
+    {
+        std::ignore = terminal.sendMousePressEvent(
+            Modifier::None, vtbackend::MouseButton::Left, topLeft, vtbackend::PixelCoordinate {}, false);
+    }
+
+    CHECK(terminal.isMouseHoveringHyperlink());
+    CHECK(terminal.currentMouseGridPosition() == topLeft);
+}
+
 TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
 {
     namespace fs = std::filesystem;
