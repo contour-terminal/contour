@@ -13,16 +13,21 @@
 #      127.0.0.1:6674, and the two roots are injected here via `cmake -E env`,
 #      because CMake already knows them. Selecting it is conditional on a daemon
 #      actually answering there — see the probe below.
-#   2. sccache — the usual third-party launcher, used when fastcache-cc is
-#      unavailable or unconfigured. Supports shared (Redis/S3/...) caches.
-#      **Under MSVC or clang-cl, selecting it emits a warning**, and the warning
-#      is the point: there sccache replays a hit's /showIncludes stream with the
-#      absolute paths of the build that stored it, so two checkouts sharing one
-#      cache stop rebuilding on a header change while the build stays green. GCC
-#      and Clang are unaffected. It is a caveat rather than a `check` that skips
-#      the row, because nothing here can tell whether the cache is shared and the
-#      choice belongs to whoever is building. See the row below.
-#   3. ccache — the classic local cache, used when neither of the above applies.
+#   2. sccache — the usual third-party launcher, supporting shared (Redis/S3/...)
+#      caches. **Never selected automatically**: it is opt-in behind
+#      `-DALLOW_SCCACHE_FALLBACK=ON`, because being the silent answer to
+#      fastcache-cc being unusable is exactly how a project stops noticing that
+#      its own cache is not in use (#815). Opted into, it keeps its rank above
+#      ccache — "explicitly requested" means requested. **Under MSVC or clang-cl,
+#      selecting it emits a warning**, and the warning is the point: there sccache
+#      replays a hit's /showIncludes stream with the absolute paths of the build
+#      that stored it, so two checkouts sharing one cache stop rebuilding on a
+#      header change while the build stays green. GCC and Clang are unaffected. It
+#      is a caveat rather than a `check` that skips the row, because nothing here
+#      can tell whether the cache is shared and the choice belongs to whoever is
+#      building. See the row below.
+#   3. ccache — the classic local cache, used when fastcache-cc is unavailable or
+#      unconfigured and sccache has not been asked for.
 #
 # Launchers are wired in as compiler launchers, so CPM-/FetchContent-fetched
 # dependencies get cached too. If a launcher is already set (e.g. via the
@@ -45,9 +50,362 @@
 # process is a bigger side effect than downloading a file and CI relies on no
 # daemon answering by default. To disable everything: -DUSE_COMPILER_CACHE=OFF.
 
+# --- the debug-path mapping, as a function so it can be tested ---------------
+#
+# Which `-fdebug-prefix-map` rules a given pair of roots deserves is a pure
+# computation over two strings, and it is the half of #203 that got the layout
+# wrong twice before it was run (see the block near the end of this file for
+# what each rule is for). Testing it through a real configure costs two
+# ~40-second configures and a compiler; testing it here costs nothing and covers
+# the layouts nobody has locally.
+#
+# @param binaryDir        The build tree.
+# @param sourceDir        The source tree.
+# @param outRules         Set to the `<from>=<to>` rules, build tree first.
+# @param outSourceMapped  Set to ON/OFF: was the source root mapped at all.
+function(_fc_debug_prefix_map_rules binaryDir sourceDir outRules outSourceMapped)
+    # A root with a SPACE in it is not mapped at all, and that is a refusal rather
+    # than a nicety. These rules are spliced into `CMAKE_<LANG>_FLAGS`, which is a
+    # space-separated string, so a rule naming `/Users/john doe/proj` reaches the
+    # driver as two arguments and every compile dies with
+    # `invalid argument '/Users/john' to '-fdebug-prefix-map'` -- measured. This
+    # file may never break a build, and `check_compiler_flag` cannot catch it
+    # because it probes a synthetic `/a=/b`. Quoting was the alternative and it is
+    # generator-dependent; declining is not.
+    if(binaryDir MATCHES " " OR sourceDir MATCHES " ")
+        set(${outRules} "" PARENT_SCOPE)
+        set(${outSourceMapped} OFF PARENT_SCOPE)
+        return()
+    endif()
+
+    file(RELATIVE_PATH back "${binaryDir}" "${sourceDir}")
+    # `file(RELATIVE_PATH)` answers with a TRAILING SEPARATOR (`../../../`), and
+    # leaving it on is not cosmetic: the compiler replaces the matched root with
+    # this text and the remainder already begins with one, so the rewritten path
+    # would read `../../..//src/tu.cpp` -- not the spelling the build system
+    # passes for the same file, so the absolute and relative spellings would stop
+    # converging and the mapping would buy less than it appears to.
+    string(REGEX REPLACE "/$" "" back "${back}")
+
+    # The replacement must itself be checkout-independent, and "relative" does not
+    # imply that. Measured: an out-of-tree build at `/tmp/x` against a source root
+    # under `/mnt/d/...` yields `../../mnt/d/fastcached/...` -- a relative path
+    # carrying the entire root inside it, so mapping to it would replace the
+    # checkout's path with the checkout's path and read as working. A `..`-only
+    # chain is exactly the case where it cannot: it says the build tree lies UNDER
+    # the source tree. Anything else drops the rule rather than guessing; the
+    # build-tree rule still lands, and that is the one carrying `DW_AT_comp_dir`.
+    set(rules "")
+    if(back MATCHES "^\.\.(/\.\.)*$")
+        list(APPEND rules "${sourceDir}=${back}")
+        set(${outSourceMapped} ON PARENT_SCOPE)
+    else()
+        set(${outSourceMapped} OFF PARENT_SCOPE)
+    endif()
+
+    # The build tree is mapped LAST, and that is the whole of the ordering: GCC and
+    # Clang honour the LAST matching rule, not the first. Measured directly off
+    # `DW_AT_comp_dir` on gcc 14 and clang 20, nested build tree `src/out/build/x`:
+    #
+    #   no rules      /abs/.../src/out/build/x
+    #   build first   ../../../out/build/x     <- the source rule wins
+    #   source first  .                        <- what is wanted
+    #
+    # This comment said the opposite for three commits, and no object comparison
+    # could catch it: `.` and `../../../out/build/x` are BOTH checkout-independent,
+    # so two checkouts still produced byte-identical objects and the e2e read
+    # green. What it costs is narrower and sharper -- two machines whose build
+    # trees sit at the same depth under different NAMES (`out/build/gcc-release`
+    # against `out/build/ci-release`) relativize to one key, because both flags
+    # tokenize to the same canonical text, while their objects differ. That is a
+    # mis-serve, and it is the #203 symptom reappearing inside the fix for it.
+    list(APPEND rules "${binaryDir}=.")
+    set(${outRules} "${rules}" PARENT_SCOPE)
+endfunction()
+
+# Resolve the compile-cache address from what the environment PRESENTED, keeping
+# "set but empty" distinct from "not set at all".
+#
+# **The two are different instructions and folding them together broke the
+# documented opt-out** (#372). `docs/tools/fastcache-cc.md` promises that a set
+# but empty `FASTCACHE_ADDR` means no caching, and the launcher honours that when
+# it reads its own environment at run time. This module decided whether the
+# launcher is used AT ALL from `if("$ENV{FASTCACHE_ADDR}" STREQUAL "")`, which is
+# true for both -- so `export FASTCACHE_ADDR=` was turned straight back into the
+# default and kept caching, on every shell and every platform.
+#
+# That is the same defect this codebase has now fixed three times in three places:
+# an explicitly emptied value is a PIN, and an empty default is not a licence to
+# drop it. `--storage=` is the recorded instance (#349) -- `ParseText` never fails,
+# so an empty one is a reachable operator instruction meaning "persist nowhere" --
+# and `OptionSpec::explicitBit` exists because a value comparison cannot see an
+# operator who typed the default. CMake can tell the two apart with
+# `DEFINED ENV{...}`; nothing but this predicate was in the way.
+#
+# **The resolved address is the whole answer**: it is what the environment SEEDS
+# into a build tree with no entry (`_fc_hold_setting`), and what a held entry is
+# compared with when a later environment presents one.
+#
+# Pure: it reads no environment and touches no cache, so
+# `check-fastcache-addr-opt-out.cmake` can drive the case a developer cannot
+# easily stage -- two runs differing only in whether the name was present.
+#
+# @param present  TRUE when the environment defines the name at all.
+# @param value    Its value; meaningful only when @p present.
+# @param outWanted  The address this module wants; empty means opt out.
+function(_fc_resolve_addr present value outWanted)
+    if(present)
+        # Whatever they set, empty INCLUDED. An empty one reaches
+        # `if(NOT FASTCACHE_ADDR)` below and opts out by name.
+        set(${outWanted} "${value}" PARENT_SCOPE)
+    else()
+        # Nobody said anything, so the compiled-in default: a stock `fastcached`
+        # listens there, and so does a `fastcache-compile-node` whose
+        # --listen-cache defaults to the same address for exactly this reason.
+        set(${outWanted} "127.0.0.1:6674" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Hold a setting the configure environment SEEDS, and say whether the environment now presents a
+# value it did not apply.
+#
+# **The environment seeds a build tree with no entry and never moves one it has.** Both settings
+# this holds once let a CHANGE in the environment retarget the entry on a reconfigure, unless the
+# entry had been changed by hand since -- and "changed by hand" was read as "differs from what
+# this module last applied", which cannot see a `-D` that typed the value already held. Measured:
+# a tree configured off from an agent's shell, reconfigured from a terminal holding the variable
+# with `-DFASTCACHE_SCHEDULER=` to say OFF explicitly, came up ON. That is the blind spot
+# `OptionSpec::explicitBit` exists for, and CMake offers nothing that says a `-D` was on this
+# command line. So nothing is inferred: a `-D`, empty included, always outranks an ambient
+# variable, and a difference is REPORTED, naming the `-D` that would apply it, never acted on.
+# Only a `-D`, `-U <name>` (which lets the next configure seed again) or `--fresh` moves it.
+#
+# Pure: it reads no environment and touches no cache, so `check-compile-cache-dispatch.cmake`
+# drives every combination.
+#
+# @param cached        TRUE when the setting has a cache entry.
+# @param cacheValue    Its value; meaningful only when @p cached.
+# @param envPresent    TRUE when the configure environment PRESENTS a value for it.
+# @param envValue      That value, or what a tree with no entry is seeded with when there is none.
+# @param outValue      The value to hold.
+# @param outSeeded     TRUE when this configure took the value from @p envValue.
+# @param outUnapplied  TRUE when the environment presents a value other than the held one.
+function(_fc_hold_setting cached cacheValue envPresent envValue outValue outSeeded outUnapplied)
+    set(${outUnapplied} FALSE PARENT_SCOPE)
+    if(NOT cached)
+        set(${outValue} "${envValue}" PARENT_SCOPE)
+        set(${outSeeded} TRUE PARENT_SCOPE)
+        return()
+    endif()
+    set(${outValue} "${cacheValue}" PARENT_SCOPE)
+    set(${outSeeded} FALSE PARENT_SCOPE)
+    if(envPresent AND NOT "${envValue}" STREQUAL "${cacheValue}")
+        set(${outUnapplied} TRUE PARENT_SCOPE)
+    endif()
+endfunction()
+
+# The line reporting an environment value a held setting did NOT apply.
+#
+# @param name      The setting.
+# @param held      What the build tree holds.
+# @param envValue  What the environment presents.
+# @param outLine   The status line.
+function(_fc_unapplied_note name held envValue outLine)
+    set(heldText "'${held}'")
+    if("${held}" STREQUAL "")
+        set(heldText "it empty")
+    endif()
+    set(envText "'${envValue}'")
+    if("${envValue}" STREQUAL "")
+        set(envText "set but empty")
+    endif()
+    set(${outLine}
+        "[cache] ${name} is ${envText} in the environment and NOT applied: this build tree holds ${heldText}, and the environment only seeds a tree with no ${name} entry -- -D${name}=${envValue} applies it"
+        PARENT_SCOPE)
+endfunction()
+
+# What configure SAYS about dispatch and what it BAKES, from the scheduler it holds.
+#
+# **Decided HERE and baked into the launcher, never left to the build's environment.** The
+# launcher reads `FASTCACHE_SCHEDULER` at run time, and this module used to pass it nothing --
+# so dispatch was whatever the environment of whichever process ran `ninja` happened to hold.
+# Measured on a workstation: agents set it in one shell and built from the next, every compile
+# recorded `NOT_CONFIGURED`, and 341 misses compiled locally while the fleet's `dispatched`
+# stood still -- with configure having said only that fastcache-cc was the launcher. A setting
+# that must be present at build time and silently is not is the silent no-op this project
+# refuses elsewhere, so configure decides, SAYS what it decided, and the generated LAUNCHER line
+# carries exactly that.
+#
+# **And the decision is HELD in the cache (`_fc_hold_setting`), not re-read from the environment
+# at every configure.** A configure is not always one somebody ran: ninja re-runs CMake by itself
+# whenever a CMakeLists.txt changes, from whatever shell started the build. Measured on the same
+# machine, a first version that re-read the environment turned dispatch OFF at exactly such a
+# re-run -- the build shell had no FASTCACHE_SCHEDULER -- and printed so into a build log nobody
+# reads, which is the original failure one step later. Set-but-empty and unset are the same
+# answer in the environment, unlike FASTCACHE_ADDR (#372), because the launcher reads them the
+# same way (`EnvOr`): neither dispatches, so neither is a value the environment PRESENTS.
+#
+# One function for the line and the entry, because the line is the module's claim and the entry
+# is the artefact (the generated LAUNCHER): two derivations could disagree, and a configure that
+# printed `dispatch: off` over a launcher that dispatches -- or the reverse -- is the #187 shape.
+# The line says where the value came from, and that it is CONFIGURATION: nothing here asks the
+# scheduler anything, and "fastcache-cc is the launcher" was once read as "the fleet is building".
+#
+# **The entry is baked in BOTH states.** An endpoint when dispatch is on; `FASTCACHE_SCHEDULER=`
+# when it is off, which the launcher reads as unset -- so a value in the build's own environment
+# cannot turn on a dispatch configure said was off, any more than it can retarget one it said was
+# on. That is what keeps the printed line true of the build.
+#
+# @param endpoint    What `_fc_hold_setting` holds: where misses go, empty for off.
+# @param seeded      TRUE when this configure seeded it from the environment.
+# @param unapplied   TRUE when the environment presents a scheduler the tree does not hold.
+# @param envValue    That scheduler; meaningful only when @p unapplied.
+# @param outLine     The status line.
+# @param outEnvEntry The `NAME=VALUE` the launcher runs with.
+function(_fc_dispatch_state endpoint seeded unapplied envValue outLine outEnvEntry)
+    set(${outEnvEntry} "FASTCACHE_SCHEDULER=${endpoint}" PARENT_SCOPE)
+    set(turnOn "<host:port>")
+    set(unappliedClause "")
+    if(unapplied)
+        set(turnOn "${envValue}")
+        set(unappliedClause "; the ${envValue} in the environment is NOT applied -- -DFASTCACHE_SCHEDULER=${envValue} retargets it")
+    endif()
+    if(NOT "${endpoint}" STREQUAL "")
+        set(source "held in this build tree's cache, where a -DFASTCACHE_SCHEDULER or the configure that created the tree put it")
+        if(seeded)
+            set(source "seeded from the configure environment and held in this build tree's cache")
+        endif()
+        set(${outLine}
+            "[cache] dispatch: ${endpoint} (configured, ${source}; baked into the launcher, so the build's own environment does not change it; not probed -- each compile records DISPATCHED or DECLINED in invocations.log; -DFASTCACHE_SCHEDULER= turns it off${unappliedClause})"
+            PARENT_SCOPE)
+        return()
+    endif()
+    set(source "FASTCACHE_SCHEDULER is empty in this build tree's cache")
+    if(seeded)
+        set(source "no FASTCACHE_SCHEDULER in the configure environment, and this build tree now holds that")
+    elseif(unapplied)
+        set(source "FASTCACHE_SCHEDULER is empty in this build tree's cache, which outranks the ${envValue} in the environment")
+    endif()
+    set(${outLine}
+        "[cache] dispatch: off (${source}; every miss compiles on this machine -- -DFASTCACHE_SCHEDULER=${turnOn} turns it on)"
+        PARENT_SCOPE)
+endfunction()
+
+# What does a launcher's REJECTION deserve to be said about it, and what replaced it?
+#
+# **Two facts this file already prints, eighty lines apart, neither mentioning the
+# other** (#658). A `fastcache-cc` row rejected for a WIRE VERSION mismatch reports
+# at `STATUS` -- correctly for most reasons, since "falling through in silence looks
+# exactly like it never being installed" -- and configure then falls through to
+# another launcher, whose caveat this file may spend a paragraph on. The operator is
+# left to join them.
+#
+# A version rejection says something the other reasons do not: a daemon **is**
+# running, it is one the operator installed, and it is out of step with the
+# launcher. That is operator-fixable and usually transient -- and it is precisely
+# the state that hands an MSVC-family build to the launcher that can silently
+# produce a wrong object. Observed on a real machine with a service 591 commits
+# behind master answering on the port.
+#
+# **Which reasons are worth saying out loud is a COLUMN of the candidate table, not
+# a condition in here.** The first version hardcoded `unsupported-version` and
+# `chosen STREQUAL "sccache"`, which is a special case layered on a file that is
+# otherwise strictly table-driven -- and the second clause was already implied by
+# the first guard below, so it could only ever matter by going SILENT if a caveat
+# ever moved to another row. A migration that quietly disables a warning while
+# nothing fails is this project's #447, and it is not worth re-earning.
+#
+# **And the WINNER decides a paragraph, never whether there is a message** (#815).
+# #658 returned empty unless the winner carried a caveat, which is a property of the
+# COMPILER: true on MSVC and clang-cl, false on GCC and Clang. So the host that
+# actually reported this -- Linux, ccache installed, daemon older than the launcher
+# -- hit every clause of #658 and was told nothing louder than a `STATUS` line among
+# a hundred others. The three cases the operator can be in are a safe replacement, a
+# hazardous replacement, and NO replacement at all, and the last is the loudest of
+# the three: the build compiles uncached. All three warn; only the wording differs.
+#
+# Not a refusal to configure: a stale daemon is a normal state during a rollout, the
+# module's contract is that it may never fail a configure (see the file header), and
+# a `SEND_ERROR` here would turn "your cache is not the one you think" into "you
+# cannot build". A `message(WARNING)` is the loudest level that leaves the build
+# buildable, which is the whole of what this decision is.
+#
+# @param reason     why the rejected row was rejected; empty when nothing was.
+# @param predicts   that row's `predicts` pattern; empty when it predicts nothing.
+# @param rejected   a human label for the rejected launcher.
+# @param winner     a human label for the launcher that won; empty when none did.
+# @param caveat     the winner's caveat; empty when it carries none.
+# @param detail     what to say about fixing the rejected one.
+# @param outVar     the warning text, or empty when this is not that situation.
+function(_fc_cache_rejection_warning reason predicts rejected winner caveat detail outVar)
+    set(${outVar} "" PARENT_SCOPE)
+
+    # Nothing rejected, or this row's rejection predicts nothing.
+    if(reason STREQUAL "" OR predicts STREQUAL "")
+        return()
+    endif()
+    if(NOT reason MATCHES "${predicts}")
+        return()
+    endif()
+
+    # What replaced it is a THIRD state and not a boolean: another launcher that is
+    # safe, another launcher that carries a hazard, or nothing at all. #658 folded
+    # the first and the third into "say nothing", which is why the host that filed
+    # #815 -- Linux, so no caveat, and ccache installed -- was told nothing above
+    # `STATUS` while its first-party cache went unused for weeks. The caveat now
+    # only decides a PARAGRAPH; the rejection alone decides that there is a message.
+    if(winner STREQUAL "")
+        set(_replacement "and nothing has replaced it: this build compiles with no compiler cache at all.")
+    elseif(caveat STREQUAL "")
+        set(_replacement "and this build has fallen through to ${winner}.")
+    else()
+        set(_replacement "and this build has fallen through to ${winner} -- which carries the correctness hazard warned about below.")
+    endif()
+
+    set(${outVar}
+"[cache] ${rejected} was refused, ${_replacement}
+
+${detail}
+
+It is called out here because THIS rejection reason means a daemon is there and answering, so the cache you installed is not the one this build is using. The others -- not installed, no answer, an uncacheable probe -- describe a cache nobody set up, and warning on them is how a warning becomes one people learn to skip."
+        PARENT_SCOPE)
+endfunction()
+
+# Everything below needs a project: there is no compiler to probe, no target to
+# front and no build to cache without one. `cmake -P` therefore stops here and
+# takes the pure computations above -- which is how `check-debug-prefix-map.cmake`
+# tests them. A stock condition rather than a variable of our own, so a project
+# that vendors this file inherits no undocumented mode flag whose only meaning is
+# that fastcached is testing itself.
+if(CMAKE_SCRIPT_MODE_FILE)
+    return()
+endif()
+
 option(USE_COMPILER_CACHE
-       "Use a compiler-cache launcher when one is available (fastcache-cc when a daemon answers, else sccache, else ccache) [default: ON]"
+       "Use a compiler-cache launcher when one is available (fastcache-cc when a daemon answers, else ccache; sccache only with ALLOW_SCCACHE_FALLBACK=ON) [default: ON]"
        ON)
+
+# sccache is never chosen FOR you.
+#
+# It is a good launcher and this project uses it deliberately on Windows CI. What
+# it must not be is the automatic answer to fastcache-cc being unusable: on the
+# host that filed #815 the daemon was an old package while the launcher was a
+# current build, every exchange was refused on the wire version, sccache took over,
+# and the project spent weeks believing it dogfooded its own cache. Every part of
+# that mechanism worked. Nobody was told, because a fallback nobody chose is a
+# fallback nobody looks at.
+#
+# So it is opt-in, and the opt-in is the announcement. The ROW is gated rather than
+# having callers set `CMAKE_C/CXX_COMPILER_LAUNCHER` themselves, which would also
+# work: this module returns early when a launcher is already set, so an external
+# one takes the `/showIncludes` caveat warning below out of the log with it -- and
+# that warning is the whole subject of #170. Gating the row keeps it.
+#
+# Unprefixed, like `USE_COMPILER_CACHE`: this file is vendored into other
+# repositories verbatim and names nothing of the project it sits in.
+option(ALLOW_SCCACHE_FALLBACK
+       "Allow sccache to be selected automatically as a compiler-cache launcher [default: OFF]"
+       OFF)
 
 # Respect a launcher provided externally (command line, preset, toolchain).
 # Check both C and CXX: a toolchain may set only one of them, and we must not
@@ -84,47 +442,68 @@ endif()
 # port. That default reaches whichever of the two serves it -- a stock `fastcached`
 # (and the service the installers register) listens there, and so does a
 # `fastcache-compile-node`, whose --listen-cache defaults to the same address for
-# exactly this reason. An empty -DFASTCACHE_ADDR= opts out of fastcache-cc entirely.
-set(_fc_addr_env "$ENV{FASTCACHE_ADDR}")
-if(_fc_addr_env STREQUAL "")
-    set(_fc_addr_wanted "127.0.0.1:6674")
-else()
-    set(_fc_addr_wanted "${_fc_addr_env}")
+# exactly this reason. An empty value opts out of fastcache-cc entirely -- either
+# spelling: `-DFASTCACHE_ADDR=` on this configure, or a set-but-empty
+# `FASTCACHE_ADDR` in the environment, which is what the operator documentation
+# promises and what #372 made true here.
+# `DEFINED ENV{}` rather than an emptiness test: see `_fc_resolve_addr`, and #372.
+set(_fc_addr_env_present FALSE)
+if(DEFINED ENV{FASTCACHE_ADDR})
+    set(_fc_addr_env_present TRUE)
+endif()
+_fc_resolve_addr("${_fc_addr_env_present}" "$ENV{FASTCACHE_ADDR}" _fc_addr_wanted)
+
+# Held, not re-read: the environment seeds a tree with no entry, and after that only a -D moves
+# the address -- see `_fc_hold_setting` for the reconfigure that silently undid a -D. A later
+# environment presenting another address is reported here rather than beside the launcher line,
+# because the address decides whether fastcache-cc is tried at all: a tree holding the empty
+# opt-out never reaches the row that would print anything else.
+set(_fc_addr_cached FALSE)
+if(DEFINED CACHE{FASTCACHE_ADDR})
+    set(_fc_addr_cached TRUE)
+endif()
+_fc_hold_setting("${_fc_addr_cached}" "${FASTCACHE_ADDR}" "${_fc_addr_env_present}" "${_fc_addr_wanted}"
+                 _fc_addr _fc_addr_seeded _fc_addr_unapplied)
+set(FASTCACHE_ADDR "${_fc_addr}" CACHE STRING
+    "host:port of the fastcached compile-cache daemon, 127.0.0.1:6674 by default (empty disables the fastcache-cc launcher)"
+    FORCE)
+if(_fc_addr_unapplied)
+    _fc_unapplied_note(FASTCACHE_ADDR "${_fc_addr}" "${_fc_addr_wanted}" _fc_addr_note)
+    message(STATUS "${_fc_addr_note}")
 endif()
 
-# Ordinary cache semantics would freeze the address at whatever the first
-# configure saw, so exporting FASTCACHE_ADDR to reach a remote daemon would do
-# nothing until the build tree was wiped. Track the environment across
-# configures instead and let a *change* to it retarget the cache entry — while
-# leaving a -D from this very run alone, which is the one instruction more
-# deliberate than the environment. The two are told apart by whether the cache
-# still holds what this module last put there, which is also why the retarget
-# needs a previous configure to compare against: on a first configure there is
-# no bookkeeping yet, both tests hold vacuously, and a -DFASTCACHE_ADDR= meant
-# to opt out would be overwritten by an address merely left in the environment.
-if(NOT DEFINED CACHE{FASTCACHE_ADDR})
-    set(FASTCACHE_ADDR "${_fc_addr_wanted}" CACHE STRING
-        "host:port of the fastcached compile-cache daemon, 127.0.0.1:6674 by default (empty disables the fastcache-cc launcher)")
-elseif(DEFINED CACHE{_FASTCACHE_ADDR_APPLIED}
-       AND NOT _fc_addr_env STREQUAL "${_FASTCACHE_ADDR_ENV_SEEN}"
-       AND FASTCACHE_ADDR STREQUAL "${_FASTCACHE_ADDR_APPLIED}")
-    message(STATUS "[cache] FASTCACHE_ADDR changed in the environment; retargeting to ${_fc_addr_wanted}")
-    set(FASTCACHE_ADDR "${_fc_addr_wanted}" CACHE STRING
-        "host:port of the fastcached compile-cache daemon, 127.0.0.1:6674 by default (empty disables the fastcache-cc launcher)"
-        FORCE)
-endif()
-set(_FASTCACHE_ADDR_ENV_SEEN "${_fc_addr_env}" CACHE INTERNAL
-    "FASTCACHE_ADDR as the environment last presented it, to notice a change on reconfigure")
-set(_FASTCACHE_ADDR_APPLIED "${FASTCACHE_ADDR}" CACHE INTERNAL
-    "the address this module last applied, to tell its own value from one set externally")
-
-# How fastcache-cc is configured, in one place: the probe below must test the
-# very environment the build will use, or it would vouch for a configuration
-# nothing else runs.
+# How the CACHE exchange is configured, in one place: the probe below must test the very cache
+# environment the build will use, or it would vouch for a configuration nothing else runs.
+# Dispatch is the one setting the probe deliberately does NOT share; the next block says why.
 set(_fc_fastcache_env
     "FASTCACHE_ADDR=${FASTCACHE_ADDR}"
     "FASTCACHE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
     "FASTCACHE_BINARY_DIR=${CMAKE_BINARY_DIR}")
+
+# Where a miss is dispatched, decided once: see `_fc_dispatch_state` for why configure decides it
+# and the build's environment does not. Joined to the LAUNCHER's environment only, never the
+# probe's -- the probe asks whether the CACHE answers, and a dispatch it could make to a scheduler
+# that is slow or gone would bound that answer by a compile node's latency and drop fastcache-cc
+# for a reason that has nothing to do with the cache. The probe pins dispatch off instead, so the
+# configure environment cannot reach it either. Whether the environment presents a scheduler the
+# tree does not hold is said on the dispatch line itself, which is printed only when fastcache-cc
+# is the launcher -- the one launcher a scheduler means anything to.
+set(_fc_scheduler_cached FALSE)
+if(DEFINED CACHE{FASTCACHE_SCHEDULER})
+    set(_fc_scheduler_cached TRUE)
+endif()
+set(_fc_scheduler_env_present FALSE)
+if(NOT "$ENV{FASTCACHE_SCHEDULER}" STREQUAL "")
+    set(_fc_scheduler_env_present TRUE)
+endif()
+_fc_hold_setting("${_fc_scheduler_cached}" "${FASTCACHE_SCHEDULER}"
+                 "${_fc_scheduler_env_present}" "$ENV{FASTCACHE_SCHEDULER}"
+                 _fc_scheduler _fc_scheduler_seeded _fc_scheduler_unapplied)
+set(FASTCACHE_SCHEDULER "${_fc_scheduler}" CACHE STRING
+    "host:port of the compile-fleet scheduler fastcache-cc dispatches misses to, baked into the launcher (empty: every miss compiles locally)"
+    FORCE)
+_fc_dispatch_state("${_fc_scheduler}" "${_fc_scheduler_seeded}" "${_fc_scheduler_unapplied}"
+                   "$ENV{FASTCACHE_SCHEDULER}" _fc_dispatch_line _fc_dispatch_env)
 
 # Optional auto-install of fastcache-cc from this project's GitHub Releases.
 #
@@ -168,6 +547,10 @@ set(FASTCACHE_AUTO_INSTALL_VERSION "" CACHE STRING
     "exact fastcache-cc version to install (empty resolves the latest stable release)")
 set(FASTCACHE_AUTO_INSTALL_TTL_HOURS "24" CACHE STRING
     "how long a resolved latest release is reused before the GitHub API is asked again")
+set(FASTCACHE_AUTO_INSTALL_HOST_SYSTEM "" CACHE STRING
+    "system to fetch fastcache-cc for (empty asks CMAKE_HOST_SYSTEM_NAME)")
+set(FASTCACHE_AUTO_INSTALL_HOST_PROCESSOR "" CACHE STRING
+    "processor to fetch fastcache-cc for (empty asks CMAKE_HOST_SYSTEM_PROCESSOR)")
 
 # Auto-installing the launcher alone leaves a genuinely clean machine exactly
 # where it started: fastcache-cc caches nothing unless a fastcached daemon
@@ -179,7 +562,10 @@ set(FASTCACHE_AUTO_INSTALL_TTL_HOURS "24" CACHE STRING
 #
 # Defaulting OFF is what keeps CI's existing, relied-upon behaviour intact:
 # several downstream projects run CI with no fastcached daemon reachable on
-# purpose, so a build transparently falls through to sccache. A default of ON
+# purpose, so a build transparently falls through to whatever else is installed
+# and usable -- which since #815 means ccache, or sccache where it was asked
+# for, or nothing. The boundary is unaffected by which of those it lands on;
+# what matters is that nothing gets started here. A default of ON
 # would remove that boundary for everyone who has not opted out, rather than
 # adding it only for those who opt in. No CI-environment sniffing backs this
 # up — an explicit -DFASTCACHE_AUTO_START=ON is trusted at face value, the
@@ -280,18 +666,46 @@ set(_fc_asset_windows_amd64_exe "fastcache-cc.exe")
 set(_fc_asset_windows_amd64_daemon_member "bin/fastcached.exe")
 set(_fc_asset_windows_amd64_daemon_exe "fastcached.exe")
 
+# The host the table above is asked about: this machine, unless
+# FASTCACHE_AUTO_INSTALL_HOST_SYSTEM / _HOST_PROCESSOR state another.
+#
+# `scripts/check-compile-cache-autoinstall.cmake` states one, because each of
+# its rows exercises a different way to decline and on a host no binary is
+# published for every one of them stops at THIS question first and never reaches
+# its own (#1432's aarch64 leg). So it pins a published platform for all of them
+# and asks this question deliberately, in a row of its own.
+#
+# Stating a platform this host cannot run fetches a binary the smoke run after
+# staging then refuses, which is one more decline and never a failed configure.
+#
+# @param systemVar Receives the host system name.
+# @param processorVar Receives the host processor.
+function(_fc_auto_install_host systemVar processorVar)
+    set(_system "${CMAKE_HOST_SYSTEM_NAME}")
+    set(_processor "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+    if(NOT "${FASTCACHE_AUTO_INSTALL_HOST_SYSTEM}" STREQUAL "")
+        set(_system "${FASTCACHE_AUTO_INSTALL_HOST_SYSTEM}")
+    endif()
+    if(NOT "${FASTCACHE_AUTO_INSTALL_HOST_PROCESSOR}" STREQUAL "")
+        set(_processor "${FASTCACHE_AUTO_INSTALL_HOST_PROCESSOR}")
+    endif()
+    set(${systemVar} "${_system}" PARENT_SCOPE)
+    set(${processorVar} "${_processor}" PARENT_SCOPE)
+endfunction()
+
 # Pick the row serving this host.
 # @param outVar Receives the row id, or empty when no binary is published for it.
 function(_fc_auto_install_select_row outVar)
     set(${outVar} "" PARENT_SCOPE)
+    _fc_auto_install_host(_system _processor)
     foreach(_id IN LISTS _fc_asset_rows)
-        if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "${_fc_asset_${_id}_system}")
+        if(NOT _system STREQUAL "${_fc_asset_${_id}_system}")
             continue()
         endif()
         # Architecture spellings vary by OS and by how CMake was told about the
         # host, so a row lists every name that means it rather than one.
         foreach(_arch IN LISTS _fc_asset_${_id}_arch)
-            if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "${_arch}")
+            if(_processor STREQUAL "${_arch}")
                 set(${outVar} "${_id}" PARENT_SCOPE)
                 return()
             endif()
@@ -392,9 +806,8 @@ function(_fc_auto_install_resolve_release rowVar versionVar jsonVar reasonVar)
 
     _fc_auto_install_select_row(_row)
     if(NOT _row)
-        set(${reasonVar}
-            "no prebuilt binary is published for ${CMAKE_HOST_SYSTEM_NAME}-${CMAKE_HOST_SYSTEM_PROCESSOR}"
-            PARENT_SCOPE)
+        _fc_auto_install_host(_system _processor)
+        set(${reasonVar} "no prebuilt binary is published for ${_system}-${_processor}" PARENT_SCOPE)
         return()
     endif()
 
@@ -684,6 +1097,51 @@ function(_fc_split_host_port addr hostVar portVar)
     endif()
 endfunction()
 
+# The first non-blank line of a captured stream, for a status message.
+#
+# One line rather than the whole capture, because a child that died noisily would
+# otherwise bury the configure's own output under something nobody asked for -- and
+# because the sentence that names the cause is the first one every loader, libc and
+# `main()` in question emits. A stream that is empty or entirely blank yields the
+# empty string, which callers read as "the child said nothing" and fall back on.
+#
+# @param text The captured stream.
+# @param outVar Set to its first non-blank line, stripped, or to the empty string.
+function(_fc_first_line text outVar)
+    # Deliberately NOT a split-into-a-list-and-walk-it. That form has to escape and
+    # restore semicolons, because a CMake list is semicolon-separated and a loader
+    # message naming a search path is full of them -- and it only ever wants the first
+    # element anyway.
+    #
+    # And deliberately NO REGEX, which is not a style choice. Before CMake 4, a regex
+    # that MATCHES AN EMPTY STRING is a hard error in `string(REGEX ...)` -- for MATCH
+    # as well as REPLACE -- and this module may never fail a configure. The obvious
+    # spelling, `REGEX REPLACE "^[ \t\r\n]*"`, matches empty on any capture with no
+    # leading whitespace, which is the ORDINARY case rather than an edge one, so it
+    # failed every configure on a CMake older than 4.
+    #
+    # The tempting repair is `*` -> `+` on that line, and it is NOT sufficient: the
+    # second regex, `MATCH "^[^\r\n]*"`, matches empty whenever the capture is empty
+    # or blank, which is the case this function exists to answer. Both had to go, and
+    # a form with no regex at all cannot raise the question a third time.
+    #
+    # Measured 2026-09-20 against cmake 3.31.6 and 4.2.3, nine inputs each, this
+    # implementation and the all-`+` one agreeing on every one: an ordinary message,
+    # a leading-blank one, one behind blank lines, empty, blanks-only, newlines-only,
+    # one carrying a semicolon-separated search path, one with trailing blanks, and a
+    # CRLF one. 4.2.3 accepts every form and so proves nothing on its own -- the
+    # version that discriminates is the OLD one, which is what CI runs and what no
+    # developer here had.
+    string(STRIP "${text}" _line)
+    string(FIND "${_line}" "\n" _break)
+    if(_break GREATER -1)
+        string(SUBSTRING "${_line}" 0 ${_break} _line)
+    endif()
+    # Again, so a CRLF capture does not keep its carriage return.
+    string(STRIP "${_line}" _line)
+    set(${outVar} "${_line}" PARENT_SCOPE)
+endfunction()
+
 # Is anything at all answering at FASTCACHE_ADDR? Deliberately cheaper and
 # less discerning than _fc_probe_fastcache_cc: that probe needs a real
 # compiler invocation and answers "does the CACHE work", which is not the
@@ -734,7 +1192,7 @@ function(_fc_daemon_answering addr outVar)
                 "FASTCACHE_BINARY_DIR=${CMAKE_BINARY_DIR}"
                 "FASTCACHE_VERBOSE=1"
                 "FASTCACHE_NO_STATS=1"
-                "FASTCACHE_TIMEOUT_MS=500"
+                "FASTCACHE_TIMEOUT=500ms"
                 "${FASTCACHE_CC}" "${CMAKE_CXX_COMPILER}" ${_args}
         WORKING_DIRECTORY "${_dir}"
         TIMEOUT 3
@@ -843,7 +1301,8 @@ function(_fc_auto_start_fastcached)
             COMMAND "${CMAKE_COMMAND}" -E env "${_staged}" ${_daemonArgs}
             RESULT_VARIABLE _rc
             TIMEOUT 5
-            OUTPUT_QUIET ERROR_QUIET)
+            OUTPUT_VARIABLE _startOut
+            ERROR_VARIABLE _startErr)
     else()
         # --daemon double-forks and the parent exits immediately once the
         # child has detached, so execute_process returns right away with the
@@ -863,10 +1322,28 @@ function(_fc_auto_start_fastcached)
             COMMAND "${_staged}" --daemon ${_daemonArgs} "--pidfile=${_pidfile}"
             RESULT_VARIABLE _rc
             TIMEOUT 5
-            OUTPUT_QUIET ERROR_QUIET)
+            OUTPUT_VARIABLE _startOut
+            ERROR_VARIABLE _startErr)
     endif()
     if(NOT _rc EQUAL 0)
-        message(STATUS "[cache] Not starting a daemon: fastcached exited immediately (${_rc})")
+        # The exit status alone is not a diagnosis, and for the commonest failure it
+        # is actively misleading: a dynamic loader that cannot resolve a library
+        # answers 127, which reads as "not found" for a binary this module has just
+        # staged and knows the path of. The daemon's own first line says which
+        # library, and it was captured by nobody until
+        # [#1538](https://github.com/LASTRADA-Software/fastcached/issues/1538) --
+        # `OUTPUT_QUIET ERROR_QUIET` here threw away the one sentence that explains
+        # the number. An empty capture degrades to the number alone, which is what
+        # this said before.
+        _fc_first_line("${_startErr}" _startWhy)
+        if(NOT _startWhy)
+            _fc_first_line("${_startOut}" _startWhy)
+        endif()
+        if(_startWhy)
+            message(STATUS "[cache] Not starting a daemon: fastcached exited immediately (${_rc}): ${_startWhy}")
+        else()
+            message(STATUS "[cache] Not starting a daemon: fastcached exited immediately (${_rc})")
+        endif()
         return()
     endif()
 
@@ -894,13 +1371,23 @@ function(_fc_auto_start_fastcached)
     endif()
 endfunction()
 
+# sccache counts as "already installed" here only when it could actually be
+# selected. It is opt-in since #815, so an installed-but-not-opted-into sccache is
+# not a decision anybody made about this build -- and reading it as one would leave
+# a machine that explicitly asked for auto-install with no cache at all, which is
+# the opposite of what the flag is for.
+set(_fc_sccache_selectable OFF)
+if(SCCACHE AND ALLOW_SCCACHE_FALLBACK)
+    set(_fc_sccache_selectable ON)
+endif()
+
 # Only when there is nothing else to use. A launcher the user installed is a
 # decision already made, and preempting it would be the behaviour change this is
 # careful not to be.
 if(USE_COMPILER_CACHE
    AND FASTCACHE_AUTO_INSTALL
    AND NOT FASTCACHE_CC
-   AND NOT SCCACHE
+   AND NOT _fc_sccache_selectable
    AND NOT CCACHE)
     _fc_auto_install_fastcache_cc(_fc_auto_installed _fc_auto_why_not)
     if(_fc_auto_installed)
@@ -954,7 +1441,7 @@ function(_fc_probe_fastcache_cc outVar reasonVar)
 
     # A probe that answers takes ~0.1s locally and little more over a LAN, so ten
     # seconds is generous for a working daemon and a bounded wait for a broken
-    # one. The cap has to live here: FASTCACHE_TIMEOUT_MS bounds the launcher's
+    # one. The cap has to live here: FASTCACHE_TIMEOUT bounds the launcher's
     # send/recv but not its connect(), so an address that drops packets rather
     # than refusing them — a firewall, a downed VPN, a host that is simply gone —
     # stalls on the TCP connect timeout instead (measured: 2m30s), and every
@@ -962,14 +1449,15 @@ function(_fc_probe_fastcache_cc outVar reasonVar)
     set(_timeoutSeconds 10)
 
     # NO_STATS keeps the probe out of `fastcache-cc --show-stats`, where it would
-    # read as a build that never hits. TIMEOUT_MS bounds a daemon that accepts
+    # read as a build that never hits. FASTCACHE_TIMEOUT bounds a daemon that accepts
     # the connection and then stalls; builds keep the launcher's own default.
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env
                 ${_fc_fastcache_env}
+                "FASTCACHE_SCHEDULER="
                 "FASTCACHE_VERBOSE=1"
                 "FASTCACHE_NO_STATS=1"
-                "FASTCACHE_TIMEOUT_MS=2000"
+                "FASTCACHE_TIMEOUT=2s"
                 "${FASTCACHE_CC}" "${CMAKE_CXX_COMPILER}" ${_args}
         WORKING_DIRECTORY "${_dir}"
         TIMEOUT ${_timeoutSeconds}
@@ -998,6 +1486,12 @@ endfunction()
 #   _fc_cache_<id>_label     human-readable name for the status message
 #   _fc_cache_<id>_program   the found program (empty when not installed)
 #   _fc_cache_<id>_requires  extra condition; the row is skipped when falsy
+#   _fc_cache_<id>_requires_note  what to say when `requires` is falsy while the
+#                            program IS installed -- a launcher sitting right
+#                            there and not being used is the silence #815 is
+#                            about. Empty for a row whose absence explains
+#                            itself, which is why fastcache-cc has none: an
+#                            emptied FASTCACHE_ADDR is a documented opt-out (#372)
 #   _fc_cache_<id>_env       NAME=VALUE pairs to inject around the invocation
 #   _fc_cache_<id>_check     function deciding usability at configure time
 #                            (empty when being installed is enough); called as
@@ -1006,7 +1500,15 @@ endfunction()
 #   _fc_cache_<id>_detail    extra words for the status message (empty for none)
 #   _fc_cache_<id>_caveat    a correctness hazard this launcher carries, warned
 #                            about when it is the row that WINS (empty for none)
-# Supporting a fourth launcher is adding an id here plus its seven variables.
+#   _fc_cache_<id>_predicts  a regex over THIS row's rejection reason; when it
+#                            matches, the rejection is warned about rather than
+#                            merely reported, and the winner's caveat -- if it has
+#                            one -- is folded into the same message (empty when no
+#                            reason predicts anything) -- see
+#                            `_fc_cache_rejection_warning` (#658, #815)
+#   _fc_cache_<id>_predicts_detail  what to tell the operator about fixing this
+#                            row, printed with that warning
+# Supporting a fourth launcher is adding an id here plus its ten variables.
 set(_fc_cache_candidates fastcache_cc sccache ccache)
 
 # Render "<label>[ <detail>]" for a row, so a launcher and where it points are
@@ -1025,16 +1527,43 @@ endfunction()
 set(_fc_cache_fastcache_cc_label "fastcache-cc")
 set(_fc_cache_fastcache_cc_program "${FASTCACHE_CC}")
 set(_fc_cache_fastcache_cc_requires "${FASTCACHE_ADDR}")
-set(_fc_cache_fastcache_cc_env ${_fc_fastcache_env})
+# No note: an empty FASTCACHE_ADDR is the documented way to opt out of this row
+# (#372), so a machine that took it does not need telling what it just asked for.
+set(_fc_cache_fastcache_cc_requires_note "")
+set(_fc_cache_fastcache_cc_env ${_fc_fastcache_env} "${_fc_dispatch_env}")
 set(_fc_cache_fastcache_cc_check _fc_probe_fastcache_cc)
+# A WIRE VERSION mismatch, and only that. "not installed", "no answer" and "the
+# probe was uncacheable" predict nothing about the replacement, and warning on
+# them is how a warning becomes one people learn to skip.
+#
+# `unsupported-version` is the launcher's own spelling, from the wire error table
+# in `Protocol/CompileCacheWire.hpp`. Nothing connects the two, so a rename there
+# disarms this silently -- narrower than the display-sentence parsing it replaced,
+# and recorded rather than hidden.
+set(_fc_cache_fastcache_cc_predicts "unsupported-version")
+# Names the remedy, and names the DIRECTION, which is the step #815's acceptance
+# clause 2 says the refusal stops short of. `unsupported wire version 3; this
+# server speaks 1..1` is accurate and leaves the reader to work out which end is
+# behind -- and the sentence is written by the DAEMON, so an old daemon will go on
+# sending the old wording forever and cannot be fixed there. It is read here.
+set(_fc_cache_fastcache_cc_predicts_detail
+    "A daemon IS answering at ${FASTCACHE_ADDR} and it is one you installed; it is simply out of step with this fastcache-cc, so this build is not using the cache you think it is. Read the refusal above as `unsupported wire version <N>; this server speaks <lo>..<hi>`: <N> is what this launcher speaks and <lo>..<hi> is what the daemon accepts, so an <hi> below <N> means the DAEMON is the older of the two and is the one to replace. Compare `fastcache-cc --version` against the daemon's, and check which binary the service actually starts -- a packaged daemon on PATH ahead of a hand-built launcher is how #815 was found. This is a normal state during a rollout, which is why it is a warning and not a refusal to configure.")
 set(_fc_cache_fastcache_cc_detail "at ${FASTCACHE_ADDR}")
 set(_fc_cache_fastcache_cc_caveat "")
 
 set(_fc_cache_sccache_label "sccache")
 set(_fc_cache_sccache_program "${SCCACHE}")
-set(_fc_cache_sccache_requires ON)
+# Opt-in, never automatic (#815). The column already existed, so this is a value
+# and not a branch: the row is skipped exactly as any other unsatisfied row is,
+# and opting in restores it in its original position -- above ccache, because
+# asking for sccache is asking for sccache.
+set(_fc_cache_sccache_requires "${ALLOW_SCCACHE_FALLBACK}")
+set(_fc_cache_sccache_requires_note
+    "not selected automatically; sccache is opt-in here, so pass -DALLOW_SCCACHE_FALLBACK=ON to use it (#815)")
 set(_fc_cache_sccache_env "")
 set(_fc_cache_sccache_check "")
+set(_fc_cache_sccache_predicts "")
+set(_fc_cache_sccache_predicts_detail "")
 set(_fc_cache_sccache_detail "")
 # Not a `check`, because the row stays usable: this is a hazard a developer has to
 # be able to weigh, not a condition this module can evaluate. Nothing here can
@@ -1070,7 +1599,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC
 
 It bites an INCREMENTAL build across two checkouts sharing one sccache cache. A clean build has no dependency graph to corrupt, and checkouts that all sit at the same absolute path replay paths that are correct -- CI is normally both, and unaffected. GCC and Clang are unaffected everywhere: their preprocessed output carries the paths, so the two checkouts do not share entries in the first place.
 
-To avoid it: install fastcache-cc and run a fastcached daemon, which rewrites a hit's paths into the consuming checkout and so does not have this failure mode; or pass -DSCCACHE= to fall through to ccache, which is unaffected; or configure with -DUSE_COMPILER_CACHE=OFF.")
+To avoid it: drop -DALLOW_SCCACHE_FALLBACK, which is the only reason sccache was selected here at all -- it is opt-in since #815 and this build asked for it; or install fastcache-cc and run a fastcached daemon, which rewrites a hit's paths into the consuming checkout and so does not have this failure mode; or pass -DSCCACHE= to fall through to ccache, which is unaffected; or configure with -DUSE_COMPILER_CACHE=OFF.")
 else()
     set(_fc_cache_sccache_caveat "")
 endif()
@@ -1078,8 +1607,11 @@ endif()
 set(_fc_cache_ccache_label "ccache")
 set(_fc_cache_ccache_program "${CCACHE}")
 set(_fc_cache_ccache_requires ON)
+set(_fc_cache_ccache_requires_note "")
 set(_fc_cache_ccache_env "")
 set(_fc_cache_ccache_check "")
+set(_fc_cache_ccache_predicts "")
+set(_fc_cache_ccache_predicts_detail "")
 set(_fc_cache_ccache_detail "")
 # ccache's default `base_dir` is empty, which is documented to mean it does not
 # rewrite absolute paths and so does not share entries between checkouts -- the
@@ -1091,7 +1623,18 @@ set(_fc_cache_chosen "")
 set(_fc_cache_rejected "")
 if(USE_COMPILER_CACHE)
     foreach(_id IN LISTS _fc_cache_candidates)
-        if(NOT _fc_cache_${_id}_program OR NOT _fc_cache_${_id}_requires)
+        if(NOT _fc_cache_${_id}_program)
+            continue()
+        endif()
+        # A row whose `requires` is falsy while its PROGRAM is right there is a
+        # launcher present and not used, and saying nothing about it would rebuild
+        # #815's shape one row over. Rows whose absence explains itself carry no
+        # note and stay silent.
+        if(NOT _fc_cache_${_id}_requires)
+            if(_fc_cache_${_id}_requires_note)
+                _fc_cache_describe("${_id}" _fc_cache_desc)
+                list(APPEND _fc_cache_rejected "${_fc_cache_desc}: ${_fc_cache_${_id}_requires_note}")
+            endif()
             continue()
         endif()
         if(_fc_cache_${_id}_check)
@@ -1101,6 +1644,11 @@ if(USE_COMPILER_CACHE)
                 # itself rather than looking like the faster one was never there.
                 _fc_cache_describe("${_id}" _fc_cache_desc)
                 list(APPEND _fc_cache_rejected "${_fc_cache_desc}: ${_fc_cache_why_not}")
+                # Kept per row rather than only inside the joined sentence: the
+                # warning below has to ask what the REASON was, and parsing it back
+                # out of display text is how a message rewording silently disables a
+                # warning (#658).
+                set(_fc_cache_${_id}_rejected_why "${_fc_cache_why_not}")
                 continue()
             endif()
         endif()
@@ -1113,6 +1661,41 @@ endif()
 # through in silence looks exactly like it never being installed.
 foreach(_rejection IN LISTS _fc_cache_rejected)
     message(STATUS "[cache] Not using ${_rejection}")
+endforeach()
+
+# ...and WARN about the ones whose reason says a warning is warranted.
+#
+# **Outside `if(_fc_cache_chosen)`, and that placement is the #815 half.** This
+# loop used to live inside it, so the case where NOTHING replaced the rejected
+# launcher -- the build compiles uncached, which is the loudest of the three --
+# produced no message at all. The winner is now an INPUT to the decision rather
+# than a precondition for reaching it: see `_fc_cache_rejection_warning`.
+#
+# Over the CANDIDATES rather than one named row, so a launcher that gains a
+# `predicts` column is covered without editing this.
+if(_fc_cache_chosen)
+    _fc_cache_describe("${_fc_cache_chosen}" _fc_cache_winner_desc)
+    set(_fc_cache_winner_caveat "${_fc_cache_${_fc_cache_chosen}_caveat}")
+else()
+    set(_fc_cache_winner_desc "")
+    set(_fc_cache_winner_caveat "")
+endif()
+foreach(_id IN LISTS _fc_cache_candidates)
+    if(NOT DEFINED _fc_cache_${_id}_rejected_why)
+        continue()
+    endif()
+    _fc_cache_describe("${_id}" _fc_cache_rejected_desc)
+    _fc_cache_rejection_warning(
+        "${_fc_cache_${_id}_rejected_why}"
+        "${_fc_cache_${_id}_predicts}"
+        "${_fc_cache_rejected_desc}"
+        "${_fc_cache_winner_desc}"
+        "${_fc_cache_winner_caveat}"
+        "${_fc_cache_${_id}_predicts_detail}"
+        _fc_cache_rejection_text)
+    if(_fc_cache_rejection_text)
+        message(WARNING "${_fc_cache_rejection_text}")
+    endif()
 endforeach()
 
 if(_fc_cache_chosen)
@@ -1132,6 +1715,12 @@ if(_fc_cache_chosen)
 
     _fc_cache_describe("${_fc_cache_chosen}" _fc_cache_desc)
     message(STATUS "[cache] Enabling ${_fc_cache_desc} (${_fc_cache_program}) for C/C++ compilation")
+    # Whether a miss leaves this machine, said beside the launcher that decides it: "fastcache-cc
+    # is the launcher" read as "the fleet is building", and it was not. Only for the row that can
+    # dispatch at all, and in the words `_fc_dispatch_state` derived from the value it baked.
+    if(_fc_cache_chosen STREQUAL "fastcache_cc")
+        message(STATUS "${_fc_dispatch_line}")
+    endif()
 
     # A launcher that can silently produce a WRONG build says so, at the moment a
     # build is opted into it. A warning rather than a status line because the
@@ -1142,6 +1731,11 @@ if(_fc_cache_chosen)
     # Never fatal, and never a `check` that skips the row: which launcher to run
     # is the developer's call, and a module vendored into other repositories does
     # not get to make it for them. It only has to make it an informed one.
+    #
+    # It is the SECOND warning, not the first: the rejection warnings above have
+    # already said why the safe launcher is not being used, and this says what the
+    # replacement costs. Two messages eighty lines apart were #658's defect and
+    # that ordering is what fixed it.
     if(_fc_cache_${_fc_cache_chosen}_caveat)
         message(WARNING "[cache] ${_fc_cache_${_fc_cache_chosen}_caveat}")
     endif()
@@ -1177,6 +1771,195 @@ if(_fc_cache_chosen)
             string(REGEX REPLACE "([-/])Zi" "\\1Z7" ${_var} "${${_var}}")
         endforeach()
     endif()
+
+    # --- make the objects relocatable, where the driver can be asked to -------
+    #
+    # A cache hit replays an object BUILT SOMEWHERE ELSE, and a compiler with
+    # debug info on records where it was built: DWARF's `DW_AT_comp_dir` is the
+    # working directory, which appears on no command line and which no key can
+    # relativize. So a replayed object names the producing checkout, a debugger
+    # looks for sources in a tree this machine does not have, and nothing fails.
+    # Issue #203; issue #489 is the same defect approached from the key end.
+    #
+    # Measured on one TU, byte-identical in two roots differing only in name,
+    # against a same-root baseline of 0 differing bytes:
+    #
+    #   driver      debug info off   debug info on    prefix-map
+    #   g++         identical        differs, 143 B   -> identical
+    #   clang++     identical        differs,   6 B   -> identical
+    #   clang-cl    identical        differs,  23 B   -> STILL 23 B
+    #   cl          differs, 11 B    differs, 28-31 B  no such switch exists
+    #
+    # Hence GNU spellings only, and hence the honest gap: on COFF a replayed
+    # object's debug records name the producing checkout and no flag closes it.
+    # `-ffile-prefix-map` does not help clang-cl -- CodeView's `S_OBJNAME` and the
+    # embedded `-cc1` line are not remapped -- and `cl` has no path-map switch at
+    # all. `.agent/rules/compile-cache.md` records that as an accepted cost.
+    #
+    # `-fdebug-prefix-map` and not `-ffile-prefix-map`, which also implies
+    # `-fmacro-prefix-map` and would rewrite `__FILE__` -- in the preprocessed text
+    # the launcher's key is taken over, which the real compile would then not
+    # produce. Program-visible file names are not this module's to fix, and the
+    # launcher does not need it to: the preprocessed key alone sees a `__FILE__`
+    # expansion, while the direct-mode key never does and `std::source_location`
+    # reaches no key at all, so `fastcache-cc` reads the OBJECT instead and keys an
+    # object naming its checkout apart (`apps/fastcache-cc/RootBinding.hpp`). This
+    # comment used to say two checkouts never share a key while their `__FILE__`
+    # strings differ; that was true of one key out of the three a hit can come from.
+    #
+    # The mapping MUST be identical on every machine sharing the cache, or two
+    # producers write different objects. That is not left as advice: the launcher
+    # relativizes the flag's root and leaves its replacement literal, so a machine
+    # mapping somewhere else computes a different key and misses rather than
+    # mis-serving (`PathValueRole::PrefixMap`).
+    #
+    # --- what this flag costs the FALLBACK launchers, per launcher (#816) ------
+    #
+    # `fastcache-cc` is unaffected, for the reason in the paragraph above. `ccache`
+    # and `sccache` hash the command line, so the roots below appear in their keys
+    # and cross-checkout reuse is at stake. The answer is NOT the same for the two,
+    # so it is recorded per launcher rather than as one sentence about "the
+    # fallbacks".
+    #
+    # Measured 2026-09-10, ccache 4.9.1 / sccache 0.7.7, clang++ 22.1.8, ext4 under
+    # WSL2 Ubuntu-24.04. Conditions pinned rather than pointed at: they describe one
+    # host at one instant and must not silently start describing another. Every arm
+    # carries BOTH controls -- an identical recompile that must HIT and an `-O0` to
+    # `-O2` change that must MISS -- because a MISS means nothing from a harness that
+    # cannot be seen to hit, and a HIT means nothing from one that cannot be seen to
+    # miss. An earlier run of this measurement used `-DX=1` as its must-miss control
+    # on a source that never mentions `X`; ccache's preprocessed mode hashed
+    # identical text and hit, correctly, and the control was the thing that was wrong.
+    #
+    #   arrangement                              ccache 4.9.1      sccache 0.7.7
+    #   two build dirs, ONE source tree          HIT (as shipped)  MISS
+    #   two WORKTREES, as shipped                MISS              MISS
+    #   two WORKTREES, CCACHE_BASEDIR set        HIT               n/a
+    #
+    # So: **ccache has a lever and sccache has none.** `CCACHE_BASEDIR`, pointed at a
+    # directory containing the worktrees, rewrites the absolute paths -- these roots
+    # included -- to CWD-relative form before hashing, and cross-worktree reuse then
+    # works. It is a CLIENT setting (the environment variable, or `base_dir` in
+    # ccache.conf) and cannot be set from here: a compile line cannot configure the
+    # cache that is about to read it. `hash_dir=false` was measured alongside and
+    # added nothing once `base_dir` was set.
+    #
+    # `sccache` 0.7.7 exposes no equivalent -- nothing in `--help` rewrites, relativises
+    # or bases paths -- so for sccache this IS an accepted cost: **the prefix-map makes
+    # cross-checkout reuse impossible, and that is the price of an object that names no
+    # checkout.** Written down here because an accepted cost that is recorded is a
+    # decision and one that is not is a defect waiting to be rediscovered. CI's fallback
+    # is sccache and CI builds each preset in its own directory, so this caps CI's hit
+    # rate structurally rather than by tuning.
+    #
+    # Removing the flag to buy hit rate is NOT the trade (#319, #506, and the
+    # `comp_dir` work): it exists so a replayed object names no checkout.
+    #
+    # And the reuse that ccache does give is SOUND rather than merely fast, which was
+    # checked rather than assumed -- the hazard being a hit that serves an object
+    # naming the producing worktree, which is #660's shape. Read out of the served
+    # object with `readelf --debug-dump=info`, never by comparing bytes:
+    #
+    #   w1 cold, stores           DW_AT_name ../src/u.cpp   comp_dir .
+    #   w2 served cross-worktree  DW_AT_name ../src/u.cpp   comp_dir .
+    #
+    # Zero occurrences of the producing worktree's name in the served object. Note
+    # that a cache-OFF build of the same source records `./u.cpp` instead, because
+    # `base_dir` hands the compiler a relative input path: both spellings are
+    # checkout-independent and neither leaks a tree, but objects built under
+    # `CCACHE_BASEDIR` are not byte-identical to objects built without it. Compare
+    # cold against warm, never control against warm.
+    #
+    # Never fatal, per this file's contract. `check_<lang>_compiler_flag` is stock
+    # CMake and reports rather than refuses, which matters because a bad flag left
+    # in CMAKE_<LANG>_FLAGS fails the compiler ABI check and takes the whole
+    # configure down -- exactly what this module may not do.
+    #
+    # Per LANGUAGE throughout, because the C and C++ compilers need not be the
+    # same product -- which the previous shape asserted in a comment while asking
+    # `CMAKE_CXX_COMPILER_ID` once and applying the answer to both.
+    _fc_debug_prefix_map_rules("${CMAKE_BINARY_DIR}" "${CMAKE_SOURCE_DIR}"
+                               _fc_prefix_maps _fc_source_mapped)
+    list(TRANSFORM _fc_prefix_maps PREPEND "-fdebug-prefix-map=" OUTPUT_VARIABLE _fc_prefix_map_flags)
+    list(JOIN _fc_prefix_map_flags " " _fc_prefix_map_flags)
+
+    # A language this project has not ENABLED is asked nothing: `check_compiler_flag`
+    # is a hard `CMake Error` ("C: needs to be enabled before use") otherwise, which
+    # fails the configure -- the one thing this file may not do. Measured rather than
+    # anticipated: this module is included from a `project()` that lists CXX before C
+    # is added, and the first run of the check ended the configure outright. A
+    # language nobody enabled also has no compile lines to put a flag on, so skipping
+    # it is right rather than merely safe.
+    get_property(_fc_enabled_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
+    set(_fc_prefix_map_langs "")
+    set(_fc_prefix_map_skipped "")
+    include(CheckCompilerFlag)
+    foreach(_lang IN ITEMS C CXX)
+        if(NOT "${_lang}" IN_LIST _fc_enabled_languages)
+            continue()
+        endif()
+
+        # The MSVC family is excluded by NAME rather than left to the probe. `cl`
+        # does not reject an unknown `-f...` outright -- it reports D9002 and exits
+        # 0 -- so the check would succeed and the flag would be appended to a
+        # compiler that ignores it, on the one platform where this cannot work at
+        # all. `clang-cl` matches "Clang" and is excluded by the simulate-id clause,
+        # which is what the 23-byte measurement above is about.
+        if(NOT CMAKE_${_lang}_COMPILER_ID MATCHES "GNU|Clang"
+           OR CMAKE_${_lang}_SIMULATE_ID STREQUAL "MSVC")
+            list(APPEND _fc_prefix_map_skipped "${_lang} (no path-map switch on this driver)")
+            continue()
+        endif()
+
+        # `check_compiler_flag` rather than the per-language modules, and cached in
+        # `FASTCACHE_<LANG>_HAS_DEBUG_PREFIX_MAP`, so a reconfigure pays nothing.
+        check_compiler_flag(${_lang} "-fdebug-prefix-map=/a=/b" FASTCACHE_${_lang}_HAS_DEBUG_PREFIX_MAP)
+        if(FASTCACHE_${_lang}_HAS_DEBUG_PREFIX_MAP)
+            string(APPEND CMAKE_${_lang}_FLAGS " ${_fc_prefix_map_flags}")
+            list(APPEND _fc_prefix_map_langs ${_lang})
+        else()
+            list(APPEND _fc_prefix_map_skipped "${_lang} (driver rejected the flag)")
+        endif()
+    endforeach()
+
+    # Say which languages got it AND which did not, rather than only the happy
+    # half: a driver that cannot take the flag still caches, still shares, and
+    # still replays objects naming another checkout. Applied, rejected, no such
+    # switch, and not enabled are four different situations, and a line reporting
+    # only the first reads identically in all of them.
+    if(_fc_prefix_map_langs)
+        list(JOIN _fc_prefix_map_langs "/" _fc_prefix_map_langs)
+        message(STATUS "[cache] Mapping debug paths for ${_fc_prefix_map_langs} so replayed objects "
+                       "name no checkout: ${_fc_prefix_map_flags}")
+        if(NOT _fc_source_mapped)
+            message(STATUS "[cache] The source root is NOT mapped: the build tree lies outside it, so the "
+                           "relative path back would carry the checkout's own path")
+        endif()
+        # #816: these roots are in ccache's and sccache's keys, because both hash the
+        # command line. ccache has a lever and sccache has none -- the measurement and
+        # the reasoning are in the long comment beside the flag above.
+        #
+        # Said HERE and only when it is ACTIONABLE, which means when ccache is the
+        # launcher that actually won AND the setting it needs is absent. A line printed
+        # unconditionally would be advice for sccache users who cannot act on it and for
+        # `fastcache-cc` users who never had the problem, and a caveat that does not
+        # apply to the reader is one the reader learns to skip.
+        #
+        # STATUS rather than WARNING: nothing is wrong. A build directory that never
+        # shares with another checkout loses nothing by leaving it unset, and this file
+        # may not fail a configure in any case.
+        if(_fc_cache_chosen STREQUAL "ccache" AND NOT DEFINED ENV{CCACHE_BASEDIR})
+            message(STATUS "[cache] ccache will not reuse these objects across checkouts: the roots above are "
+                           "in its key. Set CCACHE_BASEDIR to a directory containing your worktrees to "
+                           "recover that (measured on ccache 4.9.1); it is a client setting, so a compile "
+                           "line cannot set it here")
+        endif()
+    endif()
+    if(_fc_prefix_map_skipped)
+        list(JOIN _fc_prefix_map_skipped ", " _fc_prefix_map_skipped)
+        message(STATUS "[cache] Debug paths NOT mapped for ${_fc_prefix_map_skipped}; replayed objects "
+                       "will carry the producing checkout's paths in their debug info")
+    endif()
 else()
     # Define the launchers as empty rather than leaving them unset. Fetched
     # dependencies bring their own cache modules that auto-enable ccache when the
@@ -1189,8 +1972,12 @@ else()
     if(NOT USE_COMPILER_CACHE)
         message(STATUS "[cache] Compiler caching disabled by USE_COMPILER_CACHE=OFF")
     elseif(_fc_cache_rejected)
-        message(STATUS "[cache] No other compiler-cache launcher found (sccache, ccache); caching disabled "
-                       "(start a daemon with `fastcached` to cache through fastcache-cc)")
+        # Something WAS found and passed over, and the `Not using` line(s) above
+        # have already named which and why -- so this must not claim nothing was
+        # found. It used to name sccache and ccache outright, which stopped being
+        # true the moment sccache could be installed and merely not opted into.
+        message(STATUS "[cache] No compiler-cache launcher was usable; caching disabled "
+                       "(the `Not using` line(s) above say why each was passed over)")
     else()
         message(STATUS "[cache] No compiler-cache launcher found (fastcache-cc, sccache, ccache); caching disabled")
     endif()
