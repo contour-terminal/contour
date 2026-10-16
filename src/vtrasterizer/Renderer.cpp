@@ -826,6 +826,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             if (auto const& bar = buffer.statusBar)
                 renderStatusBar(*bar);
             renderCells(split.mainCells);
+            renderLineFlash(buffer.lineFlash, mainPageSize.columns, 0);
             renderLines(split.mainLines);
             renderGutter(std::span(buffer.gutter));
             renderAnnotations(std::span(buffer.annotations));
@@ -850,6 +851,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 
         renderPass(primaryPressure, [&] {
             renderCells(split.mainCells, smoothPixelOffset);
+            renderLineFlash(renderBuffer.get().lineFlash, mainPageSize.columns, smoothPixelOffset);
             renderLines(split.mainLines);
             // The gutter and the annotations belong to the main display, and scroll with it.
             renderGutter(std::span(renderBuffer.get().gutter));
@@ -1013,6 +1015,23 @@ void Renderer::renderOverlayCell(vtbackend::RenderCell const& cell, std::string_
     {
         errorLog()("{}: skipping a cell on line {} due to exception: {}", what, cell.position.line, e.what());
     }
+}
+
+void Renderer::renderLineFlash(std::optional<vtbackend::RenderLineFlash> const& lineFlash,
+                               vtbackend::ColumnCount columns,
+                               int smoothScrollOffset)
+{
+    if (!lineFlash)
+        return;
+    ZoneScoped;
+    auto const& flash = *lineFlash;
+    // Across the page's columns, after the cells' own backgrounds -- so it tints a coloured cell as much as
+    // a plain one -- and under their text, which a step draws after every rectangle.
+    auto const topLeft = _gridMetrics.map(flash.lineOffset, vtbackend::ColumnOffset(0), smoothScrollOffset);
+    auto const width = _gridMetrics.cellSize.width * vtbackend::Width::cast_from(columns);
+    auto const alpha = static_cast<uint8_t>(std::lround(std::clamp(flash.alpha, 0.0f, 1.0f) * 255.0f));
+    _renderTarget->renderRectangle(
+        topLeft.x, topLeft.y, width, _gridMetrics.cellSize.height, vtbackend::RGBAColor(flash.color, alpha));
 }
 
 void Renderer::renderStatusBar(vtbackend::RenderStatusBar const& bar)

@@ -980,6 +980,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // After the gutter, with the same baseLine: the header covers the main page's first row, wherever a top
     // status line put it.
     fillStickyHeader(output, baseLine);
+    fillLineFlash(output, baseLine);
 
     // Save the baseLine used for the main screen before the bottom status line shifts it.
     auto const mainScreenLine = baseLine;
@@ -3638,7 +3639,57 @@ std::expected<void, CommandBlockJumpError> Terminal::scrollToCommandBlockHead(Co
 
     // The reveal a click on a scrollbar tick performs: it refuses a head placed in another generation, then
     // one the scrollback dropped, and opens the fold hanging off the head first.
-    return revealStableLineAtTop(record->headStableId, record->headIdGeneration).transform_error(jumpErrorOf);
+    return revealStableLineAtTop(record->headStableId, record->headIdGeneration)
+        .transform([&] {
+            // The row the header copied -- the command's input -- rather than the head, which a prompt
+            // opening with a blank line or a status row puts above it: the command is what the eye goes
+            // looking for.
+            auto const& grid = primaryScreen().grid();
+            auto const head = headOffsetOf(grid, *record);
+            auto const input = head ? inputRowOf(StampedBlockRows { grid }, *head, record->id) : std::nullopt;
+
+            // Timed by the injected clock rather than currentTime(), which stands still between paints: a
+            // flash stamped with the last paint's time could be over before the frame that shows it.
+            _lineFlash.active = true;
+            _lineFlash.startTime = _clocks.steady.now();
+            _lineFlash.duration = LineFlashDuration;
+            _lineFlash.stableId = input ? grid.stableLineIdOf(*input) : record->headStableId;
+            _lineFlash.stableIdGeneration = record->headIdGeneration;
+            _lineFlash.color = blockBandColor(
+                _colorPalette,
+                _settings.gutter.exitStatus ? std::optional { outcomeOf(*record) } : std::nullopt);
+            publishAnimationsEnd();
+            breakLoopAndRefreshRenderBuffer();
+        })
+        .transform_error(jumpErrorOf);
+}
+
+void Terminal::fillLineFlash(RenderBuffer& output, LineOffset baseLine)
+{
+    if (!_lineFlash.active)
+        return;
+    auto const progress = _lineFlash.progress(currentTime());
+    if (progress >= 1.0f)
+    {
+        _lineFlash.active = false;
+        return;
+    }
+
+    // On the primary page alone, where the row is, and only where it is drawn: scrolled out of view, folded
+    // away or on another page, the flash fades unseen.
+    auto const& grid = primaryScreen().grid();
+    if (!foldingAppliesToDisplayedPage() || _lineFlash.stableIdGeneration != grid.stableIdGeneration())
+        return;
+    auto const line = grid.lineOffsetOf(_lineFlash.stableId);
+    if (!line || !_viewport.isLineVisible(*line))
+        return;
+    auto const screenRow = _viewport.translateGridToScreenCoordinate(*line);
+    if (screenRow < LineOffset(0) || screenRow >= drawnRowLimit())
+        return;
+
+    output.lineFlash = RenderLineFlash { .lineOffset = baseLine + screenRow,
+                                         .color = _lineFlash.color,
+                                         .alpha = LineFlashPeakAlpha * (1.0f - progress) };
 }
 
 void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
@@ -6514,7 +6565,8 @@ void Terminal::publishAnimationsEnd() noexcept
         return animation.active ? animation.startTime + animation.duration
                                 : chrono::steady_clock::time_point::min();
     };
-    _animationsEnd.store(std::max(endOf(_cursorMotion), endOf(_screenTransition)), std::memory_order_relaxed);
+    _animationsEnd.store(std::max({ endOf(_cursorMotion), endOf(_screenTransition), endOf(_lineFlash) }),
+                         std::memory_order_relaxed);
 }
 
 void Terminal::setPage(PageIndex target, bool moveCursorHome)

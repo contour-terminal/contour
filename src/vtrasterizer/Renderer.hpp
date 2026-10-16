@@ -439,6 +439,15 @@ class Renderer
     /// @param bar The bar the render buffer carries.
     void renderStatusBar(vtbackend::RenderStatusBar const& bar);
 
+    /// Draws a jump's line flash, if the frame carries one: a translucent band across the page's columns on
+    /// its row.
+    /// @param lineFlash The flash, as the frame carries it; nothing is drawn without one.
+    /// @param columns The main page's width, which the band spans.
+    /// @param smoothScrollOffset The pixel offset the page's rows are drawn at on this pass.
+    void renderLineFlash(std::optional<vtbackend::RenderLineFlash> const& lineFlash,
+                         vtbackend::ColumnCount columns,
+                         int smoothScrollOffset);
+
     void executeImageDiscards();
 
     /// The atlas sizing the *configuration* asked for, kept apart from the effective sizing below.

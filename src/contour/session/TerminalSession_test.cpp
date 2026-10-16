@@ -5641,6 +5641,10 @@ TEST_CASE("TerminalSession: a press on the sticky header jumps to its command",
                   vtbackend::LineOffset(0), vtbackend::MouseButton::Left, vtbackend::Modifiers {})
               == ConsumedByStickyHeader::Yes);
         CHECK(terminal.primaryScreen().grid().lineText(terminal.viewport().topLine()).starts_with("$ make"));
+        // And the row it landed on flashes, so the eye finds it.
+        auto const flash = vtbackend::test::drawFrame(terminal).lineFlash;
+        REQUIRE(flash.has_value());
+        CHECK(flash->lineOffset == vtbackend::LineOffset(0));
 
         CHECK(session.sendOwedRelease(vtbackend::MouseButton::Left) == PressOwner::StickyHeader);
         CHECK(session.sendOwedRelease(vtbackend::MouseButton::Left) == PressOwner::None);

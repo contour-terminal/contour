@@ -184,6 +184,16 @@ struct RenderStatusBar
     ColumnCount leadingColumns {};  ///< How far left of the page's column 0 its own column 0 is drawn.
 };
 
+/// A row flashed where a jump landed -- a press on the sticky header (@see
+/// Terminal::scrollToCommandBlockHead) -- so the eye finds the line the view moved to: a band across the
+/// page's columns, under the row's text, fading out.
+struct RenderLineFlash
+{
+    LineOffset lineOffset; ///< The screen row, as RenderCell::position.line counts them.
+    RGBColor color;        ///< The band's colour.
+    float alpha = 0.0f;    ///< Its opacity on this frame, from Terminal's peak down to nothing.
+};
+
 struct RenderBuffer
 {
     std::vector<RenderCell> cells {};
@@ -207,6 +217,9 @@ struct RenderBuffer
     /// The sticky command header covering the main page's first row on this frame, if any.
     std::optional<RenderStickyHeader> stickyHeader {};
 
+    /// The row a jump just landed on, while its flash fades; absent otherwise.
+    std::optional<RenderLineFlash> lineFlash {};
+
     uint64_t frameID {};
 
     /// Starts this frame's sticky header on the storage the last one left behind, so a header shown frame
@@ -228,6 +241,7 @@ struct RenderBuffer
         statusBar.reset();
         annotations.clear();
         cursor.reset();
+        lineFlash.reset();
         if (stickyHeader)
         {
             _retiredStickyHeader = std::move(*stickyHeader);

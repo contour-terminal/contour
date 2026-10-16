@@ -2430,6 +2430,51 @@ TEST_CASE("Renderer.statusBar.drawsTheIndicatorFromTheGuttersLeftEdge", "[render
     CHECK(RendererTest::liveGridMetrics(fixture.renderer).pageMargin.left == 30);
 }
 
+TEST_CASE("Renderer.lineFlash.tintsTheRowAJumpLandedOn", "[renderer][stickyheader]")
+{
+    // A translucent band across the page's columns on the head's row -- under its text, at the frame's
+    // opacity -- in one pass and in two.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(260), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    vtbackend::test::printLines(mc, "before", 3);
+    mc.writeToScreen(vtbackend::test::commandStarted("make"));
+    vtbackend::test::printLines(mc, "out", 20);
+    auto const* const block = mc.terminal.commandBlocks().current();
+    REQUIRE(block != nullptr);
+    REQUIRE(mc.terminal.scrollToCommandBlockHead(block->id).has_value());
+
+    SECTION("in one pass")
+    {
+        REQUIRE(mc.terminal.smoothScrollPixelOffset() == 0.0f);
+    }
+    SECTION("in two, while the page scrolls smoothly")
+    {
+        scrollPartway(mc);
+    }
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const flash = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return buffer.get().lineFlash;
+    }();
+    REQUIRE(flash.has_value());
+
+    // Seeded metrics: 10x20 cells, no margin -- the band is the page's 200 pixels wide and one row tall.
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const band = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.color.rgb() == flash->color && r.color.alpha() < 0xFF && r.width == Width(200);
+    });
+    REQUIRE(band != rectangles.end());
+    CHECK(band->x == 0);
+    CHECK(band->height == Height(20));
+    CHECK(band->color.alpha() > 0);
+}
+
 int main(int argc, char* argv[])
 {
     core::testing::suppressWindowsDialogs();

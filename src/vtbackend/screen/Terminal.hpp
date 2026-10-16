@@ -1668,7 +1668,9 @@ class Terminal
         return block;
     }
 
-    /// Scrolls the viewport so block @p id's head is its top row, expanding the fold that hangs off it.
+    /// Scrolls the viewport so block @p id's head is its top row, expanding the fold that hangs off it, and
+    /// flashes the row its command was typed on (RenderBuffer::lineFlash), so the eye finds where the view
+    /// moved to.
     ///
     /// What a press on the sticky header does. The head is located through the record's cached position,
     /// so the jump costs the same for a block a million rows up. It lands the way a click on a scrollbar
@@ -3938,8 +3940,32 @@ class Terminal
     /// thread). nextRender() reads _animationsEnd instead.
     CursorMotionState _cursorMotion;
 
-    /// When the later of the cursor motion and the screen transition ends, as the state lock last left them;
-    /// min() while neither runs. Atomic, for nextRender() to read on the render thread without that lock.
+    // {{{ Line flash state
+    /// A row flashed where a jump landed (@see scrollToCommandBlockHead), named by its stable id so that the
+    /// flash stays on that row as the view scrolls.
+    struct LineFlashState: crispy::AnimationState<crispy::LinearEasing>
+    {
+        int64_t stableId = 0;           ///< The row.
+        uint64_t stableIdGeneration {}; ///< The Grid::stableIdGeneration() @ref stableId was read in.
+        RGBColor color {};              ///< The band's colour: its block's, as the gutter's band has it.
+    };
+
+    /// How long a line flash takes to fade: iTerm2's, which is long enough to catch the eye and over before
+    /// the user reads on.
+    static constexpr auto LineFlashDuration = std::chrono::milliseconds { 750 };
+
+    /// A line flash's opacity as it starts. Under the row's text rather than over it, so a band in the text's
+    /// own colour -- an uncoloured success -- must stay faint enough to read through.
+    static constexpr auto LineFlashPeakAlpha = 0.4f;
+
+    /// Guarded by _stateMutex. Started by a jump (the GUI thread), advanced and ended by the render-buffer
+    /// fill. nextRender() reads _animationsEnd instead.
+    LineFlashState _lineFlash;
+    // }}}
+
+    /// When the last of the cursor motion, the screen transition and the line flash ends, as the state lock
+    /// last left them; min() while none runs. Atomic, for nextRender() to read on the render thread without
+    /// that lock.
     std::atomic<std::chrono::steady_clock::time_point> _animationsEnd =
         std::chrono::steady_clock::time_point::min();
 
@@ -4630,6 +4656,12 @@ class Terminal
     /// @param output The buffer being built.
     /// @param baseLine The screen row the main page starts at, as for fillGutter().
     void fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const;
+
+    /// Fills @p output's line flash while one fades on a drawn row of the primary page, and ends the flash
+    /// once it has faded out.
+    /// @param output The buffer being built.
+    /// @param baseLine The screen row the main page starts at, as for fillGutter().
+    void fillLineFlash(RenderBuffer& output, LineOffset baseLine);
 
     /// What one frame's sticky header is decided from, and what the fill reads back from it rather than
     /// looking it up a second time.
