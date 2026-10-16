@@ -111,6 +111,9 @@ Item {
                                           ? chrome.session.commandBlockTooltip()
                                           : ""
         readonly property bool showAbove: anchorRect.y > height + 8
+        // Half the hyperlink tip's: a pointer brought to the gutter is there on purpose, where one crossing
+        // a link is usually on its way to something else.
+        readonly property int showDelay: 300
 
         width: 1
         height: 1
@@ -122,7 +125,7 @@ Item {
         ToolTip.visible: blockTip.tipText !== ""
                          && chrome.Window.window !== null
                          && chrome.Window.window.active
-        ToolTip.delay: 600
+        ToolTip.delay: blockTip.showDelay
     }
 
     // Vertical scrollbar, bidirectionally bound to the VT viewport (drag -> viewport here; viewport ->
@@ -228,9 +231,10 @@ Item {
             width: vbar.availableWidth
             height: vbar.availableHeight
 
-            // How far past its two drawn pixels a tick takes a press, on either side: a two-pixel line is a
-            // hard target.
-            readonly property int hitMargin: 1
+            // A tick's drawn height, and how far past it the tick takes a press on either side: 3 + 2 * 3 makes a
+            // target nine pixels tall, where a two-pixel line taking one more on each side was a hard one.
+            readonly property int tickHeight: 3
+            readonly property int hitMargin: 3
 
             Repeater {
                 id: markRepeater
@@ -247,7 +251,7 @@ Item {
                     y: Math.min(markLayer.height - tick.height,
                                 Math.round(tick.modelData.position * markLayer.height))
                     width: markLayer.width
-                    height: 2
+                    height: markLayer.tickHeight
                     radius: 1
                     color: chrome.markColor(tick.modelData.kind)
 
