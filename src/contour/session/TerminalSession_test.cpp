@@ -6716,20 +6716,34 @@ TEST_CASE("TerminalSession: CopyCommandLine copies a line that is safe to paste"
     CHECK(clipboard.text() == "ls[201~;id");
 }
 
-TEST_CASE("TerminalSession: CopyCommandLine copies a command that runs nothing by itself when pasted",
+TEST_CASE("TerminalSession: CopyCommandLine preserves multiline commands only when enabled",
           "[contour][session][clipboard][semanticblocks]")
 {
-    // A block's rows may show `$ make test` while the command line the shell reported says more. Pasted into
-    // a shell without bracketed paste, every line but the last would run as it arrived, and a trailing line
-    // end would run the last one too: the copy is one line, with nothing after it, for the user to read.
     TestApp testApp;
+    auto expected = std::string { "# comment  Write-Output @'   text  '@" };
+    SECTION("the default keeps single-line copying")
+    {
+        CHECK_FALSE(testApp.app()
+                        .config()
+                        .profile(testApp.app().profileName())
+                        ->copyCommandPreserveMultiline.value());
+    }
+    SECTION("the profile can enable multiline copying")
+    {
+        testApp.app().config().profile(testApp.app().profileName())->copyCommandPreserveMultiline = true;
+        expected = "# comment\nWrite-Output @'\n\ttext\n'@";
+    }
     auto session = makeSessionWithSurface(testApp.app());
     auto const clipboard = ClipboardGuard {};
 
-    writeFinishedBlock(*session, "make test", "", ";cmdline_url=make%20test%0Acurl%20x%7Csh%0A");
+    writeFinishedBlock(
+        *session,
+        "# comment",
+        "",
+        ";cmdline_url=%23%20comment%0D%0AWrite-Output%20%40%27%0D%0A%09text%0D%0A%27%40%0D%0A");
 
     CHECK((*session)(contour::actions::CopyCommandLine {}));
-    CHECK(clipboard.text() == "make test curl x|sh");
+    CHECK(clipboard.text() == expected);
 }
 
 TEST_CASE("TerminalSession: the last command's output is copied up to where the command ended",

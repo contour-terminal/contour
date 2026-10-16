@@ -882,6 +882,7 @@ struct TerminalProfile
     ConfigEntry<vtpty::SshHostConfig, documentation::SshHostConfig> ssh {};
     ConfigEntry<bool, documentation::EscapeSandbox> escapeSandbox { true };
     ConfigEntry<vtbackend::LineOffset, documentation::CopyLastMarkRangeOffset> copyLastMarkRangeOffset { 0 };
+    ConfigEntry<bool, documentation::CopyCommandPreserveMultiline> copyCommandPreserveMultiline { false };
     // show_title_bar now selects the WINDOW DECORATION: true = native server-side frame (+ the OS's
     // own min/max/close controls; our tab strip then omits its custom ones), false = frameless with
     // full client-side decoration (our tab strip draws the controls). Defaults to false so the

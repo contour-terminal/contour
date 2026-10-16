@@ -28,9 +28,11 @@ namespace
 constexpr auto Fffd = std::string_view { "\xEF\xBF\xBD" };
 
 /// Every purpose, for the checks that hold for all of them.
-constexpr auto Purposes = std::array {
-    SanitizePurpose::Display, SanitizePurpose::Insert, SanitizePurpose::Type, SanitizePurpose::Clipboard
-};
+constexpr auto Purposes = std::array { SanitizePurpose::Display,
+                                       SanitizePurpose::Insert,
+                                       SanitizePurpose::Type,
+                                       SanitizePurpose::Clipboard,
+                                       SanitizePurpose::ClipboardMultiline };
 
 /// @return @p codePoint, UTF-8 encoded.
 [[nodiscard]] std::string utf8(char32_t codePoint)
@@ -106,6 +108,20 @@ TEST_CASE("sanitizeCommandLine for the clipboard trims trailing white space only
     // The other purposes keep it.
     CHECK(sanitizeCommandLine("ls ", SanitizePurpose::Insert) == "ls ");
     CHECK(sanitizeCommandLine("ls ", SanitizePurpose::Display) == "ls ");
+}
+
+TEST_CASE("sanitizeCommandLine preserves multiline clipboard syntax across line ending conventions",
+          "[sanitize]")
+{
+    auto const expected = "# comment\nWrite-Output @'\n\tfirst\n\nsecond\n'@";
+    CHECK(sanitizeCommandLine(expected, SanitizePurpose::ClipboardMultiline) == expected);
+    CHECK(sanitizeCommandLine("# comment\r\nWrite-Output @'\r\n\tfirst\r\n\r\nsecond\r\n'@\r\n",
+                              SanitizePurpose::ClipboardMultiline)
+          == expected);
+    CHECK(sanitizeCommandLine("a\rb\r\r\nc\n \t", SanitizePurpose::ClipboardMultiline) == "a\nb\n\nc");
+    CHECK(sanitizeCommandLine(" \t\r\n", SanitizePurpose::ClipboardMultiline).empty());
+    CHECK(sanitizeCommandLine("  a\x1b[201~\n\tb\x07\n", SanitizePurpose::ClipboardMultiline)
+          == "  a[201~\n\tb");
 }
 
 TEST_CASE("sanitizeCommandLine for the clipboard cannot end a bracketed paste", "[sanitize]")
@@ -320,7 +336,7 @@ TEST_CASE("isUnchangedBySanitizing answers what comparing with the sanitised cop
     // Plain text, a control at either end and in the middle, TAB and LF, C1, a separator, a bidi override,
     // well-formed and ill-formed multi-byte sequences, a sequence cut off by the end, and white space at
     // either end.
-    auto const samples = std::array<std::string, 17> {
+    auto const samples = std::array<std::string, 22> {
         "",
         "/home/u/notes.txt",
         "\x1b"
@@ -340,6 +356,11 @@ TEST_CASE("isUnchangedBySanitizing answers what comparing with the sanitised cop
         "ls ",
         " ls",
         "f\xc3\xbc ",
+        "a\r\nb",
+        "a\rb",
+        "a\n",
+        "a\t",
+        "a\n\tb",
     };
     for (auto const& sample: samples)
         for (auto const purpose: Purposes)

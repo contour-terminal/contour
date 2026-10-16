@@ -107,6 +107,7 @@
     <release version="0.7.1" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Adds the profile option <code>copy_command_preserve_multiline</code> to preserve line breaks and tabs when using Copy Command. Disabled by default.</li>
           <li>Fixes a view scrolled back into the history being brought down to the bottom about once a second with <code>auto_scroll_on_update</code> on, while a shell that redraws its prompt in place on a timer sat idle: only output that scrolls lines into the history now brings the view down, as in ghostty</li>
           <li>Changes the default <code>auto_scroll_on_update</code> from true to false, as in VTE, ghostty, WezTerm and Windows Terminal: a view scrolled back into the history stays there until you type. A configuration file that spells the option out keeps its value</li>
           <li>Fixes Windows ignoring the configured font fallback list and switching surrounding text to another font when a glyph was missing. DirectWrite now tries the configured fonts first and only replaces missing clusters. Also fixes undersized emoji and incorrect text/emoji presentation (#2140)</li>
